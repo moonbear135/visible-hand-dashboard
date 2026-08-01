@@ -124,7 +124,7 @@ def scrape_and_update():
         headers = {'User-Agent': 'Mozilla/5.0'}
         found = False
         for page in range(1, 6):
-            url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?marketCd=KOSPI&page={page}'
+            url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?sosok=01&page={page}'
             r = requests.get(url, headers=headers)
             r.encoding = 'euc-kr'
             soup = BeautifulSoup(r.text, 'html.parser')

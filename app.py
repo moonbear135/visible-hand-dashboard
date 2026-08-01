@@ -203,6 +203,57 @@ def backfill_missing_metrics(df):
     df = df.drop(columns=["KOSPI_pct", "USD_pct", "vol", "high_52w", "dist_high", "KOSPI_5d_prev", "KOSPI_5d_return"])
     return df
 
+def repair_missing_supply_data(df):
+    """
+    CSV 로드 시 수급 데이터가 0으로 고착된 행(결손 데이터)이 발견되면,
+    네이버 스크래퍼를 가동하여 실제 수급 데이터로 덮어쓰고 저장합니다.
+    """
+    missing_mask = (df["Retail"] == 0) & (df["Foreigner"] == 0) & (df["Institution"] == 0)
+    missing_dates = df[missing_mask]["Date"].tolist()
+    if not missing_dates:
+        return df
+
+    # 네이버 스크래핑을 통해 최근 5페이지(30영업일) 분량의 실제 수급 데이터 확보
+    scraped_data = {}
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    try:
+        for page in range(1, 6):
+            url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?sosok=01&page={page}'
+            r = requests.get(url, headers=headers, timeout=10)
+            r.encoding = 'euc-kr'
+            soup = BeautifulSoup(r.text, 'html.parser')
+            tb = soup.find('table', class_='type_1')
+            if tb:
+                rows = tb.find_all('tr')
+                for tr in rows[2:]:
+                    cells = [td.text.strip() for td in tr.find_all(['td'])]
+                    cells = [c for c in cells if c]
+                    if cells and len(cells) >= 4:
+                        date_str = "20" + cells[0].replace(".", "-")
+                        retail = int(cells[1].replace(",", ""))
+                        foreigner = int(cells[2].replace(",", ""))
+                        institution = int(cells[3].replace(",", ""))
+                        if not (retail == 0 and foreigner == 0 and institution == 0):
+                            scraped_data[date_str] = (retail, foreigner, institution)
+    except Exception:
+        pass
+
+    # 결손 날짜에 대해 실제 데이터가 매칭되면 복구 적용
+    repaired_count = 0
+    for idx, row in df.iterrows():
+        d = str(row["Date"])
+        if d in missing_dates and d in scraped_data:
+            ret, fore, inst = scraped_data[d]
+            df.at[idx, "Retail"] = ret
+            df.at[idx, "Foreigner"] = fore
+            df.at[idx, "Institution"] = inst
+            repaired_count += 1
+
+    if repaired_count > 0:
+        df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
+    return df
+
+
 def save_and_load_history(date_key, score, kospi_close, usd_close, retail, foreigner, institution, metrics_dict=None):
     """
     로컬 CSV 파일에 매일의 데이터를 누적 저장하고 불러옵니다.
@@ -236,6 +287,9 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
             
             # 기존 구버전 파일 구조 백필 마이그레이션 실행
             history_df = backfill_missing_metrics(history_df)
+            
+            # 결손 수급 데이터 자동 복구
+            history_df = repair_missing_supply_data(history_df)
             
             if is_admin:
                 st.write(f"📝 [관리자] 기존 파일 로드 및 정규화 마이그레이션 성공. 행 개수: {len(history_df)}개")
@@ -367,7 +421,7 @@ def fetch_verified_market_data():
                 headers = {'User-Agent': 'Mozilla/5.0'}
                 found = False
                 for page in range(1, 6):
-                    url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?marketCd=KOSPI&page={page}'
+                    url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?sosok=01&page={page}'
                     r = requests.get(url, headers=headers)
                     r.encoding = 'euc-kr'
                     soup = BeautifulSoup(r.text, 'html.parser')
@@ -609,6 +663,7 @@ def fetch_verified_market_data():
             temp_df = pd.read_csv(HISTORY_FILE)
             temp_df = temp_df.rename(columns={v: k for k, v in COL_MAP.items()})
             temp_df = backfill_missing_metrics(temp_df)
+            temp_df = repair_missing_supply_data(temp_df)
         except Exception:
             temp_df = pd.DataFrame()
 
@@ -672,8 +727,7 @@ def fetch_verified_market_data():
     final_score = 50.0 + (base_score - 50.0) * multiplier
     final_score = round(max(0.0, min(100.0, final_score)), 1)
 
-    if not local_loaded:
-        score = final_score
+    score = final_score
 
     # 6. 지표 상세 테이블에 넣을 내역 리빌딩 (0~1 위험도 스케일 환산)
     details = []
