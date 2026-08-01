@@ -68,9 +68,9 @@ def scrape_and_update():
         history_df = pd.DataFrame()
 
     # 2. 크롤링 기초 데이터 수집
-    kospi_close = 2500.0
+    kospi_close = None
+    usd_close = None
     kospi_change = 0.0
-    usd_close = 1350.0
     usd_change = 0.0
     volatility = 1.2
     dist_from_high = 0.08
@@ -113,10 +113,14 @@ def scrape_and_update():
         except Exception as e:
             print(f"⚠️ FinanceDataReader 수집 실패: {str(e)}")
 
+    if kospi_close is None or usd_close is None:
+        print("🚨 [에러] 지수 혹은 환율 데이터 연동에 실패하여 수집을 차단(Reject)하고 종료합니다.")
+        return
+
     # 3. 네이버 금융 외국인/기관 수급 데이터 크롤링
-    retail_flow = 0
-    foreigner_flow = 0
-    institution_flow = 0
+    retail_flow = None
+    foreigner_flow = None
+    institution_flow = None
     sugeub_fetched = False
     
     # Naver Finance 1~5페이지 날짜 매칭 방식 적용
@@ -124,7 +128,7 @@ def scrape_and_update():
         headers = {'User-Agent': 'Mozilla/5.0'}
         found = False
         for page in range(1, 6):
-            url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?sosok=01&page={page}'
+            url = f'https://finance.naver.com/sise/investorDealTrendDay.naver?bizdate={date_key.replace("-", "")}&sosok=01&page={page}'
             r = requests.get(url, headers=headers)
             r.encoding = 'euc-kr'
             soup = BeautifulSoup(r.text, 'html.parser')
@@ -151,18 +155,9 @@ def scrape_and_update():
     except Exception as e:
         print(f"⚠️ 네이버 수급 스크래핑 실패: {str(e)}")
 
-    # 스크래핑 실패 시, 이동평균 대입
     if not sugeub_fetched:
-        if not history_df.empty:
-            try:
-                recent_5 = history_df.tail(5)
-                retail_flow = int(recent_5['Retail'].mean())
-                foreigner_flow = int(recent_5['Foreigner'].mean())
-                institution_flow = int(recent_5['Institution'].mean())
-                sugeub_fetched = True
-                print(f"⚠️ 수급 수집 에러로 최근 5일 이동평균 대입 완료. 외인: {foreigner_flow}, 기관: {institution_flow}")
-            except Exception as ex:
-                print(f"❌ 이동평균 대입 실패: {str(ex)}")
+        print("🚨 [에러] 수급 데이터 매칭 및 스크래핑에 실패하여 수집을 차단(Reject)하고 종료합니다.")
+        return
 
     # 4. 리스크 지표 연산
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
@@ -309,6 +304,7 @@ def scrape_and_update():
         multiplier = 1.3  # 극단적 변동: 최대 1.3배 증폭 (완화)
     elif extreme_signal_count >= 3:
         multiplier = 1.15  # 경계 변동: 1.15배 증폭
+        
         
     score = 50.0 + (base_score - 50.0) * multiplier
     score = round(max(0.0, min(100.0, score)), 1)
