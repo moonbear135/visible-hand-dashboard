@@ -557,35 +557,85 @@ def fetch_verified_market_data():
         )
     }
 
-    # 최종 가중치 합산 스코어 계산
-    if not local_loaded:
-        calc_score = 0.0
-        investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
-        for item, w in weights.items():
-            risks = market_scores[item]
-            weighted_risk = (
-                (risks["Foreigner"] * investor_weights["Foreigner"])
-                + (risks["Institution"] * investor_weights["Institution"])
-                + (risks["Retail"] * investor_weights["Retail"])
-            )
-            calc_score += w * weighted_risk
-        score = round(calc_score, 1)
+    # 1. 50점대 둔감성 해결을 위한 비선형 점수 계산용 역사적 통계(평균/표준편차) 산출
+    import math
+    historical_stats = {}
+    temp_df = pd.DataFrame()
+    if os.path.exists(HISTORY_FILE):
+        try:
+            temp_df = pd.read_csv(HISTORY_FILE)
+            temp_df = temp_df.rename(columns={v: k for k, v in COL_MAP.items()})
+            temp_df = backfill_missing_metrics(temp_df)
+        except Exception:
+            temp_df = pd.DataFrame()
 
-    # 지표 상세 테이블에 넣을 내역 리빌딩 (산출 공식 컬럼 추가)
-    details = []
+    for item in weights.keys():
+        if not temp_df.empty and item in temp_df.columns and len(temp_df) >= 2:
+            mean_val = temp_df[item].mean()
+            std_val = temp_df[item].std()
+            if pd.isna(std_val) or std_val == 0:
+                std_val = 0.15
+        else:
+            mean_val = 0.5
+            std_val = 0.15
+        historical_stats[item] = {"mean": mean_val, "std": std_val}
+
+    # 2. 개별 지표별 가중 수급 리스크(0~1) 계산
     investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
-    for item, w in weights.items():
+    current_weighted_risks = {}
+    for item in weights.keys():
         risks = market_scores[item]
         weighted_risk = (
             (risks["Foreigner"] * investor_weights["Foreigner"])
             + (risks["Institution"] * investor_weights["Institution"])
             + (risks["Retail"] * investor_weights["Retail"])
         )
+        current_weighted_risks[item] = weighted_risk
+
+    # 3. Z-Score 산출 및 시그모이드 비선형 변환 (0~100점)
+    sub_scores = {}
+    extreme_signal_count = 0
+    for item in weights.keys():
+        raw_val = current_weighted_risks[item]
+        mean = historical_stats[item]["mean"]
+        std = historical_stats[item]["std"]
+        
+        z = (raw_val - mean) / std
+        
+        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 1.8 적용)
+        sub_score = 100 / (1 + math.exp(-1.8 * z))
+        sub_scores[item] = round(sub_score, 2)
+        
+        # 극단 국면 체크
+        if sub_score >= 80 or sub_score <= 20:
+            extreme_signal_count += 1
+
+    # 4. 1차 가중평균 산출 (100점 만점 기준)
+    base_score = sum(sub_scores[k] * (weights[k] / 100.0) for k in weights)
+
+    # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
+    multiplier = 1.0
+    if extreme_signal_count >= 5:
+        multiplier = 1.5  # 극단적 변동 50% 증폭
+    elif extreme_signal_count >= 3:
+        multiplier = 1.25 # 경계 변동 25% 증폭
+        
+    final_score = 50.0 + (base_score - 50.0) * multiplier
+    final_score = round(max(0.0, min(100.0, final_score)), 1)
+
+    if not local_loaded:
+        score = final_score
+
+    # 6. 지표 상세 테이블에 넣을 내역 리빌딩 (0~1 위험도 스케일 환산)
+    details = []
+    for item, w in weights.items():
+        sub_score_val = sub_scores[item]
+        display_risk = round(sub_score_val / 100.0, 3)
         details.append({
             "지표명 (한글 설명)": friendly_names.get(item, item),
             "중요도 (가중치)": w,
-            "위험도 (0~1)": round(weighted_risk, 3),
-            "기여점수": round(w * weighted_risk, 2),
+            "위험도 (0~1)": display_risk,
+            "기여점수": round(w * display_risk, 2),
             "산출 공식 (수학적 모델)": formulas.get(item, "")
         })
         

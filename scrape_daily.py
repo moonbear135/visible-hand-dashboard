@@ -208,20 +208,65 @@ def scrape_and_update():
         }
     }
 
-    # 최종 점수 연산
-    calc_score = 0.0
+    # 1. 50점대 둔감성 해결을 위한 비선형 점수 계산용 역사적 통계(평균/표준편차) 산출
+    import math
+    historical_stats = {}
+    
+    # 각 지표별 과거 통계값 산출
+    for item in weights.keys():
+        if not history_df.empty and item in history_df.columns and len(history_df) >= 2:
+            mean_val = history_df[item].mean()
+            std_val = history_df[item].std()
+            if pd.isna(std_val) or std_val == 0:
+                std_val = 0.15
+        else:
+            mean_val = 0.5
+            std_val = 0.15
+        historical_stats[item] = {"mean": mean_val, "std": std_val}
+
+    # 2. 개별 지표별 가중 수급 리스크(0~1) 계산 및 저장용 metrics_dict 생성
+    current_weighted_risks = {}
     metrics_dict = {}
-    for item, w in weights.items():
+    for item in weights.keys():
         risks = market_scores[item]
         weighted_risk = (
             (risks["Foreigner"] * investor_weights["Foreigner"])
             + (risks["Institution"] * investor_weights["Institution"])
             + (risks["Retail"] * investor_weights["Retail"])
         )
-        calc_score += w * weighted_risk
+        current_weighted_risks[item] = weighted_risk
         metrics_dict[item] = weighted_risk
+
+    # 3. Z-Score 산출 및 시그모이드 비선형 변환 (0~100점)
+    sub_scores = {}
+    extreme_signal_count = 0
+    for item in weights.keys():
+        raw_val = current_weighted_risks[item]
+        mean = historical_stats[item]["mean"]
+        std = historical_stats[item]["std"]
         
-    score = round(calc_score, 1)
+        z = (raw_val - mean) / std
+        
+        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 1.8 적용)
+        sub_score = 100 / (1 + math.exp(-1.8 * z))
+        sub_scores[item] = round(sub_score, 2)
+        
+        # 극단 국면 체크
+        if sub_score >= 80 or sub_score <= 20:
+            extreme_signal_count += 1
+
+    # 4. 1차 가중평균 산출 (100점 만점 기준)
+    base_score = sum(sub_scores[k] * (weights[k] / 100.0) for k in weights)
+
+    # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
+    multiplier = 1.0
+    if extreme_signal_count >= 5:
+        multiplier = 1.5  # 극단적 변동 50% 증폭
+    elif extreme_signal_count >= 3:
+        multiplier = 1.25 # 경계 변동 25% 증폭
+        
+    score = 50.0 + (base_score - 50.0) * multiplier
+    score = round(max(0.0, min(100.0, score)), 1)
     print(f"📊 당일 계산된 종합 스코어: {score}")
 
     # 5. 새 데이터 생성 및 기존 데이터에 병합하여 CSV 저장
