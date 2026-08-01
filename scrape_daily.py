@@ -247,8 +247,11 @@ def scrape_and_update():
         
         z = (raw_val - mean) / std
         
+        # Overflow 방지를 위해 Z-score 범위를 [-20, 20]으로 안전하게 클리핑
+        z_safe = max(-20.0, min(20.0, z))
+        
         # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 1.8 적용)
-        sub_score = 100 / (1 + math.exp(-1.8 * z))
+        sub_score = 100 / (1 + math.exp(-1.8 * z_safe))
         sub_scores[item] = round(sub_score, 2)
         
         # 극단 국면 체크
