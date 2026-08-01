@@ -332,6 +332,43 @@ st.markdown('<div class="sub-title">100% 순수 클린 데이터 연동형 시�
 live_result = fetch_live_market_data()
 history_df = live_result["history_df"]
 
+# --- 관리자 모드 활성화 시 데이터 수동 제어실 노출 ---
+if admin_mode:
+    st.info("🔓 관리자 권한으로 인증되었습니다. 아래 제어실을 통해 수동 입력 및 데이터 수집 가이드를 이용할 수 있습니다.")
+    with st.expander("🛠️ 관리자 전용 데이터 수동 제어실 (비상 입력 및 가이드)", expanded=True):
+        st.markdown(
+            """
+            ### 📌 데이터 수동 입력 가이드 및 출처 안내
+            자동 수집 지연/장애 시, 아래 출처 사이트에서 당일 최종 확정 데이터를 확인하여 오타 없이 기입해 주십시오.
+            
+            * **영업일 선택**: 보정 또는 신규 입력할 타겟 일자를 선택합니다.
+            * **KOSPI 종가 (pt)**: 소수점 이하 2자리까지 입력합니다.
+              * *출처*: [네이버 증권 코스피 페이지](https://finance.naver.com/sise/sise_index.naver?code=KOSPI)
+            * **원/달러 환율 (원)**: 소수점 이하 2자리까지 입력합니다.
+              * *출처*: [네이버 페이 증권 시장지표](https://finance.naver.com/marketindex/)
+            * **수급 데이터 (개인/외국인/기관)**: 억원 단위로 입력합니다.
+              * *출처*: [네이버 증권 투자자별 매매동향](https://finance.naver.com/sise/investorDealTrendDay.naver) 당일 첫 번째 행 수치
+            """
+        )
+        with st.form("admin_manual_data_form"):
+            col_m1, col_m2 = st.columns(2)
+            with col_m1:
+                m_date = st.date_input("영업일 선택", datetime.today(), key="admin_m_date")
+                m_kospi = st.number_input("KOSPI 종가 (pt)", value=2500.0, step=0.1, key="admin_m_kospi")
+                m_retail = st.number_input("개인 수급 (억원)", value=0, step=10, key="admin_m_retail")
+            with col_m2:
+                m_usd = st.number_input("원/달러 환율 (원)", value=1350.0, step=0.1, key="admin_m_usd")
+                m_fore = st.number_input("외국인 수급 (억원)", value=0, step=10, key="admin_m_fore")
+                m_inst = st.number_input("기관 수급 (억원)", value=0, step=10, key="admin_m_inst")
+
+            submit_btn = st.form_submit_button("💾 클린 DB 수동 저장 및 대시보드 반영")
+            if submit_btn:
+                m_date_key = m_date.strftime("%Y-%m-%d")
+                score, metrics_dict = compute_risk_score(m_kospi, 0.0, m_usd, 0.0, 1.2, 0.08, 0.0, m_retail, m_fore, m_inst, history_df)
+                history_df = save_clean_data(m_date_key, score, m_kospi, m_usd, m_retail, m_fore, m_inst, metrics_dict)
+                st.success(f"🎉 {m_date_key} 데이터가 검증되어 성공적으로 저장되었습니다!")
+                st.rerun()
+
 if live_result["success"]:
     st.success(f"✅ **[정상 연결]** {live_result['source']} (기준일자: {live_result['date_key']})")
     score = live_result["score"]
@@ -339,34 +376,13 @@ if live_result["success"]:
     usd_val = live_result["usd"]
 else:
     st.error(f"🚨 **[Health Safety Gate 발동]** {live_result['reason']}")
-    st.warning("자동 수집에 실패하여 DB 오염 방지를 위해 자동 저장을 차단했습니다. 아래 링크에서 확인 후 수동으로 입력해 주세요.")
+    st.warning("자동 수집에 실패하여 DB 오염 방지를 위해 자동 저장을 차단했습니다. 사이드바에서 관리자 계정으로 로그인 후 데이터를 수동으로 입력해 주십시오.")
     
     col_link1, col_link2 = st.columns(2)
     with col_link1:
         st.markdown("🔗 [네이버 금융 수급 동향 확인](https://finance.naver.com/sise/investorDealTrendDay.naver)")
     with col_link2:
         st.markdown("🔗 [KRX 정보데이터시스템 확인](https://data.krx.co.kr)")
-
-    # 수동 보정 입력 인터페이스 (Manual Gate)
-    with st.form("manual_data_form"):
-        st.subheader("✍️ 클린 데이터 수동 입력 비상구")
-        m_date = st.date_input("영업일 선택", datetime.today())
-        col_m1, col_m2 = st.columns(2)
-        with col_m1:
-            m_kospi = st.number_input("KOSPI 종가", value=2500.0, step=0.1)
-            m_retail = st.number_input("개인 수급 (억원)", value=0, step=10)
-            m_inst = st.number_input("기관 수급 (억원)", value=0, step=10)
-        with col_m2:
-            m_usd = st.number_input("원/달러 환율", value=1350.0, step=0.1)
-            m_fore = st.number_input("외국인 수급 (억원)", value=0, step=10)
-
-        submit_btn = st.form_submit_button("💾 클린 DB 수동 저장")
-        if submit_btn:
-            m_date_key = m_date.strftime("%Y-%m-%d")
-            score, metrics_dict = compute_risk_score(m_kospi, 0.0, m_usd, 0.0, 1.2, 0.08, 0.0, m_retail, m_fore, m_inst, history_df)
-            history_df = save_clean_data(m_date_key, score, m_kospi, m_usd, m_retail, m_fore, m_inst, metrics_dict)
-            st.success(f"🎉 {m_date_key} 데이터가 검증되어 성공적으로 저장되었습니다!")
-            st.rerun()
 
     # 최근 누적 데이터가 있는 경우 화면에 노출
     if not history_df.empty:
