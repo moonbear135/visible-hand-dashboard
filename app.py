@@ -846,18 +846,21 @@ with col2:
         st.rerun()
 
 # 전일 대비 주가 및 환율 등락률 계산
-if len(history_df) >= 2:
+if len(history_df) >= 1:
     df_sorted = history_df.sort_values(by="Date")
     latest_row = df_sorted.iloc[-1]
-    prev_row = df_sorted.iloc[-2]
-    
     k_val = float(latest_row["KOSPI"])
-    k_prev = float(prev_row["KOSPI"])
-    k_pct = ((k_val - k_prev) / k_prev) * 100
-    
     u_val = float(latest_row["USD_KRW"])
-    u_prev = float(prev_row["USD_KRW"])
-    u_pct = ((u_val - u_prev) / u_prev) * 100
+    
+    if len(history_df) >= 2:
+        prev_row = df_sorted.iloc[-2]
+        k_prev = float(prev_row["KOSPI"])
+        k_pct = ((k_val - k_prev) / k_prev) * 100
+        u_prev = float(prev_row["USD_KRW"])
+        u_pct = ((u_val - u_prev) / u_prev) * 100
+    else:
+        k_pct = 0.0
+        u_pct = 0.0
 else:
     k_val = 2500.0
     k_pct = 0.0
