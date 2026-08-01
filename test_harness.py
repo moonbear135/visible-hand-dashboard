@@ -28,7 +28,17 @@ class AuditRecord:
         self.how = how
 
 # 수식 및 교차검증 변경 시 이 리스트에 기록을 추가합니다.
-AUDIT_TRAIL = []
+AUDIT_TRAIL = [
+    AuditRecord(
+        version="v1.2.0",
+        date_str="2026-08-02",
+        who="보이는 손 분석팀",
+        where="app.py / scrape_daily.py / test_harness.py",
+        what="더미 데이터 기본 대입 로직 제거 및 관리자 수동 제어실 연동",
+        why="장애 혹은 비영업일 시 자동 생성되는 가상 더미 데이터의 데이터베이스 오염을 전면 차단하기 위함",
+        how="수급 이동평균 및 고정 지수 디폴트값 차단 후 Reject 문 작동, 관리자 모드 시 수동 기입 폼 및 실시간 출처 가이드 매핑"
+    )
+]
 
 def check_governance():
     """알고리즘 5W1H 감사 이력 출력 및 2개월 주기 정기 점검 알림"""
