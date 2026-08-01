@@ -219,6 +219,9 @@ def scrape_and_update():
             std_val = history_df[item].std()
             if pd.isna(std_val) or std_val == 0:
                 std_val = 0.15
+            else:
+                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.05 적용
+                std_val = max(0.05, std_val)
         else:
             mean_val = 0.5
             std_val = 0.15
@@ -250,12 +253,12 @@ def scrape_and_update():
         # Overflow 방지를 위해 Z-score 범위를 [-20, 20]으로 안전하게 클리핑
         z_safe = max(-20.0, min(20.0, z))
         
-        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 1.8 적용)
-        sub_score = 100 / (1 + math.exp(-1.8 * z_safe))
+        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.0 반영)
+        sub_score = 100 / (1 + math.exp(-1.0 * z_safe))
         sub_scores[item] = round(sub_score, 2)
         
-        # 극단 국면 체크
-        if sub_score >= 80 or sub_score <= 20:
+        # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
+        if sub_score >= 85 or sub_score <= 15:
             extreme_signal_count += 1
 
     # 4. 1차 가중평균 산출 (100점 만점 기준)
@@ -264,9 +267,9 @@ def scrape_and_update():
     # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
     multiplier = 1.0
     if extreme_signal_count >= 5:
-        multiplier = 1.5  # 극단적 변동 50% 증폭
+        multiplier = 1.2  # 극단적 변동: 최대 1.2배 증폭
     elif extreme_signal_count >= 3:
-        multiplier = 1.25 # 경계 변동 25% 증폭
+        multiplier = 1.1  # 경계 변동: 1.1배 증폭
         
     score = 50.0 + (base_score - 50.0) * multiplier
     score = round(max(0.0, min(100.0, score)), 1)

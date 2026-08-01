@@ -68,6 +68,9 @@ def recalculate_historical_scores():
                 std_val = history_slice[item].std()
                 if pd.isna(std_val) or std_val == 0:
                     std_val = 0.15
+                else:
+                    # 최소 표준편차 한계선(Floor) 0.05 적용
+                    std_val = max(0.05, std_val)
             else:
                 # 역사가 짧은 초기 구간은 글로벌 기본 설정값 부여
                 mean_val = 0.5
@@ -87,11 +90,12 @@ def recalculate_historical_scores():
             z = (raw_val - mean) / std
             z_safe = max(-20.0, min(20.0, z))
             
-            # 시그모이드 위험 점수 (0~100점)
-            sub_score = 100 / (1 + math.exp(-1.8 * z_safe))
+            # 시그모이드 위험 점수 (0~100점, k = 1.0 적용)
+            sub_score = 100 / (1 + math.exp(-1.0 * z_safe))
             sub_scores[item] = sub_score
             
-            if sub_score >= 80 or sub_score <= 20:
+            # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
+            if sub_score >= 85 or sub_score <= 15:
                 extreme_signal_count += 1
                 
         # 1차 가중평균
@@ -100,9 +104,9 @@ def recalculate_historical_scores():
         # 증폭기 작동
         multiplier = 1.0
         if extreme_signal_count >= 5:
-            multiplier = 1.5
+            multiplier = 1.2  # 최대 승수 1.2
         elif extreme_signal_count >= 3:
-            multiplier = 1.25
+            multiplier = 1.1  # 3개 이상 시 1.1
             
         final_score = 50.0 + (base_score - 50.0) * multiplier
         final_score = round(max(0.0, min(100.0, final_score)), 1)
