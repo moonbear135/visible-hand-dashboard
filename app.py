@@ -120,32 +120,35 @@ COL_MAP = {
     "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
-    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)"
+    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
 }
 
 def backfill_missing_metrics(df):
     """
-    구형 CSV 파일에 13가지 세부 지표 위험도가 누적 저장되어 있지 않은 경우,
+    구형 CSV 파일에 14가지 세부 지표 위험도가 누적 저장되어 있지 않은 경우,
     역사적 수치(KOSPI, 환율, 수급 등)를 기반으로 금융공학 역산 모델을 돌려 백필(마이그레이션)합니다.
     """
-    if "FX_Swap_Point" in df.columns:
+    if "FX_Swap_Point" in df.columns and "KOSPI_5D_Return" in df.columns:
         return df
         
     df = df.sort_values(by="Date").reset_index(drop=True)
     df["KOSPI_pct"] = df["KOSPI"].pct_change().fillna(0)
     df["USD_pct"] = df["USD_KRW"].pct_change().fillna(0)
+    df["KOSPI_5d_prev"] = df["KOSPI"].shift(5)
+    df["KOSPI_5d_return"] = ((df["KOSPI"] - df["KOSPI_5d_prev"]) / df["KOSPI_5d_prev"]).fillna(0.0)
     
     # 변동성 및 고점 하락률 계산
     df["vol"] = df["KOSPI_pct"].rolling(10, min_periods=1).std().fillna(0.012) * 100
     df["high_52w"] = df["KOSPI"].cummax()
     df["dist_high"] = (df["high_52w"] - df["KOSPI"]) / df["high_52w"]
     
-    # 13가지 세부 지표 컬럼 추가
+    # 14가지 세부 지표 컬럼 추가
     metrics_cols = [
         "FX_Swap_Point", "Put_OTM_OI", "Short_Ratio", "ELS_KnockIn",
         "VKOSPI_Skew", "Synthetic_Futures", "NDF_Night_Rate", "Futures_Net_Sell",
         "Non_Arbitrage_Ratio", "Foreign_Broker_Dump", "Stock_Short_Balance",
-        "Put_Buy_Simple", "Stock_Net_Sell"
+        "Put_Buy_Simple", "Stock_Net_Sell", "KOSPI_5D_Return"
     ]
     for col in metrics_cols:
         df[col] = 0.5
@@ -161,6 +164,7 @@ def backfill_missing_metrics(df):
         ret = int(row["Retail"])
         fore = int(row["Foreigner"])
         inst = int(row["Institution"])
+        k_5d_ret = float(row["KOSPI_5d_return"])
         
         # 공식들 대입
         fx_base = 0.5 + 0.3 * (u_close - 1200) / 300
@@ -176,6 +180,7 @@ def backfill_missing_metrics(df):
         bal_base = 0.5 + 0.3 * dist
         put_buy_base = 0.4 - 0.3 * k_change
         stock_net_base = 0.5
+        kospi_5d_base = 0.5 - 2.5 * k_5d_ret
         
         def clip(val):
             return min(1.0, max(0.0, val))
@@ -193,8 +198,9 @@ def backfill_missing_metrics(df):
         df.at[i, "Stock_Short_Balance"] = round(clip(bal_base + 0.05) * 0.55 + clip(bal_base + 0.05) * 0.37 + clip(bal_base - 0.2) * 0.08, 3)
         df.at[i, "Put_Buy_Simple"] = round(clip(put_buy_base + (0.05 if fore < 0 else -0.05)) * 0.55 + clip(put_buy_base) * 0.37 + clip(put_buy_base + (0.1 if ret > 0 else -0.1)) * 0.08, 3)
         df.at[i, "Stock_Net_Sell"] = round(clip(stock_net_base + (0.3 if fore < 0 else -0.3)) * 0.55 + clip(stock_net_base + (0.2 if inst < 0 else -0.2)) * 0.37 + clip(stock_net_base + (0.3 if ret < 0 else -0.3)) * 0.08, 3)
+        df.at[i, "KOSPI_5D_Return"] = round(clip(kospi_5d_base), 3)
         
-    df = df.drop(columns=["KOSPI_pct", "USD_pct", "vol", "high_52w", "dist_high"])
+    df = df.drop(columns=["KOSPI_pct", "USD_pct", "vol", "high_52w", "dist_high", "KOSPI_5d_prev", "KOSPI_5d_return"])
     return df
 
 def save_and_load_history(date_key, score, kospi_close, usd_close, retail, foreigner, institution, metrics_dict=None):
@@ -355,17 +361,13 @@ def fetch_verified_market_data():
             except Exception:
                 pass
 
-        # 2-B. pykrx 실패 시 Naver Finance 백업 스크래퍼 동작
+        # 2-B. pykrx 실패 시 Naver Finance 백업 스크래퍼 동작 (1~5페이지 날짜 매칭 방식 개편)
         if not sugeub_fetched:
             try:
-                check_date = target_date
-                for _ in range(7):
-                    while check_date.weekday() >= 5:
-                        check_date -= timedelta(days=1)
-                    check_date_str = check_date.strftime("%Y%m%d")
-                    
-                    url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?bizdate={check_date_str}&sosok=&page=1'
-                    headers = {'User-Agent': 'Mozilla/5.0'}
+                headers = {'User-Agent': 'Mozilla/5.0'}
+                found = False
+                for page in range(1, 6):
+                    url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?marketCd=KOSPI&page={page}'
                     r = requests.get(url, headers=headers)
                     r.encoding = 'euc-kr'
                     soup = BeautifulSoup(r.text, 'html.parser')
@@ -377,23 +379,39 @@ def fetch_verified_market_data():
                             cells = [td.text.strip() for td in tr.find_all(['td'])]
                             cells = [c for c in cells if c]
                             if cells and len(cells) >= 4:
-                                display_date = "20" + cells[0].replace(".", "년 ") + "일"
-                                retail_flow = int(cells[1].replace(",", ""))
-                                foreigner_flow = int(cells[2].replace(",", ""))
-                                institution_flow = int(cells[3].replace(",", ""))
-                                data_source_log = "성공: 백업용 마켓 수급 스크래핑 연동 완료"
-                                sugeub_fetched = True
-                                break
-                        if sugeub_fetched:
+                                date_str = "20" + cells[0].replace(".", "-")
+                                if date_str == date_key:
+                                    retail_flow = int(cells[1].replace(",", ""))
+                                    foreigner_flow = int(cells[2].replace(",", ""))
+                                    institution_flow = int(cells[3].replace(",", ""))
+                                    display_date = target_date.strftime("%Y년 %m월 %d일")
+                                    data_source_log = f"성공: 백업용 마켓 수급 스크래핑 연동 완료 (Naver Page {page})"
+                                    sugeub_fetched = True
+                                    found = True
+                                    break
+                        if found:
                             break
-                    check_date -= timedelta(days=1)
             except Exception as e:
                 data_source_log = f"수급 연동 오류로 안전 모드 강제 동작 ({str(e)})"
 
+        # 2-C. 스크래핑 최종 실패 시, 더미 대신 최근 5일 이동평균 반영
+        if not sugeub_fetched:
+            if os.path.exists(HISTORY_FILE) and not history_df.empty:
+                try:
+                    recent_5 = history_df.tail(5)
+                    retail_flow = int(recent_5['Retail'].mean())
+                    foreigner_flow = int(recent_5['Foreigner'].mean())
+                    institution_flow = int(recent_5['Institution'].mean())
+                    data_source_log = "경고: 수급 스크래퍼 에러 발생으로 최근 5일 이동평균 대입"
+                    sugeub_fetched = True
+                    is_live_connected = True
+                except Exception as ex:
+                    data_source_log = f"이동평균 대입 실패: {str(ex)}"
+            else:
+                data_source_log = "휴장일/데이터 대기 중 (안전 모드 표준 위험도 적용)"
+
         if sugeub_fetched:
             is_live_connected = True
-        else:
-            data_source_log = "휴장일/데이터 대기 중 (안전 모드 표준 위험도 적용)"
 
     # 3. 13개 지표 동적 산출 로직
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
@@ -410,14 +428,27 @@ def fetch_verified_market_data():
     put_buy_base = 0.4 - 0.3 * kospi_change
     stock_net_base = 0.5
 
+    # KOSPI 5일 낙폭 모멘텀 (KOSPI 5D Return) 신규 지표 연산
+    kospi_5d_base = 0.5
+    if FDR_AVAILABLE and not local_loaded:
+        try:
+            if len(kospi_df) >= 6:
+                kospi_5d_prev = float(kospi_df.iloc[-6]['Close'])
+                kospi_5d_return = (kospi_close - kospi_5d_prev) / kospi_5d_prev
+            else:
+                kospi_5d_return = 0.0
+            kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
+        except Exception:
+            pass
+
     def clip(val):
         return min(1.0, max(0.0, val))
 
     weights = {
-        "FX_Swap_Point": 10, "Put_OTM_OI": 10, "Short_Ratio": 8, "ELS_KnockIn": 7,
-        "VKOSPI_Skew": 7, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 8,
-        "Non_Arbitrage_Ratio": 7, "Foreign_Broker_Dump": 7, "Stock_Short_Balance": 4,
-        "Put_Buy_Simple": 4, "Stock_Net_Sell": 4
+        "FX_Swap_Point": 12, "Put_OTM_OI": 8, "Short_Ratio": 6, "ELS_KnockIn": 7,
+        "VKOSPI_Skew": 6, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 6,
+        "Non_Arbitrage_Ratio": 6, "Foreign_Broker_Dump": 6, "Stock_Short_Balance": 3,
+        "Put_Buy_Simple": 3, "Stock_Net_Sell": 3, "KOSPI_5D_Return": 12
     }
 
     friendly_names = {
@@ -433,7 +464,8 @@ def fetch_verified_market_data():
         "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
         "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
         "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
-        "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)"
+        "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
+        "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
     }
 
     market_scores = {
@@ -487,6 +519,11 @@ def fetch_verified_market_data():
             "Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)),
             "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)),
             "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))
+        },
+        "KOSPI_5D_Return": {
+            "Foreigner": clip(kospi_5d_base),
+            "Institution": clip(kospi_5d_base),
+            "Retail": clip(kospi_5d_base)
         }
     }
 
@@ -554,6 +591,12 @@ def fetch_verified_market_data():
         "Stock_Net_Sell": (
             "[공식] Base = 0.5 + (수급 주체 순매도 시: +0.3 / 순매수 시: -0.3)\\n"
             "[금융학 원리] 주식 현물 시장에서 가격 결정의 지배권을 가진 거대 핵심 세력(외국인 및 기관 동향)의 순매도 규모가 코스피 기초 체력을 얼마나 직접적으로 갉아먹고 있는지를 가중 환산하여 전체 점수에 반영하는 리스크의 기반 지표입니다."
+        ),
+        "KOSPI_5D_Return": (
+            "[공식] Base = 0.5 - 2.5 * KOSPI 5일 수익률\\n"
+            "- 분기점 (0%): 주가 상승 국면에서는 리스크를 0.5 미만으로 하향.\\n"
+            "- 감도 계수 (-2.5): 5일 낙폭이 깊어질수록 위험도를 1.0 방향으로 급격히 끌어올림.\\n"
+            "[금융학 원리] 보조지표(파생/수급)가 시장의 변곡점을 미처 포착하지 못하고 동반 지연될 때, 5일간의 지수 직접 모멘텀 낙폭을 계산하여 실제 지수 폭락 압력을 즉각 리스크 스코어에 반영하는 최후 방어선 지표입니다."
         )
     }
 
@@ -576,8 +619,8 @@ def fetch_verified_market_data():
             if pd.isna(std_val) or std_val == 0:
                 std_val = 0.15
             else:
-                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.05 적용
-                std_val = max(0.05, std_val)
+                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.02 적용
+                std_val = max(0.02, std_val)
         else:
             mean_val = 0.5
             std_val = 0.15
@@ -608,8 +651,8 @@ def fetch_verified_market_data():
         # Overflow 방지를 위해 Z-score 범위를 [-20, 20]으로 안전하게 클리핑
         z_safe = max(-20.0, min(20.0, z))
         
-        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.0 반영)
-        sub_score = 100 / (1 + math.exp(-1.0 * z_safe))
+        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.1 반영)
+        sub_score = 100 / (1 + math.exp(-1.1 * z_safe))
         sub_scores[item] = round(sub_score, 2)
         
         # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
@@ -622,9 +665,9 @@ def fetch_verified_market_data():
     # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
     multiplier = 1.0
     if extreme_signal_count >= 5:
-        multiplier = 1.2  # 극단적 변동: 최대 1.2배 증폭
+        multiplier = 1.3  # 극단적 변동: 최대 1.3배 증폭 (완화)
     elif extreme_signal_count >= 3:
-        multiplier = 1.1  # 경계 변동: 1.1배 증폭
+        multiplier = 1.15  # 경계 변동: 1.15배 증폭
         
     final_score = 50.0 + (base_score - 50.0) * multiplier
     final_score = round(max(0.0, min(100.0, final_score)), 1)

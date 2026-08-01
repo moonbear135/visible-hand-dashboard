@@ -35,7 +35,8 @@ COL_MAP = {
     "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
-    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)"
+    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
 }
 
 def clip(val):
@@ -73,6 +74,7 @@ def scrape_and_update():
     usd_change = 0.0
     volatility = 1.2
     dist_from_high = 0.08
+    kospi_5d_base = 0.5
     
     # KOSPI & USD_KRW 조회
     if FDR_AVAILABLE:
@@ -98,6 +100,15 @@ def scrape_and_update():
                 usd_close = float(latest_usd['Close'])
                 if len(usd_data) >= 2:
                     usd_change = (usd_close - float(usd_data.iloc[-2]['Close'])) / float(usd_data.iloc[-2]['Close'])
+                
+                # 5일 낙폭 모멘텀 계산
+                if len(kospi_data) >= 6:
+                    kospi_5d_prev = float(kospi_data.iloc[-6]['Close'])
+                    kospi_5d_return = (kospi_close - kospi_5d_prev) / kospi_5d_prev
+                else:
+                    kospi_5d_return = 0.0
+                kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
+                
                 print(f"✅ 시세 수집 완료. KOSPI: {kospi_close:.2f}, 환율: {usd_close:.2f}")
         except Exception as e:
             print(f"⚠️ FinanceDataReader 수집 실패: {str(e)}")
@@ -106,29 +117,52 @@ def scrape_and_update():
     retail_flow = 0
     foreigner_flow = 0
     institution_flow = 0
+    sugeub_fetched = False
+    
+    # Naver Finance 1~5페이지 날짜 매칭 방식 적용
     try:
-        url = "https://finance.naver.com/sise/sise_trans_style.naver"
-        res = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
-        soup = BeautifulSoup(res.text, "lxml")
-        
-        table = soup.find("table", {"class": "type_2"})
-        if table:
-            rows = table.find_all("tr")
-            for r in rows:
-                cols = r.find_all("td")
-                if len(cols) >= 4:
-                    label = cols[0].text.strip()
-                    # 순매수 금액 파싱 (단위: 억원)
-                    val = int(cols[1].text.replace(",", "").replace("+", "").strip())
-                    if "개인" in label:
-                        retail_flow = val
-                    elif "외국인" in label:
-                        foreigner_flow = val
-                    elif "기관" in label:
-                        institution_flow = val
-            print(f"✅ 네이버 수급 수집 완료. 외인: {foreigner_flow}, 기관: {institution_flow}")
+        headers = {'User-Agent': 'Mozilla/5.0'}
+        found = False
+        for page in range(1, 6):
+            url = f'https://finance.naver.com/sise/investorDealTrendDay.nhn?marketCd=KOSPI&page={page}'
+            r = requests.get(url, headers=headers)
+            r.encoding = 'euc-kr'
+            soup = BeautifulSoup(r.text, 'html.parser')
+            tb = soup.find('table', class_='type_1')
+            
+            if tb:
+                rows = tb.find_all('tr')
+                for tr in rows[2:]:
+                    cells = [td.text.strip() for td in tr.find_all(['td'])]
+                    cells = [c for c in cells if c]
+                    if cells and len(cells) >= 4:
+                        date_str = "20" + cells[0].replace(".", "-")
+                        if date_str == date_key:
+                            retail_flow = int(cells[1].replace(",", ""))
+                            foreigner_flow = int(cells[2].replace(",", ""))
+                            institution_flow = int(cells[3].replace(",", ""))
+                            sugeub_fetched = True
+                            found = True
+                            break
+                if found:
+                    break
+        if sugeub_fetched:
+            print(f"✅ 네이버 수급 수집 완료 (매칭 성공). 외인: {foreigner_flow}, 기관: {institution_flow}")
     except Exception as e:
-        print(f"⚠️ 네이버 수급 수집 실패: {str(e)}")
+        print(f"⚠️ 네이버 수급 스크래핑 실패: {str(e)}")
+
+    # 스크래핑 실패 시, 이동평균 대입
+    if not sugeub_fetched:
+        if not history_df.empty:
+            try:
+                recent_5 = history_df.tail(5)
+                retail_flow = int(recent_5['Retail'].mean())
+                foreigner_flow = int(recent_5['Foreigner'].mean())
+                institution_flow = int(recent_5['Institution'].mean())
+                sugeub_fetched = True
+                print(f"⚠️ 수급 수집 에러로 최근 5일 이동평균 대입 완료. 외인: {foreigner_flow}, 기관: {institution_flow}")
+            except Exception as ex:
+                print(f"❌ 이동평균 대입 실패: {str(ex)}")
 
     # 4. 리스크 지표 연산
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
@@ -148,10 +182,10 @@ def scrape_and_update():
     # 가중 위험 지표 계산 및 합산
     investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
     weights = {
-        "FX_Swap_Point": 12, "Put_OTM_OI": 10, "Short_Ratio": 8, "ELS_KnockIn": 7,
-        "VKOSPI_Skew": 7, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 8,
-        "Non_Arbitrage_Ratio": 7, "Foreign_Broker_Dump": 7, "Stock_Short_Balance": 4,
-        "Put_Buy_Simple": 4, "Stock_Net_Sell": 4
+        "FX_Swap_Point": 12, "Put_OTM_OI": 8, "Short_Ratio": 6, "ELS_KnockIn": 7,
+        "VKOSPI_Skew": 6, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 6,
+        "Non_Arbitrage_Ratio": 6, "Foreign_Broker_Dump": 6, "Stock_Short_Balance": 3,
+        "Put_Buy_Simple": 3, "Stock_Net_Sell": 3, "KOSPI_5D_Return": 12
     }
     
     market_scores = {
@@ -205,6 +239,11 @@ def scrape_and_update():
             "Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)),
             "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)),
             "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))
+        },
+        "KOSPI_5D_Return": {
+            "Foreigner": clip(kospi_5d_base),
+            "Institution": clip(kospi_5d_base),
+            "Retail": clip(kospi_5d_base)
         }
     }
 
@@ -220,8 +259,8 @@ def scrape_and_update():
             if pd.isna(std_val) or std_val == 0:
                 std_val = 0.15
             else:
-                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.05 적용
-                std_val = max(0.05, std_val)
+                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.02 적용
+                std_val = max(0.02, std_val)
         else:
             mean_val = 0.5
             std_val = 0.15
@@ -253,8 +292,8 @@ def scrape_and_update():
         # Overflow 방지를 위해 Z-score 범위를 [-20, 20]으로 안전하게 클리핑
         z_safe = max(-20.0, min(20.0, z))
         
-        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.0 반영)
-        sub_score = 100 / (1 + math.exp(-1.0 * z_safe))
+        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.1 반영)
+        sub_score = 100 / (1 + math.exp(-1.1 * z_safe))
         sub_scores[item] = round(sub_score, 2)
         
         # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
@@ -267,15 +306,15 @@ def scrape_and_update():
     # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
     multiplier = 1.0
     if extreme_signal_count >= 5:
-        multiplier = 1.2  # 극단적 변동: 최대 1.2배 증폭
+        multiplier = 1.3  # 극단적 변동: 최대 1.3배 증폭 (완화)
     elif extreme_signal_count >= 3:
-        multiplier = 1.1  # 경계 변동: 1.1배 증폭
+        multiplier = 1.15  # 경계 변동: 1.15배 증폭
         
     score = 50.0 + (base_score - 50.0) * multiplier
     score = round(max(0.0, min(100.0, score)), 1)
     print(f"📊 당일 계산된 종합 스코어: {score}")
 
-    # 5. 새 데이터 생성 및 기존 데이터에 병합하여 CSV 저장
+    # 6. 새 데이터 생성 및 기존 데이터에 병합하여 CSV 저장
     new_data = {
         "Date": [date_key],
         "Score": [score],

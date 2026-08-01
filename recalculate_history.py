@@ -26,14 +26,15 @@ COL_MAP = {
     "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
-    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)"
+    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
 }
 
 weights = {
-    "FX_Swap_Point": 12, "Put_OTM_OI": 10, "Short_Ratio": 8, "ELS_KnockIn": 7,
-    "VKOSPI_Skew": 7, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 8,
-    "Non_Arbitrage_Ratio": 7, "Foreign_Broker_Dump": 7, "Stock_Short_Balance": 4,
-    "Put_Buy_Simple": 4, "Stock_Net_Sell": 4
+    "FX_Swap_Point": 12, "Put_OTM_OI": 8, "Short_Ratio": 6, "ELS_KnockIn": 7,
+    "VKOSPI_Skew": 6, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 6,
+    "Non_Arbitrage_Ratio": 6, "Foreign_Broker_Dump": 6, "Stock_Short_Balance": 3,
+    "Put_Buy_Simple": 3, "Stock_Net_Sell": 3, "KOSPI_5D_Return": 12
 }
 
 def clip(val):
@@ -53,12 +54,15 @@ def recalculate_historical_scores():
     df_eng = df.rename(columns={v: k for k, v in COL_MAP.items()})
     df_eng = df_eng.sort_values(by="Date").reset_index(drop=True)
     
+    # KOSPI 5일 낙폭 직접 계산하여 컬럼 추가
+    df_eng["KOSPI_5d_prev"] = df_eng["KOSPI"].shift(5)
+    df_eng["KOSPI_5d_return"] = ((df_eng["KOSPI"] - df_eng["KOSPI_5d_prev"]) / df_eng["KOSPI_5d_prev"]).fillna(0.0)
+    df_eng["KOSPI_5D_Return"] = df_eng["KOSPI_5d_return"].apply(lambda r: round(clip(0.5 - 2.5 * r), 3))
+    
     recalculated_scores = []
-    investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
     
     # 2. 순차적으로 각 일자별 Z-Score 및 비선형 스코어 역산 계산 (누적 윈도우 방식)
     for i in range(len(df_eng)):
-        # i일 시점까지 쌓인 이전 데이터를 기준으로 평균/표준편차 구함 (역사적 실시간 계산 시뮬레이션)
         historical_stats = {}
         history_slice = df_eng.iloc[:i]  # 0일부터 i-1일까지의 데이터
         
@@ -69,15 +73,13 @@ def recalculate_historical_scores():
                 if pd.isna(std_val) or std_val == 0:
                     std_val = 0.15
                 else:
-                    # 최소 표준편차 한계선(Floor) 0.05 적용
-                    std_val = max(0.05, std_val)
+                    # 최소 표준편차 한계선(Floor) 0.02 적용
+                    std_val = max(0.02, std_val)
             else:
-                # 역사가 짧은 초기 구간은 글로벌 기본 설정값 부여
                 mean_val = 0.5
                 std_val = 0.15
             historical_stats[item] = {"mean": mean_val, "std": std_val}
             
-        # i일의 지표별 수급 가중치 계산
         row = df_eng.iloc[i]
         sub_scores = {}
         extreme_signal_count = 0
@@ -90,8 +92,8 @@ def recalculate_historical_scores():
             z = (raw_val - mean) / std
             z_safe = max(-20.0, min(20.0, z))
             
-            # 시그모이드 위험 점수 (0~100점, k = 1.0 적용)
-            sub_score = 100 / (1 + math.exp(-1.0 * z_safe))
+            # 시그모이드 위험 점수 (0~100점, k = 1.1 반영)
+            sub_score = 100 / (1 + math.exp(-1.1 * z_safe))
             sub_scores[item] = sub_score
             
             # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
@@ -104,9 +106,9 @@ def recalculate_historical_scores():
         # 증폭기 작동
         multiplier = 1.0
         if extreme_signal_count >= 5:
-            multiplier = 1.2  # 최대 승수 1.2
+            multiplier = 1.3  # 최대 승수 1.3
         elif extreme_signal_count >= 3:
-            multiplier = 1.1  # 3개 이상 시 1.1
+            multiplier = 1.15  # 3개 이상 시 1.15
             
         final_score = 50.0 + (base_score - 50.0) * multiplier
         final_score = round(max(0.0, min(100.0, final_score)), 1)
@@ -114,6 +116,8 @@ def recalculate_historical_scores():
         
     # 3. 새로운 비선형 스코어 주입 및 한글 변환 세이브
     df_eng["Score"] = recalculated_scores
+    df_eng = df_eng.drop(columns=["KOSPI_5d_prev", "KOSPI_5d_return"])
+    
     df_eng.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
     print("Recalculation complete. Saved updated database.")
 
