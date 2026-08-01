@@ -28,26 +28,7 @@ class AuditRecord:
         self.how = how
 
 # 수식 및 교차검증 변경 시 이 리스트에 기록을 추가합니다.
-AUDIT_TRAIL = [
-    AuditRecord(
-        version="v1.0.0",
-        date_str="2026-06-01",
-        who="보이는 손 퀀트 모델링 팀",
-        where="app.py / 스코어링 모듈",
-        what="최초 비선형 시그모이드 위험 스코어링 알고리즘 도입",
-        why="기존 단순 가중합 방식의 50점대 둔감성 해결 및 시장 변곡점 포착 강화",
-        how="Z-Score 산출 후 표준편차 기반의 시그모이드 변환(k=1.8) 및 극단 국면 증폭 멀티플라이어 적용"
-    ),
-    AuditRecord(
-        version="v1.1.0",
-        date_str="2026-08-01",
-        who="보이는 손 퀀트 모델링 팀",
-        where="app.py 및 test_harness.py (데이터 교차검증 엔진)",
-        what="KOSPI 5일 낙폭 모멘텀 추가 및 다중 출처(KRX, 네이버, FDR) 삼각 교차검증 체계 구축",
-        why="7월 말 지수 급락 감지 실패 대응 및 단일 출처 오류로 인한 0원 데이터 고착 원천 차단",
-        how="std 하한선(0.02) 설정, k=1.1 조율, 삼각 교차검증(Cross-Validation) 결과를 하네스 검증에 내장"
-    )
-]
+AUDIT_TRAIL = []
 
 def check_governance():
     """알고리즘 5W1H 감사 이력 출력 및 2개월 주기 정기 점검 알림"""
@@ -63,6 +44,11 @@ def check_governance():
         print(f"  * 왜 (Why)      : {record.why}")
         print(f"  * 어떻게 (How)   : {record.how}")
         print("-" * 50)
+
+    if not AUDIT_TRAIL:
+        print("[정보] 등록된 알고리즘 버전 변경 이력이 존재하지 않습니다.")
+        print("==================================================")
+        return
 
     # 2개월(60일) 주기 정기 점검 알림
     latest_record = AUDIT_TRAIL[-1]
