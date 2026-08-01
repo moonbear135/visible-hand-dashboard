@@ -24,7 +24,8 @@ except ImportError:
 st.set_page_config(
     page_title="잘 보면 보이는 손 - 시장 방공망 대시보드",
     page_icon="🚨",
-    layout="centered"
+    layout="centered",
+    initial_sidebar_state="collapsed"
 )
 
 # 커스텀 스타일링 적용 (풍부한 디자인 테마)
