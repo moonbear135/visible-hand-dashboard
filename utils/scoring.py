@@ -1,31 +1,45 @@
 """
 utils/scoring.py
-보이는 손 퀀트 종합 스코어링 엔진 (Hard Cut-off 킬러 로직 & 목표주가 달성 교차검증 반영)
+보이는 손 퀀트 종합 스코어링 엔진 (Hard Cut-off 킬러 로직 & 산황 검증 Guardrail 반영)
 """
 
-def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0, price=0.0, f_target=0.0):
+def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0, price=0.0, f_target=0.0, growth=0.0):
     """
     100점 만점 퀀트 스코어 계산 및 상태 배지 반환
-    (목표주가 초과/달성 교차검증 & 고평가 하드 컷오프 Killer Logic 전면 반영)
+    (역성장/적자 하드컷오프, 데이터 이상 Guardrail & 목표주가 달성 교차검증 전면 반영)
     
     1. PEGY 밸류에이션 점수 (최대 35점)
     2. 자본효율성 Quality 점수 (최대 30점)
     3. 주주환원율 Yield 점수 (최대 20점)
     4. Trailing 안정성 점수 (최대 10점)
     5. 변동성 위험 보정 점수 (최대 5점)
-    
-    교차 검증 규칙 (Cross-Validation Rules):
-    1. 목표가 달성/초과 검증 (price >= f_target):
-       - 현재가가 퀀트 목표주가를 이미 초과하거나 달성한 경우, PEGY 수치와 관계없이
-         '강력 저평가' / '저평가' 배지 부여를 엄격히 차단합니다.
-       - price >= f_target * 1.15 (15% 초과): '🔴 목표가 초과 (고평가 관망)' & quant_score 상한 45점
-       - f_target <= price < f_target * 1.15: '🟡 목표가 달성 (적정가)' & quant_score 상한 60점
-    
-    2. 하드 컷오프 (Hard Cut-off / Killer Logic):
-       - Forward PEGY >= 2.0 또는 Forward PER >= 70.0 극단적 고평가 시:
-         * quant_score = min(raw_score, 20) (최대 20점 이하 강제 상한 제한)
-         * badge = '🔴 극단적 고평가 (위험)'
     """
+    # =========================================================
+    # Guardrail 0: 데이터 오염 / PER 이상치 (PER > 200배 또는 PER <= 0) 검증
+    # =========================================================
+    if f_per > 200.0 or f_per <= 0.0 or price <= 0:
+        return {
+            "quant_score": 10,
+            "raw_score": 10,
+            "is_cutoff": True,
+            "badge": "🔴 데이터 이상/극단고평가",
+            "badge_bg": "#7f1d1d",
+            "badge_fg": "#fca5a5"
+        }
+
+    # =========================================================
+    # Guardrail 1: 역성장 및 무성장 기업 (g_eff <= 0 또는 t_roe <= 0) 예외 처리
+    # =========================================================
+    if growth <= 0.0 or t_roe <= 0.0 or f_pegy <= 0.0:
+        return {
+            "quant_score": 15,
+            "raw_score": 15,
+            "is_cutoff": True,
+            "badge": "🔴 실적 역성장/적자 (위험)",
+            "badge_bg": "#7f1d1d",
+            "badge_fg": "#fca5a5"
+        }
+
     # 1. PEGY 점수 (35점)
     if f_pegy < 0.65:
         s_pegy = 35

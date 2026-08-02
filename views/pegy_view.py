@@ -154,7 +154,7 @@ def render_pegy_page():
         pegy_list = [s.get('f_pegy', 0) for s in all_stocks if s.get('f_pegy', 0) > 0]
 
         calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
-        calc_growth = round(sum(growth_list) / max(len(growth_list), 1), 1) if growth_list else 14.2
+        calc_growth = round(pd.Series(growth_list).median(), 1) if growth_list else 14.2  # 통계적 대표값 중앙값(Median) 통일
         calc_pegy = round(pd.Series(pegy_list).median(), 2) if pegy_list else 0.73
     else:
         calc_f_per = 10.4
@@ -163,7 +163,7 @@ def render_pegy_page():
 
     # 누적 히스토리 기반 증감 변동분(Delta) 계산
     f_per_delta_str = "KOSPI 200 실시간 중앙값"
-    growth_delta_str = "실시간 평균 컨센서스"
+    growth_delta_str = "실시간 중앙값 컨센서스"
 
     if len(summary_history) >= 2:
         prev = summary_history[-2]

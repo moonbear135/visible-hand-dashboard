@@ -113,6 +113,10 @@ def fetch_kospi200_real_market_data():
                 t_per = float(row['PER']) if pd.notnull(row['PER']) and str(row['PER']) != 'nan' else 12.5
                 t_roe = float(row['ROE']) if pd.notnull(row['ROE']) and str(row['ROE']) != 'nan' else 9.5
 
+                # Guardrail: 주가 데이터 0 이하이거나 터무니없는 비정상치 스케일링 버그 검증
+                if price <= 0 or price > 10000000:
+                    continue
+
                 stocks_raw.append({
                     "rank": len(stocks_raw) + 1,
                     "name": name,
@@ -179,7 +183,7 @@ def enrich_quant_metrics(stocks_raw):
         roic = round(t_roe * 0.88, 1) if t_roe > 0 else 6.8
         
         # 성장률 (growth) 
-        growth = round(min(max(t_roe * 1.3, 5.0), 45.0), 1)
+        growth = round(min(max(t_roe * 1.3, 5.0), 45.0), 1) if t_roe > 0 else 0.0
         
         # Forward PER / EPS
         f_per = round(max(t_per * 0.88, 4.5), 2)
@@ -204,26 +208,31 @@ def enrich_quant_metrics(stocks_raw):
             time.sleep(0.1)
 
         # =========================================================
-        # 젬민이 요청 2중 Cap 실효성장률(g_eff) 및 대칭 퀀트 공식
-        # 영업성장률(Max 35%) + 주주환원수익률(Max 10%) -> 최종 실효성장률 Max 40% Cap
+        # 젬민이 요청 2중 Cap 실효성장률(g_eff) & 역성장 Floor 방공망
+        # 영업성장률(Max 35%) + 주주환원수익률(Max 10%) -> 최종 실효성장률 Max 40% Cap, Min 0.1% Floor
         # =========================================================
         sh_return_capped = min(sh_yield, 10.0)
         geff = min(min(growth, 35.0) + sh_return_capped, 40.0)
+        geff_safe = max(geff, 0.1) # 역성장/무성장 시 0 이하 나눗셈 붕괴 방지 Floor
 
         vol_penalty = 1.18 if "보정" in vol else 1.0
-        growth_eff = geff / vol_penalty
-        f_pegy = round(f_per / max(growth_eff, 0.1), 2)
-        t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2)
+        growth_eff = geff_safe / vol_penalty
+        
+        # PEGY 산출 (역성장 기업은 99.99 대입)
+        f_pegy = round(f_per / growth_eff, 2) if (growth > 0 and t_roe > 0) else 99.99
+        t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2) if (growth > 0 and t_roe > 0) else 99.99
 
         # PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (35.0배 Cap) & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
         target_pegy = 1.0 * (1.0 + roe_prem + roic_prem)
         target_per = round(min(target_pegy * growth_eff, 35.0), 2)
-        f_target = int(f_eps * target_per)
-        t_fair = int(t_eps * min(1.0 * (growth + sh_yield), 35.0))
+        
+        # 목표주가 음수 방지 안전장치
+        f_target = int(max(f_eps * target_per, 0)) if (growth > 0 and t_roe > 0) else int(price * 0.7)
+        t_fair = int(max(t_eps * min(1.0 * (growth + sh_yield), 35.0), 0))
 
-        # 종합 퀀트 스코어 및 배지 판정
+        # 종합 퀀트 스코어 및 배지 판정 (Guardrail & 역성장 Cut-off 연동)
         score_res = calculate_quant_score(
             f_pegy=f_pegy, 
             f_roe=f_roe, 
@@ -233,7 +242,8 @@ def enrich_quant_metrics(stocks_raw):
             vol=vol, 
             f_per=f_per,
             price=price,
-            f_target=f_target
+            f_target=f_target,
+            growth=growth
         )
         quant_score = score_res["quant_score"]
         badge = score_res["badge"]
@@ -281,10 +291,10 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
 
     f_per_list = [s['f_per'] for s in enriched_stocks if s.get('f_per', 0) > 0]
     growth_list = [min(s.get('growth', 0), 35.0) for s in enriched_stocks]
-    pegy_list = [s.get('f_pegy', 0) for s in enriched_stocks if s.get('f_pegy', 0) > 0]
+    pegy_list = [s.get('f_pegy', 0) for s in enriched_stocks if 0 < s.get('f_pegy', 0) < 50.0]
 
     calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
-    calc_growth = round(sum(growth_list) / max(len(growth_list), 1), 1) if growth_list else 14.2
+    calc_growth = round(pd.Series(growth_list).median(), 1) if growth_list else 14.2  # 대표값 중앙값(Median) 통일
     calc_pegy = round(pd.Series(pegy_list).median(), 2) if pegy_list else 0.73
 
     history = []

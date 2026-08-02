@@ -47,5 +47,12 @@
     "growth": 13.5,
     "pegy": 1.21,
     "total_count": 200
+  },
+  {
+    "date": "2026-08-02 21:37",
+    "f_per": 12.8,
+    "growth": 11.0,
+    "pegy": 1.06,
+    "total_count": 200
   }
 ]

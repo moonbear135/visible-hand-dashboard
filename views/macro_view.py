@@ -291,7 +291,13 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     elif extreme_signal_count >= 3:
         multiplier = 1.15
         
-    final_score = 50.0 + (base_score - 50.0) * multiplier
+    # 거시 위험 지수 곱셈기 부호 반전 오류 수정:
+    # base_score < 50 일 때 multiplier 곱셈 시 위험점수가 오히려 낮아지는 수학적 오류 차단
+    if base_score >= 50.0:
+        final_score = 50.0 + (base_score - 50.0) * multiplier
+    else:
+        final_score = base_score + (multiplier - 1.0) * 40.0
+        
     final_score = round(max(0.0, min(100.0, final_score)), 1)
     score = final_score
 
