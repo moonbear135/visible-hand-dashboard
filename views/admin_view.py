@@ -7,36 +7,23 @@ from utils.db import HISTORY_FILE
 
 def render_admin_sidebar():
     """사이드바 하단에 관리자 암호 인증 시스템을 배치합니다."""
-    with st.sidebar:
-        st.markdown(
-            """
-            <style>
-            div[data-testid="stSidebarUserContent"] {
-                display: flex;
-                flex-direction: column;
-                height: calc(100vh - 50px) !important;
-            }
-            div[data-testid="stSidebarUserContent"] > div:last-child {
-                margin-top: auto !important;
-                padding-top: 20px;
-            }
-            </style>
-            """,
-            unsafe_allow_html=True
-        )
-        st.markdown("---")
-        st.markdown("### ⚙️ 관리자 전용 메뉴")
-        admin_password = st.text_input("🔑 관리자 비밀번호", type="password", help="일반 사용자에게 노출되지 않는 디버그용 암호를 입력하세요.", key="sidebar_admin_pwd")
-        
-        # ***REMOVED-OLD-ADMIN-PASSWORD*** 의 SHA-256 해시값
-        stored_hash = "***REMOVED-OLD-PASSWORD-HASH***"
-        input_hash = hashlib.sha256(admin_password.encode()).hexdigest()
-        
-        admin_mode = hmac.compare_digest(input_hash, stored_hash)
-        st.session_state.admin_mode = admin_mode
-        if admin_mode:
-            st.success("🔓 관리자 권한 인증 성공")
-        return admin_mode
+    st.sidebar.markdown("### ⚙️ 관리자 전용 메뉴")
+    admin_password = st.sidebar.text_input(
+        "🔑 관리자 비밀번호", 
+        type="password", 
+        help="일반 사용자에게 노출되지 않는 디버그용 암호를 입력하세요.", 
+        key="sidebar_admin_pwd"
+    )
+    
+    # ***REMOVED-OLD-ADMIN-PASSWORD*** 의 SHA-256 해시값
+    stored_hash = "***REMOVED-OLD-PASSWORD-HASH***"
+    input_hash = hashlib.sha256(admin_password.encode()).hexdigest()
+    
+    admin_mode = hmac.compare_digest(input_hash, stored_hash)
+    st.session_state.admin_mode = admin_mode
+    if admin_mode:
+        st.sidebar.success("🔓 관리자 권한 인증 성공")
+    return admin_mode
 
 def render_admin_console(fetch_data_fn):
     """관리자 모드 활성화 시 메인 화면 상단에 수동 제어실을 렌더링합니다."""

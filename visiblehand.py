@@ -7,10 +7,34 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 공통 커스텀 CSS 스타일링
+# 공통 커스텀 CSS 스타일링 (사이드바 최상단 위치, 라벨 크기 확대, 줄바꿈 가시성 제어)
 st.markdown(
     """
     <style>
+    /* 1. 사이드바 최상단 여백 및 헤더 위치 조절 */
+    section[data-testid="stSidebar"] {
+        padding-top: 1rem !important;
+    }
+    
+    /* 2. '📌 서비스 메뉴 선택' 라벨 글자 크기 확대 & 커스텀 컬러링 */
+    div[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] p {
+        font-size: 18px !important;
+        font-weight: 800 !important;
+        color: #38bdf8 !important;
+        margin-bottom: 8px !important;
+        letter-spacing: -0.3px !important;
+    }
+    
+    /* 3. 사이드바 라디오 버튼 라벨 (메인메뉴 + 괄호 설명) 폰트 및 줄간격 가시성 극대화 */
+    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"] {
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        line-height: 1.6 !important;
+        padding-top: 6px !important;
+        padding-bottom: 6px !important;
+        color: #f8fafc !important;
+    }
+
     .main-title { 
         font-size: 32px; 
         font-weight: 800; 
@@ -57,22 +81,34 @@ from views.macro_view import render_macro_page
 from views.pegy_view import render_pegy_page
 
 def main():
-    # 사이드바 상단 네비게이션 메인 메뉴
-    st.sidebar.markdown("## 🏢 잘 보면 보이는 손")
+    # 1. 사이드바 최상단 네비게이션 헤더 배치
+    st.sidebar.markdown(
+        """
+        <div style="padding-bottom: 2px;">
+            <h2 style="font-size: 24px; font-weight: 800; color: #0f766e; margin: 0 0 4px 0; letter-spacing: -0.5px;">🏢 잘 보면 보이는 손</h2>
+            <div style="font-size: 13px; color: #64748b; font-weight: 600;">The Visible Hand Dashboard</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
     st.sidebar.markdown("---")
     
+    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 글자 크기 확대, 줄바꿈 가시성 반영)
     selected_menu = st.sidebar.radio(
         "📌 서비스 메뉴 선택",
-        ["🏢 잘 보면 보이는 손 (매크로 방공망)", "💡 사실 이 가격이에요 (밸류에이션 리포트)"],
+        [
+            "🏢 잘 보면 보이는 손\n   (매크로 방공망)", 
+            "💡 사실 이 가격이에요\n   (밸류에이션 리포트)"
+        ],
         index=0
     )
     st.sidebar.markdown("---")
     
-    # 사이드바 하단 관리자 로그인 시스템 배치
+    # 3. 사이드바 하단 관리자 로그인 시스템 배치
     render_admin_sidebar()
 
-    # 메인 뷰 라우팅
-    if "💡 사실 이 가격이에요" in selected_menu:
+    # 4. 메인 뷰 라우팅
+    if "사실 이 가격이에요" in selected_menu:
         render_pegy_page()
     else:
         render_macro_page()
