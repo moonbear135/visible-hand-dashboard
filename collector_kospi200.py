@@ -111,8 +111,8 @@ def fetch_kospi200_real_market_data():
                 code = str(link['href'].split('=')[-1]).strip()
                 name = str(link.text).strip()
                 
-                # 스킵: ETN, ETF 등 펀드/특수상품 제외
-                if any(x in name for x in ["ETN", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR"]):
+                # 스킵: ETF, ETN, 파생/인덱스 펀드 등 특수상품 제외 (순수 개별 주식 종목만 시총 순위 채번)
+                if any(x in name for x in ["ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR", "PLUS", "WOORI", "TIMEFOLIO", "FOCUS", "UNICORN", "HERO", "KOSEF", "KINDEX", "TREX"]):
                     continue
 
                 # 100% 실시간 최신 시장 주가 원본 크롤링
