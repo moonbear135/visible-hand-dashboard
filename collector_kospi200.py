@@ -145,45 +145,34 @@ def enrich_quant_metrics(stocks_raw):
         code = s["code"]
         name = s["name"]
         price = s["price"]
-        t_per = s["t_per"]
+        raw_per = s["t_per"]
         t_roe = s["t_roe"]
 
-        # 1. Trailing EPS 실시간 계산
-        t_eps = int(price / t_per) if t_per > 0 else int(price / 12.5)
+        # 1. Trailing EPS 실시간 파싱 및 연산
+        t_eps = int(price / raw_per) if raw_per > 0 else int(price / 12.5)
 
-        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (상위 35개 종목 확정 연간 DPS/EPS 정밀 파싱)
+        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (상위 35개 종목)
         real_dps, real_eps = None, None
         if idx < 35:
             real_dps, real_eps = fetch_naver_item_dps_and_eps(code)
             if real_eps and real_eps > 0:
                 t_eps = real_eps
 
-        # 3. 배당금 (DPS) & 자사주 매입소각 정밀 검증 (SK하이닉스 2,204원~3,000원 연간 확정 DPS 적용)
-        if real_dps is not None and real_dps > 0:
-            dps = real_dps
-        else:
-            # 주가 대비 보수적 배당금 산출
-            if t_roe > 0:
-                est_yield = min(max(t_roe * 0.08, 0.8), 3.5) / 100.0
-                dps = int(price * est_yield)
-            else:
-                dps = 0
+        # 3. Trailing PER 직접 연산 (Current_Price / Trailing_EPS) - 수치 연동 통일
+        t_per = round(price / t_eps, 2) if (price > 0 and t_eps > 0) else raw_per
 
-        # =========================================================
-        # 4. 피터 린치 PEGY 정통 배당수익률(Yield %) 산출
-        # =========================================================
-        # (1) 배당성향(Payout Ratio) 착시 방지를 위해 주가 대비 배당수익률 (Yield %) 산출
+        # 4. 배당금(DPS) 파싱 안전장치: 현금 DPS가 없거나 불확실 시 0원 처리
+        dps = real_dps if (real_dps is not None and real_dps > 0) else 0
+
+        # 피터 린치 PEGY 주가 대비 배당수익률 (Yield %) 산출
         div_yield = (dps / price * 100.0) if (price > 0 and dps > 0) else 0.0
-        buyback_yield = 2.5 if (t_roe >= 10.0 or code in ["000660", "005930", "005380", "105560", "402340"]) else 1.0
-        sh_yield = round(min(div_yield + buyback_yield, 15.0), 1)
-
-        # 표시용 주주환원율 수치
-        sh_return = sh_yield
+        buyback_yield = 2.5 if (t_roe >= 10.0 and dps > 0) else 0.0
+        sh_yield = round(min(div_yield + buyback_yield, 10.0), 1)
 
         # 총 주주환원 규모 (억원 단위 계산)
         approx_shares = 730000000 if code == "000660" else (5969000000 if code == "005930" else 213000000)
-        tot_return_krw = int(((dps + int(price * 0.003)) * approx_shares) / 100000000)
-        tot_amt = f"총 {tot_return_krw:,}억원" if dps > 0 else "0원"
+        tot_return_krw = int(((dps + int(price * 0.003)) * approx_shares) / 100000000) if dps > 0 else 0
+        tot_amt = f"총 {tot_return_krw:,}억원" if dps > 0 else "무배당 (자사주 소각 중심)"
 
         # Forward 추정 컨센서스 (ROE, EPS, PER)
         f_roe = round(t_roe * 1.12, 1) if t_roe > 0 else 8.5
@@ -196,11 +185,11 @@ def enrich_quant_metrics(stocks_raw):
         f_per = round(max(t_per * 0.88, 4.5), 2)
         f_eps = int(price / f_per) if f_per > 0 else int(t_eps * 1.15)
         
-        # 변동성 상태 판정 (안전한 문자열 해시 기반)
+        # 변동성 상태 판정
         code_hash = sum(ord(c) for c in code)
         vol = "🟢 정상" if (code_hash % 3 != 0) else "⚡ 변동성 보정 중"
 
-        # yfinance 오차 교차검증 (상위 종목 15% 이격 체크)
+        # yfinance 오차 교차검증
         per_discrepancy = False
         if idx < 15 and HAS_YFINANCE:
             try:
@@ -215,24 +204,26 @@ def enrich_quant_metrics(stocks_raw):
             time.sleep(0.1)
 
         # =========================================================
-        # 젬민이 튜닝 퀀트 대칭성(Symmetry) 통일 수식 산출
+        # 젬민이 요청 2중 Cap 실효성장률(g_eff) 및 대칭 퀀트 공식
+        # 영업성장률(Max 35%) + 주주환원수익률(Max 10%) -> 최종 실효성장률 Max 40% Cap
         # =========================================================
-        # 1. Forward PEGY 보정 공식 (growth 35% Cap & 배당수익률 적용 & 변동성 벌점 1.18배)
-        capped_growth = min(growth, 35.0)
+        sh_return_capped = min(sh_yield, 10.0)
+        geff = min(min(growth, 35.0) + sh_return_capped, 40.0)
+
         vol_penalty = 1.18 if "보정" in vol else 1.0
-        growth_eff = min(capped_growth + sh_yield, 45.0) / vol_penalty
+        growth_eff = geff / vol_penalty
         f_pegy = round(f_per / max(growth_eff, 0.1), 2)
         t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2)
 
-        # 2. PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (35.0배 Cap) & 목표주가(f_target)
+        # PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (35.0배 Cap) & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
-        target_pegy = 1.0 * (1.0 + roe_prem + roic_prem) # Quality 가중 적정 PEGY 벤치마크 (0.85 ~ 1.25배)
+        target_pegy = 1.0 * (1.0 + roe_prem + roic_prem)
         target_per = round(min(target_pegy * growth_eff, 35.0), 2)
         f_target = int(f_eps * target_per)
         t_fair = int(t_eps * min(1.0 * (growth + sh_yield), 35.0))
 
-        # 3. 종합 퀀트 스코어 및 배지 판정 (수학적 대칭성 & utils.scoring 킬러 로직 연동)
+        # 종합 퀀트 스코어 및 배지 판정
         score_res = calculate_quant_score(
             f_pegy=f_pegy, 
             f_roe=f_roe, 
