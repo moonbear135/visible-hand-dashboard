@@ -106,7 +106,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (쉽게 설명된 '착시 저평가 위험' 필터 & 2단 수직 스택 지표) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (목표가 박스 그라데이션 제거 & 깔끔 솔리드 다크 배경) 화면 렌더링"""
     
     # 1. 툴팁 전용 CSS 주입
     st.markdown(
@@ -338,7 +338,7 @@ def render_pegy_page():
                 </div>
             </div>
 
-            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 상단 라벨 / 하단 수치 2단 스택) -->
+            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 선명한 솔리드 다크 목표가 박스) -->
             <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
                 <!-- 헤더: 2줄 넉넉한 타이틀 + 우측 설명 주석 -->
                 <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
@@ -349,7 +349,7 @@ def render_pegy_page():
                     <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*12개월 Forward 컨센서스 및 3개월 변동성위험 보정 반영</span>
                 </div>
 
-                <!-- 수치 영역: 4열 Grid & 상단 라벨 / 하단 대형수치 2단 구조 -->
+                <!-- 수치 영역: 4열 Grid & 솔리드 다크 명확 목표가 박스 -->
                 <div style="display: grid; grid-template-columns: 1fr 1.3fr 1fr 1.7fr; gap: 14px; align-items: center;">
                     <div>
                         <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
@@ -369,11 +369,11 @@ def render_pegy_page():
                         </div>
                         <div style="font-size: 15.5px; font-weight: 800; color: #4ade80;">+{s['growth']}%</div>
                     </div>
-                    <div style="background-color: rgba(244, 63, 94, 0.15); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(244, 63, 94, 0.45);">
+                    <div style="background-color: #0f172a; padding: 8px 14px; border-radius: 8px; border: 1.5px solid #f43f5e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
                         <div style="font-size: 12px; color: #fca5a5; margin-bottom: 2px;">
                             <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 목표 적정주가</b><br>• 보정 PEGY: Forward PER / (성장률 + 주주환원율) * (3개월 변동성위험 보정계수)<br>• 목표 적정가: Forward EPS * 퀀트 타겟 PER</span></span>
                         </div>
-                        <div style="font-size: 16.5px; font-weight: 900; color: #f43f5e;">{s['f_pegy']} / {s['f_target']:,.0f}원</div>
+                        <div style="font-size: 16.5px; font-weight: 900; color: #ff4d6d; letter-spacing: 0.2px;">{s['f_pegy']} / {s['f_target']:,.0f}원</div>
                     </div>
                 </div>
             </div>
