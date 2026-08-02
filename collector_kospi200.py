@@ -181,9 +181,10 @@ def enrich_quant_metrics(stocks_raw):
         raw_per = s["t_per"]
         t_roe = s["t_roe"]
 
-        # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 적용
+        # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
         n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps = fetch_naver_item_dps_and_eps(code)
         
+        # Trailing PER & EPS (Naver 공식 스냅샷 우선)
         if n_t_per and n_t_per > 0:
             t_per = n_t_per
         elif raw_per > 0:
@@ -196,6 +197,7 @@ def enrich_quant_metrics(stocks_raw):
         else:
             t_eps = int(price / t_per) if t_per > 0 else int(price / 12.5)
 
+        # Forward PER & EPS (Naver 공식 스냅샷 우선)
         if n_f_per and n_f_per > 0:
             f_per = n_f_per
         else:
