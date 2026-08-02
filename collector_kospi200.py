@@ -7,6 +7,7 @@ import requests
 from datetime import datetime
 from bs4 import BeautifulSoup
 import pandas as pd
+import re
 
 from utils.scoring import calculate_quant_score
 
@@ -68,7 +69,7 @@ def fetch_naver_item_dps_and_eps(code):
             annual_cols = []
             for idx, col in enumerate(fin_df.columns):
                 tf_type = DataValidator.classify_header_timeframe(col)
-                if tf_type == "ANNUAL_TTM":
+                if tf_type in ["TTM", "ANNUAL_TTM"]:
                     annual_cols.append(idx)
                     
             if not annual_cols:
@@ -88,7 +89,7 @@ def fetch_naver_item_dps_and_eps(code):
                                     break
                         except Exception:
                             pass
-                            
+
         # 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정
         if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
             parent_code = code[:-1] + '0'
@@ -98,6 +99,9 @@ def fetch_naver_item_dps_and_eps(code):
 
         return t_per, t_eps, f_per, f_eps, div_yield, parsed_dps
     except Exception as e:
+        print("FETCH_ERROR:", e)
+        import traceback
+        traceback.print_exc()
         return None, None, None, None, None, None
 
 def fetch_kospi200_real_market_data():
@@ -222,8 +226,13 @@ def enrich_quant_metrics(stocks_raw):
         else:
             f_eps = int(price / f_per) if f_per > 0 else int(t_eps * 1.15)
 
-        # 2. 배당금(DPS) 파싱 안전장치: 현금 DPS가 없거나 불확실 시 0원 처리
-        dps = real_dps if (real_dps is not None and real_dps > 0) else 0
+        # 2. 배당금(DPS) 파싱 안전장치: n_div_yield가 존재하면 DPS 추정 계산 보정
+        if real_dps and real_dps > 0:
+            dps = real_dps
+        elif n_div_yield and n_div_yield > 0 and price > 0:
+            dps = int(price * (n_div_yield / 100.0))
+        else:
+            dps = 0
 
         # 피터 린치 PEGY 주가 대비 배당수익률 (Yield %) 산출
         div_yield = n_div_yield if (n_div_yield is not None and n_div_yield > 0) else ((dps / price * 100.0) if (price > 0 and dps > 0) else 0.0)
