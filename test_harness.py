@@ -30,6 +30,15 @@ class AuditRecord:
 # 수식 및 교차검증 변경 시 이 리스트에 기록을 추가합니다.
 AUDIT_TRAIL = [
     AuditRecord(
+        version="v1.4.0",
+        date_str="2026-08-03",
+        who="보이는 손 데이터 안심 방공망 팀",
+        where="utils/data_validator.py / collector_kospi200.py / test_harness.py",
+        what="3단계 데이터 검증 하네스 구축 (Raw vs Processed 1:1 대조, 5% PER 산티 체크, 3% 교차검증) 및 시계열 키워드 사전 연동 헤더 동적 타겟팅",
+        why="단일 분기(Q)/일간(D) 데이터와 연간(TTM) 데이터 수치 혼동 오염을 전면 차단하고 100% 검증된 데이터만 대시보드에 반영하기 위함",
+        how="DataValidator 3단계 파이프라인 수립, TIMEFRAME_KEYWORDS 정규식 매핑, 산티 산출 공식 (Price / EPS_TTM) 오차 5% 초과 시 차단/Fallback 지원"
+    ),
+    AuditRecord(
         version="v1.3.0",
         date_str="2026-08-02",
         who="보이는 손 UI/UX 퀀트 분석팀",
@@ -221,9 +230,37 @@ class DataCrossValidator:
 
         print("==================================================")
 
+class DataValidatorHarness:
+    @staticmethod
+    def test_pipeline():
+        print("==================================================")
+        print("[데이터 검증 3단계 파이프라인 (DataValidator) 하네스 검사]")
+        print("==================================================")
+        from utils.data_validator import DataValidator
+        
+        # Test Case 1: 정상 수치
+        raw_test = {"raw_eps": 10085}
+        proc_test = {"code": "055550", "name": "신한지주", "price": 100700, "t_eps": 10085, "t_per": 9.99}
+        pass1, logs1 = DataValidator.run_pipeline(raw_test, proc_test)
+        if pass1:
+            print("  * [테스트 1 - 정상주] 3단계 검증 통과 (PASS) ⭕")
+        else:
+            print(f"  * [테스트 1 - 정상주] 실패: {logs1[-1]}")
+            
+        # Test Case 2: PER 산티 오차 5% 초과 (오염 데이터)
+        proc_corrupt = {"code": "000000", "name": "오염기업", "price": 100000, "t_eps": 2000, "t_per": 80.0} # 100000/2000=50 != 80 (60% 차이!)
+        pass2, logs2 = DataValidator.run_pipeline(raw_test, proc_corrupt)
+        if not pass2:
+            print("  * [테스트 2 - 오염데이터 차단] 산티 체크 5% 초과 차단 성공 (PASS) 🛡️")
+        else:
+            print("  * [테스트 2 - 오염데이터 차단] 산티 체크 차단 실패!")
+
+        print("==================================================")
+
 def main():
     check_governance()
     UICrossValidator.validate_ui_visibility()
+    DataValidatorHarness.test_pipeline()
     DataCrossValidator.validate_latest_data()
     
     if os.path.exists(HISTORY_FILE):

@@ -16,10 +16,13 @@ try:
 except ImportError:
     HAS_YFINANCE = False
 
+from utils.data_validator import DataValidator, TIMEFRAME_KEYWORDS
+
 def fetch_naver_item_dps_and_eps(code):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
-    주요 재무제표 표에서 Naver 공식 Trailing PER, Trailing EPS, Forward PER, Forward EPS, DPS를 100% 정밀 파싱합니다.
+    주요 재무제표 표에서 TIMEFRAME_KEYWORDS 사전을 기반으로 동적 키워드 헤더 타겟팅을 적용합니다.
+    (위치 고정 인덱스 iloc[:, 2] 전면 금지, 100% 범용 동적 수집)
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -34,6 +37,7 @@ def fetch_naver_item_dps_and_eps(code):
         
         t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
         
+        # 1. 1차 출처: 우측 Investment Info 공식 스냅샷
         aside = soup.select_one('div.aside_invest_info')
         if aside:
             for tr in aside.find_all('tr'):
@@ -53,14 +57,24 @@ def fetch_naver_item_dps_and_eps(code):
                     if yield_match:
                         div_yield = float(yield_match.group(1).replace(',', ''))
                         
+        # 2. 2차 출처: 주요 재무제표 동적 키워드 타겟팅 (하드코딩 및 iloc 인덱스 금지)
         dfs = pd.read_html(res.text, encoding='euc-kr')
         fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
         parsed_dps = None
         if fin_df_list:
             fin_df = fin_df_list[0]
-            annual_cols = [idx for idx, col in enumerate(fin_df.columns) if '최근 연간 실적' in str(col) and '(E)' not in str(col)]
+            
+            # 동적 헤더 시계열 분류
+            annual_cols = []
+            for idx, col in enumerate(fin_df.columns):
+                tf_type = DataValidator.classify_header_timeframe(col)
+                if tf_type == "ANNUAL_TTM":
+                    annual_cols.append(idx)
+                    
             if not annual_cols:
-                annual_cols = [1, 2, 3]
+                # 동적 헤더 분류 폴백 (분기/일간 제외)
+                annual_cols = [idx for idx, col in enumerate(fin_df.columns) if '분기' not in str(col) and idx > 0][:3]
+                
             for i, row in fin_df.iterrows():
                 row_str = ' '.join([str(x) for x in row.values])
                 if '주당배당금' in row_str and parsed_dps is None:
@@ -291,6 +305,20 @@ def enrich_quant_metrics(stocks_raw):
 
         value_trap = (t_roe < 8.0 or roic < 6.0)
 
+        # =========================================================
+        # 3단계 데이터 검증 하네스 파이프라인 (DataValidator) 수행
+        # =========================================================
+        stock_raw_info = {"raw_eps": n_t_eps}
+        stock_proc_info = {"code": code, "name": name, "price": price, "t_per": t_per, "t_eps": t_eps}
+        sec_info = {"t_per": s["t_per"]} if s.get("t_per") else None
+
+        valid_pass, v_logs = DataValidator.run_pipeline(stock_raw_info, stock_proc_info, sec_info)
+        is_valid = valid_pass
+
+        # 검증 실패 시 로그 출력
+        if not valid_pass:
+            print(f"⚠️ [{name} ({code})] 3단계 하네스 검증 경고: {v_logs[-1]}")
+
         enriched_stocks.append({
             "rank": idx + 1,
             "name": name,
@@ -317,7 +345,9 @@ def enrich_quant_metrics(stocks_raw):
             "badge_bg": badge_bg,
             "badge_fg": badge_fg,
             "value_trap": value_trap,
-            "per_discrepancy": per_discrepancy
+            "per_discrepancy": per_discrepancy,
+            "g_eff": round(growth_eff, 1),
+            "is_valid": is_valid
         })
 
     # 전체 종목 방공망 모듈 (utils/guardrail.py) 일괄 검증 적용

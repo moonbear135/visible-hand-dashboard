@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "last_updated_at": "2026-08-02 23:56",
+    "last_updated_at": "2026-08-03 00:12",
     "status": "SUCCESS",
     "total_count": 200,
     "description": "KOSPI 200 시가총액 상위 1위~200위 100% 실데이터 퀀트 스냅샷 (장 마감 반영)"
@@ -1710,6 +1710,7 @@
       "badge_fg": "#f97316",
       "value_trap": true,
       "per_discrepancy": false,
+      "g_eff": 5.0,
       "is_valid": false,
       "is_unverified": true,
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
@@ -3573,6 +3574,7 @@
       "badge_fg": "#f97316",
       "value_trap": true,
       "per_discrepancy": false,
+      "g_eff": 0.1,
       "is_valid": false,
       "is_unverified": true,
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
@@ -4783,6 +4785,7 @@
       "badge_fg": "#f97316",
       "value_trap": true,
       "per_discrepancy": false,
+      "g_eff": 0.1,
       "is_valid": false,
       "is_unverified": true,
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
@@ -5745,6 +5748,7 @@
       "badge_fg": "#f97316",
       "value_trap": true,
       "per_discrepancy": false,
+      "g_eff": 5.0,
       "is_valid": false,
       "is_unverified": true,
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
