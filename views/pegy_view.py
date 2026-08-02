@@ -121,12 +121,24 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
     
-    # 3. 상단 그라데이션 타이틀
+    # 3. 상단 그라데이션 타이틀 및 법적 경고 박스
     st.markdown(
         """
-        <div style="text-align: center; margin-bottom: 18px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <h1 style="font-size: 34px; font-weight: 800; color: #d97706; margin: 0 0 8px 0; letter-spacing: -0.5px;">💡 사실 이 가격이에요</h1>
-            <div style="font-size: 16px; color: #64748b; font-weight: 600;">KOSPI 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
+        <div style="text-align: center; margin-bottom: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <h1 style="font-size: 36px; font-weight: 800; color: #d97706; margin: 0 0 6px 0; letter-spacing: -0.5px;">💡 사실 이 가격이에요</h1>
+            <!-- 빨간색 하이라이트 투자 주의 및 AI 수식 안내 경고 박스 -->
+            <div style="background: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%); border: 2px solid #ef4444; border-radius: 12px; padding: 12px 22px; margin: 10px auto 14px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(239, 68, 68, 0.35);">
+                <div style="font-size: 15px; font-weight: 800; color: #fca5a5; letter-spacing: -0.3px;">
+                    🚨 [투자 주의 경고 및 AI 분석 안내]
+                </div>
+                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
+                    본 리포트의 수치는 <b>순수 재무제표 공시 자료에 의거하여 AI 퀀트 공식을 통해 자동 계산된 참고용 자료</b>입니다.
+                </div>
+                <div style="font-size: 13.5px; color: #fecdd3; font-weight: 600; margin-top: 3px;">
+                    ⚠️ 투자 결과에 대한 최종 판단과 모든 법적·경제적 책임은 투자자 본인(개인)에게 있음을 명시합니다.
+                </div>
+            </div>
+            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">KOSPI 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
         </div>
         """,
         unsafe_allow_html=True
