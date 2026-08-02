@@ -229,7 +229,14 @@ def render_pegy_page():
     clean_guide_html = "\n".join([line.strip() for line in guide_box_html.split("\n") if line.strip()])
     st.markdown(clean_guide_html, unsafe_allow_html=True)
 
-    filtered_stocks = all_stocks
+    # 전체 종목 방공망 일괄 스크리닝 (Patch 4 적용)
+    from utils.guardrail import apply_valuation_guardrail
+    processed_stocks = []
+    for s in all_stocks:
+        screened_stock = apply_valuation_guardrail(s)
+        processed_stocks.append(screened_stock)
+
+    filtered_stocks = processed_stocks
     if search_query:
         filtered_stocks = [
             s for s in filtered_stocks 

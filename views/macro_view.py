@@ -290,14 +290,14 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         multiplier = 1.3
     elif extreme_signal_count >= 3:
         multiplier = 1.15
-        
-    # 거시 위험 지수 곱셈기 부호 반전 오류 수정:
-    # base_score < 50 일 때 multiplier 곱셈 시 위험점수가 오히려 낮아지는 수학적 오류 차단
-    if base_score >= 50.0:
+
+    # [수정] 위험 할증(Multiplier)은 위험 지수가 50점을 초과할 때만 상향 가산 적용
+    if base_score > 50.0:
         final_score = 50.0 + (base_score - 50.0) * multiplier
     else:
-        final_score = base_score + (multiplier - 1.0) * 40.0
-        
+        # 50점 이하 안정 구간에서는 극단 신호 발생 시 위험도 기여분을 원점수로 가산
+        final_score = base_score + (extreme_signal_count * 2.5)
+
     final_score = round(max(0.0, min(100.0, final_score)), 1)
     score = final_score
 

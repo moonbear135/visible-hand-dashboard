@@ -281,7 +281,13 @@ def enrich_quant_metrics(stocks_raw):
             "per_discrepancy": per_discrepancy
         })
 
-    return enriched_stocks
+    # 전체 종목 방공망 모듈 (utils/guardrail.py) 일괄 검증 적용
+    from utils.guardrail import apply_valuation_guardrail
+    guarded_stocks = []
+    for s in enriched_stocks:
+        guarded_stocks.append(apply_valuation_guardrail(s))
+
+    return guarded_stocks
 
 def update_pegy_summary_history(meta_date, enriched_stocks):
     """상단 3개 요약 지표 수치를 누적 기록하여 pegy_summary_history.json 에 저장합니다."""

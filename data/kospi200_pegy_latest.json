@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "last_updated_at": "2026-08-02 21:37",
+    "last_updated_at": "2026-08-02 21:41",
     "status": "SUCCESS",
     "total_count": 200,
     "description": "KOSPI 200 시가총액 상위 1위~200위 100% 실데이터 퀀트 스냅샷 (장 마감 반영)"
@@ -32,7 +32,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 17.2,
+      "is_valid": true
     },
     {
       "rank": 2,
@@ -60,7 +62,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 37.7,
+      "is_valid": true
     },
     {
       "rank": 3,
@@ -88,7 +92,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 13.2,
+      "is_valid": true
     },
     {
       "rank": 4,
@@ -116,7 +122,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 5,
@@ -144,7 +152,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 10.2,
+      "is_valid": true
     },
     {
       "rank": 6,
@@ -172,7 +182,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 13.5,
+      "is_valid": true
     },
     {
       "rank": 7,
@@ -192,15 +204,17 @@
       "f_per": 42.13,
       "f_eps": 7785,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 229599,
+      "f_pegy": 99.0,
+      "f_target": 229600.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 8,
@@ -228,7 +242,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 25.3,
+      "is_valid": true
     },
     {
       "rank": 9,
@@ -256,7 +272,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 8.1,
+      "is_valid": true
     },
     {
       "rank": 10,
@@ -284,7 +302,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.6,
+      "is_valid": true
     },
     {
       "rank": 11,
@@ -312,7 +332,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.6,
+      "is_valid": true
     },
     {
       "rank": 12,
@@ -340,7 +362,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 24.5,
+      "is_valid": true
     },
     {
       "rank": 13,
@@ -368,7 +392,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 28.2,
+      "is_valid": true
     },
     {
       "rank": 14,
@@ -396,7 +422,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 28.2,
+      "is_valid": true
     },
     {
       "rank": 15,
@@ -424,7 +452,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": true
+      "per_discrepancy": true,
+      "g_eff": 13.9,
+      "is_valid": true
     },
     {
       "rank": 16,
@@ -452,7 +482,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.1,
+      "is_valid": true
     },
     {
       "rank": 17,
@@ -480,7 +512,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 11.4,
+      "is_valid": true
     },
     {
       "rank": 18,
@@ -503,12 +537,14 @@
       "f_pegy": 105.57,
       "f_target": 540,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 10,
-      "badge": "🔴 데이터 이상/극단고평가",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
+      "quant_score": 0,
+      "badge": "🔴 측정 불가 (데이터 오류)",
+      "badge_bg": "#451a03",
+      "badge_fg": "#f97316",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "is_valid": false,
+      "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
       "rank": 19,
@@ -536,7 +572,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.7,
+      "is_valid": true
     },
     {
       "rank": 20,
@@ -564,7 +602,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.2,
+      "is_valid": true
     },
     {
       "rank": 21,
@@ -592,7 +632,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.9,
+      "is_valid": true
     },
     {
       "rank": 22,
@@ -620,7 +662,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.2,
+      "is_valid": true
     },
     {
       "rank": 23,
@@ -648,7 +692,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 19.9,
+      "is_valid": true
     },
     {
       "rank": 24,
@@ -676,7 +722,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 21.9,
+      "is_valid": true
     },
     {
       "rank": 25,
@@ -704,7 +752,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 28.8,
+      "is_valid": true
     },
     {
       "rank": 26,
@@ -732,7 +782,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.4,
+      "is_valid": true
     },
     {
       "rank": 27,
@@ -760,7 +812,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 29.4,
+      "is_valid": true
     },
     {
       "rank": 28,
@@ -788,7 +842,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.2,
+      "is_valid": true
     },
     {
       "rank": 29,
@@ -816,7 +872,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 38.5,
+      "is_valid": true
     },
     {
       "rank": 30,
@@ -844,7 +902,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.6,
+      "is_valid": true
     },
     {
       "rank": 31,
@@ -872,7 +932,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 34.5,
+      "is_valid": true
     },
     {
       "rank": 32,
@@ -900,7 +962,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 32.1,
+      "is_valid": true
     },
     {
       "rank": 33,
@@ -928,7 +992,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.0,
+      "is_valid": true
     },
     {
       "rank": 34,
@@ -956,7 +1022,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 32.9,
+      "is_valid": true
     },
     {
       "rank": 35,
@@ -984,7 +1052,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 37.9,
+      "is_valid": true
     },
     {
       "rank": 36,
@@ -1012,7 +1082,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.0,
+      "is_valid": true
     },
     {
       "rank": 37,
@@ -1040,7 +1112,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.1,
+      "is_valid": true
     },
     {
       "rank": 38,
@@ -1068,7 +1142,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.5,
+      "is_valid": true
     },
     {
       "rank": 39,
@@ -1096,7 +1172,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 17.9,
+      "is_valid": true
     },
     {
       "rank": 40,
@@ -1116,15 +1194,17 @@
       "f_per": 7.37,
       "f_eps": 14993,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 77350,
+      "f_pegy": 99.0,
+      "f_target": 77350.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 41,
@@ -1152,7 +1232,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.3,
+      "is_valid": true
     },
     {
       "rank": 42,
@@ -1172,15 +1254,17 @@
       "f_per": 8.62,
       "f_eps": 29930,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 180600,
+      "f_pegy": 99.0,
+      "f_target": 180600.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 43,
@@ -1208,7 +1292,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 44,
@@ -1236,7 +1322,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.0,
+      "is_valid": true
     },
     {
       "rank": 45,
@@ -1264,7 +1352,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.0,
+      "is_valid": true
     },
     {
       "rank": 46,
@@ -1292,7 +1382,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.3,
+      "is_valid": true
     },
     {
       "rank": 47,
@@ -1320,7 +1412,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.3,
+      "is_valid": true
     },
     {
       "rank": 48,
@@ -1348,7 +1442,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 25.0,
+      "is_valid": true
     },
     {
       "rank": 49,
@@ -1376,7 +1472,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 50,
@@ -1404,7 +1502,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 23.6,
+      "is_valid": true
     },
     {
       "rank": 51,
@@ -1432,7 +1532,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 52,
@@ -1460,7 +1562,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 53,
@@ -1488,7 +1592,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.3,
+      "is_valid": true
     },
     {
       "rank": 54,
@@ -1516,7 +1622,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.7,
+      "is_valid": true
     },
     {
       "rank": 55,
@@ -1539,12 +1647,14 @@
       "f_pegy": 147.77,
       "f_target": 790,
       "vol": "🟢 정상",
-      "quant_score": 10,
-      "badge": "🔴 데이터 이상/극단고평가",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
+      "quant_score": 0,
+      "badge": "🔴 측정 불가 (데이터 오류)",
+      "badge_bg": "#451a03",
+      "badge_fg": "#f97316",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "is_valid": false,
+      "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
       "rank": 56,
@@ -1572,7 +1682,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.0,
+      "is_valid": true
     },
     {
       "rank": 57,
@@ -1600,7 +1712,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 58,
@@ -1628,7 +1742,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.6,
+      "is_valid": true
     },
     {
       "rank": 59,
@@ -1656,7 +1772,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 24.3,
+      "is_valid": true
     },
     {
       "rank": 60,
@@ -1684,7 +1802,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.8,
+      "is_valid": true
     },
     {
       "rank": 61,
@@ -1712,7 +1832,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.4,
+      "is_valid": true
     },
     {
       "rank": 62,
@@ -1740,7 +1862,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.0,
+      "is_valid": true
     },
     {
       "rank": 63,
@@ -1768,7 +1892,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.3,
+      "is_valid": true
     },
     {
       "rank": 64,
@@ -1796,7 +1922,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 23.1,
+      "is_valid": true
     },
     {
       "rank": 65,
@@ -1824,7 +1952,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.4,
+      "is_valid": true
     },
     {
       "rank": 66,
@@ -1852,7 +1982,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.5,
+      "is_valid": true
     },
     {
       "rank": 67,
@@ -1880,7 +2012,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 68,
@@ -1908,7 +2042,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.1,
+      "is_valid": true
     },
     {
       "rank": 69,
@@ -1936,7 +2072,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 17.0,
+      "is_valid": true
     },
     {
       "rank": 70,
@@ -1964,7 +2102,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 71,
@@ -1992,7 +2132,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 17.9,
+      "is_valid": true
     },
     {
       "rank": 72,
@@ -2020,7 +2162,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.2,
+      "is_valid": true
     },
     {
       "rank": 73,
@@ -2048,7 +2192,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.3,
+      "is_valid": true
     },
     {
       "rank": 74,
@@ -2076,7 +2222,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.2,
+      "is_valid": true
     },
     {
       "rank": 75,
@@ -2104,7 +2252,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 76,
@@ -2132,7 +2282,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 23.6,
+      "is_valid": true
     },
     {
       "rank": 77,
@@ -2160,7 +2312,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.7,
+      "is_valid": true
     },
     {
       "rank": 78,
@@ -2188,7 +2342,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.2,
+      "is_valid": true
     },
     {
       "rank": 79,
@@ -2208,15 +2364,17 @@
       "f_per": 13.74,
       "f_eps": 12285,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 118159,
+      "f_pegy": 99.0,
+      "f_target": 118160.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 80,
@@ -2244,7 +2402,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 81,
@@ -2272,7 +2432,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 23.6,
+      "is_valid": true
     },
     {
       "rank": 82,
@@ -2300,7 +2462,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.8,
+      "is_valid": true
     },
     {
       "rank": 83,
@@ -2328,7 +2492,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 84,
@@ -2356,7 +2522,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 22.6,
+      "is_valid": true
     },
     {
       "rank": 85,
@@ -2384,7 +2552,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.5,
+      "is_valid": true
     },
     {
       "rank": 86,
@@ -2412,7 +2582,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 87,
@@ -2440,7 +2612,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 11.5,
+      "is_valid": true
     },
     {
       "rank": 88,
@@ -2468,7 +2642,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 89,
@@ -2496,7 +2672,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.4,
+      "is_valid": true
     },
     {
       "rank": 90,
@@ -2524,7 +2702,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 91,
@@ -2552,7 +2732,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.7,
+      "is_valid": true
     },
     {
       "rank": 92,
@@ -2572,15 +2754,17 @@
       "f_per": 6.04,
       "f_eps": 2115,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 8946,
+      "f_pegy": 99.0,
+      "f_target": 8946.0,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 93,
@@ -2608,7 +2792,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.7,
+      "is_valid": true
     },
     {
       "rank": 94,
@@ -2636,7 +2822,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 14.0,
+      "is_valid": true
     },
     {
       "rank": 95,
@@ -2664,7 +2852,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.1,
+      "is_valid": true
     },
     {
       "rank": 96,
@@ -2692,7 +2882,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 97,
@@ -2720,7 +2912,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.0,
+      "is_valid": true
     },
     {
       "rank": 98,
@@ -2748,7 +2942,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.9,
+      "is_valid": true
     },
     {
       "rank": 99,
@@ -2776,7 +2972,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 100,
@@ -2804,7 +3002,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 101,
@@ -2832,7 +3032,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.1,
+      "is_valid": true
     },
     {
       "rank": 102,
@@ -2860,7 +3062,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 103,
@@ -2880,15 +3084,17 @@
       "f_per": 6.6,
       "f_eps": 3863,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 17850,
+      "f_pegy": 99.0,
+      "f_target": 17850.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 104,
@@ -2908,15 +3114,17 @@
       "f_per": 38.75,
       "f_eps": 7406,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 200900,
+      "f_pegy": 99.0,
+      "f_target": 200900.0,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 105,
@@ -2944,7 +3152,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 18.9,
+      "is_valid": true
     },
     {
       "rank": 106,
@@ -2972,7 +3182,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 14.3,
+      "is_valid": true
     },
     {
       "rank": 107,
@@ -3000,7 +3212,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 108,
@@ -3020,15 +3234,17 @@
       "f_per": 63.62,
       "f_eps": 968,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 43120,
+      "f_pegy": 99.0,
+      "f_target": 43120.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 109,
@@ -3056,7 +3272,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.5,
+      "is_valid": true
     },
     {
       "rank": 110,
@@ -3084,7 +3302,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.5,
+      "is_valid": true
     },
     {
       "rank": 111,
@@ -3112,7 +3332,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 112,
@@ -3140,7 +3362,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.3,
+      "is_valid": true
     },
     {
       "rank": 113,
@@ -3160,15 +3384,17 @@
       "f_per": 4.5,
       "f_eps": 16044,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 50540,
+      "f_pegy": 99.0,
+      "f_target": 50540.0,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 114,
@@ -3188,15 +3414,17 @@
       "f_per": 35.9,
       "f_eps": 5300,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 133210,
+      "f_pegy": 99.0,
+      "f_target": 133210.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 115,
@@ -3219,12 +3447,14 @@
       "f_pegy": 99.99,
       "f_target": 18445,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 10,
-      "badge": "🔴 데이터 이상/극단고평가",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
+      "quant_score": 0,
+      "badge": "🔴 측정 불가 (데이터 오류)",
+      "badge_bg": "#451a03",
+      "badge_fg": "#f97316",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "is_valid": false,
+      "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
       "rank": 116,
@@ -3252,7 +3482,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 18.5,
+      "is_valid": true
     },
     {
       "rank": 117,
@@ -3272,15 +3504,17 @@
       "f_per": 22.37,
       "f_eps": 147,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 2313,
+      "f_pegy": 99.0,
+      "f_target": 2314.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 118,
@@ -3308,7 +3542,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 30.6,
+      "is_valid": true
     },
     {
       "rank": 119,
@@ -3336,7 +3572,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 120,
@@ -3364,7 +3602,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 26.8,
+      "is_valid": true
     },
     {
       "rank": 121,
@@ -3392,7 +3632,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 122,
@@ -3420,7 +3662,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 123,
@@ -3448,7 +3692,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.5,
+      "is_valid": true
     },
     {
       "rank": 124,
@@ -3476,7 +3722,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.4,
+      "is_valid": true
     },
     {
       "rank": 125,
@@ -3504,7 +3752,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 30.1,
+      "is_valid": true
     },
     {
       "rank": 126,
@@ -3532,7 +3782,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.7,
+      "is_valid": true
     },
     {
       "rank": 127,
@@ -3552,15 +3804,17 @@
       "f_per": 5.03,
       "f_eps": 14572,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 51310,
+      "f_pegy": 99.0,
+      "f_target": 51310.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 128,
@@ -3588,7 +3842,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.4,
+      "is_valid": true
     },
     {
       "rank": 129,
@@ -3616,7 +3872,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.9,
+      "is_valid": true
     },
     {
       "rank": 130,
@@ -3636,15 +3894,17 @@
       "f_per": 5.48,
       "f_eps": 34927,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 133980,
+      "f_pegy": 99.0,
+      "f_target": 133980.0,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 131,
@@ -3672,7 +3932,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.2,
+      "is_valid": true
     },
     {
       "rank": 132,
@@ -3700,7 +3962,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 133,
@@ -3728,7 +3992,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 13.6,
+      "is_valid": true
     },
     {
       "rank": 134,
@@ -3756,7 +4022,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.5,
+      "is_valid": true
     },
     {
       "rank": 135,
@@ -3776,15 +4044,17 @@
       "f_per": 28.05,
       "f_eps": 1206,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 23695,
+      "f_pegy": 99.0,
+      "f_target": 23695.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 136,
@@ -3812,7 +4082,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 26.1,
+      "is_valid": true
     },
     {
       "rank": 137,
@@ -3840,7 +4112,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.0,
+      "is_valid": true
     },
     {
       "rank": 138,
@@ -3868,7 +4142,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 11.0,
+      "is_valid": true
     },
     {
       "rank": 139,
@@ -3896,7 +4172,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.7,
+      "is_valid": true
     },
     {
       "rank": 140,
@@ -3924,7 +4202,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 24.8,
+      "is_valid": true
     },
     {
       "rank": 141,
@@ -3952,7 +4232,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 16.7,
+      "is_valid": true
     },
     {
       "rank": 142,
@@ -3980,7 +4262,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 17.1,
+      "is_valid": true
     },
     {
       "rank": 143,
@@ -4008,7 +4292,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 11.7,
+      "is_valid": true
     },
     {
       "rank": 144,
@@ -4036,7 +4322,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 18.7,
+      "is_valid": true
     },
     {
       "rank": 145,
@@ -4056,15 +4344,17 @@
       "f_per": 4.5,
       "f_eps": 12555,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 39550,
+      "f_pegy": 99.0,
+      "f_target": 39550.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 146,
@@ -4092,7 +4382,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 147,
@@ -4120,7 +4412,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 14.8,
+      "is_valid": true
     },
     {
       "rank": 148,
@@ -4148,7 +4442,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.8,
+      "is_valid": true
     },
     {
       "rank": 149,
@@ -4176,7 +4472,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 19.5,
+      "is_valid": true
     },
     {
       "rank": 150,
@@ -4204,7 +4502,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.0,
+      "is_valid": true
     },
     {
       "rank": 151,
@@ -4232,7 +4532,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 152,
@@ -4260,7 +4562,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.5,
+      "is_valid": true
     },
     {
       "rank": 153,
@@ -4288,7 +4592,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 154,
@@ -4316,7 +4622,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.0,
+      "is_valid": true
     },
     {
       "rank": 155,
@@ -4339,12 +4647,14 @@
       "f_pegy": 99.99,
       "f_target": 30379,
       "vol": "⚡ 변동성 보정 중",
-      "quant_score": 10,
-      "badge": "🔴 데이터 이상/극단고평가",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
+      "quant_score": 0,
+      "badge": "🔴 측정 불가 (데이터 오류)",
+      "badge_bg": "#451a03",
+      "badge_fg": "#f97316",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "is_valid": false,
+      "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
       "rank": 156,
@@ -4372,7 +4682,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 9.5,
+      "is_valid": true
     },
     {
       "rank": 157,
@@ -4392,15 +4704,17 @@
       "f_per": 4.5,
       "f_eps": 5022,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 15819,
+      "f_pegy": 99.0,
+      "f_target": 15820.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 158,
@@ -4428,7 +4742,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 19.1,
+      "is_valid": true
     },
     {
       "rank": 159,
@@ -4456,7 +4772,9 @@
       "badge_bg": "#166534",
       "badge_fg": "#86efac",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 18.6,
+      "is_valid": true
     },
     {
       "rank": 160,
@@ -4484,7 +4802,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 161,
@@ -4512,7 +4832,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 17.8,
+      "is_valid": true
     },
     {
       "rank": 162,
@@ -4540,7 +4862,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 20.3,
+      "is_valid": true
     },
     {
       "rank": 163,
@@ -4568,7 +4892,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 14.5,
+      "is_valid": true
     },
     {
       "rank": 164,
@@ -4596,7 +4922,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 165,
@@ -4624,7 +4952,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.0,
+      "is_valid": true
     },
     {
       "rank": 166,
@@ -4652,7 +4982,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 167,
@@ -4680,7 +5012,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 31.0,
+      "is_valid": true
     },
     {
       "rank": 168,
@@ -4708,7 +5042,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 24.1,
+      "is_valid": true
     },
     {
       "rank": 169,
@@ -4736,7 +5072,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.8,
+      "is_valid": true
     },
     {
       "rank": 170,
@@ -4764,7 +5102,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 171,
@@ -4792,7 +5132,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.7,
+      "is_valid": true
     },
     {
       "rank": 172,
@@ -4820,7 +5162,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.1,
+      "is_valid": true
     },
     {
       "rank": 173,
@@ -4848,7 +5192,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 174,
@@ -4876,7 +5222,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 8.5,
+      "is_valid": true
     },
     {
       "rank": 175,
@@ -4904,7 +5252,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 176,
@@ -4932,7 +5282,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 177,
@@ -4960,7 +5312,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 29.5,
+      "is_valid": true
     },
     {
       "rank": 178,
@@ -4988,7 +5342,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 179,
@@ -5016,7 +5372,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 180,
@@ -5044,7 +5402,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 181,
@@ -5064,15 +5424,17 @@
       "f_per": 9.54,
       "f_eps": 4564,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 30484,
+      "f_pegy": 99.0,
+      "f_target": 30485.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 182,
@@ -5100,7 +5462,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 7.8,
+      "is_valid": true
     },
     {
       "rank": 183,
@@ -5128,7 +5492,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 35.0,
+      "is_valid": true
     },
     {
       "rank": 184,
@@ -5156,7 +5522,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 185,
@@ -5176,15 +5544,17 @@
       "f_per": 13.02,
       "f_eps": 1885,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 17185,
+      "f_pegy": 99.0,
+      "f_target": 17185.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 186,
@@ -5212,7 +5582,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 20.7,
+      "is_valid": true
     },
     {
       "rank": 187,
@@ -5235,12 +5607,14 @@
       "f_pegy": 256.18,
       "f_target": 170,
       "vol": "🟢 정상",
-      "quant_score": 10,
-      "badge": "🔴 데이터 이상/극단고평가",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
+      "quant_score": 0,
+      "badge": "🔴 측정 불가 (데이터 오류)",
+      "badge_bg": "#451a03",
+      "badge_fg": "#f97316",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "is_valid": false,
+      "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
       "rank": 188,
@@ -5268,7 +5642,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 189,
@@ -5296,7 +5672,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 190,
@@ -5324,7 +5702,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.1,
+      "is_valid": true
     },
     {
       "rank": 191,
@@ -5352,7 +5732,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 15.5,
+      "is_valid": true
     },
     {
       "rank": 192,
@@ -5380,7 +5762,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.5,
+      "is_valid": true
     },
     {
       "rank": 193,
@@ -5408,7 +5792,9 @@
       "badge_bg": "#14532d",
       "badge_fg": "#4ade80",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 194,
@@ -5436,7 +5822,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 195,
@@ -5464,7 +5852,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 12.3,
+      "is_valid": true
     },
     {
       "rank": 196,
@@ -5492,7 +5882,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 6.8,
+      "is_valid": true
     },
     {
       "rank": 197,
@@ -5520,7 +5912,9 @@
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 5.0,
+      "is_valid": true
     },
     {
       "rank": 198,
@@ -5540,15 +5934,17 @@
       "f_per": 4.5,
       "f_eps": 1546,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 4872,
+      "f_pegy": 99.0,
+      "f_target": 4872.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 199,
@@ -5568,15 +5964,17 @@
       "f_per": 11.54,
       "f_eps": 2370,
       "growth": 0.0,
-      "f_pegy": 99.99,
-      "f_target": 19145,
+      "f_pegy": 99.0,
+      "f_target": 19145.0,
       "vol": "🟢 정상",
-      "quant_score": 15,
-      "badge": "🔴 실적 역성장/적자 (위험)",
+      "quant_score": 0,
+      "badge": "🔴 역성장/무성장 (가치 훼손)",
       "badge_bg": "#7f1d1d",
       "badge_fg": "#fca5a5",
       "value_trap": true,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 0.0,
+      "is_valid": true
     },
     {
       "rank": 200,
@@ -5604,7 +6002,9 @@
       "badge_bg": "#78350f",
       "badge_fg": "#fde047",
       "value_trap": false,
-      "per_discrepancy": false
+      "per_discrepancy": false,
+      "g_eff": 10.9,
+      "is_valid": true
     }
   ]
 }
