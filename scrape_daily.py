@@ -335,5 +335,14 @@ def scrape_and_update():
     history_df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
     print("💾 market_history.csv 파일 누적 갱신 성공!")
 
+    # 7. 데이터 수집 완료 후 구글 드라이브 자동 백업 실행
+    TARGET_FOLDER_ID = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"
+    try:
+        from utils.gdrive_helper import upload_file
+        print("☁️ 구글 드라이브 자동 백업 시작...")
+        upload_file(HISTORY_FILE, folder_id=TARGET_FOLDER_ID)
+    except Exception as e:
+        print(f"⚠️ 구글 드라이브 자동 백업 건너뜀: {e}")
+
 if __name__ == "__main__":
     scrape_and_update()
