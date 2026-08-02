@@ -397,7 +397,11 @@ def render_macro_page():
     u_color = "#ef4444" if u_pct > 0 else "#22c55e"
     u_sign = "▲" if u_pct > 0 else "▼"
 
-    st.markdown(
+    def render_clean_html(html_str):
+        clean_html = "\n".join([line.strip() for line in html_str.split("\n") if line.strip()])
+        st.markdown(clean_html, unsafe_allow_html=True)
+
+    render_clean_html(
         f"""
         <div style="display: flex; gap: 16px; margin-bottom: 25px; flex-wrap: wrap;">
             <div style="flex: 1 1 280px; min-width: 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #334155; border-radius: 16px; padding: 22px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -415,25 +419,23 @@ def render_macro_page():
                 </div>
             </div>
         </div>
-        """,
-        unsafe_allow_html=True
+        """
     )
 
     st.markdown("---")
 
-    st.markdown(
+    render_clean_html(
         f"""
         <div class="score-container">
             <div class="score-label">🚨 보이는 손 종합 시장 위험 지수 (RISK INDEX)</div>
             <div class="score-value">{score} <span style="font-size:24px; color:#94a3b8; font-weight:600;">/ 100 점</span></div>
         </div>
-        """,
-        unsafe_allow_html=True
+        """
     )
 
     current_layer = min(10, max(0, int(score // 10)))
 
-    st.markdown(
+    render_clean_html(
         """
         <style>
         .apartment-building {
@@ -473,8 +475,7 @@ def render_macro_page():
         .floor-card.inactive .floor-status { color: #94a3b8; }
         .floor-guide { font-size: 14px; font-weight: 600; color: #cbd5e1; }
         </style>
-        """,
-        unsafe_allow_html=True
+        """
     )
 
     st.markdown("### 🏢 지금 시장은 몇 층일까요?")
@@ -494,7 +495,7 @@ def render_macro_page():
         </div>
         """
     building_html += '</div>'
-    st.markdown(building_html, unsafe_allow_html=True)
+    render_clean_html(building_html)
 
     with st.expander("🔍 14개 변동성 지표별 위험 기여도 상세 분석표 보기"):
         st.markdown("#### 📊 14개 변동성 지표별 위험 기여도 및 산출 공식")
