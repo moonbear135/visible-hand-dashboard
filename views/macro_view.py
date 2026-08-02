@@ -497,6 +497,57 @@ def render_macro_page():
     building_html += '</div>'
     render_clean_html(building_html)
 
+
+
+    with st.expander("🔍 14개 변동성 지표별 위험 기여도 상세 분석표 보기"):
+        st.markdown("#### 📊 14개 변동성 지표별 위험 기여도 및 산출 공식")
+        st.caption("수급 가중치(외국인 55%, 기관 37%, 개인 8%)를 적용하여 산출된 개별 위험도 및 수학적 모델입니다.")
+        
+        if details:
+            html_table = """
+            <style>
+            body { background-color: transparent; margin: 0; padding: 0; }
+            .premium-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13.5px; background-color: #0f172a; border-radius: 10px; overflow: hidden; }
+            .premium-table th { background-color: #1e293b; color: #38bdf8; font-weight: 700; text-align: center; padding: 12px 10px; border-bottom: 2px solid #334155; }
+            .premium-table td { padding: 11px 10px; border-bottom: 1px solid #334155; color: #f8fafc; text-align: center; }
+            .premium-table tr:nth-child(even) { background-color: #0f172a; }
+            .premium-table tr:nth-child(odd) { background-color: #1e293b; }
+            .premium-table tr:hover { background-color: #334155; }
+            .premium-table td:first-child { text-align: left; font-weight: 600; color: #f1f5f9; }
+            </style>
+            <table class="premium-table">
+                <thead>
+                    <tr>
+                        <th style="width: 55%;">지표명 (한글 설명)<br><span style="font-size: 11px; color: #64748b; font-weight: normal;">[💡 마우스를 올려 공식을 확인하세요]</span></th>
+                        <th style="width: 15%;">중요도<br>(가중치)</th>
+                        <th style="width: 15%;">위험도<br>(0~1)</th>
+                        <th style="width: 15%;">기여점수</th>
+                    </tr>
+                </thead>
+                <tbody>
+            """
+            for row in details:
+                name = row["지표명 (한글 설명)"]
+                weight = row["중요도 (가중치)"]
+                risk = row["위험도 (0~1)"]
+                contrib = row["기여점수"]
+                formula = row["산출 공식 (수학적 모델)"].replace("\n", "&#10;").replace("\\n", "&#10;")
+                
+                html_table += f"""
+                <tr>
+                    <td title="{formula}" style="cursor: help;">{name}</td>
+                    <td>{weight}</td>
+                    <td>{risk:.3f}</td>
+                    <td>{contrib:.2f}</td>
+                </tr>
+                """
+            html_table += "</tbody></table>"
+            
+            clean_html = "\n".join([line.strip() for line in html_table.split("\n") if line.strip()])
+            st.components.v1.html(clean_html, height=700, scrolling=False)
+        else:
+            st.info("실시간 시장 데이터가 없습니다.")
+
     if 'details' in locals() and len(details) >= 3:
         top_indicators = sorted(details, key=lambda x: x["기여점수"], reverse=True)[:3]
         
@@ -571,55 +622,6 @@ def render_macro_page():
         clean_ai_html = "\n".join([line.strip() for line in ai_html.split("\n") if line.strip()])
         st.markdown(clean_ai_html, unsafe_allow_html=True)
 
-
-    with st.expander("🔍 14개 변동성 지표별 위험 기여도 상세 분석표 보기"):
-        st.markdown("#### 📊 14개 변동성 지표별 위험 기여도 및 산출 공식")
-        st.caption("수급 가중치(외국인 55%, 기관 37%, 개인 8%)를 적용하여 산출된 개별 위험도 및 수학적 모델입니다.")
-        
-        if details:
-            html_table = """
-            <style>
-            body { background-color: transparent; margin: 0; padding: 0; }
-            .premium-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13.5px; background-color: #0f172a; border-radius: 10px; overflow: hidden; }
-            .premium-table th { background-color: #1e293b; color: #38bdf8; font-weight: 700; text-align: center; padding: 12px 10px; border-bottom: 2px solid #334155; }
-            .premium-table td { padding: 11px 10px; border-bottom: 1px solid #334155; color: #f8fafc; text-align: center; }
-            .premium-table tr:nth-child(even) { background-color: #0f172a; }
-            .premium-table tr:nth-child(odd) { background-color: #1e293b; }
-            .premium-table tr:hover { background-color: #334155; }
-            .premium-table td:first-child { text-align: left; font-weight: 600; color: #f1f5f9; }
-            </style>
-            <table class="premium-table">
-                <thead>
-                    <tr>
-                        <th style="width: 55%;">지표명 (한글 설명)<br><span style="font-size: 11px; color: #64748b; font-weight: normal;">[💡 마우스를 올려 공식을 확인하세요]</span></th>
-                        <th style="width: 15%;">중요도<br>(가중치)</th>
-                        <th style="width: 15%;">위험도<br>(0~1)</th>
-                        <th style="width: 15%;">기여점수</th>
-                    </tr>
-                </thead>
-                <tbody>
-            """
-            for row in details:
-                name = row["지표명 (한글 설명)"]
-                weight = row["중요도 (가중치)"]
-                risk = row["위험도 (0~1)"]
-                contrib = row["기여점수"]
-                formula = row["산출 공식 (수학적 모델)"].replace("\n", "&#10;").replace("\\n", "&#10;")
-                
-                html_table += f"""
-                <tr>
-                    <td title="{formula}" style="cursor: help;">{name}</td>
-                    <td>{weight}</td>
-                    <td>{risk:.3f}</td>
-                    <td>{contrib:.2f}</td>
-                </tr>
-                """
-            html_table += "</tbody></table>"
-            
-            clean_html = "\n".join([line.strip() for line in html_table.split("\n") if line.strip()])
-            st.components.v1.html(clean_html, height=700, scrolling=False)
-        else:
-            st.info("실시간 시장 데이터가 없습니다.")
 
 
     with st.expander("📈 방공망 리스크 지수(INDEX) 역사적 트렌드 차트"):
