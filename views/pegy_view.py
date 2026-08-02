@@ -83,7 +83,7 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: 330px;
+            width: 340px;
             background-color: #0f172a;
             color: #f1f5f9;
             text-align: left;
@@ -308,7 +308,7 @@ def render_pegy_page():
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점<br><b>*목표가 도달/초과 시 적정가/고평가 정합성 자동 교차검증</b></span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
+                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점<br><b>*PEGY-목표가 100% 수학적 대칭성 통일 산식 반영</b></span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
                     </span>
                     <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
                         {s['badge']}
@@ -407,7 +407,7 @@ def render_pegy_page():
                     </div>
                     <div style="background-color: #0f172a; padding: 8px 14px; border-radius: 8px; border: 1.5px solid #f43f5e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
                         <div style="font-size: 12px; color: #fca5a5; margin-bottom: 2px;">
-                            <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 퀀트 목표주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 예상 성장률(최대 35% 상한)과 주주환원율의 합으로 나누어 밸류에이션 부담을 측정합니다. (변동성 위험 시 1.18배 보정)<br>• <b>퀀트 목표주가</b>: 12개월 추정 EPS(주당순이익)에 코스피 평균 PER(10.4배)을 기본 적용하고, ROE 12% 이상(+15%) 및 ROIC 10% 이상(+10%) 우량 자본효율성 프리미엄을 가산하여 산출합니다.</span></span>
+                            <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY 대칭) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 수학적 대칭 퀀트 목표주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 실효성장률(성장률 35% Cap + 주주환원율, 변동성 1.18배 보정)로 나누어 산출합니다.<br>• <b>대칭 퀀트 목표주가</b>: PEGY 산출식과의 100% 수학적 대칭성(Symmetry)을 통일하여 [Target PER = Target PEGY(1.0 ± ROE/ROIC 프리미엄) × 실효성장률]로 산출합니다. (현재가 / 목표가 = PEGY / Target PEGY 100% 비례 완벽 대칭)</span></span>
                         </div>
                         <div style="font-size: 16.5px; font-weight: 900; color: #ff4d6d; letter-spacing: 0.2px;">{s['f_pegy']} / {s['f_target']:,.0f}원</div>
                     </div>

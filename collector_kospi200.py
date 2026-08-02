@@ -215,23 +215,24 @@ def enrich_quant_metrics(stocks_raw):
             time.sleep(0.1)
 
         # =========================================================
-        # 젬민이 튜닝 퀀트 공식 산출
+        # 젬민이 튜닝 퀀트 대칭성(Symmetry) 통일 수식 산출
         # =========================================================
         # 1. Forward PEGY 보정 공식 (growth 35% Cap & 변동성 벌점 1.18배)
         capped_growth = min(growth, 35.0)
-        denom = capped_growth + sh_return
         vol_penalty = 1.18 if "보정" in vol else 1.0
-        f_pegy = round((f_per / max(denom, 0.1)) * vol_penalty, 2)
-        t_pegy = round((t_per / max(growth + sh_return, 0.1)), 2)
+        growth_eff = (capped_growth + sh_return) / vol_penalty
+        f_pegy = round(f_per / max(growth_eff, 0.1), 2)
+        t_pegy = round(t_per / max(growth + sh_return, 0.1), 2)
 
-        # 2. ROE/ROIC 품질 가중 Target PER & 목표주가(f_target)
+        # 2. PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
-        target_per = 10.4 * (1.0 + roe_prem + roic_prem)
+        target_pegy = 1.0 * (1.0 + roe_prem + roic_prem) # Quality 가중 적정 PEGY 벤치마크 (0.85 ~ 1.25배)
+        target_per = round(target_pegy * growth_eff, 2)
         f_target = int(f_eps * target_per)
-        t_fair = int(t_eps * 10.4)
+        t_fair = int(t_eps * (1.0 * (growth + sh_return)))
 
-        # 3. 종합 퀀트 스코어 및 배지 판정 (목표주가 초과 교차검증 & utils.scoring 킬러 로직 연동)
+        # 3. 종합 퀀트 스코어 및 배지 판정 (수학적 대칭성 & utils.scoring 킬러 로직 연동)
         score_res = calculate_quant_score(
             f_pegy=f_pegy, 
             f_roe=f_roe, 
