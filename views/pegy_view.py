@@ -231,15 +231,35 @@ def render_pegy_page():
     # 데이터에 존재하는 모든 뱃지 유형을 동적으로 추출하여 기본 옵션에 포함 (단 1개 종목도 누락 방지)
     all_badge_options = list(dict.fromkeys([s["badge"] for s in processed_stocks if s.get("badge")]))
 
-    f_col1, f_col2, f_col3 = st.columns([2, 3, 2.2])
+    f_col1, f_col2, f_col3 = st.columns([2.2, 3.2, 2.0])
     with f_col1:
         search_query = st.text_input("🔍 종목명 / 종목코드 검색", placeholder="예: 삼성전자, 005930").strip()
     with f_col2:
-        selected_badges = st.multiselect(
-            "🏷️ 밸류에이션 상태 필터",
-            all_badge_options,
-            default=all_badge_options
+        filter_preset = st.selectbox(
+            "🏷️ 밸류에이션 빠른 필터",
+            [
+                "🌐 전체 종목 보기 (200개 코스피)",
+                "🟢 저평가 우량주 그룹 (강력저평가 + 저평가)",
+                "🟡 적정가 형성 그룹 (적정가 + 목표달성)",
+                "🔴 고평가 / 주의 종목 그룹 (고평가 + 역성장 + 주의)",
+                "⚙️ 세부 뱃지 직접 선택 (커스텀 필터)"
+            ],
+            index=0
         )
+        selected_badges = None
+        if "세부 뱃지" in filter_preset:
+            selected_badges = st.multiselect(
+                "상세 뱃지 스마트 선택",
+                all_badge_options,
+                default=all_badge_options
+            )
+        elif "저평가 우량주" in filter_preset:
+            selected_badges = [b for b in all_badge_options if "저평가" in b]
+        elif "적정가" in filter_preset:
+            selected_badges = [b for b in all_badge_options if "적정가" in b]
+        elif "고평가" in filter_preset:
+            selected_badges = [b for b in all_badge_options if ("고평가" in b or "역성장" in b or "오류" in b or "검증" in b or "위험" in b)]
+
     with f_col3:
         only_value_trap = st.checkbox(
             "⚠️ '착시 저평가' 주의 종목만 보기", 
