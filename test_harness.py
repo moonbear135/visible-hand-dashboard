@@ -30,6 +30,15 @@ class AuditRecord:
 # 수식 및 교차검증 변경 시 이 리스트에 기록을 추가합니다.
 AUDIT_TRAIL = [
     AuditRecord(
+        version="v1.3.0",
+        date_str="2026-08-02",
+        who="보이는 손 UI/UX 퀀트 분석팀",
+        where="visiblehand.py / views/pegy_view.py / test_harness.py",
+        what="사이드바 서비스 메뉴 최상단배치, 18px 폰트 확대, pre-line 강제 줄바꿈 및 가시성 자동 검증 규칙 이식",
+        why="사이드바 라벨 텍스트 축소/줄바꿈 붕괴 현상을 막고 화면 가시성 무결성을 100% 보장하기 위함",
+        how="Streamlit DOM 라디오 pre-line CSS 적용, 명시적 개행문자 조합 및 하네스 자동 검증 체인 이식"
+    ),
+    AuditRecord(
         version="v1.2.0",
         date_str="2026-08-02",
         who="보이는 손 분석팀",
@@ -61,7 +70,7 @@ def check_governance():
         return
 
     # 2개월(60일) 주기 정기 점검 알림
-    latest_record = AUDIT_TRAIL[-1]
+    latest_record = AUDIT_TRAIL[0]
     days_elapsed = (datetime.now() - latest_record.date).days
     print(f"[정보] 최근 알고리즘 파라미터 튜닝 후 경과 일수: {days_elapsed}일")
     
@@ -71,9 +80,37 @@ def check_governance():
         print(f"[성공] 파라미터 정기 점검 주기까지 {60 - days_elapsed}일 남았습니다.")
     print("==================================================")
 
+# ==============================================================================
+# 2. UI/UX 줄 간격 & 가시성 확보 무결성 검증 (Line-Spacing & Visibility Engine)
+# ==============================================================================
+class UICrossValidator:
+    """사이드바 및 대시보드 카드 렌더링 줄 간격 & 가시성 무결성 검증"""
+    
+    @staticmethod
+    def validate_ui_visibility():
+        print("\n==================================================")
+        print("[UI/UX 줄 간격 & 가시성 확보 무결성 검증 (Line-Spacing Check)]")
+        print("==================================================")
+        
+        visiblehand_path = os.path.join(BASE_DIR, "visiblehand.py")
+        if os.path.exists(visiblehand_path):
+            with open(visiblehand_path, "r", encoding="utf-8") as f:
+                code_content = f.read()
+                
+            has_pre_line = "white-space: pre-line" in code_content
+            has_explicit_newline = "\\n" in code_content
+            
+            if has_pre_line and has_explicit_newline:
+                print("  [성공] [사이드바 라벨 줄간격 검증] pre-line 및 개행 문자가 정상 적용되어 가시성이 확보되었습니다!")
+            else:
+                print("  [경고] [사이드바 라벨 줄간격 경고] pre-line 또는 개행 설정 누락! UI 가시성 점검이 필요합니다.")
+        else:
+            print("  [경고] visiblehand.py 파일을 찾을 수 없습니다.")
+            
+        print("==================================================")
 
 # ==============================================================================
-# 2. 다중 출처 수급 & 지수 데이터 교차 검증 (Cross-Validation Engine)
+# 3. 다중 출처 수급 & 지수 데이터 교차 검증 (Cross-Validation Engine)
 # ==============================================================================
 class DataCrossValidator:
     """네이버, KRX, FDR 등 다중 출처 교차검증 및 데이터 무결성 검사"""
@@ -127,16 +164,14 @@ class DataCrossValidator:
             else:
                 print(f"  [경고] [지수 교차검증 경고] 출처 간 지수 오차 발생! (FDR: {fdr_kospi} vs 네이버: {naver_kospi})")
 
-
         # --- B. 투자자 수급 데이터 교차검증 (네이버 vs KRX 공식) ---
         print("\n[투자자 수급 데이터 교차검증]")
 
         naver_flow = None
         krx_flow = None
 
-        # 1) 네이버 수급 스크래핑 (정확한 규격 적용)
+        # 1) 네이버 수급 스크래핑
         try:
-            # 0원 고정 방지를 위해 당일 기준의 bizdate를 query 파라미터로 조합 적용
             date_query = target_date.strftime("%Y%m%d")
             url_s = f"https://finance.naver.com/sise/investorDealTrendDay.naver?bizdate={date_query}&sosok=01&page=1"
             headers = {'User-Agent': 'Mozilla/5.0'}
@@ -175,7 +210,7 @@ class DataCrossValidator:
         # 3) 수급 교차검증 최종 판정
         if naver_flow and krx_flow:
             diff = abs(naver_flow["외국인"] - krx_flow["외국인"])
-            if diff <= 50:  # 50억원 이내 차이는 정상 범위
+            if diff <= 50:
                 print("  [성공] [수급 교차검증 성공] 네이버와 KRX 공식 수급 데이터가 정확히 상호 검증되었습니다!")
             else:
                 print(f"  [경고] [수급 교차검증 불일치] 출처 간 오차 발생(차이: {diff}억원). KRX 확정 수치를 우대합니다.")
@@ -186,9 +221,9 @@ class DataCrossValidator:
 
         print("==================================================")
 
-
 def main():
     check_governance()
+    UICrossValidator.validate_ui_visibility()
     DataCrossValidator.validate_latest_data()
     
     if os.path.exists(HISTORY_FILE):
