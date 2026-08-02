@@ -45,12 +45,25 @@ def load_kospi200_snapshot():
     now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
     return {"last_updated_at": now_str, "status": "BACKUP"}, []
 
+def load_pegy_summary_history():
+    """data/pegy_summary_history.json 누적 수치 이력을 로드합니다."""
+    data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
+    history_path = os.path.join(data_dir, "pegy_summary_history.json")
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            pass
+    return []
+
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 연동) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 & 누적 히스토리 연동) 화면 렌더링"""
     
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
     last_updated_at = metadata.get("last_updated_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    summary_history = load_pegy_summary_history()
 
     # 관리자 로그인 여부 확인
     is_admin = st.session_state.get("admin_mode", False)
@@ -134,7 +147,7 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
 
-    # 5. 최신 200개 종목 동기화 데이터 기반 실시간 동적 요약 지표 산출
+    # 5. 최신 200개 종목 동기화 데이터 및 누적 히스토리 기반 동적 요약 지표 산출
     if all_stocks:
         f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per', 0) > 0]
         growth_list = [min(s.get('growth', 0), 35.0) for s in all_stocks]
@@ -148,6 +161,18 @@ def render_pegy_page():
         calc_growth = 14.2
         calc_pegy = 0.73
 
+    # 누적 히스토리 기반 증감 변동분(Delta) 계산
+    f_per_delta_str = "KOSPI 200 실시간 중앙값"
+    growth_delta_str = "실시간 평균 컨센서스"
+
+    if len(summary_history) >= 2:
+        prev = summary_history[-2]
+        diff_per = round(calc_f_per - prev.get("f_per", calc_f_per), 1)
+        diff_growth = round(calc_growth - prev.get("growth", calc_growth), 1)
+        
+        f_per_delta_str = f"{diff_per:+.1f}배 (이전 동기화 대비)"
+        growth_delta_str = f"{diff_growth:+.1f}%p (이전 동기화 대비)"
+
     if calc_pegy < 0.85:
         pegy_status = "🟢 저평가 수용 구간"
     elif calc_pegy < 1.15:
@@ -157,9 +182,9 @@ def render_pegy_page():
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", "KOSPI 200 실시간 중앙값")
+        st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", f_per_delta_str)
     with col2:
-        st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", "실시간 평균 컨센서스")
+        st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", growth_delta_str)
     with col3:
         st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy}", pegy_status)
 

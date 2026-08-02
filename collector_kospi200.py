@@ -315,6 +315,45 @@ def enrich_quant_metrics(stocks_raw):
 
     return enriched_stocks
 
+def update_pegy_summary_history(meta_date, enriched_stocks):
+    """상단 3개 요약 지표 수치를 누적 기록하여 pegy_summary_history.json 에 저장합니다."""
+    data_dir = os.path.join(os.path.dirname(__file__), "data")
+    os.makedirs(data_dir, exist_ok=True)
+    history_path = os.path.join(data_dir, "pegy_summary_history.json")
+
+    f_per_list = [s['f_per'] for s in enriched_stocks if s.get('f_per', 0) > 0]
+    growth_list = [min(s.get('growth', 0), 35.0) for s in enriched_stocks]
+    pegy_list = [s.get('f_pegy', 0) for s in enriched_stocks if s.get('f_pegy', 0) > 0]
+
+    calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
+    calc_growth = round(sum(growth_list) / max(len(growth_list), 1), 1) if growth_list else 14.2
+    calc_pegy = round(pd.Series(pegy_list).median(), 2) if pegy_list else 0.73
+
+    history = []
+    if os.path.exists(history_path):
+        try:
+            with open(history_path, "r", encoding="utf-8") as f:
+                history = json.load(f)
+        except Exception:
+            history = []
+
+    new_record = {
+        "date": meta_date,
+        "f_per": calc_f_per,
+        "growth": calc_growth,
+        "pegy": calc_pegy,
+        "total_count": len(enriched_stocks)
+    }
+
+    # 동일 시각 중복 기록 방지 후 누적 저장을 위해 이력 추가
+    history = [h for h in history if h.get("date") != meta_date]
+    history.append(new_record)
+
+    with open(history_path, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+
+    print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
+
 def run_kospi200_collector():
     """KOSPI 200 시가총액 순 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실시간 실데이터 수집 시작...")
@@ -343,6 +382,9 @@ def run_kospi200_collector():
 
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(snapshot_payload, f, ensure_ascii=False, indent=2)
+
+    # 상단 요약 지표 수치 누적 기록 저장
+    update_pegy_summary_history(now_str, enriched_stocks)
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시총 순 {len(enriched_stocks)}개 실데이터 저장 완료! -> {json_path}")
     return json_path
