@@ -426,9 +426,9 @@ def render_macro_page():
 
     render_clean_html(
         f"""
-        <div class="score-container">
-            <div class="score-label">🚨 보이는 손 종합 시장 위험 지수 (RISK INDEX)</div>
-            <div class="score-value">{score} <span style="font-size:24px; color:#94a3b8; font-weight:600;">/ 100 점</span></div>
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 2px solid #334155; border-radius: 16px; padding: 28px; text-align: center; box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.4); margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <div style="font-size: 17px; color: #94a3b8; font-weight: 700; letter-spacing: 1px; margin-bottom: 8px;">🚨 보이는 손 종합 시장 위험 지수 (RISK INDEX)</div>
+            <div style="font-size: 58px; color: #ff4d4d; font-weight: 900; margin: 5px 0; line-height: 1.1;">{score} <span style="font-size: 26px; color: #94a3b8; font-weight: 600;">/ 100 점</span></div>
         </div>
         """
     )
