@@ -284,15 +284,19 @@ def enrich_quant_metrics(stocks_raw):
         f_pegy = round(f_per / growth_eff, 2) if (growth > 0 and t_roe > 0) else 99.99
         t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2) if (growth > 0 and t_roe > 0) else 99.99
 
-        # PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (35.0배 Cap) & 목표주가(f_target)
+        # PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (25.0배 Cap) & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
         target_pegy = 1.0 * (1.0 + roe_prem + roic_prem)
-        target_per = round(min(target_pegy * growth_eff, 35.0), 2)
+        target_per = round(min(target_pegy * growth_eff, 25.0), 2)
         
-        # 목표주가 음수 방지 안전장치
-        f_target = int(max(f_eps * target_per, 0)) if (growth > 0 and t_roe > 0) else int(price * 0.7)
-        t_fair = int(max(t_eps * min(1.0 * (growth + sh_yield), 35.0), 0))
+        # 초고EPS/고성장 종목 목표주가 폭발 방지 상한선 캡 (현재가의 최대 2.5배 Cap 방공망)
+        max_reasonable_target = int(price * 2.5) if price > 0 else 999999999
+        f_target_calc = int(max(f_eps * target_per, 0)) if (growth > 0 and t_roe > 0) else int(price * 0.7)
+        t_fair_calc = int(max(t_eps * min(1.0 * (growth + sh_yield), 25.0), 0))
+        
+        f_target = min(f_target_calc, max_reasonable_target) if price > 0 else f_target_calc
+        t_fair = min(t_fair_calc, max_reasonable_target) if price > 0 else t_fair_calc
 
         # 종합 퀀트 스코어 및 배지 판정 (Guardrail & 역성장 Cut-off 연동)
         score_res = calculate_quant_score(

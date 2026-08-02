@@ -124,5 +124,19 @@
     "growth": 9.9,
     "pegy": 0.76,
     "total_count": 200
+  },
+  {
+    "date": "2026-08-03 00:32",
+    "f_per": 12.0,
+    "growth": 9.9,
+    "pegy": 0.76,
+    "total_count": 200
+  },
+  {
+    "date": "2026-08-03 00:33",
+    "f_per": 12.0,
+    "growth": 9.9,
+    "pegy": 0.76,
+    "total_count": 200
   }
 ]
