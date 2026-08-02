@@ -6,7 +6,6 @@ import streamlit as st
 @st.cache_data
 def get_kospi200_pegy_data():
     """KOSPI 200 대표 종목 밸류에이션(Trailing vs Forward PEGY & ROE/ROIC 자본효율성) 200개 데이터셋 생성"""
-    # KOSPI 주요 30개 시총 상위 실제 종목 템플릿 (ROE / ROIC 추가)
     base_stocks = [
         {"name": "삼성전자", "code": "005930", "price": 74500, "t_roe": 10.5, "f_roe": 12.8, "roic": 11.2, "t_per": 14.8, "t_eps": 5033, "sh_return": 2.4, "t_pegy": 0.85, "t_fair": 82000, "f_per": 12.84, "f_eps": 5800, "growth": 18.5, "f_pegy": 0.63, "f_target": 98000, "vol": "🟢 정상"},
         {"name": "SK하이닉스", "code": "000660", "price": 182000, "t_roe": 22.5, "f_roe": 26.8, "roic": 21.0, "t_per": 12.5, "t_eps": 14560, "sh_return": 1.2, "t_pegy": 0.52, "t_fair": 210000, "f_per": 9.33, "f_eps": 19500, "growth": 24.1, "f_pegy": 0.37, "f_target": 260000, "vol": "🟢 정상"},
@@ -79,7 +78,6 @@ def get_kospi200_pegy_data():
             "f_pegy": f_pegy_val, "f_target": f_target_val, "vol": vol_val
         })
 
-    # Forward PEGY 기반 밸류에이션 평가 배지 및 자본효율성 품질 경고 로직 적용
     for s in stocks:
         fp = s["f_pegy"]
         if fp < 0.65:
@@ -99,13 +97,12 @@ def get_kospi200_pegy_data():
             s["badge_bg"] = "#7f1d1d"
             s["badge_fg"] = "#fca5a5"
 
-        # 품질 경고 로직: Trailing ROE < 8% 이거나 ROIC < 6% 일 경우 '가치주 덫' 경고 발령
         s["value_trap"] = (s["t_roe"] < 8.0 or s["roic"] < 6.0)
 
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (Forward PEGY/PER/EPS 밸류에이션 & ROE/ROIC 품질분석) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (1줄 1종목 100% 와이드 가로형 밸류에이션 리포트) 화면 렌더링"""
     
     # 1. 상단 그라데이션 타이틀
     st.markdown(
@@ -132,7 +129,7 @@ def render_pegy_page():
     # 3. KOSPI 200 종목 데이터 로드
     all_stocks = get_kospi200_pegy_data()
 
-    # 4. 상단 검색 및 밸류에이션 / 품질 필터 컨트롤
+    # 4. 상단 검색 및 필터 컨트롤
     f_col1, f_col2, f_col3 = st.columns([2, 3, 2])
     with f_col1:
         search_query = st.text_input("🔍 종목명 / 종목코드 검색", placeholder="예: 삼성전자, 005930").strip()
@@ -145,7 +142,6 @@ def render_pegy_page():
     with f_col3:
         only_value_trap = st.checkbox("⚠️ 가치주 덫 종목만 보기 (ROE<8% / ROIC<6%)", value=False)
 
-    # 필터링 적용
     filtered_stocks = all_stocks
     if search_query:
         filtered_stocks = [
@@ -162,7 +158,7 @@ def render_pegy_page():
 
     st.markdown(f"**전체 검색/필터 결과:** `{len(filtered_stocks)}`개 종목 (총 {len(all_stocks)}개 KOSPI 종목 중)")
 
-    # 5. 페이지네이션 정보 계산 (페이지 선택은 하단으로 배치)
+    # 5. 페이지네이션 정보 계산 (페이지 선택은 하단 배치)
     items_per_page = 20
     total_items = len(filtered_stocks)
     total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
@@ -178,117 +174,109 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 6. 와이드 가로형 카드 그리드 - ROE/ROIC 품질 바 및 가치주 덫 경고 반영
+    # 6. 1줄에 1개 종목씩 100% 와이드 가로형 배치 (Full Width Banner Layout)
     if not page_stocks:
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
 
-    grid_cols = st.columns(2)
-
-    for idx, s in enumerate(page_stocks):
-        col = grid_cols[idx % 2]
+    for s in page_stocks:
         vol_color = "#f43f5e" if "보정 중" in s["vol"] else "#38bdf8"
-        
         roe_color = "#f43f5e" if s["t_roe"] < 8.0 else "#4ade80"
         roic_color = "#f43f5e" if s["roic"] < 6.0 else "#38bdf8"
         
         trap_badge_html = ""
         if s["value_trap"]:
             trap_badge_html = """
-            <span style="background-color: #7f1d1d; color: #fca5a5; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; border: 1px solid #f87171; white-space: nowrap;">
+            <span style="background-color: #7f1d1d; color: #fca5a5; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #f87171; white-space: nowrap;">
                 ⚠️ 자본효율성 낮음 (가치주 덫 주의)
             </span>
             """
         else:
             trap_badge_html = """
-            <span style="background-color: #14532d; color: #86efac; font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 8px; border: 1px solid #4ade80; white-space: nowrap;">
+            <span style="background-color: #14532d; color: #86efac; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #4ade80; white-space: nowrap;">
                 ✨ 우량 자본효율성 (Quality OK)
             </span>
             """
 
         card_html = f"""
-        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <!-- 1. 헤더: 종목명 / 코드 / 배지 / 현재가 -->
-            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 10px; margin-bottom: 10px; flex-wrap: wrap; gap: 8px;">
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 19px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{s['name']}</span>
-                    <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">{s['code']}</span>
-                    <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
+        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 20px 24px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <!-- 1. 헤더: 종목명 / 코드 / 현재가 / 배지 / 필터 상태 전체 1줄 정렬 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
+                <div style="display: flex; align-items: center; gap: 12px; flex-wrap: wrap;">
+                    <span style="font-size: 22px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{s['name']}</span>
+                    <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
+                    <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
                         {s['badge']}
                     </span>
+                    <span style="font-size: 12px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">{s['vol']}</span>
+                    {trap_badge_html}
                 </div>
-                <div style="display: flex; align-items: center; gap: 10px;">
-                    <span style="font-size: 11.5px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 3px 8px; border-radius: 6px; border: 1px solid #334155;">{s['vol']}</span>
-                    <div>
-                        <span style="font-size: 12px; color: #94a3b8;">현재가:</span>
-                        <span style="font-size: 21px; font-weight: 900; color: #38bdf8; margin-left: 4px;">{s['price']:,.0f}원</span>
-                    </div>
+                <div style="display: flex; align-items: baseline; gap: 8px;">
+                    <span style="font-size: 13px; color: #94a3b8;">현재가:</span>
+                    <span style="font-size: 24px; font-weight: 900; color: #38bdf8;">{s['price']:,.0f}원</span>
                 </div>
             </div>
 
-            <!-- 2. 카드 상단 품질 바 (Quality Bar & 가치주 덫 경고 태그) -->
-            <div style="display: flex; justify-content: space-between; align-items: center; background-color: rgba(15, 23, 42, 0.7); border: 1px solid #334155; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; flex-wrap: wrap; gap: 6px;">
-                <div style="font-size: 12px; font-weight: 600; color: #cbd5e1; display: flex; gap: 12px; align-items: center;">
-                    <span style="color: #94a3b8; font-weight: 700;">💎 자본효율성:</span>
-                    <span>Trailing ROE: <b style="color: {roe_color}; font-weight: 700;">{s['t_roe']}%</b></span>
-                    <span>ROIC (ROC): <b style="color: {roic_color}; font-weight: 700;">{s['roic']}%</b></span>
-                </div>
-                {trap_badge_html}
+            <!-- 2. 자본효율성 품질 바 (Quality Bar) -->
+            <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px; padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: flex-start; gap: 28px; flex-wrap: wrap;">
+                <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
+                <span style="font-size: 13px; color: #e2e8f0;">Trailing ROE: <b style="color: {roe_color}; font-weight: 700; font-size: 14px;">{s['t_roe']}%</b></span>
+                <span style="font-size: 13px; color: #e2e8f0;">Forward ROE: <b style="color: #38bdf8; font-weight: 700; font-size: 14px;">{s['f_roe']}%</b></span>
+                <span style="font-size: 13px; color: #e2e8f0;">ROIC (ROC): <b style="color: {roic_color}; font-weight: 700; font-size: 14px;">{s['roic']}%</b></span>
             </div>
 
-            <!-- 3. Trailing vs Forward 병렬 비교 영역 -->
-            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                <!-- Left: Trailing (과거/현재 실적) -->
-                <div style="background-color: rgba(30, 41, 59, 0.65); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
-                    <div style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px; border-bottom: 1px dashed #475569; padding-bottom: 4px;">
+            <!-- 3. Trailing vs Forward 병렬 비교 섹션 -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 18px;">
+                <!-- Left: Trailing (과거 실적) -->
+                <div style="background-color: rgba(30, 41, 59, 0.65); border: 1px solid #334155; border-radius: 10px; padding: 14px 18px;">
+                    <div style="font-size: 13.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 10px; border-bottom: 1px dashed #475569; padding-bottom: 6px;">
                         📜 Trailing (과거 실적 기준)
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
                         <span style="color: #94a3b8;">Trailing ROE:</span>
                         <span style="color: #f1f5f9; font-weight: 600;">{s['t_roe']}%</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                        <span style="color: #94a3b8;">PER / EPS:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+                        <span style="color: #94a3b8;">Trailing PER / EPS:</span>
                         <span style="color: #f1f5f9; font-weight: 600;">{s['t_per']}배 / {s['t_eps']:,.0f}원</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                        <span style="color: #94a3b8;">주주환원율:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+                        <span style="color: #94a3b8;">주주환원율 (배당 + 자사주):</span>
                         <span style="color: #f1f5f9; font-weight: 600;">{s['sh_return']}%</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px;">
-                        <span style="color: #94a3b8;">PEGY / 적정가:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span style="color: #94a3b8;">Trailing PEGY / 과거 적정주가:</span>
                         <span style="color: #38bdf8; font-weight: 700;">{s['t_pegy']} / {s['t_fair']:,.0f}원</span>
                     </div>
                 </div>
 
-                <!-- Right: Forward (미래 추정 밸류) -->
-                <div style="background-color: rgba(15, 23, 42, 0.9); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px;">
-                    <div style="font-size: 12.5px; font-weight: 700; color: #38bdf8; margin-bottom: 8px; border-bottom: 1px solid #0284c7; padding-bottom: 4px;">
+                <!-- Right: Forward (미래 추정) -->
+                <div style="background-color: rgba(15, 23, 42, 0.9); border: 1.5px solid #0284c7; border-radius: 10px; padding: 14px 18px;">
+                    <div style="font-size: 13.5px; font-weight: 700; color: #38bdf8; margin-bottom: 10px; border-bottom: 1px solid #0284c7; padding-bottom: 6px;">
                         🚀 Forward (미래 추정 밸류)
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
                         <span style="color: #94a3b8;">Forward ROE:</span>
                         <span style="color: #38bdf8; font-weight: 700;">{s['f_roe']}%</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                        <span style="color: #94a3b8;">PER / EPS:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+                        <span style="color: #94a3b8;">Forward PER / EPS:</span>
                         <span style="color: #f1f5f9; font-weight: 600;">{s['f_per']}배 / {s['f_eps']:,.0f}원</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 4px;">
-                        <span style="color: #94a3b8;">예상 성장률:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px; margin-bottom: 6px;">
+                        <span style="color: #94a3b8;">예상 EPS 성장률:</span>
                         <span style="color: #4ade80; font-weight: 700;">+{s['growth']}%</span>
                     </div>
-                    <div style="display: flex; justify-content: space-between; font-size: 12px;">
-                        <span style="color: #94a3b8;">보정 PEGY / 목표가:</span>
+                    <div style="display: flex; justify-content: space-between; font-size: 13px;">
+                        <span style="color: #94a3b8;">보정 Forward PEGY / 목표 적정주가:</span>
                         <span style="color: #f43f5e; font-weight: 800;">{s['f_pegy']} / {s['f_target']:,.0f}원</span>
                     </div>
                 </div>
             </div>
         </div>
         """
-        with col:
-            clean_card = "\n".join([line.strip() for line in card_html.split("\n") if line.strip()])
-            st.markdown(clean_card, unsafe_allow_html=True)
+        clean_card = "\n".join([line.strip() for line in card_html.split("\n") if line.strip()])
+        st.markdown(clean_card, unsafe_allow_html=True)
 
     # 7. 페이지네이션 (Pagination) 컨트롤 - 하단 배치
     st.markdown("---")
