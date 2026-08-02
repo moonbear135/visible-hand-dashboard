@@ -46,7 +46,7 @@ def load_kospi200_snapshot():
     return {"last_updated_at": now_str, "status": "BACKUP"}, []
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 툴팁 쉬운 언어 개선) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 연동) 화면 렌더링"""
     
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
@@ -134,14 +134,34 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
 
-    # 5. 요약 지표 카드 3종
+    # 5. 최신 200개 종목 동기화 데이터 기반 실시간 동적 요약 지표 산출
+    if all_stocks:
+        f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per', 0) > 0]
+        growth_list = [min(s.get('growth', 0), 35.0) for s in all_stocks]
+        pegy_list = [s.get('f_pegy', 0) for s in all_stocks if s.get('f_pegy', 0) > 0]
+
+        calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
+        calc_growth = round(sum(growth_list) / max(len(growth_list), 1), 1) if growth_list else 14.2
+        calc_pegy = round(pd.Series(pegy_list).median(), 2) if pegy_list else 0.73
+    else:
+        calc_f_per = 10.4
+        calc_growth = 14.2
+        calc_pegy = 0.73
+
+    if calc_pegy < 0.85:
+        pegy_status = "🟢 저평가 수용 구간"
+    elif calc_pegy < 1.15:
+        pegy_status = "🟡 적정 밸류 구간"
+    else:
+        pegy_status = "🔴 고평가 관망 구간"
+
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("타겟 평균 Forward PER", "10.4 배", "-0.8배 (전월 대비)")
+        st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", "KOSPI 200 실시간 중앙값")
     with col2:
-        st.metric("코스피 대표 EPS 성장률 (Cap 35%)", "14.2 %", "+1.5%p")
+        st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", "실시간 평균 컨센서스")
     with col3:
-        st.metric("시장 적정 밸류에이션 (PEGY)", "0.73", "저평가 수용 구간")
+        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy}", pegy_status)
 
     st.markdown("---")
 
