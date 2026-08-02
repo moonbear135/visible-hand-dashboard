@@ -3,3 +3,4 @@ __pycache__/
 .streamlit/config.toml
 .venv/
 venv/
+service_account.json
