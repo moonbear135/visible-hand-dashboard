@@ -170,15 +170,15 @@ def enrich_quant_metrics(stocks_raw):
                 dps = 0
 
         # =========================================================
-        # 4. 주주환원율 재검증 공식: (연간 총 배당금 + 자사주 매입 소각액) / 당기순이익 * 100
+        # 4. 피터 린치 PEGY 정통 배당수익률(Yield %) 산출
         # =========================================================
-        # 현금 배당 성향 (%) + 자사주 소각/매입 프리미엄 (+1.8% ~ +3.5%)
-        if t_eps > 0 and dps > 0:
-            div_payout = (dps / t_eps) * 100.0
-            buyback_payout = 2.5 if (t_roe >= 10.0 or code in ["000660", "005930", "005380", "105560"]) else 1.0
-            sh_return = round(min(div_payout + buyback_payout, 65.0), 1)
-        else:
-            sh_return = round(min(max(t_roe * 0.25, 0.5), 8.5), 1)
+        # (1) 배당성향(Payout Ratio) 착시 방지를 위해 주가 대비 배당수익률 (Yield %) 산출
+        div_yield = (dps / price * 100.0) if (price > 0 and dps > 0) else 0.0
+        buyback_yield = 2.5 if (t_roe >= 10.0 or code in ["000660", "005930", "005380", "105560", "402340"]) else 1.0
+        sh_yield = round(min(div_yield + buyback_yield, 15.0), 1)
+
+        # 표시용 주주환원율 수치
+        sh_return = sh_yield
 
         # 총 주주환원 규모 (억원 단위 계산)
         approx_shares = 730000000 if code == "000660" else (5969000000 if code == "005930" else 213000000)
@@ -217,27 +217,27 @@ def enrich_quant_metrics(stocks_raw):
         # =========================================================
         # 젬민이 튜닝 퀀트 대칭성(Symmetry) 통일 수식 산출
         # =========================================================
-        # 1. Forward PEGY 보정 공식 (growth 35% Cap & 변동성 벌점 1.18배)
+        # 1. Forward PEGY 보정 공식 (growth 35% Cap & 배당수익률 적용 & 변동성 벌점 1.18배)
         capped_growth = min(growth, 35.0)
         vol_penalty = 1.18 if "보정" in vol else 1.0
-        growth_eff = (capped_growth + sh_return) / vol_penalty
+        growth_eff = min(capped_growth + sh_yield, 45.0) / vol_penalty
         f_pegy = round(f_per / max(growth_eff, 0.1), 2)
-        t_pegy = round(t_per / max(growth + sh_return, 0.1), 2)
+        t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2)
 
-        # 2. PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER & 목표주가(f_target)
+        # 2. PEGY 수식과 100% 대칭(Symmetric) 연동된 Target PER (35.0배 Cap) & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
         target_pegy = 1.0 * (1.0 + roe_prem + roic_prem) # Quality 가중 적정 PEGY 벤치마크 (0.85 ~ 1.25배)
-        target_per = round(target_pegy * growth_eff, 2)
+        target_per = round(min(target_pegy * growth_eff, 35.0), 2)
         f_target = int(f_eps * target_per)
-        t_fair = int(t_eps * (1.0 * (growth + sh_return)))
+        t_fair = int(t_eps * min(1.0 * (growth + sh_yield), 35.0))
 
         # 3. 종합 퀀트 스코어 및 배지 판정 (수학적 대칭성 & utils.scoring 킬러 로직 연동)
         score_res = calculate_quant_score(
             f_pegy=f_pegy, 
             f_roe=f_roe, 
             roic=roic, 
-            sh_return=sh_return, 
+            sh_return=sh_yield, 
             t_roe=t_roe, 
             vol=vol, 
             f_per=f_per,
@@ -263,7 +263,7 @@ def enrich_quant_metrics(stocks_raw):
             "return_total": tot_amt,
             "t_per": t_per,
             "t_eps": t_eps,
-            "sh_return": sh_return,
+            "sh_return": sh_yield,
             "t_pegy": t_pegy,
             "t_fair": t_fair,
             "f_per": f_per,
