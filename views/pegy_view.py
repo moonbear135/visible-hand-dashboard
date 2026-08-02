@@ -106,7 +106,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (Forward 2줄 타이틀 & 핵심타겟 뱃지 완전 제거) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (2단 수직 스택 지표 카드 레이아웃) 화면 렌더링"""
     
     # 1. 툴팁 전용 CSS 주입
     st.markdown(
@@ -231,7 +231,7 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 7. Grid 4열 정렬 & Forward 2줄 타이틀 적용
+    # 7. 2단 수직 스택(상단 지표라벨 / 하단 수치대형폰트) 지표 레이아웃 정렬
     if not page_stocks:
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
@@ -293,36 +293,44 @@ def render_pegy_page():
                 </span>
             </div>
 
-            <!-- 3. Trailing 섹션 (과거 실적 참고용 - 4열 Grid 칼맞춤 정렬) -->
+            <!-- 3. Trailing 섹션 (과거 실적 참고용 - 상단 라벨 / 하단 수치 2단 스택) -->
             <div style="background-color: rgba(30, 41, 59, 0.45); border: 1px solid #334155; border-radius: 10px; padding: 12px 18px; margin-bottom: 14px; opacity: 0.88;">
-                <div style="font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 8px; border-bottom: 1px dashed #475569; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+                <div style="font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 10px; border-bottom: 1px dashed #475569; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
                     <span>📜 Trailing (과거 실적 참고용)</span>
                     <span style="font-size: 11px; color: #64748b; font-weight: 400;">*과거 12개월 실적 스냅샷</span>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1.3fr 2.2fr 1.4fr; gap: 12px; align-items: center; font-size: 12.5px;">
+                <div style="display: grid; grid-template-columns: 1fr 1.3fr 2.2fr 1.3fr; gap: 14px; align-items: flex-start;">
                     <div>
-                        <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>:
-                        <span style="color: #cbd5e1; font-weight: 600; margin-left: 4px;">{s['t_roe']}%</span>
+                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;">{s['t_roe']}%</div>
                     </div>
                     <div>
-                        <span class="q-tooltip">PER / EPS ℹ️<span class="q-tooltiptext"><b>Trailing PER & EPS</b><br>• PER (주가수익비율): 주가 / 주당순이익<br>• EPS (주당순이익): 최근 4분기 합산 순이익 / 발행주식수</span></span>:
-                        <span style="color: #cbd5e1; font-weight: 600; margin-left: 4px;">{s['t_per']}배 / {s['t_eps']:,.0f}원</span>
+                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">PER / EPS ℹ️<span class="q-tooltiptext"><b>Trailing PER & EPS</b><br>• PER (주가수익비율): 주가 / 주당순이익<br>• EPS (주당순이익): 최근 4분기 합산 순이익 / 발행주식수</span></span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;">{s['t_per']}배 / {s['t_eps']:,.0f}원</div>
                     </div>
                     <div>
-                        <span class="q-tooltip">주주환원 상세 ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 주주환원 총 규모: {s['return_total']}<br>• 총 주주환원율: {s['sh_return']}%</span></span>:
-                        <span style="color: #86efac; font-weight: 600; margin-left: 4px;">DPS {dps_str} | 환원율 {s['sh_return']}% ({s['return_total']})</span>
+                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">주주환원 상세 (DPS/총액) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 주주환원 총 규모: {s['return_total']}<br>• 총 주주환원율: {s['sh_return']}%</span></span>
+                        </div>
+                        <div style="font-size: 13.5px; font-weight: 700; color: #86efac;">DPS {dps_str} | 환원율 {s['sh_return']}% ({s['return_total']})</div>
                     </div>
                     <div>
-                        <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>:
-                        <span style="color: #38bdf8; font-weight: 700; margin-left: 4px;">{s['t_pegy']} / {s['t_fair']:,.0f}원</span>
+                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
+                        </div>
+                        <div style="font-size: 14px; font-weight: 700; color: #38bdf8;">{s['t_pegy']} / {s['t_fair']:,.0f}원</div>
                     </div>
                 </div>
             </div>
 
-            <!-- 4. Forward 섹션 (2줄 타이틀: 🚀 Forward / (미래 추정 밸류 분석) & 뱃지 완전 제거) -->
+            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 상단 라벨 / 하단 수치 2단 스택) -->
             <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
                 <!-- 헤더: 2줄 넉넉한 타이틀 + 우측 설명 주석 -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
                     <div>
                         <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
                         <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
@@ -330,23 +338,31 @@ def render_pegy_page():
                     <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*12개월 Forward 컨센서스 및 3개월 변동성위험 보정 반영</span>
                 </div>
 
-                <!-- 수치 영역: 4열 Grid로 완벽한 칼맞춤 세로선 정렬 -->
-                <div style="display: grid; grid-template-columns: 1fr 1.3fr 1fr 1.7fr; gap: 12px; align-items: center; font-size: 13.5px;">
+                <!-- 수치 영역: 4열 Grid & 상단 라벨 / 하단 대형수치 2단 구조 -->
+                <div style="display: grid; grid-template-columns: 1fr 1.3fr 1fr 1.7fr; gap: 14px; align-items: center;">
                     <div>
-                        <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>향후 12개월 애널리스트 예상 순이익 기반 ROE</span></span>:
-                        <span style="color: #38bdf8; font-weight: 800; font-size: 14.5px; margin-left: 4px;">{s['f_roe']}%</span>
+                        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>향후 12개월 애널리스트 예상 순이익 기반 ROE</span></span>
+                        </div>
+                        <div style="font-size: 15.5px; font-weight: 800; color: #38bdf8;">{s['f_roe']}%</div>
                     </div>
                     <div>
-                        <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>:
-                        <span style="color: #f1f5f9; font-weight: 800; font-size: 14.5px; margin-left: 4px;">{s['f_per']}배 / {s['f_eps']:,.0f}원</span>
+                        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
+                        </div>
+                        <div style="font-size: 15.5px; font-weight: 800; color: #f1f5f9;">{s['f_per']}배 / {s['f_eps']:,.0f}원</div>
                     </div>
                     <div>
-                        <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>향후 12개월 EPS 예상 성장 비율 (PEG 계산 분모)</span></span>:
-                        <span style="color: #4ade80; font-weight: 800; font-size: 14.5px; margin-left: 4px;">+{s['growth']}%</span>
+                        <div style="font-size: 12px; color: #94a3b8; margin-bottom: 4px;">
+                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>향후 12개월 EPS 예상 성장 비율 (PEG 계산 분모)</span></span>
+                        </div>
+                        <div style="font-size: 15.5px; font-weight: 800; color: #4ade80;">+{s['growth']}%</div>
                     </div>
-                    <div style="background-color: rgba(244, 63, 94, 0.15); padding: 6px 14px; border-radius: 8px; border: 1px solid rgba(244, 63, 94, 0.45); white-space: nowrap; display: flex; align-items: center; justify-content: space-between;">
-                        <span class="q-tooltip" style="color: #fca5a5; font-weight: 700; font-size: 12.5px;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 목표 적정주가</b><br>• 보정 PEGY: Forward PER / (성장률 + 주주환원율) * (3개월 변동성위험 보정계수)<br>• 목표 적정가: Forward EPS * 퀀트 타겟 PER</span></span>:
-                        <span style="color: #f43f5e; font-weight: 900; font-size: 16px; margin-left: 6px;">{s['f_pegy']} / {s['f_target']:,.0f}원</span>
+                    <div style="background-color: rgba(244, 63, 94, 0.15); padding: 8px 14px; border-radius: 8px; border: 1px solid rgba(244, 63, 94, 0.45);">
+                        <div style="font-size: 12px; color: #fca5a5; margin-bottom: 2px;">
+                            <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 목표 적정주가</b><br>• 보정 PEGY: Forward PER / (성장률 + 주주환원율) * (3개월 변동성위험 보정계수)<br>• 목표 적정가: Forward EPS * 퀀트 타겟 PER</span></span>
+                        </div>
+                        <div style="font-size: 16.5px; font-weight: 900; color: #f43f5e;">{s['f_pegy']} / {s['f_target']:,.0f}원</div>
                     </div>
                 </div>
             </div>
