@@ -7,7 +7,7 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 공통 커스텀 CSS 스타일링 (사이드바 최상단 위치, 라벨 크기 확대, 줄바꿈 가시성 제어)
+# 공통 커스텀 CSS 스타일링 (사이드바 최상단 위치, 라벨 크기 확대, 줄바꿈 pre-line 강제 제어)
 st.markdown(
     """
     <style>
@@ -20,19 +20,20 @@ st.markdown(
     div[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] p {
         font-size: 18px !important;
         font-weight: 800 !important;
-        color: #38bdf8 !important;
+        color: #0f766e !important;
         margin-bottom: 8px !important;
         letter-spacing: -0.3px !important;
     }
     
-    /* 3. 사이드바 라디오 버튼 라벨 (메인메뉴 + 괄호 설명) 폰트 및 줄간격 가시성 극대화 */
-    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"] {
-        font-size: 15px !important;
+    /* 3. 사이드바 라디오 버튼 라벨 (메인메뉴 + 괄호 설명) pre-line 줄바꿈 강제 적용 */
+    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"],
+    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"] *,
+    div[data-testid="stRadio"] label * {
+        font-size: 14.5px !important;
         font-weight: 700 !important;
-        line-height: 1.6 !important;
-        padding-top: 6px !important;
-        padding-bottom: 6px !important;
-        color: #f8fafc !important;
+        line-height: 1.5 !important;
+        white-space: pre-line !important;
+        word-break: break-word !important;
     }
 
     .main-title { 
@@ -93,12 +94,12 @@ def main():
     )
     st.sidebar.markdown("---")
     
-    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 글자 크기 확대, 줄바꿈 가시성 반영)
+    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 글자 크기 확대, pre-line 줄바꿈 적용)
     selected_menu = st.sidebar.radio(
         "📌 서비스 메뉴 선택",
         [
-            "🏢 잘 보면 보이는 손\n   (매크로 방공망)", 
-            "💡 사실 이 가격이에요\n   (밸류에이션 리포트)"
+            "🏢 잘 보면 보이는 손\n(매크로 방공망)", 
+            "💡 사실 이 가격이에요\n(밸류에이션 리포트)"
         ],
         index=0
     )
