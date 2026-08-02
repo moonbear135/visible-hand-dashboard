@@ -46,7 +46,7 @@ def load_kospi200_snapshot():
     return {"last_updated_at": now_str, "status": "BACKUP"}, []
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 관리자 전용 이격 배지 제어) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 안내 가이드 줄간격 보정) 화면 렌더링"""
     
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
@@ -145,7 +145,7 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 6. 상단 검색 및 필터 컨트롤 + 쉬운 설명 가이드
+    # 6. 상단 검색 및 필터 컨트롤 + 줄간격 보정 가이드 박스
     f_col1, f_col2, f_col3 = st.columns([2, 3, 2.2])
     with f_col1:
         search_query = st.text_input("🔍 종목명 / 종목코드 검색", placeholder="예: 삼성전자, 005930").strip()
@@ -162,12 +162,22 @@ def render_pegy_page():
             help="주가가 PER 수치상 싸 보이지만, 실제 이익창출력(ROE<8% 또는 ROIC<6%)이 낮아 오랜 기간 주가가 오르지 못하고 갇히는 위험 종목입니다."
         )
 
-    # 쉬운 용어 안내 박스 (인포서브 설명)
-    st.info(
-        "💡 **'착시 저평가 (가치주 덫)' 및 100점 만점 퀀트 스코어 안내**\n"
-        "• **100점 만점 퀀트 스코어(quant_score)**: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다.\n"
-        "• **착시 저평가**: 주가가 단순히 PER 5배~7배로 싸 보이지만 이익창출력(ROE<8% / ROIC<6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다."
-    )
+    # 줄간격 및 수평 여백이 보정된 넉넉한 가이드 박스
+    guide_box_html = """
+    <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #0284c7; border-radius: 12px; padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+        <div style="font-size: 15px; font-weight: 800; color: #38bdf8; margin-bottom: 10px;">
+            💡 '착시 저평가 (가치주 덫)' 및 100점 만점 퀀트 스코어 가이드
+        </div>
+        <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65; margin-bottom: 8px;">
+            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다.
+        </div>
+        <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65;">
+            • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만 실제 이익창출력(ROE&lt;8% 또는 ROIC&lt;6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.
+        </div>
+    </div>
+    """
+    clean_guide_html = "\n".join([line.strip() for line in guide_box_html.split("\n") if line.strip()])
+    st.markdown(clean_guide_html, unsafe_allow_html=True)
 
     filtered_stocks = all_stocks
     if search_query:
