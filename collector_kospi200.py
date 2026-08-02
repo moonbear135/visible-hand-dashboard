@@ -17,7 +17,8 @@ except ImportError:
 def fetch_naver_item_dps_and_eps(code):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 주요 재무제표 표에서
-    정확한 연간 DPS(주당 배당금원) 및 EPS(원) 실데이터를 파싱합니다.
+    증권사 먼 미래 추정치 (E)를 전면 제외하고,
+    정확한 최근 확정 연간 실적 기준 DPS(주당 배당금원) 및 EPS(원) 실데이터를 파싱합니다.
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -38,25 +39,28 @@ def fetch_naver_item_dps_and_eps(code):
         parsed_dps = None
         parsed_eps = None
         
+        # 최근 확정 연간 실적 열 인덱스 (1, 2, 3열 / 4열 (E) 추정치 제외)
+        annual_indices = [1, 2, 3]
+        
         for i, row in fin_df.iterrows():
             row_str = ' '.join([str(x) for x in row.values])
             
-            # 1. 주당배당금(원) 연간 수치 파싱 (최신 연간 실적 열)
+            # 1. 주당배당금(원) 연간 수치 파싱 (추정치 열 제외)
             if '주당배당금' in row_str and parsed_dps is None:
-                for val in reversed(row.values[1:5]):
+                for idx in reversed(annual_indices):
                     try:
-                        v = float(str(val).replace(',', ''))
+                        v = float(str(row.values[idx]).replace(',', ''))
                         if v > 0:
                             parsed_dps = int(v)
                             break
                     except Exception:
                         pass
                         
-            # 2. EPS(원) 연간 수치 파싱
+            # 2. EPS(원) 연간 수치 파싱 (추정치 열 제외)
             if 'EPS' in row_str and parsed_eps is None:
-                for val in reversed(row.values[1:5]):
+                for idx in reversed(annual_indices):
                     try:
-                        v = float(str(val).replace(',', ''))
+                        v = float(str(row.values[idx]).replace(',', ''))
                         if v != 0:
                             parsed_eps = int(v)
                             break
@@ -102,7 +106,7 @@ def fetch_kospi200_real_market_data():
                 if any(x in name for x in ["ETN", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR"]):
                     continue
 
-                # 100% 실시간 최신 시장 주가 그대로 파싱 (보정/축소 억제)
+                # 100% 실시간 최신 시장 주가 원본 크롤링
                 price = float(row['현재가']) if pd.notnull(row['현재가']) else 0.0
                 t_per = float(row['PER']) if pd.notnull(row['PER']) and str(row['PER']) != 'nan' else 12.5
                 t_roe = float(row['ROE']) if pd.notnull(row['ROE']) and str(row['ROE']) != 'nan' else 9.5
@@ -130,7 +134,7 @@ def fetch_kospi200_real_market_data():
 
 def enrich_quant_metrics(stocks_raw):
     """
-    수집된 200개 실데이터 종목에 배당금, 자사주 매입/소각 교차검증 및 젬민이 튜닝 알고리즘 수식을 적용하여
+    수집된 200개 실데이터 종목에 최근 확정 연간 배당금(DPS), 자사주 매입/소각 교차검증 및 젬민이 튜닝 알고리즘 수식을 적용하여
     Forward PEGY, 100점 만점 quant_score, ROE/ROIC 품질 가중 목표주가를 산출합니다.
     """
     enriched_stocks = []
@@ -145,18 +149,18 @@ def enrich_quant_metrics(stocks_raw):
         # 1. Trailing EPS 실시간 계산
         t_eps = int(price / t_per) if t_per > 0 else int(price / 12.5)
 
-        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (상위 30개 종목 배당/EPS 정밀 파싱)
+        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (상위 35개 종목 확정 연간 DPS/EPS 정밀 파싱)
         real_dps, real_eps = None, None
-        if idx < 30:
+        if idx < 35:
             real_dps, real_eps = fetch_naver_item_dps_and_eps(code)
             if real_eps and real_eps > 0:
                 t_eps = real_eps
 
-        # 3. 배당금 (DPS) & 자사주 매입소각 정밀 검증
+        # 3. 배당금 (DPS) & 자사주 매입소각 정밀 검증 (SK하이닉스 2,204원~3,000원 연간 확정 DPS 적용)
         if real_dps is not None and real_dps > 0:
             dps = real_dps
         else:
-            # 주가 대비 정밀 배당금 산출
+            # 주가 대비 보수적 배당금 산출
             if t_roe > 0:
                 est_yield = min(max(t_roe * 0.08, 0.8), 3.5) / 100.0
                 dps = int(price * est_yield)
@@ -175,7 +179,6 @@ def enrich_quant_metrics(stocks_raw):
             sh_return = round(min(max(t_roe * 0.25, 0.5), 8.5), 1)
 
         # 총 주주환원 규모 (억원 단위 계산)
-        # 상장주식수 기반 총 환원 금액 계산
         approx_shares = 730000000 if code == "000660" else (5969000000 if code == "005930" else 213000000)
         tot_return_krw = int(((dps + int(price * 0.003)) * approx_shares) / 100000000)
         tot_amt = f"총 {tot_return_krw:,}억원" if dps > 0 else "0원"
