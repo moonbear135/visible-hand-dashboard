@@ -7,33 +7,40 @@ st.set_page_config(
     initial_sidebar_state="expanded"
 )
 
-# 공통 커스텀 CSS 스타일링 (사이드바 최상단 위치, 라벨 크기 확대, 줄바꿈 pre-line 강제 제어)
+# 공통 커스텀 CSS 스타일링 (사이드바 메뉴 최상단 위치, 📌 타이틀 확대, 2줄 라벨 강제 줄바꿈 및 flex-start 상단정렬)
 st.markdown(
     """
     <style>
-    /* 1. 사이드바 최상단 여백 및 헤더 위치 조절 */
+    /* 1. 사이드바 최상단 패딩 및 여백 조절 */
     section[data-testid="stSidebar"] {
-        padding-top: 1rem !important;
+        padding-top: 0.8rem !important;
     }
     
-    /* 2. '📌 서비스 메뉴 선택' 라벨 글자 크기 확대 & 커스텀 컬러링 */
-    div[data-testid="stSidebar"] label[data-testid="stWidgetLabel"] p {
+    /* 2. '📌 서비스 메뉴 선택' 타이틀 글자 크기 확대 (18px Bold) & Teal 색상 */
+    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] p {
         font-size: 18px !important;
         font-weight: 800 !important;
         color: #0f766e !important;
-        margin-bottom: 8px !important;
+        margin-bottom: 12px !important;
         letter-spacing: -0.3px !important;
+        line-height: 1.4 !important;
     }
     
-    /* 3. 사이드바 라디오 버튼 라벨 (메인메뉴 + 괄호 설명) pre-line 줄바꿈 강제 적용 */
-    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"],
-    section[data-testid="stSidebar"] div[class*="stRadio"] label[data-baseweb="radio"] *,
-    div[data-testid="stRadio"] label * {
-        font-size: 14.5px !important;
+    /* 3. 라디오 버튼 항목 강제 2줄 (pre-line) 줄바꿈 & 폰트 가시성 강화 */
+    [data-testid="stSidebar"] [data-baseweb="radio"] [data-testid="stMarkdownContainer"] p {
+        font-size: 15px !important;
         font-weight: 700 !important;
-        line-height: 1.5 !important;
+        line-height: 1.6 !important;
         white-space: pre-line !important;
-        word-break: break-word !important;
+        display: block !important;
+        margin: 0 !important;
+    }
+
+    /* 4. 라디오 동그라미 버튼을 2줄 텍스트의 첫 번째 줄 상단으로 정렬 */
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        align-items: flex-start !important;
+        padding-top: 8px !important;
+        padding-bottom: 8px !important;
     }
 
     .main-title { 
@@ -94,12 +101,12 @@ def main():
     )
     st.sidebar.markdown("---")
     
-    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 글자 크기 확대, pre-line 줄바꿈 적용)
+    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 18px 타이틀, 명시적 2줄 줄바꿈 적용)
     selected_menu = st.sidebar.radio(
         "📌 서비스 메뉴 선택",
         [
-            "🏢 잘 보면 보이는 손\n(매크로 방공망)", 
-            "💡 사실 이 가격이에요\n(밸류에이션 리포트)"
+            "🏢 잘 보면 보이는 손  \n(매크로 방공망)", 
+            "💡 사실 이 가격이에요  \n(밸류에이션 리포트)"
         ],
         index=0
     )
