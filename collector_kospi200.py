@@ -231,8 +231,18 @@ def enrich_quant_metrics(stocks_raw):
         f_target = int(f_eps * target_per)
         t_fair = int(t_eps * 10.4)
 
-        # 3. 종합 퀀트 스코어 및 배지 판정 (utils.scoring 킬러 로직 연동)
-        score_res = calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per)
+        # 3. 종합 퀀트 스코어 및 배지 판정 (목표주가 초과 교차검증 & utils.scoring 킬러 로직 연동)
+        score_res = calculate_quant_score(
+            f_pegy=f_pegy, 
+            f_roe=f_roe, 
+            roic=roic, 
+            sh_return=sh_return, 
+            t_roe=t_roe, 
+            vol=vol, 
+            f_per=f_per,
+            price=price,
+            f_target=f_target
+        )
         quant_score = score_res["quant_score"]
         badge = score_res["badge"]
         badge_bg = score_res["badge_bg"]
