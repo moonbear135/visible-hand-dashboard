@@ -192,12 +192,35 @@ def enrich_quant_metrics(stocks_raw):
     """
     enriched_stocks = []
     
+    # =========================================================
+    # 우선주 ROE 상속 전처리: 보통주(코드 끝 0) ROE 룩업 테이블 구축
+    # 우선주(코드 끝 5/K/L)는 네이버 시총 테이블에서 ROE를 0으로 주므로
+    # 같은 회사 보통주의 ROE를 상속받아야 함 (범용 로직, 하드코딩 금지)
+    # =========================================================
+    common_roe_lookup = {}
+    for s in stocks_raw:
+        c = s["code"]
+        # 보통주(끝자리 0)이고 ROE가 유효한 종목만 등록
+        if c[-1] == '0' and s.get("t_roe", 0) != 0:
+            # 코드 앞 5자리를 키로 사용 (005930 → 00593, 005935 → 00593)
+            common_roe_lookup[c[:5]] = s["t_roe"]
+    
     for idx, s in enumerate(stocks_raw):
         code = s["code"]
         name = s["name"]
         price = s["price"]
         raw_per = s["t_per"]
         t_roe = s["t_roe"]
+        
+        # 우선주 ROE 상속: ROE=0이고 우선주로 판별되면 보통주 ROE 사용
+        # 우선주 판별 기준: 코드 끝자리 5(1우), 7(2우B), K, L 또는 종목명에 '우' 포함
+        is_preferred = code[-1] in ('5', '7', 'K', 'L') or ('우' in name and name != code)
+        if t_roe == 0 and is_preferred:
+            parent_key = code[:5]
+            inherited_roe = common_roe_lookup.get(parent_key, 0)
+            if inherited_roe != 0:
+                t_roe = inherited_roe
+                print(f"  📋 [{name}({code})] 우선주 ROE 상속: 보통주 ROE {inherited_roe}% 적용")
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
         n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps = fetch_naver_item_dps_and_eps(code)
