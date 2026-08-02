@@ -1279,7 +1279,7 @@ with st.expander("📈 방공망 리스크 지수(INDEX) 역사적 트렌드 차
         # 테이블 표사용 데이터 한글 컬럼명 변환 및 역순 정렬
         display_history = df_grouped.rename(columns=COL_MAP).sort_values(by="날짜", ascending=False)
         
-        st.dataframe(display_history, use_container_width=True, hide_index=True)
+        st.table(display_history.set_index("날짜"))
     else:
         st.info("누적된 히스토리 데이터가 아직 없습니다. 데이터 수집이 시작되면 여기에 그래프가 표시됩니다.")
 
