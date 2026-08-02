@@ -106,7 +106,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (2단 수직 스택 지표 카드 레이아웃) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (쉽게 설명된 '착시 저평가 위험' 필터 & 2단 수직 스택 지표) 화면 렌더링"""
     
     # 1. 툴팁 전용 CSS 주입
     st.markdown(
@@ -123,12 +123,12 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: 300px;
+            width: 320px;
             background-color: #0f172a;
             color: #f1f5f9;
             text-align: left;
             border-radius: 8px;
-            padding: 10px 14px;
+            padding: 12px 15px;
             position: absolute;
             z-index: 9999;
             bottom: 130%;
@@ -138,7 +138,7 @@ def render_pegy_page():
             transition: opacity 0.2s ease-in-out, visibility 0.2s;
             border: 1px solid #38bdf8;
             font-size: 11.5px;
-            line-height: 1.45;
+            line-height: 1.5;
             box-shadow: 0 6px 18px rgba(0,0,0,0.6);
             font-weight: 400;
         }
@@ -186,8 +186,8 @@ def render_pegy_page():
     # 4. KOSPI 200 종목 데이터 로드
     all_stocks = get_kospi200_pegy_data()
 
-    # 5. 상단 검색 및 필터 컨트롤
-    f_col1, f_col2, f_col3 = st.columns([2, 3, 2])
+    # 5. 상단 검색 및 필터 컨트롤 + 쉬운 설명 가이드
+    f_col1, f_col2, f_col3 = st.columns([2, 3, 2.2])
     with f_col1:
         search_query = st.text_input("🔍 종목명 / 종목코드 검색", placeholder="예: 삼성전자, 005930").strip()
     with f_col2:
@@ -197,7 +197,18 @@ def render_pegy_page():
             default=["🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", "🔴 고평가 관망"]
         )
     with f_col3:
-        only_value_trap = st.checkbox("⚠️ 가치주 덫 종목만 보기 (ROE<8% / ROIC<6%)", value=False)
+        only_value_trap = st.checkbox(
+            "⚠️ '착시 저평가' 주의 종목만 보기", 
+            value=False,
+            help="주가가 PER 수치상 싸 보이지만, 실제 이익창출력(ROE<8% 또는 ROIC<6%)이 낮아 오랜 기간 주가가 오르지 못하고 갇히는 위험 종목입니다."
+        )
+
+    # 쉬운 용어 안내 박스 (인포서브 설명)
+    st.info(
+        "💡 **'착시 저평가 (가치주 덫)'이란 무엇인가요?**\n"
+        "주가가 단순히 PER 5배~7배로 '수치상 저평가'되어 보이지만, 실제 기업이 자본을 굴려 버는 수익성(ROE < 8% 또는 ROIC < 6%)이 턱없이 낮아 "
+        "주가가 수년 동안 오르지 못하고 바닥에 갇히는 **착시 현상(Valuation Trap)**을 말합니다. 본 리포트는 이러한 위험 종목에 ⚠️ 경고 태그를 자동으로 부여합니다."
+    )
 
     filtered_stocks = all_stocks
     if search_query:
@@ -245,7 +256,7 @@ def render_pegy_page():
         if s["value_trap"]:
             trap_badge_html = """
             <span style="background-color: #7f1d1d; color: #fca5a5; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #f87171; white-space: nowrap;">
-                ⚠️ 자본효율성 낮음 (가치주 덫 주의)
+                ⚠️ 이익창출력 저하 (착시 저평가 주의)
             </span>
             """
         else:
@@ -280,7 +291,7 @@ def render_pegy_page():
             <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px; padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: flex-start; gap: 28px; flex-wrap: wrap;">
                 <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE (자기자본이익률)</b><br>지난 12개월(4분기 합산) 순이익을 자기자본으로 나눈 자본 효율성 지표입니다.</span></span>: 
+                    <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE (자기자본이익률)</b><br>지난 12개월(4분기 합산) 순이익을 자기자본으로 나눈 자본 효율성 지표입니다. 8% 미만 시 이익 창출력이 부족한 상태입니다.</span></span>: 
                     <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['t_roe']}%</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
@@ -288,7 +299,7 @@ def render_pegy_page():
                     <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['f_roe']}%</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (투입자본이익률 / ROC)</b><br>실제 영업에 투입된 자산이 창출한 세후 영업이익 비율로, 6% 미만 시 가치주 덫 위험이 발생합니다.</span></span>: 
+                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (투입자본이익률 / ROC)</b><br>실제 영업에 투입된 자산이 창출한 세후 영업이익 비율로, 6% 미만 시 '착시 저평가(가치주 덫)' 위험이 발생합니다.</span></span>: 
                     <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['roic']}%</b>
                 </span>
             </div>
