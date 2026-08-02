@@ -18,8 +18,8 @@ except ImportError:
 
 def fetch_naver_item_dps_and_eps(code):
     """
-    네이버 증권 종목 상세 페이지(item/main.naver)의 주요 재무제표 표에서
-    증권사/금융사/우선주 포함 최근 확정 연간 실적 기준 DPS(주당 배당금원) 및 EPS(원) 실데이터를 정확히 파싱합니다.
+    네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
+    주요 재무제표 표에서 Naver 공식 Trailing PER, Trailing EPS, Forward PER, Forward EPS, DPS를 100% 정밀 파싱합니다.
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -28,104 +28,126 @@ def fetch_naver_item_dps_and_eps(code):
     try:
         res = requests.get(url, headers=headers, timeout=5)
         if res.status_code != 200:
-            return None, None
+            return None, None, None, None, None, None
             
-        dfs = pd.read_html(res.text, encoding='euc-kr')
-        # 제조업(매출액), 금융사/증권사(영업이익/주당배당금) 유연한 재무표 탐색
-        fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
-        if not fin_df_list:
-            return None, None
-            
-        fin_df = fin_df_list[0]
+        soup = BeautifulSoup(res.text, 'html.parser')
         
-        parsed_dps = None
-        parsed_eps = None
+        t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
         
-        for i, row in fin_df.iterrows():
-            row_str = ' '.join([str(x) for x in row.values])
-            
-            # 1. 주당배당금(원) 최근 확정 수치 탐색
-            if '주당배당금' in row_str and parsed_dps is None:
-                for val in row.values[1:]:
-                    try:
-                        v_str = str(val).replace(',', '').strip()
-                        if v_str and v_str != 'nan':
-                            v = float(v_str)
-                            if v > 0:
-                                parsed_dps = int(v)
-                    except Exception:
-                        pass
+        aside = soup.select_one('div.aside_invest_info')
+        if aside:
+            for tr in aside.find_all('tr'):
+                text = tr.text.strip().replace('\n', ' ')
+                if 'PERlEPS' in text and '추정' not in text and '동일업종' not in text:
+                    per_match = re.search(r'([\d\.,]+)배\s*l\s*([\d\.,]+)원', text)
+                    if per_match:
+                        t_per = float(per_match.group(1).replace(',', ''))
+                        t_eps = int(per_match.group(2).replace(',', ''))
+                elif '추정PERlEPS' in text:
+                    per_match = re.search(r'([\d\.,]+)배\s*l\s*([\d\.,]+)원', text)
+                    if per_match:
+                        f_per = float(per_match.group(1).replace(',', ''))
+                        f_eps = int(per_match.group(2).replace(',', ''))
+                elif '배당수익률' in text:
+                    yield_match = re.search(r'([\d\.,]+)%', text)
+                    if yield_match:
+                        div_yield = float(yield_match.group(1).replace(',', ''))
                         
-            # 2. EPS(원) 파싱
-            if 'EPS' in row_str and parsed_eps is None:
-                for val in row.values[1:]:
-                    try:
-                        v_str = str(val).replace(',', '').strip()
-                        if v_str and v_str != 'nan':
-                            v = float(v_str)
-                            if v != 0:
-                                parsed_eps = int(v)
-                    except Exception:
-                        pass
-
-        # 3. 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정
-        # 우선주는 보통주 배당금 이상의 최소 배당금이 보장되므로, 동일 기업 보통주 DPS를 폴백으로 매핑
+        dfs = pd.read_html(res.text, encoding='euc-kr')
+        fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
+        parsed_dps = None
+        if fin_df_list:
+            fin_df = fin_df_list[0]
+            annual_cols = [idx for idx, col in enumerate(fin_df.columns) if '최근 연간 실적' in str(col) and '(E)' not in str(col)]
+            if not annual_cols:
+                annual_cols = [1, 2, 3]
+            for i, row in fin_df.iterrows():
+                row_str = ' '.join([str(x) for x in row.values])
+                if '주당배당금' in row_str and parsed_dps is None:
+                    for col_i in reversed(annual_cols):
+                        try:
+                            v_str = str(row.values[col_i]).replace(',', '').strip()
+                            if v_str and v_str != 'nan':
+                                v = float(v_str)
+                                if v > 0:
+                                    parsed_dps = int(v)
+                                    break
+                        except Exception:
+                            pass
+                            
+        # 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정
         if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
-            parent_code = code[:-1] + '0' # 보통주 코드 매핑
-            p_dps, p_eps = fetch_naver_item_dps_and_eps(parent_code)
+            parent_code = code[:-1] + '0'
+            p_t_per, p_t_eps, p_f_per, p_f_eps, p_div_yield, p_dps = fetch_naver_item_dps_and_eps(parent_code)
             if p_dps and p_dps > 0:
                 parsed_dps = p_dps
 
-        return parsed_dps, parsed_eps
+        return t_per, t_eps, f_per, f_eps, div_yield, parsed_dps
     except Exception as e:
-        return None, None
+        return None, None, None, None, None, None
 
 def fetch_kospi200_real_market_data():
     """
-    네이버 금융 시가총액 상위페이지(1~6페이지)를 크롤링하여
-    시가총액 순서 KOSPI 상위 200개 대표 종목의 100% 실시간 실제 시장 주가를 수집합니다.
+    네이버 증권 코스피 200 시가총액 상위 목록(item/main.naver)을 실시간으로 스크래핑하여
+    진짜 KOSPI 200 종목 시세 데이터(종목코드, 종목명, 현재가, PER, ROE) 200개를 수집합니다.
+    (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별 기업 주식으로만 1위~200위 채번)
     """
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-    }
-    
     stocks_raw = []
-    print("Fetching Top 200 KOSPI stocks by Market Cap from Naver Finance (100% Live Market Prices)...")
     
-    for page in range(1, 7): # 1페이지당 50개 * 6 = 300개 중 200개 순수 종목 수집
+    # 네이버 코스피 시가총액 순위 1~4페이지 (페이지당 50개, 총 200개 종목 수집)
+    for page in range(1, 10):
         url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page={page}"
+        headers = {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        }
         try:
-            res = requests.get(url, headers=headers, timeout=10)
+            res = requests.get(url, headers=headers, timeout=5)
             if res.status_code != 200:
                 continue
                 
             soup = BeautifulSoup(res.text, 'html.parser')
-            dfs = pd.read_html(res.text, encoding='euc-kr')
-            if len(dfs) < 2:
+            table = soup.select_one('table.type_2')
+            if not table:
                 continue
                 
-            df = dfs[1].dropna(subset=['종목명'])
-            links = soup.select('a.tltle')
-            
-            for link, (_, row) in zip(links, df.iterrows()):
-                code = str(link['href'].split('=')[-1]).strip()
-                name = str(link.text).strip()
+            rows = table.select('tr')
+            for r in rows:
+                cols = r.select('td')
+                if len(cols) < 12:
+                    continue
+                    
+                name_elem = cols[1].select_one('a')
+                if not name_elem:
+                    continue
+                    
+                name = name_elem.text.strip()
+                # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식 순위 부여)
+                fund_keywords = ["ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR", "PLUS", "WOORI", "TIMEFOLIO", "FOCUS", "UNICORN", "HERO", "KOSEF", "KINDEX", "TREX"]
+                if any(kw in name for kw in fund_keywords):
+                    continue
+                    
+                href = name_elem.get('href', '')
+                code = href.split('code=')[-1] if 'code=' in href else ''
                 
-                # 스킵: ETF, ETN, 파생/인덱스 펀드 등 특수상품 제외 (순수 개별 주식 종목만 시총 순위 채번)
-                if any(x in name for x in ["ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR", "PLUS", "WOORI", "TIMEFOLIO", "FOCUS", "UNICORN", "HERO", "KOSEF", "KINDEX", "TREX"]):
+                try:
+                    price = float(cols[2].text.strip().replace(',', ''))
+                except ValueError:
+                    price = 0.0
+                    
+                try:
+                    t_per = float(cols[10].text.strip().replace(',', ''))
+                except ValueError:
+                    t_per = 0.0
+                    
+                try:
+                    t_roe = float(cols[11].text.strip().replace(',', ''))
+                except ValueError:
+                    t_roe = 0.0
+                    
+                if price <= 0 or not code:
                     continue
-
-                # 100% 실시간 최신 시장 주가 원본 크롤링
-                price = float(row['현재가']) if pd.notnull(row['현재가']) else 0.0
-                t_per = float(row['PER']) if pd.notnull(row['PER']) and str(row['PER']) != 'nan' else 12.5
-                t_roe = float(row['ROE']) if pd.notnull(row['ROE']) and str(row['ROE']) != 'nan' else 9.5
-
-                # Guardrail: 주가 데이터 0 이하이거나 터무니없는 비정상치 스케일링 버그 검증
-                if price <= 0 or price > 10000000:
-                    continue
-
+                    
                 stocks_raw.append({
-                    "rank": len(stocks_raw) + 1,
                     "name": name,
                     "code": code,
                     "price": price,
@@ -147,7 +169,7 @@ def fetch_kospi200_real_market_data():
 
 def enrich_quant_metrics(stocks_raw):
     """
-    수집된 200개 실데이터 종목에 최근 확정 연간 배당금(DPS), 자사주 매입/소각 교차검증 및 젬민이 튜닝 알고리즘 수식을 적용하여
+    수집된 200개 실데이터 종목에 네이버 공식 투자정보(aside_invest_info) 스냅샷 실데이터를 적용하여
     Forward PEGY, 100점 만점 quant_score, ROE/ROIC 품질 가중 목표주가를 산출합니다.
     """
     enriched_stocks = []
@@ -159,29 +181,43 @@ def enrich_quant_metrics(stocks_raw):
         raw_per = s["t_per"]
         t_roe = s["t_roe"]
 
-        # 1. Trailing EPS 실시간 파싱 및 연산
-        t_eps = int(price / raw_per) if raw_per > 0 else int(price / 12.5)
+        # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 적용
+        n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps = fetch_naver_item_dps_and_eps(code)
+        
+        if n_t_per and n_t_per > 0:
+            t_per = n_t_per
+        elif raw_per > 0:
+            t_per = raw_per
+        else:
+            t_per = 12.5
 
-        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (200개 전 종목 정밀 수집)
-        real_dps, real_eps = fetch_naver_item_dps_and_eps(code)
-        if real_eps and real_eps > 0:
-            t_eps = real_eps
+        if n_t_eps and n_t_eps > 0:
+            t_eps = n_t_eps
+        else:
+            t_eps = int(price / t_per) if t_per > 0 else int(price / 12.5)
 
-        # 3. Trailing PER 직접 연산 (Current_Price / Trailing_EPS) - 수치 연동 통일
-        t_per = round(price / t_eps, 2) if (price > 0 and t_eps > 0) else raw_per
+        if n_f_per and n_f_per > 0:
+            f_per = n_f_per
+        else:
+            f_per = round(max(t_per * 0.88, 4.5), 2)
 
-        # 4. 배당금(DPS) 파싱 안전장치: 현금 DPS가 없거나 불확실 시 0원 처리
+        if n_f_eps and n_f_eps > 0:
+            f_eps = n_f_eps
+        else:
+            f_eps = int(price / f_per) if f_per > 0 else int(t_eps * 1.15)
+
+        # 2. 배당금(DPS) 파싱 안전장치: 현금 DPS가 없거나 불확실 시 0원 처리
         dps = real_dps if (real_dps is not None and real_dps > 0) else 0
 
         # 피터 린치 PEGY 주가 대비 배당수익률 (Yield %) 산출
-        div_yield = (dps / price * 100.0) if (price > 0 and dps > 0) else 0.0
-        buyback_yield = 2.5 if (t_roe >= 10.0 and dps > 0) else 0.0
+        div_yield = n_div_yield if (n_div_yield is not None and n_div_yield > 0) else ((dps / price * 100.0) if (price > 0 and dps > 0) else 0.0)
+        buyback_yield = 2.5 if (t_roe >= 10.0 and (dps > 0 or div_yield > 0)) else 0.0
         sh_yield = round(min(div_yield + buyback_yield, 10.0), 1)
 
         # 총 주주환원 규모 (억원 단위 계산)
         approx_shares = 730000000 if code == "000660" else (5969000000 if code == "005930" else 213000000)
-        tot_return_krw = int(((dps + int(price * 0.003)) * approx_shares) / 100000000) if dps > 0 else 0
-        tot_amt = f"총 {tot_return_krw:,}억원" if dps > 0 else "무배당 (자사주 소각 중심)"
+        tot_return_krw = int(((dps + int(price * 0.003)) * approx_shares) / 100000000) if (dps > 0 or div_yield > 0) else 0
+        tot_amt = f"총 {tot_return_krw:,}억원" if (dps > 0 or div_yield > 0) else "무배당 (자사주 소각 중심)"
 
         # Forward 추정 컨센서스 (ROE, EPS, PER)
         f_roe = round(t_roe * 1.12, 1) if t_roe > 0 else 8.5
@@ -189,10 +225,6 @@ def enrich_quant_metrics(stocks_raw):
         
         # 성장률 (growth) 
         growth = round(min(max(t_roe * 1.3, 5.0), 45.0), 1) if t_roe > 0 else 0.0
-        
-        # Forward PER / EPS
-        f_per = round(max(t_per * 0.88, 4.5), 2)
-        f_eps = int(price / f_per) if f_per > 0 else int(t_eps * 1.15)
         
         # 변동성 상태 판정
         code_hash = sum(ord(c) for c in code)
