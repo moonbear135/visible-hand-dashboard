@@ -1241,6 +1241,7 @@ with st.expander("📈 방공망 리스크 지수(INDEX) 역사적 트렌드 차
             horizontal=True,
             help="차트와 테이블의 데이터 집계 주기를 설정합니다."
         )
+        st.caption("*시트를 다운 받으시면 날짜별 가중치와 점수를 볼 수 있습니다")
         
         # 데이터 복사 및 날짜 타입 변환
         df_temp = history_df.copy()
@@ -1279,7 +1280,20 @@ with st.expander("📈 방공망 리스크 지수(INDEX) 역사적 트렌드 차
         # 테이블 표사용 데이터 한글 컬럼명 변환 및 역순 정렬
         display_history = df_grouped.rename(columns=COL_MAP).sort_values(by="날짜", ascending=False)
         
-        st.table(display_history.set_index("날짜"))
+        # UI 표에는 날짜, 종합 위험 점수, 코스피 종가, 원/달러 환율만 표기
+        visible_cols = ["날짜", "종합 위험 점수", "코스피 종가", "원/달러 환율"]
+        visible_cols = [c for c in visible_cols if c in display_history.columns]
+        
+        st.table(display_history[visible_cols].set_index("날짜"))
+        
+        # 전체 다운로드용 CSV 준비 (엑셀 한글 호환을 위해 utf-8-sig 인코딩 적용)
+        csv_data = history_df.rename(columns=COL_MAP).sort_values(by="날짜", ascending=False).to_csv(index=False).encode('utf-8-sig')
+        st.download_button(
+            label="📥 전체 시장 리스크 역사적 데이터 다운로드 (CSV)",
+            data=csv_data,
+            file_name=f"market_risk_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
     else:
         st.info("누적된 히스토리 데이터가 아직 없습니다. 데이터 수집이 시작되면 여기에 그래프가 표시됩니다.")
 
