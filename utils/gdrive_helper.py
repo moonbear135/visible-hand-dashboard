@@ -48,8 +48,8 @@ def upload_to_gdrive(local_file_path: str, drive_folder_id: str):
         print(f"❌ [{file_name}] 업로드 실패: {e}")
 
 if __name__ == "__main__":
-    # 테스트용 실행 (폴더 ID에 복사한 값을 넣어주세요)
-    TARGET_FOLDER_ID = "여기에_구글_드라이브_폴더_ID_붙여넣기"
+    # 테스트용 실행 (구글 드라이브 폴더 ID 적용 완료)
+    TARGET_FOLDER_ID = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"
     
     # market_history.csv 파일 업로드 테스트
     test_file = "market_history.csv"
