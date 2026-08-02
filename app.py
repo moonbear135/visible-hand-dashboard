@@ -817,9 +817,14 @@ with st.sidebar:
     )
     # 상단 새로운 공간 컨테이너 정의 (향후 새로운 내용 추가용)
     sidebar_top = st.container()
-    st.markdown("---")
     # 하단 관리자 로그인 컨테이너 정의
     sidebar_bottom = st.container()
+
+with sidebar_top:
+    st.markdown("## 🏢 잘 보면 보이는 손")
+    st.markdown("### 💡 사실 이 가격이에요")
+    st.info("이곳에 새로운 분석 데이터가 들어갈 예정입니다.")
+    st.markdown("---")
 
 with sidebar_bottom:
     st.markdown("### ⚙️ 관리자 전용 메뉴")
