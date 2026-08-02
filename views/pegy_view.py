@@ -46,11 +46,14 @@ def load_kospi200_snapshot():
     return {"last_updated_at": now_str, "status": "BACKUP"}, []
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 동기화 배너) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 관리자 전용 이격 배지 제어) 화면 렌더링"""
     
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
     last_updated_at = metadata.get("last_updated_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
+
+    # 관리자 로그인 여부 확인
+    is_admin = st.session_state.get("admin_mode", False)
 
     # 2. 툴팁 전용 CSS 주입
     st.markdown(
@@ -222,12 +225,12 @@ def render_pegy_page():
             </span>
             """
 
-        # 야후 파이낸스 교차검증 15% 이상 이격 발생 뱃지
+        # 야후 파이낸스 교차검증 15% 이상 이격 발생 뱃지 (관리자 전용 노출)
         discrepancy_badge_html = ""
-        if s.get("per_discrepancy", False):
+        if is_admin and s.get("per_discrepancy", False):
             discrepancy_badge_html = """
             <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #facc15; white-space: nowrap;">
-                ⚠️ 데이터 이격 발생 (yfinance 차이>15%)
+                ⚙️ [관리자용] 데이터 이격 발생 (yfinance 차이>15%)
             </span>
             """
 
