@@ -5,8 +5,15 @@ from datetime import datetime
 
 def render_pegy_page():
     """'💡 사실 이 가격이에요' (Forward PEGY/PER/EPS 밸류에이션 분석) 화면 렌더링"""
-    st.markdown('<div class="main-title">💡 사실 이 가격이에요</div>', unsafe_allow_html=True)
-    st.markdown('<div class="sub-title">Forward PEGY / PER / EPS 스냅샷 기반 퀀트 적정가치 분석</div>', unsafe_allow_html=True)
+    st.markdown(
+        """
+        <div style="text-align: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <h1 style="font-size: 36px; font-weight: 900; background: linear-gradient(90deg, #d97706 0%, #f59e0b 50%, #fbbf24 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 6px 0; letter-spacing: -0.8px;">💡 사실 이 가격이에요</h1>
+            <div style="font-size: 16px; color: #94a3b8; font-weight: 600; letter-spacing: -0.2px;">Forward PEGY / PER / EPS 스냅샷 기반 퀀트 적정가치 분석</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
 
     col1, col2, col3 = st.columns(3)
     with col1:
