@@ -5,38 +5,38 @@ import streamlit as st
 
 @st.cache_data
 def get_kospi200_pegy_data():
-    """KOSPI 200 대표 종목 밸류에이션(Trailing vs Forward PEGY & ROE/ROIC 자본효율성) 200개 데이터셋 생성"""
+    """KOSPI 200 대표 종목 밸류에이션(Trailing/Forward PEGY, ROE/ROIC, DPS & 주주환원 총액) 200개 데이터셋 생성"""
     base_stocks = [
-        {"name": "삼성전자", "code": "005930", "price": 74500, "t_roe": 10.5, "f_roe": 12.8, "roic": 11.2, "t_per": 14.8, "t_eps": 5033, "sh_return": 2.4, "t_pegy": 0.85, "t_fair": 82000, "f_per": 12.84, "f_eps": 5800, "growth": 18.5, "f_pegy": 0.63, "f_target": 98000, "vol": "🟢 정상"},
-        {"name": "SK하이닉스", "code": "000660", "price": 182000, "t_roe": 22.5, "f_roe": 26.8, "roic": 21.0, "t_per": 12.5, "t_eps": 14560, "sh_return": 1.2, "t_pegy": 0.52, "t_fair": 210000, "f_per": 9.33, "f_eps": 19500, "growth": 24.1, "f_pegy": 0.37, "f_target": 260000, "vol": "🟢 정상"},
-        {"name": "현대차", "code": "005380", "price": 245000, "t_roe": 12.4, "f_roe": 13.5, "roic": 11.8, "t_per": 8.2, "t_eps": 29878, "sh_return": 5.2, "t_pegy": 0.71, "t_fair": 280000, "f_per": 7.66, "f_eps": 32000, "growth": 8.2, "f_pegy": 0.62, "f_target": 310000, "vol": "🟢 정상"},
-        {"name": "NAVER", "code": "035420", "price": 178000, "t_roe": 9.8, "f_roe": 11.2, "roic": 8.5, "t_per": 22.5, "t_eps": 7911, "sh_return": 1.5, "t_pegy": 1.82, "t_fair": 165000, "f_per": 20.00, "f_eps": 8900, "growth": 12.0, "f_pegy": 1.58, "f_target": 190000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "카카오", "code": "035720", "price": 42000, "t_roe": 3.2, "f_roe": 4.5, "roic": 3.8, "t_per": 31.2, "t_eps": 1346, "sh_return": 0.8, "t_pegy": 3.85, "t_fair": 35000, "f_per": 26.25, "f_eps": 1600, "growth": 7.5, "f_pegy": 3.43, "f_target": 40000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "기아", "code": "000270", "price": 118000, "t_roe": 18.2, "f_roe": 19.5, "roic": 16.8, "t_per": 6.8, "t_eps": 17350, "sh_return": 6.1, "t_pegy": 0.55, "t_fair": 145000, "f_per": 6.10, "f_eps": 19340, "growth": 11.4, "f_pegy": 0.48, "f_target": 160000, "vol": "🟢 정상"},
-        {"name": "LG에너지솔루션", "code": "373220", "price": 348000, "t_roe": 5.8, "f_roe": 7.2, "roic": 5.1, "t_per": 62.0, "t_eps": 5612, "sh_return": 0.3, "t_pegy": 2.85, "t_fair": 290000, "f_per": 48.50, "f_eps": 7175, "growth": 27.8, "f_pegy": 1.72, "f_target": 380000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "삼성바이오로직스", "code": "207940", "price": 815000, "t_roe": 9.4, "f_roe": 11.8, "roic": 8.9, "t_per": 58.4, "t_eps": 13955, "sh_return": 0.0, "t_pegy": 2.41, "t_fair": 750000, "f_per": 46.20, "f_eps": 17640, "growth": 26.4, "f_pegy": 1.75, "f_target": 920000, "vol": "🟢 정상"},
-        {"name": "KB금융", "code": "105560", "price": 82500, "t_roe": 9.8, "f_roe": 10.5, "roic": 7.8, "t_per": 6.9, "t_eps": 11956, "sh_return": 7.4, "t_pegy": 0.58, "t_fair": 105000, "f_per": 6.20, "f_eps": 13306, "growth": 9.2, "f_pegy": 0.49, "f_target": 115000, "vol": "🟢 정상"},
-        {"name": "신한지주", "code": "055550", "price": 53200, "t_roe": 9.2, "f_roe": 9.9, "roic": 7.2, "t_per": 6.4, "t_eps": 8312, "sh_return": 6.8, "t_pegy": 0.54, "t_fair": 68000, "f_per": 5.80, "f_eps": 9172, "growth": 8.5, "f_pegy": 0.46, "f_target": 72000, "vol": "🟢 정상"},
-        {"name": "POSCO홀딩스", "code": "005490", "price": 362000, "t_roe": 4.8, "f_roe": 6.2, "roic": 4.1, "t_per": 18.2, "t_eps": 19890, "sh_return": 3.8, "t_pegy": 1.45, "t_fair": 330000, "f_per": 14.50, "f_eps": 24965, "growth": 14.2, "f_pegy": 1.02, "f_target": 410000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "셀트리온", "code": "068270", "price": 189000, "t_roe": 8.8, "f_roe": 11.5, "roic": 8.1, "t_per": 42.0, "t_eps": 4500, "sh_return": 0.9, "t_pegy": 1.95, "t_fair": 170000, "f_per": 31.50, "f_eps": 6000, "growth": 33.3, "f_pegy": 0.94, "f_target": 230000, "vol": "🟢 정상"},
-        {"name": "현대모비스", "code": "012330", "price": 224000, "t_roe": 8.5, "f_roe": 9.2, "roic": 7.9, "t_per": 7.1, "t_eps": 31549, "sh_return": 3.5, "t_pegy": 0.68, "t_fair": 270000, "f_per": 6.40, "f_eps": 35000, "growth": 9.5, "f_pegy": 0.59, "f_target": 290000, "vol": "🟢 정상"},
-        {"name": "삼성물산", "code": "028260", "price": 146000, "t_roe": 8.1, "f_roe": 8.9, "roic": 7.4, "t_per": 11.2, "t_eps": 13035, "sh_return": 2.9, "t_pegy": 0.92, "t_fair": 160000, "f_per": 9.80, "f_eps": 14897, "growth": 10.2, "f_pegy": 0.75, "f_target": 185000, "vol": "🟢 정상"},
-        {"name": "LG화학", "code": "051910", "price": 312000, "t_roe": 4.2, "f_roe": 5.8, "roic": 3.9, "t_per": 25.4, "t_eps": 12283, "sh_return": 2.1, "t_pegy": 1.85, "t_fair": 280000, "f_per": 19.50, "f_eps": 16000, "growth": 21.0, "f_pegy": 1.15, "f_target": 360000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "삼성SDI", "code": "006400", "price": 335000, "t_roe": 7.8, "f_roe": 9.5, "roic": 7.1, "t_per": 21.8, "t_eps": 15366, "sh_return": 1.1, "t_pegy": 1.62, "t_fair": 310000, "f_per": 16.20, "f_eps": 20679, "growth": 22.5, "f_pegy": 0.98, "f_target": 420000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "HD현대중공업", "code": "329180", "price": 195000, "t_roe": 14.5, "f_roe": 18.2, "roic": 13.8, "t_per": 35.0, "t_eps": 5571, "sh_return": 0.5, "t_pegy": 1.25, "t_fair": 180000, "f_per": 21.40, "f_eps": 9112, "growth": 63.5, "f_pegy": 0.33, "f_target": 270000, "vol": "🟢 정상"},
-        {"name": "메리츠금융지주", "code": "138040", "price": 89000, "t_roe": 28.5, "f_roe": 31.0, "roic": 24.5, "t_per": 8.1, "t_eps": 10987, "sh_return": 9.8, "t_pegy": 0.42, "t_fair": 115000, "f_per": 7.10, "f_eps": 12535, "growth": 14.1, "f_pegy": 0.35, "f_target": 130000, "vol": "🟢 정상"},
-        {"name": "한국전력", "code": "015760", "price": 21500, "t_roe": 4.2, "f_roe": 5.5, "roic": 2.8, "t_per": 5.4, "t_eps": 3981, "sh_return": 0.0, "t_pegy": 0.65, "t_fair": 28000, "f_per": 4.50, "f_eps": 4777, "growth": 20.0, "f_pegy": 0.45, "f_target": 32000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "크래프톤", "code": "259960", "price": 315000, "t_roe": 16.8, "f_roe": 19.4, "roic": 15.2, "t_per": 20.5, "t_eps": 15365, "sh_return": 1.8, "t_pegy": 1.12, "t_fair": 300000, "f_per": 15.80, "f_eps": 19936, "growth": 29.7, "f_pegy": 0.68, "f_target": 410000, "vol": "🟢 정상"},
-        {"name": "한화에어로스페이스", "code": "012450", "price": 295000, "t_roe": 15.2, "f_roe": 18.9, "roic": 14.1, "t_per": 24.2, "t_eps": 12190, "sh_return": 0.8, "t_pegy": 0.88, "t_fair": 280000, "f_per": 16.50, "f_eps": 17878, "growth": 46.6, "f_pegy": 0.42, "f_target": 380000, "vol": "🟢 정상"},
-        {"name": "SK텔레콤", "code": "017670", "price": 54200, "t_roe": 9.5, "f_roe": 10.2, "roic": 8.1, "t_per": 10.2, "t_eps": 5313, "sh_return": 7.1, "t_pegy": 0.85, "t_fair": 60000, "f_per": 9.40, "f_eps": 5765, "growth": 8.5, "f_pegy": 0.60, "f_target": 67000, "vol": "🟢 정상"},
-        {"name": "KT", "code": "030200", "price": 39500, "t_roe": 8.9, "f_roe": 9.8, "roic": 7.5, "t_per": 8.8, "t_eps": 4488, "sh_return": 6.8, "t_pegy": 0.78, "t_fair": 45000, "f_per": 7.90, "f_eps": 5000, "growth": 11.4, "f_pegy": 0.52, "f_target": 51000, "vol": "🟢 정상"},
-        {"name": "S-Oil", "code": "010950", "price": 68500, "t_roe": 7.2, "f_roe": 9.8, "roic": 6.5, "t_per": 11.5, "t_eps": 5956, "sh_return": 4.5, "t_pegy": 1.25, "t_fair": 65000, "f_per": 8.90, "f_eps": 7696, "growth": 29.2, "f_pegy": 0.72, "f_target": 88000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "HMM", "code": "011200", "price": 18200, "t_roe": 6.5, "f_roe": 7.8, "roic": 5.2, "t_per": 6.2, "t_eps": 2935, "sh_return": 3.8, "t_pegy": 0.75, "t_fair": 21000, "f_per": 5.10, "f_eps": 3568, "growth": 21.5, "f_pegy": 0.41, "f_target": 25000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "삼성엔지니어링", "code": "028050", "price": 24800, "t_roe": 14.8, "f_roe": 16.5, "roic": 13.2, "t_per": 7.8, "t_eps": 3179, "sh_return": 0.0, "t_pegy": 0.68, "t_fair": 29000, "f_per": 6.70, "f_eps": 3701, "growth": 16.4, "f_pegy": 0.51, "f_target": 35000, "vol": "🟢 정상"},
-        {"name": "두산에너빌리티", "code": "034020", "price": 20800, "t_roe": 3.8, "f_roe": 5.2, "roic": 3.1, "t_per": 48.0, "t_eps": 433, "sh_return": 0.0, "t_pegy": 2.15, "t_fair": 18000, "f_per": 32.50, "f_eps": 640, "growth": 47.8, "f_pegy": 0.98, "f_target": 27000, "vol": "⚡ 변동성 보정 중"},
-        {"name": "현대글로비스", "code": "086280", "price": 121500, "t_roe": 13.2, "f_roe": 14.8, "roic": 11.5, "t_per": 7.4, "t_eps": 16418, "sh_return": 3.8, "t_pegy": 0.69, "t_fair": 145000, "f_per": 6.50, "f_eps": 18692, "growth": 13.8, "f_pegy": 0.48, "f_target": 165000, "vol": "🟢 정상"},
-        {"name": "KT&G", "code": "033780", "price": 104500, "t_roe": 11.8, "f_roe": 12.5, "roic": 10.2, "t_per": 12.8, "t_eps": 8164, "sh_return": 7.8, "t_pegy": 0.88, "t_fair": 115000, "f_per": 11.20, "f_eps": 9330, "growth": 14.2, "f_pegy": 0.62, "f_target": 130000, "vol": "🟢 정상"},
-        {"name": "한국타이어앤테크놀로지", "code": "161390", "price": 49800, "t_roe": 11.2, "f_roe": 12.4, "roic": 9.8, "t_per": 6.8, "t_eps": 7323, "sh_return": 3.2, "t_pegy": 0.64, "t_fair": 60000, "f_per": 5.90, "f_eps": 8440, "growth": 15.2, "f_pegy": 0.45, "f_target": 70000, "vol": "🟢 정상"}
+        {"name": "삼성전자", "code": "005930", "price": 74500, "t_roe": 10.5, "f_roe": 12.8, "roic": 11.2, "dps": 3617, "return_total": "총 9.8조원", "t_per": 14.8, "t_eps": 5033, "sh_return": 2.4, "t_pegy": 0.85, "t_fair": 82000, "f_per": 12.84, "f_eps": 5800, "growth": 18.5, "f_pegy": 0.63, "f_target": 98000, "vol": "🟢 정상"},
+        {"name": "SK하이닉스", "code": "000660", "price": 182000, "t_roe": 22.5, "f_roe": 26.8, "roic": 21.0, "dps": 1500, "return_total": "총 1.8조원", "t_per": 12.5, "t_eps": 14560, "sh_return": 1.2, "t_pegy": 0.52, "t_fair": 210000, "f_per": 9.33, "f_eps": 19500, "growth": 24.1, "f_pegy": 0.37, "f_target": 260000, "vol": "🟢 정상"},
+        {"name": "현대차", "code": "005380", "price": 245000, "t_roe": 12.4, "f_roe": 13.5, "roic": 11.8, "dps": 11400, "return_total": "총 3.2조원", "t_per": 8.2, "t_eps": 29878, "sh_return": 5.2, "t_pegy": 0.71, "t_fair": 280000, "f_per": 7.66, "f_eps": 32000, "growth": 8.2, "f_pegy": 0.62, "f_target": 310000, "vol": "🟢 정상"},
+        {"name": "NAVER", "code": "035420", "price": 178000, "t_roe": 9.8, "f_roe": 11.2, "roic": 8.5, "dps": 1190, "return_total": "총 4,800억원", "t_per": 22.5, "t_eps": 7911, "sh_return": 1.5, "t_pegy": 1.82, "t_fair": 165000, "f_per": 20.00, "f_eps": 8900, "growth": 12.0, "f_pegy": 1.58, "f_target": 190000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "카카오", "code": "035720", "price": 42000, "t_roe": 3.2, "f_roe": 4.5, "roic": 3.8, "dps": 340, "return_total": "총 1,200억원", "t_per": 31.2, "t_eps": 1346, "sh_return": 0.8, "t_pegy": 3.85, "t_fair": 35000, "f_per": 26.25, "f_eps": 1600, "growth": 7.5, "f_pegy": 3.43, "f_target": 40000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "기아", "code": "000270", "price": 118000, "t_roe": 18.2, "f_roe": 19.5, "roic": 16.8, "dps": 5600, "return_total": "총 2.1조원", "t_per": 6.8, "t_eps": 17350, "sh_return": 6.1, "t_pegy": 0.55, "t_fair": 145000, "f_per": 6.10, "f_eps": 19340, "growth": 11.4, "f_pegy": 0.48, "f_target": 160000, "vol": "🟢 정상"},
+        {"name": "LG에너지솔루션", "code": "373220", "price": 348000, "t_roe": 5.8, "f_roe": 7.2, "roic": 5.1, "dps": 1000, "return_total": "총 2,500억원", "t_per": 62.0, "t_eps": 5612, "sh_return": 0.3, "t_pegy": 2.85, "t_fair": 290000, "f_per": 48.50, "f_eps": 7175, "growth": 27.8, "f_pegy": 1.72, "f_target": 380000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "삼성바이오로직스", "code": "207940", "price": 815000, "t_roe": 9.4, "f_roe": 11.8, "roic": 8.9, "dps": 0, "return_total": "0원 (재투자)", "t_per": 58.4, "t_eps": 13955, "sh_return": 0.0, "t_pegy": 2.41, "t_fair": 750000, "f_per": 46.20, "f_eps": 17640, "growth": 26.4, "f_pegy": 1.75, "f_target": 920000, "vol": "🟢 정상"},
+        {"name": "KB금융", "code": "105560", "price": 82500, "t_roe": 9.8, "f_roe": 10.5, "roic": 7.8, "dps": 3060, "return_total": "총 2.4조원", "t_per": 6.9, "t_eps": 11956, "sh_return": 7.4, "t_pegy": 0.58, "t_fair": 105000, "f_per": 6.20, "f_eps": 13306, "growth": 9.2, "f_pegy": 0.49, "f_target": 115000, "vol": "🟢 정상"},
+        {"name": "신한지주", "code": "055550", "price": 53200, "t_roe": 9.2, "f_roe": 9.9, "roic": 7.2, "dps": 2100, "return_total": "총 1.9조원", "t_per": 6.4, "t_eps": 8312, "sh_return": 6.8, "t_pegy": 0.54, "t_fair": 68000, "f_per": 5.80, "f_eps": 9172, "growth": 8.5, "f_pegy": 0.46, "f_target": 72000, "vol": "🟢 정상"},
+        {"name": "POSCO홀딩스", "code": "005490", "price": 362000, "t_roe": 4.8, "f_roe": 6.2, "roic": 4.1, "dps": 10000, "return_total": "총 9,500억원", "t_per": 18.2, "t_eps": 19890, "sh_return": 3.8, "t_pegy": 1.45, "t_fair": 330000, "f_per": 14.50, "f_eps": 24965, "growth": 14.2, "f_pegy": 1.02, "f_target": 410000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "셀트리온", "code": "068270", "price": 189000, "t_roe": 8.8, "f_roe": 11.5, "roic": 8.1, "dps": 500, "return_total": "총 1,800억원", "t_per": 42.0, "t_eps": 4500, "sh_return": 0.9, "t_pegy": 1.95, "t_fair": 170000, "f_per": 31.50, "f_eps": 6000, "growth": 33.3, "f_pegy": 0.94, "f_target": 230000, "vol": "🟢 정상"},
+        {"name": "현대모비스", "code": "012330", "price": 224000, "t_roe": 8.5, "f_roe": 9.2, "roic": 7.9, "dps": 4500, "return_total": "총 8,200억원", "t_per": 7.1, "t_eps": 31549, "sh_return": 3.5, "t_pegy": 0.68, "t_fair": 270000, "f_per": 6.40, "f_eps": 35000, "growth": 9.5, "f_pegy": 0.59, "f_target": 290000, "vol": "🟢 정상"},
+        {"name": "삼성물산", "code": "028260", "price": 146000, "t_roe": 8.1, "f_roe": 8.9, "roic": 7.4, "dps": 2550, "return_total": "총 6,500억원", "t_per": 11.2, "t_eps": 13035, "sh_return": 2.9, "t_pegy": 0.92, "t_fair": 160000, "f_per": 9.80, "f_eps": 14897, "growth": 10.2, "f_pegy": 0.75, "f_target": 185000, "vol": "🟢 정상"},
+        {"name": "LG화학", "code": "051910", "price": 312000, "t_roe": 4.2, "f_roe": 5.8, "roic": 3.9, "dps": 3500, "return_total": "총 4,200억원", "t_per": 25.4, "t_eps": 12283, "sh_return": 2.1, "t_pegy": 1.85, "t_fair": 280000, "f_per": 19.50, "f_eps": 16000, "growth": 21.0, "f_pegy": 1.15, "f_target": 360000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "삼성SDI", "code": "006400", "price": 335000, "t_roe": 7.8, "f_roe": 9.5, "roic": 7.1, "dps": 1000, "return_total": "총 2,100억원", "t_per": 21.8, "t_eps": 15366, "sh_return": 1.1, "t_pegy": 1.62, "t_fair": 310000, "f_per": 16.20, "f_eps": 20679, "growth": 22.5, "f_pegy": 0.98, "f_target": 420000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "HD현대중공업", "code": "329180", "price": 195000, "t_roe": 14.5, "f_roe": 18.2, "roic": 13.8, "dps": 0, "return_total": "0원 (설비투자)", "t_per": 35.0, "t_eps": 5571, "sh_return": 0.5, "t_pegy": 1.25, "t_fair": 180000, "f_per": 21.40, "f_eps": 9112, "growth": 63.5, "f_pegy": 0.33, "f_target": 270000, "vol": "🟢 정상"},
+        {"name": "메리츠금융지주", "code": "138040", "price": 89000, "t_roe": 28.5, "f_roe": 31.0, "roic": 24.5, "dps": 2360, "return_total": "총 1.7조원", "t_per": 8.1, "t_eps": 10987, "sh_return": 9.8, "t_pegy": 0.42, "t_fair": 115000, "f_per": 7.10, "f_eps": 12535, "growth": 14.1, "f_pegy": 0.35, "f_target": 130000, "vol": "🟢 정상"},
+        {"name": "한국전력", "code": "015760", "price": 21500, "t_roe": 4.2, "f_roe": 5.5, "roic": 2.8, "dps": 0, "return_total": "0원", "t_per": 5.4, "t_eps": 3981, "sh_return": 0.0, "t_pegy": 0.65, "t_fair": 28000, "f_per": 4.50, "f_eps": 4777, "growth": 20.0, "f_pegy": 0.45, "f_target": 32000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "크래프톤", "code": "259960", "price": 315000, "t_roe": 16.8, "f_roe": 19.4, "roic": 15.2, "dps": 0, "return_total": "총 1,600억원 (자사주 소각)", "t_per": 20.5, "t_eps": 15365, "sh_return": 1.8, "t_pegy": 1.12, "t_fair": 300000, "f_per": 15.80, "f_eps": 19936, "growth": 29.7, "f_pegy": 0.68, "f_target": 410000, "vol": "🟢 정상"},
+        {"name": "한화에어로스페이스", "code": "012450", "price": 295000, "t_roe": 15.2, "f_roe": 18.9, "roic": 14.1, "dps": 1000, "return_total": "총 950억원", "t_per": 24.2, "t_eps": 12190, "sh_return": 0.8, "t_pegy": 0.88, "t_fair": 280000, "f_per": 16.50, "f_eps": 17878, "growth": 46.6, "f_pegy": 0.42, "f_target": 380000, "vol": "🟢 정상"},
+        {"name": "SK텔레콤", "code": "017670", "price": 54200, "t_roe": 9.5, "f_roe": 10.2, "roic": 8.1, "dps": 3540, "return_total": "총 7,800억원", "t_per": 10.2, "t_eps": 5313, "sh_return": 7.1, "t_pegy": 0.85, "t_fair": 60000, "f_per": 9.40, "f_eps": 5765, "growth": 8.5, "f_pegy": 0.60, "f_target": 67000, "vol": "🟢 정상"},
+        {"name": "KT", "code": "030200", "price": 39500, "t_roe": 8.9, "f_roe": 9.8, "roic": 7.5, "dps": 1960, "return_total": "총 5,100억원", "t_per": 8.8, "t_eps": 4488, "sh_return": 6.8, "t_pegy": 0.78, "t_fair": 45000, "f_per": 7.90, "f_eps": 5000, "growth": 11.4, "f_pegy": 0.52, "f_target": 51000, "vol": "🟢 정상"},
+        {"name": "S-Oil", "code": "010950", "price": 68500, "t_roe": 7.2, "f_roe": 9.8, "roic": 6.5, "dps": 2900, "return_total": "총 3,400억원", "t_per": 11.5, "t_eps": 5956, "sh_return": 4.5, "t_pegy": 1.25, "t_fair": 65000, "f_per": 8.90, "f_eps": 7696, "growth": 29.2, "f_pegy": 0.72, "f_target": 88000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "HMM", "code": "011200", "price": 18200, "t_roe": 6.5, "f_roe": 7.8, "roic": 5.2, "dps": 700, "return_total": "총 4,800억원", "t_per": 6.2, "t_eps": 2935, "sh_return": 3.8, "t_pegy": 0.75, "t_fair": 21000, "f_per": 5.10, "f_eps": 3568, "growth": 21.5, "f_pegy": 0.41, "f_target": 25000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "삼성엔지니어링", "code": "028050", "price": 24800, "t_roe": 14.8, "f_roe": 16.5, "roic": 13.2, "dps": 0, "return_total": "0원", "t_per": 7.8, "t_eps": 3179, "sh_return": 0.0, "t_pegy": 0.68, "t_fair": 29000, "f_per": 6.70, "f_eps": 3701, "growth": 16.4, "f_pegy": 0.51, "f_target": 35000, "vol": "🟢 정상"},
+        {"name": "두산에너빌리티", "code": "034020", "price": 20800, "t_roe": 3.8, "f_roe": 5.2, "roic": 3.1, "dps": 0, "return_total": "0원", "t_per": 48.0, "t_eps": 433, "sh_return": 0.0, "t_pegy": 2.15, "t_fair": 18000, "f_per": 32.50, "f_eps": 640, "growth": 47.8, "f_pegy": 0.98, "f_target": 27000, "vol": "⚡ 변동성 보정 중"},
+        {"name": "현대글로비스", "code": "086280", "price": 121500, "t_roe": 13.2, "f_roe": 14.8, "roic": 11.5, "dps": 3800, "return_total": "총 2,800억원", "t_per": 7.4, "t_eps": 16418, "sh_return": 3.8, "t_pegy": 0.69, "t_fair": 145000, "f_per": 6.50, "f_eps": 18692, "growth": 13.8, "f_pegy": 0.48, "f_target": 165000, "vol": "🟢 정상"},
+        {"name": "KT&G", "code": "033780", "price": 104500, "t_roe": 11.8, "f_roe": 12.5, "roic": 10.2, "dps": 5200, "return_total": "총 8,900억원", "t_per": 12.8, "t_eps": 8164, "sh_return": 7.8, "t_pegy": 0.88, "t_fair": 115000, "f_per": 11.20, "f_eps": 9330, "growth": 14.2, "f_pegy": 0.62, "f_target": 130000, "vol": "🟢 정상"},
+        {"name": "한국타이어앤테크놀로지", "code": "161390", "price": 49800, "t_roe": 11.2, "f_roe": 12.4, "roic": 9.8, "dps": 1200, "return_total": "총 1,600억원", "t_per": 6.8, "t_eps": 7323, "sh_return": 3.2, "t_pegy": 0.64, "t_fair": 60000, "f_per": 5.90, "f_eps": 8440, "growth": 15.2, "f_pegy": 0.45, "f_target": 70000, "vol": "🟢 정상"}
     ]
 
     rng = random.Random(42)
@@ -56,9 +56,12 @@ def get_kospi200_pegy_data():
         f_roe_val = round(t_roe_val * rng.uniform(0.9, 1.25), 1)
         roic_val = round(t_roe_val * rng.uniform(0.7, 0.95), 1)
         
+        sh_ret_val = round(rng.uniform(0.0, 8.5), 1)
+        dps_val = int(price_val * (sh_ret_val * 0.6) / 100)
+        tot_amt_val = f"총 {rng.randint(300, 9500)}억원" if sh_ret_val > 0.5 else "0원"
+        
         t_per_val = round(rng.uniform(5.0, 35.0), 2)
         t_eps_val = int(price_val / t_per_val)
-        sh_ret_val = round(rng.uniform(0.0, 8.5), 1)
         t_pegy_val = round(rng.uniform(0.35, 2.5), 2)
         t_fair_val = int(price_val * rng.uniform(0.85, 1.35))
         
@@ -72,6 +75,7 @@ def get_kospi200_pegy_data():
         stocks.append({
             "name": name_str, "code": code_str, "price": price_val,
             "t_roe": t_roe_val, "f_roe": f_roe_val, "roic": roic_val,
+            "dps": dps_val, "return_total": tot_amt_val,
             "t_per": t_per_val, "t_eps": t_eps_val, "sh_return": sh_ret_val,
             "t_pegy": t_pegy_val, "t_fair": t_fair_val,
             "f_per": f_per_val, "f_eps": f_eps_val, "growth": growth_val,
@@ -102,7 +106,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (가로 1줄 배치 & 인터랙티브 퀀트 툴팁) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (1주당 배당금 DPS & 주주환원 총액 반영) 화면 렌더링"""
     
     # 1. 툴팁 전용 CSS 주입
     st.markdown(
@@ -119,7 +123,7 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: 280px;
+            width: 300px;
             background-color: #0f172a;
             color: #f1f5f9;
             text-align: left;
@@ -162,7 +166,7 @@ def render_pegy_page():
         """
         <div style="text-align: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <h1 style="font-size: 34px; font-weight: 800; color: #d97706; margin: 0 0 8px 0; letter-spacing: -0.5px;">💡 사실 이 가격이에요</h1>
-            <div style="font-size: 16px; color: #64748b; font-weight: 600;">KOSPI 200개 종목 Trailing vs Forward PEGY & ROE/ROIC 자본효율성 퀀트 리포트</div>
+            <div style="font-size: 16px; color: #64748b; font-weight: 600;">KOSPI 200개 종목 Trailing vs Forward PEGY & ROE/DPS 주주환원 퀀트 리포트</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -227,7 +231,7 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 7. 100% 와이드 배너 & Trailing/Forward 구간 각 1줄 수평 가로 정렬 + 인터랙티브 툴팁
+    # 7. 100% 와이드 배너 & Trailing/Forward 1줄 가로 정렬 + DPS 및 주주환원 상세
     if not page_stocks:
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
@@ -250,6 +254,8 @@ def render_pegy_page():
                 ✨ 우량 자본효율성 (Quality OK)
             </span>
             """
+
+        dps_str = f"{s['dps']:,.0f}원/주" if s['dps'] > 0 else "무배당"
 
         card_html = f"""
         <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 20px 24px; margin-bottom: 22px; box-shadow: 0 4px 16px rgba(0,0,0,0.38); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -287,7 +293,7 @@ def render_pegy_page():
                 </span>
             </div>
 
-            <!-- 3. Trailing 섹션 (과거 실적 기준) - 1줄 수평 가로 정렬 -->
+            <!-- 3. Trailing 섹션 (과거 실적 기준) - 1주당 배당금 DPS & 주주환원 총액 명시 -->
             <div style="background-color: rgba(30, 41, 59, 0.65); border: 1px solid #334155; border-radius: 10px; padding: 12px 18px; margin-bottom: 12px;">
                 <div style="font-size: 13px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px; border-bottom: 1px dashed #475569; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
                     <span>📜 Trailing (과거 실적 기준)</span>
@@ -303,8 +309,8 @@ def render_pegy_page():
                         <span style="color: #f1f5f9; font-weight: 700; margin-left: 4px;">{s['t_per']}배 / {s['t_eps']:,.0f}원</span>
                     </div>
                     <div>
-                        <span class="q-tooltip">주주환원율 ℹ️<span class="q-tooltiptext"><b>주주환원율 (%)</b><br>배당수익률 + 자사주 매입/소각 비율 합산</span></span>:
-                        <span style="color: #f1f5f9; font-weight: 700; margin-left: 4px;">{s['sh_return']}%</span>
+                        <span class="q-tooltip">🎁 주주환원 상세 (DPS/총액) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 주주환원 총 규모 (배당금 + 자사주 매입/소각): {s['return_total']}<br>• 총 주주환원율: {s['sh_return']}%</span></span>:
+                        <span style="color: #4ade80; font-weight: 700; margin-left: 4px;">DPS {dps_str} | 환원율 {s['sh_return']}% ({s['return_total']})</span>
                     </div>
                     <div>
                         <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>:
