@@ -9,6 +9,10 @@ import streamlit as st
 from utils.db import HISTORY_FILE, COL_MAP, save_and_load_history
 from views.admin_view import render_admin_console
 
+def render_clean_html(html_str):
+    clean_html = "\n".join([line.strip() for line in html_str.split("\n") if line.strip()])
+    st.markdown(clean_html, unsafe_allow_html=True)
+
 try:
     from pykrx import stock
     PYKRX_AVAILABLE = True
@@ -402,10 +406,6 @@ def render_macro_page():
     k_sign = "▼" if k_pct < 0 else "▲"
     u_color = "#ef4444" if u_pct > 0 else "#22c55e"
     u_sign = "▲" if u_pct > 0 else "▼"
-
-    def render_clean_html(html_str):
-        clean_html = "\n".join([line.strip() for line in html_str.split("\n") if line.strip()])
-        st.markdown(clean_html, unsafe_allow_html=True)
 
     render_clean_html(
         f"""
