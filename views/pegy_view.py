@@ -326,17 +326,67 @@ def render_pegy_page():
         rank_num = s.get("rank", start_idx + idx_stock + 1)
         rank_prefix_html = f'<span style="font-size: 32px; font-weight: 900; color: #38bdf8; letter-spacing: -1px; margin-right: 4px; line-height: 1;">{rank_num}.</span>'
 
-        # 데이터 무결성 방공망: 주주환원 공시 미확정 및 오염 종목 카드 가림 처리
+        # 데이터 무결성 방공망: 차단 사유별 분기 마스크 카드 렌더링
         if s.get('is_unverified', False):
+            reject_reason = s.get('reject_reason', '')
+            unverified_reason = s.get('unverified_reason', '')
+
+            # 사유별 테마 분기
+            if 'PER' in reject_reason or 'PER' in str(s.get('badge', '')):
+                # 🔴 PER 극단치 / 데이터 오염 (빨간 테마)
+                badge_label = "🔴 PER 극단 고평가 (밸류에이션 측정 불가)"
+                badge_bg = "#7f1d1d"
+                badge_border = "#f87171"
+                badge_fg = "#fca5a5"
+                card_bg = "linear-gradient(135deg, #450a0a 0%, #1e1b4b 100%)"
+                card_border_color = "#dc2626"
+                inner_border = "#991b1b"
+                title_icon = "🚫"
+                title_text = "밸류에이션 산출 범위 초과 — 분석 제외 종목"
+                title_color = "#f87171"
+                desc_text = f"본 종목은 <b>PER {s['t_per']:,.1f}배 (EPS {s['t_eps']:,}원)</b>로 정상 밸류에이션 산출 범위(PER 300배)를 크게 초과하여 PEGY 분석이 무의미한 극단 고평가 상태입니다."
+                desc_color = "#fecaca"
+                hint_text = "📌 이익 수준이 정상화(EPS 회복)되면 자동으로 분석 대상에 복귀합니다."
+            elif '역성장' in str(s.get('badge', '')) or s.get('g_eff', 1) <= 0:
+                # 🟣 역성장 / 무성장 (보라 테마)
+                badge_label = "🟣 역성장 · 무성장 (가치 훼손 위험)"
+                badge_bg = "#3b0764"
+                badge_border = "#a855f7"
+                badge_fg = "#d8b4fe"
+                card_bg = "linear-gradient(135deg, #3b0764 0%, #1e1b4b 100%)"
+                card_border_color = "#7c3aed"
+                inner_border = "#6d28d9"
+                title_icon = "📉"
+                title_text = "성장률 0% 이하 — 가치 훼손 구간"
+                title_color = "#c4b5fd"
+                desc_text = f"본 종목은 <b>ROE {s['t_roe']}%</b>로 실효성장률(g_eff)이 0 이하이며, 성장 기반 밸류에이션(PEGY) 적용이 부적합합니다."
+                desc_color = "#e9d5ff"
+                hint_text = "📌 이익 성장이 재개되면 자동으로 밸류에이션 분석이 복구됩니다."
+            else:
+                # 🟡 주주환원 공시 미확정 (주황 테마 — 기존)
+                badge_label = "⚠️ 배당/주주환원 공시 데이터 미확정"
+                badge_bg = "#78350f"
+                badge_border = "#facc15"
+                badge_fg = "#fde047"
+                card_bg = "linear-gradient(135deg, #451a03 0%, #1e1b4b 100%)"
+                card_border_color = "#f59e0b"
+                inner_border = "#b45309"
+                title_icon = "🛡️"
+                title_text = "주주환원 데이터 검증 대기 중"
+                title_color = "#fbbf24"
+                desc_text = f"본 종목은 <b>리츠/인프라/금융</b> 등 배당 필수 업종이나 DPS(주당배당금)가 0원으로 수집되어, PEGY 왜곡 방지를 위해 일시 차단 중입니다."
+                desc_color = "#fef08a"
+                hint_text = "💡 공시 실데이터 재검토 및 출처 교차검증 완료 후 정확한 밸류에이션 리포트가 복구됩니다."
+
             unverified_html = f"""
-            <div style="background: linear-gradient(135deg, #451a03 0%, #1e1b4b 100%); border: 2px dashed #f59e0b; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #78350f; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+            <div style="background: {card_bg}; border: 2px dashed {card_border_color}; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid {inner_border}; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
                     <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                         {rank_prefix_html}
-                        <span style="font-size: 22px; font-weight: 800; color: #fde047;">{s['name']}</span>
+                        <span style="font-size: 22px; font-weight: 800; color: {badge_fg};">{s['name']}</span>
                         <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
-                        <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid #facc15; white-space: nowrap;">
-                            ⚠️ 데이터 검증 필요 (주주환원 미확정)
+                        <span style="background-color: {badge_bg}; color: {badge_fg}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {badge_border}; white-space: nowrap;">
+                            {badge_label}
                         </span>
                     </div>
                     <div style="display: flex; align-items: baseline; gap: 8px;">
@@ -344,13 +394,13 @@ def render_pegy_page():
                         <span style="font-size: 22px; font-weight: 900; color: #38bdf8;">{s['price']:,.0f}원</span>
                     </div>
                 </div>
-                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #b45309; border-radius: 10px; padding: 18px 24px; text-align: center;">
-                    <h3 style="color: #fbbf24; font-size: 16.5px; font-weight: 800; margin: 0 0 6px 0;">🛡️ 데이터 무결성 보호 차단 마스크 작동 중</h3>
-                    <p style="color: #fef08a; font-size: 13.5px; font-weight: 600; margin: 0; line-height: 1.5;">
-                        본 종목은 주주환원(배당금/자사주) 공시 데이터 검증 미완료로 <b>PEGY 밸류에이션 수치 왜곡 방지</b>를 위해 정보 노출이 일시 차단되었습니다.
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid {inner_border}; border-radius: 10px; padding: 18px 24px; text-align: center;">
+                    <h3 style="color: {title_color}; font-size: 16.5px; font-weight: 800; margin: 0 0 6px 0;">{title_icon} {title_text}</h3>
+                    <p style="color: {desc_color}; font-size: 13.5px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        {desc_text}
                     </p>
                     <div style="color: #cbd5e1; font-size: 12px; margin-top: 6px;">
-                        💡 공시 실데이터 재검토 및 출처 교차검증 완료 후 정확한 밸류에이션 리포트가 복구됩니다.
+                        {hint_text}
                     </div>
                 </div>
             </div>
