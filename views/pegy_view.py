@@ -286,6 +286,37 @@ def render_pegy_page():
         return
 
     for s in page_stocks:
+        # 데이터 무결성 방공망: 주주환원 공시 미확정 및 오염 종목 카드 가림 처리
+        if s.get('is_unverified', False):
+            unverified_html = f"""
+            <div style="background: linear-gradient(135deg, #451a03 0%, #1e1b4b 100%); border: 2px dashed #f59e0b; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #78350f; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <span style="font-size: 22px; font-weight: 800; color: #fde047;">{s['name']}</span>
+                        <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
+                        <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid #facc15; white-space: nowrap;">
+                            ⚠️ 데이터 검증 필요 (주주환원 미확정)
+                        </span>
+                    </div>
+                    <div style="display: flex; align-items: baseline; gap: 8px;">
+                        <span style="font-size: 13px; color: #94a3b8;">현재가:</span>
+                        <span style="font-size: 22px; font-weight: 900; color: #38bdf8;">{s['price']:,.0f}원</span>
+                    </div>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #b45309; border-radius: 10px; padding: 18px 24px; text-align: center;">
+                    <h3 style="color: #fbbf24; font-size: 16.5px; font-weight: 800; margin: 0 0 6px 0;">🛡️ 데이터 무결성 보호 차단 마스크 작동 중</h3>
+                    <p style="color: #fef08a; font-size: 13.5px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        본 종목은 주주환원(배당금/자사주) 공시 데이터 검증 미완료로 <b>PEGY 밸류에이션 수치 왜곡 방지</b>를 위해 정보 노출이 일시 차단되었습니다.
+                    </p>
+                    <div style="color: #cbd5e1; font-size: 12px; margin-top: 6px;">
+                        💡 공시 실데이터 재검토 및 출처 교차검증 완료 후 정확한 밸류에이션 리포트가 복구됩니다.
+                    </div>
+                </div>
+            </div>
+            """
+            st.markdown("\n".join([line.strip() for line in unverified_html.split("\n") if line.strip()]), unsafe_allow_html=True)
+            continue
+
         vol_color = "#f43f5e" if "보정 중" in s.get("vol", "") else "#38bdf8"
         roe_color = "#f43f5e" if s.get("t_roe", 0) < 8.0 else "#4ade80"
         roic_color = "#f43f5e" if s.get("roic", 0) < 6.0 else "#38bdf8"
