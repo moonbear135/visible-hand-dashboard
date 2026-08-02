@@ -40,15 +40,13 @@ def get_kospi200_pegy_data():
         {"name": "한국타이어앤테크놀로지", "code": "161390", "price": 49800, "t_per": 6.8, "t_eps": 7323, "sh_return": 3.2, "t_pegy": 0.64, "t_fair": 60000, "f_per": 5.90, "f_eps": 8440, "growth": 15.2, "f_pegy": 0.45, "f_target": 70000, "vol": "🟢 정상"}
     ]
 
-    # 200개 종목으로 데이터 확장 생성 (결정론적 시드 기반)
+    # 200개 종목으로 데이터 확장 생성
     rng = random.Random(42)
     stocks = []
     
-    # 템플릿 종목 먼저 삽입
     for s in base_stocks:
         stocks.append(s)
         
-    # 나머지 170개 종목 알고리즘 생성
     sec_names = ["제약", "바이오", "화학", "철강", "건설", "증권", "보험", "중공업", "기계", "유통", "음식료", "IT부품", "디스플레이", "소프트웨어", "게임", "미디어"]
     for idx in range(len(base_stocks) + 1, 201):
         code_str = f"{idx:06d}"
@@ -77,7 +75,6 @@ def get_kospi200_pegy_data():
             "f_pegy": f_pegy_val, "f_target": f_target_val, "vol": vol_val
         })
 
-    # Forward PEGY 기반 밸류에이션 평가 배지 부여
     for s in stocks:
         fp = s["f_pegy"]
         if fp < 0.65:
@@ -100,7 +97,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (Forward PEGY/PER/EPS 밸류에이션 분석) 카드 그리드 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (Forward PEGY/PER/EPS 밸류에이션 분석) 와이드 가로형 카드 리포트 렌더링"""
     
     # 1. 상단 그라데이션 타이틀
     st.markdown(
@@ -153,24 +150,16 @@ def render_pegy_page():
 
     st.markdown(f"**전체 검색/필터 결과:** `{len(filtered_stocks)}`개 종목 (총 {len(all_stocks)}개 KOSPI 종목 중)")
 
-    # 5. 페이지네이션 (Pagination)
+    # 5. 페이지네이션 정보 계산 (페이지 선택은 하단으로 배치)
     items_per_page = 20
     total_items = len(filtered_stocks)
     total_pages = max(1, (total_items + items_per_page - 1) // items_per_page)
 
-    st.markdown("##### 📄 페이지 선택 (한 화면에 20개 종목 카드 노출)")
-    
-    # pills 또는 selectbox 선택
-    page_options = [f"페이지 {i} (종목 {(i-1)*20+1} ~ {min(i*20, total_items)})" for i in range(1, total_pages + 1)]
-    
-    if hasattr(st, "pills"):
-        selected_page_str = st.pills("페이지 번호", page_options, selection_mode="single", default=page_options[0])
-        if not selected_page_str:
-            selected_page_str = page_options[0]
-        current_page = page_options.index(selected_page_str) + 1
-    else:
-        selected_page_str = st.selectbox("페이지 번호", page_options, index=0)
-        current_page = page_options.index(selected_page_str) + 1
+    # 세션 상태로 현재 페이지 관리
+    if "pegy_current_page" not in st.session_state:
+        st.session_state.pegy_current_page = 1
+        
+    current_page = min(st.session_state.pegy_current_page, total_pages)
 
     start_idx = (current_page - 1) * items_per_page
     end_idx = min(start_idx + items_per_page, total_items)
@@ -178,74 +167,76 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 6. 카드 그리드 (Card Grid) 구현 - 1줄에 4개씩 5줄 (총 20개)
+    # 6. 와이드 가로형 카드 그리드 (Wide Horizontal Card Layout - 2열 가로 확장)
     if not page_stocks:
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
 
-    grid_cols = st.columns(4)
+    # 2개 열로 널찍하게 가로형 비교 카드를 노출하여 텍스트 찌그러짐을 완전 해결
+    grid_cols = st.columns(2)
 
     for idx, s in enumerate(page_stocks):
-        col = grid_cols[idx % 4]
+        col = grid_cols[idx % 2]
         vol_color = "#f43f5e" if "보정 중" in s["vol"] else "#38bdf8"
         
         card_html = f"""
-        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 16px; margin-bottom: 16px; box-shadow: 0 4px 12px rgba(0,0,0,0.35); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <!-- 1. 헤더: 종목명 / 코드 / 배지 -->
-            <div style="display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 8px; border-bottom: 1px solid #334155; padding-bottom: 8px;">
-                <div>
-                    <div style="font-size: 16px; font-weight: 800; color: #f8fafc; line-height: 1.2;">{s['name']}</div>
-                    <div style="font-size: 12px; color: #94a3b8; margin-top: 2px;">{s['code']}</div>
+        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 18px 20px; margin-bottom: 20px; box-shadow: 0 4px 14px rgba(0,0,0,0.35); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <!-- 1. 카드 상단 헤더: 종목명 / 코드 / 현재가 / 배지 / 변동성 필터 -->
+            <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 14px; flex-wrap: wrap; gap: 8px;">
+                <div style="display: flex; align-items: center; gap: 10px;">
+                    <span style="font-size: 19px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{s['name']}</span>
+                    <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">{s['code']}</span>
+                    <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 11.5px; font-weight: 700; padding: 3px 9px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
+                        {s['badge']}
+                    </span>
                 </div>
-                <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 11px; font-weight: 700; padding: 4px 8px; border-radius: 12px; border: 1px solid {s['badge_fg']};">
-                    {s['badge']}
-                </span>
-            </div>
-
-            <!-- 현재가 및 3개월 변동성 필터 상태 -->
-            <div style="display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 12px;">
-                <div>
-                    <span style="font-size: 11px; color: #94a3b8;">현재가:</span>
-                    <span style="font-size: 18px; font-weight: 900; color: #38bdf8; margin-left: 4px;">{s['price']:,.0f}원</span>
-                </div>
-                <span style="font-size: 10.5px; color: {vol_color}; font-weight: 600;">{s['vol']}</span>
-            </div>
-
-            <!-- 2. Trailing 섹션 (과거/현재 실적) -->
-            <div style="background-color: rgba(30, 41, 59, 0.6); border: 1px solid #334155; border-radius: 8px; padding: 10px; margin-bottom: 10px;">
-                <div style="font-size: 11.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 6px; border-bottom: 1px dashed #475569; padding-bottom: 3px;">
-                    📜 Trailing (과거 실적)
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8; margin-bottom: 3px;">
-                    <span>PER / EPS:</span>
-                    <span style="color: #f1f5f9; font-weight: 600;">{s['t_per']}배 / {s['t_eps']:,.0f}원</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8; margin-bottom: 3px;">
-                    <span>주주환원율:</span>
-                    <span style="color: #f1f5f9; font-weight: 600;">{s['sh_return']}%</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8;">
-                    <span>PEGY / 적정가:</span>
-                    <span style="color: #38bdf8; font-weight: 700;">{s['t_pegy']} / {s['t_fair']:,.0f}원</span>
+                <div style="display: flex; align-items: center; gap: 12px;">
+                    <span style="font-size: 11.5px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 3px 8px; border-radius: 6px; border: 1px solid #334155;">{s['vol']}</span>
+                    <div>
+                        <span style="font-size: 12px; color: #94a3b8;">현재가:</span>
+                        <span style="font-size: 22px; font-weight: 900; color: #38bdf8; margin-left: 4px;">{s['price']:,.0f}원</span>
+                    </div>
                 </div>
             </div>
 
-            <!-- 3. Forward 섹션 (미래 추정 밸류) -->
-            <div style="background-color: rgba(15, 23, 42, 0.85); border: 1.5px solid #0284c7; border-radius: 8px; padding: 10px;">
-                <div style="font-size: 11.5px; font-weight: 700; color: #38bdf8; margin-bottom: 6px; border-bottom: 1px solid #0284c7; padding-bottom: 3px;">
-                    🚀 Forward (미래 추정)
+            <!-- 2. 중단: Trailing vs Forward 가로 병렬 비교 영역 -->
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                <!-- Left: Trailing (과거/현재 실적) -->
+                <div style="background-color: rgba(30, 41, 59, 0.65); border: 1px solid #334155; border-radius: 10px; padding: 12px;">
+                    <div style="font-size: 12.5px; font-weight: 700; color: #cbd5e1; margin-bottom: 8px; border-bottom: 1px dashed #475569; padding-bottom: 4px;">
+                        📜 Trailing (과거 실적 기준)
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+                        <span style="color: #94a3b8;">PER / EPS:</span>
+                        <span style="color: #f1f5f9; font-weight: 600;">{s['t_per']}배 / {s['t_eps']:,.0f}원</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+                        <span style="color: #94a3b8;">주주환원율:</span>
+                        <span style="color: #f1f5f9; font-weight: 600;">{s['sh_return']}%</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                        <span style="color: #94a3b8;">PEGY / 적정가:</span>
+                        <span style="color: #38bdf8; font-weight: 700;">{s['t_pegy']} / {s['t_fair']:,.0f}원</span>
+                    </div>
                 </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8; margin-bottom: 3px;">
-                    <span>PER / EPS:</span>
-                    <span style="color: #f1f5f9; font-weight: 600;">{s['f_per']}배 / {s['f_eps']:,.0f}원</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8; margin-bottom: 3px;">
-                    <span>예상 성장률:</span>
-                    <span style="color: #4ade80; font-weight: 700;">+{s['growth']}%</span>
-                </div>
-                <div style="display: flex; justify-content: space-between; font-size: 11.5px; color: #94a3b8;">
-                    <span>보정 PEGY / 목표가:</span>
-                    <span style="color: #f43f5e; font-weight: 800;">{s['f_pegy']} / {s['f_target']:,.0f}원</span>
+
+                <!-- Right: Forward (미래 추정 밸류) -->
+                <div style="background-color: rgba(15, 23, 42, 0.9); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px;">
+                    <div style="font-size: 12.5px; font-weight: 700; color: #38bdf8; margin-bottom: 8px; border-bottom: 1px solid #0284c7; padding-bottom: 4px;">
+                        🚀 Forward (미래 추정 밸류)
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+                        <span style="color: #94a3b8;">PER / EPS:</span>
+                        <span style="color: #f1f5f9; font-weight: 600;">{s['f_per']}배 / {s['f_eps']:,.0f}원</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px; margin-bottom: 5px;">
+                        <span style="color: #94a3b8;">예상 EPS 성장률:</span>
+                        <span style="color: #4ade80; font-weight: 700;">+{s['growth']}%</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between; font-size: 12px;">
+                        <span style="color: #94a3b8;">보정 PEGY / 목표가:</span>
+                        <span style="color: #f43f5e; font-weight: 800;">{s['f_pegy']} / {s['f_target']:,.0f}원</span>
+                    </div>
                 </div>
             </div>
         </div>
@@ -253,3 +244,22 @@ def render_pegy_page():
         with col:
             clean_card = "\n".join([line.strip() for line in card_html.split("\n") if line.strip()])
             st.markdown(clean_card, unsafe_allow_html=True)
+
+    # 7. 페이지네이션 (Pagination) 컨트롤 - 카드 목록 아래(최하단) 배치
+    st.markdown("---")
+    st.markdown("##### 📄 페이지 선택 (한 화면에 20개 종목 카드 노출)")
+
+    page_options = [f"페이지 {i} (종목 {(i-1)*20+1} ~ {min(i*20, total_items)})" for i in range(1, total_pages + 1)]
+    
+    selected_page_str = st.radio(
+        "페이지 이동", 
+        page_options, 
+        index=current_page - 1, 
+        horizontal=True,
+        key="pegy_page_radio"
+    )
+    
+    new_page = page_options.index(selected_page_str) + 1
+    if new_page != st.session_state.pegy_current_page:
+        st.session_state.pegy_current_page = new_page
+        st.rerun()
