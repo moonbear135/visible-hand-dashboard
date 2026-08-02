@@ -797,6 +797,13 @@ import hmac
 
 # 사이드바 관리자 암호 인증 시스템 배치 (암호 일방향 해시 및 안전 비교 적용)
 with st.sidebar:
+    # 상단 새로운 공간 컨테이너 정의 (향후 새로운 내용 추가용)
+    sidebar_top = st.container()
+    st.markdown("---")
+    # 하단 관리자 로그인 컨테이너 정의
+    sidebar_bottom = st.container()
+
+with sidebar_bottom:
     st.markdown("### ⚙️ 관리자 전용 메뉴")
     admin_password = st.text_input("🔑 관리자 비밀번호", type="password", help="일반 사용자에게 노출되지 않는 디버그용 암호를 입력하세요.")
     
