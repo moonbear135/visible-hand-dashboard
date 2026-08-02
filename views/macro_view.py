@@ -504,10 +504,13 @@ def render_macro_page():
         if details:
             html_table = """
             <style>
-            .premium-table { width: 100%; border-collapse: collapse; margin-top: 10px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13.5px; }
+            body { background-color: transparent; margin: 0; padding: 0; }
+            .premium-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13.5px; background-color: #0f172a; border-radius: 10px; overflow: hidden; }
             .premium-table th { background-color: #1e293b; color: #38bdf8; font-weight: 700; text-align: center; padding: 12px 10px; border-bottom: 2px solid #334155; }
             .premium-table td { padding: 11px 10px; border-bottom: 1px solid #334155; color: #f8fafc; text-align: center; }
-            .premium-table tr:hover { background-color: #1e293b; }
+            .premium-table tr:nth-child(even) { background-color: #0f172a; }
+            .premium-table tr:nth-child(odd) { background-color: #1e293b; }
+            .premium-table tr:hover { background-color: #334155; }
             .premium-table td:first-child { text-align: left; font-weight: 600; color: #f1f5f9; }
             </style>
             <table class="premium-table">
