@@ -340,8 +340,8 @@ def render_macro_page():
     render_clean_html(
         """
         <div style="text-align: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <h1 style="font-size: 36px; font-weight: 900; background: linear-gradient(90deg, #0f766e 0%, #14b8a6 50%, #38bdf8 100%); -webkit-background-clip: text; -webkit-text-fill-color: transparent; margin: 0 0 6px 0; letter-spacing: -0.8px;">🏢 잘 보면 보이는 손 <span style="font-size: 24px; font-weight: 700; color: #64748b; -webkit-text-fill-color: initial;">(The Visible Hand)</span></h1>
-            <div style="font-size: 16px; color: #94a3b8; font-weight: 600; letter-spacing: -0.2px;">실시간 수급 연동형 시장 종합 위험 방공망 대시보드</div>
+            <h1 style="font-size: 34px; font-weight: 800; color: #0f766e; margin: 0 0 8px 0; letter-spacing: -0.5px;">🏢 잘 보면 보이는 손 <span style="font-size: 22px; font-weight: 600; color: #64748b;">(The Visible Hand)</span></h1>
+            <div style="font-size: 16px; color: #64748b; font-weight: 600;">실시간 수급 연동형 시장 종합 위험 방공망 대시보드</div>
         </div>
         """
     )
