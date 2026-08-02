@@ -39,6 +39,13 @@ COL_MAP = {
     "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
 }
 
+# 지표별 기간 키워드 사전 (Period Keywords Dictionary)
+PERIOD_KEYWORDS = {
+    "TTM": ["연간", "TTM", "최근 12개월", "최근 연간 실적"],
+    "QUARTERLY": ["분기", "1Q", "2Q", "3Q", "4Q", "3개월"],
+    "DAILY": ["일별", "당일", "D", "일간"]
+}
+
 def clip(val):
     return min(1.0, max(0.0, val))
 

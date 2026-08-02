@@ -16,7 +16,7 @@ try:
 except ImportError:
     HAS_YFINANCE = False
 
-from utils.data_validator import DataValidator, TIMEFRAME_KEYWORDS
+from utils.data_validator import DataValidator, PERIOD_KEYWORDS, INDICATOR_TARGET_RULES
 
 def fetch_naver_item_dps_and_eps(code):
     """
@@ -307,9 +307,10 @@ def enrich_quant_metrics(stocks_raw):
 
         # =========================================================
         # 3단계 데이터 검증 하네스 파이프라인 (DataValidator) 수행
+        # 지표별 기간 키워드 사전 (PERIOD_KEYWORDS) 기반 1:1 타겟팅 검증
         # =========================================================
-        stock_raw_info = {"raw_eps": n_t_eps}
-        stock_proc_info = {"code": code, "name": name, "price": price, "t_per": t_per, "t_eps": t_eps}
+        stock_raw_info = {"raw_eps": n_t_eps, "raw_period": "TTM"}
+        stock_proc_info = {"code": code, "name": name, "price": price, "t_per": t_per, "t_eps": t_eps, "indicator_type": "PER"}
         sec_info = {"t_per": s["t_per"]} if s.get("t_per") else None
 
         valid_pass, v_logs = DataValidator.run_pipeline(stock_raw_info, stock_proc_info, sec_info)

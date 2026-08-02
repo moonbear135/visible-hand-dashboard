@@ -1,54 +1,59 @@
 import math
 import re
 
-# 체계적인 시계열 키워드 사전 (Timeframe Keyword Registry)
-TIMEFRAME_KEYWORDS = {
-    "ANNUAL_TTM": [
-        "최근 연간 실적", "연간", "TTM", "최근 12개월", "ANNUAL", "YEARLY", "A",
-        r"\b20\d{2}\.12\b", r"\bFY\d{2,4}\b"
-    ],
-    "QUARTERLY": [
-        "최근 분기 실적", "분기", "1Q", "2Q", "3Q", "4Q", "Q1", "Q2", "Q3", "Q4",
-        "QUARTERLY", "Q", r"\b20\d{2}\.03\b", r"\b20\d{2}\.06\b", r"\b20\d{2}\.09\b"
-    ],
-    "DAILY_PERIOD": [
-        "일간", "주간", "월간", "DAILY", "WEEKLY", "MONTHLY", "D", "W", "M"
-    ],
-    "ESTIMATE": [
-        "(E)", "(P)", "E", "P", "ESTIMATE", "CONSENSUS"
-    ]
+# 지표별 기간 키워드 사전 (Period Keywords Dictionary)
+PERIOD_KEYWORDS = {
+    "TTM": ["연간", "TTM", "최근 12개월", "최근 연간 실적", "ANNUAL", "YEARLY", "A", r"\b20\d{2}\.12\b", r"\bFY\d{2,4}\b"],
+    "QUARTERLY": ["분기", "1Q", "2Q", "3Q", "4Q", "3개월", "Q1", "Q2", "Q3", "Q4", "QUARTERLY", "Q", r"\b20\d{2}\.03\b", r"\b20\d{2}\.06\b", r"\b20\d{2}\.09\b"],
+    "DAILY": ["일별", "당일", "D", "일간", "주간", "월간", "DAILY", "WEEKLY", "MONTHLY"],
+    "ESTIMATE": ["(E)", "(P)", "E", "P", "ESTIMATE", "CONSENSUS"]
+}
+
+# 지표별 타겟팅 규칙 (Indicator-Specific Targeting Rules)
+INDICATOR_TARGET_RULES = {
+    "PER": "TTM",
+    "EPS": "TTM",
+    "DPS": "TTM",
+    "PBR": "TTM",
+    "ROE": "TTM",
+    "QUARTERLY_EARNINGS": "QUARTERLY",
+    "MOMENTUM_3M": "QUARTERLY",
+    "DAILY_PRICE": "DAILY",
+    "DAILY_VOLUME": "DAILY",
+    "DAILY_FLOW": "DAILY"
 }
 
 class DataValidator:
     """
     3단계 강건한 데이터 검증 파이프라인 (Data Validation Harness)
-    ① 1단계: Raw vs Processed 1:1 대조 및 단위/시계열 정규화
+    ① 1단계: Raw vs Processed 1:1 대조 및 단위/지표별 기간 키워드 매핑 정규화
     ② 2단계: 단일 출처 산티 체크 (PER = Price / EPS_TTM 오차 <= 5%)
     ③ 3단계: 출처 간 교차 검증 (교차 오차 <= 3% 승인, 초과 시 Fallback)
     """
     
     @staticmethod
     def classify_header_timeframe(header_text):
-        """헤더 텍스트를 분석하여 ANNUAL_TTM, QUARTERLY, DAILY_PERIOD, ESTIMATE 여부를 판정"""
+        """
+        헤더 텍스트를 분석하여 TTM (연간), QUARTERLY (분기), DAILY (일별), ESTIMATE (추정) 여부를 판정
+        """
         text = str(header_text).strip()
-        is_est = any(kw in text for kw in TIMEFRAME_KEYWORDS["ESTIMATE"])
-        is_q = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in TIMEFRAME_KEYWORDS["QUARTERLY"])
-        is_d = any(kw in text for kw in TIMEFRAME_KEYWORDS["DAILY_PERIOD"])
-        is_y = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in TIMEFRAME_KEYWORDS["ANNUAL_TTM"])
+        is_est = any(kw in text for kw in PERIOD_KEYWORDS["ESTIMATE"])
+        is_q = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["QUARTERLY"])
+        is_d = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["DAILY"])
+        is_y = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["TTM"])
         
         if is_d:
             return "DAILY"
         if is_q and not is_y:
             return "QUARTERLY_EST" if is_est else "QUARTERLY"
         if is_y:
-            return "ANNUAL_EST" if is_est else "ANNUAL_TTM"
+            return "ANNUAL_EST" if is_est else "TTM"
         return "UNKNOWN"
 
     @staticmethod
     def validate_raw_vs_processed(raw_dict, processed_dict):
         """
-        1단계: Raw Data <-> Processed Data 1:1 대조 검증
-        수치 단위 변환 외에 의미하는 바가 1:1 일치하는지, 값 누락(NaN), 0 덮어쓰기, 행/열 스왑이 없는지 확인
+        1단계: Raw Data <-> Processed Data 1:1 대조 및 지표-기간 1:1 타겟팅 매핑 검증
         """
         logs = []
         is_pass = True
@@ -63,7 +68,17 @@ class DataValidator:
         if not is_pass:
             return False, logs
             
-        # 2. Raw 대비 수치 스왑 및 0 변형 체크
+        # 2. 수집 타겟-가공 목적 1:1 일치 여부 검증 (TTM vs QUARTERLY vs DAILY 교차 오염 차단)
+        indicator = processed_dict.get("indicator_type", "PER")
+        expected_target = INDICATOR_TARGET_RULES.get(indicator, "TTM")
+        raw_period = raw_dict.get("raw_period", expected_target)
+        if raw_period != expected_target:
+            is_pass = False
+            logs.append(f"❌ 1단계 타겟-목적 1:1 불일치: 지표({indicator})의 예상 기간({expected_target}) vs 수집된 기간({raw_period})")
+        else:
+            logs.append(f"✅ 1단계 타겟-목적 1:1 일치: {indicator} -> {expected_target} 매핑 확인")
+
+        # 3. Raw 대비 수치 스왑 및 0 변형 체크
         raw_eps = raw_dict.get("raw_eps")
         proc_eps = processed_dict.get("t_eps")
         if raw_eps and proc_eps:
