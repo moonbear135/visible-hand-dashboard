@@ -106,7 +106,7 @@ def get_kospi200_pegy_data():
     return stocks
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (Grid 4열 정밀 줄맞춤 및 배지 오버랩 완벽 수정) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (Forward 2줄 타이틀 & 핵심타겟 뱃지 완전 제거) 화면 렌더링"""
     
     # 1. 툴팁 전용 CSS 주입
     st.markdown(
@@ -231,7 +231,7 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 7. Grid 4열 칼맞춤 배치 & Forward 뱃지 위치 보정
+    # 7. Grid 4열 정렬 & Forward 2줄 타이틀 적용
     if not page_stocks:
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
@@ -319,13 +319,13 @@ def render_pegy_page():
                 </div>
             </div>
 
-            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 4열 Grid 칼맞춤 정렬 & 뱃지 위치 수정) -->
+            <!-- 4. Forward 섹션 (2줄 타이틀: 🚀 Forward / (미래 추정 밸류 분석) & 뱃지 완전 제거) -->
             <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
-                <!-- 헤더: 타이틀과 배지, 주석 설명 겹침 오버랩을 완벽히 방지하는 2단 깔끔 분리 -->
-                <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
-                        <span style="font-size: 15px; font-weight: 800; color: #38bdf8;">🚀 Forward (미래 추정 밸류 분석)</span>
-                        <span style="background-color: #0284c7; color: #ffffff; font-size: 11px; font-weight: 700; padding: 3px 10px; border-radius: 12px; border: 1px solid #38bdf8; white-space: nowrap;">⭐ 핵심 타겟 분석</span>
+                <!-- 헤더: 2줄 넉넉한 타이틀 + 우측 설명 주석 -->
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 12px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
                     </div>
                     <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*12개월 Forward 컨센서스 및 3개월 변동성위험 보정 반영</span>
                 </div>
