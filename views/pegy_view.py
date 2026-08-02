@@ -121,6 +121,25 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
     
+    # 1-1. 페이지 이동 시 최상단 자동 스크롤 트리거
+    if st.session_state.get("pegy_scroll_to_top", False):
+        st.session_state.pegy_scroll_to_top = False
+        st.markdown(
+            """
+            <script>
+                setTimeout(function() {
+                    if (window.parent && window.parent.document) {
+                        var mainSec = window.parent.document.querySelector('section.main');
+                        if (mainSec) { mainSec.scrollTo({top: 0, behavior: 'smooth'}); }
+                        window.parent.scrollTo({top: 0, behavior: 'smooth'});
+                    }
+                    window.scrollTo({top: 0, behavior: 'smooth'});
+                }, 100);
+            </script>
+            """,
+            unsafe_allow_html=True
+        )
+
     # 3. 상단 그라데이션 타이틀 및 법적 경고 박스
     st.markdown(
         """
@@ -285,15 +304,27 @@ def render_pegy_page():
         st.warning("선택한 필터 조건에 일치하는 종목이 없습니다.")
         return
 
-    for s in page_stocks:
+    for idx_stock, s in enumerate(page_stocks):
+        # 시가총액 순위 뱃지 (Rank Badge)
+        rank_num = s.get("rank", start_idx + idx_stock + 1)
+        if rank_num == 1:
+            rank_badge_html = '<span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12px; font-weight: 800; padding: 3.5px 10px; border-radius: 8px; border: 1px solid #fde047; white-space: nowrap;">🥇 시총 1위</span>'
+        elif rank_num == 2:
+            rank_badge_html = '<span style="background: linear-gradient(135deg, #475569 0%, #1e293b 100%); color: #e2e8f0; font-size: 12px; font-weight: 800; padding: 3.5px 10px; border-radius: 8px; border: 1px solid #94a3b8; white-space: nowrap;">🥈 시총 2위</span>'
+        elif rank_num == 3:
+            rank_badge_html = '<span style="background: linear-gradient(135deg, #7c2d12 0%, #431407 100%); color: #ffedd5; font-size: 12px; font-weight: 800; padding: 3.5px 10px; border-radius: 8px; border: 1px solid #fdba74; white-space: nowrap;">🥉 시총 3위</span>'
+        else:
+            rank_badge_html = f'<span style="background-color: #0284c7; color: #f0f9ff; font-size: 12px; font-weight: 800; padding: 3.5px 10px; border-radius: 8px; border: 1px solid #38bdf8; white-space: nowrap;">📊 시총 #{rank_num}위</span>'
+
         # 데이터 무결성 방공망: 주주환원 공시 미확정 및 오염 종목 카드 가림 처리
         if s.get('is_unverified', False):
             unverified_html = f"""
             <div style="background: linear-gradient(135deg, #451a03 0%, #1e1b4b 100%); border: 2px dashed #f59e0b; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
                 <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #78350f; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
-                    <div style="display: flex; align-items: center; gap: 10px;">
+                    <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                         <span style="font-size: 22px; font-weight: 800; color: #fde047;">{s['name']}</span>
                         <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
+                        {rank_badge_html}
                         <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid #facc15; white-space: nowrap;">
                             ⚠️ 데이터 검증 필요 (주주환원 미확정)
                         </span>
@@ -356,6 +387,7 @@ def render_pegy_page():
                 <div style="display: flex; align-items: center; gap: 10px; flex-wrap: wrap;">
                     <span style="font-size: 23px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{s['name']}</span>
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
+                    {rank_badge_html}
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
                         <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점<br><b>*PEGY-목표가 100% 수학적 대칭성 통일 산식 반영</b></span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
