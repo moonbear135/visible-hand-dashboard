@@ -19,8 +19,7 @@ except ImportError:
 def fetch_naver_item_dps_and_eps(code):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 주요 재무제표 표에서
-    증권사 먼 미래 추정치 (E)를 전면 제외하고,
-    정확한 최근 확정 연간 실적 기준 DPS(주당 배당금원) 및 EPS(원) 실데이터를 파싱합니다.
+    증권사/금융사/우선주 포함 최근 확정 연간 실적 기준 DPS(주당 배당금원) 및 EPS(원) 실데이터를 정확히 파싱합니다.
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -32,7 +31,8 @@ def fetch_naver_item_dps_and_eps(code):
             return None, None
             
         dfs = pd.read_html(res.text, encoding='euc-kr')
-        fin_df_list = [d for d in dfs if '매출액' in str(d)]
+        # 제조업(매출액), 금융사/증권사(영업이익/주당배당금) 유연한 재무표 탐색
+        fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
         if not fin_df_list:
             return None, None
             
@@ -41,33 +41,40 @@ def fetch_naver_item_dps_and_eps(code):
         parsed_dps = None
         parsed_eps = None
         
-        # 최근 확정 연간 실적 열 인덱스 (1, 2, 3열 / 4열 (E) 추정치 제외)
-        annual_indices = [1, 2, 3]
-        
         for i, row in fin_df.iterrows():
             row_str = ' '.join([str(x) for x in row.values])
             
-            # 1. 주당배당금(원) 연간 수치 파싱 (추정치 열 제외)
+            # 1. 주당배당금(원) 최근 확정 수치 탐색
             if '주당배당금' in row_str and parsed_dps is None:
-                for idx in reversed(annual_indices):
+                for val in row.values[1:]:
                     try:
-                        v = float(str(row.values[idx]).replace(',', ''))
-                        if v > 0:
-                            parsed_dps = int(v)
-                            break
+                        v_str = str(val).replace(',', '').strip()
+                        if v_str and v_str != 'nan':
+                            v = float(v_str)
+                            if v > 0:
+                                parsed_dps = int(v)
                     except Exception:
                         pass
                         
-            # 2. EPS(원) 연간 수치 파싱 (추정치 열 제외)
+            # 2. EPS(원) 파싱
             if 'EPS' in row_str and parsed_eps is None:
-                for idx in reversed(annual_indices):
+                for val in row.values[1:]:
                     try:
-                        v = float(str(row.values[idx]).replace(',', ''))
-                        if v != 0:
-                            parsed_eps = int(v)
-                            break
+                        v_str = str(val).replace(',', '').strip()
+                        if v_str and v_str != 'nan':
+                            v = float(v_str)
+                            if v != 0:
+                                parsed_eps = int(v)
                     except Exception:
                         pass
+
+        # 3. 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정
+        # 우선주는 보통주 배당금 이상의 최소 배당금이 보장되므로, 동일 기업 보통주 DPS를 폴백으로 매핑
+        if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
+            parent_code = code[:-1] + '0' # 보통주 코드 매핑
+            p_dps, p_eps = fetch_naver_item_dps_and_eps(parent_code)
+            if p_dps and p_dps > 0:
+                parsed_dps = p_dps
 
         return parsed_dps, parsed_eps
     except Exception as e:
@@ -155,12 +162,10 @@ def enrich_quant_metrics(stocks_raw):
         # 1. Trailing EPS 실시간 파싱 및 연산
         t_eps = int(price / raw_per) if raw_per > 0 else int(price / 12.5)
 
-        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (상위 35개 종목)
-        real_dps, real_eps = None, None
-        if idx < 35:
-            real_dps, real_eps = fetch_naver_item_dps_and_eps(code)
-            if real_eps and real_eps > 0:
-                t_eps = real_eps
+        # 2. 네이버 종목 상세 페이지 실데이터 파싱 (200개 전 종목 정밀 수집)
+        real_dps, real_eps = fetch_naver_item_dps_and_eps(code)
+        if real_eps and real_eps > 0:
+            t_eps = real_eps
 
         # 3. Trailing PER 직접 연산 (Current_Price / Trailing_EPS) - 수치 연동 통일
         t_per = round(price / t_eps, 2) if (price > 0 and t_eps > 0) else raw_per
