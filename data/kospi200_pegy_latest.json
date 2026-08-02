@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "last_updated_at": "2026-08-03 08:24",
+    "last_updated_at": "2026-08-03 08:30",
     "status": "SUCCESS",
     "total_count": 200,
     "description": "KOSPI 200 시가총액 상위 1위~200위 100% 실데이터 퀀트 스냅샷 (장 마감 반영)"
@@ -3016,37 +3016,6 @@
     },
     {
       "rank": 98,
-      "name": "BNK금융지주",
-      "code": "138930",
-      "price": 15170.0,
-      "t_roe": 7.58,
-      "f_roe": 8.5,
-      "roic": 6.7,
-      "dps": 375,
-      "return_total": "총 894억원",
-      "t_per": 5.55,
-      "t_eps": 2731,
-      "sh_return": 4.8,
-      "t_pegy": 0.38,
-      "t_fair": 37925,
-      "f_per": 6.0,
-      "f_eps": 2577,
-      "growth": 9.9,
-      "f_pegy": 0.48,
-      "f_target": 27290,
-      "vol": "⚡ 변동성 보정 중",
-      "quant_score": 64,
-      "badge": "🟢 강력 저평가",
-      "badge_bg": "#14532d",
-      "badge_fg": "#4ade80",
-      "value_trap": true,
-      "per_discrepancy": false,
-      "g_eff": 14.7,
-      "is_valid": true,
-      "is_unverified": false
-    },
-    {
-      "rank": 99,
       "name": "현대차우",
       "code": "005385",
       "price": 199600.0,
@@ -3077,7 +3046,7 @@
       "is_unverified": false
     },
     {
-      "rank": 100,
+      "rank": 99,
       "name": "LG디스플레이",
       "code": "034220",
       "price": 9210.0,
@@ -3108,7 +3077,7 @@
       "is_unverified": false
     },
     {
-      "rank": 101,
+      "rank": 100,
       "name": "대한전선",
       "code": "001440",
       "price": 23200.0,
@@ -3139,7 +3108,7 @@
       "is_unverified": false
     },
     {
-      "rank": 102,
+      "rank": 101,
       "name": "산일전기",
       "code": "062040",
       "price": 143200.0,
@@ -3170,7 +3139,7 @@
       "is_unverified": false
     },
     {
-      "rank": 103,
+      "rank": 102,
       "name": "한화솔루션",
       "code": "009830",
       "price": 25500.0,
@@ -3201,7 +3170,7 @@
       "is_unverified": false
     },
     {
-      "rank": 104,
+      "rank": 103,
       "name": "LG생활건강",
       "code": "051900",
       "price": 287000.0,
@@ -3232,7 +3201,7 @@
       "is_unverified": false
     },
     {
-      "rank": 105,
+      "rank": 104,
       "name": "한미약품",
       "code": "128940",
       "price": 333500.0,
@@ -3263,7 +3232,7 @@
       "is_unverified": false
     },
     {
-      "rank": 106,
+      "rank": 105,
       "name": "가온전선",
       "code": "000500",
       "price": 134200.0,
@@ -3294,7 +3263,7 @@
       "is_unverified": false
     },
     {
-      "rank": 107,
+      "rank": 106,
       "name": "신세계",
       "code": "004170",
       "price": 423000.0,
@@ -3325,7 +3294,7 @@
       "is_unverified": false
     },
     {
-      "rank": 108,
+      "rank": 107,
       "name": "두산로보틱스",
       "code": "454910",
       "price": 61600.0,
@@ -3356,7 +3325,7 @@
       "is_unverified": false
     },
     {
-      "rank": 109,
+      "rank": 108,
       "name": "영원무역",
       "code": "111770",
       "price": 89400.0,
@@ -3387,7 +3356,7 @@
       "is_unverified": false
     },
     {
-      "rank": 110,
+      "rank": 109,
       "name": "한화생명",
       "code": "088350",
       "price": 4420.0,
@@ -3418,7 +3387,7 @@
       "is_unverified": false
     },
     {
-      "rank": 111,
+      "rank": 110,
       "name": "CJ",
       "code": "001040",
       "price": 129400.0,
@@ -3449,7 +3418,7 @@
       "is_unverified": false
     },
     {
-      "rank": 112,
+      "rank": 111,
       "name": "DB하이텍",
       "code": "000990",
       "price": 83100.0,
@@ -3480,7 +3449,7 @@
       "is_unverified": false
     },
     {
-      "rank": 113,
+      "rank": 112,
       "name": "SKC",
       "code": "011790",
       "price": 72200.0,
@@ -3511,7 +3480,7 @@
       "is_unverified": false
     },
     {
-      "rank": 114,
+      "rank": 113,
       "name": "OCI홀딩스",
       "code": "010060",
       "price": 190300.0,
@@ -3542,7 +3511,7 @@
       "is_unverified": false
     },
     {
-      "rank": 115,
+      "rank": 114,
       "name": "현대제철",
       "code": "004020",
       "price": 26350.0,
@@ -3573,7 +3542,7 @@
       "is_unverified": false
     },
     {
-      "rank": 116,
+      "rank": 115,
       "name": "한전기술",
       "code": "052690",
       "price": 89000.0,
@@ -3604,7 +3573,7 @@
       "is_unverified": false
     },
     {
-      "rank": 117,
+      "rank": 116,
       "name": "한온시스템",
       "code": "018880",
       "price": 3305.0,
@@ -3635,7 +3604,7 @@
       "is_unverified": false
     },
     {
-      "rank": 118,
+      "rank": 117,
       "name": "KCC",
       "code": "002380",
       "price": 388000.0,
@@ -3666,7 +3635,7 @@
       "is_unverified": false
     },
     {
-      "rank": 119,
+      "rank": 118,
       "name": "롯데쇼핑",
       "code": "023530",
       "price": 117300.0,
@@ -3697,7 +3666,7 @@
       "is_unverified": false
     },
     {
-      "rank": 120,
+      "rank": 119,
       "name": "현대해상",
       "code": "001450",
       "price": 38450.0,
@@ -3728,7 +3697,7 @@
       "is_unverified": false
     },
     {
-      "rank": 121,
+      "rank": 120,
       "name": "한화엔진",
       "code": "082740",
       "price": 39050.0,
@@ -3759,7 +3728,7 @@
       "is_unverified": false
     },
     {
-      "rank": 122,
+      "rank": 121,
       "name": "한국가스공사",
       "code": "036460",
       "price": 34450.0,
@@ -3790,7 +3759,7 @@
       "is_unverified": false
     },
     {
-      "rank": 123,
+      "rank": 122,
       "name": "강원랜드",
       "code": "035250",
       "price": 14700.0,
@@ -3821,7 +3790,7 @@
       "is_unverified": false
     },
     {
-      "rank": 124,
+      "rank": 123,
       "name": "넷마블",
       "code": "251270",
       "price": 38300.0,
@@ -3852,7 +3821,7 @@
       "is_unverified": false
     },
     {
-      "rank": 125,
+      "rank": 124,
       "name": "F&F",
       "code": "383220",
       "price": 80500.0,
@@ -3883,7 +3852,7 @@
       "is_unverified": false
     },
     {
-      "rank": 126,
+      "rank": 125,
       "name": "서울보증보험",
       "code": "031210",
       "price": 42950.0,
@@ -3914,7 +3883,7 @@
       "is_unverified": false
     },
     {
-      "rank": 127,
+      "rank": 126,
       "name": "엘앤에프",
       "code": "066970",
       "price": 73300.0,
@@ -3945,7 +3914,7 @@
       "is_unverified": false
     },
     {
-      "rank": 128,
+      "rank": 127,
       "name": "포스코DX",
       "code": "022100",
       "price": 19260.0,
@@ -3976,7 +3945,7 @@
       "is_unverified": false
     },
     {
-      "rank": 129,
+      "rank": 128,
       "name": "팬오션",
       "code": "028670",
       "price": 5470.0,
@@ -4007,7 +3976,7 @@
       "is_unverified": false
     },
     {
-      "rank": 130,
+      "rank": 129,
       "name": "CJ제일제당",
       "code": "097950",
       "price": 191400.0,
@@ -4038,7 +4007,7 @@
       "is_unverified": false
     },
     {
-      "rank": 131,
+      "rank": 130,
       "name": "금호석유화학",
       "code": "011780",
       "price": 114400.0,
@@ -4069,7 +4038,7 @@
       "is_unverified": false
     },
     {
-      "rank": 132,
+      "rank": 131,
       "name": "달바글로벌",
       "code": "483650",
       "price": 221000.0,
@@ -4100,7 +4069,7 @@
       "is_unverified": false
     },
     {
-      "rank": 133,
+      "rank": 132,
       "name": "에스원",
       "code": "012750",
       "price": 71200.0,
@@ -4131,7 +4100,7 @@
       "is_unverified": false
     },
     {
-      "rank": 134,
+      "rank": 133,
       "name": "iM금융지주",
       "code": "139130",
       "price": 16950.0,
@@ -4162,7 +4131,7 @@
       "is_unverified": false
     },
     {
-      "rank": 135,
+      "rank": 134,
       "name": "SK바이오사이언스",
       "code": "302440",
       "price": 33850.0,
@@ -4193,7 +4162,7 @@
       "is_unverified": false
     },
     {
-      "rank": 136,
+      "rank": 135,
       "name": "현대엘리베이터",
       "code": "017800",
       "price": 67900.0,
@@ -4224,7 +4193,7 @@
       "is_unverified": false
     },
     {
-      "rank": 137,
+      "rank": 136,
       "name": "현대백화점",
       "code": "069960",
       "price": 118800.0,
@@ -4255,7 +4224,7 @@
       "is_unverified": false
     },
     {
-      "rank": 138,
+      "rank": 137,
       "name": "동서",
       "code": "026960",
       "price": 25500.0,
@@ -4286,7 +4255,7 @@
       "is_unverified": false
     },
     {
-      "rank": 139,
+      "rank": 138,
       "name": "영원무역홀딩스",
       "code": "009970",
       "price": 192000.0,
@@ -4317,7 +4286,7 @@
       "is_unverified": false
     },
     {
-      "rank": 140,
+      "rank": 139,
       "name": "일진전기",
       "code": "103590",
       "price": 52000.0,
@@ -4348,7 +4317,7 @@
       "is_unverified": false
     },
     {
-      "rank": 141,
+      "rank": 140,
       "name": "에스엘",
       "code": "005850",
       "price": 52900.0,
@@ -4379,7 +4348,7 @@
       "is_unverified": false
     },
     {
-      "rank": 142,
+      "rank": 141,
       "name": "한미사이언스",
       "code": "008930",
       "price": 35850.0,
@@ -4410,7 +4379,7 @@
       "is_unverified": false
     },
     {
-      "rank": 143,
+      "rank": 142,
       "name": "코리안리",
       "code": "003690",
       "price": 13770.0,
@@ -4441,7 +4410,7 @@
       "is_unverified": false
     },
     {
-      "rank": 144,
+      "rank": 143,
       "name": "효성",
       "code": "004800",
       "price": 144500.0,
@@ -4472,7 +4441,7 @@
       "is_unverified": false
     },
     {
-      "rank": 145,
+      "rank": 144,
       "name": "롯데케미칼",
       "code": "011170",
       "price": 56500.0,
@@ -4503,38 +4472,7 @@
       "is_unverified": false
     },
     {
-      "rank": 146,
-      "name": "TIME 미국나스닥100액티브",
-      "code": "426030",
-      "price": 45735.0,
-      "t_roe": 0.0,
-      "f_roe": 8.5,
-      "roic": 6.8,
-      "dps": 0,
-      "return_total": "무배당 (자사주 소각 중심)",
-      "t_per": 12.5,
-      "t_eps": 3658,
-      "sh_return": 0.0,
-      "t_pegy": 99.99,
-      "t_fair": 0,
-      "f_per": 11.0,
-      "f_eps": 4157,
-      "growth": 0.0,
-      "f_pegy": 99.0,
-      "f_target": 32014.0,
-      "vol": "⚡ 변동성 보정 중",
-      "quant_score": 0,
-      "badge": "🔴 역성장/무성장 (가치 훼손)",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
-      "value_trap": true,
-      "per_discrepancy": false,
-      "g_eff": 0.0,
-      "is_valid": true,
-      "is_unverified": false
-    },
-    {
-      "rank": 147,
+      "rank": 145,
       "name": "미스토홀딩스",
       "code": "081660",
       "price": 45150.0,
@@ -4565,7 +4503,7 @@
       "is_unverified": false
     },
     {
-      "rank": 148,
+      "rank": 146,
       "name": "한국앤컴퍼니",
       "code": "000240",
       "price": 24950.0,
@@ -4596,7 +4534,7 @@
       "is_unverified": false
     },
     {
-      "rank": 149,
+      "rank": 147,
       "name": "DN오토모티브",
       "code": "007340",
       "price": 40350.0,
@@ -4627,7 +4565,7 @@
       "is_unverified": false
     },
     {
-      "rank": 150,
+      "rank": 148,
       "name": "농심",
       "code": "004370",
       "price": 383000.0,
@@ -4658,7 +4596,7 @@
       "is_unverified": false
     },
     {
-      "rank": 151,
+      "rank": 149,
       "name": "신영증권",
       "code": "001720",
       "price": 140300.0,
@@ -4689,7 +4627,7 @@
       "is_unverified": false
     },
     {
-      "rank": 152,
+      "rank": 150,
       "name": "에코프로머티",
       "code": "450080",
       "price": 32200.0,
@@ -4720,7 +4658,7 @@
       "is_unverified": false
     },
     {
-      "rank": 153,
+      "rank": 151,
       "name": "케이뱅크",
       "code": "279570",
       "price": 5590.0,
@@ -4751,7 +4689,7 @@
       "is_unverified": false
     },
     {
-      "rank": 154,
+      "rank": 152,
       "name": "한올바이오파마",
       "code": "009420",
       "price": 43400.0,
@@ -4783,7 +4721,7 @@
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
-      "rank": 155,
+      "rank": 153,
       "name": "DL이앤씨",
       "code": "375500",
       "price": 58500.0,
@@ -4814,7 +4752,7 @@
       "is_unverified": false
     },
     {
-      "rank": 156,
+      "rank": 154,
       "name": "롯데지주",
       "code": "004990",
       "price": 22600.0,
@@ -4845,7 +4783,7 @@
       "is_unverified": false
     },
     {
-      "rank": 157,
+      "rank": 155,
       "name": "한국콜마",
       "code": "161890",
       "price": 95200.0,
@@ -4876,7 +4814,7 @@
       "is_unverified": false
     },
     {
-      "rank": 158,
+      "rank": 156,
       "name": "한솔케미칼",
       "code": "014680",
       "price": 208000.0,
@@ -4907,7 +4845,7 @@
       "is_unverified": false
     },
     {
-      "rank": 159,
+      "rank": 157,
       "name": "이마트",
       "code": "139480",
       "price": 79800.0,
@@ -4938,7 +4876,7 @@
       "is_unverified": false
     },
     {
-      "rank": 160,
+      "rank": 158,
       "name": "제일기획",
       "code": "030000",
       "price": 18930.0,
@@ -4969,7 +4907,7 @@
       "is_unverified": false
     },
     {
-      "rank": 161,
+      "rank": 159,
       "name": "BGF리테일",
       "code": "282330",
       "price": 125000.0,
@@ -5000,7 +4938,7 @@
       "is_unverified": false
     },
     {
-      "rank": 162,
+      "rank": 160,
       "name": "현대지에프홀딩스",
       "code": "005440",
       "price": 11780.0,
@@ -5031,38 +4969,7 @@
       "is_unverified": false
     },
     {
-      "rank": 163,
-      "name": "TIME 글로벌AI인공지능액티브",
-      "code": "456600",
-      "price": 56995.0,
-      "t_roe": 0.0,
-      "f_roe": 8.5,
-      "roic": 6.8,
-      "dps": 0,
-      "return_total": "무배당 (자사주 소각 중심)",
-      "t_per": 12.5,
-      "t_eps": 4559,
-      "sh_return": 0.0,
-      "t_pegy": 99.99,
-      "t_fair": 0,
-      "f_per": 11.0,
-      "f_eps": 5181,
-      "growth": 0.0,
-      "f_pegy": 99.0,
-      "f_target": 39896.0,
-      "vol": "⚡ 변동성 보정 중",
-      "quant_score": 0,
-      "badge": "🔴 역성장/무성장 (가치 훼손)",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
-      "value_trap": true,
-      "per_discrepancy": false,
-      "g_eff": 0.0,
-      "is_valid": true,
-      "is_unverified": false
-    },
-    {
-      "rank": 164,
+      "rank": 161,
       "name": "한화비전",
       "code": "489790",
       "price": 42000.0,
@@ -5093,7 +5000,7 @@
       "is_unverified": false
     },
     {
-      "rank": 165,
+      "rank": 162,
       "name": "HL만도",
       "code": "204320",
       "price": 44700.0,
@@ -5124,7 +5031,7 @@
       "is_unverified": false
     },
     {
-      "rank": 166,
+      "rank": 163,
       "name": "코스맥스",
       "code": "192820",
       "price": 184700.0,
@@ -5155,7 +5062,7 @@
       "is_unverified": false
     },
     {
-      "rank": 167,
+      "rank": 164,
       "name": "금호타이어",
       "code": "073240",
       "price": 7290.0,
@@ -5186,7 +5093,7 @@
       "is_unverified": false
     },
     {
-      "rank": 168,
+      "rank": 165,
       "name": "미래에셋생명",
       "code": "085620",
       "price": 15490.0,
@@ -5217,7 +5124,7 @@
       "is_unverified": false
     },
     {
-      "rank": 169,
+      "rank": 166,
       "name": "GS리테일",
       "code": "007070",
       "price": 24750.0,
@@ -5248,7 +5155,7 @@
       "is_unverified": false
     },
     {
-      "rank": 170,
+      "rank": 167,
       "name": "SK가스",
       "code": "018670",
       "price": 223500.0,
@@ -5279,7 +5186,7 @@
       "is_unverified": false
     },
     {
-      "rank": 171,
+      "rank": 168,
       "name": "한전KPS",
       "code": "051600",
       "price": 44950.0,
@@ -5310,7 +5217,7 @@
       "is_unverified": false
     },
     {
-      "rank": 172,
+      "rank": 169,
       "name": "GS건설",
       "code": "006360",
       "price": 23450.0,
@@ -5341,7 +5248,7 @@
       "is_unverified": false
     },
     {
-      "rank": 173,
+      "rank": 170,
       "name": "풍산",
       "code": "103140",
       "price": 71200.0,
@@ -5372,7 +5279,7 @@
       "is_unverified": false
     },
     {
-      "rank": 174,
+      "rank": 171,
       "name": "아모레퍼시픽홀딩스",
       "code": "002790",
       "price": 25500.0,
@@ -5403,7 +5310,7 @@
       "is_unverified": false
     },
     {
-      "rank": 175,
+      "rank": 172,
       "name": "대한조선",
       "code": "439260",
       "price": 50100.0,
@@ -5434,7 +5341,7 @@
       "is_unverified": false
     },
     {
-      "rank": 176,
+      "rank": 173,
       "name": "시프트업",
       "code": "462870",
       "price": 31600.0,
@@ -5465,38 +5372,7 @@
       "is_unverified": false
     },
     {
-      "rank": 177,
-      "name": "KIWOOM 200TR",
-      "code": "294400",
-      "price": 142690.0,
-      "t_roe": 0.0,
-      "f_roe": 8.5,
-      "roic": 6.8,
-      "dps": 0,
-      "return_total": "무배당 (자사주 소각 중심)",
-      "t_per": 12.5,
-      "t_eps": 11415,
-      "sh_return": 0.0,
-      "t_pegy": 99.99,
-      "t_fair": 0,
-      "f_per": 11.0,
-      "f_eps": 12971,
-      "growth": 0.0,
-      "f_pegy": 99.0,
-      "f_target": 99883.0,
-      "vol": "🟢 정상",
-      "quant_score": 0,
-      "badge": "🔴 역성장/무성장 (가치 훼손)",
-      "badge_bg": "#7f1d1d",
-      "badge_fg": "#fca5a5",
-      "value_trap": true,
-      "per_discrepancy": false,
-      "g_eff": 0.0,
-      "is_valid": true,
-      "is_unverified": false
-    },
-    {
-      "rank": 178,
+      "rank": 174,
       "name": "두산우",
       "code": "000155",
       "price": 439500.0,
@@ -5527,7 +5403,7 @@
       "is_unverified": false
     },
     {
-      "rank": 179,
+      "rank": 175,
       "name": "호텔신라",
       "code": "008770",
       "price": 43550.0,
@@ -5558,7 +5434,7 @@
       "is_unverified": false
     },
     {
-      "rank": 180,
+      "rank": 176,
       "name": "CJ대한통운",
       "code": "000120",
       "price": 74500.0,
@@ -5589,7 +5465,7 @@
       "is_unverified": false
     },
     {
-      "rank": 181,
+      "rank": 177,
       "name": "HD현대마린엔진",
       "code": "071970",
       "price": 49450.0,
@@ -5620,7 +5496,7 @@
       "is_unverified": false
     },
     {
-      "rank": 182,
+      "rank": 178,
       "name": "SK리츠",
       "code": "395400",
       "price": 5480.0,
@@ -5652,7 +5528,7 @@
       "unverified_reason": "⚠️ 데이터 검증 필요 (주주환원/배당 공시 미확정)"
     },
     {
-      "rank": 183,
+      "rank": 179,
       "name": "두산퓨얼셀",
       "code": "336260",
       "price": 24550.0,
@@ -5683,7 +5559,7 @@
       "is_unverified": false
     },
     {
-      "rank": 184,
+      "rank": 180,
       "name": "다우기술",
       "code": "023590",
       "price": 36650.0,
@@ -5714,7 +5590,7 @@
       "is_unverified": false
     },
     {
-      "rank": 185,
+      "rank": 181,
       "name": "이수스페셜티케미컬",
       "code": "457190",
       "price": 52400.0,
@@ -5746,7 +5622,7 @@
       "reject_reason": "PER/주가 산출 범위 초과 또는 데이터 오염"
     },
     {
-      "rank": 186,
+      "rank": 182,
       "name": "현대위아",
       "code": "011210",
       "price": 58200.0,
@@ -5777,7 +5653,7 @@
       "is_unverified": false
     },
     {
-      "rank": 187,
+      "rank": 183,
       "name": "씨에스윈드",
       "code": "112610",
       "price": 37300.0,
@@ -5808,7 +5684,7 @@
       "is_unverified": false
     },
     {
-      "rank": 188,
+      "rank": 184,
       "name": "동원산업",
       "code": "006040",
       "price": 35400.0,
@@ -5839,7 +5715,7 @@
       "is_unverified": false
     },
     {
-      "rank": 189,
+      "rank": 185,
       "name": "SK이터닉스",
       "code": "475150",
       "price": 45450.0,
@@ -5870,7 +5746,7 @@
       "is_unverified": false
     },
     {
-      "rank": 190,
+      "rank": 186,
       "name": "오리온홀딩스",
       "code": "001800",
       "price": 25500.0,
@@ -5901,7 +5777,7 @@
       "is_unverified": false
     },
     {
-      "rank": 191,
+      "rank": 187,
       "name": "미래에셋증권2우B",
       "code": "00680K",
       "price": 10940.0,
@@ -5932,7 +5808,7 @@
       "is_unverified": false
     },
     {
-      "rank": 192,
+      "rank": 188,
       "name": "SK네트웍스",
       "code": "001740",
       "price": 7320.0,
@@ -5963,7 +5839,7 @@
       "is_unverified": false
     },
     {
-      "rank": 193,
+      "rank": 189,
       "name": "LX인터내셔널",
       "code": "001120",
       "price": 37400.0,
@@ -5994,7 +5870,7 @@
       "is_unverified": false
     },
     {
-      "rank": 194,
+      "rank": 190,
       "name": "코오롱인더",
       "code": "120110",
       "price": 48050.0,
@@ -6025,7 +5901,7 @@
       "is_unverified": false
     },
     {
-      "rank": 195,
+      "rank": 191,
       "name": "아시아나항공",
       "code": "020560",
       "price": 6960.0,
@@ -6056,7 +5932,7 @@
       "is_unverified": false
     },
     {
-      "rank": 196,
+      "rank": 192,
       "name": "롯데에너지머티리얼즈",
       "code": "020150",
       "price": 27350.0,
@@ -6087,7 +5963,7 @@
       "is_unverified": false
     },
     {
-      "rank": 197,
+      "rank": 193,
       "name": "롯데렌탈",
       "code": "089860",
       "price": 39350.0,
@@ -6118,7 +5994,7 @@
       "is_unverified": false
     },
     {
-      "rank": 198,
+      "rank": 194,
       "name": "HJ중공업",
       "code": "097230",
       "price": 15700.0,
@@ -6149,7 +6025,7 @@
       "is_unverified": false
     },
     {
-      "rank": 199,
+      "rank": 195,
       "name": "케이씨텍",
       "code": "281820",
       "price": 69800.0,
@@ -6180,7 +6056,7 @@
       "is_unverified": false
     },
     {
-      "rank": 200,
+      "rank": 196,
       "name": "녹십자",
       "code": "006280",
       "price": 115900.0,
@@ -6207,6 +6083,130 @@
       "value_trap": true,
       "per_discrepancy": false,
       "g_eff": 1.3,
+      "is_valid": true,
+      "is_unverified": false
+    },
+    {
+      "rank": 197,
+      "name": "효성티앤씨",
+      "code": "298020",
+      "price": 308000.0,
+      "t_roe": 0.72,
+      "f_roe": 0.8,
+      "roic": 0.6,
+      "dps": 10100,
+      "return_total": "총 23,481억원",
+      "t_per": 45.54,
+      "t_eps": 6763,
+      "sh_return": 3.3,
+      "t_pegy": 5.49,
+      "t_fair": 56132,
+      "f_per": 6.0,
+      "f_eps": 52742,
+      "growth": 5.0,
+      "f_pegy": 0.85,
+      "f_target": 315397,
+      "vol": "⚡ 변동성 보정 중",
+      "quant_score": 45,
+      "badge": "🟢 저평가",
+      "badge_bg": "#166534",
+      "badge_fg": "#86efac",
+      "value_trap": true,
+      "per_discrepancy": false,
+      "g_eff": 8.3,
+      "is_valid": true,
+      "is_unverified": false
+    },
+    {
+      "rank": 198,
+      "name": "대웅제약",
+      "code": "069620",
+      "price": 113800.0,
+      "t_roe": 21.75,
+      "f_roe": 24.4,
+      "roic": 19.1,
+      "dps": 600,
+      "return_total": "총 2,004억원",
+      "t_per": 6.6,
+      "t_eps": 17249,
+      "sh_return": 3.0,
+      "t_pegy": 0.21,
+      "t_fair": 284500,
+      "f_per": 7.0,
+      "f_eps": 16217,
+      "growth": 28.3,
+      "f_pegy": 0.22,
+      "f_target": 284500,
+      "vol": "🟢 정상",
+      "quant_score": 94,
+      "badge": "🟢 강력 저평가",
+      "badge_bg": "#14532d",
+      "badge_fg": "#4ade80",
+      "value_trap": false,
+      "per_discrepancy": false,
+      "g_eff": 31.3,
+      "is_valid": true,
+      "is_unverified": false
+    },
+    {
+      "rank": 199,
+      "name": "IPARK현대산업개발",
+      "code": "294870",
+      "price": 19850.0,
+      "t_roe": 5.0,
+      "f_roe": 5.6,
+      "roic": 4.4,
+      "dps": 700,
+      "return_total": "총 1,616억원",
+      "t_per": 8.54,
+      "t_eps": 2325,
+      "sh_return": 3.5,
+      "t_pegy": 0.85,
+      "t_fair": 23250,
+      "f_per": 4.0,
+      "f_eps": 5336,
+      "growth": 6.5,
+      "f_pegy": 0.47,
+      "f_target": 38419,
+      "vol": "⚡ 변동성 보정 중",
+      "quant_score": 60,
+      "badge": "🟢 강력 저평가",
+      "badge_bg": "#14532d",
+      "badge_fg": "#4ade80",
+      "value_trap": true,
+      "per_discrepancy": false,
+      "g_eff": 10.0,
+      "is_valid": true,
+      "is_unverified": false
+    },
+    {
+      "rank": 200,
+      "name": "동양생명",
+      "code": "082640",
+      "price": 8330.0,
+      "t_roe": 7.08,
+      "f_roe": 7.9,
+      "roic": 6.2,
+      "dps": 400,
+      "return_total": "총 903억원",
+      "t_per": 13.02,
+      "t_eps": 640,
+      "sh_return": 4.8,
+      "t_pegy": 0.93,
+      "t_fair": 8960,
+      "f_per": 11.46,
+      "f_eps": 726,
+      "growth": 9.2,
+      "f_pegy": 0.82,
+      "f_target": 8639,
+      "vol": "🟢 정상",
+      "quant_score": 61,
+      "badge": "🟢 저평가",
+      "badge_bg": "#166534",
+      "badge_fg": "#86efac",
+      "value_trap": true,
+      "per_discrepancy": false,
+      "g_eff": 14.0,
       "is_valid": true,
       "is_unverified": false
     }

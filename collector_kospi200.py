@@ -140,8 +140,27 @@ def fetch_kospi200_real_market_data():
                     
                 name = name_elem.text.strip()
                 # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식 순위 부여)
-                fund_keywords = ["ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", "ARIRANG", "HANARO", "KBSTAR", "PLUS", "WOORI", "TIMEFOLIO", "FOCUS", "UNICORN", "HERO", "KOSEF", "KINDEX", "TREX"]
-                if any(kw in name for kw in fund_keywords):
+                # 1차: 브랜드명 키워드 필터 (ETF 운용사 브랜드)
+                fund_brand_keywords = [
+                    "ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", 
+                    "ARIRANG", "HANARO", "KBSTAR", "PLUS", "KOSEF", "KINDEX", "TREX",
+                    "TIMEFOLIO", "FOCUS", "UNICORN", "HERO",
+                    "KIWOOM", "BNK", "MIRAEASSET"
+                ]
+                # 2차: 상품 유형 키워드 필터 (ETF/펀드 상품명 패턴)
+                fund_type_keywords = [
+                    "액티브", "인덱스", "레버리지", "인버스", "채권", "혼합",
+                    "200TR", "배당성장", "고배당", "K-뉴딜"
+                ]
+                # 3차: 영문 대문자로만 구성 + 숫자 조합 이름 (ETF 패턴, 예: "TIME 미국나스닥100액티브")
+                name_upper_ratio = sum(1 for c in name if c.isupper()) / max(len(name), 1)
+                is_etf_pattern = name_upper_ratio > 0.5 and any(c.isdigit() for c in name) and len(name) > 5
+                
+                if any(kw in name for kw in fund_brand_keywords):
+                    continue
+                if any(kw in name for kw in fund_type_keywords):
+                    continue
+                if is_etf_pattern and name not in ("LG", "SK", "HD"):
                     continue
                     
                 href = name_elem.get('href', '')
@@ -173,15 +192,18 @@ def fetch_kospi200_real_market_data():
                     "t_roe": t_roe
                 })
                 
-                if len(stocks_raw) >= 200:
+                # 시총 순위 변동 여유분 확보: 210개 수집 후 순수 개별주식 200개 선별
+                if len(stocks_raw) >= 210:
                     break
-            if len(stocks_raw) >= 200:
+            if len(stocks_raw) >= 210:
                 break
         except Exception as e:
             print(f"Error scraping page {page}: {e}")
             
         time.sleep(0.2) # 접속 매너 준수
         
+    # 최종 200개 캡 (여유분 수집 후 상위 200개만 반환)
+    stocks_raw = stocks_raw[:200]
     print(f"Successfully retrieved {len(stocks_raw)} real KOSPI stocks.")
     return stocks_raw
 
