@@ -197,8 +197,8 @@ def render_pegy_page():
     with f_col2:
         selected_badges = st.multiselect(
             "🏷️ 밸류에이션 상태 필터",
-            ["🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", "🔴 고평가 관망"],
-            default=["🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", "🔴 고평가 관망"]
+            ["🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", "🔴 고평가 관망", "🔴 극단적 고평가 (위험)"],
+            default=["🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", "🔴 고평가 관망", "🔴 극단적 고평가 (위험)"]
         )
     with f_col3:
         only_value_trap = st.checkbox(
@@ -214,7 +214,7 @@ def render_pegy_page():
             💡 '착시 저평가 (가치주 덫)' 및 100점 만점 퀀트 스코어 가이드
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65; margin-bottom: 8px;">
-            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다.
+            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다. (단, PEGY &ge; 2.0 등 극단적 고평가 시 <b>최대 20점 강제 상한 컷오프</b> 적용)
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65;">
             • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만 실제 이익창출력(ROE&lt;8% 또는 ROIC&lt;6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.
@@ -303,7 +303,7 @@ def render_pegy_page():
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점</span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
+                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점<br><b>*단, PEGY &ge; 2.0 극단적 고평가 시 최대 20점 컷오프</b></span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
                     </span>
                     <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
                         {s['badge']}

@@ -8,6 +8,8 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import pandas as pd
 
+from utils.scoring import calculate_quant_score
+
 try:
     import yfinance as yf
     HAS_YFINANCE = True
@@ -229,58 +231,12 @@ def enrich_quant_metrics(stocks_raw):
         f_target = int(f_eps * target_per)
         t_fair = int(t_eps * 10.4)
 
-        # 3. 종합 퀀트 스코어 (Quant Score - 100점 만점)
-        if f_pegy < 0.65:
-            s_pegy = 35
-        elif f_pegy < 0.85:
-            s_pegy = 28
-        elif f_pegy < 1.0:
-            s_pegy = 20
-        elif f_pegy < 1.35:
-            s_pegy = 12
-        else:
-            s_pegy = 5
-
-        s_f_roe = 15 if f_roe >= 15.0 else (10 if f_roe >= 10.0 else 4)
-        s_roic = 15 if roic >= 12.0 else (10 if roic >= 8.0 else 4)
-        s_quality = s_f_roe + s_roic
-
-        if sh_return >= 5.0:
-            s_return = 20
-        elif sh_return >= 3.0:
-            s_return = 14
-        elif sh_return >= 1.0:
-            s_return = 8
-        else:
-            s_return = 3
-
-        if t_roe >= 10.0:
-            s_trailing = 10
-        elif t_roe >= 6.0:
-            s_trailing = 6
-        else:
-            s_trailing = 2
-
-        s_vol = 5 if "정상" in vol else 1
-        quant_score = int(s_pegy + s_quality + s_return + s_trailing + s_vol)
-
-        # 4. 상태 배지 및 착시 저평가 위험 판정
-        if f_pegy < 0.65:
-            badge = "🟢 강력 저평가"
-            badge_bg = "#14532d"
-            badge_fg = "#4ade80"
-        elif f_pegy < 0.95:
-            badge = "🟢 저평가"
-            badge_bg = "#166534"
-            badge_fg = "#86efac"
-        elif f_pegy < 1.35:
-            badge = "🟡 적정가 형성"
-            badge_bg = "#78350f"
-            badge_fg = "#fde047"
-        else:
-            badge = "🔴 고평가 관망"
-            badge_bg = "#7f1d1d"
-            badge_fg = "#fca5a5"
+        # 3. 종합 퀀트 스코어 및 배지 판정 (utils.scoring 킬러 로직 연동)
+        score_res = calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per)
+        quant_score = score_res["quant_score"]
+        badge = score_res["badge"]
+        badge_bg = score_res["badge_bg"]
+        badge_fg = score_res["badge_fg"]
 
         value_trap = (t_roe < 8.0 or roic < 6.0)
 
