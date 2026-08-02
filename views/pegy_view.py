@@ -221,16 +221,20 @@ def render_pegy_page():
 
     st.markdown("---")
 
-    # 6. 상단 검색 및 필터 컨트롤 + 줄간격 보정 가이드 박스
+    # 6. 전체 종목 방공망 일괄 스크리닝 및 뱃지 필터 컨트롤 (모든 뱃지 동적 자동 구성)
+    from utils.guardrail import apply_valuation_guardrail
+    processed_stocks = []
+    for s in all_stocks:
+        screened_stock = apply_valuation_guardrail(s)
+        processed_stocks.append(screened_stock)
+
+    # 데이터에 존재하는 모든 뱃지 유형을 동적으로 추출하여 기본 옵션에 포함 (단 1개 종목도 누락 방지)
+    all_badge_options = list(dict.fromkeys([s["badge"] for s in processed_stocks if s.get("badge")]))
+
     f_col1, f_col2, f_col3 = st.columns([2, 3, 2.2])
     with f_col1:
         search_query = st.text_input("🔍 종목명 / 종목코드 검색", placeholder="예: 삼성전자, 005930").strip()
     with f_col2:
-        all_badge_options = [
-            "🟢 강력 저평가", "🟢 저평가", "🟡 적정가 형성", 
-            "🟡 목표가 달성 (적정가)", "🔴 고평가 관망", 
-            "🔴 목표가 초과 (고평가 관망)", "🔴 극단적 고평가 (위험)"
-        ]
         selected_badges = st.multiselect(
             "🏷️ 밸류에이션 상태 필터",
             all_badge_options,
@@ -259,13 +263,6 @@ def render_pegy_page():
     """
     clean_guide_html = "\n".join([line.strip() for line in guide_box_html.split("\n") if line.strip()])
     st.markdown(clean_guide_html, unsafe_allow_html=True)
-
-    # 전체 종목 방공망 일괄 스크리닝 (Patch 4 적용)
-    from utils.guardrail import apply_valuation_guardrail
-    processed_stocks = []
-    for s in all_stocks:
-        screened_stock = apply_valuation_guardrail(s)
-        processed_stocks.append(screened_stock)
 
     filtered_stocks = processed_stocks
     if search_query:
