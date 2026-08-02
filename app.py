@@ -797,6 +797,24 @@ import hmac
 
 # 사이드바 관리자 암호 인증 시스템 배치 (암호 일방향 해시 및 안전 비교 적용)
 with st.sidebar:
+    # 사이드바 전체 레이아웃을 Flexbox로 설정하여 하단 컨테이너를 아래로 밀어내는 CSS 주입
+    st.markdown(
+        """
+        <style>
+        div[data-testid="stSidebarUserContent"] {
+            display: flex;
+            flex-direction: column;
+            height: calc(100vh - 50px) !important;
+        }
+        /* 사이드바의 마지막 자식 블록(관리자 메뉴)을 맨 아래로 자동 밀기 */
+        div[data-testid="stSidebarUserContent"] > div:last-child {
+            margin-top: auto !important;
+            padding-top: 20px;
+        }
+        </style>
+        """,
+        unsafe_allow_html=True
+    )
     # 상단 새로운 공간 컨테이너 정의 (향후 새로운 내용 추가용)
     sidebar_top = st.container()
     st.markdown("---")
