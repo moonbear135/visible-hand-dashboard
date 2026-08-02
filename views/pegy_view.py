@@ -46,7 +46,7 @@ def load_kospi200_snapshot():
     return {"last_updated_at": now_str, "status": "BACKUP"}, []
 
 def render_pegy_page():
-    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 안내 가이드 줄간격 보정) 화면 렌더링"""
+    """'💡 사실 이 가격이에요' (배치 수집 JSON 연동 & 툴팁 쉬운 언어 개선) 화면 렌더링"""
     
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
@@ -70,7 +70,7 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: 320px;
+            width: 330px;
             background-color: #0f172a;
             color: #f1f5f9;
             text-align: left;
@@ -85,7 +85,7 @@ def render_pegy_page():
             transition: opacity 0.2s ease-in-out, visibility 0.2s;
             border: 1px solid #38bdf8;
             font-size: 11.5px;
-            line-height: 1.5;
+            line-height: 1.55;
             box-shadow: 0 6px 18px rgba(0,0,0,0.6);
             font-weight: 400;
         }
@@ -357,7 +357,7 @@ def render_pegy_page():
                     </div>
                     <div style="background-color: #0f172a; padding: 8px 14px; border-radius: 8px; border: 1.5px solid #f43f5e; box-shadow: 0 4px 12px rgba(0,0,0,0.5);">
                         <div style="font-size: 12px; color: #fca5a5; margin-bottom: 2px;">
-                            <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 퀀트 목표주가</b><br>• 보정 PEGY = (f_per / (min(growth,35) + sh_return)) * (1.18 if 변동성보정 else 1.0)<br>• 목표가(Target Price) = f_eps * (10.4 * (1 + ROE프리미엄 + ROIC프리미엄))</span></span>
+                            <span class="q-tooltip" style="color: #fca5a5; font-weight: 700;">목표가 (PEGY) ℹ️<span class="q-tooltiptext"><b>보정 Forward PEGY & 퀀트 목표주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 예상 성장률(최대 35% 상한)과 주주환원율의 합으로 나누어 밸류에이션 부담을 측정합니다. (변동성 위험 시 1.18배 보정)<br>• <b>퀀트 목표주가</b>: 12개월 추정 EPS(주당순이익)에 코스피 평균 PER(10.4배)을 기본 적용하고, ROE 12% 이상(+15%) 및 ROIC 10% 이상(+10%) 우량 자본효율성 프리미엄을 가산하여 산출합니다.</span></span>
                         </div>
                         <div style="font-size: 16.5px; font-weight: 900; color: #ff4d6d; letter-spacing: 0.2px;">{s['f_pegy']} / {s['f_target']:,.0f}원</div>
                     </div>
