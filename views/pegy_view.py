@@ -465,6 +465,26 @@ def render_pegy_page():
                 </div>
             </div>
 
+            {"" if s.get('t_roe', 0) >= 0 else f'''
+            <!-- 적자 경고 배너: ROE 마이너스 종목 강조 경고 -->
+            <div style="background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 50%, #450a0a 100%); border: 1.5px solid #dc2626; border-radius: 10px; padding: 12px 20px; margin-bottom: 14px; display: flex; align-items: center; gap: 14px; box-shadow: 0 0 15px rgba(220, 38, 38, 0.25); animation: pulse-border 2s infinite;">
+                <div style="font-size: 28px; flex-shrink: 0;">🚨</div>
+                <div style="flex: 1;">
+                    <div style="color: #fca5a5; font-size: 14px; font-weight: 800; margin-bottom: 3px;">
+                        ⚠️ 적자 기업 — PEGY 밸류에이션 산출 불가 (ROE {s["t_roe"]}%)
+                    </div>
+                    <div style="color: #fecaca; font-size: 12px; font-weight: 500; line-height: 1.5;">
+                        본 종목은 최근 12개월 기준 <b>순이익 적자(ROE &lt; 0)</b> 상태로, 성장 기반 밸류에이션(PEGY)을 적용할 수 없습니다.
+                        아래 목표주가·적정가는 <b>참고 불가</b>하며, 이익 정상화 전까지 투자에 각별한 주의가 필요합니다.
+                    </div>
+                </div>
+                <div style="background: #991b1b; border: 1px solid #f87171; border-radius: 8px; padding: 6px 14px; text-align: center; flex-shrink: 0;">
+                    <div style="color: #f87171; font-size: 18px; font-weight: 900;">99.99</div>
+                    <div style="color: #fca5a5; font-size: 10px; font-weight: 600;">PEGY 측정불가</div>
+                </div>
+            </div>
+            '''}
+
             <!-- 2. 자본효율성 품질 바 (Quality Bar) -->
             <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px; padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: flex-start; gap: 28px; flex-wrap: wrap;">
                 <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
