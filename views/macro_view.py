@@ -59,7 +59,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         volatility = 1.2
         dist_from_high = 0.08
         sugeub_fetched = True
-        data_source_log = "관리자 수동 데이터 입력 완료"
+        data_source_log = "✅ 동기화 완료 (관리자 입력)"
     else:
         target_date = datetime.today()
         while target_date.weekday() >= 5:
@@ -98,7 +98,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                 pass
 
         is_live_connected = False
-        data_source_log = "로컬 누적 DB 로드 완료" if local_loaded else "안전 모드 진입"
+        data_source_log = "✅ 동기화 완료" if local_loaded else "⚠️ 안전 모드"
 
     if not local_loaded and override_date is None:
         if FDR_AVAILABLE:
@@ -125,9 +125,9 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                     high_52w = kospi_df['High'].max()
                     dist_from_high = (high_52w - kospi_close) / high_52w
                     display_date = latest_kospi.name.strftime("%Y년 %m월 %d일")
-                    data_source_log = "성공: FinanceDataReader 실시간 지수/환율 연동 성공"
+                    data_source_log = "✅ 실시간 동기화 완료"
             except Exception as e:
-                data_source_log = f"시세 연동 실패로 안전 모드 동작 ({str(e)})"
+                data_source_log = "⚠️ 안전 모드 (시세 연동 지연)"
 
         sugeub_fetched = False
         if PYKRX_AVAILABLE:
@@ -138,7 +138,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                     retail_flow = int(df_net['개인'].sum() / 100000000)
                     foreigner_flow = int(df_net['외국인합계'].sum() / 100000000)
                     institution_flow = int(df_net['기관합계'].sum() / 100000000)
-                    data_source_log = "성공: pykrx 수급 스크래퍼 연동 완료"
+                    data_source_log = "✅ 동기화 완료"
                     sugeub_fetched = True
             except Exception:
                 pass
@@ -166,14 +166,14 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                                     foreigner_flow = int(cells[2].replace(",", ""))
                                     institution_flow = int(cells[3].replace(",", ""))
                                     display_date = target_date.strftime("%Y년 %m월 %d일")
-                                    data_source_log = f"성공: 백업용 마켓 수급 스크래핑 연동 완료 (Naver Page {page})"
+                                    data_source_log = "✅ 동기화 완료"
                                     sugeub_fetched = True
                                     found = True
                                     break
                         if found:
                             break
             except Exception as e:
-                data_source_log = f"수급 연동 오류로 안전 모드 강제 동작 ({str(e)})"
+                data_source_log = "⚠️ 안전 모드 (수급 연동 지연)"
 
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
@@ -376,14 +376,12 @@ def render_macro_page():
     col1, col2 = st.columns([4, 1])
     with col1:
         user_log_msg = log_msg
-        if not admin_mode:
-            user_log_msg = user_log_msg.replace("로컬 누적 DB 로드 완료", "실시간 금융 데이터 동기화 완료")
         
         clean_status = user_log_msg.split('|')[0].strip()
         if is_live:
-            st.success(f"✅ **[실전 연동 성공 상태]** {clean_status}")
+            st.success(f"{clean_status}")
         else:
-            st.info(f"ℹ️ **[휴장일/안전 모드 상태]** {clean_status}")
+            st.info(f"{clean_status}")
     with col2:
         if st.button("🔄 새로고침"):
             st.cache_data.clear()
