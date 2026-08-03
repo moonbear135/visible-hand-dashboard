@@ -37,6 +37,7 @@ def fetch_naver_item_dps_and_eps(code):
         soup = BeautifulSoup(res.text, 'html.parser')
         
         t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
+        t_pbr, ev_ebitda = "-", "-"
         
         # 1. 1차 출처: 우측 Investment Info 공식 스냅샷
         aside = soup.select_one('div.aside_invest_info')
@@ -54,6 +55,10 @@ def fetch_naver_item_dps_and_eps(code):
                     if per_match:
                         f_per = float(per_match.group(1).replace(',', ''))
                         f_eps = int(per_match.group(2).replace(',', ''))
+                elif 'PBRlBPS' in text:
+                    pbr_match = re.search(r'([\d\.,]+)배', text)
+                    if pbr_match:
+                        t_pbr = pbr_match.group(1).replace(',', '')
                 elif '배당수익률' in text:
                     yield_match = re.search(r'([\d\.,]+)%', text)
                     if yield_match:
@@ -99,19 +104,36 @@ def fetch_naver_item_dps_and_eps(code):
                         except Exception:
                             pass
 
+        # EV/EBITDA (Naver WiseReport) 추가 스크래핑
+        time.sleep(1.5) # 서버 부하 방지
+        try:
+            res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
+            if res_ev.status_code == 200:
+                ev_dfs = pd.read_html(res_ev.text)
+                for df in ev_dfs:
+                    if 'EV/EBITDA' in str(df):
+                        for row_idx in range(len(df)):
+                            if 'EV/EBITDA' in str(df.iloc[row_idx, 0]):
+                                val = str(df.iloc[row_idx, 1])
+                                if pd.notna(df.iloc[row_idx, 1]) and val != 'nan':
+                                    ev_ebitda = val
+                                break
+        except Exception as e:
+            print("EV_EBITDA FETCH_ERROR:", e)
+
         # 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정
         if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
             parent_code = code[:-1] + '0'
-            p_t_per, p_t_eps, p_f_per, p_f_eps, p_div_yield, p_dps, p_shares = fetch_naver_item_dps_and_eps(parent_code)
+            p_t_per, p_t_eps, p_f_per, p_f_eps, p_div_yield, p_dps, p_shares, p_t_pbr, p_ev = fetch_naver_item_dps_and_eps(parent_code)
             if p_dps and p_dps > 0:
                 parsed_dps = p_dps
 
-        return t_per, t_eps, f_per, f_eps, div_yield, parsed_dps, outstanding_shares
+        return t_per, t_eps, f_per, f_eps, div_yield, parsed_dps, outstanding_shares, t_pbr, ev_ebitda
     except Exception as e:
         print("FETCH_ERROR:", e)
         import traceback
         traceback.print_exc()
-        return None, None, None, None, None, None, None
+        return None, None, None, None, None, None, None, "-", "-"
 
 def fetch_kospi200_real_market_data():
     """
@@ -254,7 +276,7 @@ def enrich_quant_metrics(stocks_raw):
                 print(f"  📋 [{name}({code})] 우선주 ROE 상속: 보통주 ROE {inherited_roe}% 적용")
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
-        n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps, outstanding_shares = fetch_naver_item_dps_and_eps(code)
+        n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps, outstanding_shares, t_pbr, ev_ebitda = fetch_naver_item_dps_and_eps(code)
         
         # Trailing PER & EPS (Naver 공식 스냅샷 우선)
         if n_t_per and n_t_per > 0:
@@ -388,6 +410,8 @@ def enrich_quant_metrics(stocks_raw):
             "vol": vol,
             "value_trap": value_trap,
             "per_discrepancy": per_discrepancy,
+            "t_pbr": t_pbr,
+            "ev_ebitda": ev_ebitda,
             "g_eff": round(growth_eff, 1),
             "is_valid": is_valid
         }
