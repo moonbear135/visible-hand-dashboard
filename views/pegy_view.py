@@ -500,7 +500,7 @@ def render_pegy_page():
         f_target = s.get('f_target', 0)
         if price > 0 and f_target > 0:
             gap_pct = ((f_target - price) / price) * 100.0
-            gap_str = f"+{gap_pct:.1f}% 상승 여력" if gap_pct >= 0 else f"{gap_pct:.1f}% 프리미엄"
+            gap_str = f"+{gap_pct:.1f}% 상승 여력" if gap_pct >= 0 else f"{abs(gap_pct):.1f}% 프리미엄"
             gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
             bar_color = "#22c55e" if gap_pct >= 0 else "#ef4444"
             bar_width = min(abs(gap_pct), 100)
@@ -645,7 +645,7 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (PEGY {s['f_pegy']}) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>보정 Forward PEGY & 수학적 대칭 퀀트 목표주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 실효성장률(성장률 35% Cap + 주주환원율, 변동성 1.18배 보정)로 나누어 산출합니다.<br>• <b>대칭 퀀트 목표주가</b>: PEGY 산출식과의 100% 수학적 대칭성(Symmetry)을 통일하여 [Target PER = Target PEGY(1.0 ± ROE/ROIC 프리미엄) × 실효성장률]로 산출합니다. (현재가 / 목표가 = PEGY / Target PEGY 100% 비례 완벽 대칭)</span></span>
+                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>보정 Forward PEGY & 목표 적정주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 실효성장률(성장률 35% Cap + 주주환원율, 변동성 1.18배 보정)로 나누어 산출합니다.<br>• <b>목표 적정가</b>: 클로드 원본 공식에 따라 [Target PER = 10.4 × (1.0 ± ROE/ROIC 프리미엄)]을 산출한 뒤, Forward EPS에 곱하여 산출합니다.</span></span>
                                 </span>
                                 <span class="price-text-target">{f_target:,.0f}원</span>
                             </div>
