@@ -525,6 +525,16 @@ def render_pegy_page():
         growth_disp = f"+{growth_val}%" if growth_val <= 35.0 else f"+{growth_val}% (Cap 35%)"
 
         price = s.get('price', 0)
+
+        # 콘크리트 바닥가 계산
+        floor_price_str = "-"
+        try:
+            pbr_val = float(t_pbr)
+            if pbr_val > 0:
+                floor_price = price / pbr_val
+                floor_price_str = f"{floor_price:,.0f}원"
+        except (ValueError, TypeError):
+            pass
         f_target = s.get('f_target', 0)
         if price > 0 and f_target > 0:
             gap_pct = ((f_target - price) / price) * 100.0
