@@ -177,6 +177,14 @@ def render_sandbox_page():
                 ev_ebitda = stock.get("ev_ebitda", "-")
                 
                 t_eps_str = f"{t_eps:,}" if isinstance(t_eps, (int, float)) else str(t_eps)
+                
+                # EV/EBITDA 연수 계산 (안전한 파싱)
+                ev_years_str = ""
+                try:
+                    ev_val = float(ev_ebitda)
+                    ev_years_str = f" <span style='font-size: 12px; color: #94a3b8; font-weight: 500;'>(약 {ev_val:.1f}년)</span>"
+                except (ValueError, TypeError):
+                    pass
 
                 st.markdown(
                     f"""
@@ -204,11 +212,11 @@ def render_sandbox_page():
                         <div class="comparison-box" style="background-color: #1e293b; border-color: #334155;">
                             <div class="comparison-row divider">
                                 <span class="label-text" title="과거 4분기 실적 기준 PER/EPS/PBR">📜 Trailing (과거 실적)</span>
-                                <span style="font-size: 13px; color: #cbd5e1; font-weight: 600;">{t_per}배 / {t_eps_str}원 / {t_pbr}배</span>
+                                <span style="font-size: 13px; color: #cbd5e1; font-weight: 600;"><span title="현재 주가 수익 대비 평가 지표 (수치가 낮을수록 저평가)" style="font-weight: bold; color: #94a3b8;">PER</span> {t_per}배 <span style="color: #475569;">|</span> <span title="주식 1주가 1년 동안 벌어들인 순이익" style="font-weight: bold; color: #94a3b8;">EPS</span> {t_eps_str}원 <span style="color: #475569;">|</span> <span title="장부상 순자산 대비 주가 (청산 가치, 1배 미만이면 자산가치보다 쌈)" style="font-weight: bold; color: #94a3b8;">PBR</span> {t_pbr}배</span>
                             </div>
                             <div class="comparison-row">
-                                <span class="label-text" title="8~10배 이하 시 현금 창출력 우수">EV/EBITDA (현금회수)</span>
-                                <span style="font-size: 14px; color: #38bdf8; font-weight: 700;">{ev_ebitda}배</span>
+                                <span class="label-text" title="기업 통째로 인수 시, 회사가 벌어들이는 순수 현금으로 투자 원금을 회수하는 데 걸리는 시간">EV/EBITDA (M&A 원금회수)</span>
+                                <span style="font-size: 14px; color: #38bdf8; font-weight: 700;">{ev_ebitda}배{ev_years_str}</span>
                             </div>
                         </div>
                         <div class="gap-footer" style="color: {gap_color};">
