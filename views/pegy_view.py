@@ -212,11 +212,15 @@ def render_pegy_page():
                     ⚠️ 모든 투자 결정과 그에 따른 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있음을 명시합니다.
                 </div>
             </div>
-            
-            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1px dashed #475569; border-radius: 12px; padding: 14px 22px; margin: 0 auto 24px auto; max-width: 860px; text-align: left; box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);">
-                <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 500; line-height: 1.6;">
-                    <span style="color: #38bdf8; font-weight: 700;">학습용 보조 도구:</span> '잘 보면 보이는 손'은 정식 금융기관의 서비스가 아니며, 주식 초보자의 직관적인 밸류에이션 이해를 돕는 참고용 프로젝트입니다.<br>
-                    <span style="color: #f87171; font-weight: 700;">투자의 책임:</span> 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다. 제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 신중한 결정하에 본인에게 있음을 알려드립니다.
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #475569; border-radius: 12px; padding: 12px 22px; margin: 0 auto 24px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);">
+                <div style="font-size: 15px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px;">
+                    📘 [학습용 보조 도구 안내]
+                </div>
+                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
+                    '잘 보면 보이는 손'은 정식 금융기관의 서비스가 아니며, 주식 초보자의 직관적인 밸류에이션 이해를 돕는 <b>참고용 프로젝트</b>입니다.
+                </div>
+                <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 3px;">
+                    ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다. 제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
                 </div>
             </div>
             <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">KOSPI 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
@@ -732,10 +736,14 @@ def render_pegy_page():
     st.markdown("<br><br>", unsafe_allow_html=True)
     st.markdown(
         """
-        <div style="background-color: #0f172a; border-top: 1px solid #1e293b; padding: 20px; margin-top: 10px; text-align: center;">
-            <span style="font-size: 13px; color: #64748b; line-height: 1.5; font-weight: 500;">
-                ⚠️ <b>알림:</b> 본 서비스는 정식 금융기관이 아닌 주식 공부를 돕는 개인 프로젝트(보조 도구)입니다.<br>종목 추천이나 원금 보장을 하지 않으며, 모든 데이터는 참고용이므로 최종 투자 판단과 책임은 본인에게 있습니다.
-            </span>
+        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #475569; border-radius: 12px; padding: 12px 22px; margin: 20px auto 10px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);">
+            <div style="font-size: 14px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px;">
+                ⚠️ [알림: 학습용 보조 도구]
+            </div>
+            <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 5px; line-height: 1.5;">
+                본 서비스는 정식 금융기관이 아닌 주식 공부를 돕는 개인 프로젝트(보조 도구)입니다.<br>
+                종목 추천이나 원금 보장을 하지 않으며, 모든 데이터는 참고용이므로 최종 투자 판단과 책임은 본인에게 있습니다.
+            </div>
         </div>
         """,
         unsafe_allow_html=True
