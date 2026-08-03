@@ -184,10 +184,13 @@ def scrape_and_update():
     # 가중 위험 지표 계산 및 합산
     investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
     weights = {
-        "FX_Swap_Point": 12, "Put_OTM_OI": 8, "Short_Ratio": 6, "ELS_KnockIn": 7,
-        "VKOSPI_Skew": 6, "Synthetic_Futures": 12, "NDF_Night_Rate": 12, "Futures_Net_Sell": 6,
-        "Non_Arbitrage_Ratio": 6, "Foreign_Broker_Dump": 6, "Stock_Short_Balance": 3,
-        "Put_Buy_Simple": 3, "Stock_Net_Sell": 3, "KOSPI_5D_Return": 12
+        "FX_Swap_Point": round(12 * 100 / 102, 4), "Put_OTM_OI": round(8 * 100 / 102, 4),
+        "Short_Ratio": round(6 * 100 / 102, 4), "ELS_KnockIn": round(7 * 100 / 102, 4),
+        "VKOSPI_Skew": round(6 * 100 / 102, 4), "Synthetic_Futures": round(12 * 100 / 102, 4),
+        "NDF_Night_Rate": round(12 * 100 / 102, 4), "Futures_Net_Sell": round(6 * 100 / 102, 4),
+        "Non_Arbitrage_Ratio": round(6 * 100 / 102, 4), "Foreign_Broker_Dump": round(6 * 100 / 102, 4),
+        "Stock_Short_Balance": round(3 * 100 / 102, 4), "Put_Buy_Simple": round(3 * 100 / 102, 4),
+        "Stock_Net_Sell": round(3 * 100 / 102, 4), "KOSPI_5D_Return": round(12 * 100 / 102, 4)
     }
     
     market_scores = {

@@ -222,11 +222,13 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     }
 
     weights = {
-        "FX_Swap_Point": 10.0, "Put_OTM_OI": 9.0, "Short_Ratio": 9.0,
-        "ELS_KnockIn": 8.0, "VKOSPI_Skew": 8.0, "Synthetic_Futures": 8.0,
-        "NDF_Night_Rate": 8.0, "Futures_Net_Sell": 7.0, "Non_Arbitrage_Ratio": 7.0,
-        "Foreign_Broker_Dump": 6.0, "Stock_Short_Balance": 6.0, "Put_Buy_Simple": 5.0,
-        "Stock_Net_Sell": 4.0, "KOSPI_5D_Return": 5.0
+        "FX_Swap_Point": round(12 * 100 / 102, 4), "Put_OTM_OI": round(8 * 100 / 102, 4),
+        "Short_Ratio": round(6 * 100 / 102, 4), "ELS_KnockIn": round(7 * 100 / 102, 4),
+        "VKOSPI_Skew": round(6 * 100 / 102, 4), "Synthetic_Futures": round(12 * 100 / 102, 4),
+        "NDF_Night_Rate": round(12 * 100 / 102, 4), "Futures_Net_Sell": round(6 * 100 / 102, 4),
+        "Non_Arbitrage_Ratio": round(6 * 100 / 102, 4), "Foreign_Broker_Dump": round(6 * 100 / 102, 4),
+        "Stock_Short_Balance": round(3 * 100 / 102, 4), "Put_Buy_Simple": round(3 * 100 / 102, 4),
+        "Stock_Net_Sell": round(3 * 100 / 102, 4), "KOSPI_5D_Return": round(12 * 100 / 102, 4)
     }
 
     friendly_names = {

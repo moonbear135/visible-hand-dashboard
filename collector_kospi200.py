@@ -343,24 +343,6 @@ def enrich_quant_metrics(stocks_raw):
         f_target = min(f_target_calc, max_reasonable_target) if price > 0 else f_target_calc
         t_fair = min(t_fair_calc, max_reasonable_target) if price > 0 else t_fair_calc
 
-        # 종합 퀀트 스코어 및 배지 판정 (Guardrail & 역성장 Cut-off 연동)
-        score_res = calculate_quant_score(
-            f_pegy=f_pegy, 
-            f_roe=f_roe, 
-            roic=roic, 
-            sh_return=sh_yield, 
-            t_roe=t_roe, 
-            vol=vol, 
-            f_per=f_per,
-            price=price,
-            f_target=f_target,
-            growth=growth
-        )
-        quant_score = score_res["quant_score"]
-        badge = score_res["badge"]
-        badge_bg = score_res["badge_bg"]
-        badge_fg = score_res["badge_fg"]
-
         value_trap = (t_roe < 8.0 or roic < 6.0)
 
         # =========================================================
@@ -378,7 +360,7 @@ def enrich_quant_metrics(stocks_raw):
         if not valid_pass:
             print(f"⚠️ [{name} ({code})] 3단계 하네스 검증 경고: {v_logs[-1]}")
 
-        enriched_stocks.append({
+        stock_dict = {
             "rank": idx + 1,
             "name": name,
             "code": code,
@@ -399,23 +381,58 @@ def enrich_quant_metrics(stocks_raw):
             "f_pegy": f_pegy,
             "f_target": f_target,
             "vol": vol,
-            "quant_score": quant_score,
-            "badge": badge,
-            "badge_bg": badge_bg,
-            "badge_fg": badge_fg,
             "value_trap": value_trap,
             "per_discrepancy": per_discrepancy,
             "g_eff": round(growth_eff, 1),
             "is_valid": is_valid
-        })
+        }
 
-    # 전체 종목 방공망 모듈 (utils/guardrail.py) 일괄 검증 적용
-    from utils.guardrail import apply_valuation_guardrail
-    guarded_stocks = []
-    for s in enriched_stocks:
-        guarded_stocks.append(apply_valuation_guardrail(s))
+        # 전체 종목 방공망 모듈 (utils/guardrail.py) 검증 적용
+        from utils.guardrail import apply_valuation_guardrail
+        stock_dict = apply_valuation_guardrail(stock_dict)
 
-    return guarded_stocks
+        # 초기화 (기본값 또는 guardrail 차단 시)
+        quant_score = 0
+        badge = "🔴 검증 불가"
+        badge_bg = "#451a03"
+        badge_fg = "#f97316"
+        
+        if stock_dict.get('reject_reason'):
+            badge = "🔴 측정 불가 (데이터 오류)"
+            badge_bg = "#451a03"
+            badge_fg = "#f97316"
+        elif stock_dict.get('unverified_reason'):
+            badge = "⚠️ 데이터 검증 필요"
+            badge_bg = "#78350f"
+            badge_fg = "#facc15"
+        
+        # Guardrail 통과 시 스코어링 적용
+        if stock_dict.get('is_valid', True) and not stock_dict.get('is_unverified', False):
+            score_res = calculate_quant_score(
+                f_pegy=f_pegy, 
+                f_roe=f_roe, 
+                roic=roic, 
+                sh_return=sh_yield, 
+                t_roe=t_roe, 
+                vol=vol, 
+                f_per=f_per,
+                price=price,
+                f_target=f_target,
+                growth=growth
+            )
+            quant_score = score_res["quant_score"]
+            badge = score_res["badge"]
+            badge_bg = score_res["badge_bg"]
+            badge_fg = score_res["badge_fg"]
+
+        stock_dict["quant_score"] = quant_score
+        stock_dict["badge"] = badge
+        stock_dict["badge_bg"] = badge_bg
+        stock_dict["badge_fg"] = badge_fg
+
+        enriched_stocks.append(stock_dict)
+
+    return enriched_stocks
 
 def update_pegy_summary_history(meta_date, enriched_stocks):
     """상단 3개 요약 지표 수치를 누적 기록하여 pegy_summary_history.json 에 저장합니다."""

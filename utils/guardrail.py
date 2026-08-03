@@ -27,29 +27,15 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
         cleaned['is_valid'] = False
         cleaned['is_unverified'] = True
         cleaned['reject_reason'] = "PER/주가 산출 범위 초과 또는 데이터 오염"
-        cleaned['quant_score'] = 0
-        cleaned['badge'] = "🔴 측정 불가 (데이터 오류)"
-        cleaned['badge_bg'] = "#451a03"
-        cleaned['badge_fg'] = "#f97316"
         return cleaned
 
-    # 2. 실효성장률(g_eff) Cap 및 Hard Cut-off
-    growth_capped = min(growth, 35.0) # 성장률 35% 상한 적용
-    g_eff = growth_capped + sh_return
-    
-    cleaned['g_eff'] = round(g_eff, 2)
+    # 2. 실효성장률(g_eff)
+    g_eff = cleaned.get('g_eff', 0)
     
     # 3. 역성장/무성장 기업 (g_eff <= 0) 하드 컷오프
     if g_eff <= 0:
         cleaned['is_valid'] = True
         cleaned['is_unverified'] = False
-        cleaned['f_pegy'] = 99.0 # 음수 PEGY 착시 방지를 위한 고평가 페널티 지정
-        cleaned['quant_score'] = max(0, cleaned.get('quant_score', 50) - 40) # 40점 강제 감점
-        cleaned['badge'] = "🔴 역성장/무성장 (가치 훼손)"
-        cleaned['badge_bg'] = "#7f1d1d"
-        cleaned['badge_fg'] = "#fca5a5"
-        # 목표주가 삭감 (현재가 이하 하방 페널티)
-        cleaned['f_target'] = round(price * 0.7, 0)
         return cleaned
 
     # 4. 주주환원 공시 미확정 / 배당 필수 종목(리츠/인프라/금융) 데이터 무결성 검증
@@ -59,9 +45,6 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
         cleaned['is_valid'] = True
         cleaned['is_unverified'] = True
         cleaned['unverified_reason'] = "⚠️ 데이터 검증 필요 (주주환원/배당 공시 미확정)"
-        cleaned['badge'] = "⚠️ 데이터 검증 필요"
-        cleaned['badge_bg'] = "#78350f"
-        cleaned['badge_fg'] = "#facc15"
         return cleaned
 
     cleaned['is_valid'] = True

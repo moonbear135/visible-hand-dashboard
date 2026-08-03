@@ -15,9 +15,9 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
     5. 변동성 위험 보정 점수 (최대 5점)
     """
     # =========================================================
-    # Guardrail 0: 데이터 오염 / PER 이상치 (PER > 200배 또는 PER <= 0) 검증
+    # Guardrail 0: 데이터 오염 / PER 이상치 (PER > 300배 또는 PER <= 0) 검증
     # =========================================================
-    if f_per > 200.0 or f_per <= 0.0 or price <= 0:
+    if f_per > 300.0 or f_per <= 0.0 or price <= 0:
         return {
             "quant_score": 10,
             "raw_score": 10,
