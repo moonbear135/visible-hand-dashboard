@@ -170,11 +170,13 @@ def render_sandbox_page():
                     bar_color = "#64748b"
                     bar_width = 0
                     
-                # Trailing 지표 파싱
+                # Trailing 지표 파싱 및 안전한 포맷팅
                 t_per = stock.get("t_per", 0)
                 t_eps = stock.get("t_eps", 0)
                 t_pbr = stock.get("t_pbr", "-")
                 ev_ebitda = stock.get("ev_ebitda", "-")
+                
+                t_eps_str = f"{t_eps:,}" if isinstance(t_eps, (int, float)) else str(t_eps)
 
                 st.markdown(
                     f"""
@@ -198,12 +200,11 @@ def render_sandbox_page():
                                 <span class="price-text-target">{f_target:,.0f}원</span>
                             </div>
                         </div>
-                        
                         <!-- Trailing 퀀트 지표 -->
                         <div class="comparison-box" style="background-color: #1e293b; border-color: #334155;">
                             <div class="comparison-row divider">
                                 <span class="label-text" title="과거 4분기 실적 기준 PER/EPS/PBR">📜 Trailing (과거 실적)</span>
-                                <span style="font-size: 13px; color: #cbd5e1; font-weight: 600;">{t_per}배 / {t_eps:,}원 / {t_pbr}배</span>
+                                <span style="font-size: 13px; color: #cbd5e1; font-weight: 600;">{t_per}배 / {t_eps_str}원 / {t_pbr}배</span>
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text" title="8~10배 이하 시 현금 창출력 우수">EV/EBITDA (현금회수)</span>
