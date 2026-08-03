@@ -37,7 +37,9 @@
       "quant_score": 84,
       "badge": "🟢 강력 저평가",
       "badge_bg": "#14532d",
-      "badge_fg": "#4ade80"
+      "badge_fg": "#4ade80",
+      "t_pbr": "3.33",
+      "ev_ebitda": "17.53"
     },
     {
       "rank": 2,
@@ -70,7 +72,9 @@
       "quant_score": 84,
       "badge": "🟢 강력 저평가",
       "badge_bg": "#14532d",
-      "badge_fg": "#4ade80"
+      "badge_fg": "#4ade80",
+      "t_pbr": "6.76",
+      "ev_ebitda": "20.36"
     },
     {
       "rank": 3,
