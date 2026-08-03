@@ -40,6 +40,23 @@ layers = {
     0:  ("0층", "⚪ 무위험 지대", "주식 100% / 현금 0%", "하방 위험 없음 / 적극 홀딩")
 }
 
+FRIENDLY_NAMES = {
+    "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
+    "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 배팅한 투기자본)",
+    "Short_Ratio": "공매도 거래 비중 (주도권을 쥐어짜려는 매도세)",
+    "ELS_KnockIn": "ELS 녹인 위험 (대규모 원금손실 구간 진입 여부)",
+    "VKOSPI_Skew": "공포지수 비대칭성 (투자자들의 불안 심리 강도)",
+    "Synthetic_Futures": "합성선물 가격차이 (외국인의 파생상품 하방 압력)",
+    "NDF_Night_Rate": "야간 환율스왑 변동 (원/달러 환율 급등 위험)",
+    "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 투기)",
+    "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도세)",
+    "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
+    "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
+    "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 쏠림 배팅 규모)",
+    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 하락에 따른 직접 지표)"
+}
+
 def fetch_verified_market_data(override_date=None, override_kospi=None, override_usd=None, override_retail=None, override_fore=None, override_inst=None):
     """
     KRX 및 Naver 수급 데이터를 크롤링하고 실전 가중치를 산출합니다.
@@ -338,7 +355,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         sub_score_val = sub_scores[item]
         display_risk = round(sub_score_val / 100.0, 3)
         details.append({
-            "지표명 (한글 설명)": friendly_names.get(item, item),
+            "지표명 (한글 설명)": FRIENDLY_NAMES.get(item, item),
             "중요도 (가중치)": w,
             "위험도 (0~1)": display_risk,
             "기여점수": round(w * display_risk, 2),
@@ -627,7 +644,7 @@ def render_macro_page():
         for ind in top_indicators:
             raw_key = None
             # Retrieve the english key using friendly_names since the indicator name was set using it
-            for eng_k, kor_v in friendly_names.items():
+            for eng_k, kor_v in FRIENDLY_NAMES.items():
                 if kor_v == ind["지표명 (한글 설명)"]:
                     raw_key = eng_k
                     break
