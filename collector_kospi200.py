@@ -336,13 +336,12 @@ def enrich_quant_metrics(stocks_raw):
         f_pegy = round(f_per / max(growth_eff, 0.1), 2) if (growth > 0 and t_roe > 0) else 99.99
         t_pegy = round(t_per / max(growth + sh_yield, 0.1), 2) if (growth > 0 and t_roe > 0) else 99.99
 
-        # PEGY 수식 연동된 Target PER & 목표주가(f_target)
+        # 2. ROE/ROIC 품질 가중 Target PER & 목표주가(f_target)
         roe_prem = 0.15 if f_roe >= 12.0 else -0.10
         roic_prem = 0.10 if roic >= 10.0 else -0.05
-        target_pegy = 1.0 * (1.0 + roe_prem + roic_prem)
-        target_per = round(target_pegy * max(growth_eff, 0), 2)
+        target_per = 10.4 * (1.0 + roe_prem + roic_prem)
         
-        # 목표주가 폭발 방지 상한선 캡 (max_reasonable_target) 제거
+        # 목표주가 폭발 방지 상한선 캡 없음
         f_target = int(max(f_eps * target_per, 0)) if (growth > 0 and t_roe > 0) else int(price * 0.7)
         t_fair = int(max(t_eps * (growth + sh_yield), 0))
 
