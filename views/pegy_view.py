@@ -652,7 +652,7 @@ def render_pegy_page():
                             <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
                         </div>
                         <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['f_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {s['f_eps']:,.0f}원
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['f_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {s['f_eps']:,.0f}원
                         </div>
                     </div>
                     <div>
