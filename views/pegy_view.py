@@ -86,7 +86,10 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: 340px;
+            width: max-content;
+            max-width: 380px;
+            word-break: keep-all;
+            line-height: 1.4;
             background-color: #0f172a;
             color: #f1f5f9;
             text-align: left;
@@ -604,10 +607,10 @@ def render_pegy_page():
                             <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
                         </div>
                         <div style="font-size: 18px; color: #cbd5e1; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext"><b>PER (주가수익비율)</b><br>현재 주가 수익 대비 평가 지표 (수치가 낮을수록 저평가)</span></span> {s['t_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext"><b>EPS (주당순이익)</b><br>주식 1주가 1년 동안 벌어들인 순이익</span></span> {t_eps_str}원 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext"><b>PBR (주가순자산비율)</b><br>장부상 순자산 대비 주가 (청산 가치, 1배 미만이면 자산가치보다 쌈)</span></span> {t_pbr}배
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['t_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str}원 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr}배
                         </div>
                         <div style="font-size: 18px; color: #38bdf8; font-weight: 800; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext"><b>EV/EBITDA</b><br>기업 통째로 인수 시, 회사가 벌어들이는 순수 현금으로 투자 원금을 회수하는 데 걸리는 시간</span></span> {ev_ebitda}배{ev_years_str.replace("11px", "13px")}
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda}배{ev_years_str.replace("11px", "13px")}
                         </div>
                     </div>
                     <div>
@@ -649,7 +652,7 @@ def render_pegy_page():
                             <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
                         </div>
                         <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext"><b>Forward PER</b><br>현재 주가 대비 12개월 예상 순이익 기준 평가 지표</span></span> {s['f_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext"><b>Forward EPS</b><br>향후 12개월 예상 주당순이익</span></span> {s['f_eps']:,.0f}원
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['f_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {s['f_eps']:,.0f}원
                         </div>
                     </div>
                     <div>
