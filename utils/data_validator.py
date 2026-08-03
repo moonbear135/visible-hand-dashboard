@@ -1,5 +1,6 @@
 import math
 import re
+import pandas as pd
 
 # 지표별 기간 키워드 사전 (Period Keywords Dictionary)
 PERIOD_KEYWORDS = {
@@ -30,6 +31,36 @@ class DataValidator:
     ② 2단계: 단일 출처 산티 체크 (PER = Price / EPS_TTM 오차 <= 5%)
     ③ 3단계: 출처 간 교차 검증 (교차 오차 <= 3% 승인, 초과 시 Fallback)
     """
+    
+    @staticmethod
+    def normalize_currency(value_str):
+        """
+        문자열 내의 화폐 단위('백만원', '억원', '원')를 파악하여
+        순수 숫자를 원화(KRW) 기준 단위로 정규화(Scaling)하여 float로 반환합니다.
+        """
+        if not value_str or pd.isna(value_str):
+            return 0.0
+            
+        text = str(value_str).replace(',', '').strip()
+        
+        # 숫자 부분 추출 (음수, 소수점 포함)
+        match = re.search(r'(-?\d+(\.\d+)?)', text)
+        if not match:
+            return 0.0
+            
+        val = float(match.group(1))
+        
+        # 단위 스케일링
+        if '백만원' in text:
+            val *= 1_000_000
+        elif '억원' in text or '억' in text:
+            val *= 100_000_000
+        elif '조원' in text or '조' in text:
+            val *= 1_000_000_000_000
+        elif '천원' in text:
+            val *= 1_000
+            
+        return val
     
     @staticmethod
     def classify_header_timeframe(header_text):

@@ -1,4 +1,7 @@
 import os
+import sys
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
@@ -51,6 +54,11 @@ def clip(val):
 
 def scrape_and_update():
     target_date = datetime.today()
+    
+    # 15시 30분(장 마감) 이전이라면, 수집 대상은 전날 데이터입니다.
+    if target_date.hour < 15 or (target_date.hour == 15 and target_date.minute < 30):
+        target_date -= timedelta(days=1)
+        
     # 주말일 경우 직전 금요일로 조정
     while target_date.weekday() >= 5:
         target_date -= timedelta(days=1)
@@ -58,21 +66,21 @@ def scrape_and_update():
     date_key = target_date.strftime("%Y-%m-%d")
     print(f"🚀 자동 수집 시작 대상 영업일: {date_key}")
     
-    # 1. 기존 데이터 로드 및 중복 검사
+    # 1. 기존 데이터 로드 및 중복 검사 (중복 시 덮어쓰기 위해 기존 행 삭제)
+    history_df = pd.DataFrame()
     if os.path.exists(HISTORY_FILE):
         try:
             history_df = pd.read_csv(HISTORY_FILE)
             history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
             history_df["Date"] = history_df["Date"].astype(str)
             
+            # 기존에 동일한 날짜 데이터가 있다면 삭제 (새로운 최신 데이터로 덮어쓰기 위함)
             if date_key in history_df["Date"].values:
-                print(f"ℹ️ {date_key} 데이터가 이미 존재합니다. 작업을 종료합니다.")
-                return
+                print(f"ℹ️ {date_key} 데이터가 이미 존재합니다. 최신 데이터로 덮어씁니다.")
+                history_df = history_df[history_df["Date"] != date_key]
         except Exception as e:
             print(f"❌ 기존 파일 읽기 오류: {str(e)}")
             history_df = pd.DataFrame()
-    else:
-        history_df = pd.DataFrame()
 
     # 2. 크롤링 기초 데이터 수집
     kospi_close = None

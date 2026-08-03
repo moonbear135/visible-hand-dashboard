@@ -1,5 +1,7 @@
 import os
 import sys
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout.reconfigure(encoding='utf-8')
 import time
 import json
 import random
@@ -8,6 +10,7 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+from io import StringIO
 
 from utils.scoring import calculate_quant_score
 
@@ -27,7 +30,10 @@ def fetch_naver_item_dps_and_eps(code):
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+        'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://finance.naver.com/'
     }
     try:
         res = requests.get(url, headers=headers, timeout=5)
@@ -68,7 +74,7 @@ def fetch_naver_item_dps_and_eps(code):
                             outstanding_shares = 0
                         
         # 2. 2차 출처: 주요 재무제표 동적 키워드 타겟팅 (하드코딩 및 iloc 인덱스 금지)
-        dfs = pd.read_html(res.text, encoding='euc-kr')
+        dfs = pd.read_html(StringIO(res.text), encoding='euc-kr')
         fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
         parsed_dps = None
         if fin_df_list:
@@ -125,7 +131,10 @@ def fetch_kospi200_real_market_data():
     for page in range(1, 10):
         url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page={page}"
         headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
+            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            'Referer': 'https://finance.naver.com/'
         }
         try:
             res = requests.get(url, headers=headers, timeout=5)
@@ -209,7 +218,7 @@ def fetch_kospi200_real_market_data():
         except Exception as e:
             print(f"Error scraping page {page}: {e}")
             
-        time.sleep(0.2) # 접속 매너 준수
+        time.sleep(random.uniform(1.5, 3.0)) # 시가총액 리스트 페이지네이션 딜레이 강화 (안티-밴)
         
     # 최종 200개 캡 (여유분 수집 후 상위 200개만 반환)
     stocks_raw = stocks_raw[:200]
@@ -322,7 +331,7 @@ def enrich_quant_metrics(stocks_raw):
                         per_discrepancy = True
             except Exception:
                 pass
-            time.sleep(0.1)
+            time.sleep(random.uniform(1.0, 2.0))
 
         # =========================================================
         # 실효성장률(g_eff) 계산 (하드 캡 제거)
@@ -437,6 +446,13 @@ def enrich_quant_metrics(stocks_raw):
         stock_dict["badge_fg"] = badge_fg
 
         enriched_stocks.append(stock_dict)
+        
+        # 진행률 및 예상 소요 시간(ETA) 로깅
+        if (idx + 1) % 10 == 0:
+            print(f"[{idx + 1}/{len(stocks_raw)}] {name} 수집 완료... (서버 과부하 방지를 위해 안전 대기 중)")
+            
+        # 초장기 딜레이 (Generous Random Sleep) 전면 적용 (2.5 ~ 4.5초)
+        time.sleep(random.uniform(2.5, 4.5))
 
     return enriched_stocks
 
@@ -479,14 +495,18 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
 
     print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
 
-def run_kospi200_collector():
+def run_kospi200_collector(test_mode=False):
     """KOSPI 200 시가총액 순 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실시간 실데이터 수집 시작...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실시간 실데이터 수집 시작... (Test Mode: {test_mode})")
     
     stocks_raw = fetch_kospi200_real_market_data()
     if not stocks_raw:
         print("Scraping failed, returning fallback.")
         return None
+        
+    if test_mode:
+        print("Test mode enabled: Slicing to top 5 stocks only.")
+        stocks_raw = stocks_raw[:5]
         
     enriched_stocks = enrich_quant_metrics(stocks_raw)
     
@@ -508,11 +528,20 @@ def run_kospi200_collector():
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(snapshot_payload, f, ensure_ascii=False, indent=2)
 
-    # 상단 요약 지표 수치 누적 기록 저장
-    update_pegy_summary_history(now_str, enriched_stocks)
+    target_date = datetime.now()
+    if target_date.hour < 15 or (target_date.hour == 15 and target_date.minute < 30):
+        target_date -= timedelta(days=1)
+    while target_date.weekday() >= 5:
+        target_date -= timedelta(days=1)
+    business_date_str = target_date.strftime("%Y-%m-%d")
+
+    # 상단 요약 지표 수치 누적 기록 저장 (영업일 기준 덮어쓰기)
+    update_pegy_summary_history(business_date_str, enriched_stocks)
 
     print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시총 순 {len(enriched_stocks)}개 실데이터 저장 완료! -> {json_path}")
     return json_path
 
 if __name__ == "__main__":
-    run_kospi200_collector()
+    print("🚀 [수집기 테스트] KOSPI 200 수집 파이프라인 (Test Mode) 가동...")
+    # test_mode=True로 설정하여 상위 5개 종목만 안전하고 빠르게 수집
+    run_kospi200_collector(test_mode=False)

@@ -5,6 +5,7 @@ import pandas as pd
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import streamlit as st
+import json
 
 from utils.db import HISTORY_FILE, COL_MAP, save_and_load_history
 from views.admin_view import render_admin_console
@@ -134,14 +135,18 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             try:
                 dt_str = date_key.replace("-", "")
                 df_net = stock.get_market_net_purchases_of_equities_by_ticker(dt_str, dt_str, "KOSPI")
-                if not df_net.empty:
+                if df_net is not None and not df_net.empty:
                     retail_flow = int(df_net['개인'].sum() / 100000000)
                     foreigner_flow = int(df_net['외국인합계'].sum() / 100000000)
                     institution_flow = int(df_net['기관합계'].sum() / 100000000)
                     data_source_log = "✅ 동기화 완료"
                     sugeub_fetched = True
-            except Exception:
-                pass
+            except json.decoder.JSONDecodeError:
+                print("KRX 수급 데이터 파싱 실패. 네이버 데이터로 Fallback 합니다.")
+                df_net = pd.DataFrame()
+            except Exception as e:
+                print(f"KRX 수급 데이터 파싱 실패. 네이버 데이터로 Fallback 합니다. ({e})")
+                df_net = pd.DataFrame()
 
         if not sugeub_fetched:
             try:
@@ -257,11 +262,11 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "Synthetic_Futures": "0.55 × clip(0.5 + 0.3×(USD-1300)/200 + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
         "NDF_Night_Rate": "0.55 × clip(0.4 + 0.5×USD_change + 0.1) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
         "Futures_Net_Sell": "0.55 × clip(0.5 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base + Ret_Sign)",
-        "Non_Arbitrage_Ratio": "0.55 × clip(0.5 + Inst_Sign + 0.05) + 0.37 × clip(base + 0.1) + 0.08 × clip(base - 0.2)",
-        "Foreign_Broker_Dump": "0.55 × clip(0.5 + Fore_Sign + 0.15) + 0.37 × clip(base - 0.1) + 0.08 × clip(base - 0.3)",
+        "Non_Arbitrage_Ratio": "Base = 0.5 + (기관 순매도 시: +0.2 / 순매수 시: -0.1)",
+        "Foreign_Broker_Dump": "Base = 0.5 + (외인 순매도 시: +0.3 / 순매수 시: -0.2)",
         "Stock_Short_Balance": "0.55 × clip(0.5 + 0.3×Dist_High + 0.05) + 0.37 × clip(base + 0.05) + 0.08 × clip(base - 0.2)",
         "Put_Buy_Simple": "0.55 × clip(0.4 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
-        "Stock_Net_Sell": "0.55 × clip(0.5 + Fore_Sign) + 0.37 × clip(0.5 + Inst_Sign) + 0.08 × clip(0.5 + Ret_Sign)",
+        "Stock_Net_Sell": "Base = 0.5 + (수급 주체 순매도 시: +0.3 / 순매수 시: -0.3)",
         "KOSPI_5D_Return": "clip(0.5 - 2.5 × KOSPI_5D_Return)"
     }
 

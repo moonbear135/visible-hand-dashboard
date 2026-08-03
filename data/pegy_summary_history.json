@@ -173,5 +173,33 @@
     "growth": 10.5,
     "pegy": 0.73,
     "total_count": 200
+  },
+  {
+    "date": "2026-08-03 14:32",
+    "f_per": 12.0,
+    "growth": 10.5,
+    "pegy": 0.72,
+    "total_count": 200
+  },
+  {
+    "date": "2026-08-03 14:51",
+    "f_per": 5.0,
+    "growth": 14.1,
+    "pegy": 0.23,
+    "total_count": 5
+  },
+  {
+    "date": "2026-08-03 14:55",
+    "f_per": 5.0,
+    "growth": 14.1,
+    "pegy": 0.23,
+    "total_count": 5
+  },
+  {
+    "date": "2026-08-03 20:07",
+    "f_per": 12.0,
+    "growth": 10.5,
+    "pegy": 0.75,
+    "total_count": 200
   }
 ]

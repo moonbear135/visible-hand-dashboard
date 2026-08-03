@@ -3,6 +3,7 @@ import requests
 from bs4 import BeautifulSoup
 import pandas as pd
 from datetime import datetime, timedelta
+import json
 
 # pykrx 임포트 시도
 try:
@@ -211,6 +212,9 @@ class DataCrossValidator:
                     ret_krx = int(df_krx['개인'].sum() / 100000000)
                     krx_flow = {"개인": ret_krx, "외국인": fore_krx, "기관": inst_krx}
                     print(f"  * [출처 B] KRX 공식 수급 : 개인 = {ret_krx}억 | 외인 = {fore_krx}억 | 기관 = {inst_krx}억")
+            except json.decoder.JSONDecodeError:
+                print("KRX 수급 데이터 파싱 실패. 네이버 데이터로 Fallback 합니다.")
+                df_krx = pd.DataFrame()
             except Exception as e:
                 print(f"  * [출처 B] KRX 수급 조회 실패: {e}")
         else:
