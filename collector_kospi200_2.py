@@ -185,6 +185,11 @@ def fetch_kospi200_real_market_data():
                 code = href.split('code=')[-1] if 'code=' in href else ''
                 
                 try:
+                    rank_val = int(cols[0].text.strip())
+                except ValueError:
+                    rank_val = len(stocks_raw) + 1
+
+                try:
                     price = float(cols[2].text.strip().replace(',', ''))
                 except ValueError:
                     price = 0.0
@@ -203,6 +208,7 @@ def fetch_kospi200_real_market_data():
                     continue
                     
                 stocks_raw.append({
+                    "rank": rank_val,
                     "name": name,
                     "code": code,
                     "price": price,
@@ -374,7 +380,7 @@ def enrich_quant_metrics(stocks_raw):
             print(f"⚠️ [{name} ({code})] 3단계 하네스 검증 경고: {v_logs[-1]}")
 
         stock_dict = {
-            "rank": idx + 1,
+            "rank": s["rank"],
             "name": name,
             "code": code,
             "price": price,

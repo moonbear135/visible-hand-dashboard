@@ -88,6 +88,13 @@ from views.admin_view import render_admin_sidebar
 from views.macro_view import render_macro_page
 from views.pegy_view import render_pegy_page
 from views.sandbox_view import render_sandbox_page
+from utils.scheduler import start_scheduler_thread
+
+@st.cache_resource
+def init_background_jobs():
+    start_scheduler_thread()
+
+init_background_jobs()
 
 def main():
     # URL Query Parameter 체크 (예: ?view=sandbox)

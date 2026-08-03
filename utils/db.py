@@ -192,8 +192,15 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
             
             if str(date_key) not in history_df["Date"].values:
                 if is_admin:
-                    st.write(f"📝 [관리자] 신규 날짜 {date_key} 추가 결합 진행")
+                    st.write(f"💡 [관리자] 신규 날짜 {date_key} 추가 결합 진행")
                 history_df = pd.concat([history_df, new_df], ignore_index=True)
+            else:
+                if is_admin:
+                    st.write(f"💡 [관리자] 기존 날짜 {date_key} 데이터 업데이트 진행")
+                history_df.set_index("Date", inplace=True)
+                new_df.set_index("Date", inplace=True)
+                history_df.update(new_df)
+                history_df.reset_index(inplace=True)
                 
             history_df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
         except Exception as e:

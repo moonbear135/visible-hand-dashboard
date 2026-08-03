@@ -206,26 +206,6 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         except Exception:
             pass
 
-    def clip(val):
-        return min(1.0, max(0.0, val))
-
-    market_scores = {
-        "FX_Swap_Point": {"Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)},
-        "Put_OTM_OI": {"Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)), "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))},
-        "Short_Ratio": {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
-        "ELS_KnockIn": {"Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)},
-        "VKOSPI_Skew": {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
-        "Synthetic_Futures": {"Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)), "Institution": clip(synth_base), "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))},
-        "NDF_Night_Rate": {"Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)},
-        "Futures_Net_Sell": {"Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)), "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)), "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))},
-        "Non_Arbitrage_Ratio": {"Foreigner": clip(non_base + 0.05), "Institution": clip(non_base + 0.1), "Retail": clip(non_base - 0.2)},
-        "Foreign_Broker_Dump": {"Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)},
-        "Stock_Short_Balance": {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
-        "Put_Buy_Simple": {"Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)), "Institution": clip(put_buy_base), "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))},
-        "Stock_Net_Sell": {"Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)), "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)), "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))},
-        "KOSPI_5D_Return": {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
-    }
-
     weights = {
         "FX_Swap_Point": round(12 * 100 / 102, 4), "Put_OTM_OI": round(8 * 100 / 102, 4),
         "Short_Ratio": round(6 * 100 / 102, 4), "ELS_KnockIn": round(7 * 100 / 102, 4),
@@ -238,19 +218,19 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
 
     friendly_names = {
         "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
-        "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 베팅한 대기자금)",
-        "Short_Ratio": "공매도 거래 비중 (주가를 떨어뜨리려는 매도세)",
-        "ELS_KnockIn": "ELS 낙인 위험 (대규모 원금손실 구간 진입 여부)",
-        "VKOSPI_Skew": "공포지수 비대칭도 (투자자들의 불안 심리 강도)",
-        "Synthetic_Futures": "합성선물 가격 차이 (외국인의 파생상품 하방 압력)",
-        "NDF_Night_Rate": "야간 역외환율 변동 (원/달러 환율 급등 위험)",
-        "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 세기)",
-        "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도량)",
+        "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 배팅한 투기자본)",
+        "Short_Ratio": "공매도 거래 비중 (주도권을 쥐어짜려는 매도세)",
+        "ELS_KnockIn": "ELS 녹인 위험 (대규모 원금손실 구간 진입 여부)",
+        "VKOSPI_Skew": "공포지수 비대칭성 (투자자들의 불안 심리 강도)",
+        "Synthetic_Futures": "합성선물 가격차이 (외국인의 파생상품 하방 압력)",
+        "NDF_Night_Rate": "야간 환율스왑 변동 (원/달러 환율 급등 위험)",
+        "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 투기)",
+        "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도세)",
         "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
         "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
-        "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
+        "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 쏠림 배팅 규모)",
         "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-        "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 하락에 따른 직접 지표)"
     }
 
     formulas = {
@@ -262,51 +242,79 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "Synthetic_Futures": "0.55 × clip(0.5 + 0.3×(USD-1300)/200 + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
         "NDF_Night_Rate": "0.55 × clip(0.4 + 0.5×USD_change + 0.1) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
         "Futures_Net_Sell": "0.55 × clip(0.5 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base + Ret_Sign)",
-        "Non_Arbitrage_Ratio": "Base = 0.5 + (기관 순매도 시: +0.2 / 순매수 시: -0.1)",
-        "Foreign_Broker_Dump": "Base = 0.5 + (외인 순매도 시: +0.3 / 순매수 시: -0.2)",
+        "Non_Arbitrage_Ratio": "Base = 0.5 + (기관 순매도시 +0.2 / 순매수시 -0.1)",
+        "Foreign_Broker_Dump": "Base = 0.5 + (외인 순매도시 +0.3 / 순매수시 -0.2)",
         "Stock_Short_Balance": "0.55 × clip(0.5 + 0.3×Dist_High + 0.05) + 0.37 × clip(base + 0.05) + 0.08 × clip(base - 0.2)",
         "Put_Buy_Simple": "0.55 × clip(0.4 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
-        "Stock_Net_Sell": "Base = 0.5 + (수급 주체 순매도 시: +0.3 / 순매수 시: -0.3)",
+        "Stock_Net_Sell": "Base = 0.5 + (수급 주체 순매도시 +0.3 / 순매수시 -0.3)",
         "KOSPI_5D_Return": "clip(0.5 - 2.5 × KOSPI_5D_Return)"
     }
 
+    sub_scores = {}
+    extreme_signal_count = 0
     investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
 
-    sub_scores = {}
-    total_weighted_risk = 0.0
-    total_weight = sum(weights.values())
-    extreme_signal_count = 0
+    if not local_loaded:
+        def clip(val):
+            return min(1.0, max(0.0, val))
 
-    for item, w in weights.items():
-        risks = market_scores[item]
-        weighted_risk = (
-            (risks["Foreigner"] * investor_weights["Foreigner"])
-            + (risks["Institution"] * investor_weights["Institution"])
-            + (risks["Retail"] * investor_weights["Retail"])
-        )
-        if weighted_risk >= 0.75:
-            extreme_signal_count += 1
-            
-        sub_scores[item] = round(weighted_risk * 100.0, 1)
-        total_weighted_risk += weighted_risk * w
+        market_scores = {
+            "FX_Swap_Point": {"Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)},
+            "Put_OTM_OI": {"Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)), "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))},
+            "Short_Ratio": {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
+            "ELS_KnockIn": {"Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)},
+            "VKOSPI_Skew": {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
+            "Synthetic_Futures": {"Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)), "Institution": clip(synth_base), "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))},
+            "NDF_Night_Rate": {"Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)},
+            "Futures_Net_Sell": {"Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)), "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)), "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))},
+            "Non_Arbitrage_Ratio": {"Foreigner": clip(non_base + 0.05), "Institution": clip(non_base + 0.1), "Retail": clip(non_base - 0.2)},
+            "Foreign_Broker_Dump": {"Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)},
+            "Stock_Short_Balance": {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
+            "Put_Buy_Simple": {"Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)), "Institution": clip(put_buy_base), "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))},
+            "Stock_Net_Sell": {"Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)), "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)), "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))},
+            "KOSPI_5D_Return": {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
+        }
 
-    base_score = (total_weighted_risk / total_weight) * 100.0
+        total_weighted_risk = 0.0
+        total_weight = sum(weights.values())
 
-    multiplier = 1.0
-    if extreme_signal_count >= 5:
-        multiplier = 1.3
-    elif extreme_signal_count >= 3:
-        multiplier = 1.15
+        for item, w in weights.items():
+            risks = market_scores[item]
+            weighted_risk = (
+                (risks["Foreigner"] * investor_weights["Foreigner"])
+                + (risks["Institution"] * investor_weights["Institution"])
+                + (risks["Retail"] * investor_weights["Retail"])
+            )
+            if weighted_risk >= 0.75:
+                extreme_signal_count += 1
+                
+            sub_scores[item] = round(weighted_risk * 100.0, 1)
+            total_weighted_risk += weighted_risk * w
 
-    # [수정] 위험 할증(Multiplier)은 위험 지수가 50점을 초과할 때만 상향 가산 적용
-    if base_score > 50.0:
-        final_score = 50.0 + (base_score - 50.0) * multiplier
+        base_score = (total_weighted_risk / total_weight) * 100.0
+
+        multiplier = 1.0
+        if extreme_signal_count >= 5:
+            multiplier = 1.3
+        elif extreme_signal_count >= 3:
+            multiplier = 1.15
+
+        if base_score > 50.0:
+            final_score = 50.0 + (base_score - 50.0) * multiplier
+        else:
+            final_score = base_score + (extreme_signal_count * 2.5)
+
+        score = round(max(0.0, min(100.0, final_score)), 1)
     else:
-        # 50점 이하 안정 구간에서는 극단 신호 발생 시 위험도 기여분을 원점수로 가산
-        final_score = base_score + (extreme_signal_count * 2.5)
-
-    final_score = round(max(0.0, min(100.0, final_score)), 1)
-    score = final_score
+        for item, w in weights.items():
+            if item in row.columns:
+                val = float(row.iloc[0][item])
+                sub_scores[item] = round(val * 100.0, 1)
+                if val >= 0.75:
+                    extreme_signal_count += 1
+            else:
+                sub_scores[item] = 50.0
+        score = float(row.iloc[0]["Score"])
 
     details = []
     for item, w in weights.items():
@@ -323,14 +331,21 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     details = sorted(details, key=lambda x: x["중요도 (가중치)"], reverse=True)
 
     metrics_dict = {}
-    for item in weights.keys():
-        risks = market_scores[item]
-        weighted_risk = (
-            (risks["Foreigner"] * investor_weights["Foreigner"])
-            + (risks["Institution"] * investor_weights["Institution"])
-            + (risks["Retail"] * investor_weights["Retail"])
-        )
-        metrics_dict[item] = weighted_risk
+    if not local_loaded:
+        for item in weights.keys():
+            risks = market_scores[item]
+            weighted_risk = (
+                (risks["Foreigner"] * investor_weights["Foreigner"])
+                + (risks["Institution"] * investor_weights["Institution"])
+                + (risks["Retail"] * investor_weights["Retail"])
+            )
+            metrics_dict[item] = weighted_risk
+    else:
+        for item in weights.keys():
+            if item in row.columns:
+                metrics_dict[item] = float(row.iloc[0][item])
+            else:
+                metrics_dict[item] = 0.5
 
     if local_loaded or is_live_connected:
         history_df = save_and_load_history(date_key, score, kospi_close, usd_close, retail_flow, foreigner_flow, institution_flow, metrics_dict)
@@ -401,22 +416,28 @@ def render_macro_page():
         if len(history_df) >= 2:
             prev_row = df_sorted.iloc[-2]
             k_prev = float(prev_row["KOSPI"])
-            k_pct = ((k_val - k_prev) / k_prev) * 100
+            k_diff = k_val - k_prev
+            k_pct = (k_diff / k_prev) * 100 if k_prev != 0 else 0.0
             u_prev = float(prev_row["USD_KRW"])
-            u_pct = ((u_val - u_prev) / u_prev) * 100
+            u_diff = u_val - u_prev
+            u_pct = (u_diff / u_prev) * 100 if u_prev != 0 else 0.0
         else:
+            k_diff = 0.0
             k_pct = 0.0
+            u_diff = 0.0
             u_pct = 0.0
     else:
         k_val = 2500.0
+        k_diff = 0.0
         k_pct = 0.0
         u_val = 1350.0
+        u_diff = 0.0
         u_pct = 0.0
 
-    k_color = "#ef4444" if k_pct < 0 else "#22c55e"
-    k_sign = "▼" if k_pct < 0 else "▲"
-    u_color = "#ef4444" if u_pct > 0 else "#22c55e"
-    u_sign = "▲" if u_pct > 0 else "▼"
+    k_color = "#ef4444" if k_diff < 0 else "#22c55e"
+    k_sign = "▼" if k_diff < 0 else "▲"
+    u_color = "#ef4444" if u_diff > 0 else "#22c55e"
+    u_sign = "▲" if u_diff > 0 else "▼"
 
     render_clean_html(
         f"""
@@ -425,7 +446,7 @@ def render_macro_page():
                 <div style="font-size: 15px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">📈 KOSPI 주가지수</div>
                 <div style="font-size: 46px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{k_val:,.2f}</div>
                 <div style="font-size: 17px; color: {k_color}; font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 4px;">
-                    <span>{k_sign} {abs(k_pct):.2f}%</span>
+                    <span>{k_sign} {abs(k_diff):.2f} ({abs(k_pct):.2f}%)</span>
                 </div>
             </div>
             <div style="flex: 1 1 280px; min-width: 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #334155; border-radius: 16px; padding: 22px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -631,8 +652,14 @@ def render_macro_page():
             </ul>
             <div style="background-color: #ef4444; border-radius: 8px; padding: 14px; margin-top: 22px; text-align: center; box-shadow: 0 4px 6px rgba(0,0,0,0.3);">
                 <span style="color: #ffffff; font-size: 15.5px; font-weight: 700; letter-spacing: 1.2px; display: inline-block;">
-                    🚨 [중요 경고] AI의 분석 결과이므로 절대적인 책임은 투자자 본인에게 있습니다.
+                    🚨 [투자 주의 경고 및 AI 분석 안내]
                 </span>
+                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
+                    본 리포트의 수치 및 분석 결과는 공시된 재무제표와 시장 데이터를 기반으로 AI 퀀트 알고리즘이 자동 계산한 단순 참고용 정보입니다. 특정 종목의 매수·매도를 권유하거나 투자 자문을 제공하지 않으며, 데이터의 정확성이나 완벽성을 보장하지 않습니다.
+                </div>
+                <div style="font-size: 13.5px; color: #fecdd3; font-weight: 600; margin-top: 3px;">
+                    ⚠️ 모든 투자 결정과 그에 따른 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있음을 명시합니다.
+                </div>
             </div>
         </div>
         """
@@ -653,6 +680,7 @@ def render_macro_page():
             
             df_temp = history_df.copy()
             df_temp['Date'] = pd.to_datetime(df_temp['Date'])
+            df_temp = df_temp.sort_values('Date')
             
             agg_rules = {
                 "Score": "mean",
