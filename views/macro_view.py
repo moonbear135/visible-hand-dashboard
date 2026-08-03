@@ -453,7 +453,7 @@ def render_macro_page():
                 <div style="font-size: 15px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">💵 원/달러 환율</div>
                 <div style="font-size: 46px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{u_val:,.2f}<span style="font-size: 28px; font-weight: 700;">원</span></div>
                 <div style="font-size: 17px; color: {u_color}; font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 4px;">
-                    <span>{u_sign} {abs(u_pct):.2f}%</span>
+                    <span>{u_sign} {abs(u_diff):.2f} ({abs(u_pct):.2f}%)</span>
                 </div>
             </div>
         </div>
