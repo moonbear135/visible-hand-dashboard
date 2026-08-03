@@ -254,7 +254,9 @@ def render_pegy_page():
         
         f_per_delta_str = f"{diff_per:+.1f}배 (이전 동기화 대비)"
         growth_delta_str = f"{diff_growth:+.1f}%p (이전 동기화 대비)"
-        pegy_delta_str = f"{diff_pegy:+.2f} (이전 동기화 대비)"
+        pegy_delta_num = f"{diff_pegy:+.2f}"
+    else:
+        pegy_delta_num = "+0.00"
 
     if calc_pegy < 0.85:
         pegy_status = "🟢 저평가 수용 구간"
@@ -263,13 +265,15 @@ def render_pegy_page():
     else:
         pegy_status = "🔴 고평가 관망 구간"
 
+    pegy_delta_str = f"{pegy_delta_num} | {pegy_status}"
+
     col1, col2, col3 = st.columns(3)
     with col1:
         st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", f_per_delta_str)
     with col2:
         st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", growth_delta_str)
     with col3:
-        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy} ({pegy_status})", pegy_delta_str)
+        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy}", pegy_delta_str)
 
     st.markdown("---")
 
