@@ -494,6 +494,17 @@ def render_pegy_page():
             </span>
             """
 
+        t_eps_val = s.get('t_eps', 0)
+        t_eps_str = f"{t_eps_val:,}" if isinstance(t_eps_val, (int, float)) else str(t_eps_val)
+        t_pbr = s.get("t_pbr", "-")
+        ev_ebitda = s.get("ev_ebitda", "-")
+        ev_years_str = ""
+        try:
+            ev_val = float(ev_ebitda)
+            ev_years_str = f" <span style='font-size: 11px; color: #94a3b8; font-weight: 500;'>(약 {ev_val:.1f}년)</span>"
+        except (ValueError, TypeError):
+            pass
+
         dps_val = s.get('dps', 0)
         dps_str = f"{dps_val:,.0f}원/주" if dps_val > 0 else "무배당"
         growth_val = s.get('growth', 0)
@@ -581,7 +592,7 @@ def render_pegy_page():
                     <span>📜 Trailing (과거 실적 참고용)</span>
                     <span style="font-size: 11px; color: #64748b; font-weight: 400;">*과거 12개월 실적 스냅샷</span>
                 </div>
-                <div style="display: grid; grid-template-columns: 1fr 1.3fr 2.2fr 1.3fr; gap: 14px; align-items: flex-start;">
+                <div style="display: grid; grid-template-columns: 0.9fr 1.8fr 1.9fr 1.2fr; gap: 12px; align-items: flex-start;">
                     <div>
                         <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
                             <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>
@@ -589,10 +600,15 @@ def render_pegy_page():
                         <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;">{s['t_roe']}%</div>
                     </div>
                     <div>
-                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
-                            <span class="q-tooltip">PER / EPS ℹ️<span class="q-tooltiptext"><b>Trailing PER & EPS</b><br>• PER (주가수익비율): 주가 / 주당순이익<br>• EPS (주당순이익): 최근 4분기 합산 순이익 / 발행주식수</span></span>
+                        <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 5px;">
+                            <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
                         </div>
-                        <div style="font-size: 14px; font-weight: 700; color: #cbd5e1;">{s['t_per']}배 / {s['t_eps']:,.0f}원</div>
+                        <div style="font-size: 12.5px; color: #cbd5e1; font-weight: 600; margin-bottom: 4px; letter-spacing: -0.4px;">
+                            <span title="현재 주가 수익 대비 평가 지표 (수치가 낮을수록 저평가)" style="font-weight: 800; color: #94a3b8;">PER</span> {s['t_per']}배 <span style="color: #475569;">|</span> <span title="주식 1주가 1년 동안 벌어들인 순이익" style="font-weight: 800; color: #94a3b8;">EPS</span> {t_eps_str}원 <span style="color: #475569;">|</span> <span title="장부상 순자산 대비 주가 (청산 가치, 1배 미만이면 자산가치보다 쌈)" style="font-weight: 800; color: #94a3b8;">PBR</span> {t_pbr}배
+                        </div>
+                        <div style="font-size: 12.5px; color: #38bdf8; font-weight: 700; letter-spacing: -0.4px;">
+                            <span title="기업 통째로 인수 시, 회사가 벌어들이는 순수 현금으로 투자 원금을 회수하는 데 걸리는 시간" style="color: #94a3b8;">EV/EBITDA (M&A 원금회수)</span> {ev_ebitda}배{ev_years_str}
+                        </div>
                     </div>
                     <div>
                         <div style="font-size: 11.5px; color: #94a3b8; margin-bottom: 4px;">
