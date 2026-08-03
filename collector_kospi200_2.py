@@ -163,7 +163,7 @@ def fetch_kospi200_real_market_data():
                     "ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", 
                     "ARIRANG", "HANARO", "KBSTAR", "PLUS", "KOSEF", "KINDEX", "TREX",
                     "TIMEFOLIO", "FOCUS", "UNICORN", "HERO",
-                    "KIWOOM", "BNK", "MIRAEASSET"
+                    "KIWOOM ", "BNK ", "MIRAEASSET "
                 ]
                 # 2차: 상품 유형 키워드 필터 (ETF/펀드 상품명 패턴)
                 fund_type_keywords = [
