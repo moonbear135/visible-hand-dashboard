@@ -86,7 +86,8 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                 history_df = pd.read_csv(HISTORY_FILE)
                 history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
                 history_df["Date"] = history_df["Date"].astype(str)
-                row = history_df[history_df["Date"] == date_key]
+                df_sorted = history_df.sort_values(by="Date").reset_index(drop=True)
+                row = df_sorted[df_sorted["Date"] == date_key]
                 if not row.empty:
                     score = float(row.iloc[0]["Score"])
                     kospi_close = float(row.iloc[0]["KOSPI"])
@@ -94,9 +95,20 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                     retail_flow = int(row.iloc[0]["Retail"])
                     foreigner_flow = int(row.iloc[0]["Foreigner"])
                     institution_flow = int(row.iloc[0]["Institution"])
+                    
+                    idx = row.index[0]
+                    if idx > 0:
+                        prev_row = df_sorted.iloc[idx - 1]
+                        prev_k = float(prev_row["KOSPI"])
+                        prev_u = float(prev_row["USD_KRW"])
+                        if prev_k != 0:
+                            kospi_change = (kospi_close - prev_k) / prev_k
+                        if prev_u != 0:
+                            usd_change = (usd_close - prev_u) / prev_u
+                    
                     local_loaded = True
-            except Exception:
-                pass
+            except Exception as e:
+                print(f"Error loading local history: {e}")
 
         is_live_connected = False
         data_source_log = "✅ 동기화 완료" if local_loaded else "⚠️ 안전 모드"
@@ -125,7 +137,12 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                         
                     high_52w = kospi_df['High'].max()
                     dist_from_high = (high_52w - kospi_close) / high_52w
+                    
+                    actual_date = latest_kospi.name.strftime("%Y-%m-%d")
+                    if date_key != actual_date:
+                        date_key = actual_date
                     display_date = latest_kospi.name.strftime("%Y년 %m월 %d일")
+                    
                     data_source_log = "✅ 실시간 동기화 완료"
             except Exception as e:
                 data_source_log = "⚠️ 안전 모드 (시세 연동 지연)"
@@ -609,7 +626,8 @@ def render_macro_page():
         warning_items_html = ""
         for ind in top_indicators:
             raw_key = None
-            for eng_k, kor_v in COL_MAP.items():
+            # Retrieve the english key using friendly_names since the indicator name was set using it
+            for eng_k, kor_v in friendly_names.items():
                 if kor_v == ind["지표명 (한글 설명)"]:
                     raw_key = eng_k
                     break
