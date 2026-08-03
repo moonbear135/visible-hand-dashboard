@@ -231,7 +231,7 @@ def render_pegy_page():
     if all_stocks:
         f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per', 0) > 0]
         growth_list = [min(s.get('growth', 0), 35.0) for s in all_stocks]
-        pegy_list = [s.get('f_pegy', 0) for s in all_stocks if s.get('f_pegy', 0) > 0]
+        pegy_list = [s.get('f_pegy', 0) for s in all_stocks if 0 < s.get('f_pegy', 0) < 50.0]
 
         calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
         calc_growth = round(pd.Series(growth_list).median(), 1) if growth_list else 14.2  # 통계적 대표값 중앙값(Median) 통일
@@ -244,14 +244,17 @@ def render_pegy_page():
     # 누적 히스토리 기반 증감 변동분(Delta) 계산
     f_per_delta_str = "KOSPI 200 실시간 중앙값"
     growth_delta_str = "실시간 중앙값 컨센서스"
+    pegy_delta_str = "적정 밸류에이션"
 
     if len(summary_history) >= 2:
         prev = summary_history[-2]
         diff_per = round(calc_f_per - prev.get("f_per", calc_f_per), 1)
         diff_growth = round(calc_growth - prev.get("growth", calc_growth), 1)
+        diff_pegy = round(calc_pegy - prev.get("pegy", calc_pegy), 2)
         
         f_per_delta_str = f"{diff_per:+.1f}배 (이전 동기화 대비)"
         growth_delta_str = f"{diff_growth:+.1f}%p (이전 동기화 대비)"
+        pegy_delta_str = f"{diff_pegy:+.2f} (이전 동기화 대비)"
 
     if calc_pegy < 0.85:
         pegy_status = "🟢 저평가 수용 구간"
@@ -266,7 +269,7 @@ def render_pegy_page():
     with col2:
         st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", growth_delta_str)
     with col3:
-        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy}", pegy_status)
+        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy} ({pegy_status})", pegy_delta_str)
 
     st.markdown("---")
 
