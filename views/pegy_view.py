@@ -60,6 +60,9 @@ def load_pegy_summary_history():
 def render_pegy_page():
     """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 & 누적 히스토리 연동) 화면 렌더링"""
     
+    # 0. 최상단 앵커 (스크롤 이동용)
+    st.markdown("<div id='top-anchor'></div>", unsafe_allow_html=True)
+
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
     last_updated_at = metadata.get("last_updated_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
@@ -667,7 +670,21 @@ def render_pegy_page():
 
     # 9. 페이지네이션 (Pagination) 컨트롤 - 하단 배치
     st.markdown("---")
-    st.markdown("##### 📄 페이지 선택 (한 화면에 20개 종목 카드 노출)")
+    
+    col1, col2 = st.columns([0.8, 0.2])
+    with col1:
+        st.markdown("##### 📄 페이지 선택 (한 화면에 20개 종목 카드 노출)")
+    with col2:
+        st.markdown(
+            """
+            <div style='text-align: right; padding-top: 5px;'>
+                <a href='#top-anchor' target='_self' style='display: inline-block; padding: 8px 16px; background-color: #38bdf8; color: #0f172a; font-size: 14px; font-weight: 800; border-radius: 8px; text-decoration: none; box-shadow: 0 4px 6px rgba(0,0,0,0.3); transition: all 0.2s;'>
+                    ⬆️ TOP으로 가기
+                </a>
+            </div>
+            """, 
+            unsafe_allow_html=True
+        )
 
     page_options = [f"페이지 {i} (종목 {(i-1)*20+1} ~ {min(i*20, total_items)})" for i in range(1, total_pages + 1)]
     
