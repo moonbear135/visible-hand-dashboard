@@ -690,7 +690,7 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row divider">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ 콘크리트 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
+                                    <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 계산의 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
                                 </span>
                                 <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{floor_price_str}</span>
                             </div>

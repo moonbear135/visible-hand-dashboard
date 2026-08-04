@@ -214,7 +214,7 @@ def render_sandbox_page():
                                 <span class="price-text-curr">{price:,.0f}원</span>
                             </div>
                             <div class="comparison-row divider">
-                                <span class="label-text" title="회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)">🛡️ 콘크리트 바닥가</span>
+                                <span class="label-text" title="회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)">🛡️ PBR 계산의 바닥가</span>
                                 <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{floor_price_str}</span>
                             </div>
                             <div class="comparison-row">
