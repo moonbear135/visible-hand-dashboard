@@ -29,11 +29,27 @@ def fetch_naver_item_dps_and_eps(code):
     headers = {
         'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
     }
-    try:
-        res = requests.get(url, headers=headers, timeout=5)
-        if res.status_code != 200:
-            return None, None, None, None, None, None
+    max_retries = 3
+    base_delay = 1.0
+    res = None
+    
+    for attempt in range(max_retries):
+        try:
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code == 200:
+                break
+            else:
+                time.sleep(base_delay * (2 ** attempt) + random.uniform(0.1, 0.5))
+        except requests.exceptions.RequestException as e:
+            if attempt == max_retries - 1:
+                print(f"Error fetching {code}: {e}")
+                return None, None, None, None, None, None, None, "-", "-"
+            time.sleep(base_delay * (2 ** attempt) + random.uniform(0.1, 0.5))
             
+    if not res or res.status_code != 200:
+        return None, None, None, None, None, None, None, "-", "-"
+        
+    try:
         soup = BeautifulSoup(res.text, 'html.parser')
         
         t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
@@ -231,7 +247,7 @@ def fetch_kospi200_real_market_data():
         except Exception as e:
             print(f"Error scraping page {page}: {e}")
             
-        time.sleep(0.2) # 접속 매너 준수
+        time.sleep(random.uniform(2.0, 3.0)) # 매너 있는 크롤링을 위한 여유 있는 딜레이 (Polite Scraping)
         
     # 최종 200개 캡 (여유분 수집 후 상위 200개만 반환)
     stocks_raw = stocks_raw[:200]
@@ -460,6 +476,9 @@ def enrich_quant_metrics(stocks_raw):
         stock_dict["badge_fg"] = badge_fg
 
         enriched_stocks.append(stock_dict)
+        
+        # Polite Scraping: 대상 서버(네이버)에 부하를 주지 않기 위해 종목별 크롤링 간격 부여
+        time.sleep(random.uniform(2.0, 3.0))
 
     return enriched_stocks
 

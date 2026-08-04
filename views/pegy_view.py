@@ -243,6 +243,29 @@ def render_pegy_page():
         """,
         unsafe_allow_html=True
     )
+    
+    col_dl1, col_dl2 = st.columns(2)
+    with col_dl1:
+        latest_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "kospi200_pegy_latest.json")
+        if os.path.exists(latest_path):
+            with open(latest_path, "r", encoding="utf-8") as f:
+                st.download_button(
+                    label="📥 KOSPI 200 최신 스냅샷 다운로드 (JSON)",
+                    data=f.read(),
+                    file_name=f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json"
+                )
+    with col_dl2:
+        history_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "pegy_summary_history.json")
+        if os.path.exists(history_path):
+            with open(history_path, "r", encoding="utf-8") as f:
+                st.download_button(
+                    label="📥 누적 요약 히스토리 다운로드 (JSON)",
+                    data=f.read(),
+                    file_name=f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.json",
+                    mime="application/json"
+                )
+    st.markdown("<br>", unsafe_allow_html=True)
 
     # 5. 최신 200개 종목 동기화 데이터 및 누적 히스토리 기반 동적 요약 지표 산출
     if all_stocks:
@@ -558,7 +581,7 @@ def render_pegy_page():
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>• PEGY 밸류에이션: 최대 35점<br>• 자본효율성 (ROE/ROIC): 최대 30점<br>• 주주환원율 (DPS): 최대 20점<br>• Trailing 실적안정성: 최대 10점<br>• 변동성위험 보정: 최대 5점<br><b>*PEGY-목표가 100% 수학적 대칭성 통일 산식 반영</b></span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
+                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!</span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
                     </span>
                     <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
                         {s['badge']}
@@ -601,11 +624,11 @@ def render_pegy_page():
                     <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['t_roe']}%</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (추정 자기자본이익률)</b><br>향후 12개월 애널리스트 컨센서스 기준 예상 순이익 기반 예상 ROE입니다. (>=12% 시 목표가 +15% 프리미엄)</span></span>: 
+                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>내년에 회사가 가진 돈(자본)으로 얼마나 이익을 낼지 예상한 비율이에요. 높을수록 수익성이 좋아집니다.</span></span>: 
                     <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['f_roe']}%</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (투입자본이익률 / ROC)</b><br>실제 영업에 투입된 자산이 창출한 세후 영업이익 비율입니다. (>=10% 시 목표가 +10% 프리미엄, <6% 시 착시 저평가 경고)</span></span>: 
+                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>장사 밑천을 얼마나 효율적으로 굴렸는지 보여주는 지표예요. 이 숫자가 높을수록 돈을 잘 굴리는 똑똑한 기업입니다.</span></span>: 
                     <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['roic']}%</b>
                 </span>
             </div>
@@ -696,7 +719,7 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>보정 Forward PEGY & 목표 적정주가 안내</b><br>• <b>보정 PEGY 수치</b>: 주가수익비율(PER)을 실효성장률(성장률 35% Cap + 주주환원율, 변동성 1.18배 보정)로 나누어 산출합니다.<br>• <b>목표 적정가</b>: 클로드 원본 공식에 따라 [Target PER = 10.4 × (1.0 ± ROE/ROIC 프리미엄)]을 산출한 뒤, Forward EPS에 곱하여 산출합니다.</span></span>
+                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.</span></span>
                                 </span>
                                 <span class="price-text-target">{f_target:,.0f}원</span>
                             </div>

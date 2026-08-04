@@ -134,7 +134,15 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                 print(f"Error loading local history: {e}")
 
         is_live_connected = False
-        data_source_log = "✅ 마감 데이터 기준" if local_loaded else "⚠️ 안전 모드"
+        if local_loaded:
+            try:
+                mtime = os.path.getmtime(HISTORY_FILE)
+                sync_time = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
+                data_source_log = f"✅ 최종 동기화: {sync_time}"
+            except Exception:
+                data_source_log = "✅ 마감 데이터 기준"
+        else:
+            data_source_log = "⚠️ 안전 모드"
 
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
@@ -564,7 +572,7 @@ def render_macro_page():
         warning_items_html = ""
         for ind in sorted_details:
             raw_key = None
-            for eng_k, kor_v in friendly_names.items():
+            for eng_k, kor_v in FRIENDLY_NAMES.items():
                 if kor_v == ind["지표명 (한글 설명)"]:
                     raw_key = eng_k
                     break
