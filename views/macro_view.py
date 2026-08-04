@@ -79,13 +79,6 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         sugeub_fetched = True
         data_source_log = "✅ 동기화 완료 (관리자 입력)"
     else:
-        target_date = datetime.today()
-        while target_date.weekday() >= 5:
-            target_date -= timedelta(days=1)
-            
-        date_key = target_date.strftime("%Y-%m-%d")
-        display_date = target_date.strftime("%Y년 %m월 %d일")
-        
         local_loaded = False
         kospi_close = 2500.0
         kospi_change = 0.0
@@ -98,22 +91,34 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         retail_flow = 0
         score = 50.0
         
+        target_date = datetime.today()
+        while target_date.weekday() >= 5:
+            target_date -= timedelta(days=1)
+        date_key = target_date.strftime("%Y-%m-%d")
+        display_date = target_date.strftime("%Y년 %m월 %d일")
+        
         if os.path.exists(HISTORY_FILE):
             try:
                 history_df = pd.read_csv(HISTORY_FILE)
-                history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
-                history_df["Date"] = history_df["Date"].astype(str)
-                df_sorted = history_df.sort_values(by="Date").reset_index(drop=True)
-                row = df_sorted[df_sorted["Date"] == date_key]
-                if not row.empty:
-                    score = float(row.iloc[0]["Score"])
-                    kospi_close = float(row.iloc[0]["KOSPI"])
-                    usd_close = float(row.iloc[0]["USD_KRW"])
-                    retail_flow = int(row.iloc[0]["Retail"])
-                    foreigner_flow = int(row.iloc[0]["Foreigner"])
-                    institution_flow = int(row.iloc[0]["Institution"])
+                if not history_df.empty:
+                    history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
+                    history_df["Date"] = history_df["Date"].astype(str)
+                    df_sorted = history_df.sort_values(by="Date").reset_index(drop=True)
                     
-                    idx = row.index[0]
+                    # 항상 가장 최근에 마감된 영업일 데이터(마지막 행)를 불러옵니다.
+                    latest_row = df_sorted.iloc[-1]
+                    
+                    date_key = str(latest_row["Date"])
+                    display_date = datetime.strptime(date_key, "%Y-%m-%d").strftime("%Y년 %m월 %d일")
+                    
+                    score = float(latest_row["Score"])
+                    kospi_close = float(latest_row["KOSPI"])
+                    usd_close = float(latest_row["USD_KRW"])
+                    retail_flow = int(latest_row["Retail"])
+                    foreigner_flow = int(latest_row["Foreigner"])
+                    institution_flow = int(latest_row["Institution"])
+                    
+                    idx = df_sorted.index[-1]
                     if idx > 0:
                         prev_row = df_sorted.iloc[idx - 1]
                         prev_k = float(prev_row["KOSPI"])
@@ -128,91 +133,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                 print(f"Error loading local history: {e}")
 
         is_live_connected = False
-        data_source_log = "✅ 동기화 완료" if local_loaded else "⚠️ 안전 모드"
-
-    if not local_loaded and override_date is None:
-        if FDR_AVAILABLE:
-            try:
-                kospi_df = fdr.DataReader('^KS11')
-                usd_df = fdr.DataReader('USDKRW=X')
-                
-                if not kospi_df.empty and not usd_df.empty:
-                    latest_kospi = kospi_df.iloc[-1]
-                    prev_kospi = kospi_df.iloc[-2]
-                    kospi_close = latest_kospi['Close']
-                    kospi_change = (kospi_close - prev_kospi['Close']) / prev_kospi['Close']
-                    
-                    latest_usd = usd_df.iloc[-1]
-                    prev_usd = usd_df.iloc[-2]
-                    usd_close = latest_usd['Close']
-                    usd_change = (usd_close - prev_usd['Close']) / prev_usd['Close']
-                    
-                    kospi_returns = kospi_df['Close'].pct_change(fill_method=None).dropna()
-                    volatility = kospi_returns.tail(10).std() * 100
-                    if math.isnan(volatility) or volatility == 0:
-                        volatility = 1.2
-                        
-                    high_52w = kospi_df['High'].max()
-                    dist_from_high = (high_52w - kospi_close) / high_52w
-                    
-                    actual_date = latest_kospi.name.strftime("%Y-%m-%d")
-                    if date_key != actual_date:
-                        date_key = actual_date
-                    display_date = latest_kospi.name.strftime("%Y년 %m월 %d일")
-                    
-                    data_source_log = "✅ 실시간 동기화 완료"
-            except Exception as e:
-                data_source_log = "⚠️ 안전 모드 (시세 연동 지연)"
-
-        sugeub_fetched = False
-        if PYKRX_AVAILABLE:
-            try:
-                dt_str = date_key.replace("-", "")
-                df_net = stock.get_market_net_purchases_of_equities_by_ticker(dt_str, dt_str, "KOSPI")
-                if df_net is not None and not df_net.empty:
-                    retail_flow = int(df_net['개인'].sum() / 100000000)
-                    foreigner_flow = int(df_net['외국인합계'].sum() / 100000000)
-                    institution_flow = int(df_net['기관합계'].sum() / 100000000)
-                    data_source_log = "✅ 동기화 완료"
-                    sugeub_fetched = True
-            except json.decoder.JSONDecodeError:
-                print("KRX 수급 데이터 파싱 실패. 네이버 데이터로 Fallback 합니다.")
-                df_net = pd.DataFrame()
-            except Exception as e:
-                print(f"KRX 수급 데이터 파싱 실패. 네이버 데이터로 Fallback 합니다. ({e})")
-                df_net = pd.DataFrame()
-
-        if not sugeub_fetched:
-            try:
-                headers = {'User-Agent': 'Mozilla/5.0'}
-                found = False
-                for page in range(1, 6):
-                    url = f'https://finance.naver.com/sise/investorDealTrendDay.naver?bizdate={date_key.replace("-", "")}&sosok=01&page={page}'
-                    r = requests.get(url, headers=headers)
-                    r.encoding = 'euc-kr'
-                    soup = BeautifulSoup(r.text, 'html.parser')
-                    tb = soup.find('table', class_='type_1')
-                    
-                    if tb:
-                        rows = tb.find_all('tr')
-                        for tr in rows[2:]:
-                            cells = [td.text.strip() for td in tr.find_all(['td'])]
-                            cells = [c for c in cells if c]
-                            if cells and len(cells) >= 4:
-                                date_str = "20" + cells[0].replace(".", "-")
-                                if date_str == date_key:
-                                    retail_flow = int(cells[1].replace(",", ""))
-                                    foreigner_flow = int(cells[2].replace(",", ""))
-                                    institution_flow = int(cells[3].replace(",", ""))
-                                    display_date = target_date.strftime("%Y년 %m월 %d일")
-                                    data_source_log = "✅ 동기화 완료"
-                                    sugeub_fetched = True
-                                    found = True
-                                    break
-                        if found:
-                            break
-            except Exception as e:
-                data_source_log = "⚠️ 안전 모드 (수급 연동 지연)"
+        data_source_log = "✅ 마감 데이터 기준" if local_loaded else "⚠️ 안전 모드"
 
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
