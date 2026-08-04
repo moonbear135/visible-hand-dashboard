@@ -548,35 +548,6 @@ def render_pegy_page():
             bar_color = "#64748b"
             bar_width = 0
 
-        qs = s.get('quant_score', 0)
-        if qs >= 90:
-            ai_comment_text = "성장성, 자본효율성, 주주환원 3박자를 모두 완벽히 갖춘 최상급 퀄리티 주식입니다. 펀더멘털 대비 매우 매력적인 할인 구간에 진입해 있습니다."
-            ai_comment_color = "#10b981"
-        elif qs >= 80:
-            ai_comment_text = "안정적인 실적과 훌륭한 주주환원율을 보여주는 우량주로, 밸류에이션상 확실한 저평가 메리트를 가지고 있습니다."
-            ai_comment_color = "#34d399"
-        elif qs >= 70:
-            ai_comment_text = "준수한 실적과 펀더멘털을 갖추고 있으며, 현재 주가 역시 합리적인 저평가 구간에 머물러 있습니다."
-            ai_comment_color = "#38bdf8"
-        elif qs >= 60:
-            ai_comment_text = "주가 밸류에이션은 시장 평균 수준이거나 적정가에 근접해 있습니다. 추가적인 모멘텀이 확인될 때까지 관망을 권장합니다."
-            ai_comment_color = "#94a3b8"
-        elif qs >= 50:
-            ai_comment_text = "펀더멘털 대비 주가가 다소 높은 편입니다. 성장성에 비해 프리미엄이 껴 있어 하락 리스크를 대비해야 합니다."
-            ai_comment_color = "#fbbf24"
-        elif qs >= 40:
-            ai_comment_text = "실적 대비 밸류에이션이 상당히 고평가되어 있습니다. 현재 가격에서는 기대 수익률이 제한적일 수 있습니다."
-            ai_comment_color = "#f87171"
-        else:
-            ai_comment_text = "위험: 이익 대비 주가가 지나치게 고평가되어 있거나 실적이 크게 악화된 상태입니다. 투자에 각별한 주의가 요구되는 고위험 구간입니다."
-            ai_comment_color = "#ef4444"
-
-        ai_comment_html = f'''
-        <div style="margin-bottom: 14px; background: rgba(15, 23, 42, 0.5); border-left: 4px solid {ai_comment_color}; padding: 12px 16px; border-radius: 6px; font-size: 14px; color: #cbd5e1; line-height: 1.5; box-shadow: 0 4px 6px rgba(0,0,0,0.15);">
-            <b style="color: {ai_comment_color}; margin-right: 6px; font-size: 15px;">🤖 AI 코멘트:</b> {ai_comment_text}
-        </div>
-        '''
-
         card_html = f"""
         <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <!-- 1. 메인 헤더: 종목명 / 코드 / 퀀트종합점수 / 배지 / 현재가 -->
@@ -601,8 +572,6 @@ def render_pegy_page():
                     <span style="font-size: 25px; font-weight: 900; color: #38bdf8;">{s['price']:,.0f}원</span>
                 </div>
             </div>
-
-            {ai_comment_html}
 
             {"" if s.get('t_roe', 0) >= 0 else f'''
             <!-- 적자 경고 배너: ROE 마이너스 종목 강조 경고 -->
