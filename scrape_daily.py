@@ -143,9 +143,48 @@ def scrape_and_update():
         except Exception as e:
             print(f"⚠️ FinanceDataReader 수집 실패: {str(e)}")
 
-    if kospi_close is None or usd_close is None:
-        print("🚨 [에러] 지수 혹은 환율 데이터 연동에 실패하여 수집을 차단(Reject)하고 종료합니다.")
-        return
+    # === [네이버 웹 스크래핑(Primary) 우회 수집 로직] ===
+    try:
+        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
+        
+        # KOSPI 수집
+        k_res = requests.get("https://finance.naver.com/sise/sise_index.naver?code=KOSPI", headers=headers, timeout=5)
+        k_soup = BeautifulSoup(k_res.text, 'html.parser')
+        k_now = k_soup.select_one('#now_value')
+        if k_now:
+            k_val_str = k_now.text.replace(',', '')
+            if k_val_str.replace('.', '', 1).isdigit():
+                kospi_close_naver = float(k_val_str)
+                kospi_close = kospi_close_naver
+                print(f"✅ 네이버 금융 KOSPI 수집 성공: {kospi_close}")
+                        
+        # USD/KRW 수집
+        u_res = requests.get("https://finance.naver.com/marketindex/", headers=headers, timeout=5)
+        u_soup = BeautifulSoup(u_res.text, 'html.parser')
+        u_now = u_soup.select_one('#exchangeList > li.on > a.head.usd > div > span.value')
+        if u_now:
+            u_val_str = u_now.text.replace(',', '')
+            if u_val_str.replace('.', '', 1).isdigit():
+                usd_close_naver = float(u_val_str)
+                usd_close = usd_close_naver
+                print(f"✅ 네이버 금융 환율 수집 성공: {usd_close}")
+
+    except Exception as e:
+        print(f"⚠️ 네이버 금융 스크래핑 실패 (FDR 값 유지): {e}")
+
+    # === [백엔드 결측치 방어 로직 (Validation & Forward Fill)] ===
+    if pd.isna(kospi_close) or pd.isna(usd_close) or kospi_close is None or usd_close is None:
+        print("🚨 KOSPI 또는 환율 데이터 결측치(NaN/None) 감지! 과거 데이터(전일 종가)로 Forward Fill 보정 시도합니다.")
+        if not history_df.empty:
+            if pd.isna(kospi_close) or kospi_close is None:
+                kospi_close = float(history_df.iloc[-1]['코스피 종가'])
+                kospi_change = 0.0
+            if pd.isna(usd_close) or usd_close is None:
+                usd_close = float(history_df.iloc[-1]['원/달러 환율'])
+                usd_change = 0.0
+        else:
+            print("🚨 [에러] 과거 데이터마저 비어있어 시스템을 종료합니다.")
+            return
 
     # 3. 네이버 금융 외국인/기관 수급 데이터 크롤링
     retail_flow = None
@@ -367,6 +406,13 @@ def scrape_and_update():
     # 한글 컬럼명으로 변환하여 저장
     history_df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
     print("💾 market_history.csv 파일 누적 갱신 성공!")
+
+    # 6.5. AI 젬민이 코멘트 생성 (14개 지표 개별 루프)
+    try:
+        from utils.macro_ai import generate_macro_commentary
+        generate_macro_commentary(metrics_dict, score, kospi_close, usd_close)
+    except Exception as e:
+        print(f"⚠️ AI 코멘트 생성 중 에러 발생: {e}")
 
     # 7. 데이터 수집 완료 후 구글 드라이브 자동 백업 실행
     TARGET_FOLDER_ID = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"
