@@ -257,7 +257,10 @@ def render_pegy_page():
                 )
             if st.session_state.get("admin_mode", False):
                 try:
-                    df_latest = pd.read_json(latest_path)
+                    import json
+                    with open(latest_path, "r", encoding="utf-8") as f_json:
+                        latest_data = json.load(f_json)
+                    df_latest = pd.DataFrame(latest_data.get("stocks", []))
                     csv_latest = df_latest.to_csv(index=False).encode('utf-8-sig')
                     st.download_button(
                         label="📊 [관리자] 최신 스냅샷 다운로드 (Excel)",
@@ -265,7 +268,7 @@ def render_pegy_page():
                         file_name=f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv"
                     )
-                except Exception:
+                except Exception as e:
                     pass
     with col_dl2:
         history_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "pegy_summary_history.json")
