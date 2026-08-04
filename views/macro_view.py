@@ -105,8 +105,9 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
                     history_df["Date"] = history_df["Date"].astype(str)
                     df_sorted = history_df.sort_values(by="Date").reset_index(drop=True)
                     
-                    # 항상 가장 최근에 마감된 영업일 데이터(마지막 행)를 불러옵니다.
-                    latest_row = df_sorted.iloc[-1]
+                    # 항상 가장 최근에 마감된 영업일 데이터(마지막 행)를 DataFrame(1줄)으로 불러옵니다.
+                    row = df_sorted.tail(1)
+                    latest_row = row.iloc[0]
                     
                     date_key = str(latest_row["Date"])
                     display_date = datetime.strptime(date_key, "%Y-%m-%d").strftime("%Y년 %m월 %d일")
