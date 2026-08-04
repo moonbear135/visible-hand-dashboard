@@ -87,7 +87,6 @@ st.markdown(
 from views.admin_view import render_admin_sidebar
 from views.macro_view import render_macro_page
 from views.pegy_view import render_pegy_page
-from views.sandbox_view import render_sandbox_page
 from utils.scheduler import start_scheduler_thread
 
 @st.cache_resource
@@ -97,13 +96,8 @@ def init_background_jobs():
 init_background_jobs()
 
 def main():
-    # URL Query Parameter 체크 (예: ?view=sandbox)
+    # URL Query Parameter 체크
     query_params = st.query_params
-    view_param = query_params.get("view", None)
-    
-    if view_param == "sandbox":
-        render_sandbox_page()
-        return
 
     # 1. 사이드바 최상단 네비게이션 헤더 배치
     st.sidebar.markdown(
@@ -122,8 +116,7 @@ def main():
         "📌 서비스 메뉴 선택",
         [
             "🏢 잘 보면 보이는 손  \n(매크로 방공망)", 
-            "💡 사실 이 가격이에요  \n(밸류에이션 리포트)",
-            "🧪 UI/UX 샌드박스  \n(가격 비교 실험실)"
+            "💡 사실 이 가격이에요  \n(밸류에이션 리포트)"
         ],
         index=0
     )
@@ -133,9 +126,7 @@ def main():
     render_admin_sidebar()
 
     # 4. 메인 뷰 라우팅
-    if "샌드박스" in selected_menu:
-        render_sandbox_page()
-    elif "사실 이 가격이에요" in selected_menu:
+    if "사실 이 가격이에요" in selected_menu:
         render_pegy_page()
     else:
         render_macro_page()

@@ -273,7 +273,7 @@ def enrich_quant_metrics(stocks_raw):
             inherited_roe = common_roe_lookup.get(parent_key, 0)
             if inherited_roe != 0:
                 t_roe = inherited_roe
-                print(f"  📋 [{name}({code})] 우선주 ROE 상속: 보통주 ROE {inherited_roe}% 적용")
+                print(f"  [우선주 ROE 상속] {name}({code}): 보통주 ROE {inherited_roe}% 적용")
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
         n_t_per, n_t_eps, n_f_per, n_f_eps, n_div_yield, real_dps, outstanding_shares, t_pbr, ev_ebitda = fetch_naver_item_dps_and_eps(code)
