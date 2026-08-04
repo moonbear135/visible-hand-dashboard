@@ -255,6 +255,18 @@ def render_pegy_page():
                     file_name=f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.json",
                     mime="application/json"
                 )
+            if st.session_state.get("admin_mode", False):
+                try:
+                    df_latest = pd.read_json(latest_path)
+                    csv_latest = df_latest.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="📊 [관리자] 최신 스냅샷 다운로드 (Excel)",
+                        data=csv_latest,
+                        file_name=f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                except Exception:
+                    pass
     with col_dl2:
         history_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "pegy_summary_history.json")
         if os.path.exists(history_path):
@@ -265,6 +277,18 @@ def render_pegy_page():
                     file_name=f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.json",
                     mime="application/json"
                 )
+            if st.session_state.get("admin_mode", False):
+                try:
+                    df_history = pd.read_json(history_path)
+                    csv_history = df_history.to_csv(index=False).encode('utf-8-sig')
+                    st.download_button(
+                        label="📊 [관리자] 히스토리 다운로드 (Excel)",
+                        data=csv_history,
+                        file_name=f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.csv",
+                        mime="text/csv"
+                    )
+                except Exception:
+                    pass
     st.markdown("<br>", unsafe_allow_html=True)
 
     # 5. 최신 200개 종목 동기화 데이터 및 누적 히스토리 기반 동적 요약 지표 산출
