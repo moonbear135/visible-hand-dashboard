@@ -229,5 +229,15 @@
     "growth": 10.5,
     "pegy": 0.76,
     "total_count": 200
+  },
+  {
+    "date": "2026-08-05 11:59",
+    "f_per": 13.0,
+    "growth": 22.1,
+    "pegy": 0.51,
+    "total_count": 200,
+    "f_per_sample_count": 163,
+    "growth_sample_count": 147,
+    "pegy_sample_count": 130
   }
 ]
