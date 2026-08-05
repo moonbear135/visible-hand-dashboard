@@ -59,6 +59,39 @@ def fetch_recent_volatility(code):
         return None
 
 
+def _load_outstanding_shares_lookup():
+    """
+    FinanceDataReader의 KRX 상장종목 리스트(구조화 데이터)에서 상장주식수를 조회합니다.
+    네이버 종목 상세페이지의 자유 텍스트를 정규식으로 파싱하는 기존 방식은 페이지 문구/구조가
+    조금만 바뀌어도 다른 필드(예: 외국인소진율 %)를 상장주식수로 오인할 위험이 있어,
+    구조화된 표(컬럼 이름이 명확한 DataFrame)를 1차 출처로 우선 사용합니다.
+    조회에 실패하면 빈 dict 를 반환하며, 이 경우 기존 네이버 파싱 값(자체 sanity check 포함)만 사용합니다.
+    """
+    if not HAS_FDR:
+        return {}
+    try:
+        df = fdr.StockListing('KRX')
+        shares_col = None
+        for candidate_col in ('Stocks', 'Shares', 'ListedStockCnt', 'ListedShares'):
+            if candidate_col in df.columns:
+                shares_col = candidate_col
+                break
+        if shares_col is None or 'Code' not in df.columns:
+            print(f"⚠️ [상장주식수 구조화 조회] fdr.StockListing('KRX') 컬럼 구조가 예상과 다릅니다: {list(df.columns)}")
+            return {}
+        lookup = {}
+        for _, row in df[['Code', shares_col]].dropna().iterrows():
+            try:
+                lookup[str(row['Code'])] = int(row[shares_col])
+            except (ValueError, TypeError):
+                continue
+        print(f"  [상장주식수 구조화 조회 성공] {len(lookup)}개 종목 매핑 완료 (컬럼={shares_col})")
+        return lookup
+    except Exception as e:
+        print(f"⚠️ [상장주식수 구조화 조회 실패] {e}")
+        return {}
+
+
 def _empty_item_info(error_msg):
     """종목 상세 수집 실패 시 반환 구조 (모든 수치는 None = '데이터 없음')"""
     return {
@@ -342,7 +375,10 @@ def enrich_quant_metrics(stocks_raw):
     Forward PEGY, 100점 만점 quant_score, ROE/ROIC 품질 가중 목표주가를 산출합니다.
     """
     enriched_stocks = []
-    
+
+    # 상장주식수 1차 출처: FinanceDataReader 구조화 데이터 (한 번만 조회, 종목별 재조회 안 함)
+    outstanding_shares_lookup = _load_outstanding_shares_lookup()
+
     # =========================================================
     # 우선주 ROE 상속 전처리: 보통주(코드 끝 0) ROE 룩업 테이블 구축
     # 우선주(코드 끝 5/K/L)는 네이버 시총 테이블에서 ROE를 0으로 주므로
@@ -383,6 +419,20 @@ def enrich_quant_metrics(stocks_raw):
         n_div_yield = item["div_yield"]
         real_dps = item["dps"]
         outstanding_shares = item["outstanding_shares"]
+
+        # 상장주식수 최종 판정: FDR 구조화 데이터(1차, 컬럼 명확) 우선,
+        # 네이버 텍스트 파싱 값(2차, 이미 자체 sanity check 통과)은 백업으로만 사용.
+        # 두 출처 모두 실패/미달이면 지어내지 않고 None 처리 (guardrail 이 최종 차단).
+        fdr_shares = outstanding_shares_lookup.get(code)
+        if fdr_shares and fdr_shares >= MIN_OUTSTANDING_SHARES:
+            outstanding_shares = fdr_shares
+        elif outstanding_shares and outstanding_shares >= MIN_OUTSTANDING_SHARES:
+            pass  # 네이버 파싱 값 유지 (fetch_naver_item_dps_and_eps 에서 이미 검증됨)
+        else:
+            if outstanding_shares:
+                data_issues.append(f"상장주식수 파싱 오류 의심 (네이버={outstanding_shares}, FDR={fdr_shares})")
+            outstanding_shares = None
+
         t_pbr = item["t_pbr"]
         ev_ebitda = item["ev_ebitda"]
         raw_period = item["raw_period"]
