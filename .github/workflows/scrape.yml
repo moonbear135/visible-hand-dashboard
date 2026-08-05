@@ -2,8 +2,9 @@ name: Daily Market Scraper
 
 on:
   schedule:
-    # 매일 평일(월-금) 한국 시간 오후 5:00 (UTC 8:00)에 자동 실행
-    - cron: '0 8 * * 1-5'
+    # 매일 평일(월-금) 한국 시간 오후 4:05 (UTC 7:05)에 자동 실행
+    # 정각(0분)은 깃허브 서버가 몰려서 지연/누락되기 쉬워 5분 뒤로 설정
+    - cron: '5 7 * * 1-5'
   workflow_dispatch:
     # 깃허브 웹 화면에서 수동으로 즉시 실행할 수 있는 버튼 활성화
 
@@ -21,7 +22,6 @@ jobs:
     - name: 파이썬 환경 설정
       uses: actions/setup-python@v4
       with:
-        python-state-: '3.10'
         python-version: '3.10'
 
     - name: 필수 의존 라이브러리 설치
@@ -29,7 +29,13 @@ jobs:
         python -m pip install --upgrade pip
         pip install -r requirements.txt
 
-    - name: 실시간 금융 수급 데이터 자동 수집 실행
+    - name: 코스피200 개별 종목 데이터 수집 (data/*.json 갱신)
+      run: |
+        python collector_kospi200.py
+
+    - name: 거시경제/수급 데이터 수집 (market_history.csv 갱신)
+      env:
+        GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
         python scrape_daily.py
 
@@ -37,6 +43,6 @@ jobs:
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add market_history.csv
+        git add data/ market_history.csv
         git commit -m "Auto Update: $(date +'%Y-%m-%d') [무인 자동화 로봇]" || exit 0
         git push origin main
