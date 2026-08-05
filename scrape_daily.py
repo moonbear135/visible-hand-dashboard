@@ -42,12 +42,9 @@ COL_MAP = {
     "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
 }
 
-# 지표별 기간 키워드 사전 (Period Keywords Dictionary)
-PERIOD_KEYWORDS = {
-    "TTM": ["연간", "TTM", "최근 12개월", "최근 연간 실적"],
-    "QUARTERLY": ["분기", "1Q", "2Q", "3Q", "4Q", "3개월"],
-    "DAILY": ["일별", "당일", "D", "일간"]
-}
+# (SPEC §3: 개별 크롤러의 PERIOD_KEYWORDS 사본 하드코딩 금지.
+#  이 파일에서는 실제로 사용되지 않으므로 utils/data_validator.py 의 사전을 단일 출처로 참조합니다.)
+from utils.data_validator import PERIOD_KEYWORDS  # noqa: F401  (단일 출처 유지용)
 
 def clip(val):
     return min(1.0, max(0.0, val))
@@ -89,14 +86,18 @@ def scrape_and_update(target_date_override=None):
             history_df = pd.DataFrame()
 
     # 2. 크롤링 기초 데이터 수집
+    #    ⚠️ 시드값(1.2 / 0.08 / 0.5)을 미리 넣어두면 FDR 조회가 실패해도 그 값이
+    #       그대로 지표 계산에 흘러들어가 '정상적으로 보이는 점수'가 만들어집니다.
+    #       따라서 전부 None 으로 두고, 없으면 아래에서 수집을 중단합니다.
     kospi_close = None
     usd_close = None
     kospi_change = 0.0
     usd_change = 0.0
-    volatility = 1.2
-    dist_from_high = 0.08
-    kospi_5d_base = 0.5
-    
+    volatility = None
+    dist_from_high = None
+    kospi_5d_base = None
+
+
     # KOSPI & USD_KRW 조회
     if FDR_AVAILABLE:
         try:
@@ -109,9 +110,10 @@ def scrape_and_update(target_date_override=None):
                 kospi_data.index = kospi_data.index.tz_localize(None)
                 usd_data.index = usd_data.index.tz_localize(None)
                 
-                valid_kospi = kospi_data[kospi_data.index <= target_dt].ffill()
-                valid_usd = usd_data[usd_data.index <= target_dt].ffill()
-                
+                # .ffill() 제거: 휴장일이 아닌 '진짜 결측'까지 전일 값으로 조용히 메워지는 것을 방지
+                valid_kospi = kospi_data[kospi_data.index <= target_dt].dropna(subset=['Close'])
+                valid_usd = usd_data[usd_data.index <= target_dt].dropna(subset=['Close'])
+
                 if not valid_kospi.empty and not valid_usd.empty:
                     latest_kospi = valid_kospi.iloc[-1]
                     kospi_close = float(latest_kospi['Close'])
@@ -183,20 +185,22 @@ def scrape_and_update(target_date_override=None):
     else:
         print(f"ℹ️ 백필 모드: 실시간 시세 조회를 건너뛰고 {date_key} 기준 종가(FDR)를 사용합니다.")
 
-    # === [백엔드 결측치 방어 로직 (Validation & Forward Fill)] ===
+    # === [백엔드 결측치 검증] ===
+    # ⚠️ 과거 버전은 여기서 전일 종가를 '오늘 종가 자리에' 그대로 써넣고(Forward Fill)
+    #    변화율을 0.0(보합)으로 기록했습니다. CSV에는 보정 흔적이 남지 않아
+    #    대시보드가 실제 종가와 100% 동일하게 렌더링했습니다 → 전면 금지.
     if pd.isna(kospi_close) or pd.isna(usd_close) or kospi_close is None or usd_close is None:
-        print("🚨 KOSPI 또는 환율 데이터 결측치(NaN/None) 감지! 과거 데이터(전일 종가)로 Forward Fill 보정 시도합니다.")
-        if not history_df.empty:
-            # 참고: 이 시점의 history_df는 위에서 이미 영문 컬럼명(KOSPI, USD_KRW)으로 변환되어 있음
-            if pd.isna(kospi_close) or kospi_close is None:
-                kospi_close = float(history_df.iloc[-1]['KOSPI'])
-                kospi_change = 0.0
-            if pd.isna(usd_close) or usd_close is None:
-                usd_close = float(history_df.iloc[-1]['USD_KRW'])
-                usd_change = 0.0
-        else:
-            print("🚨 [에러] 과거 데이터마저 비어있어 시스템을 종료합니다.")
-            return
+        raise RuntimeError(
+            f"{date_key} KOSPI/환율 종가 수집 실패 — 전일 값으로 메우지 않고 당일 수집을 중단합니다. "
+            f"(KOSPI={kospi_close}, USD={usd_close})"
+        )
+
+    # 변동성·고점대비낙폭이 없으면 4개 지표(공매도 비중/ELS 낙인/공포지수/공매도 잔고)가
+    # 시드 상수로 계산되어 버리므로, 아예 수집을 중단합니다.
+    if volatility is None or dist_from_high is None:
+        raise RuntimeError(
+            f"{date_key} 변동성/고점대비낙폭 산출 실패 — 임의 상수(1.2 / 0.08)로 대체하지 않고 당일 수집을 중단합니다."
+        )
 
     # 3. 네이버 금융 외국인/기관 수급 데이터 크롤링
     retail_flow = None
@@ -320,11 +324,17 @@ def scrape_and_update(target_date_override=None):
             "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))
         },
         "KOSPI_5D_Return": {
-            "Foreigner": clip(kospi_5d_base),
-            "Institution": clip(kospi_5d_base),
-            "Retail": clip(kospi_5d_base)
+            "Foreigner": clip(kospi_5d_base if kospi_5d_base is not None else 0.0),
+            "Institution": clip(kospi_5d_base if kospi_5d_base is not None else 0.0),
+            "Retail": clip(kospi_5d_base if kospi_5d_base is not None else 0.0)
         }
     }
+
+    # 5일 모멘텀을 산출하지 못했으면 0.5(중립)로 채우지 않고 해당 지표를 통째로 제외합니다.
+    if kospi_5d_base is None:
+        print("⚠️ KOSPI 5일 모멘텀 산출 불가 → 당일 점수 산출에서 해당 지표를 제외합니다.")
+        weights.pop("KOSPI_5D_Return", None)
+        market_scores.pop("KOSPI_5D_Return", None)
 
     # 1. 50점대 둔감성 해결을 위한 비선형 점수 계산용 역사적 통계(평균/표준편차) 산출
     import math
@@ -341,9 +351,15 @@ def scrape_and_update(target_date_override=None):
                 # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.02 적용
                 std_val = max(0.02, std_val)
         else:
+            # 이력 표본이 없을 때만 쓰는 '정규화 기준선'입니다(지표값 자체를 만드는 값이 아님).
+            # 표본이 적으면 점수 의미가 날짜마다 달라지므로 대시보드에 표본 부족 경고가 표시됩니다.
             mean_val = 0.5
             std_val = 0.15
         historical_stats[item] = {"mean": mean_val, "std": std_val}
+
+    if len(history_df) < 20:
+        print(f"⚠️ 정규화 표본 부족: 누적 이력 {len(history_df)}행 (권장 20행 이상). "
+              f"Z-Score 기반 서브 점수가 극단으로 튈 수 있습니다.")
 
     # 2. 개별 지표별 가중 수급 리스크(0~1) 계산 및 저장용 metrics_dict 생성
     current_weighted_risks = {}
@@ -379,8 +395,11 @@ def scrape_and_update(target_date_override=None):
         if sub_score >= 85 or sub_score <= 15:
             extreme_signal_count += 1
 
-    # 4. 1차 가중평균 산출 (100점 만점 기준)
-    base_score = sum(sub_scores[k] * (weights[k] / 100.0) for k in weights)
+    # 4. 1차 가중평균 산출 (산출 가능한 지표의 가중치 합으로 정규화)
+    total_weight = sum(weights.values())
+    if total_weight <= 0:
+        raise RuntimeError("산출 가능한 위험 지표가 없어 종합 점수를 계산할 수 없습니다.")
+    base_score = sum(sub_scores[k] * (weights[k] / total_weight) for k in weights)
 
     # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
     multiplier = 1.0

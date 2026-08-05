@@ -25,8 +25,12 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 def run_collector():
     """KOSPI 200 데이터 수집기를 실행합니다."""
     logging.info("🚀 KOSPI 200 데이터 수집 작업을 시작합니다...")
-    script_path = os.path.join(BASE_DIR, "collector_kospi200_2.py")
-    
+    script_path = os.path.join(BASE_DIR, "collector_kospi200.py")
+
+    if not os.path.exists(script_path):
+        logging.error(f"❌ 수집 스크립트를 찾을 수 없습니다: {script_path}")
+        return
+
     try:
         # 서브프로세스로 수집기 실행 (블로킹 모드)
         result = subprocess.run(

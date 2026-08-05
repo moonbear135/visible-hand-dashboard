@@ -1,49 +1,58 @@
 import os
 import json
-import random
 from datetime import datetime
 import pandas as pd
 import streamlit as st
 
-def get_kospi200_pegy_data():
-    """Fallback generator for KOSPI 200 datasets"""
-    from collector_kospi200 import run_kospi200_collector
-    json_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "kospi200_pegy_latest.json")
-    if not os.path.exists(json_path):
-        run_kospi200_collector()
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-                return payload.get("stocks", [])
-        except Exception:
-            pass
-    return []
+
+def fmt_num(value, suffix="", digits=None, na_text="데이터 없음"):
+    """
+    None / 결측값을 절대 그럴듯한 숫자로 바꾸지 않고 '데이터 없음'으로 표기합니다.
+    (ENGINEERING_SPEC §0-1)
+    """
+    if value is None:
+        return na_text
+    try:
+        if isinstance(value, str):
+            return f"{value}{suffix}"
+        if digits is None:
+            return f"{value:,}{suffix}"
+        return f"{value:,.{digits}f}{suffix}"
+    except (TypeError, ValueError):
+        return na_text
+
 
 def load_kospi200_snapshot():
-    """data/kospi200_pegy_latest.json 스냅샷 로드 및 메타데이터 반환"""
+    """
+    data/kospi200_pegy_latest.json 스냅샷 로드 및 메타데이터 반환.
+
+    ⚠️ 렌더링 도중에 수집기(run_kospi200_collector)를 절대 실행하지 않습니다.
+       (종목당 2~3초 슬립 × 200종목 = 10분 이상 블로킹 → Streamlit 타임아웃)
+       스냅샷이 없거나 깨졌으면 '현재 시각'을 마지막 동기화 시각인 것처럼 꾸미지 않고
+       last_updated_at=None / status="LOAD_FAILED" 를 그대로 반환합니다.
+    """
     data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
     json_path = os.path.join(data_dir, "kospi200_pegy_latest.json")
-    
-    if not os.path.exists(json_path):
-        try:
-            from collector_kospi200 import run_kospi200_collector
-            run_kospi200_collector()
-        except Exception as e:
-            print(f"Initial collector run exception: {e}")
-            
-    if os.path.exists(json_path):
-        try:
-            with open(json_path, "r", encoding="utf-8") as f:
-                payload = json.load(f)
-                meta = payload.get("metadata", {})
-                stocks = payload.get("stocks", [])
-                return meta, stocks
-        except Exception as e:
-            print(f"Error reading JSON snapshot: {e}")
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
-    return {"last_updated_at": now_str, "status": "BACKUP"}, []
+    if not os.path.exists(json_path):
+        return {"last_updated_at": None, "status": "LOAD_FAILED",
+                "load_error": "스냅샷 파일(data/kospi200_pegy_latest.json)이 없습니다."}, []
+
+    try:
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        meta = payload.get("metadata", {})
+        stocks = payload.get("stocks", [])
+        if not stocks:
+            meta = dict(meta)
+            meta["status"] = meta.get("status") or "EMPTY"
+            meta["load_error"] = "스냅샷에 종목 데이터가 0건입니다."
+        return meta, stocks
+    except Exception as e:
+        print(f"Error reading JSON snapshot: {e}")
+        return {"last_updated_at": None, "status": "LOAD_FAILED",
+                "load_error": f"스냅샷 파일을 읽지 못했습니다: {e}"}, []
+
 
 def load_pegy_summary_history():
     """data/pegy_summary_history.json 누적 수치 이력을 로드합니다."""
@@ -53,8 +62,12 @@ def load_pegy_summary_history():
         try:
             with open(history_path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ 요약 히스토리 로드 실패: {e}")
+            try:
+                st.warning(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다: {e}")
+            except Exception:
+                pass
     return []
 
 def render_pegy_page():
@@ -65,7 +78,8 @@ def render_pegy_page():
 
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
-    last_updated_at = metadata.get("last_updated_at", datetime.now().strftime("%Y-%m-%d %H:%M"))
+    last_updated_at = metadata.get("last_updated_at")   # 없으면 None (현재 시각으로 위장 금지)
+    snapshot_status = metadata.get("status", "UNKNOWN")
     summary_history = load_pegy_summary_history()
 
     # 관리자 로그인 여부 확인
@@ -229,7 +243,35 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
 
-    # 4. 대시보드 상단 배치 동기화 배너 (metadata.last_updated_at 활용)
+    # 4. 대시보드 상단 배치 동기화 배너 + 스냅샷 상태/신선도(staleness) 검사
+    if last_updated_at is None or not all_stocks:
+        st.error(
+            f"🚨 KOSPI 200 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
+            "가짜 기본값으로 화면을 채우지 않기 위해 밸류에이션 수치를 표시하지 않습니다. "
+            "자동 수집(GitHub Actions `Daily Market Scraper`)이 정상 동작했는지 확인해 주세요."
+        )
+        st.stop()
+
+    # 스냅샷이 언제 것인지, 수집 품질이 어땠는지 화면에 그대로 노출
+    stale_hours = None
+    try:
+        stale_hours = (datetime.now() - datetime.strptime(last_updated_at, "%Y-%m-%d %H:%M")).total_seconds() / 3600.0
+    except Exception:
+        stale_hours = None
+
+    if stale_hours is not None and stale_hours >= 24:
+        st.error(
+            f"🚨 마지막 수집이 **{stale_hours/24:.1f}일 전({last_updated_at})** 입니다. "
+            "아래 수치는 최신 시세가 아닙니다. 자동 수집이 멈춰 있는지 확인해 주세요."
+        )
+
+    if snapshot_status not in ("SUCCESS", "UNKNOWN"):
+        st.warning(
+            f"⚠️ 스냅샷 수집 상태: **{snapshot_status}** — "
+            f"검증 통과 {metadata.get('valid_count', '?')}/{metadata.get('total_count', '?')}종목. "
+            "일부 종목은 데이터 부족으로 '측정 불가' 카드로 표시됩니다."
+        )
+
     st.markdown(
         f"""
         <div style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px 20px; margin-bottom: 22px; text-align: center; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -237,13 +279,13 @@ def render_pegy_page():
                 📅 마지막 동기화: {last_updated_at} (장 마감 반영)
             </span>
             <span style="font-size: 13px; color: #94a3b8; margin-left: 14px; font-weight: 600;">
-                • 배치 수집 스냅샷 (200개 KOSPI 대표 종목 연동 완료)
+                • 배치 수집 스냅샷 ({metadata.get('total_count', len(all_stocks))}개 종목 / 상태 {snapshot_status})
             </span>
         </div>
         """,
         unsafe_allow_html=True
     )
-    
+
     col_dl1, col_dl2 = st.columns(2)
     with col_dl1:
         latest_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "kospi200_pegy_latest.json")
@@ -269,7 +311,8 @@ def render_pegy_page():
                         mime="text/csv"
                     )
                 except Exception as e:
-                    pass
+                    print(f"⚠️ [관리자] 스냅샷 CSV 변환 실패: {e}")
+                    st.warning(f"⚠️ [관리자] 스냅샷 Excel 변환에 실패했습니다: {e}")
     with col_dl2:
         history_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data", "pegy_summary_history.json")
         if os.path.exists(history_path):
@@ -290,57 +333,57 @@ def render_pegy_page():
                         file_name=f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.csv",
                         mime="text/csv"
                     )
-                except Exception:
-                    pass
+                except Exception as e:
+                    print(f"⚠️ [관리자] 히스토리 CSV 변환 실패: {e}")
+                    st.warning(f"⚠️ [관리자] 히스토리 Excel 변환에 실패했습니다: {e}")
     st.markdown("<br>", unsafe_allow_html=True)
 
-    # 5. 최신 200개 종목 동기화 데이터 및 누적 히스토리 기반 동적 요약 지표 산출
-    if all_stocks:
-        f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per', 0) > 0]
-        growth_list = [min(s.get('growth', 0), 35.0) for s in all_stocks]
-        pegy_list = [s.get('f_pegy', 0) for s in all_stocks if 0 < s.get('f_pegy', 0) < 50.0]
+    # 5. 최신 종목 데이터 기반 요약 지표 산출
+    #    ⚠️ 표본이 없으면 10.4 / 14.2 / 0.73 같은 그럴듯한 상수를 표시하지 않고 '데이터 없음'.
+    f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per')]
+    growth_list = [s['growth'] for s in all_stocks if s.get('growth') is not None]
+    pegy_list = [s['f_pegy'] for s in all_stocks if s.get('f_pegy') and 0 < s['f_pegy'] < 50.0]
 
-        calc_f_per = round(pd.Series(f_per_list).median(), 1) if f_per_list else 10.4
-        calc_growth = round(pd.Series(growth_list).median(), 1) if growth_list else 14.2  # 통계적 대표값 중앙값(Median) 통일
-        calc_pegy = round(pd.Series(pegy_list).median(), 2) if pegy_list else 0.73
-    else:
-        calc_f_per = 10.4
-        calc_growth = 14.2
-        calc_pegy = 0.73
+    calc_f_per = round(float(pd.Series(f_per_list).median()), 1) if f_per_list else None
+    calc_growth = round(float(pd.Series(growth_list).median()), 1) if growth_list else None
+    calc_pegy = round(float(pd.Series(pegy_list).median()), 2) if pegy_list else None
 
     # 누적 히스토리 기반 증감 변동분(Delta) 계산
-    f_per_delta_str = "KOSPI 200 실시간 중앙값"
-    growth_delta_str = "실시간 중앙값 컨센서스"
-    pegy_delta_str = "적정 밸류에이션"
+    f_per_delta_str = f"{len(f_per_list)}개 종목 실측 중앙값"
+    growth_delta_str = f"{len(growth_list)}개 종목 실측 중앙값"
+    pegy_delta_num = None
 
-    if len(summary_history) >= 2:
+    if len(summary_history) >= 2 and None not in (calc_f_per, calc_growth, calc_pegy):
         prev = summary_history[-2]
-        diff_per = round(calc_f_per - prev.get("f_per", calc_f_per), 1)
-        diff_growth = round(calc_growth - prev.get("growth", calc_growth), 1)
-        diff_pegy = round(calc_pegy - prev.get("pegy", calc_pegy), 2)
-        
-        f_per_delta_str = f"{diff_per:+.1f}배 (이전 동기화 대비)"
-        growth_delta_str = f"{diff_growth:+.1f}%p (이전 동기화 대비)"
-        pegy_delta_num = f"{diff_pegy:+.2f}"
-    else:
-        pegy_delta_num = "+0.00"
+        p_per, p_growth, p_pegy = prev.get("f_per"), prev.get("growth"), prev.get("pegy")
+        if p_per is not None:
+            f_per_delta_str = f"{calc_f_per - p_per:+.1f}배 (이전 동기화 대비)"
+        if p_growth is not None:
+            growth_delta_str = f"{calc_growth - p_growth:+.1f}%p (이전 동기화 대비)"
+        if p_pegy is not None:
+            pegy_delta_num = f"{calc_pegy - p_pegy:+.2f}"
 
-    if calc_pegy < 0.85:
+    if calc_pegy is None:
+        pegy_status = "산출 불가 (표본 없음)"
+    elif calc_pegy < 0.85:
         pegy_status = "🟢 저평가 수용 구간"
     elif calc_pegy < 1.15:
         pegy_status = "🟡 적정 밸류 구간"
     else:
         pegy_status = "🔴 고평가 관망 구간"
 
-    pegy_delta_str = f"{pegy_delta_num} | {pegy_status}"
+    pegy_delta_str = f"{pegy_delta_num} | {pegy_status}" if pegy_delta_num else pegy_status
 
     col1, col2, col3 = st.columns(3)
     with col1:
-        st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", f_per_delta_str)
+        st.metric("타겟 중앙 Forward PER", fmt_num(calc_f_per, " 배", 1), f_per_delta_str)
     with col2:
-        st.metric("코스피 대표 EPS 성장률 (Cap 35%)", f"{calc_growth} %", growth_delta_str)
+        st.metric("코스피 대표 EPS 성장률 (컨센서스 EPS 기준)", fmt_num(calc_growth, " %", 1), growth_delta_str)
     with col3:
-        st.metric("시장 적정 밸류에이션 (PEGY)", f"{calc_pegy}", pegy_delta_str)
+        st.metric("시장 적정 밸류에이션 (PEGY)", fmt_num(calc_pegy, "", 2), pegy_delta_str)
+
+    if None in (calc_f_per, calc_growth, calc_pegy):
+        st.warning("⚠️ 위 요약 지표 중 일부는 실측 표본이 없어 산출하지 못했습니다 ('데이터 없음').")
 
     st.markdown("---")
 
@@ -450,12 +493,28 @@ def render_pegy_page():
         rank_prefix_html = f'<span style="font-size: 32px; font-weight: 900; color: #38bdf8; letter-spacing: -1px; margin-right: 4px; line-height: 1;">{rank_num}.</span>'
 
         # 데이터 무결성 방공망: 차단 사유별 분기 마스크 카드 렌더링
-        if s.get('is_unverified', False):
+        # (is_valid=False 인 종목도 반드시 마스크 카드로 표시 — 정상 카드로 새어나가지 않도록)
+        if s.get('is_unverified', False) or not s.get('is_valid', True):
             reject_reason = s.get('reject_reason', '')
             unverified_reason = s.get('unverified_reason', '')
 
             # 사유별 테마 분기
-            if 'PER' in reject_reason or 'PER' in str(s.get('badge', '')):
+            if '수집 실패' in reject_reason or '산출 불가' in reject_reason or '파싱 오류' in reject_reason:
+                # ⚪ 데이터 미수집 (회색 테마)
+                badge_label = "⚪ 데이터 없음 (측정 불가)"
+                badge_bg = "#1e293b"
+                badge_border = "#64748b"
+                badge_fg = "#cbd5e1"
+                card_bg = "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)"
+                card_border_color = "#64748b"
+                inner_border = "#334155"
+                title_icon = "🚫"
+                title_text = "필수 데이터를 수집하지 못해 밸류에이션을 산출하지 않았습니다"
+                title_color = "#cbd5e1"
+                desc_text = f"수집 실패 사유: <b>{reject_reason or unverified_reason or '원인 미상'}</b>"
+                desc_color = "#94a3b8"
+                hint_text = "📌 값을 추정해 채우지 않고 '데이터 없음'으로 남깁니다. 다음 수집에서 정상화되면 자동 복구됩니다."
+            elif 'PER' in reject_reason or 'PER' in str(s.get('badge', '')):
                 # 🔴 PER 극단치 / 데이터 오염 (빨간 테마)
                 badge_label = "🔴 PER 극단 고평가 (밸류에이션 측정 불가)"
                 badge_bg = "#7f1d1d"
@@ -467,10 +526,14 @@ def render_pegy_page():
                 title_icon = "🚫"
                 title_text = "밸류에이션 산출 범위 초과 — 분석 제외 종목"
                 title_color = "#f87171"
-                desc_text = f"본 종목은 <b>PER {s['t_per']:,.1f}배 (EPS {s['t_eps']:,}원)</b>로 정상 밸류에이션 산출 범위(PER 300배)를 크게 초과하여 PEGY 분석이 무의미한 극단 고평가 상태입니다."
+                desc_text = (
+                    f"본 종목은 <b>PER {fmt_num(s.get('t_per'), '배', 1)} "
+                    f"(EPS {fmt_num(s.get('t_eps'), '원')})</b>로 정상 밸류에이션 산출 범위(PER 300배)를 "
+                    "크게 초과하여 PEGY 분석이 무의미한 극단 고평가 상태입니다."
+                )
                 desc_color = "#fecaca"
                 hint_text = "📌 이익 수준이 정상화(EPS 회복)되면 자동으로 분석 대상에 복귀합니다."
-            elif '역성장' in str(s.get('badge', '')) or s.get('g_eff', 1) <= 0:
+            elif '역성장' in str(s.get('badge', '')) or (s.get('g_eff') is not None and s['g_eff'] <= 0):
                 # 🟣 역성장 / 무성장 (보라 테마)
                 badge_label = "🟣 역성장 · 무성장 (가치 훼손 위험)"
                 badge_bg = "#3b0764"
@@ -482,7 +545,7 @@ def render_pegy_page():
                 title_icon = "📉"
                 title_text = "성장률 0% 이하 — 가치 훼손 구간"
                 title_color = "#c4b5fd"
-                desc_text = f"본 종목은 <b>ROE {s['t_roe']}%</b>로 실효성장률(g_eff)이 0 이하이며, 성장 기반 밸류에이션(PEGY) 적용이 부적합합니다."
+                desc_text = f"본 종목은 <b>ROE {fmt_num(s.get('t_roe'), '%')}</b> 기준 실효성장률(g_eff)이 0 이하이며, 성장 기반 밸류에이션(PEGY) 적용이 부적합합니다."
                 desc_color = "#e9d5ff"
                 hint_text = "📌 이익 성장이 재개되면 자동으로 밸류에이션 분석이 복구됩니다."
             else:
@@ -531,15 +594,30 @@ def render_pegy_page():
             st.markdown("\n".join([line.strip() for line in unverified_html.split("\n") if line.strip()]), unsafe_allow_html=True)
             continue
 
-        vol_color = "#f43f5e" if "보정 중" in s.get("vol", "") else "#38bdf8"
-        roe_color = "#f43f5e" if s.get("t_roe", 0) < 8.0 else "#4ade80"
-        roic_color = "#f43f5e" if s.get("roic", 0) < 6.0 else "#38bdf8"
-        
+        vol_text = s.get("vol") or "❔ 변동성 데이터 없음"
+        if "데이터 없음" in vol_text:
+            vol_color = "#94a3b8"
+        elif "확대" in vol_text or "보정" in vol_text:
+            vol_color = "#f43f5e"
+        else:
+            vol_color = "#38bdf8"
+
+        t_roe_val = s.get("t_roe")
+        roic_val = s.get("roic")
+        roe_color = "#94a3b8" if t_roe_val is None else ("#f43f5e" if t_roe_val < 8.0 else "#4ade80")
+        roic_color = "#94a3b8" if roic_val is None else ("#f43f5e" if roic_val < 6.0 else "#38bdf8")
+
         trap_badge_html = ""
         if s.get("value_trap", False):
             trap_badge_html = """
             <span style="background-color: #7f1d1d; color: #fca5a5; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #f87171; white-space: nowrap;">
                 ⚠️ 이익창출력 저하 (착시 저평가 주의)
+            </span>
+            """
+        elif t_roe_val is None:
+            trap_badge_html = """
+            <span style="background-color: #1e293b; color: #cbd5e1; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #64748b; white-space: nowrap;">
+                ❔ 자본효율성 판정 불가 (데이터 없음)
             </span>
             """
         else:
@@ -549,19 +627,27 @@ def render_pegy_page():
             </span>
             """
 
-        # 야후 파이낸스 교차검증 15% 이상 이격 발생 뱃지 (관리자 전용 노출)
+        # 야후 파이낸스 교차검증 뱃지 (관리자 전용) — 미수행(None)과 이상없음(False)을 구분
         discrepancy_badge_html = ""
-        if is_admin and s.get("per_discrepancy", False):
-            discrepancy_badge_html = """
-            <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #facc15; white-space: nowrap;">
-                ⚙️ [관리자용] 데이터 이격 발생 (yfinance 차이>15%)
-            </span>
-            """
+        if is_admin:
+            if s.get("per_discrepancy") is True:
+                discrepancy_badge_html = """
+                <span style="background-color: #78350f; color: #fde047; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #facc15; white-space: nowrap;">
+                    ⚙️ [관리자용] 데이터 이격 발생 (yfinance 차이>15%)
+                </span>
+                """
+            elif s.get("per_discrepancy") is None:
+                discrepancy_badge_html = """
+                <span style="background-color: #1e293b; color: #cbd5e1; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #64748b; white-space: nowrap;">
+                    ⚙️ [관리자용] 외부 교차검증 미수행
+                </span>
+                """
 
-        t_eps_val = s.get('t_eps', 0)
-        t_eps_str = f"{t_eps_val:,}" if isinstance(t_eps_val, (int, float)) else str(t_eps_val)
-        t_pbr = s.get("t_pbr", "-")
-        ev_ebitda = s.get("ev_ebitda", "-")
+        t_eps_str = fmt_num(s.get('t_eps'))
+        t_pbr = s.get("t_pbr")
+        t_pbr_str = fmt_num(t_pbr)
+        ev_ebitda = s.get("ev_ebitda")
+        ev_ebitda_str = fmt_num(ev_ebitda)
         ev_years_str = ""
         try:
             ev_val = float(ev_ebitda)
@@ -569,15 +655,15 @@ def render_pegy_page():
         except (ValueError, TypeError):
             pass
 
-        dps_val = s.get('dps', 0)
+        dps_val = s.get('dps') or 0
         dps_str = f"{dps_val:,.0f}원/주" if dps_val > 0 else "무배당"
-        growth_val = s.get('growth', 0)
-        growth_disp = f"+{growth_val}%" if growth_val <= 35.0 else f"+{growth_val}% (Cap 35%)"
+        growth_val = s.get('growth')
+        growth_disp = "데이터 없음" if growth_val is None else f"{growth_val:+.1f}%"
 
-        price = s.get('price', 0)
+        price = s.get('price') or 0
 
         # 콘크리트 바닥가 계산
-        floor_price_str = "-"
+        floor_price_str = "데이터 없음"
         try:
             pbr_val = float(t_pbr)
             if pbr_val > 0:
@@ -585,8 +671,8 @@ def render_pegy_page():
                 floor_price_str = f"{floor_price:,.0f}원"
         except (ValueError, TypeError):
             pass
-        f_target = s.get('f_target', 0)
-        if price > 0 and f_target > 0:
+        f_target = s.get('f_target')
+        if price > 0 and f_target:
             gap_pct = ((f_target - price) / price) * 100.0
             gap_str = f"+{gap_pct:.1f}% 상승 여력" if gap_pct >= 0 else f"{abs(gap_pct):.1f}% 프리미엄"
             gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
@@ -598,6 +684,21 @@ def render_pegy_page():
             bar_color = "#64748b"
             bar_width = 0
 
+        # 퀀트 스코어 — 기본값 80점 금지. 산출되지 않았으면 '측정 불가'로 표기하고,
+        # 배점이 제외된 항목이 있으면 만점(score_max)을 그대로 노출합니다.
+        q_score = s.get('quant_score')
+        q_max = s.get('score_max')
+        excluded_items = s.get('score_excluded_items') or []
+        if q_score is None:
+            score_badge_html = "<b>측정 불가</b> (데이터 없음)"
+            score_tooltip_extra = "필수 지표를 수집하지 못해 점수를 산출하지 않았습니다."
+        else:
+            score_badge_html = f"<b>{q_score}점</b> / {q_max or 100}점"
+            score_tooltip_extra = (
+                f"※ 배점 제외 항목: {', '.join(excluded_items)}" if excluded_items
+                else "모든 항목이 배점에 반영되었습니다."
+            )
+
         card_html = f"""
         <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <!-- 1. 메인 헤더: 종목명 / 코드 / 퀀트종합점수 / 배지 / 현재가 -->
@@ -608,12 +709,12 @@ def render_pegy_page():
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어 (100점 만점)</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!</span></span> <b>{s.get('quant_score', 80)}점</b> / 100점
+                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!<br>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외합니다.<br>{score_tooltip_extra}</span></span> {score_badge_html}
                     </span>
                     <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
                         {s['badge']}
                     </span>
-                    <span style="font-size: 12px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">{s['vol']}</span>
+                    <span style="font-size: 12px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">{vol_text}</span>
                     {trap_badge_html}
                     {discrepancy_badge_html}
                 </div>
@@ -623,7 +724,7 @@ def render_pegy_page():
                 </div>
             </div>
 
-            {"" if s.get('t_roe', 0) >= 0 else f'''
+            {"" if (t_roe_val is None or t_roe_val >= 0) else f'''
             <!-- 적자 경고 배너: ROE 마이너스 종목 강조 경고 -->
             <div style="background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 50%, #450a0a 100%); border: 1.5px solid #dc2626; border-radius: 10px; padding: 12px 20px; margin-bottom: 14px; display: flex; align-items: center; gap: 14px; box-shadow: 0 0 15px rgba(220, 38, 38, 0.25); animation: pulse-border 2s infinite;">
                 <div style="font-size: 28px; flex-shrink: 0;">🚨</div>
@@ -648,15 +749,15 @@ def render_pegy_page():
                 <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
                 <span style="font-size: 13px; color: #e2e8f0;">
                     <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE (자기자본이익률)</b><br>지난 12개월(4분기 합산) 순이익을 자기자본으로 나눈 자본 효율성 지표입니다. 8% 미만 시 이익 창출력이 부족한 상태입니다.</span></span>: 
-                    <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['t_roe']}%</b>
+                    <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(t_roe_val, '%', 1)}</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>내년에 회사가 가진 돈(자본)으로 얼마나 이익을 낼지 예상한 비율이에요. 높을수록 수익성이 좋아집니다.</span></span>: 
-                    <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['f_roe']}%</b>
+                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>애널리스트 컨센서스 기반 예상 ROE 입니다.<br>현재 이 프로젝트는 컨센서스 ROE를 수집하지 않으므로 값을 추정해 채우지 않고 '데이터 없음'으로 표시합니다.</span></span>:
+                    <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(s.get('f_roe'), '%', 1)}</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>장사 밑천을 얼마나 효율적으로 굴렸는지 보여주는 지표예요. 이 숫자가 높을수록 돈을 잘 굴리는 똑똑한 기업입니다.</span></span>: 
-                    <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{s['roic']}%</b>
+                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>영업이익 ÷ 투하자본으로 별도 산출해야 하는 지표입니다.<br>현재 이 프로젝트는 해당 원천 데이터를 수집하지 않으므로 '데이터 없음'으로 표시합니다.</span></span>:
+                    <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(roic_val, '%', 1)}</b>
                 </span>
             </div>
 
@@ -671,30 +772,30 @@ def render_pegy_page():
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                             <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #cbd5e1;">{s['t_roe']}%</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #cbd5e1;">{fmt_num(t_roe_val, '%', 1)}</div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                             <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
                         </div>
                         <div style="font-size: 18px; color: #cbd5e1; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['t_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str}원 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr}배
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('t_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"}
                         </div>
                         <div style="font-size: 18px; color: #38bdf8; font-weight: 800; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda}배{ev_years_str.replace("11px", "13px")}
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda_str if ev_ebitda_str == "데이터 없음" else ev_ebitda_str + "배"}{ev_years_str.replace("11px", "13px")}
                         </div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">주주환원 상세 (DPS/총액) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 주주환원 총 규모: {s['return_total']}<br>• 총 주주환원율: {s['sh_return']}%</span></span>
+                            <span class="q-tooltip">배당수익률 상세 (DPS/총액) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 환원율 {s['sh_return']}% <span style="font-size: 13px; color: #94a3b8;">({s['return_total']})</span></div>
+                        <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {fmt_num(s.get('sh_return'), '%', 2)} <span style="font-size: 13px; color: #94a3b8;">({s.get('return_total', '데이터 없음')})</span></div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                             <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{s['t_pegy']} <span style="color: #475569; font-size: 15px; margin: 0 4px;">/</span> {s['t_fair']:,.0f}원</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('t_pegy'), '', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">/</span> {fmt_num(s.get('t_fair'), '원', 0)}</div>
                     </div>
                 </div>
             </div>
@@ -707,28 +808,28 @@ def render_pegy_page():
                         <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
                         <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
                     </div>
-                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*12개월 Forward 컨센서스 (성장률 35% Cap & 변동성 1.18x 벌점 반영)</span>
+                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 1.18x 벌점 반영)</span>
                 </div>
 
                 <!-- 수치 영역: 2x2 Grid -->
                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>향후 12개월 애널리스트 예상 순이익 기반 ROE</span></span>
+                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>애널리스트 컨센서스 예상 ROE. 현재 이 프로젝트는 해당 컨센서스를 수집하지 않으므로 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{s['f_roe']}%</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}</div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                             <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
                         </div>
                         <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {s['f_per']}배 <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {s['f_eps']:,.0f}원
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
                         </div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>향후 12개월 EPS 예상 성장 비율 (기저효과 착시 방지를 위해 최대 35.0% 상한 적용)</span></span>
+                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}</div>
                     </div>
@@ -748,7 +849,7 @@ def render_pegy_page():
                                 <span class="label-text">
                                     <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.</span></span>
                                 </span>
-                                <span class="price-text-target">{f_target:,.0f}원</span>
+                                <span class="price-text-target">{fmt_num(f_target, '원', 0)}</span>
                             </div>
                         </div>
                         <div class="gap-footer" style="color: {gap_color};">

@@ -3,26 +3,47 @@ utils/scoring.py
 보이는 손 퀀트 종합 스코어링 엔진 (Hard Cut-off 킬러 로직 & 산황 검증 Guardrail 반영)
 """
 
-def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0, price=0.0, f_target=0.0, growth=0.0):
+def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None, price=0.0, f_target=None, growth=None):
     """
-    100점 만점 퀀트 스코어 계산 및 상태 배지 반환
+    퀀트 스코어 계산 및 상태 배지 반환
     (역성장/적자 하드컷오프, 데이터 이상 Guardrail & 목표주가 달성 교차검증 전면 반영)
-    
-    1. PEGY 밸류에이션 점수 (최대 35점)
-    2. 자본효율성 Quality 점수 (최대 30점)
-    3. 주주환원율 Yield 점수 (최대 20점)
-    4. Trailing 안정성 점수 (최대 10점)
-    5. 변동성 위험 보정 점수 (최대 5점)
+
+    ⚠️ ENGINEERING_SPEC §0-1: 수집하지 못한 지표는 '중립값'을 대입하지 않고 배점에서 제외합니다.
+       따라서 만점(score_max)은 종목마다 달라질 수 있으며, 반환값 score_max / excluded_items 로
+       UI가 "xx점 / yy점 (제외: ...)" 형태로 정직하게 표기해야 합니다.
+
+    1. PEGY 밸류에이션 점수 (최대 35점) — f_pegy 필요
+    2. 자본효율성 Quality 점수 (최대 30점) — f_roe / roic 필요
+    3. 배당수익률(주주환원) 점수 (최대 20점) — sh_return 필요
+    4. Trailing 안정성 점수 (최대 10점) — t_roe 필요
+    5. 변동성 위험 보정 점수 (최대 5점) — 실측 변동성 필요
     """
     # =========================================================
     # Guardrail 0: 데이터 오염 / PER 이상치 (PER > 300배 또는 PER <= 0) 검증
     # =========================================================
-    if f_per > 300.0 or f_per <= 0.0 or price <= 0:
+    if f_per is None or price is None or f_per > 300.0 or f_per <= 0.0 or price <= 0:
         return {
-            "quant_score": 10,
-            "raw_score": 10,
+            "quant_score": None if f_per is None else 10,
+            "raw_score": None if f_per is None else 10,
+            "score_max": None,
+            "excluded_items": ["전 항목 (Forward PER/주가 데이터 없음 또는 범위 초과)"],
             "is_cutoff": True,
-            "badge": "🔴 데이터 이상/극단고평가",
+            "badge": "🔴 데이터 없음 (측정 불가)" if f_per is None else "🔴 데이터 이상/극단고평가",
+            "badge_bg": "#7f1d1d",
+            "badge_fg": "#fca5a5"
+        }
+
+    # =========================================================
+    # Guardrail 0-2: 성장률/PEGY 산출 불가 → 점수를 만들지 않고 '측정 불가' 반환
+    # =========================================================
+    if growth is None or f_pegy is None or t_roe is None:
+        return {
+            "quant_score": None,
+            "raw_score": None,
+            "score_max": None,
+            "excluded_items": ["전 항목 (성장률 또는 PEGY 산출 불가)"],
+            "is_cutoff": True,
+            "badge": "🔴 데이터 없음 (측정 불가)",
             "badge_bg": "#7f1d1d",
             "badge_fg": "#fca5a5"
         }
@@ -34,6 +55,8 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
         return {
             "quant_score": 15,
             "raw_score": 15,
+            "score_max": 100,
+            "excluded_items": [],
             "is_cutoff": True,
             "badge": "🔴 실적 역성장/적자 (위험)",
             "badge_bg": "#7f1d1d",
@@ -48,6 +71,10 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
         # PEGY 점수를 보수적으로 깎음(극단적 과대평가 방지)
         f_pegy = max(f_pegy * 2.0, 1.5) # PEGY를 강제로 악화시킴
 
+    excluded_items = []
+    earned = 0
+    possible = 0
+
     # 1. PEGY 점수 (35점)
     if f_pegy < 0.65:
         s_pegy = 35
@@ -61,35 +88,55 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
         s_pegy = 5
     else:
         s_pegy = 0
+    earned += s_pegy
+    possible += 35
 
-    # 2. Quality 점수 (30점)
-    s_f_roe = 15 if f_roe >= 15.0 else (10 if f_roe >= 10.0 else 4)
-    s_roic = 15 if roic >= 12.0 else (10 if roic >= 8.0 else 4)
-    s_quality = s_f_roe + s_roic
-
-    # 3. 주주환원 점수 (20점)
-    if sh_return >= 5.0:
-        s_return = 20
-    elif sh_return >= 3.0:
-        s_return = 14
-    elif sh_return >= 1.0:
-        s_return = 8
+    # 2. Quality 점수 (30점) — f_roe / roic 는 실측 컨센서스가 없으면 배점에서 제외
+    if f_roe is not None:
+        earned += 15 if f_roe >= 15.0 else (10 if f_roe >= 10.0 else 4)
+        possible += 15
     else:
-        s_return = 3
+        excluded_items.append("Forward ROE 15점 (데이터 없음)")
+    if roic is not None:
+        earned += 15 if roic >= 12.0 else (10 if roic >= 8.0 else 4)
+        possible += 15
+    else:
+        excluded_items.append("ROIC 15점 (데이터 없음)")
+
+    # 3. 배당수익률(주주환원) 점수 (20점)
+    if sh_return is not None:
+        if sh_return >= 5.0:
+            earned += 20
+        elif sh_return >= 3.0:
+            earned += 14
+        elif sh_return >= 1.0:
+            earned += 8
+        else:
+            earned += 3
+        possible += 20
+    else:
+        excluded_items.append("배당수익률 20점 (데이터 없음)")
 
     # 4. Trailing 실적 점수 (10점)
     if t_roe >= 10.0:
-        s_trailing = 10
+        earned += 10
     elif t_roe >= 6.0:
-        s_trailing = 6
+        earned += 6
     else:
-        s_trailing = 2
+        earned += 2
+    possible += 10
 
-    # 5. 변동성 보정 점수 (5점)
-    s_vol = 5 if "정상" in vol else 1
+    # 5. 변동성 보정 점수 (5점) — 실측 변동성이 없으면 가점도 감점도 하지 않고 배점 제외
+    vol_text = vol or ""
+    if "데이터 없음" in vol_text:
+        excluded_items.append("변동성 5점 (데이터 없음)")
+    else:
+        earned += 5 if "정상" in vol_text else 1
+        possible += 5
 
-    # Raw 합산 점수 (0 ~ 100점)
-    raw_score = int(s_pegy + s_quality + s_return + s_trailing + s_vol)
+    # Raw 합산 점수 (획득 점수 / 산출 가능 만점)
+    raw_score = int(earned)
+    score_max = int(possible)
 
     # 기본 PEGY 기반 배지 판정
     if f_pegy < 0.65:
@@ -111,23 +158,27 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
 
     quant_score = raw_score
 
+    # 배점이 제외된 종목은 상한(캡)도 만점 대비 같은 비율로 환산합니다.
+    def _cap(pct_of_100):
+        return int(round(pct_of_100 * score_max / 100.0))
+
     # =========================================================
     # 교차 검증 1: 목표주가(f_target) 초과/달성 여부 정합성 체크
     # 현재가가 목표가를 넘었거나 달성했다면 저평가 배지 절대 부여 금지!
     # =========================================================
-    if f_target > 0 and price > 0:
+    if f_target and price > 0:
         if price >= f_target * 1.15:
             # 목표가 15% 이상 초과 고평가
             badge = "🔴 목표가 초과 (고평가 관망)"
             badge_bg = "#7f1d1d"
             badge_fg = "#fca5a5"
-            quant_score = min(quant_score, 45)
+            quant_score = min(quant_score, _cap(45))
         elif price >= f_target:
             # 목표주가 달성 및 도달
             badge = "🟡 목표가 달성 (적정가)"
             badge_bg = "#78350f"
             badge_fg = "#fde047"
-            quant_score = min(quant_score, 60)
+            quant_score = min(quant_score, _cap(60))
 
     # =========================================================
     # 교차 검증 2: 하드 컷오프 (Hard Cut-off / Killer Logic)
@@ -135,7 +186,7 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
     # =========================================================
     is_extreme_overvalued = (f_pegy >= 2.0 or (f_per is not None and f_per >= 70.0))
     if is_extreme_overvalued:
-        quant_score = min(quant_score, 20) # 최대 20점 이하 강제 상한 제한
+        quant_score = min(quant_score, _cap(20))  # 만점 대비 20% 이하 강제 상한
         badge = "🔴 극단적 고평가 (위험)"
         badge_bg = "#7f1d1d"
         badge_fg = "#fca5a5"
@@ -143,6 +194,8 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=0.0,
     return {
         "quant_score": quant_score,
         "raw_score": raw_score,
+        "score_max": score_max,
+        "excluded_items": excluded_items,
         "is_cutoff": is_extreme_overvalued,
         "badge": badge,
         "badge_bg": badge_bg,

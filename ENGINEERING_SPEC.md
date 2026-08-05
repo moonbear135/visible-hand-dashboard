@@ -19,6 +19,172 @@
 
 ---
 
+## 0-1. 🚫 코딩 원칙: 하드코딩 및 더미 데이터 금지 (최우선 규칙)
+
+> [!CAUTION]
+> **이 프로젝트의 제1원칙입니다. 아래 다른 모든 규칙보다 우선합니다.**
+> AI(Gemini, Claude, ChatGPT 등)든 사람이든, 이 저장소의 코드를 수정하는 누구나 반드시 지켜야 합니다.
+
+### 원칙 선언
+
+**실데이터 수집에 실패했을 때, 그럴듯해 보이는 하드코딩·더미·기본값으로 조용히 메우는 것을 절대 금지합니다.**
+
+에러는 보이면 고칠 수 있습니다. 하지만 가짜 데이터가 실데이터인 척 시스템에 남으면
+**어디가 잘못됐는지 영원히 알 수 없습니다.** 이것이 이 프로젝트에서 가장 심각한 결함 유형입니다.
+
+수집/파싱/계산에 실패하면 코드는 반드시 다음 셋 중 하나를 해야 합니다.
+
+1. **명확한 예외를 발생시켜 중단** — `raise RuntimeError("...")` (배치 수집기의 기본 동작)
+2. **해당 데이터 포인트를 `None` 으로 두고 UI에 "데이터 없음 / 수집 실패" 로 표시** (개별 종목·지표 단위)
+3. **대시보드 상단에 눈에 띄는 경고 배너 노출** — `st.error()` / 빨간 배지 (전체 화면 단위)
+
+### ⛔ "로그만 남기는 것"은 조치가 아닙니다
+
+`print("⚠️ 수집 실패")` 는 **GitHub Actions 로그나 서버 콘솔에만** 남습니다.
+대시보드를 보는 사람은 아무것도 알 수 없습니다.
+**실패 사실은 반드시 사용자가 보는 화면까지 도달해야 합니다.**
+
+마찬가지로 아래 패턴도 전부 금지입니다.
+
+- `except Exception: pass` — 예외를 삼켜서 실패와 정상을 구분 불가능하게 만듦
+- 실패 시 "중립값"(0.5, 50점, 평균값) 대입 — 정상처럼 보이는 숫자가 됨
+- 실패 시 이전 값 유지(Forward Fill)를 **표시 없이** 하는 것 — 표시하면 허용
+- JSON/CSV에 `status: "SUCCESS"` 를 조건 없이 기록하는 것
+
+---
+
+### 예시 1 — 계산할 수 없는 지표를 지어내지 말 것
+
+이 프로젝트에서 실제로 발견된 사례입니다. `collector_kospi200.py` 의 변동성 판정이
+**종목코드 글자 합의 나머지 연산**으로 되어 있었고, 200종목 중 78종목이 이 가짜 값 때문에
+PEGY에 1.18배 벌점을 받고 빨간 배지를 달고 있었습니다.
+
+```python
+# ❌ 절대 금지 — 주가를 보지도 않고 변동성을 "생성"함
+code_hash = sum(ord(c) for c in code)
+vol = "🟢 정상" if (code_hash % 3 != 0) else "⚡ 변동성 보정 중"
+vol_penalty = 1.18 if "보정" in vol else 1.0
+
+# ✅ 실제 값을 계산하거나, 없으면 지표를 비활성화하고 UI에 명시
+returns = price_series.pct_change().dropna()
+if len(returns) < 20:
+    vol = "❔ 변동성 데이터 없음"      # 카드에 회색으로 표시
+    vol_penalty = 1.0                  # 감점/가점 어느 쪽도 주지 않음
+else:
+    vol_std = float(returns.tail(20).std()) * 100
+    vol = "🟢 정상" if vol_std < 2.0 else "⚡ 변동성 확대"
+    vol_penalty = 1.18 if vol_std >= 2.0 else 1.0
+```
+
+---
+
+### 예시 2 — 파싱 실패를 "평균적인 숫자"로 메우지 말 것
+
+`collector_kospi200.py` 는 PER/EPS/ROE 파싱에 실패하면 `12.5`, `8.5`, `6.8` 같은
+그럴듯한 상수를 넣고 있었습니다. 그 결과 현재 스냅샷에서 **`f_roe = 8.5` 인 종목이 27개,
+`roic = 6.8` 인 종목이 30개** 이며, 화면 툴팁은 이를 "애널리스트 예상치"라고 설명합니다.
+
+```python
+# ❌ 절대 금지 — 실패한 값을 평균치로 채우면 검증도 통과해버림
+t_per = 12.5                                  # PER 파싱 실패 시
+t_eps = int(price / t_per)                    # EPS를 주가/PER로 역산 → 산티체크 항상 통과
+f_roe = round(t_roe * 1.12, 1) if t_roe > 0 else 8.5
+roic  = round(t_roe * 0.88, 1) if t_roe > 0 else 6.8
+
+# ✅ 값이 없으면 None으로 두고, 종목 자체를 "검증 대기" 마스크로 차단
+if not n_t_per or n_t_per <= 0:
+    stock_dict["is_unverified"] = True
+    stock_dict["unverified_reason"] = "PER 수집 실패 (네이버 aside_invest_info 파싱 불가)"
+    stock_dict["t_per"] = None
+    return stock_dict          # 점수 매기지 않음. pegy_view의 회색 마스크 카드로 렌더링됨
+```
+
+> **부가 규칙**: 파싱 결과에는 반드시 **범위 검증(sanity range check)** 을 붙이십시오.
+> 예: `상장주식수`가 100만 주 미만이면 파싱 실패로 간주하고 `raise`.
+> (현재 200종목 중 197종목의 `outstanding_shares`가 46, 51, 79 같은 값으로 깨져 있는데
+> 아무 검증이 없어 166종목이 주주환원 총액을 "총 0억원"으로 표시하고 있습니다.)
+
+---
+
+### 예시 3 — 화면은 "데이터 없음"을 그려야지, 기본 시세를 그리면 안 됨
+
+`views/macro_view.py` 는 CSV 로드에 실패하면 **KOSPI 2500 / 환율 1350** 이라는 상수로
+14개 지표와 종합 위험점수를 전부 계산해 평소와 똑같이 렌더링했습니다.
+유일한 신호는 회색 `st.info("⚠️ 안전 모드")` 한 줄이었습니다.
+
+```python
+# ❌ 절대 금지 — 가짜 시세로 점수를 계산해서 정상 화면처럼 그림
+kospi_close = 2500.0
+usd_close   = 1350.0
+volatility  = 1.2
+score       = 50.0
+data_source_log = "⚠️ 안전 모드"        # st.info() 회색 박스 → 아무도 눈치 못 챔
+
+# ✅ 숫자를 아예 그리지 않고, 빨간 에러로 중단
+if not local_loaded:
+    st.error(
+        "🚨 시장 데이터를 불러오지 못했습니다.\n\n"
+        f"- 파일: {HISTORY_FILE}\n"
+        "- 위험 지수와 14개 지표는 표시하지 않습니다. 수집 파이프라인을 확인해 주세요."
+    )
+    st.stop()
+```
+
+동일 원칙이 `views/pegy_view.py` 에도 적용됩니다.
+
+```python
+# ❌ 절대 금지 — 스냅샷이 없는데 "마지막 동기화: 지금" + 그럴듯한 중앙값 3종 세트
+return {"last_updated_at": datetime.now().strftime("%Y-%m-%d %H:%M"), "status": "BACKUP"}, []
+calc_f_per, calc_growth, calc_pegy = 10.4, 14.2, 0.73      # 라벨은 "KOSPI 200 실시간 중앙값"
+st.metric("타겟 중앙 Forward PER", f"{calc_f_per} 배", "KOSPI 200 실시간 중앙값")
+
+# ✅ 상태를 그대로 화면에 전달
+if not all_stocks:
+    st.error("🚨 KOSPI 200 스냅샷(data/kospi200_pegy_latest.json)을 읽지 못했습니다.")
+    st.metric("타겟 중앙 Forward PER", "—", "데이터 없음")
+    return
+```
+
+---
+
+### 예시 4 — Forward Fill / 이전 값 유지는 "표시하면" 허용
+
+이전 정상 데이터를 유지하는 것 자체는 SPEC §2-3이 허용하는 방식입니다.
+**단, 그 사실이 데이터와 화면에 남아야 합니다.** 흔적 없는 FFILL은 더미 데이터와 동일합니다.
+
+```python
+# ❌ 절대 금지 — 전일 종가를 오늘 종가 자리에 넣고 변동률 0%로 저장. CSV에 흔적 없음
+if kospi_close is None:
+    kospi_close = float(history_df.iloc[-1]['KOSPI'])
+    kospi_change = 0.0
+
+# ✅ 보정했다는 사실을 데이터에 기록하고 UI에 표시
+if kospi_close is None:
+    kospi_close = float(history_df.iloc[-1]['KOSPI'])
+    kospi_change = 0.0
+    data_quality = "FFILL_KOSPI"        # market_history.csv 의 data_quality 컬럼에 저장
+    print("🚨 KOSPI 결측 → 전일 종가로 보정 (data_quality=FFILL_KOSPI)")
+# → macro_view 의 KOSPI 카드에서 data_quality != "OK" 이면
+#    "⚠️ 전일 값 보정 (당일 수집 실패)" 배지를 반드시 함께 렌더링할 것
+```
+
+---
+
+### 체크리스트 (모든 PR/코드 수정 시)
+
+- [ ] 새로 추가한 상수 중, **실데이터가 들어갈 자리를 대신 채우는 값**이 있는가? (있으면 제거)
+- [ ] `except` 블록이 `pass` 나 `print` 만 하고 계속 진행하지 않는가?
+- [ ] 수집/파싱 실패가 **대시보드 화면까지** 전달되는가? (로그만으로는 불합격)
+- [ ] Forward Fill·백필·수동입력 값에 **출처 표시(data_quality / source 컬럼)** 가 있는가?
+- [ ] `status`, `is_valid`, `last_updated_at` 같은 상태 필드를 **조건 없이 성공값으로** 쓰고 있지 않은가?
+- [ ] 하위 함수가 상위의 검증 결과를 **덮어쓰지** 않는가? (예: guardrail이 DataValidator 판정을 `True`로 덮는 사례 있었음)
+- [ ] 파싱 결과에 **범위 검증**이 있는가? (주가 > 0, 상장주식수 > 100만, PER 0~300 등)
+
+> 📄 이 원칙이 도입된 배경과 현재 코드베이스에서 발견된 위반 사례 전체 목록은
+> 프로젝트 루트의 **`AUDIT_REPORT.md`** 를 참고하십시오.
+
+---
+
 ## 1. 아키텍처 다이어그램 (데이터 흐름)
 
 ```

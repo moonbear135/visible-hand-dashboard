@@ -3,11 +3,13 @@ import re
 import pandas as pd
 
 # 지표별 기간 키워드 사전 (Period Keywords Dictionary)
+# ⚠️ 단일 문자 키워드(A/Q/D/E/P)는 반드시 단어 경계(\b)로 감싸야 합니다.
+#    (예전에는 "Annual Data" 의 D 때문에 DAILY 로 오분류되는 등 헤더 분류가 사실상 무작위였습니다.)
 PERIOD_KEYWORDS = {
-    "TTM": ["연간", "TTM", "최근 12개월", "최근 연간 실적", "ANNUAL", "YEARLY", "A", r"\b20\d{2}\.12\b", r"\bFY\d{2,4}\b"],
-    "QUARTERLY": ["분기", "1Q", "2Q", "3Q", "4Q", "3개월", "Q1", "Q2", "Q3", "Q4", "QUARTERLY", "Q", r"\b20\d{2}\.03\b", r"\b20\d{2}\.06\b", r"\b20\d{2}\.09\b"],
-    "DAILY": ["일별", "당일", "D", "일간", "주간", "월간", "DAILY", "WEEKLY", "MONTHLY"],
-    "ESTIMATE": ["(E)", "(P)", "E", "P", "ESTIMATE", "CONSENSUS"]
+    "TTM": ["연간", "TTM", "최근 12개월", "최근 연간 실적", "ANNUAL", "YEARLY", r"\bA\b", r"\b20\d{2}\.12\b", r"\bFY\d{2,4}\b"],
+    "QUARTERLY": ["분기", "1Q", "2Q", "3Q", "4Q", "3개월", "Q1", "Q2", "Q3", "Q4", "QUARTERLY", r"\bQ\b", r"\b20\d{2}\.03\b", r"\b20\d{2}\.06\b", r"\b20\d{2}\.09\b"],
+    "DAILY": ["일별", "당일", "일간", "주간", "월간", "DAILY", "WEEKLY", "MONTHLY", r"\bD\b"],
+    "ESTIMATE": ["(E)", "(P)", "ESTIMATE", "CONSENSUS", r"\bE\b", r"\bP\b"]
 }
 
 # 지표별 타겟팅 규칙 (Indicator-Specific Targeting Rules)
@@ -67,11 +69,18 @@ class DataValidator:
         """
         헤더 텍스트를 분석하여 TTM (연간), QUARTERLY (분기), DAILY (일별), ESTIMATE (추정) 여부를 판정
         """
-        text = str(header_text).strip()
-        is_est = any(kw in text for kw in PERIOD_KEYWORDS["ESTIMATE"])
-        is_q = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["QUARTERLY"])
-        is_d = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["DAILY"])
-        is_y = any(re.search(kw, text) if '\\b' in kw or '\\d' in kw else kw in text for kw in PERIOD_KEYWORDS["TTM"])
+        text = str(header_text).strip().upper()  # 영문 키워드 대소문자 무관 매칭
+
+        def _match(kw):
+            # 정규식 메타문자(\b, \d)가 포함된 키워드는 정규식으로, 그 외는 단순 포함으로 판정
+            if '\\b' in kw or '\\d' in kw:
+                return re.search(kw, text) is not None
+            return kw in text
+
+        is_est = any(_match(kw) for kw in PERIOD_KEYWORDS["ESTIMATE"])
+        is_q = any(_match(kw) for kw in PERIOD_KEYWORDS["QUARTERLY"])
+        is_d = any(_match(kw) for kw in PERIOD_KEYWORDS["DAILY"])
+        is_y = any(_match(kw) for kw in PERIOD_KEYWORDS["TTM"])
         
         if is_d:
             return "DAILY"
@@ -102,7 +111,13 @@ class DataValidator:
         # 2. 수집 타겟-가공 목적 1:1 일치 여부 검증 (TTM vs QUARTERLY vs DAILY 교차 오염 차단)
         indicator = processed_dict.get("indicator_type", "PER")
         expected_target = INDICATOR_TARGET_RULES.get(indicator, "TTM")
-        raw_period = raw_dict.get("raw_period", expected_target)
+        # ⚠️ 기대값을 기본값으로 채우면 '자기 자신과 비교'가 되어 검증이 항상 통과합니다(=검증 부재).
+        #    수집 단계에서 실제 헤더로 판정한 raw_period 가 없으면 검증 실패로 처리합니다.
+        raw_period = raw_dict.get("raw_period")
+        if raw_period is None:
+            is_pass = False
+            logs.append(f"❌ 1단계 수집 기간 미확인: 지표({indicator})의 원본 헤더에서 기간을 판정하지 못함 (raw_period 없음)")
+            return False, logs
         if raw_period != expected_target:
             is_pass = False
             logs.append(f"❌ 1단계 타겟-목적 1:1 불일치: 지표({indicator})의 예상 기간({expected_target}) vs 수집된 기간({raw_period})")
@@ -131,6 +146,9 @@ class DataValidator:
         기준: reported_per와 계산된 PER 오차가 tolerance(5%) 이내여야 함
         """
         logs = []
+        if price is None or eps_ttm is None or reported_per is None:
+            logs.append("❌ 2단계 산티 체크 거부: 주가/EPS/PER 중 수집되지 않은 값이 있음 (None)")
+            return False, logs
         if price <= 0 or eps_ttm <= 0:
             logs.append(f"❌ 2단계 산티 체크 거부: 주가({price}) 또는 EPS({eps_ttm})가 0 이하임")
             return False, logs
@@ -153,9 +171,12 @@ class DataValidator:
         """
         logs = []
         if not secondary_dict:
-            logs.append("ℹ️ 3단계 교차 검증: 2차 출처 데이터 없음 (Primary 단독 승인)")
+            # 교차검증 '미수행'과 '통과'는 다른 상태입니다. 반환값은 True(차단하지 않음)이지만
+            # 로그와 호출부의 cross_validated 플래그로 미수행 사실이 반드시 남아야 합니다.
+            logs.append("⚠️ 3단계 교차 검증 미수행: 2차 출처 데이터 없음 (검증되지 않음 / 통과 아님)")
             return True, logs
-            
+
+
         p_per = primary_dict.get("t_per")
         s_per = secondary_dict.get("t_per")
         

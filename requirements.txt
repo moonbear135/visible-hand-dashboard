@@ -5,3 +5,11 @@ requests
 beautifulsoup4
 lxml
 schedule
+
+# 아래 패키지가 없으면 관련 기능이 try/except 로 '조용히 꺼집니다'.
+# (교차검증 미수행 / AI 코멘트 미생성 / 드라이브 백업 미실행)
+yfinance
+google-generativeai
+google-api-python-client
+google-auth-oauthlib
+google-auth-httplib2

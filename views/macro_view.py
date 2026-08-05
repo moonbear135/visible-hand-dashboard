@@ -57,11 +57,34 @@ FRIENDLY_NAMES = {
     "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 하락에 따른 직접 지표)"
 }
 
+def _load_history_df():
+    """읽기 전용으로 누적 이력 CSV 를 로드합니다 (실패 시 빈 DataFrame)."""
+    if not os.path.exists(HISTORY_FILE):
+        return pd.DataFrame()
+    try:
+        df = pd.read_csv(HISTORY_FILE)
+        df = df.rename(columns={v: k for k, v in COL_MAP.items()})
+        df["Date"] = df["Date"].astype(str)
+        return df
+    except Exception as e:
+        print(f"Error loading local history: {e}")
+        return pd.DataFrame()
+
+
 def fetch_verified_market_data(override_date=None, override_kospi=None, override_usd=None, override_retail=None, override_fore=None, override_inst=None):
     """
-    KRX 및 Naver 수급 데이터를 크롤링하고 실전 가중치를 산출합니다.
-    로컬 CSV 파일을 체크하여 이미 조회한 날짜의 데이터라면 웹 크롤링 요청 없이 로컬에서 즉시 불러옵니다.
+    누적 이력(market_history.csv) 또는 관리자 수동 입력값으로 시장 위험 지표를 산출합니다.
+
+    ⚠️ ENGINEERING_SPEC §0-1 준수:
+       실데이터를 불러오지 못하면 KOSPI 2500 / 환율 1350 같은 가짜 시세를 만들지 않고
+       score=None 을 반환합니다. 호출부(render_macro_page)는 이 경우 숫자를 전혀 그리지 않고
+       빨간 오류 배너만 표시합니다.
     """
+    row = None
+    volatility = None        # 실측 변동성 (없으면 관련 지표 산출 제외)
+    dist_from_high = None    # 52주 고점 대비 낙폭 (없으면 관련 지표 산출 제외)
+    unavailable_metrics = [] # 데이터가 없어 산출하지 못한 지표 목록
+
     if override_date is not None:
         date_key = override_date
         display_date = datetime.strptime(override_date, "%Y-%m-%d").strftime("%Y년 %m월 %d일")
@@ -74,23 +97,27 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         institution_flow = override_inst
         kospi_change = 0.0
         usd_change = 0.0
-        volatility = 1.2
-        dist_from_high = 0.08
-        sugeub_fetched = True
-        data_source_log = "✅ 동기화 완료 (관리자 입력)"
+        score = None
+        # 관리자는 KOSPI·환율·수급만 입력하므로 변동성/낙폭 기반 지표는 산출할 수 없습니다.
+        data_source_log = "⚠️ 관리자 수동 입력 (변동성·고점대비낙폭 미입력 → 해당 지표 제외)"
+
+        if not kospi_close or not usd_close or kospi_close <= 0 or usd_close <= 0:
+            return (
+                display_date, False,
+                "🚨 관리자 입력값이 유효하지 않습니다 (KOSPI 종가·환율은 필수).",
+                None, [], _load_history_df()
+            )
     else:
         local_loaded = False
-        kospi_close = 2500.0
+        kospi_close = None
         kospi_change = 0.0
-        usd_close = 1350.0
+        usd_close = None
         usd_change = 0.0
-        volatility = 1.2
-        dist_from_high = 0.08
         foreigner_flow = 0
         institution_flow = 0
         retail_flow = 0
-        score = 50.0
-        
+        score = None
+
         target_date = datetime.today()
         while target_date.weekday() >= 5:
             target_date -= timedelta(days=1)
@@ -142,33 +169,45 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             except Exception:
                 data_source_log = "✅ 마감 데이터 기준"
         else:
-            data_source_log = "⚠️ 안전 모드"
+            # 🚨 실데이터 없음 → 가짜 시세(2500/1350)로 점수를 만들지 않고 실패를 그대로 반환
+            return (
+                display_date, False,
+                "🚨 시장 데이터를 불러오지 못했습니다 (market_history.csv 없음 또는 손상). 수치를 표시하지 않습니다.",
+                None, [], _load_history_df()
+            )
 
+    # =====================================================================
+    # 지표 산출 — 입력이 없는 지표는 '중립값 0.5'를 넣지 않고 산출 대상에서 제외합니다.
+    # =====================================================================
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
-    short_base = 0.4 + 0.4 * (volatility / 5.0)
-    els_base = 0.1 + 0.7 * dist_from_high
-    skew_base = 0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change
+    short_base = (0.4 + 0.4 * (volatility / 5.0)) if volatility is not None else None
+    els_base = (0.1 + 0.7 * dist_from_high) if dist_from_high is not None else None
+    skew_base = (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change) if volatility is not None else None
     synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
     ndf_base = 0.4 + 0.5 * usd_change
     fut_base = 0.5 - 0.3 * kospi_change
     non_base = 0.5 + (0.2 if institution_flow < 0 else -0.1)
     dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
-    bal_base = 0.5 + 0.3 * dist_from_high
+    bal_base = (0.5 + 0.3 * dist_from_high) if dist_from_high is not None else None
     put_buy_base = 0.4 - 0.3 * kospi_change
     stock_net_base = 0.5
 
-    kospi_5d_base = 0.5
-    if FDR_AVAILABLE and not local_loaded:
-        try:
-            if len(kospi_df) >= 6:
-                kospi_5d_prev = float(kospi_df.iloc[-6]['Close'])
-                kospi_5d_return = (kospi_close - kospi_5d_prev) / kospi_5d_prev
-            else:
-                kospi_5d_return = 0.0
-            kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
-        except Exception:
-            pass
+    # KOSPI 5일 모멘텀: 누적 이력에서 5영업일 전 종가를 실제로 조회해 산출합니다.
+    # (과거 버전은 정의되지 않은 변수 kospi_df 를 참조해 항상 NameError → 0.5 고정이었습니다.)
+    kospi_5d_base = None
+    try:
+        hist_for_5d = _load_history_df()
+        if not hist_for_5d.empty and "KOSPI" in hist_for_5d.columns:
+            hist_sorted = hist_for_5d.sort_values(by="Date").reset_index(drop=True)
+            past = hist_sorted[hist_sorted["Date"] <= str(date_key)]
+            if len(past) >= 6:
+                k_5d_prev = float(past.iloc[-6]["KOSPI"])
+                if k_5d_prev > 0:
+                    kospi_5d_base = 0.5 - 2.5 * ((kospi_close - k_5d_prev) / k_5d_prev)
+    except Exception as e:
+        print(f"⚠️ KOSPI 5일 모멘텀 산출 실패: {e}")
+        kospi_5d_base = None
 
     weights = {
         "FX_Swap_Point": 10.0, "Put_OTM_OI": 9.0, "Short_Ratio": 9.0,
@@ -178,22 +217,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "Stock_Net_Sell": 4.0, "KOSPI_5D_Return": 5.0
     }
 
-    friendly_names = {
-        "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
-        "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 배팅한 투기자본)",
-        "Short_Ratio": "공매도 거래 비중 (주도권을 쥐어짜려는 매도세)",
-        "ELS_KnockIn": "ELS 녹인 위험 (대규모 원금손실 구간 진입 여부)",
-        "VKOSPI_Skew": "공포지수 비대칭성 (투자자들의 불안 심리 강도)",
-        "Synthetic_Futures": "합성선물 가격차이 (외국인의 파생상품 하방 압력)",
-        "NDF_Night_Rate": "야간 환율스왑 변동 (원/달러 환율 급등 위험)",
-        "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 투기)",
-        "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도세)",
-        "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
-        "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
-        "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 쏠림 배팅 규모)",
-        "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 하락에 따른 직접 지표)"
-    }
+    # (중복 정의였던 friendly_names 사전 제거 — 표기는 모듈 상단 FRIENDLY_NAMES 로 일원화)
 
     formulas = {
         "FX_Swap_Point": "0.55 × clip(0.5 + 0.3×(USD-1200)/300 + 0.1×USD_change) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
@@ -220,27 +244,34 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         def clip(val):
             return min(1.0, max(0.0, val))
 
-        market_scores = {
+        # 입력이 없는(None) 지표는 아래에서 통째로 제거되어 가중평균에서 제외됩니다.
+        market_scores_raw = {
             "FX_Swap_Point": {"Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)},
             "Put_OTM_OI": {"Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)), "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))},
-            "Short_Ratio": {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
-            "ELS_KnockIn": {"Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)},
-            "VKOSPI_Skew": {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
+            "Short_Ratio": None if short_base is None else {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
+            "ELS_KnockIn": None if els_base is None else {"Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)},
+            "VKOSPI_Skew": None if skew_base is None else {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
             "Synthetic_Futures": {"Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)), "Institution": clip(synth_base), "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))},
             "NDF_Night_Rate": {"Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)},
             "Futures_Net_Sell": {"Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)), "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)), "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))},
             "Non_Arbitrage_Ratio": {"Foreigner": clip(non_base + 0.05), "Institution": clip(non_base + 0.1), "Retail": clip(non_base - 0.2)},
             "Foreign_Broker_Dump": {"Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)},
-            "Stock_Short_Balance": {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
+            "Stock_Short_Balance": None if bal_base is None else {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
             "Put_Buy_Simple": {"Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)), "Institution": clip(put_buy_base), "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))},
             "Stock_Net_Sell": {"Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)), "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)), "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))},
-            "KOSPI_5D_Return": {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
+            "KOSPI_5D_Return": None if kospi_5d_base is None else {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
         }
 
+        market_scores = {k: v for k, v in market_scores_raw.items() if v is not None}
+        unavailable_metrics = [k for k, v in market_scores_raw.items() if v is None]
+
         total_weighted_risk = 0.0
-        total_weight = sum(weights.values())
+        available_weight = sum(w for k, w in weights.items() if k in market_scores)
 
         for item, w in weights.items():
+            if item not in market_scores:
+                sub_scores[item] = None   # 데이터 없음 → 중립값(50점) 대입 금지
+                continue
             risks = market_scores[item]
             weighted_risk = (
                 (risks["Foreigner"] * investor_weights["Foreigner"])
@@ -249,11 +280,18 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             )
             if weighted_risk >= 0.75:
                 extreme_signal_count += 1
-                
+
             sub_scores[item] = round(weighted_risk * 100.0, 1)
             total_weighted_risk += weighted_risk * w
 
-        base_score = (total_weighted_risk / total_weight) * 100.0
+        if available_weight <= 0:
+            return (
+                display_date, False,
+                "🚨 산출 가능한 위험 지표가 하나도 없습니다. 종합 위험 점수를 표시하지 않습니다.",
+                None, [], _load_history_df()
+            )
+
+        base_score = (total_weighted_risk / available_weight) * 100.0
 
         multiplier = 1.0
         if extreme_signal_count >= 5:
@@ -269,58 +307,57 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         score = round(max(0.0, min(100.0, final_score)), 1)
     else:
         for item, w in weights.items():
-            if item in row.columns:
-                val = float(row.iloc[0][item])
+            val = None
+            if row is not None and item in row.columns:
+                try:
+                    raw_val = row.iloc[0][item]
+                    val = None if pd.isna(raw_val) else float(raw_val)
+                except (TypeError, ValueError):
+                    val = None
+            if val is None:
+                sub_scores[item] = None   # 컬럼 결측 → "데이터 없음" (0.5 중립값 대입 금지)
+                unavailable_metrics.append(item)
+            else:
                 sub_scores[item] = round(val * 100.0, 1)
                 if val >= 0.75:
                     extreme_signal_count += 1
-            else:
-                sub_scores[item] = 50.0
-        score = float(row.iloc[0]["Score"])
+        try:
+            score = float(row.iloc[0]["Score"])
+        except (TypeError, ValueError, KeyError):
+            score = None
 
     details = []
     for item, w in weights.items():
-        sub_score_val = sub_scores[item]
-        display_risk = round(sub_score_val / 100.0, 3)
+        sub_score_val = sub_scores.get(item)
+        display_risk = None if sub_score_val is None else round(sub_score_val / 100.0, 3)
         details.append({
             "지표명 (한글 설명)": FRIENDLY_NAMES.get(item, item),
             "중요도 (가중치)": w,
             "위험도 (0~1)": display_risk,
-            "기여점수": round(w * display_risk, 2),
+            "기여점수": None if display_risk is None else round(w * display_risk, 2),
             "산출 공식 (수학적 모델)": formulas.get(item, "")
         })
-        
+
     details = sorted(details, key=lambda x: x["중요도 (가중치)"], reverse=True)
 
     metrics_dict = {}
-    if not local_loaded:
-        for item in weights.keys():
-            risks = market_scores[item]
-            weighted_risk = (
-                (risks["Foreigner"] * investor_weights["Foreigner"])
-                + (risks["Institution"] * investor_weights["Institution"])
-                + (risks["Retail"] * investor_weights["Retail"])
-            )
-            metrics_dict[item] = weighted_risk
-    else:
-        for item in weights.keys():
-            if item in row.columns:
-                metrics_dict[item] = float(row.iloc[0][item])
-            else:
-                metrics_dict[item] = 0.5
+    for item in weights.keys():
+        if sub_scores.get(item) is not None:
+            metrics_dict[item] = sub_scores[item] / 100.0
+    # 산출하지 못한 지표는 metrics_dict 에 넣지 않습니다 → CSV 에도 값이 기록되지 않음(결측 유지)
 
-    if local_loaded or is_live_connected:
+    # SPEC §6: 표현 계층(조회 화면)은 DB를 쓰지 않습니다.
+    # 관리자 수동 입력(override) 으로 새 데이터가 들어온 경우에만 저장합니다.
+    if override_date is not None:
         history_df = save_and_load_history(date_key, score, kospi_close, usd_close, retail_flow, foreigner_flow, institution_flow, metrics_dict)
     else:
-        if os.path.exists(HISTORY_FILE):
-            history_df = pd.read_csv(HISTORY_FILE)
-            history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
-            history_df["Date"] = history_df["Date"].astype(str)
-        else:
-            history_df = pd.DataFrame()
+        history_df = _load_history_df()
 
     if local_loaded:
         is_live_connected = True
+
+    if unavailable_metrics:
+        data_source_log += f" | ⚠️ 산출 불가 지표 {len(unavailable_metrics)}개 (가중평균에서 제외)"
 
     status_text = f"KOSPI: {kospi_close:.2f} ({kospi_change*100:+.2f}%) | 환율: {usd_close:.2f}원 ({usd_change*100:+.2f}%)"
     return display_date, is_live_connected, f"{data_source_log} | {status_text}", score, details, history_df
@@ -342,8 +379,34 @@ def render_macro_page():
 
     render_admin_console(fetch_verified_market_data)
 
+    # 🚨 실데이터 로드 실패: 가짜 수치를 그리지 않고 여기서 렌더링을 중단합니다.
+    if score is None:
+        st.error(
+            f"🚨 {log_msg}\n\n"
+            "가짜 기본값(KOSPI 2,500 / 환율 1,350 등)으로 화면을 채우지 않기 위해 "
+            "위험 점수·지표·차트를 표시하지 않습니다. 자동 수집(GitHub Actions)이 정상 동작했는지 확인해 주세요."
+        )
+        if admin_mode:
+            st.info("⚙️ [관리자] 사이드바에서 로그인 후, 위 '관리자 수동 제어실'에서 당일 데이터를 직접 입력할 수 있습니다.")
+        st.stop()
+
     if admin_mode:
         st.write(f"📊 **[관리자] 로드된 데이터 행 개수:** `{len(history_df)}`개")
+
+    # 데이터 신선도(staleness) 검사 — 오래된 CSV를 '실시간'으로 표기하지 않습니다.
+    stale_days = None
+    try:
+        latest_date = pd.to_datetime(history_df["Date"]).max()
+        stale_days = (pd.Timestamp(datetime.today().date()) - latest_date.normalize()).days
+    except Exception:
+        stale_days = None
+
+    if stale_days is not None and stale_days >= 3:
+        st.warning(
+            f"⚠️ 최신 시장 데이터가 **{stale_days}일 전({latest_date.strftime('%Y-%m-%d')})** 기준입니다. "
+            "자동 수집이 멈춰 있을 수 있으니 아래 수치는 최신이 아닙니다."
+        )
+        is_live = False
 
     st.markdown(
         f"""
@@ -389,40 +452,42 @@ def render_macro_page():
             u_diff = 0.0
             u_pct = 0.0
     else:
-        k_val = 2500.0
-        k_diff = 0.0
-        k_pct = 0.0
-        u_val = 1350.0
-        u_diff = 0.0
-        u_pct = 0.0
+        # 이력이 비어 있으면 임의 시세(2500 / 1350)를 그리지 않고 '데이터 없음'으로 표기합니다.
+        k_val = None
+        k_diff = None
+        k_pct = None
+        u_val = None
+        u_diff = None
+        u_pct = None
 
-    k_color = "#ef4444" if k_diff < 0 else "#22c55e"
-    k_sign = "▼" if k_diff < 0 else "▲"
-    u_color = "#ef4444" if u_diff > 0 else "#22c55e"
-    u_sign = "▲" if u_diff > 0 else "▼"
+    k_color = "#ef4444" if (k_diff is not None and k_diff < 0) else "#22c55e"
+    k_sign = "▼" if (k_diff is not None and k_diff < 0) else "▲"
+    u_color = "#ef4444" if (u_diff is not None and u_diff > 0) else "#22c55e"
+    u_sign = "▲" if (u_diff is not None and u_diff > 0) else "▼"
 
     def format_val(val, fmt="{:,.2f}"):
-        if pd.isna(val): return "-"
+        if val is None or pd.isna(val):
+            return "데이터 없음"
         return fmt.format(val)
 
     k_val_str = format_val(k_val)
     u_val_str = format_val(u_val)
-    k_diff_str = f"{k_sign} {abs(k_diff):.2f} ({abs(k_pct):.2f}%)" if not pd.isna(k_val) else "-"
-    u_diff_str = f"{u_sign} {abs(u_diff):.2f} ({abs(u_pct):.2f}%)" if not pd.isna(u_val) else "-"
+    k_diff_str = f"{k_sign} {abs(k_diff):.2f} ({abs(k_pct):.2f}%)" if (k_val is not None and k_diff is not None and not pd.isna(k_val)) else "-"
+    u_diff_str = f"{u_sign} {abs(u_diff):.2f} ({abs(u_pct):.2f}%)" if (u_val is not None and u_diff is not None and not pd.isna(u_val)) else "-"
 
     render_clean_html(
         f"""
         <div style="display: flex; gap: 16px; margin-bottom: 25px; flex-wrap: wrap;">
             <div style="flex: 1 1 280px; min-width: 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #334155; border-radius: 16px; padding: 22px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
                 <div style="font-size: 15px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">📈 KOSPI 주가지수</div>
-                <div style="font-size: 46px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{k_val_str}</div>
+                <div style="font-size: {46 if k_val is not None else 26}px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{k_val_str}</div>
                 <div style="font-size: 17px; color: {k_color}; font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 4px;">
                     <span>{k_diff_str}</span>
                 </div>
             </div>
             <div style="flex: 1 1 280px; min-width: 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 2px solid #334155; border-radius: 16px; padding: 22px; box-shadow: 0 10px 15px -3px rgba(0,0,0,0.3); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
                 <div style="font-size: 15px; color: #94a3b8; font-weight: 600; margin-bottom: 6px; display: flex; align-items: center; gap: 6px;">💵 원/달러 환율</div>
-                <div style="font-size: 46px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{u_val_str}<span style="font-size: 28px; font-weight: 700;">원</span></div>
+                <div style="font-size: {46 if u_val is not None else 26}px; color: #f8fafc; font-weight: 800; letter-spacing: -1.5px; line-height: 1.1;">{u_val_str}<span style="font-size: 28px; font-weight: 700;">{"원" if u_val is not None else ""}</span></div>
                 <div style="font-size: 17px; color: {u_color}; font-weight: 700; margin-top: 8px; display: flex; align-items: center; gap: 4px;">
                     <span>{u_diff_str}</span>
                 </div>
@@ -441,6 +506,13 @@ def render_macro_page():
         </div>
         """
     )
+
+    # 표본 부족 경고 — Z-Score 정규화는 이력이 충분히 쌓여야 의미가 생깁니다.
+    if len(history_df) < 20:
+        st.warning(
+            f"⚠️ 누적 이력이 **{len(history_df)}일치**뿐이라 점수 정규화(Z-Score) 표본이 부족합니다. "
+            "지표별 점수가 0점/100점으로 튈 수 있으니 절대값보다 추세로 참고해 주세요. (권장 표본: 20일 이상)"
+        )
 
     current_layer = min(10, max(0, int(score // 10)))
 
@@ -511,7 +583,16 @@ def render_macro_page():
     with st.expander("🔍 14개 변동성 지표별 위험 기여도 상세 분석표 보기"):
         st.markdown("#### 📊 14개 변동성 지표별 위험 기여도 및 산출 공식")
         st.caption("수급 가중치(외국인 55%, 기관 37%, 개인 8%)를 적용하여 산출된 개별 위험도 및 수학적 모델입니다.")
-        
+        st.info(
+            "ℹ️ **지표 산출 방식 안내** — 아래 14개 수치는 실제 파생상품·공매도 시장에서 직접 수집한 값이 아니라, "
+            "**KOSPI 종가 · 원/달러 환율 · 두 값의 전일 대비 변화율 · 투자자 3주체 수급** 5개 실측값으로부터 "
+            "위 '산출 공식'에 따라 계산한 **추정 프록시(대용치)** 입니다. "
+            "'데이터 없음'으로 표시된 지표는 입력값이 없어 산출하지 못한 것이며, 종합 점수의 가중평균에서도 제외됩니다."
+        )
+        n_missing = len([d for d in details if d["위험도 (0~1)"] is None])
+        if n_missing:
+            st.warning(f"⚠️ 14개 중 {n_missing}개 지표를 산출하지 못했습니다 (아래 표에 '데이터 없음'으로 표기).")
+
         if details:
             html_table = """
             <style>
@@ -541,13 +622,17 @@ def render_macro_page():
                 risk = row["위험도 (0~1)"]
                 contrib = row["기여점수"]
                 formula = row["산출 공식 (수학적 모델)"].replace("\n", "&#10;").replace("\\n", "&#10;")
-                
+
+                risk_str = "데이터 없음" if risk is None else f"{risk:.3f}"
+                contrib_str = "산출 불가" if contrib is None else f"{contrib:.2f}"
+                row_style = ' style="color:#94a3b8;"' if risk is None else ""
+
                 html_table += f"""
-                <tr>
-                    <td title="{formula}" style="cursor: help;">{name}</td>
+                <tr{row_style}>
+                    <td title="{formula}" style="cursor: help;">{name}{' <span style="color:#f97316;">(데이터 없음)</span>' if risk is None else ''}</td>
                     <td>{weight:.2f}</td>
-                    <td>{risk:.3f}</td>
-                    <td>{contrib:.2f}</td>
+                    <td>{risk_str}</td>
+                    <td>{contrib_str}</td>
                 </tr>
                 """
             html_table += "</tbody></table>"
@@ -558,17 +643,24 @@ def render_macro_page():
             st.info("실시간 시장 데이터가 없습니다.")
 
     if 'details' in locals() and len(details) > 0:
-        sorted_details = sorted(details, key=lambda x: x["위험도 (0~1)"], reverse=True)
-        
+        sorted_details = sorted(details, key=lambda x: (x["위험도 (0~1)"] is not None, x["위험도 (0~1)"] or 0), reverse=True)
+
         ai_comments_data = {}
-        ai_commentary_file = "data/macro_commentary.json"
+        ai_comment_dates = {}
+        ai_commentary_file = os.path.join(
+            os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data", "macro_commentary.json"
+        )
         if os.path.exists(ai_commentary_file):
             try:
                 with open(ai_commentary_file, "r", encoding="utf-8") as f:
-                    ai_comments_data = json.load(f).get("comments", {})
-            except Exception:
-                pass
+                    _ai_payload = json.load(f)
+                ai_comments_data = _ai_payload.get("comments", {})
+                ai_comment_dates = _ai_payload.get("comment_dates", {})
+            except Exception as e:
+                print(f"⚠️ AI 코멘트 파일 로드 실패: {e}")
+                st.warning(f"⚠️ AI 코멘트 파일을 읽지 못했습니다: {e}")
 
+        today_str_kr = datetime.today().strftime("%Y-%m-%d")
         warning_items_html = ""
         for ind in sorted_details:
             raw_key = None
@@ -576,25 +668,39 @@ def render_macro_page():
                 if kor_v == ind["지표명 (한글 설명)"]:
                     raw_key = eng_k
                     break
-            
+
             risk = ind["위험도 (0~1)"]
             w_text = ai_comments_data.get(raw_key, "AI 코멘트가 준비되지 않았습니다.")
-            
-            if risk >= 0.65:
-                icon = "🔴"
-                color = "#fca5a5"
-            elif risk >= 0.35:
-                icon = "🟡"
-                color = "#fde047"
+
+            # 오늘 생성된 코멘트가 아니면 '언제 것인지' 반드시 표시 (전일 코멘트를 오늘 것처럼 쓰지 않음)
+            c_date = ai_comment_dates.get(raw_key)
+            if raw_key in ai_comments_data:
+                if c_date and c_date != today_str_kr:
+                    w_text = f"<span style='color:#fbbf24;'>⚠️ ({c_date} 생성 코멘트)</span> {w_text}"
+                elif not c_date:
+                    w_text = f"<span style='color:#94a3b8;'>ℹ️ (생성 일자 미기록)</span> {w_text}"
+
+            if risk is None:
+                icon = "⚪"
+                color = "#94a3b8"
+                risk_label = "위험도: 데이터 없음 (산출 불가)"
             else:
-                icon = "🟢"
-                color = "#86efac"
-                
+                risk_label = f"위험도: {risk:.2f}"
+                if risk >= 0.65:
+                    icon = "🔴"
+                    color = "#fca5a5"
+                elif risk >= 0.35:
+                    icon = "🟡"
+                    color = "#fde047"
+                else:
+                    icon = "🟢"
+                    color = "#86efac"
+
             warning_items_html += f'''
             <li style="margin-bottom: 12px; line-height: 1.5; list-style-type: none;">
                 <div style="display: flex; align-items: center; gap: 6px; margin-bottom: 4px;">
                     <span style="font-size: 14px;">{icon}</span>
-                    <b style="color: {color}; font-size: 14.5px;">{ind['지표명 (한글 설명)']} (위험도: {risk:.2f})</b>
+                    <b style="color: {color}; font-size: 14.5px;">{ind['지표명 (한글 설명)']} ({risk_label})</b>
                 </div>
                 <div style="color: #cbd5e1; font-size: 13.5px; font-weight: 400; padding-left: 24px;">{w_text}</div>
             </li>
@@ -724,8 +830,30 @@ def render_macro_page():
             """
         )
         
-        tab1, tab2, tab3 = st.tabs(["📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거)", "📄 v1.0.0 (최초 배포)"])
-        
+        tab0, tab1, tab2, tab3 = st.tabs(
+            ["📄 v1.4.0 (데이터 무결성 감사 반영)", "📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거 시도)", "📄 v1.0.0 (최초 배포)"]
+        )
+
+        with tab0:
+            st.markdown(
+                """
+                #### 🏷️ [v1.4.0] - 2026년 08월 05일 (하드코딩·더미 데이터 전면 제거)
+                * **언제 (When)**: 2026년 08월 05일 데이터 무결성 감사(AUDIT_REPORT.md) 후속 조치
+                * **누가 (Who)**: 보이는 손 엔지니어링 감사 (Claude Opus 정밀 점검)
+                * **어디를 (Where)**: `collector_kospi200.py` / `views/macro_view.py` / `views/pegy_view.py` / `utils/*.py`
+                * **무엇을 (What)**:
+                    * 매크로 화면의 **KOSPI 2,500 / 환율 1,350 하드코딩 폴백 완전 삭제** (데이터 없으면 오류 배너 + 렌더링 중단)
+                    * 종목코드 해시(`code_hash % 3`)로 만들던 **가짜 변동성 판정 삭제** → 실제 20일 수익률 표준편차로 대체, 산출 불가 시 벌점 없음
+                    * Forward ROE / ROIC 상수(8.5 / 6.8) 및 t_roe 파생값 삭제 → **'데이터 없음' 표기 + 배점에서 제외**
+                    * 성장률을 ROE 파생값이 아닌 **네이버 실측 추정EPS vs TTM EPS 증감률**로 재산출
+                    * 자사주 매입 2.5% 가정 삭제 → 주주환원율은 **배당수익률만** 반영
+                    * 상장주식수 파싱에 **범위 검증(100만 주 미만 거부)** 도입 → '총 0억원' 오표기 차단
+                    * 지표 결측 시 0.5(중립) 대입 금지 → **가중평균에서 제외 + 표에 '데이터 없음' 표기**
+                * **왜 (Why)**: 실패한 수집을 그럴듯한 숫자로 덮으면 어디가 잘못됐는지 영원히 알 수 없기 때문 (ENGINEERING_SPEC §0-1)
+                * **어떻게 (How)**: 모든 실패 경로에서 `None` 반환 → UI에 '데이터 없음/산출 불가' 노출, 배치 수집기는 예외로 중단
+                """
+            )
+
         with tab1:
             st.markdown(
                 """

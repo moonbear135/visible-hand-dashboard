@@ -58,16 +58,20 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
         try:
             with open(commentary_file, "r", encoding="utf-8") as f:
                 commentary_data = json.load(f)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"⚠️ 기존 AI 코멘트 파일 로드 실패(신규 생성으로 진행): {e}")
 
     # 오늘 날짜
     today_str = time.strftime("%Y-%m-%d")
     if commentary_data.get("date") == today_str and len(commentary_data.get("comments", {})) == 14:
-        print("ℹ️ 이미 오늘의 AI 코멘트가 모두 생성되어 있습니다.")
-    
+        # 여기서 return 하지 않으면 매 실행마다 14회씩 API를 다시 호출합니다(비용/쿼터 낭비).
+        print("ℹ️ 이미 오늘의 AI 코멘트가 모두 생성되어 있습니다. 재호출을 건너뜁니다.")
+        return
+
     new_comments = commentary_data.get("comments", {})
-    
+    # 코멘트별 생성 일자 — 실패 시 전일 코멘트가 '오늘 분석'으로 둔갑하지 않도록 개별 기록
+    comment_dates = commentary_data.get("comment_dates", {})
+
     for key, risk_val in metrics_dict.items():
         name = FRIENDLY_NAMES.get(key, key)
         
@@ -90,19 +94,24 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
             response = model.generate_content(prompt)
             if response and response.text:
                 new_comments[key] = response.text.strip()
+                comment_dates[key] = today_str      # 실제 생성 성공 시에만 오늘 날짜 기록
             else:
                 raise ValueError("빈 응답")
             time.sleep(2)  # Rate limit 방어
         except Exception as e:
             print(f"   ⚠️ [{key}] AI 코멘트 생성 실패: {e}")
             if key not in new_comments:
-                new_comments[key] = "현재 코멘트 업데이트 중입니다. 잠시 후 다시 확인해주세요."
-            time.sleep(5) 
+                new_comments[key] = "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음)."
+                comment_dates[key] = None
+            # 기존 코멘트가 있으면 유지하되, comment_dates 는 갱신하지 않습니다.
+            # → 대시보드가 "(YYYY-MM-DD 생성 코멘트)" 라고 명시적으로 표기합니다.
+            time.sleep(5)
 
     commentary_data["date"] = today_str
     commentary_data["score"] = score
     commentary_data["comments"] = new_comments
-    
+    commentary_data["comment_dates"] = comment_dates
+
     with open(commentary_file, "w", encoding="utf-8") as f:
         json.dump(commentary_data, f, ensure_ascii=False, indent=4)
         
