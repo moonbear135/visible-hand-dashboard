@@ -369,9 +369,15 @@ def render_macro_page():
         """
         <div style="text-align: center; margin-bottom: 25px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <h1 style="font-size: 34px; font-weight: 800; color: #0f766e; margin: 0 0 8px 0; letter-spacing: -0.5px;">🏢 잘 보면 보이는 손 <span style="font-size: 22px; font-weight: 600; color: #64748b;">(The Visible Hand)</span></h1>
-            <div style="font-size: 16px; color: #64748b; font-weight: 600;">실시간 수급 연동형 시장 종합 위험 방공망 대시보드</div>
+            <div style="font-size: 16px; color: #64748b; font-weight: 600;">장마감 후 확정 데이터 기반 시장 종합 위험 방공망 대시보드</div>
         </div>
         """
+    )
+
+    st.warning(
+        "🔒 이 화면은 현재 **관리자 전용**이며 공개 화면에는 노출되지 않습니다. "
+        "14개 위험 지표 중 다수가 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 의존하고 있어, "
+        "ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용, 실시간 배제)에 맞게 재설계될 때까지 비공개 상태로 둡니다."
     )
 
     admin_mode = st.session_state.get("admin_mode", False)

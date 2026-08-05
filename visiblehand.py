@@ -110,26 +110,21 @@ def main():
         unsafe_allow_html=True
     )
     st.sidebar.markdown("---")
-    
-    # 2. 서비스 메뉴 선택 라디오 버튼 (최상단 위치, 18px 타이틀, 명시적 2줄 줄바꿈 적용)
-    selected_menu = st.sidebar.radio(
-        "📌 서비스 메뉴 선택",
-        [
-            "🏢 잘 보면 보이는 손  \n(매크로 방공망)", 
-            "💡 사실 이 가격이에요  \n(밸류에이션 리포트)"
-        ],
-        index=0
-    )
-    st.sidebar.markdown("---")
-    
-    # 3. 사이드바 하단 관리자 로그인 시스템 배치
-    render_admin_sidebar()
+
+    # 2. 공개 서비스는 "사실 이 가격이에요(밸류에이션 리포트)" 하나뿐입니다.
+    #    "🏢 잘 보면 보이는 손(매크로 방공망)"은 2026-08-05 오너 지침(ENGINEERING_SPEC.md §0-3-1)에 따라
+    #    실시간을 전제로 한 추정 프록시 지표 위주라 공개 화면에서는 제외하고,
+    #    관리자 인증 후 사이드바 하단의 "⚙️ 관리자 전용 메뉴"에서만 볼 수 있게 이동했습니다.
+    #    (일반 방문자에게는 메뉴 선택지 자체가 보이지 않습니다 — 후행지표로 재설계 전까지 비공개)
+
+    # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
+    admin_mode = render_admin_sidebar()
 
     # 4. 메인 뷰 라우팅
-    if "사실 이 가격이에요" in selected_menu:
-        render_pegy_page()
-    else:
+    if admin_mode and st.session_state.get("admin_view_macro"):
         render_macro_page()
+    else:
+        render_pegy_page()
 
 if __name__ == "__main__":
     main()
