@@ -163,12 +163,14 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
 
         is_live_connected = False
         if local_loaded:
-            try:
-                mtime = os.path.getmtime(HISTORY_FILE)
-                sync_time = datetime.fromtimestamp(mtime).strftime("%Y-%m-%d %H:%M:%S")
-                data_source_log = f"✅ 최종 동기화: {sync_time}"
-            except Exception:
-                data_source_log = "✅ 마감 데이터 기준"
+            # "마지막 동기화" 표시는 파일 mtime(배포·재시작 시각과 뒤섞일 수 있음)이 아니라
+            # 실제로 크롤링이 끝나 이 행이 저장된 시각(Collected_At)을 사용합니다.
+            # (views/pegy_view.py의 "마지막 동기화" 표기와 동일한 기준으로 통일 — 2026-08-06)
+            collected_at = latest_row.get("Collected_At") if "Collected_At" in df_sorted.columns else None
+            if collected_at is not None and pd.notna(collected_at):
+                data_source_log = f"📅 마지막 동기화: {collected_at} (크롤링 완료 후 장마감 데이터 적용)"
+            else:
+                data_source_log = "✅ 마감 데이터 기준 (수집 완료 시각 기록 없음 — 구버전 데이터)"
         else:
             # 🚨 실데이터 없음 → 가짜 시세(2500/1350)로 점수를 만들지 않고 실패를 그대로 반환
             return (
@@ -377,7 +379,7 @@ def render_macro_page():
     st.warning(
         "🔒 이 화면은 현재 **관리자 전용**이며 공개 화면에는 노출되지 않습니다. "
         "14개 위험 지표 중 다수가 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 의존하고 있어, "
-        "ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용, 실시간 배제)에 맞게 재설계될 때까지 비공개 상태로 둡니다."
+        "ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용)에 맞게 재설계될 때까지 비공개 상태로 둡니다."
     )
 
     admin_mode = st.session_state.get("admin_mode", False)
@@ -400,7 +402,7 @@ def render_macro_page():
     if admin_mode:
         st.write(f"📊 **[관리자] 로드된 데이터 행 개수:** `{len(history_df)}`개")
 
-    # 데이터 신선도(staleness) 검사 — 오래된 CSV를 '실시간'으로 표기하지 않습니다.
+    # 데이터 신선도(staleness) 검사 — 오래된 CSV를 최신 데이터인 것처럼 표기하지 않습니다.
     stale_days = None
     try:
         latest_date = pd.to_datetime(history_df["Date"]).max()
@@ -652,7 +654,7 @@ def render_macro_page():
             # 표 높이에 상관없이 페이지 스크롤로 전체가 다 보이게 수정했습니다.
             st.markdown(clean_html, unsafe_allow_html=True)
         else:
-            st.info("실시간 시장 데이터가 없습니다.")
+            st.info("시장 데이터가 없습니다.")
 
     if 'details' in locals() and len(details) > 0:
         sorted_details = sorted(details, key=lambda x: (x["위험도 (0~1)"] is not None, x["위험도 (0~1)"] or 0), reverse=True)

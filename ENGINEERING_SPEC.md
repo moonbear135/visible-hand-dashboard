@@ -546,7 +546,7 @@ t_fair   = min(t_eps × min(growth + sh_yield, 25.0), price × 2.5)
 
 | 파일 | 역할 | 수정 시 주의 |
 |------|------|-------------|
-| `collector_kospi200.py` | KOSPI 200 실시간 수집 + 퀀트 지표 산출 | **네이버 HTML 구조 변경 시에만 파싱 로직 수정. iloc 금지. PERIOD_KEYWORDS 참조 필수** |
+| `collector_kospi200.py` | KOSPI 200 배치 수집(GitHub Actions 실행 시점 기준) + 퀀트 지표 산출 | **네이버 HTML 구조 변경 시에만 파싱 로직 수정. iloc 금지. PERIOD_KEYWORDS 참조 필수** |
 | `scrape_daily.py` | 일별 매크로 위험 지표 수집 | 수급/환율/선물 지표. 별도의 PERIOD_KEYWORDS 사본 보유 (동기화 필요) |
 
 ### 검증 계층 (Validation Layer)

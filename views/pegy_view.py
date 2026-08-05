@@ -4,6 +4,33 @@ from datetime import datetime
 import pandas as pd
 import streamlit as st
 
+from utils.db import HISTORY_FILE, COL_MAP
+
+
+def load_latest_kospi_usd():
+    """
+    market_history.csv에서 가장 최근 코스피 지수·원/달러 환율만 가볍게 읽어옵니다.
+    ("잘 보면 보이는 손"이 관리자 전용으로 바뀌면서 공개 화면에서 이 기본 정보가
+    아예 안 보이게 된 문제를 보완하기 위해 2026-08-06 추가.)
+    실패해도 절대 지어내지 않고 None을 반환합니다.
+    """
+    try:
+        if not os.path.exists(HISTORY_FILE):
+            return None
+        df = pd.read_csv(HISTORY_FILE)
+        df = df.rename(columns={v: k for k, v in COL_MAP.items()})
+        if df.empty or "KOSPI" not in df.columns or "USD_KRW" not in df.columns:
+            return None
+        last = df.iloc[-1]
+        kospi = float(last["KOSPI"]) if pd.notna(last.get("KOSPI")) else None
+        usd = float(last["USD_KRW"]) if pd.notna(last.get("USD_KRW")) else None
+        date_str = str(last["Date"]) if "Date" in df.columns and pd.notna(last.get("Date")) else None
+        if kospi is None or usd is None:
+            return None
+        return {"kospi": kospi, "usd": usd, "date": date_str}
+    except Exception:
+        return None
+
 
 def fmt_num(value, suffix="", digits=None, na_text="데이터 없음"):
     """
@@ -243,6 +270,28 @@ def render_pegy_page():
         unsafe_allow_html=True
     )
 
+    # 3-1. 코스피 지수 / 원/달러 환율 요약 카드 — 2026-08-06 추가.
+    # "잘 보면 보이는 손"(매크로 화면)이 관리자 전용으로 바뀌면서 공개 화면에서 이 기본 정보를
+    # 아예 볼 수 없게 된 문제를 보완. 일반 사용자에게 소수점까지는 필요 없으므로 정수로 반올림 표기.
+    market_snapshot = load_latest_kospi_usd()
+    if market_snapshot:
+        date_label = f" ({market_snapshot['date']} 장마감 기준)" if market_snapshot.get('date') else ""
+        st.markdown(
+            f"""
+            <div style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; max-width: 860px; margin-left: auto; margin-right: auto;">
+                <div style="flex: 1 1 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155; border-radius: 14px; padding: 16px 20px;">
+                    <div style="font-size: 13px; color: #94a3b8; font-weight: 700;">📈 코스피 지수{date_label}</div>
+                    <div style="font-size: 30px; color: #f8fafc; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['kospi']:,.0f}</div>
+                </div>
+                <div style="flex: 1 1 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155; border-radius: 14px; padding: 16px 20px;">
+                    <div style="font-size: 13px; color: #94a3b8; font-weight: 700;">💵 원/달러 환율{date_label}</div>
+                    <div style="font-size: 30px; color: #f8fafc; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['usd']:,.0f}<span style="font-size: 18px; font-weight: 700;">원</span></div>
+                </div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+
     # 4. 대시보드 상단 배치 동기화 배너 + 스냅샷 상태/신선도(staleness) 검사
     if last_updated_at is None or not all_stocks:
         st.error(
@@ -276,7 +325,7 @@ def render_pegy_page():
         f"""
         <div style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px 20px; margin-bottom: 22px; text-align: center; box-shadow: 0 4px 14px rgba(2, 132, 199, 0.25); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <span style="font-size: 15.5px; font-weight: 800; color: #38bdf8;">
-                📅 마지막 동기화: {last_updated_at} (장 마감 반영)
+                📅 마지막 동기화: {last_updated_at} (크롤링 완료 후 장마감 데이터 적용)
             </span>
             <span style="font-size: 13px; color: #94a3b8; margin-left: 14px; font-weight: 600;">
                 • 배치 수집 스냅샷 ({metadata.get('total_count', len(all_stocks))}개 종목 / 상태 {snapshot_status})
@@ -930,7 +979,7 @@ def render_pegy_page():
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">작년 배당률 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실시간 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
+                            <span class="q-tooltip">작년 배당률 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실제 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str}{calc_dps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {fmt_num(s.get('sh_return'), '%', 2)} <span style="font-size: 13px; color: #94a3b8;">({s.get('return_total', '데이터 없음')})</span></div>
                     </div>

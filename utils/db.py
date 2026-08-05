@@ -54,7 +54,10 @@ COL_MAP = {
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
     "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)",
+    # 2026-08-06: '동기화/업데이트' 표기를 파일 mtime(배포·재시작 시각) 대신
+    # 실제 크롤링이 끝나고 이 행이 저장된 시각으로 통일하기 위해 추가.
+    "Collected_At": "데이터 수집 완료 시각",
 }
 
 def ensure_metric_columns(df):
@@ -141,7 +144,10 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
         "USD_KRW": [round(usd_close, 2)],
         "Retail": [retail],
         "Foreigner": [foreigner],
-        "Institution": [institution]
+        "Institution": [institution],
+        # 이 행이 실제로 저장되는(= 수집이 끝나 반영되는) 시각. 화면의 "마지막 동기화" 표시는
+        # 이 값을 기준으로 하며, 파일 수정시각(mtime)이나 페이지 로드 시각을 쓰지 않습니다.
+        "Collected_At": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
     }
     
     if metrics_dict:

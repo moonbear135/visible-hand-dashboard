@@ -161,7 +161,7 @@ def scrape_and_update(target_date_override=None):
             print(f"⚠️ FinanceDataReader 수집 실패: {str(e)}")
 
     # === [네이버 웹 스크래핑(Primary) 우회 수집 로직] ===
-    # 주의: 이 블록은 "지금 이 순간의 실시간 시세"를 가져오는 로직이라,
+    # 주의: 이 블록은 "스크립트 실행 시점(장마감 직후)의 시세"를 가져오는 로직이라,
     # 과거 날짜를 보정(백필)하는 경우에는 건너뜁니다. (안 그러면 오늘 시세로 과거 데이터가 덮어써짐)
     if not is_backfill:
         try:
@@ -192,7 +192,7 @@ def scrape_and_update(target_date_override=None):
         except Exception as e:
             print(f"⚠️ 네이버 금융 스크래핑 실패 (FDR 값 유지): {e}")
     else:
-        print(f"ℹ️ 백필 모드: 실시간 시세 조회를 건너뛰고 {date_key} 기준 종가(FDR)를 사용합니다.")
+        print(f"ℹ️ 백필 모드: 당일 시세 조회를 건너뛰고 {date_key} 기준 종가(FDR)를 사용합니다.")
 
     # === [백엔드 결측치 검증] ===
     # ⚠️ 과거 버전은 여기서 전일 종가를 '오늘 종가 자리에' 그대로 써넣고(Forward Fill)
@@ -430,7 +430,10 @@ def scrape_and_update(target_date_override=None):
         "USD_KRW": [round(usd_close, 2)],
         "Retail": [retail_flow],
         "Foreigner": [foreigner_flow],
-        "Institution": [institution_flow]
+        "Institution": [institution_flow],
+        # 이 행이 실제로 저장되는(= 크롤링이 끝나 반영되는) 시각. 화면의 "마지막 동기화" 표시는
+        # 파일 mtime이 아니라 이 값을 사용합니다.
+        "Collected_At": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
     }
     
     for k, v in metrics_dict.items():

@@ -270,7 +270,7 @@ def fetch_naver_item_dps_and_eps(code):
 
 def fetch_kospi200_real_market_data():
     """
-    네이버 증권 코스피 200 시가총액 상위 목록(item/main.naver)을 실시간으로 스크래핑하여
+    네이버 증권 코스피 200 시가총액 상위 목록(item/main.naver)을 실행 시점 기준으로 스크래핑하여
     진짜 KOSPI 200 종목 시세 데이터(종목코드, 종목명, 현재가, PER, ROE) 200개를 수집합니다.
     (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별 기업 주식으로만 1위~200위 채번)
     """
@@ -780,7 +780,7 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
 
 def run_kospi200_collector():
     """KOSPI 200 시가총액 순 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실시간 실데이터 수집 시작...")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실데이터 수집 시작...")
     
     stocks_raw = fetch_kospi200_real_market_data()
     if not stocks_raw:
