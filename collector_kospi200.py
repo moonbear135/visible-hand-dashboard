@@ -455,8 +455,18 @@ def enrich_quant_metrics(stocks_raw):
             data_issues.append("Trailing PER 수집 실패")
 
         t_eps = n_t_eps if (n_t_eps and n_t_eps > 0) else None
+        t_eps_calculated = False
+        t_eps_source = "naver_실측" if t_eps is not None else None
         if t_eps is None:
             data_issues.append("Trailing EPS 수집 실패")
+            # 2026-08-05 추가: 대수적 역산 허용 예외 (ENGINEERING_SPEC.md §0-1 예시2-보충)
+            # 조건: 실측 EPS를 어디서도 못 구했고, t_per·price 둘 다 실측값일 때만
+            # EPS = 가격 ÷ PER 로 역산합니다. 반드시 계산값으로 마킹해서 실측값과 섞지 않습니다.
+            if t_per and t_per > 0 and price and price > 0:
+                t_eps = round(price / t_per)
+                t_eps_calculated = True
+                t_eps_source = "calculated_price_div_per"
+                data_issues.append(f"Trailing EPS 계산값 사용 (실측 없음, 가격÷PER = {t_eps})")
 
         # Forward PER / EPS — 네이버 '추정PER|EPS' (실제 컨센서스) 만 사용
         f_per = n_f_per if (n_f_per and n_f_per > 0) else None
@@ -516,7 +526,8 @@ def enrich_quant_metrics(stocks_raw):
         # =========================================================
         if t_eps and f_eps and t_eps > 0:
             growth = round((f_eps - t_eps) / t_eps * 100.0, 1)
-            growth_source = "consensus_eps_vs_ttm_eps"
+            # Trailing EPS가 계산값(가격÷PER)이면 성장률도 그 영향을 그대로 받으므로 함께 마킹합니다.
+            growth_source = "consensus_eps_vs_ttm_eps_calculated" if t_eps_calculated else "consensus_eps_vs_ttm_eps"
         else:
             growth = None
             growth_source = None
@@ -618,6 +629,8 @@ def enrich_quant_metrics(stocks_raw):
             "return_total": tot_amt,
             "t_per": t_per,
             "t_eps": t_eps,
+            "t_eps_calculated": t_eps_calculated,
+            "t_eps_source": t_eps_source,
             "sh_return": sh_yield,
             "sh_return_basis": sh_return_basis,
             "t_pegy": t_pegy,

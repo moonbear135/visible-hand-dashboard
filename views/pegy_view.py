@@ -644,6 +644,15 @@ def render_pegy_page():
                 """
 
         t_eps_str = fmt_num(s.get('t_eps'))
+        # 2026-08-05 추가: Trailing EPS가 실측값이 아니라 계산값(가격÷PER 역산)이면
+        # ENGINEERING_SPEC.md §0-1 예시2-보충 원칙에 따라 반드시 별도 마크를 붙입니다.
+        calc_eps_tag = (
+            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+            'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">네이버에 실측 EPS가 없어 '
+            '가격÷PER 로 역산한 값입니다 (실측 아님)</span></span>'
+            if s.get("t_eps_calculated") else ""
+        )
         t_pbr = s.get("t_pbr")
         t_pbr_str = fmt_num(t_pbr)
         ev_ebitda = s.get("ev_ebitda")
@@ -659,6 +668,9 @@ def render_pegy_page():
         dps_str = f"{dps_val:,.0f}원/주" if dps_val > 0 else "무배당"
         growth_val = s.get('growth')
         growth_disp = "데이터 없음" if growth_val is None else f"{growth_val:+.1f}%"
+        # growth가 계산값 Trailing EPS를 기반으로 산출됐으면 같은 마크를 붙입니다.
+        if str(s.get("growth_source", "")).endswith("_calculated"):
+            growth_disp += calc_eps_tag
 
         price = s.get('price') or 0
 
@@ -779,7 +791,7 @@ def render_pegy_page():
                             <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
                         </div>
                         <div style="font-size: 18px; color: #cbd5e1; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('t_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"}
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('t_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"}{calc_eps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"}
                         </div>
                         <div style="font-size: 18px; color: #38bdf8; font-weight: 800; letter-spacing: -0.4px;">
                             <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda_str if ev_ebitda_str == "데이터 없음" else ev_ebitda_str + "배"}{ev_years_str.replace("11px", "13px")}
