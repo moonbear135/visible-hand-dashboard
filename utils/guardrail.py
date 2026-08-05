@@ -99,8 +99,8 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
     if is_high_dividend_sector and dps <= 0 and sh_return <= 0:
         cleaned['dividend_data_unverified'] = True
         cleaned['dividend_unverified_reason'] = (
-            "이 종목은 리츠·인프라·금융 등 배당 필수 업종인데 DPS(주당배당금)·배당수익률이 모두 0으로 "
-            "수집되었습니다. 실제로 무배당일 수도 있고 공시 데이터가 아직 반영되지 않았을 수도 있습니다."
+            "이 종목은 리츠·인프라·금융 등 배당 필수 업종인데 DPS(주당배당금)·배당수익률이 모두 0으로 수집되었습니다.<br>"
+            "실제로 무배당일 수도 있고 공시 데이터가 아직 반영되지 않았을 수도 있습니다."
         )
 
     return _finish(True, False)

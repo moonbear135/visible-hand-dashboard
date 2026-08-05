@@ -251,7 +251,8 @@ def render_pegy_page():
                     🚨 [투자 주의 경고 및 AI 분석 안내]
                 </div>
                 <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
-                    본 리포트의 수치 및 분석 결과는 <b>공시된 재무제표와 시장 데이터를 기반으로 AI 퀀트 알고리즘이 자동 계산한 단순 참고용 정보</b>입니다. 특정 종목의 매수·매도를 권유하거나 투자 자문을 제공하지 않으며, 데이터의 정확성이나 완벽성을 보장하지 않습니다.
+                    본 리포트의 수치 및 분석 결과는 <b>공시된 재무제표와 시장 데이터를 기반으로 AI 퀀트 알고리즘이 자동 계산한 단순 참고용 정보</b>입니다.<br>
+                    특정 종목의 매수·매도를 권유하거나 투자 자문을 제공하지 않으며, 데이터의 정확성이나 완벽성을 보장하지 않습니다.
                 </div>
                 <div style="font-size: 13.5px; color: #fecdd3; font-weight: 600; margin-top: 3px;">
                     ⚠️ 모든 투자 결정과 그에 따른 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있음을 명시합니다.
@@ -265,7 +266,8 @@ def render_pegy_page():
                     '잘 보면 보이는 손'은 정식 금융기관의 서비스가 아니며, 주식 초보자의 직관적인 밸류에이션 이해를 돕는 <b>참고용 프로젝트</b>입니다.
                 </div>
                 <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 3px;">
-                    ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다. 제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
+                    ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다.<br>
+                    제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
                 </div>
             </div>
             <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
@@ -493,10 +495,12 @@ def render_pegy_page():
             💡 '착시 저평가 (가치주 덫)' 및 100점 만점 퀀트 스코어 가이드
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65; margin-bottom: 8px;">
-            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다. (단, 현재가가 목표가를 초과했거나 PEGY &ge; 2.0 시 <b>목표가 달성 적정가/고평가 교차검증</b> 적용)
+            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다.<br>
+            (단, 현재가가 목표가를 초과했거나 PEGY &ge; 2.0 시 <b>목표가 달성 적정가/고평가 교차검증</b> 적용)
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65;">
-            • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만 실제 이익창출력(ROE&lt;8% 또는 ROIC&lt;6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.
+            • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만<br>
+            실제 이익창출력(ROE&lt;8% 또는 ROIC&lt;6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.
         </div>
     </div>
     """
@@ -545,80 +549,33 @@ def render_pegy_page():
         rank_num = s.get("rank", start_idx + idx_stock + 1)
         rank_prefix_html = f'<span style="font-size: 32px; font-weight: 900; color: #38bdf8; letter-spacing: -1px; margin-right: 4px; line-height: 1;">{rank_num}.</span>'
 
-        # 데이터 무결성 방공망: 차단 사유별 분기 마스크 카드 렌더링
-        # (is_valid=False 인 종목도 반드시 마스크 카드로 표시 — 정상 카드로 새어나가지 않도록)
-        if s.get('is_unverified', False) or not s.get('is_valid', True):
-            reject_reason = s.get('reject_reason', '')
-            unverified_reason = s.get('unverified_reason', '')
+        # 데이터 무결성 방공망: 진짜 카드 자체를 그릴 수 없는 경우만 전체 차단합니다.
+        # ⚠️ 2026-08-06 변경(오너 지적): "재무제표(Trailing)가 이미 존재하는 종목"까지 PER 극단치·
+        # 역성장·검증 하네스 실패 등을 이유로 전체를 가려버리면 과거 데이터로 공부할 수가 없습니다.
+        # → 진짜 아무것도 못 그리는 경우(price 없음, 상장주식수 파싱 오류로 전 지표 오염 의심)만
+        # 전체 차단하고, 나머지(PER 극단치/역성장/g_eff 산출불가/일반 검증 실패)는 Trailing은 정상
+        # 노출하고 "🚀 Forward" 카드 자리에만 사유별 색상 배지를 띄웁니다(배당 미확정 케이스와 동일 패턴).
+        reject_reason = s.get('reject_reason', '')
+        unverified_reason = s.get('unverified_reason', '')
+        hard_block = (not s.get('is_valid', True)) and (
+            '필수 지표 수집 실패' in reject_reason or '상장주식수 파싱 오류' in reject_reason
+        )
 
-            # 사유별 테마 분기
-            if '수집 실패' in reject_reason or '산출 불가' in reject_reason or '파싱 오류' in reject_reason:
-                # ⚪ 데이터 미수집 (회색 테마)
-                badge_label = "⚪ 데이터 없음 (측정 불가)"
-                badge_bg = "#1e293b"
-                badge_border = "#64748b"
-                badge_fg = "#cbd5e1"
-                card_bg = "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)"
-                card_border_color = "#64748b"
-                inner_border = "#334155"
-                title_icon = "🚫"
-                title_text = "필수 데이터를 수집하지 못해 밸류에이션을 산출하지 않았습니다"
-                title_color = "#cbd5e1"
-                desc_text = f"수집 실패 사유: <b>{reject_reason or unverified_reason or '원인 미상'}</b>"
-                desc_color = "#94a3b8"
-                hint_text = "📌 값을 추정해 채우지 않고 '데이터 없음'으로 남깁니다. 다음 수집에서 정상화되면 자동 복구됩니다."
-            elif 'PER' in reject_reason or 'PER' in str(s.get('badge', '')):
-                # 🔴 PER 극단치 / 데이터 오염 (빨간 테마)
-                badge_label = "🔴 PER 극단 고평가 (밸류에이션 측정 불가)"
-                badge_bg = "#7f1d1d"
-                badge_border = "#f87171"
-                badge_fg = "#fca5a5"
-                card_bg = "linear-gradient(135deg, #450a0a 0%, #1e1b4b 100%)"
-                card_border_color = "#dc2626"
-                inner_border = "#991b1b"
-                title_icon = "🚫"
-                title_text = "밸류에이션 산출 범위 초과 — 분석 제외 종목"
-                title_color = "#f87171"
-                desc_text = (
-                    f"본 종목은 <b>PER {fmt_num(s.get('t_per'), '배', 1)} "
-                    f"(EPS {fmt_num(s.get('t_eps'), '원')})</b>로 정상 밸류에이션 산출 범위(PER 300배)를 "
-                    "크게 초과하여 PEGY 분석이 무의미한 극단 고평가 상태입니다."
-                )
-                desc_color = "#fecaca"
-                hint_text = "📌 이익 수준이 정상화(EPS 회복)되면 자동으로 분석 대상에 복귀합니다."
-            elif '역성장' in str(s.get('badge', '')) or (s.get('g_eff') is not None and s['g_eff'] <= 0):
-                # 🟣 역성장 / 무성장 (보라 테마)
-                badge_label = "🟣 역성장 · 무성장 (가치 훼손 위험)"
-                badge_bg = "#3b0764"
-                badge_border = "#a855f7"
-                badge_fg = "#d8b4fe"
-                card_bg = "linear-gradient(135deg, #3b0764 0%, #1e1b4b 100%)"
-                card_border_color = "#7c3aed"
-                inner_border = "#6d28d9"
-                title_icon = "📉"
-                title_text = "성장률 0% 이하 — 가치 훼손 구간"
-                title_color = "#c4b5fd"
-                desc_text = f"본 종목은 <b>ROE {fmt_num(s.get('t_roe'), '%')}</b> 기준 실효성장률(g_eff)이 0 이하이며, 성장 기반 밸류에이션(PEGY) 적용이 부적합합니다."
-                desc_color = "#e9d5ff"
-                hint_text = "📌 이익 성장이 재개되면 자동으로 밸류에이션 분석이 복구됩니다."
-            else:
-                # 🟡 상위 3단계 데이터 검증 하네스 통과 실패 (주황 테마)
-                # ⚠️ 2026-08-06: 예전엔 "배당 필수 업종 DPS=0" 케이스도 여기로 왔지만, 이제 그 경우는
-                # 종목을 차단하지 않고 Forward 카드 자리의 노란 배지로만 표시합니다(guardrail.py 참고).
-                # 여기 남는 건 상위 검증 단계(DataValidator) 자체가 실패로 판정한 경우뿐입니다.
-                badge_label = "⚠️ 데이터 검증 실패"
-                badge_bg = "#78350f"
-                badge_border = "#facc15"
-                badge_fg = "#fde047"
-                card_bg = "linear-gradient(135deg, #451a03 0%, #1e1b4b 100%)"
-                card_border_color = "#f59e0b"
-                inner_border = "#b45309"
-                title_icon = "🛡️"
-                title_text = "데이터 검증 실패 — 밸류에이션 미표시"
-                title_color = "#fbbf24"
-                desc_text = f"수집 단계의 데이터 검증(DataValidator)을 통과하지 못했습니다: <b>{unverified_reason or '사유 미상'}</b>"
-                desc_color = "#fef08a"
-                hint_text = "💡 다음 수집에서 검증을 통과하면 자동으로 정상 카드로 복구됩니다."
+        if hard_block:
+            # ⚪ 카드 자체를 그릴 수 없음 (price 없음, 또는 상장주식수 파싱 오류로 다수 지표 오염 의심)
+            badge_label = "⚪ 데이터 없음 (측정 불가)"
+            badge_bg = "#1e293b"
+            badge_border = "#64748b"
+            badge_fg = "#cbd5e1"
+            card_bg = "linear-gradient(135deg, #0f172a 0%, #1e293b 100%)"
+            card_border_color = "#64748b"
+            inner_border = "#334155"
+            title_icon = "🚫"
+            title_text = "필수 데이터를 수집하지 못해 밸류에이션을 산출하지 않았습니다"
+            title_color = "#cbd5e1"
+            desc_text = f"수집 실패 사유: <b>{reject_reason or unverified_reason or '원인 미상'}</b>"
+            desc_color = "#94a3b8"
+            hint_text = "📌 값을 추정해 채우지 않고 '데이터 없음'으로 남깁니다. 다음 수집에서 정상화되면 자동 복구됩니다."
 
             unverified_html = f"""
             <div style="background: {card_bg}; border: 2px dashed {card_border_color}; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -780,12 +737,37 @@ def render_pegy_page():
         # 2026-08-05 추가: Forward(미래 추정) 데이터가 없는 종목은 종목 전체를 차단하지 않고
         # 이 섹션만 마스크 처리합니다 (ENGINEERING_SPEC.md 0-3 원칙 — Trailing은 정상 노출).
         # =========================================================
+        # =========================================================
+        # 2026-08-06: Forward 카드를 마스킹해야 하는 사유를 한 곳에서 판정합니다.
+        # (배당 미확정 케이스는 guardrail.py가 이미 dividend_data_unverified로 표시해뒀으므로 제외)
+        # 우선순위: 배당 미확정 > 역성장 > PER 극단치 > g_eff 산출불가 > 일반 검증 실패 > Forward 결측 > 정상
+        # =========================================================
+        # was_blocked: 예전 같으면 전체 마스킹 카드로 갔을 종목(퀀트 점수 산출이 스킵된 상태)만 대상으로 삼습니다.
+        # g_eff<=0 자체는 guardrail.py에서 이미 정상(is_valid=True) 처리라, 검증까지 다 통과한 종목은
+        # 이 분기를 타지 않고 원래대로 실제 점수 + 빨간 "역성장" 배지가 붙은 정상 카드로 렌더링됩니다.
+        was_blocked = (not s.get('is_valid', True)) or s.get('is_unverified', False)
+        is_per_extreme = was_blocked and ('PER' in reject_reason)
+        is_geff_missing = was_blocked and ('실효성장률' in reject_reason)
+        is_negative_growth_case = was_blocked and (
+            bool(s.get('is_negative_growth')) or (s.get('g_eff') is not None and s['g_eff'] <= 0)
+        )
+        is_generic_harness_fail = (
+            was_blocked
+            and not is_per_extreme and not is_geff_missing and not is_negative_growth_case
+            and not s.get('forward_data_missing')
+        )
+        forward_needs_mask = bool(
+            s.get('dividend_data_unverified') or is_negative_growth_case or is_per_extreme
+            or is_geff_missing or is_generic_harness_fail or s.get('forward_data_missing')
+        )
+
         # 2026-08-05 추가, 2026-08-06 위치 변경: Trailing EPS·BPS만으로 구할 수 있는
         # 그레이엄 넘버(Graham Number)를 참고용으로 보여줍니다 (성장률 예측 불필요).
         # ⚠️ 오너 요청(2026-08-06): 예전엔 Forward 마스크 박스 안에 중첩되어 있었으나,
         # 이 값은 Trailing 지표에서만 산출되므로 Trailing 섹션 바로 아래(Forward 섹션과는 별개)로 옮깁니다.
+        # Forward 카드가 어떤 사유로든 마스킹되는 모든 경우에 참고용으로 함께 보여줍니다.
         graham_box_html = ""
-        if s.get('forward_data_missing'):
+        if forward_needs_mask:
             graham_target = s.get('graham_target')
             graham_is_fin = s.get('graham_is_financial_sector', False)
             if graham_target is not None and graham_is_fin:
@@ -796,7 +778,7 @@ def render_pegy_page():
                     <div style="color: #fca5a5; font-size: 13px; font-weight: 800; margin-bottom: 6px;">⚠️⚠️ 강한 경고: 금융업종 — 그레이엄 넘버 적용 부적합 가능성 높음</div>
                     <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">🧮 {graham_target:,.0f}원 <span style="font-size: 12px; color: #fca5a5; font-weight: 700;">(Trailing 전용 참고 목표가)</span></div>
                     <p style="color: #fecaca; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
-                        은행/보험/증권 등은 장부가(BPS)의 의미가 제조업과 달라, 이 공식(√22.5×EPS×BPS)의 전제가 잘 맞지 않습니다.
+                        은행/보험/증권 등은 장부가(BPS)의 의미가 제조업과 달라, 이 공식(√22.5×EPS×BPS)의 전제가 잘 맞지 않습니다.<br>
                         참고 수준으로만 활용하고, 이 숫자를 실제 목표주가로 신뢰하지 마세요.
                     </p>
                 </div>
@@ -807,7 +789,7 @@ def render_pegy_page():
                     <div style="color: #94a3b8; font-size: 13px; font-weight: 700; margin-bottom: 6px;">🧮 Trailing 전용 참고 목표가 (Graham Number)</div>
                     <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">{graham_target:,.0f}원</div>
                     <p style="color: #94a3b8; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
-                        성장률 예측 없이 √(22.5 × Trailing EPS × BPS) 공식(벤저민 그레이엄)으로만 산출한 참고값입니다.
+                        성장률 예측 없이 √(22.5 × Trailing EPS × BPS) 공식(벤저민 그레이엄)으로만 산출한 참고값입니다.<br>
                         고성장 기업에는 보수적으로(낮게) 나올 수 있으니 유일한 판단 근거로 쓰지 마세요.
                     </p>
                 </div>
@@ -840,6 +822,94 @@ def render_pegy_page():
                     <p style="color: #fef08a; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
                         {s.get('dividend_unverified_reason', '리츠/인프라/금융 등 배당 필수 업종인데 DPS·배당수익률이 0으로 수집되었습니다.')}<br>
                         위 <b>Trailing(과거 실적)</b> 지표와 퀀트 점수는 수집된 값 그대로 정상 반영되어 있으니 참고해 주세요.
+                    </p>
+                </div>
+            </div>
+            """
+        elif is_negative_growth_case:
+            # 🟣 역성장/무성장 — 예전엔 종목 전체를 가렸으나, Trailing 재무제표 자체는 정상 존재하므로
+            # Forward 카드 자리에만 마스킹합니다(오너 요청, 2026-08-06).
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(59, 7, 100, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #a855f7; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #6d28d9; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #d8b4fe; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #c4b5fd; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #c4b5fd; font-weight: 500; white-space: nowrap;">📉 역성장 · 무성장</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #6d28d9; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">📉</div>
+                    <h4 style="color: #d8b4fe; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">실효성장률(g_eff) 0% 이하 — 가치 훼손 구간</h4>
+                    <p style="color: #e9d5ff; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        본 종목은 <b>ROE {fmt_num(s.get('t_roe'), '%')}</b> 기준 실효성장률(성장률+주주환원율)이 0 이하로 계산되어,<br>
+                        성장을 전제로 하는 PEGY 밸류에이션 적용이 부적합합니다.<br>
+                        위 <b>Trailing(과거 실적)</b> 지표는 참고하실 수 있으나, 퀀트 종합점수는 이 사유로 산출되지 않습니다.
+                    </p>
+                </div>
+            </div>
+            """
+        elif is_per_extreme:
+            # 🔴 Forward PER 극단치/데이터 오염 — Forward PER 계산에만 생긴 문제라 Trailing은 정상 노출합니다.
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(69, 10, 10, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #f87171; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #991b1b; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #fca5a5; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #fecaca; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #fecaca; font-weight: 500; white-space: nowrap;">🚫 PER 극단치</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #991b1b; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">🚫</div>
+                    <h4 style="color: #fca5a5; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">Forward PER 산출 범위 초과</h4>
+                    <p style="color: #fecaca; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        애널리스트 컨센서스 기반 Forward PER이 정상 범위(300배)를 크게 벗어나 신뢰할 수 없습니다.<br>
+                        위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요. 퀀트 종합점수는 산출되지 않습니다.
+                    </p>
+                </div>
+            </div>
+            """
+        elif is_geff_missing:
+            # 🔵 Forward 데이터는 있는데 실효성장률(g_eff)만 계산 불가 — Trailing은 정상 노출합니다.
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(51, 65, 85, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #64748b; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #334155; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #94a3b8; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #64748b; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #64748b; font-weight: 500; white-space: nowrap;">🔒 실효성장률 산출 불가</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">🔒</div>
+                    <h4 style="color: #cbd5e1; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">실효성장률(g_eff) 산출 불가</h4>
+                    <p style="color: #94a3b8; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        Forward 컨센서스는 있지만, 성장률·주주환원율 계산에 필요한 값이 부족해 g_eff를 구하지 못했습니다.<br>
+                        위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요. 퀀트 종합점수는 산출되지 않습니다.
+                    </p>
+                </div>
+            </div>
+            """
+        elif is_generic_harness_fail:
+            # 🟡 상위 3단계 데이터 검증 하네스 통과 실패 — Trailing 원천값들끼리의 교차검증 문제라
+            # PBR/DPS/EV-EBITDA 등 다른 지표는 영향받지 않으므로 Trailing은 정상 노출합니다.
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(120, 53, 15, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #facc15; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #92400e; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #fbbf24; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #fde047; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #fde047; font-weight: 500; white-space: nowrap;">🛡️ 데이터 검증 실패</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #92400e; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">🛡️</div>
+                    <h4 style="color: #fbbf24; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">데이터 검증 실패 (PER·EPS 교차검증)</h4>
+                    <p style="color: #fef08a; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        수집 단계의 데이터 검증(DataValidator)을 통과하지 못했습니다:<br>
+                        <b>{unverified_reason or '사유 미상'}</b><br>
+                        위 <b>Trailing(과거 실적)</b> 지표는 참고용으로 노출되며, 퀀트 종합점수는 검증 통과 전까지 산출되지 않습니다.
                     </p>
                 </div>
             </div>
