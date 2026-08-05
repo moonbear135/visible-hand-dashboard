@@ -218,11 +218,14 @@ def fetch_naver_item_dps_and_eps(code):
                     for col_i in reversed(annual_cols):
                         try:
                             v_str = str(row.values[col_i]).replace(',', '').strip()
-                            if v_str and v_str != 'nan':
-                                v = float(v_str)
-                                if v > 0:
-                                    parsed_dps = int(v)
-                                    break
+                            # 네이버는 배당이 없는 해에 셀을 '-'로 표시합니다. 이건 파싱 실패가
+                            # 아니라 "배당 없음"이라는 뜻이므로, 에러로 기록하지 않고 조용히 건너뜁니다.
+                            if v_str in ('', 'nan', '-', 'ㅡ', '−'):
+                                continue
+                            v = float(v_str)
+                            if v > 0:
+                                parsed_dps = int(v)
+                                break
                         except (ValueError, TypeError, IndexError) as e:
                             errors.append(f"DPS 셀 파싱 실패(col={col_i}): {e}")
 
