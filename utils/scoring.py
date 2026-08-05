@@ -52,12 +52,21 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
         }
 
     # =========================================================
-    # Forward(미래 추정) 데이터 가용 여부 — 2026-08-05 추가.
+    # Forward(미래 추정) 데이터 가용 여부 — 2026-08-05 추가, 2026-08-06 정의 수정.
     # 네이버가 애널리스트 컨센서스(추정 PER/EPS/성장률)를 아예 안 주는 종목이 많아서,
     # 이것 때문에 Trailing 데이터까지 멀쩡한 종목 전체를 '측정 불가'로 묻어버리지 않습니다.
     # PEGY(35점)만 배점에서 빼고, 나머지(자본효율성/배당/Trailing안정성/변동성)는 정상 채점합니다.
+    #
+    # ⚠️ 2026-08-06 버그 수정: 예전엔 f_pegy가 None이면(=성장률이 마이너스라 PEGY 계산식
+    # 자체가 성립 안 하는 경우도 포함) forward_available을 False로 판정했습니다. 그 결과
+    # 애널리스트 컨센서스(f_per/f_eps/growth)가 실제로는 다 있는데도 "🔵 Trailing만 검증됨
+    # (Forward 데이터 없음)" 배지가 붙고, 정작 화면의 Forward 카드에는 그 실측값이 그대로
+    # 표시되는 자기모순이 있었습니다(CJ대한통운 사례). "컨센서스 자체가 없는 것"과
+    # "컨센서스는 있는데 성장률이 마이너스라 PEGY만 못 구하는 것"은 다른 상황이므로,
+    # forward_available은 f_per/growth 존재 여부만으로 판정하고, 후자는 아래 Guardrail 1의
+    # "역성장" 컷오프에서 별도로 처리합니다.
     # =========================================================
-    forward_available = (f_per is not None and growth is not None and f_pegy is not None)
+    forward_available = (f_per is not None and growth is not None)
 
     excluded_items = []
     if not forward_available:
@@ -67,7 +76,7 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
     # Guardrail 1: 역성장 및 무성장 기업 (g_eff <= 0 또는 t_roe <= 0) 예외 처리
     # Forward 데이터가 없으면 growth/f_pegy 로는 판단할 수 없으니 t_roe 기준으로만 판단합니다.
     # =========================================================
-    if forward_available and (growth <= 0.0 or t_roe <= 0.0 or f_pegy <= 0.0):
+    if forward_available and (growth <= 0.0 or t_roe <= 0.0 or (f_pegy is not None and f_pegy <= 0.0)):
         return {
             "quant_score": 15,
             "raw_score": 15,
@@ -95,7 +104,7 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
     # =========================================================
     # Guardrail 1-2: 비정상적 고성장률(기저효과 왜곡 등) 패널티 (캡 제거에 따른 방어)
     # =========================================================
-    if forward_available and growth >= 100.0:
+    if forward_available and growth >= 100.0 and f_pegy is not None:
         # 비정상적(100% 이상) 성장은 일시적 기저효과일 가능성이 크므로
         # PEGY 점수를 보수적으로 깎음(극단적 과대평가 방지)
         f_pegy = max(f_pegy * 2.0, 1.5) # PEGY를 강제로 악화시킴
@@ -104,7 +113,9 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
     possible = 0
 
     # 1. PEGY 점수 (35점) — Forward 데이터가 있을 때만 배점 (없으면 위에서 이미 excluded_items에 기록)
-    if forward_available:
+    # ⚠️ f_pegy is not None 방어: forward_available=True인데 f_pegy가 None인 경우는 위 Guardrail 1
+    # (역성장 컷오프)에서 이미 걸러지지만, 부동소수점 경계 등 예외 상황에 대비한 안전장치입니다.
+    if forward_available and f_pegy is not None:
         if f_pegy < 0.65:
             s_pegy = 35
         elif f_pegy < 0.85:
