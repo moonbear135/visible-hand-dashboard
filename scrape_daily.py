@@ -6,6 +6,11 @@ import pandas as pd
 import requests
 from bs4 import BeautifulSoup
 from datetime import datetime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
 
 # FinanceDataReader 임포트
 try:
@@ -57,10 +62,14 @@ def scrape_and_update(target_date_override=None):
         target_date = datetime.strptime(target_date_override, "%Y-%m-%d")
         print(f"🩹 백필 모드: {target_date_override} 데이터를 보정합니다.")
     else:
-        target_date = datetime.today()
+        # 🐛 [버그 수정] datetime.today()는 실행 서버의 시스템 시간(깃허브 액션 서버는 UTC)을 반환합니다.
+        # 아래 "15시 30분 장마감" 판단은 한국시간(KST) 기준이므로, UTC 그대로 비교하면
+        # 날짜가 하루씩 밀리는 문제가 있었습니다. 반드시 한국시간으로 변환해서 판단합니다.
+        target_date = datetime.now(KST) if KST else datetime.today()
         # 15시 30분(장 마감) 이전이라면, 수집 대상은 전날 데이터입니다.
         if target_date.hour < 15 or (target_date.hour == 15 and target_date.minute < 30):
             target_date -= timedelta(days=1)
+        target_date = target_date.replace(tzinfo=None)
 
     # 주말일 경우 직전 금요일로 조정
     while target_date.weekday() >= 5:
