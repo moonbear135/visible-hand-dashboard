@@ -6,6 +6,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import streamlit as st
 import json
+import plotly.express as px
 
 from utils.db import HISTORY_FILE, COL_MAP, save_and_load_history
 from views.admin_view import render_admin_console
@@ -802,7 +803,13 @@ def render_macro_page():
             
             chart_data = df_grouped.set_index("Date")[["Score"]]
             chart_data.columns = ["위험 지수"]
-            st.line_chart(chart_data)
+            # 참고: st.line_chart 는 내부적으로 altair(vega-lite)를 거치는데,
+            # 배포 환경의 altair/Python 조합에서 TypedDict(closed=True) 관련 TypeError가
+            # 발생하는 문제가 있어(altair 자체 버그, 우리 데이터와 무관), altair 의존 없이
+            # 렌더링되는 Plotly로 대체했습니다.
+            fig = px.line(chart_data.reset_index(), x="Date", y="위험 지수")
+            fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=300)
+            st.plotly_chart(fig, use_container_width=True)
             
             display_history = df_grouped.rename(columns=COL_MAP).sort_values(by="날짜", ascending=False)
             visible_cols = ["날짜", "종합 위험 점수", "코스피 종가", "원/달러 환율"]
