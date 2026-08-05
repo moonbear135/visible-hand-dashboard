@@ -7,6 +7,11 @@ on:
     - cron: '5 7 * * 1-5'
   workflow_dispatch:
     # 깃허브 웹 화면에서 수동으로 즉시 실행할 수 있는 버튼 활성화
+    inputs:
+      target_date:
+        description: '(선택) 과거 날짜를 보정하려면 YYYY-MM-DD 형식으로 입력. 비워두면 오늘 기준으로 정상 수집합니다.'
+        required: false
+        default: ''
 
 permissions:
   contents: write # 깃허브에 파일 쓰기 권한 활성화
@@ -30,6 +35,8 @@ jobs:
         pip install -r requirements.txt
 
     - name: 코스피200 개별 종목 데이터 수집 (data/*.json 갱신)
+      # 과거 날짜 보정(백필) 실행일 때는 건너뜁니다 (이 수집기는 항상 "현재 시점" 데이터만 가져오기 때문)
+      if: ${{ github.event.inputs.target_date == '' }}
       run: |
         python collector_kospi200.py
 
@@ -37,7 +44,7 @@ jobs:
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
       run: |
-        python scrape_daily.py
+        python scrape_daily.py "${{ github.event.inputs.target_date }}"
 
     - name: 갱신된 데이터를 깃허브에 영구 커밋 및 업로드
       run: |

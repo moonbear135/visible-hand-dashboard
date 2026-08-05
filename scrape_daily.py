@@ -52,17 +52,23 @@ PERIOD_KEYWORDS = {
 def clip(val):
     return min(1.0, max(0.0, val))
 
-def scrape_and_update():
-    target_date = datetime.today()
-    
-    # 15시 30분(장 마감) 이전이라면, 수집 대상은 전날 데이터입니다.
-    if target_date.hour < 15 or (target_date.hour == 15 and target_date.minute < 30):
-        target_date -= timedelta(days=1)
-        
+def scrape_and_update(target_date_override=None):
+    is_backfill = bool(target_date_override)
+
+    if is_backfill:
+        # 특정 과거 날짜를 지정해서 보정(백필)하는 모드
+        target_date = datetime.strptime(target_date_override, "%Y-%m-%d")
+        print(f"🩹 백필 모드: {target_date_override} 데이터를 보정합니다.")
+    else:
+        target_date = datetime.today()
+        # 15시 30분(장 마감) 이전이라면, 수집 대상은 전날 데이터입니다.
+        if target_date.hour < 15 or (target_date.hour == 15 and target_date.minute < 30):
+            target_date -= timedelta(days=1)
+
     # 주말일 경우 직전 금요일로 조정
     while target_date.weekday() >= 5:
         target_date -= timedelta(days=1)
-        
+
     date_key = target_date.strftime("%Y-%m-%d")
     print(f"🚀 자동 수집 시작 대상 영업일: {date_key}")
     
@@ -144,33 +150,38 @@ def scrape_and_update():
             print(f"⚠️ FinanceDataReader 수집 실패: {str(e)}")
 
     # === [네이버 웹 스크래핑(Primary) 우회 수집 로직] ===
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
-        
-        # KOSPI 수집
-        k_res = requests.get("https://finance.naver.com/sise/sise_index.naver?code=KOSPI", headers=headers, timeout=5)
-        k_soup = BeautifulSoup(k_res.text, 'html.parser')
-        k_now = k_soup.select_one('#now_value')
-        if k_now:
-            k_val_str = k_now.text.replace(',', '')
-            if k_val_str.replace('.', '', 1).isdigit():
-                kospi_close_naver = float(k_val_str)
-                kospi_close = kospi_close_naver
-                print(f"✅ 네이버 금융 KOSPI 수집 성공: {kospi_close}")
-                        
-        # USD/KRW 수집
-        u_res = requests.get("https://finance.naver.com/marketindex/", headers=headers, timeout=5)
-        u_soup = BeautifulSoup(u_res.text, 'html.parser')
-        u_now = u_soup.select_one('#exchangeList > li.on > a.head.usd > div > span.value')
-        if u_now:
-            u_val_str = u_now.text.replace(',', '')
-            if u_val_str.replace('.', '', 1).isdigit():
-                usd_close_naver = float(u_val_str)
-                usd_close = usd_close_naver
-                print(f"✅ 네이버 금융 환율 수집 성공: {usd_close}")
+    # 주의: 이 블록은 "지금 이 순간의 실시간 시세"를 가져오는 로직이라,
+    # 과거 날짜를 보정(백필)하는 경우에는 건너뜁니다. (안 그러면 오늘 시세로 과거 데이터가 덮어써짐)
+    if not is_backfill:
+        try:
+            headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
 
-    except Exception as e:
-        print(f"⚠️ 네이버 금융 스크래핑 실패 (FDR 값 유지): {e}")
+            # KOSPI 수집
+            k_res = requests.get("https://finance.naver.com/sise/sise_index.naver?code=KOSPI", headers=headers, timeout=5)
+            k_soup = BeautifulSoup(k_res.text, 'html.parser')
+            k_now = k_soup.select_one('#now_value')
+            if k_now:
+                k_val_str = k_now.text.replace(',', '')
+                if k_val_str.replace('.', '', 1).isdigit():
+                    kospi_close_naver = float(k_val_str)
+                    kospi_close = kospi_close_naver
+                    print(f"✅ 네이버 금융 KOSPI 수집 성공: {kospi_close}")
+
+            # USD/KRW 수집
+            u_res = requests.get("https://finance.naver.com/marketindex/", headers=headers, timeout=5)
+            u_soup = BeautifulSoup(u_res.text, 'html.parser')
+            u_now = u_soup.select_one('#exchangeList > li.on > a.head.usd > div > span.value')
+            if u_now:
+                u_val_str = u_now.text.replace(',', '')
+                if u_val_str.replace('.', '', 1).isdigit():
+                    usd_close_naver = float(u_val_str)
+                    usd_close = usd_close_naver
+                    print(f"✅ 네이버 금융 환율 수집 성공: {usd_close}")
+
+        except Exception as e:
+            print(f"⚠️ 네이버 금융 스크래핑 실패 (FDR 값 유지): {e}")
+    else:
+        print(f"ℹ️ 백필 모드: 실시간 시세 조회를 건너뛰고 {date_key} 기준 종가(FDR)를 사용합니다.")
 
     # === [백엔드 결측치 방어 로직 (Validation & Forward Fill)] ===
     if pd.isna(kospi_close) or pd.isna(usd_close) or kospi_close is None or usd_close is None:
@@ -424,4 +435,7 @@ def scrape_and_update():
         print(f"⚠️ 구글 드라이브 자동 백업 건너뜀: {e}")
 
 if __name__ == "__main__":
-    scrape_and_update()
+    # 명령줄에 날짜(YYYY-MM-DD)를 넣으면 그 날짜 데이터를 보정(백필)합니다.
+    # 예) python scrape_daily.py 2026-08-04
+    override_arg = sys.argv[1].strip() if len(sys.argv) > 1 else None
+    scrape_and_update(target_date_override=override_arg if override_arg else None)
