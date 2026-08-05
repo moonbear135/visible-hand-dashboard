@@ -468,6 +468,30 @@ def enrich_quant_metrics(stocks_raw):
                 t_eps_source = "calculated_price_div_per"
                 data_issues.append(f"Trailing EPS 계산값 사용 (실측 없음, 가격÷PER = {t_eps})")
 
+        # =========================================================
+        # 2026-08-05 추가: 그레이엄 넘버(Graham Number) — Forward 데이터가 없어도 쓸 수 있는
+        # Trailing 전용 참고 목표가. 벤저민 그레이엄의 원전 공식(PER 15배 × PBR 1.5배 = 22.5)을
+        # 그대로 사용하며, 성장률 등 미래 추정치를 전혀 쓰지 않습니다 (ENGINEERING_SPEC §0-1 예시2-보충2).
+        # 공식: √(22.5 × Trailing EPS × BPS), BPS = 현재가 ÷ Trailing PBR
+        #
+        # 한계 (반드시 배지로 경고):
+        # - 적자 기업(EPS ≤ 0)은 제곱근 안이 음수가 되어 수학적으로 산출 자체가 불가능합니다
+        #   (지어내지 않고 None으로 둡니다 — 오너 요청으로 적자 종목이라고 표에서 빼지는 않습니다).
+        # - 은행/보험/증권 등 금융업종은 장부가(BPS)의 의미가 제조업과 달라 그레이엄 넘버의
+        #   전제가 잘 안 맞습니다. 계산 자체는 하되 화면에 강한 경고 배지를 붙입니다.
+        # =========================================================
+        graham_target = None
+        graham_is_financial_sector = any(kw in name for kw in ['은행', '금융지주', '보험', '증권', '캐피탈'])
+        try:
+            t_pbr_val = float(t_pbr) if t_pbr not in (None, '') else None
+        except (ValueError, TypeError):
+            t_pbr_val = None
+        if t_eps is not None and t_eps > 0 and t_pbr_val and t_pbr_val > 0 and price > 0:
+            bps = price / t_pbr_val
+            graham_target = round((22.5 * t_eps * bps) ** 0.5)
+        elif t_eps is not None and t_eps <= 0:
+            data_issues.append("그레이엄 넘버 산출 불가 (적자 기업, EPS ≤ 0)")
+
         # Forward PER / EPS — 네이버 '추정PER|EPS' (실제 컨센서스) 만 사용
         f_per = n_f_per if (n_f_per and n_f_per > 0) else None
         f_eps = n_f_eps if (n_f_eps and n_f_eps > 0) else None
@@ -631,6 +655,8 @@ def enrich_quant_metrics(stocks_raw):
             "t_eps": t_eps,
             "t_eps_calculated": t_eps_calculated,
             "t_eps_source": t_eps_source,
+            "graham_target": graham_target,
+            "graham_is_financial_sector": graham_is_financial_sector,
             "sh_return": sh_yield,
             "sh_return_basis": sh_return_basis,
             "t_pegy": t_pegy,

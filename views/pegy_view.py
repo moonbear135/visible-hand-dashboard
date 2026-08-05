@@ -716,7 +716,42 @@ def render_pegy_page():
         # 이 섹션만 마스크 처리합니다 (ENGINEERING_SPEC.md 0-3 원칙 — Trailing은 정상 노출).
         # =========================================================
         if s.get('forward_data_missing'):
-            forward_section_html = """
+            # 2026-08-05 추가: Forward가 없어도 Trailing EPS·BPS만으로 구할 수 있는
+            # 그레이엄 넘버(Graham Number)를 참고용으로 함께 보여줍니다 (성장률 예측 불필요).
+            graham_target = s.get('graham_target')
+            graham_is_fin = s.get('graham_is_financial_sector', False)
+            if graham_target is not None and graham_is_fin:
+                # 금융주(은행/보험/증권 등)는 그레이엄 넘버의 전제(제조업 장부가)가 잘 안 맞으므로
+                # 값은 보여주되 강한 경고 배지를 붙입니다 (오너 요청 — 배제하지 않고 경고로 표시).
+                graham_html = f"""
+                <div style="margin-top: 16px; background-color: rgba(127, 29, 29, 0.35); border: 2px solid #f87171; border-radius: 10px; padding: 16px 20px;">
+                    <div style="color: #fca5a5; font-size: 13px; font-weight: 800; margin-bottom: 6px;">⚠️⚠️ 강한 경고: 금융업종 — 그레이엄 넘버 적용 부적합 가능성 높음</div>
+                    <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">🧮 {graham_target:,.0f}원 <span style="font-size: 12px; color: #fca5a5; font-weight: 700;">(Trailing 전용 참고 목표가)</span></div>
+                    <p style="color: #fecaca; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
+                        은행/보험/증권 등은 장부가(BPS)의 의미가 제조업과 달라, 이 공식(√22.5×EPS×BPS)의 전제가 잘 맞지 않습니다.
+                        참고 수준으로만 활용하고, 이 숫자를 실제 목표주가로 신뢰하지 마세요.
+                    </p>
+                </div>
+                """
+            elif graham_target is not None:
+                graham_html = f"""
+                <div style="margin-top: 16px; background-color: rgba(15, 23, 42, 0.85); border: 1px solid #475569; border-radius: 10px; padding: 16px 20px;">
+                    <div style="color: #94a3b8; font-size: 13px; font-weight: 700; margin-bottom: 6px;">🧮 Trailing 전용 참고 목표가 (Graham Number)</div>
+                    <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">{graham_target:,.0f}원</div>
+                    <p style="color: #94a3b8; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
+                        성장률 예측 없이 √(22.5 × Trailing EPS × BPS) 공식(벤저민 그레이엄)으로만 산출한 참고값입니다.
+                        고성장 기업에는 보수적으로(낮게) 나올 수 있으니 유일한 판단 근거로 쓰지 마세요.
+                    </p>
+                </div>
+                """
+            else:
+                graham_html = """
+                <div style="margin-top: 16px; background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center;">
+                    <div style="color: #64748b; font-size: 12.5px; font-weight: 700;">🧮 그레이엄 넘버 산출 불가 (적자 기업 — EPS가 0 이하라 수학적으로 계산할 수 없음)</div>
+                </div>
+                """
+
+            forward_section_html = f"""
             <div style="background: linear-gradient(135deg, rgba(51, 65, 85, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #64748b; border-radius: 12px; padding: 16px 22px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #334155; padding-bottom: 8px; margin-bottom: 14px;">
                     <div>
@@ -733,6 +768,7 @@ def render_pegy_page():
                         위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요. PEGY 점수(35점)만 배점에서 제외됩니다.
                     </p>
                 </div>
+                {graham_html}
             </div>
             """
         else:
