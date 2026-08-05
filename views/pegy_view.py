@@ -105,6 +105,10 @@ def render_pegy_page():
 
     # 1. JSON 스냅샷 및 메타데이터 연동
     metadata, all_stocks = load_kospi200_snapshot()
+    # 히스테리시스 버퍼(2026-08-06 도입) 적용 시 JSON에는 201~230위 버퍼 구간 종목도 함께 저장되지만
+    # (요약 이력이 끊기지 않게 하기 위함), 화면 노출은 항상 정확히 순위 200위 이내만입니다.
+    # is_visible 필드가 없는 구버전 스냅샷은 전부 노출(True)로 간주해 하위 호환을 유지합니다.
+    all_stocks = [s for s in all_stocks if s.get("is_visible", True)]
     last_updated_at = metadata.get("last_updated_at")   # 없으면 None (현재 시각으로 위장 금지)
     snapshot_status = metadata.get("status", "UNKNOWN")
     summary_history = load_pegy_summary_history()
@@ -264,7 +268,7 @@ def render_pegy_page():
                     ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다. 제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
                 </div>
             </div>
-            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">KOSPI 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
+            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -295,7 +299,7 @@ def render_pegy_page():
     # 4. 대시보드 상단 배치 동기화 배너 + 스냅샷 상태/신선도(staleness) 검사
     if last_updated_at is None or not all_stocks:
         st.error(
-            f"🚨 KOSPI 200 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
+            f"🚨 시가총액 상위 200 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
             "가짜 기본값으로 화면을 채우지 않기 위해 밸류에이션 수치를 표시하지 않습니다. "
             "자동 수집(GitHub Actions `Daily Market Scraper`)이 정상 동작했는지 확인해 주세요."
         )
@@ -341,7 +345,7 @@ def render_pegy_page():
         if os.path.exists(latest_path):
             with open(latest_path, "r", encoding="utf-8") as f:
                 st.download_button(
-                    label="📥 KOSPI 200 최신 스냅샷 다운로드 (JSON)",
+                    label="📥 시가총액 상위 200 최신 스냅샷 다운로드 (JSON)",
                     data=f.read(),
                     file_name=f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.json",
                     mime="application/json"
@@ -598,8 +602,11 @@ def render_pegy_page():
                 desc_color = "#e9d5ff"
                 hint_text = "📌 이익 성장이 재개되면 자동으로 밸류에이션 분석이 복구됩니다."
             else:
-                # 🟡 주주환원 공시 미확정 (주황 테마 — 기존)
-                badge_label = "⚠️ 배당/주주환원 공시 데이터 미확정"
+                # 🟡 상위 3단계 데이터 검증 하네스 통과 실패 (주황 테마)
+                # ⚠️ 2026-08-06: 예전엔 "배당 필수 업종 DPS=0" 케이스도 여기로 왔지만, 이제 그 경우는
+                # 종목을 차단하지 않고 Forward 카드 자리의 노란 배지로만 표시합니다(guardrail.py 참고).
+                # 여기 남는 건 상위 검증 단계(DataValidator) 자체가 실패로 판정한 경우뿐입니다.
+                badge_label = "⚠️ 데이터 검증 실패"
                 badge_bg = "#78350f"
                 badge_border = "#facc15"
                 badge_fg = "#fde047"
@@ -607,11 +614,11 @@ def render_pegy_page():
                 card_border_color = "#f59e0b"
                 inner_border = "#b45309"
                 title_icon = "🛡️"
-                title_text = "주주환원 데이터 검증 대기 중"
+                title_text = "데이터 검증 실패 — 밸류에이션 미표시"
                 title_color = "#fbbf24"
-                desc_text = f"본 종목은 <b>리츠/인프라/금융</b> 등 배당 필수 업종이나 DPS(주당배당금)가 0원으로 수집되어, PEGY 왜곡 방지를 위해 일시 차단 중입니다."
+                desc_text = f"수집 단계의 데이터 검증(DataValidator)을 통과하지 못했습니다: <b>{unverified_reason or '사유 미상'}</b>"
                 desc_color = "#fef08a"
-                hint_text = "💡 공시 실데이터 재검토 및 출처 교차검증 완료 후 정확한 밸류에이션 리포트가 복구됩니다."
+                hint_text = "💡 다음 수집에서 검증을 통과하면 자동으로 정상 카드로 복구됩니다."
 
             unverified_html = f"""
             <div style="background: {card_bg}; border: 2px dashed {card_border_color}; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -773,16 +780,19 @@ def render_pegy_page():
         # 2026-08-05 추가: Forward(미래 추정) 데이터가 없는 종목은 종목 전체를 차단하지 않고
         # 이 섹션만 마스크 처리합니다 (ENGINEERING_SPEC.md 0-3 원칙 — Trailing은 정상 노출).
         # =========================================================
+        # 2026-08-05 추가, 2026-08-06 위치 변경: Trailing EPS·BPS만으로 구할 수 있는
+        # 그레이엄 넘버(Graham Number)를 참고용으로 보여줍니다 (성장률 예측 불필요).
+        # ⚠️ 오너 요청(2026-08-06): 예전엔 Forward 마스크 박스 안에 중첩되어 있었으나,
+        # 이 값은 Trailing 지표에서만 산출되므로 Trailing 섹션 바로 아래(Forward 섹션과는 별개)로 옮깁니다.
+        graham_box_html = ""
         if s.get('forward_data_missing'):
-            # 2026-08-05 추가: Forward가 없어도 Trailing EPS·BPS만으로 구할 수 있는
-            # 그레이엄 넘버(Graham Number)를 참고용으로 함께 보여줍니다 (성장률 예측 불필요).
             graham_target = s.get('graham_target')
             graham_is_fin = s.get('graham_is_financial_sector', False)
             if graham_target is not None and graham_is_fin:
                 # 금융주(은행/보험/증권 등)는 그레이엄 넘버의 전제(제조업 장부가)가 잘 안 맞으므로
                 # 값은 보여주되 강한 경고 배지를 붙입니다 (오너 요청 — 배제하지 않고 경고로 표시).
-                graham_html = f"""
-                <div style="margin-top: 16px; background-color: rgba(127, 29, 29, 0.35); border: 2px solid #f87171; border-radius: 10px; padding: 16px 20px;">
+                graham_box_html = f"""
+                <div style="background-color: rgba(127, 29, 29, 0.35); border: 2px solid #f87171; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;">
                     <div style="color: #fca5a5; font-size: 13px; font-weight: 800; margin-bottom: 6px;">⚠️⚠️ 강한 경고: 금융업종 — 그레이엄 넘버 적용 부적합 가능성 높음</div>
                     <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">🧮 {graham_target:,.0f}원 <span style="font-size: 12px; color: #fca5a5; font-weight: 700;">(Trailing 전용 참고 목표가)</span></div>
                     <p style="color: #fecaca; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
@@ -792,8 +802,8 @@ def render_pegy_page():
                 </div>
                 """
             elif graham_target is not None:
-                graham_html = f"""
-                <div style="margin-top: 16px; background-color: rgba(15, 23, 42, 0.85); border: 1px solid #475569; border-radius: 10px; padding: 16px 20px;">
+                graham_box_html = f"""
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #475569; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;">
                     <div style="color: #94a3b8; font-size: 13px; font-weight: 700; margin-bottom: 6px;">🧮 Trailing 전용 참고 목표가 (Graham Number)</div>
                     <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">{graham_target:,.0f}원</div>
                     <p style="color: #94a3b8; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
@@ -803,12 +813,38 @@ def render_pegy_page():
                 </div>
                 """
             else:
-                graham_html = """
-                <div style="margin-top: 16px; background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center;">
+                graham_box_html = """
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center; margin-bottom: 14px;">
                     <div style="color: #64748b; font-size: 12.5px; font-weight: 700;">🧮 그레이엄 넘버 산출 불가 (적자 기업 — EPS가 0 이하라 수학적으로 계산할 수 없음)</div>
                 </div>
                 """
 
+        # =========================================================
+        # 2026-08-06 추가: 배당 필수 업종(리츠/인프라/금융)인데 DPS·배당수익률이 0으로 수집된 경우.
+        # 예전엔 종목 전체를 차단했으나(오너 지적: 실제 무배당 기업도 많아 과잉 차단), Trailing 지표와
+        # 퀀트 점수는 정상 노출하고 Forward 카드 자리에만 노란색 확인-필요 배지를 띄웁니다.
+        # =========================================================
+        if s.get('dividend_data_unverified'):
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(120, 53, 15, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #facc15; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #92400e; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #fbbf24; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #fde047; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #fde047; font-weight: 500; white-space: nowrap;">🛡️ 배당 데이터 확인 필요</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #92400e; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">🛡️</div>
+                    <h4 style="color: #fbbf24; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">주주환원 데이터 검증 대기 중</h4>
+                    <p style="color: #fef08a; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        {s.get('dividend_unverified_reason', '리츠/인프라/금융 등 배당 필수 업종인데 DPS·배당수익률이 0으로 수집되었습니다.')}<br>
+                        위 <b>Trailing(과거 실적)</b> 지표와 퀀트 점수는 수집된 값 그대로 정상 반영되어 있으니 참고해 주세요.
+                    </p>
+                </div>
+            </div>
+            """
+        elif s.get('forward_data_missing'):
             forward_section_html = f"""
             <div style="background: linear-gradient(135deg, rgba(51, 65, 85, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #64748b; border-radius: 12px; padding: 16px 22px;">
                 <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #334155; padding-bottom: 8px; margin-bottom: 14px;">
@@ -826,7 +862,6 @@ def render_pegy_page():
                         위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요. PEGY 점수(35점)만 배점에서 제외됩니다.
                     </p>
                 </div>
-                {graham_html}
             </div>
             """
         else:
@@ -991,6 +1026,9 @@ def render_pegy_page():
                     </div>
                 </div>
             </div>
+
+            <!-- 3-1. 그레이엄 넘버(Trailing 전용 참고 목표가) - Forward 마스크와 무관하게 Trailing 바로 아래 표시 -->
+            {graham_box_html}
 
             <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 데이터 없으면 이 섹션만 마스크 처리) -->
             {forward_section_html}

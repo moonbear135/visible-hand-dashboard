@@ -270,8 +270,10 @@ def fetch_naver_item_dps_and_eps(code):
 
 def fetch_kospi200_real_market_data():
     """
-    네이버 증권 코스피 200 시가총액 상위 목록(item/main.naver)을 실행 시점 기준으로 스크래핑하여
-    진짜 KOSPI 200 종목 시세 데이터(종목코드, 종목명, 현재가, PER, ROE) 200개를 수집합니다.
+    네이버 증권 코스피 시가총액 순위 목록(item/main.naver)을 실행 시점 기준으로 스크래핑하여
+    코스피 시가총액 상위 종목 시세 데이터(종목코드, 종목명, 현재가, PER, ROE) 200개를 수집합니다.
+    ⚠️ 주의: KRX가 공식 발표하는 "코스피 200 지수" 편입종목과는 다릅니다(공식 지수는 유동주식 시총·업종
+    안배·유동성 심사를 거쳐 연 2회만 리밸런싱됨). 이 프로젝트는 단순 시가총액 순위 기준입니다.
     (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별 기업 주식으로만 1위~200위 채번)
     """
     stocks_raw = []
@@ -357,20 +359,78 @@ def fetch_kospi200_real_market_data():
                     "t_roe": t_roe
                 })
                 
-                # 시총 순위 변동 여유분 확보: 210개 수집 후 순수 개별주식 200개 선별
-                if len(stocks_raw) >= 210:
+                # 히스테리시스 버퍼(진입 200위/이탈 230위) 판정에 필요한 여유분까지 확보.
+                # 230위 판정 + ETF 필터링/파싱 실패 여유분까지 감안해 250개 순수 개별주식 확보.
+                if len(stocks_raw) >= 250:
                     break
-            if len(stocks_raw) >= 210:
+            if len(stocks_raw) >= 250:
                 break
         except Exception as e:
             print(f"Error scraping page {page}: {e}")
-            
+
         time.sleep(random.uniform(2.0, 3.0)) # 매너 있는 크롤링을 위한 여유 있는 딜레이 (Polite Scraping)
-        
-    # 최종 200개 캡 (여유분 수집 후 상위 200개만 반환)
-    stocks_raw = stocks_raw[:200]
-    print(f"Successfully retrieved {len(stocks_raw)} real KOSPI stocks.")
+
+    # 여기서는 200개로 자르지 않습니다 — 히스테리시스 버퍼 판정(apply_hysteresis_buffer)이
+    # 순위 1~250위 전체를 보고 "화면 노출 200개 + 버퍼 구간 최대 230위까지 추적"을 결정합니다.
+    print(f"Successfully retrieved {len(stocks_raw)} real KOSPI candidates (rank order, up to 250).")
     return stocks_raw
+
+
+def _load_previously_tracked_codes(json_path):
+    """
+    직전 수집분(data/kospi200_pegy_latest.json)에 실려있던 종목 코드 전체(화면에 보이던 200개 +
+    버퍼 구간에서 조용히 추적만 되던 종목까지 전부)를 히스테리시스 판정용으로 불러옵니다.
+
+    ⚠️ 파일이 없거나 깨졌으면 빈 집합(set())을 반환합니다 — 이 경우 오늘 수집은 그냥
+       "진입 기준 200위 단순 컷"과 동일하게 동작합니다(첫 실행이거나 복구 불능 상황에서도
+       안전하게 진행 가능, 지어내지 않음).
+    """
+    try:
+        if not os.path.exists(json_path):
+            return set()
+        with open(json_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        return {s["code"] for s in payload.get("stocks", []) if s.get("code")}
+    except Exception as e:
+        print(f"⚠️ 히스테리시스 버퍼용 직전 추적 종목 목록 로드 실패(빈 목록으로 진행): {e}")
+        return set()
+
+
+def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=200, exit_rank=230):
+    """
+    시가총액 순위 경계선에서 하루만 왔다갔다 해도 종목이 사라졌다 재등장하며
+    히스토리 연속성이 깨지는 문제를 막기 위한 히스테리시스 버퍼.
+
+    규칙(오너 확정, 2026-08-06):
+    - 진입: 순위가 entry_rank(200위) 이내로 처음 들어오면 추적 시작.
+    - 유지: 어제 이미 추적 중이었던 종목은 exit_rank(230위) 밖으로 완전히 밀려나야 추적 중단.
+    - 화면 노출은 항상 정확히 entry_rank(200개)만: 버퍼 구간(201~230위)에 걸린 종목은
+      계속 수집·보강은 하되(요약 이력이 끊기지 않도록) `is_visible=False`로 표시해 화면에서는 숨김.
+
+    candidates: fetch_kospi200_real_market_data()가 반환한 순위 1위부터의 후보 리스트(최대 250개).
+    previous_codes: 직전 수집분에 있었던 종목 코드 집합(_load_previously_tracked_codes 결과).
+    반환: 실제로 이번 회차에 수집/보강할 종목 리스트(200~230개 사이, rank/is_visible 필드 포함).
+    """
+    tracked = []
+    for idx, c in enumerate(candidates):
+        rank = idx + 1
+        if rank <= entry_rank:
+            keep = True
+        elif c.get("code") in previous_codes and rank <= exit_rank:
+            keep = True  # 히스테리시스: 어제부터 추적 중이었고 아직 230위 안쪽 → 유지
+        else:
+            keep = False
+        if keep:
+            c["rank"] = rank
+            c["is_visible"] = rank <= entry_rank
+            tracked.append(c)
+
+    buffer_count = sum(1 for c in tracked if not c["is_visible"])
+    if buffer_count:
+        print(f"📎 히스테리시스 버퍼: {entry_rank}위 밖 {buffer_count}개 종목을 화면 비노출 상태로 계속 추적합니다.")
+
+    return tracked
+
 
 def enrich_quant_metrics(stocks_raw):
     """
@@ -639,7 +699,12 @@ def enrich_quant_metrics(stocks_raw):
             print(f"⚠️ [{name} ({code})] 3단계 하네스 검증 경고: {v_logs[-1]}")
 
         stock_dict = {
-            "rank": idx + 1,
+            # 히스테리시스 버퍼 적용 시 apply_hysteresis_buffer()가 매긴 실제 시가총액 순위를 그대로 쓰고,
+            # (버퍼 미적용 구snapshot 등) rank 필드가 없으면 기존처럼 리스트 순서(idx+1)로 대체합니다.
+            "rank": s.get("rank", idx + 1),
+            # 화면(공개 페이지)에 보여줄지 여부. 200위 이내면 True, 히스테리시스 버퍼 구간(201~230위)에서
+            # "이탈 확정 전까지 계속 수집만 하고 화면에는 숨김" 상태면 False.
+            "is_visible": s.get("is_visible", True),
             "name": name,
             "code": code,
             "price": price,
@@ -779,24 +844,37 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
     print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
 
 def run_kospi200_collector():
-    """KOSPI 200 시가총액 순 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시가총액 순 100% 실데이터 수집 시작...")
+    """코스피 시가총액 상위 200 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 코스피 시가총액 상위 200 100% 실데이터 수집 시작...")
     
-    stocks_raw = fetch_kospi200_real_market_data()
-    if not stocks_raw:
-        # 종목 목록조차 못 가져오면 기존 스냅샷을 건드리지 않고 명확히 실패시킵니다.
-        raise RuntimeError("KOSPI 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
-
-    enriched_stocks = enrich_quant_metrics(stocks_raw)
-
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(data_dir, exist_ok=True)
     json_path = os.path.join(data_dir, "kospi200_pegy_latest.json")
 
-    # 수집 품질 집계: 조건 없는 "SUCCESS" 기록 금지
-    total_count = len(enriched_stocks)
-    valid_stocks = [s for s in enriched_stocks if s.get("is_valid") and not s.get("is_unverified")]
-    failed_codes = [s["code"] for s in enriched_stocks if not (s.get("is_valid") and not s.get("is_unverified"))]
+    # 히스테리시스 버퍼 판정을 위해 "어제 뭘 추적 중이었는지"를 오늘 파일을 덮어쓰기 전에 먼저 읽어둡니다.
+    previous_codes = _load_previously_tracked_codes(json_path)
+
+    candidates = fetch_kospi200_real_market_data()
+    if not candidates:
+        # 종목 목록조차 못 가져오면 기존 스냅샷을 건드리지 않고 명확히 실패시킵니다.
+        raise RuntimeError("KOSPI 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
+
+    # 히스테리시스 버퍼 적용: 진입 200위 / 이탈 230위. 화면 노출은 여전히 상위 200개만이고,
+    # 201~230위 버퍼 구간 종목은 어제도 추적 중이었을 때만 "화면 비노출로 계속 수집"됩니다.
+    tracked_stocks = apply_hysteresis_buffer(candidates, previous_codes)
+    if not tracked_stocks:
+        raise RuntimeError("히스테리시스 버퍼 적용 후 추적 대상 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)")
+
+    enriched_stocks = enrich_quant_metrics(tracked_stocks)
+
+    # 공개 화면에는 is_visible(순위 200위 이내)인 종목만 노출됩니다. 품질 지표(검증 통과율 등)도
+    # "화면에 실제로 보이는 200개" 기준으로 집계해야 배너 숫자가 사용자에게 의미가 있습니다.
+    visible_stocks = [s for s in enriched_stocks if s.get("is_visible", True)]
+    total_count = len(visible_stocks)
+    tracked_count = len(enriched_stocks)
+    hidden_buffer_count = tracked_count - total_count
+    valid_stocks = [s for s in visible_stocks if s.get("is_valid") and not s.get("is_unverified")]
+    failed_codes = [s["code"] for s in visible_stocks if not (s.get("is_valid") and not s.get("is_unverified"))]
     valid_ratio = (len(valid_stocks) / total_count) if total_count else 0.0
 
     if total_count == 0:
@@ -815,11 +893,18 @@ def run_kospi200_collector():
             "valid_count": len(valid_stocks),
             "valid_ratio": round(valid_ratio, 3),
             "failed_codes": failed_codes,
+            # 히스테리시스 버퍼 관련 필드(2026-08-06 신설). tracked_count는 화면 비노출 버퍼 구간까지
+            # 포함한 실제 수집 종목 수, hidden_buffer_count는 그중 화면에 안 보이는 개수입니다.
+            "tracked_count": tracked_count,
+            "hidden_buffer_count": hidden_buffer_count,
             "description": (
-                f"KOSPI 200 시가총액 상위 1위~{total_count}위 퀀트 스냅샷 "
+                f"코스피 시가총액 상위 1위~{total_count}위 퀀트 스냅샷 "
                 f"(검증 통과 {len(valid_stocks)}/{total_count} 종목, 상태={status})"
+                + (f" + 히스테리시스 버퍼 비노출 {hidden_buffer_count}종목" if hidden_buffer_count else "")
             )
         },
+        # ⚠️ 버퍼 구간(is_visible=False) 종목도 그대로 포함합니다 — 화면 필터링은 views/pegy_view.py에서
+        # is_visible 기준으로 하고, 여기서는 요약 이력이 끊기지 않도록 전부 저장합니다.
         "stocks": enriched_stocks
     }
 
@@ -829,10 +914,14 @@ def run_kospi200_collector():
     if status != "SUCCESS":
         print(f"⚠️ 수집 품질 저하(status={status}): 검증 통과 {len(valid_stocks)}/{total_count} 종목. 실패 종목: {failed_codes[:20]}{' ...' if len(failed_codes) > 20 else ''}")
 
-    # 상단 요약 지표 수치 누적 기록 저장
-    update_pegy_summary_history(now_str, enriched_stocks)
+    # 상단 요약 지표(PER/성장률/PEGY 중앙값) 수치 누적 기록 저장.
+    # ⚠️ 여기는 visible_stocks(화면에 실제 보이는 200개)만 넘깁니다 — views/pegy_view.py가
+    # "이전 동기화 대비" 델타를 계산할 때도 화면에 보이는 종목만으로 오늘자 중앙값을 구하므로,
+    # 기준이 어긋나지 않게 맞춰야 합니다. 버퍼 구간 종목의 이력 연속성은 kospi200_pegy_latest.json
+    # 쪽(위 stocks 배열에 그대로 포함)에서 이미 보장됩니다.
+    update_pegy_summary_history(now_str, visible_stocks)
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] KOSPI 200 시총 순 {len(enriched_stocks)}개 실데이터 저장 완료! -> {json_path}")
+    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 코스피 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
     return json_path
 
 if __name__ == "__main__":

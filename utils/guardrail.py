@@ -1,6 +1,6 @@
 """
 utils/guardrail.py
-KOSPI 200 및 글로벌 종목 전용 데이터 방공망 (Valuation Guardrail)
+코스피 시가총액 상위 200 및 글로벌 종목 전용 데이터 방공망 (Valuation Guardrail)
 
 ⚠️ ENGINEERING_SPEC §0-1 (하드코딩·더미 데이터 금지) 준수 규칙
    - 이 모듈은 상위 단계(DataValidator)의 검증 결과를 **절대 상향(False → True)하지 않습니다.**
@@ -12,11 +12,12 @@ MIN_OUTSTANDING_SHARES = 1_000_000  # 상장주식수 sanity range check 하한 
 
 def apply_valuation_guardrail(stock_data: dict) -> dict:
     """
-    KOSPI 200 및 글로벌 종목 전용 데이터 검증 & 하드 컷오프 모듈
+    코스피 시가총액 상위 200 및 글로벌 종목 전용 데이터 검증 & 하드 컷오프 모듈
     - PER / 주가 스케일 오류 검증
     - 상장주식수 sanity range check (파싱 오염 탐지)
     - g_eff <= 0 역성장 표시
-    - 주주환원율(DPS/자사주) 공시 데이터 미확정 및 신뢰 불가 종목 차단 마스크 부여
+    - 배당 필수 업종(리츠/인프라/금융)인데 DPS·배당수익률이 0인 경우 dividend_data_unverified 플래그 부여
+      (2026-08-06부터 종목 전체 차단은 안 함 — Forward 카드 자리에만 확인-필요 배지 표시)
     """
     cleaned = stock_data.copy()
 
@@ -88,9 +89,18 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
             cleaned['is_negative_growth'] = True
             return _finish(True, False)
 
-    # 4. 주주환원 공시 미확정 / 배당 필수 업종(리츠/인프라/금융) 데이터 무결성 검증
+    # 4. 배당 필수 업종(리츠/인프라/금융)인데 DPS·배당수익률이 모두 0으로 수집된 경우.
+    #    ⚠️ 2026-08-06 변경: 예전엔 종목 전체를 차단(is_unverified=True)했습니다. 하지만 국내 상장사는
+    #    아직 주주환원율이 높지 않고 실제로 배당을 전혀 안 주는 곳도 많아서(오너 지적), "배당필수업종인데
+    #    DPS=0"이라는 것만으로 종목 전체의 Trailing 데이터까지 못 믿게 막는 건 과합니다.
+    #    → 종목 전체는 차단하지 않고, Forward 카드 자리에만 확인-필요 배지를 띄웁니다
+    #    (Trailing 지표·퀀트 점수는 수집된 값 그대로 정상 반영 — views/pegy_view.py에서 렌더링).
     is_high_dividend_sector = any(kw in name for kw in ['리츠', '인프라', '금융지주', '우B'])
     if is_high_dividend_sector and dps <= 0 and sh_return <= 0:
-        return _finish(True, True, unverified_reason="⚠️ 데이터 검증 필요 (주주환원/배당 공시 미확정)")
+        cleaned['dividend_data_unverified'] = True
+        cleaned['dividend_unverified_reason'] = (
+            "이 종목은 리츠·인프라·금융 등 배당 필수 업종인데 DPS(주당배당금)·배당수익률이 모두 0으로 "
+            "수집되었습니다. 실제로 무배당일 수도 있고 공시 데이터가 아직 반영되지 않았을 수도 있습니다."
+        )
 
     return _finish(True, False)
