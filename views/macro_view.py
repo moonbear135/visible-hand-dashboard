@@ -639,7 +639,12 @@ def render_macro_page():
             html_table += "</tbody></table>"
             
             clean_html = "\n".join([line.strip() for line in html_table.split("\n") if line.strip()])
-            st.components.v1.html(clean_html, height=700, scrolling=False)
+            # 이전: st.components.v1.html(..., height=700, scrolling=False) 를 쓰고 있었는데,
+            # 이 방식은 표를 고정 높이 700px짜리 iframe 안에 넣고 스크롤도 꺼놓는 방식이라
+            # 지표 설명이 길어서 표 전체 높이가 700px를 넘으면 아래쪽 행이 통째로 잘려서
+            # 보이지도, 스크롤해서 볼 수도 없었습니다. iframe 없이 페이지에 바로 그리도록 바꿔서
+            # 표 높이에 상관없이 페이지 스크롤로 전체가 다 보이게 수정했습니다.
+            st.markdown(clean_html, unsafe_allow_html=True)
         else:
             st.info("실시간 시장 데이터가 없습니다.")
 
