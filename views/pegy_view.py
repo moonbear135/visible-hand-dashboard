@@ -666,6 +666,15 @@ def render_pegy_page():
 
         dps_val = s.get('dps') or 0
         dps_str = f"{dps_val:,.0f}원/주" if dps_val > 0 else "무배당"
+        # 2026-08-06 추가: DPS가 재무제표 실측이 아니라 배당수익률로 역산한 계산값이면
+        # ENGINEERING_SPEC.md §0-1 예시2-보충 원칙에 따라 별도 마크를 붙입니다.
+        calc_dps_tag = (
+            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+            'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">재무제표에 확정 DPS가 없어 '
+            '배당수익률로 역산한 값입니다 (실측 아님)</span></span>'
+            if s.get("dps_source") == "derived_from_div_yield" else ""
+        )
         growth_val = s.get('growth')
         growth_disp = "데이터 없음" if growth_val is None else f"{growth_val:+.1f}%"
         # growth가 계산값 Trailing EPS를 기반으로 산출됐으면 같은 마크를 붙입니다.
@@ -921,9 +930,9 @@ def render_pegy_page():
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">배당수익률 상세 (DPS/총액) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
+                            <span class="q-tooltip">작년 배당률 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실시간 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {fmt_num(s.get('sh_return'), '%', 2)} <span style="font-size: 13px; color: #94a3b8;">({s.get('return_total', '데이터 없음')})</span></div>
+                        <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str}{calc_dps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {fmt_num(s.get('sh_return'), '%', 2)} <span style="font-size: 13px; color: #94a3b8;">({s.get('return_total', '데이터 없음')})</span></div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
