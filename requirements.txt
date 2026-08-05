@@ -6,10 +6,13 @@ beautifulsoup4
 lxml
 schedule
 
-# 아래 패키지가 없으면 관련 기능이 try/except 로 '조용히 꺼집니다'.
-# (교차검증 미수행 / AI 코멘트 미생성 / 드라이브 백업 미실행)
-yfinance
-google-generativeai
-google-api-python-client
-google-auth-oauthlib
-google-auth-httplib2
+# 아래 패키지들은 일부러 requirements.txt 에 넣지 않았습니다.
+# 코드에서 전부 try/except ImportError 로 감싸져 있어, 없으면 해당 기능만
+# (교차검증/AI 코멘트/드라이브 백업/pykrx 보조수집) 조용히 꺼지고 앱 자체는 정상 작동합니다.
+# Streamlit Cloud 빌드 안정성을 위해 필요할 때만 아래 주석을 풀어 하나씩 추가하는 걸 권장합니다.
+# yfinance
+# google-generativeai
+# google-api-python-client
+# google-auth-oauthlib
+# google-auth-httplib2
+# pykrx
