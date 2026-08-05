@@ -711,6 +711,92 @@ def render_pegy_page():
                 else "모든 항목이 배점에 반영되었습니다."
             )
 
+        # =========================================================
+        # 2026-08-05 추가: Forward(미래 추정) 데이터가 없는 종목은 종목 전체를 차단하지 않고
+        # 이 섹션만 마스크 처리합니다 (ENGINEERING_SPEC.md 0-3 원칙 — Trailing은 정상 노출).
+        # =========================================================
+        if s.get('forward_data_missing'):
+            forward_section_html = """
+            <div style="background: linear-gradient(135deg, rgba(51, 65, 85, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed #64748b; border-radius: 12px; padding: 16px 22px;">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #334155; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #94a3b8; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #64748b; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #64748b; font-weight: 500; white-space: nowrap;">🔒 데이터 없음</span>
+                </div>
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #334155; border-radius: 10px; padding: 26px 24px; text-align: center;">
+                    <div style="font-size: 30px; margin-bottom: 8px;">🔒</div>
+                    <h4 style="color: #cbd5e1; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">예상 실적(Forward) 데이터 없음</h4>
+                    <p style="color: #94a3b8; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
+                        이 종목은 증권사 애널리스트 컨센서스(추정 PER·EPS) 커버리지가 없어 네이버에도 데이터가 없습니다.<br>
+                        위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요. PEGY 점수(35점)만 배점에서 제외됩니다.
+                    </p>
+                </div>
+            </div>
+            """
+        else:
+            forward_section_html = f"""
+            <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
+                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
+                    <div>
+                        <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
+                        <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
+                    </div>
+                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 1.18x 벌점 반영)</span>
+                </div>
+                <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
+                    <div>
+                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
+                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>애널리스트 컨센서스 예상 ROE. 현재 이 프로젝트는 해당 컨센서스를 수집하지 않으므로 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
+                        </div>
+                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}</div>
+                    </div>
+                    <div>
+                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
+                            <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
+                        </div>
+                        <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
+                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
+                        </div>
+                    </div>
+                    <div>
+                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
+                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
+                        </div>
+                        <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}</div>
+                    </div>
+                    <div>
+                        <div class="comparison-box" style="margin-bottom: 8px; border-color: #38bdf8; width: 100%;">
+                            <div class="comparison-row divider">
+                                <span class="label-text">현재가</span>
+                                <span class="price-text-curr">{price:,.0f}원</span>
+                            </div>
+                            <div class="comparison-row divider">
+                                <span class="label-text">
+                                    <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 계산의 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
+                                </span>
+                                <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{floor_price_str}</span>
+                            </div>
+                            <div class="comparison-row">
+                                <span class="label-text">
+                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.</span></span>
+                                </span>
+                                <span class="price-text-target">{fmt_num(f_target, '원', 0)}</span>
+                            </div>
+                        </div>
+                        <div class="gap-footer" style="color: {gap_color};">
+                            <span>적정가 대비 갭</span>
+                            <span>{gap_str}</span>
+                        </div>
+                        <div class="gap-bar-bg">
+                            <div style="height: 100%; width: {bar_width}%; background-color: {bar_color}; border-radius: 3px;"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            """
+
         card_html = f"""
         <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #334155; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.4); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <!-- 1. 메인 헤더: 종목명 / 코드 / 퀀트종합점수 / 배지 / 현재가 -->
@@ -812,68 +898,8 @@ def render_pegy_page():
                 </div>
             </div>
 
-            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 선명 솔리드 다크 목표가 박스 & 35% Cap 산식 적용) -->
-            <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
-                <!-- 헤더: 2줄 넉넉한 타이틀 + 우측 설명 주석 -->
-                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
-                    <div>
-                        <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
-                        <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
-                    </div>
-                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 1.18x 벌점 반영)</span>
-                </div>
-
-                <!-- 수치 영역: 2x2 Grid -->
-                <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
-                    <div>
-                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>애널리스트 컨센서스 예상 ROE. 현재 이 프로젝트는 해당 컨센서스를 수집하지 않으므로 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
-                        </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}</div>
-                    </div>
-                    <div>
-                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
-                        </div>
-                        <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
-                        </div>
-                    </div>
-                    <div>
-                        <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
-                        </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}</div>
-                    </div>
-                    <div>
-                        <div class="comparison-box" style="margin-bottom: 8px; border-color: #38bdf8; width: 100%;">
-                            <div class="comparison-row divider">
-                                <span class="label-text">현재가</span>
-                                <span class="price-text-curr">{price:,.0f}원</span>
-                            </div>
-                            <div class="comparison-row divider">
-                                <span class="label-text">
-                                    <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 계산의 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
-                                </span>
-                                <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{floor_price_str}</span>
-                            </div>
-                            <div class="comparison-row">
-                                <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.</span></span>
-                                </span>
-                                <span class="price-text-target">{fmt_num(f_target, '원', 0)}</span>
-                            </div>
-                        </div>
-                        <div class="gap-footer" style="color: {gap_color};">
-                            <span>적정가 대비 갭</span>
-                            <span>{gap_str}</span>
-                        </div>
-                        <div class="gap-bar-bg">
-                            <div style="height: 100%; width: {bar_width}%; background-color: {bar_color}; border-radius: 3px;"></div>
-                        </div>
-                    </div>
-                </div>
-            </div>
+            <!-- 4. Forward 섹션 (미래 추정 밸류 분석 - 데이터 없으면 이 섹션만 마스크 처리) -->
+            {forward_section_html}
         </div>
         """
         clean_card = "\n".join([line.strip() for line in card_html.split("\n") if line.strip()])

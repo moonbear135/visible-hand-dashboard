@@ -119,6 +119,21 @@ if not n_t_per or n_t_per <= 0:
 
 **적용 사례**: `collector_kospi200.py`의 Trailing EPS — 네이버 상세페이지 파싱은 실패했지만 Trailing PER은 시총순위표(2차 출처)에서 실측되었고 주가도 실측값일 때, `EPS = 가격 ÷ PER` 로 역산하고 `t_eps_source = "calculated_price_div_per"`, `t_eps_calculated = True` 로 마킹합니다. (Forward EPS·성장률처럼 **미래 추정이 필요한 값에는 이 예외를 적용하지 않습니다** — 그런 값은 실측 컨센서스가 없으면 계속 "데이터 없음"으로 둡니다.)
 
+### 예시 2-보충2 — 2026-08-05 추가: 결측 데이터는 "종목 전체 차단"이 아니라 "해당 섹션만 마스킹"
+
+> [!IMPORTANT]
+> 네이버가 애널리스트 컨센서스(추정 PER/EPS)를 제공하지 않는 종목이 KOSPI 200 중 다수 존재합니다.
+> 이건 정상적으로 흔한 일(증권사 커버리지 부족)이지, 수집 파이프라인의 결함이 아닙니다.
+> **Forward(미래 추정) 데이터가 없다고 해서 정상적으로 수집된 Trailing(과거 실적) 데이터까지
+> 통째로 "데이터 없음" 카드로 묻어버리지 않습니다.** 대신:
+>
+> - `utils/guardrail.py`: Forward 전용 필드(`f_per`/`f_eps`/`growth`)가 없으면 `is_valid`를 `False`로 꺾지 않고, `forward_data_missing = True` 플래그만 남깁니다. 종목을 차단하는 필수 조건은 이제 `price` 하나뿐입니다.
+> - `utils/scoring.py`: `forward_available` 여부에 따라 PEGY(35점)만 배점에서 제외하고, 자본효율성·배당·Trailing안정성·변동성 점수는 정상 산출합니다. 전용 배지 `"🔵 Trailing만 검증됨 (Forward 데이터 없음)"`를 부여합니다.
+> - `views/pegy_view.py`: 종목 카드 전체는 정상 렌더링하고, **"🚀 Forward" 섹션 하나만** 🔒 마스크 패널로 대체합니다 (Trailing 섹션은 그대로 노출).
+>
+> 이 패턴(전체 차단 대신 결측된 섹션만 마스킹 + 반드시 이유를 명시)은 이후 다른 화면에서도
+> "일부 지표만 없는" 상황에 동일하게 적용하는 것을 권장합니다.
+
 ---
 
 ### 예시 3 — 화면은 "데이터 없음"을 그려야지, 기본 시세를 그리면 안 됨
