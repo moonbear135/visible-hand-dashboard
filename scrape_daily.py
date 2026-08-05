@@ -109,8 +109,8 @@ def scrape_and_update(target_date_override=None):
                 kospi_data.index = kospi_data.index.tz_localize(None)
                 usd_data.index = usd_data.index.tz_localize(None)
                 
-                valid_kospi = kospi_data[kospi_data.index <= target_dt]
-                valid_usd = usd_data[usd_data.index <= target_dt]
+                valid_kospi = kospi_data[kospi_data.index <= target_dt].ffill()
+                valid_usd = usd_data[usd_data.index <= target_dt].ffill()
                 
                 if not valid_kospi.empty and not valid_usd.empty:
                     latest_kospi = valid_kospi.iloc[-1]
@@ -187,11 +187,12 @@ def scrape_and_update(target_date_override=None):
     if pd.isna(kospi_close) or pd.isna(usd_close) or kospi_close is None or usd_close is None:
         print("🚨 KOSPI 또는 환율 데이터 결측치(NaN/None) 감지! 과거 데이터(전일 종가)로 Forward Fill 보정 시도합니다.")
         if not history_df.empty:
+            # 참고: 이 시점의 history_df는 위에서 이미 영문 컬럼명(KOSPI, USD_KRW)으로 변환되어 있음
             if pd.isna(kospi_close) or kospi_close is None:
-                kospi_close = float(history_df.iloc[-1]['코스피 종가'])
+                kospi_close = float(history_df.iloc[-1]['KOSPI'])
                 kospi_change = 0.0
             if pd.isna(usd_close) or usd_close is None:
-                usd_close = float(history_df.iloc[-1]['원/달러 환율'])
+                usd_close = float(history_df.iloc[-1]['USD_KRW'])
                 usd_change = 0.0
         else:
             print("🚨 [에러] 과거 데이터마저 비어있어 시스템을 종료합니다.")
