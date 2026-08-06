@@ -4,7 +4,7 @@
 > 위젯 자체는 깔끔하게 유지하기 위해 완료된 항목을 지우고, 여기에 전체 이력을 남깁니다.
 > 지금 진행 중/예정 상태는 `PROJECT_STATUS.md`의 "지금 열려있는 일"을 참고하세요.
 
-마지막 정리: 2026-08-06 (밤, 4차)
+마지막 정리: 2026-08-06 (밤, 5차)
 
 ---
 
@@ -52,6 +52,10 @@
 36. **`AUDIT_REPORT_V2.md` 27건 전체 처리 완료.** 오너 지시("검사한김에 오푸스로 싹 고치자")로 Opus 에이전트가 collector_kospi200.py/utils/scoring.py/utils/guardrail.py/views/pegy_view.py 19건 + `utils/constants.py`(임계값 단일 출처) 신설까지 먼저 처리(에이전트 실행이 15분 뒤 오너가 중단시켰으나, 확인 결과 컴파일·import·실데이터 재현 테스트 전부 통과하는 완결된 상태였음). 나머지 scrape_daily.py/macro_view.py 8건(4-1~4-5, 5-1~5-3)은 이어서 직접 처리: ① 동시 충격 증폭기 flat 1.3/1.15 → 극단신호 비율 비례 스케일링, ② KOSPI 5일 모멘텀/전일대비 변화율 실패시 0.0 대입 제거(배점 제외로 전환), ③ 개인 순매도 규모(stock_net_base) 방향성만 반영하던 것을 3주체 수급 비중 반영으로 보완, ④ 네이버 시세로 FDR 종가 덮어쓸 때 괴리 발생 시 변화율 재계산(값은 그대로 유지, 시점 불일치만 해소), ⑤ `utils/macro_scoring.py` 신설로 scrape_daily.py/macro_view.py의 가중치·시그모이드 정규화·증폭기 로직을 단일 모듈로 통합(가중치는 `utils/constants.py`의 `RISK_WEIGHTS`), ⑥ 매크로 화면이 과거 날짜를 보여줄 때 재계산 대신 그날 실제 저장된 `SubScore_*`/`Multiplier` 컬럼을 읽도록 변경(구버전 행은 근사치 폴백 + "구버전 데이터" 표시), ⑦ 감사이력 탭에 v1.5.0 항목 추가. 전체 컴파일·import·합성테스트 통과 확인.
 
 37. **타임존(UTC/KST) 버그 재발견 및 전면 수정** — run #13 실데이터 검증 중 오너가 JSON `last_updated_at`이 "08:09"(실제 KST 완료 17:09)로 9시간 어긋난 걸 발견. `datetime.now()`가 GitHub Actions/Streamlit 서버(UTC 기본)에서 naive UTC를 반환하는 게 원인 — `collector_kospi200.py`는 애초에 KST 처리가 없었고, `scrape_daily.py`/`utils/db.py`의 `Collected_At`은 KST 변수가 이미 있는데도 안 쓰고 있었음(부분 회귀). 전부 `datetime.now(KST)`로 통일: ① `collector_kospi200.py`(`_now_kst()` 신설, metadata `last_updated_at` + 로그), ② `scrape_daily.py`/`utils/db.py`의 `Collected_At`, ③ `views/pegy_view.py`의 신선도(staleness) 비교 기준, ④ `views/macro_view.py`의 "오늘 날짜" 판정(`_today_kst()` 신설, 기본 조회일/데이터 신선도/다운로드 파일명), ⑤ `utils/scheduler.py`의 "16시 이후 자동실행" 트리거(기본 비활성 상태지만 재발 방지 차원에서 함께 수정). 전체 컴파일 통과.
+
+38. **run #14 실크롤링으로 AUDIT_REPORT_V2.md + 타임존 수정 최종 확인 완료.** `last_updated_at`이 "2026-08-06 17:59"(실제 크롤링 완료 시각과 일치, KST 정상)로 확인 — 타임존 버그 완전 해결. 목표가 캡(`f_target_capped`) 36종목 정상 플래그(삼성전자 목표가 576250 = 현재가×2.5 배수 캡 정상 적용), 고성장 PEGY 보정(`growth_score_capped`) 28종목 정상. `market_history.csv`에 `Multiplier`/`ExtremeSignalCount`/`SubScore_*` 14개 컬럼 전부 실제값으로 채워짐(매크로 재설계 정상 작동). AUDIT_REPORT_V2.md 27건 + 타임존 버그, 데이터 레벨 검증 전부 종료.
+
+39. **사이드바 빈 공간 정리** — 오너가 사이드바 상단(타이틀~구분선 사이)이 뭔가 빠진 것처럼 비어 보인다고 지적. 확인 결과 8/5 매크로 관리자 전용 전환 시 없앤 "서비스 메뉴 선택" 라디오의 흔적(죽은 CSS)이었고, 새로 생긴 문제 아님. 죽은 CSS 제거 + "현재 공개 서비스: 사실 이 가격이에요" 캡션 추가로 그 자리가 의도된 여백임을 명시.
 
 ## 진행 예정 (백로그)
 

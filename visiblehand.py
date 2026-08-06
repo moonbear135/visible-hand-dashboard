@@ -15,35 +15,12 @@ st.markdown(
     section[data-testid="stSidebar"] {
         padding-top: 0.8rem !important;
     }
-    
-    /* 2. '📌 서비스 메뉴 선택' 타이틀 글자 크기 확대 (18px Bold) & Teal 색상 */
-    [data-testid="stSidebar"] [data-testid="stWidgetLabel"] [data-testid="stMarkdownContainer"] p {
-        font-size: 18px !important;
-        font-weight: 800 !important;
-        color: #0f766e !important;
-        margin-bottom: 12px !important;
-        letter-spacing: -0.3px !important;
-        line-height: 1.4 !important;
-    }
-    
-    /* 3. 라디오 버튼 항목 강제 2줄 (pre-line) 줄바꿈 & 폰트 가시성 강화 */
-    [data-testid="stSidebar"] [data-baseweb="radio"] [data-testid="stMarkdownContainer"] p {
-        font-size: 15px !important;
-        font-weight: 700 !important;
-        line-height: 1.6 !important;
-        white-space: pre-line !important;
-        display: block !important;
-        margin: 0 !important;
-    }
 
-    /* 4. 라디오 동그라미 버튼을 2줄 텍스트의 첫 번째 줄 상단으로 정렬 */
-    [data-testid="stSidebar"] [data-baseweb="radio"] {
-        align-items: flex-start !important;
-        padding-top: 8px !important;
-        padding-bottom: 8px !important;
-    }
+    /* 참고: 2026-08-05 매크로 화면 관리자 전용 전환 시 사이드바 공개 메뉴(서비스 선택 라디오)를
+       완전히 없앴습니다. 그때 그 라디오 전용 스타일(옛 규칙 2~4번)이 죽은 CSS로 남아있던 걸
+       2026-08-06 정리 과정에서 제거했습니다 — 실제 화면엔 아무 영향 없는 정리입니다. */
 
-    .main-title { 
+    .main-title {
         font-size: 32px; 
         font-weight: 800; 
         text-align: center; 
@@ -105,6 +82,7 @@ def main():
         <div style="padding-bottom: 2px;">
             <h2 style="font-size: 24px; font-weight: 800; color: #0f766e; margin: 0 0 4px 0; letter-spacing: -0.5px;">🏢 잘 보면 보이는 손</h2>
             <div style="font-size: 13px; color: #64748b; font-weight: 600;">The Visible Hand Dashboard</div>
+            <div style="font-size: 12px; color: #94a3b8; font-weight: 600; margin-top: 10px;">📊 현재 공개 서비스: 사실 이 가격이에요<br>(밸류에이션 리포트)</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -116,6 +94,8 @@ def main():
     #    후행지표 원칙에 맞지 않는 추정 프록시 지표 위주라 공개 화면에서는 제외하고,
     #    관리자 인증 후 사이드바 하단의 "⚙️ 관리자 전용 메뉴"에서만 볼 수 있게 이동했습니다.
     #    (일반 방문자에게는 메뉴 선택지 자체가 보이지 않습니다 — 후행지표로 재설계 전까지 비공개)
+    #    2026-08-06: 빈 공간이 마치 뭔가 빠진 것처럼 보인다는 오너 피드백으로, 위 타이틀 아래에
+    #    "현재 공개 서비스" 캡션을 추가해 그 자리가 의도된 것임을 명시했습니다.
 
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
