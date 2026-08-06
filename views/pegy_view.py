@@ -796,8 +796,11 @@ def render_pegy_page():
             cap_reason = s.get('f_target_cap_reason') or "현재가 배수 상한에 도달"
             uncapped = s.get('f_target_uncapped')
             uncapped_txt = f"캡을 적용하지 않은 산출값은 {uncapped:,}원입니다.<br>" if uncapped else ""
-            gap_pct = ((f_target - price) / price) * 100.0
-            gap_str = f"상한 도달 (＞+{gap_pct:.0f}%, 추정 신뢰구간 밖)"
+            # ⚠️ 2026-08-06 오너 지적("직관성이 너무 떨어져"): 상한 배수(현재가×2.5)가 고정값이라
+            # gap_pct는 캡에 걸린 모든 종목에서 항상 정확히 +150%로 동일합니다 — 계산된 개별
+            # 수치가 아니라 상수 그 자체라서, "＞+150%"처럼 숫자를 앞세우면 마치 종목마다 다른
+            # 정밀한 값처럼 보여 오해를 줍니다. 숫자는 빼고 "산출 안 함" 상태를 명확히 표기합니다.
+            gap_str = "상승여력 산출 안 함 (상한 캡 적용)"
             gap_color = "#fbbf24"
             bar_color = "#78716c"        # 계산된 상승여력이 아니므로 초록 바를 쓰지 않습니다
             bar_width = 100

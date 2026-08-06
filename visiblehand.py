@@ -82,7 +82,6 @@ def main():
         <div style="padding-bottom: 2px;">
             <h2 style="font-size: 24px; font-weight: 800; color: #0f766e; margin: 0 0 4px 0; letter-spacing: -0.5px;">🏢 잘 보면 보이는 손</h2>
             <div style="font-size: 13px; color: #64748b; font-weight: 600;">The Visible Hand Dashboard</div>
-            <div style="font-size: 12px; color: #94a3b8; font-weight: 600; margin-top: 10px;">📊 현재 공개 서비스: 사실 이 가격이에요<br>(밸류에이션 리포트)</div>
         </div>
         """,
         unsafe_allow_html=True
@@ -94,8 +93,10 @@ def main():
     #    후행지표 원칙에 맞지 않는 추정 프록시 지표 위주라 공개 화면에서는 제외하고,
     #    관리자 인증 후 사이드바 하단의 "⚙️ 관리자 전용 메뉴"에서만 볼 수 있게 이동했습니다.
     #    (일반 방문자에게는 메뉴 선택지 자체가 보이지 않습니다 — 후행지표로 재설계 전까지 비공개)
-    #    2026-08-06: 빈 공간이 마치 뭔가 빠진 것처럼 보인다는 오너 피드백으로, 위 타이틀 아래에
-    #    "현재 공개 서비스" 캡션을 추가해 그 자리가 의도된 것임을 명시했습니다.
+    #    2026-08-06: 타이틀 아래에 "현재 공개 서비스" 캡션을 잠깐 추가했다가 되돌렸습니다 — 곧
+    #    해외주식 페이지가 추가되면 여기 자리는 정적 캡션이 아니라 실제 페이지 네비게이션 메뉴로
+    #    채워져야 하는데, 지금 하드코딩 문구를 넣으면 그때 다시 지워야 하는 이중작업이 됩니다.
+    #    빈 공간은 해외주식 페이지 착수 시 진짜 메뉴로 채울 예정(PROJECT_STATUS.md 1번 항목).
 
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
