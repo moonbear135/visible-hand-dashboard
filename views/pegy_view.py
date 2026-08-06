@@ -727,8 +727,26 @@ def render_pegy_page():
             score_badge_html = "<b>측정 불가</b> (데이터 없음)"
             score_tooltip_extra = "필수 지표를 수집하지 못해 점수를 산출하지 않았습니다."
         else:
-            score_badge_html = f"<b>{q_score}점</b> / {q_max or 100}점"
-            score_tooltip_extra = (
+            # =========================================================
+            # 2026-08-06 추가: 만점(score_max)이 종목마다 달라(제외된 항목 수에 따라 35~100점
+            # 등으로 유동적) 원점수만 보면 서로 비교가 안 되는 문제(오너 지적: "만점이 35점인
+            # 것도 있고 100점인 것도 있다") — 달성률(%)을 함께 크게 표기해 만점이 달라도
+            # 한눈에 비교되게 합니다.
+            # =========================================================
+            q_max_val = q_max or 100
+            pct = round(q_score / q_max_val * 100) if q_max_val else 0
+            if pct >= 60:
+                pct_color = "#4ade80"
+            elif pct >= 30:
+                pct_color = "#fde047"
+            else:
+                pct_color = "#fca5a5"
+            score_badge_html = (
+                f"<b>{q_score}점</b> / {q_max_val}점 "
+                f"<span style='color:{pct_color}; font-weight:900;'>({pct}%)</span>"
+            )
+            score_tooltip_extra = "만점이 종목마다 달라(배점 제외 항목 수에 따라 유동적) 원점수보다 %(달성률)로 비교하는 걸 권장해요.<br>"
+            score_tooltip_extra += (
                 f"※ 배점 제외 항목: {', '.join(excluded_items)}" if excluded_items
                 else "모든 항목이 배점에 반영되었습니다."
             )

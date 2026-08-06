@@ -3,6 +3,7 @@ import sys
 import time
 import json
 import random
+import statistics
 import requests
 from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
@@ -750,52 +751,78 @@ def enrich_quant_metrics(stocks_raw):
         stock_dict = apply_valuation_guardrail(stock_dict)
 
         # 초기화: 점수를 산출할 수 없는 종목은 0점이 아니라 None(= '측정 불가')
-        quant_score = None
-        score_max = None
-        badge = "🔴 검증 불가"
-        badge_bg = "#451a03"
-        badge_fg = "#f97316"
+        # ⚠️ 2026-08-06: 실제 스코어링(calculate_quant_score)은 이 루프가 다 끝난 뒤
+        # 2차 패스에서 일괄 수행합니다 — 역성장/적자·극단고평가 하드컷오프의 점수 상한을
+        # "오늘 수집된 종목 전체 분포 대비 z-score"로 매기려면 모든 종목의 raw 지표가
+        # 먼저 다 모여야 평균/표준편차를 구할 수 있기 때문입니다(아래 루프 이후 코드 참고).
+        stock_dict["quant_score"] = None
+        stock_dict["score_max"] = None
+        stock_dict["badge"] = "🔴 검증 불가"
+        stock_dict["badge_bg"] = "#451a03"
+        stock_dict["badge_fg"] = "#f97316"
+        stock_dict["score_excluded_items"] = []
 
         if stock_dict.get('reject_reason'):
-            badge = "🔴 측정 불가 (데이터 오류)"
-            badge_bg = "#451a03"
-            badge_fg = "#f97316"
+            stock_dict["badge"] = "🔴 측정 불가 (데이터 오류)"
+            stock_dict["badge_bg"] = "#451a03"
+            stock_dict["badge_fg"] = "#f97316"
         elif stock_dict.get('unverified_reason'):
-            badge = "⚠️ 데이터 검증 필요"
-            badge_bg = "#78350f"
-            badge_fg = "#facc15"
-
-        # Guardrail 통과 시 스코어링 적용
-        if stock_dict.get('is_valid', False) and not stock_dict.get('is_unverified', False):
-            score_res = calculate_quant_score(
-                f_pegy=f_pegy,
-                f_roe=f_roe,
-                roic=roic,
-                sh_return=sh_yield,
-                t_roe=t_roe,
-                vol=vol,
-                f_per=f_per,
-                price=price,
-                f_target=f_target,
-                growth=growth
-            )
-            quant_score = score_res["quant_score"]
-            score_max = score_res["score_max"]
-            badge = score_res["badge"]
-            badge_bg = score_res["badge_bg"]
-            badge_fg = score_res["badge_fg"]
-            stock_dict["score_excluded_items"] = score_res.get("excluded_items", [])
-
-        stock_dict["quant_score"] = quant_score
-        stock_dict["score_max"] = score_max
-        stock_dict["badge"] = badge
-        stock_dict["badge_bg"] = badge_bg
-        stock_dict["badge_fg"] = badge_fg
+            stock_dict["badge"] = "⚠️ 데이터 검증 필요"
+            stock_dict["badge_bg"] = "#78350f"
+            stock_dict["badge_fg"] = "#facc15"
 
         enriched_stocks.append(stock_dict)
-        
+
         # Polite Scraping: 대상 서버(네이버)에 부하를 주지 않기 위해 종목별 크롤링 간격 부여
         time.sleep(random.uniform(2.0, 3.0))
+
+    # =========================================================
+    # 2026-08-06 추가: 퀀트 스코어링 2차 패스 (횡단면 population 통계 계산 후 일괄 적용)
+    # utils/scoring.py의 하드컷오프(역성장/적자, 극단고평가) 점수 상한은 "오늘 수집된 종목
+    # 전체 분포 대비 몇 표준편차 벗어났는지(z-score)"로 정합니다 — Barra/Fama-French류
+    # 퀀트 팩터 모델에서 쓰는 표준 횡단면 정규화 기법(오너 요청: "랜덤한 가중치 말고
+    # 금융공학적 표준"). 표본이 5개 미만이면 population 통계 없이 진행하며, 이 경우
+    # scoring.py가 자동으로 중간값 캡으로 안전하게 대체합니다(크래시·임의값 없음).
+    # =========================================================
+    _score_pool = [st for st in enriched_stocks if st.get('is_valid', False) and not st.get('is_unverified', False)]
+
+    def _pop_stats(values):
+        vals = [v for v in values if v is not None]
+        if len(vals) < 5:
+            return None
+        mean = statistics.mean(vals)
+        std = statistics.pstdev(vals)
+        return (mean, std) if std > 0 else None
+
+    growth_pop_stats = _pop_stats([st.get('growth') for st in _score_pool])
+    roe_pop_stats = _pop_stats([st.get('t_roe') for st in _score_pool])
+    pegy_pop_stats = _pop_stats([
+        st.get('f_pegy') for st in _score_pool
+        if st.get('f_pegy') is not None and 0 < st['f_pegy'] < 50.0
+    ])
+
+    for stock_dict in _score_pool:
+        score_res = calculate_quant_score(
+            f_pegy=stock_dict.get('f_pegy'),
+            f_roe=stock_dict.get('f_roe'),
+            roic=stock_dict.get('roic'),
+            sh_return=stock_dict.get('sh_return'),
+            t_roe=stock_dict.get('t_roe'),
+            vol=stock_dict.get('vol'),
+            f_per=stock_dict.get('f_per'),
+            price=stock_dict.get('price'),
+            f_target=stock_dict.get('f_target'),
+            growth=stock_dict.get('growth'),
+            growth_pop_stats=growth_pop_stats,
+            roe_pop_stats=roe_pop_stats,
+            pegy_pop_stats=pegy_pop_stats
+        )
+        stock_dict["quant_score"] = score_res["quant_score"]
+        stock_dict["score_max"] = score_res["score_max"]
+        stock_dict["badge"] = score_res["badge"]
+        stock_dict["badge_bg"] = score_res["badge_bg"]
+        stock_dict["badge_fg"] = score_res["badge_fg"]
+        stock_dict["score_excluded_items"] = score_res.get("excluded_items", [])
 
     return enriched_stocks
 
