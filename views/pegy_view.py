@@ -1122,7 +1122,7 @@ def render_pegy_page():
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward PER / EPS ℹ️<span class="q-tooltiptext"><b>Forward PER & EPS</b><br>• Forward PER: 주가 / 12개월 추정 EPS<br>• Forward EPS: 향후 12개월 예상 주당순이익</span></span>
+                            <span class="q-tooltip">가치 지표 ℹ️<span class="q-tooltiptext"><b>Forward 밸류에이션</b><br>• PER: 주가 / 12개월 추정 EPS<br>• EPS: 향후 12개월 예상 주당순이익</span></span>
                         </div>
                         <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
                             <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
@@ -1148,7 +1148,7 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.<br>다만 고성장 종목은 공식상 값이 발산하기 때문에 <b>현재가의 2.5배 / 목표 PER 25배</b> 상한을 둡니다. 상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다.</span></span>
+                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br>PEGY(=PER÷실효성장률) 공식을 거꾸로 풀어서 계산해요.<br><b>① 목표 PEGY</b> = 기준 1.0배 + ROE/ROIC 프리미엄(이익 창출력이 좋을수록 더 비싼 배수를 인정)<br><b>② 목표 PER</b> = 목표 PEGY × Forward 실효성장률(g_eff = 예상 성장률+주주환원율(배당 등), 변동성 벌점 반영)<br><b>③ 목표주가</b> = Forward EPS × 목표 PER<br>Forward EPS·PER은 네이버 '추정 컨센서스' 기반입니다.<br>다만 고성장 종목은 공식상 값이 발산하기 때문에 <b>목표 PER 25배 / 현재가의 2.5배</b> 상한을 둡니다. 상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다.</span></span>
                                 </span>
                                 <span class="price-text-target">{fmt_num(f_target, '원', 0)}{target_cap_badge_html}</span>
                             </div>
