@@ -10,6 +10,12 @@ import plotly.express as px
 
 from utils.db import HISTORY_FILE, COL_MAP, save_and_load_history
 from views.admin_view import render_admin_console
+# 2026-08-06 2차 감사 5-1/5-2: 가중치·정규화 로직을 scrape_daily.py와 공유하는 단일 출처로 이전
+from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
+from utils.macro_scoring import (
+    compute_historical_stats, compute_sub_scores, compute_final_score,
+    EXTREME_SUB_SCORE_HIGH, EXTREME_SUB_SCORE_LOW,
+)
 
 def render_clean_html(html_str):
     clean_html = "\n".join([line.strip() for line in html_str.split("\n") if line.strip()])
@@ -206,13 +212,10 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         print(f"⚠️ KOSPI 5일 모멘텀 산출 실패: {e}")
         kospi_5d_base = None
 
-    weights = {
-        "FX_Swap_Point": 10.0, "Put_OTM_OI": 9.0, "Short_Ratio": 9.0,
-        "ELS_KnockIn": 8.0, "VKOSPI_Skew": 8.0, "Synthetic_Futures": 8.0,
-        "NDF_Night_Rate": 8.0, "Futures_Net_Sell": 7.0, "Non_Arbitrage_Ratio": 7.0,
-        "Foreign_Broker_Dump": 6.0, "Stock_Short_Balance": 6.0, "Put_Buy_Simple": 5.0,
-        "Stock_Net_Sell": 4.0, "KOSPI_5D_Return": 5.0
-    }
+    # 2026-08-06 2차 감사 5-1: scrape_daily.py가 실제로 쓰는 것과 같은 단일 출처를 참조합니다
+    # (예전엔 여기 가중치가 scrape_daily.py와 서로 달라, 화면 표의 기여점수 합이 실제 종합점수와
+    # 맞지 않았습니다).
+    weights = dict(RISK_WEIGHTS)
 
     # (중복 정의였던 friendly_names 사전 제거 — 표기는 모듈 상단 FRIENDLY_NAMES 로 일원화)
 
@@ -235,7 +238,8 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
 
     sub_scores = {}
     extreme_signal_count = 0
-    investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
+    investor_weights = dict(INVESTOR_WEIGHTS)
+    data_source_log_suffix = ""
 
     if not local_loaded:
         def clip(val):
@@ -262,66 +266,69 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         market_scores = {k: v for k, v in market_scores_raw.items() if v is not None}
         unavailable_metrics = [k for k, v in market_scores_raw.items() if v is None]
 
-        total_weighted_risk = 0.0
-        available_weight = sum(w for k, w in weights.items() if k in market_scores)
-
-        for item, w in weights.items():
-            if item not in market_scores:
-                sub_scores[item] = None   # 데이터 없음 → 중립값(50점) 대입 금지
-                continue
-            risks = market_scores[item]
-            weighted_risk = (
+        current_weighted_risks = {}
+        for item, risks in market_scores.items():
+            current_weighted_risks[item] = (
                 (risks["Foreigner"] * investor_weights["Foreigner"])
                 + (risks["Institution"] * investor_weights["Institution"])
                 + (risks["Retail"] * investor_weights["Retail"])
             )
-            if weighted_risk >= 0.75:
-                extreme_signal_count += 1
 
-            sub_scores[item] = round(weighted_risk * 100.0, 1)
-            total_weighted_risk += weighted_risk * w
-
-        if available_weight <= 0:
+        if not current_weighted_risks:
             return (
                 display_date, False,
                 "🚨 산출 가능한 위험 지표가 하나도 없습니다. 종합 위험 점수를 표시하지 않습니다.",
                 None, [], _load_history_df()
             )
 
-        base_score = (total_weighted_risk / available_weight) * 100.0
-
-        multiplier = 1.0
-        if extreme_signal_count >= 5:
-            multiplier = 1.3
-        elif extreme_signal_count >= 3:
-            multiplier = 1.15
-
-        if base_score > 50.0:
-            final_score = 50.0 + (base_score - 50.0) * multiplier
-        else:
-            final_score = base_score + (extreme_signal_count * 2.5)
-
-        score = round(max(0.0, min(100.0, final_score)), 1)
+        # 2026-08-06 2차 감사 5-2: 예전엔 이 "미리보기" 분기가 가중위험(0~1)을 단순히 ×100 한
+        # 값을 서브점수로 썼는데, 실제 scrape_daily.py는 과거 이력 대비 z-score+시그모이드
+        # 변환을 씁니다 — 척도가 달라 미리보기 점수가 실제 저장될 점수와 다르게 보였습니다.
+        # scrape_daily.py와 동일한 함수를 호출해 척도를 맞춥니다(이 분기는 "아직 수집 전"이라
+        # 재계산 자체는 불가피하지만, 최소한 같은 산식을 씁니다).
+        active_weights = {k: weights[k] for k in current_weighted_risks if k in weights}
+        historical_stats = compute_historical_stats(_load_history_df(), active_weights.keys())
+        computed_sub_scores = compute_sub_scores(current_weighted_risks, historical_stats)
+        sub_scores = {k: computed_sub_scores.get(k) for k in weights}
+        score, base_score, multiplier, extreme_signal_count, _ = compute_final_score(computed_sub_scores, active_weights)
     else:
+        # 2026-08-06 2차 감사 5-2: 그날 실제로 저장된 SubScore_*/Multiplier를 그대로 읽습니다
+        # (재계산 시 그날의 historical_stats를 지금 재현할 수 없어 실제 점수와 달라질 수 있음).
+        has_stored_subscores = row is not None and any(f"SubScore_{k}" in row.columns for k in weights)
         for item, w in weights.items():
+            col = f"SubScore_{item}"
             val = None
-            if row is not None and item in row.columns:
+            if has_stored_subscores and row is not None and col in row.columns:
                 try:
-                    raw_val = row.iloc[0][item]
+                    raw_val = row.iloc[0][col]
                     val = None if pd.isna(raw_val) else float(raw_val)
                 except (TypeError, ValueError):
                     val = None
+            elif row is not None and item in row.columns:
+                # 구버전 행(SubScore_* 컬럼 도입 이전) — 원시 가중위험만 있어 선형 근사로
+                # 대체합니다. 실제 그날 점수(시그모이드 변환)와 정확히 일치하지 않을 수 있어
+                # unavailable_metrics 목록과 별개로 근사치임을 화면에 알릴 필요가 있습니다.
+                try:
+                    raw_val = row.iloc[0][item]
+                    raw = None if pd.isna(raw_val) else float(raw_val)
+                    val = None if raw is None else round(raw * 100.0, 1)
+                except (TypeError, ValueError):
+                    val = None
+
+            sub_scores[item] = val
             if val is None:
-                sub_scores[item] = None   # 컬럼 결측 → "데이터 없음" (0.5 중립값 대입 금지)
                 unavailable_metrics.append(item)
-            else:
-                sub_scores[item] = round(val * 100.0, 1)
-                if val >= 0.75:
-                    extreme_signal_count += 1
+            elif val >= EXTREME_SUB_SCORE_HIGH or val <= EXTREME_SUB_SCORE_LOW:
+                extreme_signal_count += 1
         try:
             score = float(row.iloc[0]["Score"])
         except (TypeError, ValueError, KeyError):
             score = None
+
+        if not has_stored_subscores and row is not None:
+            data_source_log_suffix = " | ⚠️ 구버전 데이터(지표별 세부점수는 근사치)"
+        else:
+            data_source_log_suffix = ""
 
     details = []
     for item, w in weights.items():
@@ -355,6 +362,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
 
     if unavailable_metrics:
         data_source_log += f" | ⚠️ 산출 불가 지표 {len(unavailable_metrics)}개 (가중평균에서 제외)"
+    data_source_log += data_source_log_suffix
 
     status_text = f"KOSPI: {kospi_close:.2f} ({kospi_change*100:+.2f}%) | 환율: {usd_close:.2f}원 ({usd_change*100:+.2f}%)"
     return display_date, is_live_connected, f"{data_source_log} | {status_text}", score, details, history_df
@@ -844,9 +852,33 @@ def render_macro_page():
             """
         )
         
-        tab0, tab1, tab2, tab3 = st.tabs(
-            ["📄 v1.4.0 (데이터 무결성 감사 반영)", "📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거 시도)", "📄 v1.0.0 (최초 배포)"]
+        tab_new, tab0, tab1, tab2, tab3 = st.tabs(
+            ["📄 v1.5.0 (2차 감사·가중치 단일화)", "📄 v1.4.0 (데이터 무결성 감사 반영)", "📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거 시도)", "📄 v1.0.0 (최초 배포)"]
         )
+
+        with tab_new:
+            st.markdown(
+                """
+                #### 🏷️ [v1.5.0] - 2026년 08월 06일 (2차 감사 반영 · scrape_daily.py/macro_view.py 가중치·척도 단일화)
+                * **언제 (When)**: 2026년 08월 06일 2차 데이터 무결성 감사(AUDIT_REPORT_V2.md) 후속 조치
+                * **누가 (Who)**: 보이는 손 엔지니어링 감사 (Claude Opus 정밀 점검)
+                * **어디를 (Where)**: `scrape_daily.py` / `views/macro_view.py` / `utils/macro_scoring.py`(신설) / `utils/constants.py`
+                * **무엇을 (What)**:
+                    * 이 화면(macro_view.py)과 scrape_daily.py가 서로 다른 가중치 사전을 각자 갖고 있던 문제를
+                      `utils/constants.py`의 `RISK_WEIGHTS` 하나로 통일(이 문서 위 tab의 "10.4 고정 배수"는
+                      2026-08-03 당시 실제 기록이라 그대로 보존, 그 이후 로직은 계속 진화함)
+                    * 화면의 "위험도"가 저장된 원시값(0~1)을 단순 ×100 한 근사치였던 것을, 실제 종합점수를
+                      만드는 시그모이드 정규화 변환과 동일한 척도로 통일(`utils/macro_scoring.py`)
+                    * 이미 수집된 날짜는 재계산 대신 그날 실제 저장된 서브점수(`SubScore_*`)를 그대로 읽도록 변경
+                    * 동시 충격 증폭기(구 버전: 극단신호 3개↑ 1.15배/5개↑ 1.3배 flat)를 극단신호 비율에 비례한
+                      1.0~1.3배 연속 스케일링으로 교체
+                    * KOSPI 5일 모멘텀·전일 대비 변화율 산출 실패 시 0.0(보합)으로 채우던 것을 제거, 배점 제외로 전환
+                * **왜 (Why)**: 화면 표의 지표별 기여점수를 다 더해도 위에 뜬 종합 위험 지수와 맞지 않는 등,
+                  "표시값과 실제 판정값이 다른 소스에서 계산되는" 문제가 반복 발견되었기 때문(2026-08-06 오너 지적)
+                * **어떻게 (How)**: 가중치·정규화·증폭기 로직을 `utils/macro_scoring.py` 단일 모듈로 옮기고
+                  scrape_daily.py/macro_view.py 양쪽 모두 이 모듈만 호출하도록 변경
+                """
+            )
 
         with tab0:
             st.markdown(

@@ -19,6 +19,11 @@ try:
 except ImportError:
     FDR_AVAILABLE = False
 
+# 2026-08-06 2차 감사 5-1/5-2/4-1: 가중치·정규화·증폭기 로직을 macro_view.py와 공유하는
+# 단일 출처로 이전(utils/macro_scoring.py, utils/constants.py 참고).
+from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
+from utils.macro_scoring import compute_historical_stats, compute_sub_scores, compute_final_score
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
 
@@ -100,8 +105,11 @@ def scrape_and_update(target_date_override=None):
     #       따라서 전부 None 으로 두고, 없으면 아래에서 수집을 중단합니다.
     kospi_close = None
     usd_close = None
-    kospi_change = 0.0
-    usd_change = 0.0
+    # 2026-08-06 2차 감사 4-4: 전일 종가를 못 구해 변화율을 산출할 수 없는 경우 0.0(보합)으로
+    # 채우면 실제 관측처럼 보이는 값이 6개 지표 공식에 그대로 흘러들어갑니다. None으로 두고
+    # 아래에서 의존 지표를 배점 제외합니다.
+    kospi_change = None
+    usd_change = None
     volatility = None
     dist_from_high = None
     kospi_5d_base = None
@@ -147,12 +155,15 @@ def scrape_and_update(target_date_override=None):
                         usd_change = (usd_close - usd_prev) / usd_prev
                     
                     # 5일 낙폭 모멘텀 계산
+                    # 2026-08-06 2차 감사 4-2: 5영업일 이력이 부족하면 0.0(변화 없음)으로
+                    # 채우지 않고 None으로 둡니다 — 아래 죽어있던 가드(kospi_5d_base is None)가
+                    # 실제로 작동해 이 지표를 배점에서 제외하게 됩니다.
                     if len(valid_kospi) >= 6:
                         k_5d_ago = float(valid_kospi.iloc[-6]['Close'])
                         kospi_5d_return = (kospi_close - k_5d_ago) / k_5d_ago
+                        kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
                     else:
-                        kospi_5d_return = 0.0
-                    kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
+                        kospi_5d_base = None
                     
                     print(f"✅ 야후 파이낸스(FDR) 시장 데이터 조회 성공 ({date_key}) KOSPI={kospi_close:.2f}")
                 else:
@@ -163,6 +174,17 @@ def scrape_and_update(target_date_override=None):
     # === [네이버 웹 스크래핑(Primary) 우회 수집 로직] ===
     # 주의: 이 블록은 "스크립트 실행 시점(장마감 직후)의 시세"를 가져오는 로직이라,
     # 과거 날짜를 보정(백필)하는 경우에는 건너뜁니다. (안 그러면 오늘 시세로 과거 데이터가 덮어써짐)
+    # 2026-08-06 2차 감사 4-5: 네이버 현재가로 FDR 종가를 덮어쓰기 전에 괴리율을 검사합니다.
+    # ⚠️ 여기서 "괴리가 크면 덮어쓰지 않는다"로 막지 않습니다 — 이 네이버 재조회 블록은
+    # 원래 "FDR(야후 소스)가 하루 지연되는 경우가 있어 장마감 직후 실제 값으로 보정한다"는
+    # 목적으로 존재하므로(정상적인 하루 지연 보정 시 몇 % 괴리는 흔하고 정상), 괴리를 이유로
+    # 덮어쓰기를 막으면 이 블록의 존재 목적 자체가 무력화됩니다. 대신 큰 괴리가 있으면
+    # kospi_change(전일 대비 변화율)도 네이버 종가 기준으로 재계산해, "저장된 종가"와
+    # "점수 계산에 쓰인 변화율"이 서로 다른 시점 값이 되는 문제만 없앱니다(volatility·
+    # dist_from_high는 장기 시계열 기반이라 하루 지연의 영향이 미미해 그대로 둡니다).
+    NAVER_DEVIATION_WARN_THRESHOLD = 0.01  # 1% — 이 이상이면 "다른 시점 값일 수 있다"는 흔적을 남김
+    kospi_close_fdr = kospi_close
+
     if not is_backfill:
         try:
             headers = {'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)'}
@@ -175,6 +197,16 @@ def scrape_and_update(target_date_override=None):
                 k_val_str = k_now.text.replace(',', '')
                 if k_val_str.replace('.', '', 1).isdigit():
                     kospi_close_naver = float(k_val_str)
+                    if kospi_close_fdr:
+                        deviation = abs(kospi_close_naver - kospi_close_fdr) / kospi_close_fdr
+                        if deviation > NAVER_DEVIATION_WARN_THRESHOLD and kospi_change is not None:
+                            # FDR 종가 기준으로 이미 계산된 변화율을, 실제로 저장될 네이버 종가
+                            # 기준으로 다시 맞춥니다(둘 다 "전일 대비"라는 의미는 동일하게 유지).
+                            kospi_prev_est = kospi_close_fdr / (1 + kospi_change)
+                            kospi_change = (kospi_close_naver - kospi_prev_est) / kospi_prev_est
+                            print(f"⚠️ 네이버 KOSPI({kospi_close_naver})가 FDR 종가({kospi_close_fdr})와 "
+                                  f"{deviation*100:.2f}% 괴리 — FDR이 지연된 것으로 보고 변화율을 "
+                                  f"네이버 종가 기준으로 재계산했습니다.")
                     kospi_close = kospi_close_naver
                     print(f"✅ 네이버 금융 KOSPI 수집 성공: {kospi_close}")
 
@@ -254,37 +286,47 @@ def scrape_and_update(target_date_override=None):
         return
 
     # 4. 리스크 지표 연산
-    fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
-    put_base = 0.5 - 0.4 * kospi_change
+    # 2026-08-06 2차 감사 4-4: kospi_change/usd_change가 None이면(전일 종가 비교 불가)
+    # 그걸 입력으로 쓰는 지표들도 값을 지어내지 않고 None으로 둡니다(아래 market_scores
+    # 구성 단계에서 자동으로 배점 제외됩니다).
+    fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300  # usd_close 자체는 위에서 이미 None 방어됨
+    put_base = None if kospi_change is None else (0.5 - 0.4 * kospi_change)
     short_base = 0.4 + 0.4 * (volatility / 5.0)
     els_base = 0.1 + 0.7 * dist_from_high
-    skew_base = 0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change
+    skew_base = None if kospi_change is None else (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change)
     synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
-    ndf_base = 0.4 + 0.5 * usd_change
-    fut_base = 0.5 - 0.3 * kospi_change
+    ndf_base = None if usd_change is None else (0.4 + 0.5 * usd_change)
+    fut_base = None if kospi_change is None else (0.5 - 0.3 * kospi_change)
     non_base = 0.5 + (0.2 if institution_flow < 0 else -0.1)
     dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
     bal_base = 0.5 + 0.3 * dist_from_high
-    put_buy_base = 0.4 - 0.3 * kospi_change
-    stock_net_base = 0.5
+    put_buy_base = None if kospi_change is None else (0.4 - 0.3 * kospi_change)
+    # 2026-08-06 2차 감사 4-3: 예전엔 순수 상수 0.5(방향성만 반영, 규모 미반영)였습니다.
+    # 정확한 매매대금 대비 순매도 '비중' 데이터는 아직 수집하지 않아 완전한 규모화는
+    # 어렵지만, 최소한 3주체 수급 규모 대비 개인 수급이 차지하는 상대적 비중만큼은
+    # 반영해 "방향만 있고 크기는 무시"하는 문제를 완화합니다. 세 흐름이 전부 0이면(드묾)
+    # 중립 0.5를 유지합니다.
+    _flow_denom = abs(retail_flow) + abs(foreigner_flow) + abs(institution_flow)
+    if _flow_denom > 0:
+        _retail_share = abs(retail_flow) / _flow_denom  # 0~1: 개인 수급이 전체에서 차지하는 비중
+        stock_net_base = 0.5 + (0.3 if retail_flow < 0 else -0.3) * _retail_share
+    else:
+        stock_net_base = 0.5
 
-    # 가중 위험 지표 계산 및 합산
-    investor_weights = {"Foreigner": 0.55, "Institution": 0.37, "Retail": 0.08}
-    weights = {
-        "FX_Swap_Point": round(12 * 100 / 102, 4), "Put_OTM_OI": round(8 * 100 / 102, 4),
-        "Short_Ratio": round(6 * 100 / 102, 4), "ELS_KnockIn": round(7 * 100 / 102, 4),
-        "VKOSPI_Skew": round(6 * 100 / 102, 4), "Synthetic_Futures": round(12 * 100 / 102, 4),
-        "NDF_Night_Rate": round(12 * 100 / 102, 4), "Futures_Net_Sell": round(6 * 100 / 102, 4),
-        "Non_Arbitrage_Ratio": round(6 * 100 / 102, 4), "Foreign_Broker_Dump": round(6 * 100 / 102, 4),
-        "Stock_Short_Balance": round(3 * 100 / 102, 4), "Put_Buy_Simple": round(3 * 100 / 102, 4),
-        "Stock_Net_Sell": round(3 * 100 / 102, 4), "KOSPI_5D_Return": round(12 * 100 / 102, 4)
-    }
-    
+    # 가중 위험 지표 계산 및 합산 (2026-08-06 2차 감사 5-1: 가중치 단일 출처로 통일 —
+    # scrape_daily.py/macro_view.py 양쪽 다 utils.constants.RISK_WEIGHTS만 참조합니다)
+    investor_weights = dict(INVESTOR_WEIGHTS)
+    weights = dict(RISK_WEIGHTS)
+
+    # 2026-08-06 2차 감사 4-4 방어: usd_change가 None이면 FX_Swap_Point의 외국인 항목도
+    # None으로 두어야 하므로, fx_base와 usd_change 보정을 분리해 None 전파를 명시적으로 처리.
+    fx_foreigner = None if usd_change is None else clip(fx_base + 0.1 * usd_change)
+
     market_scores = {
-        "FX_Swap_Point": {
-            "Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)
+        "FX_Swap_Point": None if fx_foreigner is None else {
+            "Foreigner": fx_foreigner, "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)
         },
-        "Put_OTM_OI": {
+        "Put_OTM_OI": None if put_base is None else {
             "Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)),
             "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)),
             "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))
@@ -297,7 +339,7 @@ def scrape_and_update(target_date_override=None):
         "ELS_KnockIn": {
             "Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)
         },
-        "VKOSPI_Skew": {
+        "VKOSPI_Skew": None if skew_base is None else {
             "Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)
         },
         "Synthetic_Futures": {
@@ -305,10 +347,10 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(synth_base),
             "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))
         },
-        "NDF_Night_Rate": {
+        "NDF_Night_Rate": None if ndf_base is None else {
             "Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)
         },
-        "Futures_Net_Sell": {
+        "Futures_Net_Sell": None if fut_base is None else {
             "Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)),
             "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)),
             "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))
@@ -322,7 +364,7 @@ def scrape_and_update(target_date_override=None):
         "Stock_Short_Balance": {
             "Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)
         },
-        "Put_Buy_Simple": {
+        "Put_Buy_Simple": None if put_buy_base is None else {
             "Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)),
             "Institution": clip(put_buy_base),
             "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))
@@ -332,45 +374,19 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)),
             "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))
         },
-        "KOSPI_5D_Return": {
-            "Foreigner": clip(kospi_5d_base if kospi_5d_base is not None else 0.0),
-            "Institution": clip(kospi_5d_base if kospi_5d_base is not None else 0.0),
-            "Retail": clip(kospi_5d_base if kospi_5d_base is not None else 0.0)
+        "KOSPI_5D_Return": None if kospi_5d_base is None else {
+            "Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)
         }
     }
 
-    # 5일 모멘텀을 산출하지 못했으면 0.5(중립)로 채우지 않고 해당 지표를 통째로 제외합니다.
-    if kospi_5d_base is None:
-        print("⚠️ KOSPI 5일 모멘텀 산출 불가 → 당일 점수 산출에서 해당 지표를 제외합니다.")
-        weights.pop("KOSPI_5D_Return", None)
-        market_scores.pop("KOSPI_5D_Return", None)
+    # 산출 불가(None)로 남은 지표는 0.5(중립)로 채우지 않고 통째로 제외합니다(§0-1).
+    unavailable_items = [k for k, v in market_scores.items() if v is None]
+    if unavailable_items:
+        print(f"⚠️ 산출 불가 지표 {len(unavailable_items)}건 제외: {', '.join(unavailable_items)}")
+    weights = {k: w for k, w in weights.items() if market_scores.get(k) is not None}
+    market_scores = {k: v for k, v in market_scores.items() if v is not None}
 
-    # 1. 50점대 둔감성 해결을 위한 비선형 점수 계산용 역사적 통계(평균/표준편차) 산출
-    import math
-    historical_stats = {}
-    
-    # 각 지표별 과거 통계값 산출
-    for item in weights.keys():
-        if not history_df.empty and item in history_df.columns and len(history_df) >= 2:
-            mean_val = history_df[item].mean()
-            std_val = history_df[item].std()
-            if pd.isna(std_val) or std_val == 0:
-                std_val = 0.15
-            else:
-                # Z-Score 폭주 방지를 위해 최소 표준편차 한계선(Floor) 0.02 적용
-                std_val = max(0.02, std_val)
-        else:
-            # 이력 표본이 없을 때만 쓰는 '정규화 기준선'입니다(지표값 자체를 만드는 값이 아님).
-            # 표본이 적으면 점수 의미가 날짜마다 달라지므로 대시보드에 표본 부족 경고가 표시됩니다.
-            mean_val = 0.5
-            std_val = 0.15
-        historical_stats[item] = {"mean": mean_val, "std": std_val}
-
-    if len(history_df) < 20:
-        print(f"⚠️ 정규화 표본 부족: 누적 이력 {len(history_df)}행 (권장 20행 이상). "
-              f"Z-Score 기반 서브 점수가 극단으로 튈 수 있습니다.")
-
-    # 2. 개별 지표별 가중 수급 리스크(0~1) 계산 및 저장용 metrics_dict 생성
+    # 1. 개별 지표별 가중 수급 리스크(0~1) 계산 및 저장용 metrics_dict 생성
     current_weighted_risks = {}
     metrics_dict = {}
     for item in weights.keys():
@@ -383,44 +399,20 @@ def scrape_and_update(target_date_override=None):
         current_weighted_risks[item] = weighted_risk
         metrics_dict[item] = weighted_risk
 
-    # 3. Z-Score 산출 및 시그모이드 비선형 변환 (0~100점)
-    sub_scores = {}
-    extreme_signal_count = 0
-    for item in weights.keys():
-        raw_val = current_weighted_risks[item]
-        mean = historical_stats[item]["mean"]
-        std = historical_stats[item]["std"]
-        
-        z = (raw_val - mean) / std
-        
-        # Overflow 방지를 위해 Z-score 범위를 [-20, 20]으로 안전하게 클리핑
-        z_safe = max(-20.0, min(20.0, z))
-        
-        # Z-Score를 0~100점 시그모이드 곡선으로 변환 (민감도 k = 1.1 반영)
-        sub_score = 100 / (1 + math.exp(-1.1 * z_safe))
-        sub_scores[item] = round(sub_score, 2)
-        
-        # 극단 국면 체크 (Sub_Score >= 85 또는 <= 15)
-        if sub_score >= 85 or sub_score <= 15:
-            extreme_signal_count += 1
+    if len(history_df) < 20:
+        print(f"⚠️ 정규화 표본 부족: 누적 이력 {len(history_df)}행 (권장 20행 이상). "
+              f"Z-Score 기반 서브 점수가 극단으로 튈 수 있습니다.")
 
-    # 4. 1차 가중평균 산출 (산출 가능한 지표의 가중치 합으로 정규화)
-    total_weight = sum(weights.values())
-    if total_weight <= 0:
-        raise RuntimeError("산출 가능한 위험 지표가 없어 종합 점수를 계산할 수 없습니다.")
-    base_score = sum(sub_scores[k] * (weights[k] / total_weight) for k in weights)
-
-    # 5. 동시 충격 비선형 증폭기 (Regime Switch) 적용
-    multiplier = 1.0
-    if extreme_signal_count >= 5:
-        multiplier = 1.3  # 극단적 변동: 최대 1.3배 증폭 (완화)
-    elif extreme_signal_count >= 3:
-        multiplier = 1.15  # 경계 변동: 1.15배 증폭
-        
-        
-    score = 50.0 + (base_score - 50.0) * multiplier
-    score = round(max(0.0, min(100.0, score)), 1)
-    print(f"📊 당일 계산된 종합 스코어: {score}")
+    # 2026-08-06 2차 감사 5-1/5-2/4-1: 과거 통계·시그모이드 변환·증폭기 로직을
+    # macro_view.py와 공유하는 utils/macro_scoring.py로 이전(파일 상단 import 참고).
+    # ⚠️ 이 파일이 "그날의 실제 점수"를 만드는 유일한 지점입니다 — 계산 직후 sub_scores/
+    # multiplier를 CSV에 그대로 저장해(아래 6번), macro_view.py가 과거 날짜를 보여줄 때는
+    # 재계산하지 않고 이 값을 그대로 읽게 합니다(그날의 historical_stats는 지금 재현 불가).
+    historical_stats = compute_historical_stats(history_df, weights.keys())
+    sub_scores = compute_sub_scores(current_weighted_risks, historical_stats)
+    score, base_score, multiplier, extreme_signal_count, available_count = compute_final_score(sub_scores, weights)
+    print(f"📊 당일 계산된 종합 스코어: {score} (기본점수 {base_score}, 증폭배율 {multiplier}x, "
+          f"극단신호 {extreme_signal_count}/{available_count})")
 
     # 6. 새 데이터 생성 및 기존 데이터에 병합하여 CSV 저장
     new_data = {
@@ -434,11 +426,19 @@ def scrape_and_update(target_date_override=None):
         # 이 행이 실제로 저장되는(= 크롤링이 끝나 반영되는) 시각. 화면의 "마지막 동기화" 표시는
         # 파일 mtime이 아니라 이 값을 사용합니다.
         "Collected_At": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        # 2026-08-06 2차 감사 5-2: 그날 실제로 화면 점수를 만든 시그모이드 변환 후 서브점수·
+        # 증폭배율을 함께 저장합니다. macro_view.py가 과거 날짜를 보여줄 때 이 값을 그대로
+        # 읽으면(재계산 없이) 화면 표의 기여점수 합이 항상 위에 뜬 종합점수와 일치합니다.
+        "Multiplier": [multiplier],
+        "ExtremeSignalCount": [extreme_signal_count],
     }
-    
+
     for k, v in metrics_dict.items():
         new_data[k] = [round(v, 3)]
-        
+    for k, v in sub_scores.items():
+        new_data[f"SubScore_{k}"] = [v]
+
+
     new_df = pd.DataFrame(new_data)
     
     if not history_df.empty:

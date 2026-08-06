@@ -270,7 +270,11 @@ def render_pegy_page():
                     제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
                 </div>
             </div>
-            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY & 100점 만점 퀀트 종합점수 리포트</div>
+            <!-- 2026-08-06 2차 감사 3-3: "100점 만점" 문구 정정.
+                 실제 만점은 종목마다 다릅니다(ROIC 15점은 원천 데이터를 수집하지 않아 상시 제외라
+                 대부분 85점 이하, 컨센서스가 없으면 더 낮아짐). 수집 못 한 항목을 배점에서 빼는
+                 설계와 화면 문구가 어긋나 있었습니다. -->
+            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY & 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외하므로, 각 카드에 '획득점수 / 그 종목의 만점 (달성률%)'로 표기됩니다)</span></div>
         </div>
         """,
         unsafe_allow_html=True
@@ -442,12 +446,29 @@ def render_pegy_page():
 
     st.markdown("---")
 
+    # =========================================================
     # 6. 전체 종목 방공망 일괄 스크리닝 및 뱃지 필터 컨트롤 (모든 뱃지 동적 자동 구성)
+    # ⚠️ 2026-08-06 2차 감사 3-5: 예전엔 렌더링할 때마다 guardrail을 무조건 재실행했습니다.
+    # 수집기(collector_kospi200.py)가 이미 저장 전에 돌린 것과 같은 함수라 지금까지는
+    # 결과가 같았지만, 어느 한쪽 로직이 갈라지는 순간 "저장된 판정"과 "화면 판정"이
+    # 달라져도 아무도 모르는 구조였습니다(퀀트 점수는 저장값을, 배지·마스킹은 재실행값을
+    # 쓰기 때문). → 스냅샷에 guardrail 결과가 이미 들어있으면 그대로 신뢰해서 쓰고,
+    # 구버전 스냅샷(해당 필드 없음)일 때만 하위호환으로 재실행합니다.
+    # =========================================================
     from utils.guardrail import apply_valuation_guardrail
     processed_stocks = []
+    legacy_rescreened = 0
     for s in all_stocks:
-        screened_stock = apply_valuation_guardrail(s)
-        processed_stocks.append(screened_stock)
+        if 'forward_data_missing' in s:
+            processed_stocks.append(s)   # 수집 시점 판정 그대로 사용 (단일 출처)
+        else:
+            processed_stocks.append(apply_valuation_guardrail(s))
+            legacy_rescreened += 1
+    if legacy_rescreened and is_admin:
+        st.info(
+            f"ℹ️ [관리자] 구버전 스냅샷 {legacy_rescreened}종목은 guardrail 판정 결과가 저장돼 있지 않아 "
+            "화면에서 재실행했습니다. 다음 수집 이후에는 저장된 판정을 그대로 사용합니다."
+        )
 
     # 데이터에 존재하는 모든 뱃지 유형을 동적으로 추출하여 기본 옵션에 포함 (단 1개 종목도 누락 방지)
     all_badge_options = list(dict.fromkeys([s["badge"] for s in processed_stocks if s.get("badge")]))
@@ -483,24 +504,28 @@ def render_pegy_page():
 
     with f_col3:
         only_value_trap = st.checkbox(
-            "⚠️ '착시 저평가' 주의 종목만 보기", 
+            "⚠️ '착시 저평가' 주의 종목만 보기",
             value=False,
-            help="주가가 PER 수치상 싸 보이지만, 실제 이익창출력(ROE<8% 또는 ROIC<6%)이 낮아 오랜 기간 주가가 오르지 못하고 갇히는 위험 종목입니다."
+            # 2차 감사 1-8: 코드는 ROE 기준으로만 판정하는데 설명에는 ROIC가 적혀 있었습니다.
+            help="주가가 PER 수치상 싸 보이지만, 실제 이익창출력(Trailing ROE<8%)이 낮아 오랜 기간 주가가 오르지 못하고 갇히는 위험 종목입니다. (ROIC 기준은 원천 데이터 미수집으로 판정에 사용하지 않습니다)"
         )
 
     # 줄간격 및 수평 여백이 보정된 넉넉한 가이드 박스
     guide_box_html = """
     <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #0284c7; border-radius: 12px; padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
         <div style="font-size: 15px; font-weight: 800; color: #38bdf8; margin-bottom: 10px;">
-            💡 '착시 저평가 (가치주 덫)' 및 100점 만점 퀀트 스코어 가이드
+            💡 '착시 저평가 (가치주 덫)' 및 퀀트 스코어 가이드
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65; margin-bottom: 8px;">
-            • <b style="color: #fef08a;">🏆 100점 만점 퀀트 스코어 (quant_score)</b>: PEGY(35점) + ROE/ROIC(30점) + 주주환원(20점) + Trailing(10점) + 변동성(5점)을 합산하여 종합 점수를 매깁니다.<br>
+            • <b style="color: #fef08a;">🏆 퀀트 스코어 (quant_score)</b>: PEGY(35점) + Forward ROE(15점) + ROIC(15점) + 주주환원(20점) + Trailing(10점) + 변동성(5점) = 이론상 100점 만점입니다.<br>
+            다만 <b>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 통째로 제외</b>하므로 실제 만점은 종목마다 다릅니다.
+            (현재 ROIC는 원천 데이터를 수집하지 않아 항상 제외되어 대부분 85점 이하가 만점이고, 애널리스트 컨센서스가 없으면 PEGY 35점도 빠집니다.)<br>
             (단, 현재가가 목표가를 초과했거나 PEGY &ge; 2.0 시 <b>목표가 달성 적정가/고평가 교차검증</b> 적용)
         </div>
         <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.65;">
             • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만<br>
-            실제 이익창출력(ROE&lt;8% 또는 ROIC&lt;6%)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.
+            실제 이익창출력(<b>Trailing ROE &lt; 8%</b>)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.<br>
+            <span style="color: #94a3b8; font-size: 12.5px;">※ ROIC(&lt;6%) 기준은 원천 데이터(영업이익÷투하자본)를 아직 수집하지 않아 판정에 사용되지 않습니다 — 현재는 ROE 기준 단독 판정입니다.</span>
         </div>
     </div>
     """
@@ -747,8 +772,35 @@ def render_pegy_page():
                 floor_price_str = f"{floor_price:,.0f}원"
         except (ValueError, TypeError):
             pass
+        # =========================================================
+        # 목표가 대비 갭 표시
+        # ⚠️ 2026-08-06 2차 감사 1-3: 목표가가 캡 상수(현재가×2.5)에 걸린 종목은 화면의
+        # "+150.0% 상승 여력"이 계산 결과가 아니라 캡 상수 그 자체입니다(200종목 중 40종목이
+        # 전부 똑같은 +150%였고, 툴팁은 "성장률·주주환원·이익창출력을 모두 고려해 계산"이라고
+        # 설명하고 있었습니다). 초록색 상승여력 바 대신 회색/노란 '상한 도달' 배지로 바꿔
+        # "이 숫자는 추정 신뢰구간 밖이라 절단된 값"이라는 사실을 그대로 노출합니다.
+        # =========================================================
         f_target = s.get('f_target')
-        if price > 0 and f_target:
+        f_target_capped = bool(s.get('f_target_capped'))
+        target_cap_badge_html = ""
+        if price > 0 and f_target and f_target_capped:
+            cap_reason = s.get('f_target_cap_reason') or "현재가 배수 상한에 도달"
+            uncapped = s.get('f_target_uncapped')
+            uncapped_txt = f"캡을 적용하지 않은 산출값은 {uncapped:,}원입니다.<br>" if uncapped else ""
+            gap_pct = ((f_target - price) / price) * 100.0
+            gap_str = f"상한 도달 (＞+{gap_pct:.0f}%, 추정 신뢰구간 밖)"
+            gap_color = "#fbbf24"
+            bar_color = "#78716c"        # 계산된 상승여력이 아니므로 초록 바를 쓰지 않습니다
+            bar_width = 100
+            target_cap_badge_html = (
+                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+                'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">이 목표가는 계산 결과가 아니라 '
+                f'<b>상한(캡) 값</b>입니다.<br>{cap_reason}.<br>{uncapped_txt}'
+                '고성장 종목은 PEGY 공식상 목표가가 발산하기 때문에 폭주 방지 상한을 두고 있으며, '
+                '상한에 걸린 종목의 상승여력은 "최소 이만큼"이라는 뜻일 뿐 정밀한 추정치가 아닙니다.</span></span>'
+            )
+        elif price > 0 and f_target:
             gap_pct = ((f_target - price) / price) * 100.0
             gap_str = f"+{gap_pct:.1f}% 상승 여력" if gap_pct >= 0 else f"{abs(gap_pct):.1f}% 프리미엄"
             gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
@@ -759,6 +811,18 @@ def render_pegy_page():
             gap_color = "#94a3b8"
             bar_color = "#64748b"
             bar_width = 0
+
+        # Trailing 적정가(t_fair)도 같은 상한에 걸릴 수 있으므로 동일하게 표시합니다.
+        t_fair_cap_badge_html = ""
+        if s.get('t_fair_capped'):
+            t_fair_uncapped = s.get('t_fair_uncapped')
+            t_fair_uncapped_txt = f"캡 미적용 산출값 {t_fair_uncapped:,}원.<br>" if t_fair_uncapped else ""
+            t_fair_cap_badge_html = (
+                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+                'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">과거 적정가가 현재가 2.5배 '
+                f'상한에 걸려 절단된 값입니다.<br>{t_fair_uncapped_txt}계산 결과가 아니라 상한값입니다.</span></span>'
+            )
 
         # 퀀트 스코어 — 기본값 80점 금지. 산출되지 않았으면 '측정 불가'로 표기하고,
         # 배점이 제외된 항목이 있으면 만점(score_max)을 그대로 노출합니다.
@@ -775,18 +839,25 @@ def render_pegy_page():
             # 것도 있고 100점인 것도 있다") — 달성률(%)을 함께 크게 표기해 만점이 달라도
             # 한눈에 비교되게 합니다.
             # =========================================================
-            q_max_val = q_max or 100
-            pct = round(q_score / q_max_val * 100) if q_max_val else 0
-            if pct >= 60:
-                pct_color = "#4ade80"
-            elif pct >= 30:
-                pct_color = "#fde047"
+            # ⚠️ 2026-08-06 2차 감사 3-4: `q_max or 100` 제거.
+            # 만점(score_max)이 없다는 건 "이 종목에서 채점 가능한 항목이 하나도 없다"는
+            # 뜻인데, 거기에 없는 분모 100을 지어내면 달성률(%)까지 가짜가 됩니다.
+            # 분모가 없으면 %를 계산하지 않고 그대로 '산출 불가'로 표기합니다(§0-1).
+            q_max_val = q_max
+            if not q_max_val:
+                score_badge_html = f"<b>{q_score}점</b> / 만점 산출 불가 (채점 가능 항목 없음)"
             else:
-                pct_color = "#fca5a5"
-            score_badge_html = (
-                f"<b>{q_score}점</b> / {q_max_val}점 "
-                f"<span style='color:{pct_color}; font-weight:900;'>({pct}%)</span>"
-            )
+                pct = round(q_score / q_max_val * 100)
+                if pct >= 60:
+                    pct_color = "#4ade80"
+                elif pct >= 30:
+                    pct_color = "#fde047"
+                else:
+                    pct_color = "#fca5a5"
+                score_badge_html = (
+                    f"<b>{q_score}점</b> / {q_max_val}점 "
+                    f"<span style='color:{pct_color}; font-weight:900;'>({pct}%)</span>"
+                )
             # 배지에 %가 이미 보이므로 툴팁 문구는 원래 길이(1줄)로 유지 — 예전에 설명을
             # 한 줄 더 추가했더니 툴팁 박스가 길어지면서 옆/아래 카드로 튀어나가는 렌더링
             # 버그가 생겨(오너 제보, 2026-08-06) 다시 짧게 되돌림.
@@ -828,11 +899,35 @@ def render_pegy_page():
         # ⚠️ 오너 요청(2026-08-06): 예전엔 Forward 마스크 박스 안에 중첩되어 있었으나,
         # 이 값은 Trailing 지표에서만 산출되므로 Trailing 섹션 바로 아래(Forward 섹션과는 별개)로 옮깁니다.
         # Forward 카드가 어떤 사유로든 마스킹되는 모든 경우에 참고용으로 함께 보여줍니다.
+        # =========================================================
+        # ⚠️ 2026-08-06 2차 감사 3-2: 방어적 크로스체크
+        # 수집기(1-1)에서 PER/EPS 부호가 유실되면 적자 기업에도 그레이엄 넘버가 산출되어,
+        # "🚨 적자 기업 — 산출 불가" 배너 바로 아래에 목표가가 나란히 표시되는 자기모순이
+        # 생깁니다(실제로 24종목에서 발생). 수집기를 고쳤더라도 화면 쪽에서 한 번 더 막습니다
+        # — 표시 로직은 데이터가 모순이어도 절대 모순된 화면을 만들지 않아야 합니다.
+        # =========================================================
+        is_loss_making = bool(
+            s.get('is_trailing_loss')
+            or (t_roe_val is not None and t_roe_val < 0)
+            or (s.get('t_eps') is not None and s.get('t_eps') <= 0)
+            or (s.get('t_per_measured') is not None and s.get('t_per_measured') < 0)
+        )
+
         graham_box_html = ""
         if forward_needs_mask:
             graham_target = s.get('graham_target')
             graham_is_fin = s.get('graham_is_financial_sector', False)
-            if graham_target is not None and graham_is_fin:
+            if is_loss_making:
+                # 적자 기업은 √(22.5×EPS×BPS) 의 제곱근 안이 음수가 되어 수학적으로 산출
+                # 불가능합니다. 스냅샷에 값이 남아 있더라도(구버전/수집 오류) 표시하지 않습니다.
+                loss_reason = ", ".join(s.get('loss_evidence') or []) or f"Trailing ROE {fmt_num(t_roe_val, '%')}"
+                graham_box_html = f"""
+                <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center; margin-bottom: 14px;">
+                    <div style="color: #94a3b8; font-size: 12.5px; font-weight: 700;">🧮 그레이엄 넘버 산출 불가 — 적자 기업 (EPS가 0 이하라 제곱근 안이 음수가 됩니다)</div>
+                    <div style="color: #64748b; font-size: 11.5px; font-weight: 600; margin-top: 4px;">판정 근거: {loss_reason}</div>
+                </div>
+                """
+            elif graham_target is not None and graham_is_fin:
                 # 금융주(은행/보험/증권 등)는 그레이엄 넘버의 전제(제조업 장부가)가 잘 안 맞으므로
                 # 값은 보여주되 강한 경고 배지를 붙입니다 (오너 요청 — 배제하지 않고 경고로 표시).
                 graham_box_html = f"""
@@ -1041,9 +1136,9 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.</span></span>
+                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가</b><br>회사의 예상 성장률, 주주환원(배당 등), 이익 창출력(ROE/ROIC)을 모두 고려해 계산한 '적당한 가격'이에요.<br>다만 고성장 종목은 공식상 값이 발산하기 때문에 <b>현재가의 2.5배 / 목표 PER 25배</b> 상한을 둡니다. 상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다.</span></span>
                                 </span>
-                                <span class="price-text-target">{fmt_num(f_target, '원', 0)}</span>
+                                <span class="price-text-target">{fmt_num(f_target, '원', 0)}{target_cap_badge_html}</span>
                             </div>
                         </div>
                         <div class="gap-footer" style="color: {gap_color};">
@@ -1096,9 +1191,13 @@ def render_pegy_page():
                         아래 목표주가·적정가는 <b>참고 불가</b>하며, 이익 정상화 전까지 투자에 각별한 주의가 필요합니다.
                     </div>
                 </div>
+                <!-- 2026-08-06 2차 감사 3-1: 여기 있던 하드코딩 숫자 '99.99'를 삭제했습니다.
+                     적자라서 PEGY를 산출하지 못한 자리에 18px 볼드로 큰 숫자가 박혀 있으면
+                     사용자에게는 그게 이 종목의 PEGY 값으로 읽힙니다(1차 감사 §3-3 "PEGY 99.0" 잔재).
+                     값이 없으면 값을 쓰지 않습니다 (ENGINEERING_SPEC §0-1). -->
                 <div style="background: #991b1b; border: 1px solid #f87171; border-radius: 8px; padding: 6px 14px; text-align: center; flex-shrink: 0;">
-                    <div style="color: #f87171; font-size: 18px; font-weight: 900;">99.99</div>
-                    <div style="color: #fca5a5; font-size: 10px; font-weight: 600;">PEGY 측정불가</div>
+                    <div style="color: #f87171; font-size: 18px; font-weight: 900;">—</div>
+                    <div style="color: #fca5a5; font-size: 10px; font-weight: 600;">PEGY 산출 불가</div>
                 </div>
             </div>
             '''}

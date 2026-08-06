@@ -7,7 +7,20 @@ utils/guardrail.py
    - 검증 결과는 AND 로만 결합합니다. 즉 어느 한 단계라도 실패하면 최종 is_valid 는 False 입니다.
 """
 
+from utils.constants import PER_EXTREME_MAX, TARGET_PRICE_CAP_MULTIPLE
+
 MIN_OUTSTANDING_SHARES = 1_000_000  # 상장주식수 sanity range check 하한 (collector 와 동일 기준)
+
+# 배당 필수 업종 판정 키워드 — 2026-08-06 2차 감사 6-1.
+# 예전 목록에는 '우B'(2우B 같은 우선주 표기)가 섞여 있었습니다. 우선주는 '업종'이 아니라
+# 주식의 종류라서, 배당을 안 주는 일반 제조업 우선주까지 "배당 필수 업종인데 배당이 0"이라는
+# 잘못된 경고를 받고 있었습니다. 업종 키워드만 남깁니다.
+HIGH_DIVIDEND_SECTOR_KEYWORDS = ['리츠', '인프라', '금융지주', '은행', '보험', '증권']
+
+# 그레이엄 넘버 이상치 판정 배수 — 현재가의 5배를 넘는 그레이엄 넘버는 EPS/PBR 파싱
+# 오염(단위 오인)일 가능성이 높습니다. 목표주가 캡(2.5배)보다 훨씬 느슨하게 잡아
+# "진짜 이상한 값"만 걸러냅니다.
+GRAHAM_OUTLIER_MULTIPLE = 5.0
 
 
 def apply_valuation_guardrail(stock_data: dict) -> dict:
@@ -28,13 +41,74 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
 
     price = cleaned.get('price') or 0
     f_per = cleaned.get('f_per')
-    sh_return = cleaned.get('sh_return') or 0  # 배당수익률(%) 기준
-    dps = cleaned.get('dps') or 0
+    sh_return = cleaned.get('sh_return')          # None = 미수집 (0% 와 구분, 2차 감사 1-4)
+    dps = cleaned.get('dps')                      # None = 미수집
     name = cleaned.get('name', '')
     outstanding_shares = cleaned.get('outstanding_shares') or 0
 
+    # =========================================================
+    # 2026-08-06 2차 감사 6-2: 정합성 크로스체크(회귀 가드)
+    # 이 검사가 없어서 "t_roe<0 인데 t_per>0"인 모순 상태가 24종목 규모로 방치됐습니다
+    # (abs()가 부호를 지운 1-1 버그의 직접적 방치 원인). 값을 고치지는 않고 —
+    # 여기서 조용히 보정하면 또 같은 일이 반복되므로 — 모순을 발견하면 목록에
+    # 그대로 적어 화면·JSON에 노출하고, 심각한 것만 검증 실패로 승격시킵니다.
+    # =========================================================
+    consistency_warnings = []
+    t_roe = cleaned.get('t_roe')
+    t_per = cleaned.get('t_per')
+    t_eps = cleaned.get('t_eps')
+    graham_target = cleaned.get('graham_target')
+
+    # ① 적자(ROE<0)인데 Trailing PER이 양수 → 부호 유실(정규식/abs) 재발 신호
+    if t_roe is not None and t_roe < 0 and t_per is not None and t_per > 0:
+        consistency_warnings.append(
+            f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing PER은 {t_per}배(양수) — PER 부호 유실 의심"
+        )
+    # ② 적자인데 Trailing EPS가 양수 → 같은 계열의 부호 유실
+    if t_roe is not None and t_roe < 0 and t_eps is not None and t_eps > 0 and not cleaned.get('t_eps_calculated'):
+        consistency_warnings.append(
+            f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing EPS는 {t_eps:,}원(양수) — EPS 부호 유실 의심"
+        )
+    # ③ DPS는 있는데 주주환원율이 0 → 배당수익률 환산 누락
+    if dps is not None and dps > 0 and sh_return is not None and sh_return <= 0:
+        consistency_warnings.append(
+            f"모순: DPS {dps:,}원인데 배당수익률이 {sh_return}% — 배당수익률 환산 누락 의심"
+        )
+    # ④ 적자인데 그레이엄 넘버가 산출됨 → "적자는 산출 불가" 규칙 위반
+    if t_roe is not None and t_roe < 0 and graham_target:
+        consistency_warnings.append(
+            f"모순: 적자(ROE {t_roe}%) 종목인데 그레이엄 넘버({graham_target:,}원)가 산출됨 — 표시 금지 대상"
+        )
+    # ⑤ 그레이엄 넘버가 현재가의 5배 초과 → EPS/PBR 파싱 오염 의심
+    if graham_target and price > 0 and graham_target > price * GRAHAM_OUTLIER_MULTIPLE:
+        consistency_warnings.append(
+            f"이상치: 그레이엄 넘버 {graham_target:,}원이 현재가의 {GRAHAM_OUTLIER_MULTIPLE}배를 초과 — EPS/PBR 파싱 오염 의심"
+        )
+    # ⑥ 목표주가가 캡 상수 그 자체 → 화면 갭(%)이 계산 결과가 아님을 명시적으로 기록
+    if cleaned.get('f_target_capped'):
+        consistency_warnings.append(
+            f"주의: 목표주가가 현재가 {TARGET_PRICE_CAP_MULTIPLE}배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
+        )
+
+    if consistency_warnings:
+        cleaned['consistency_warnings'] = consistency_warnings
+        existing_issues = list(cleaned.get('data_issues') or [])
+        for w in consistency_warnings:
+            if w not in existing_issues:
+                existing_issues.append(w)
+        cleaned['data_issues'] = existing_issues
+
+    # 위 ①②④(부호 유실 계열 모순)는 "값이 조금 이상하다"가 아니라 "수집 로직이 다시
+    # 망가졌다"는 신호이므로, 종목을 완전히 차단하진 않되 검증 미통과로 승격시켜
+    # 퀀트 점수 산출 대상에서 빼고 화면에 사유를 띄웁니다(회귀 가드).
+    critical_contradictions = [w for w in consistency_warnings if w.startswith("모순")]
+
     def _finish(is_valid, is_unverified, reject_reason=None, unverified_reason=None):
         """검증 결과 결합: 상위 판정과 AND 로만 합칩니다."""
+        if critical_contradictions:
+            is_unverified = True
+            if not unverified_reason:
+                unverified_reason = "⚠️ 데이터 정합성 모순 감지: " + " / ".join(critical_contradictions)
         cleaned['is_valid'] = bool(inherited_valid and is_valid)
         cleaned['is_unverified'] = bool(inherited_unverified or is_unverified)
         if reject_reason:
@@ -63,7 +137,8 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
         cleaned['forward_missing_fields'] = forward_missing
 
     # 1. Price & PER Sanity Check (스케일 오류 및 음수/무한대 PER 차단) — f_per가 있을 때만 검사
-    if f_per is not None and (f_per <= 0 or f_per > 300):
+    # (2차 감사 6-3: 300 임계치는 utils/constants.py 단일 출처에서만 가져옵니다)
+    if f_per is not None and (f_per <= 0 or f_per > PER_EXTREME_MAX):
         return _finish(False, True, reject_reason="PER/주가 산출 범위 초과 또는 데이터 오염")
 
     # 2. 상장주식수 sanity range check
@@ -95,11 +170,21 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
     #    DPS=0"이라는 것만으로 종목 전체의 Trailing 데이터까지 못 믿게 막는 건 과합니다.
     #    → 종목 전체는 차단하지 않고, Forward 카드 자리에만 확인-필요 배지를 띄웁니다
     #    (Trailing 지표·퀀트 점수는 수집된 값 그대로 정상 반영 — views/pegy_view.py에서 렌더링).
-    is_high_dividend_sector = any(kw in name for kw in ['리츠', '인프라', '금융지주', '우B'])
-    if is_high_dividend_sector and dps <= 0 and sh_return <= 0:
+    #    ⚠️ 2026-08-06 2차 감사 6-1: 키워드 목록에서 '우B'(우선주 표기) 제거 — 업종이 아닙니다.
+    #    ⚠️ 2026-08-06 2차 감사 1-4: 이제 dps/sh_return 은 None(미수집)과 0(무배당 확정)이
+    #       구분되므로, 두 경우의 안내 문구도 분리합니다.
+    is_high_dividend_sector = any(kw in name for kw in HIGH_DIVIDEND_SECTOR_KEYWORDS)
+    dividend_not_collected = (dps is None or sh_return is None or cleaned.get('dps_source') == 'not_collected')
+    if dividend_not_collected:
         cleaned['dividend_data_unverified'] = True
         cleaned['dividend_unverified_reason'] = (
-            "이 종목은 리츠·인프라·금융 등 배당 필수 업종인데 DPS(주당배당금)·배당수익률이 모두 0으로 수집되었습니다.<br>"
+            "이 종목의 배당 데이터(DPS·배당수익률)를 수집하지 못했습니다.<br>"
+            "'배당이 없다'는 뜻이 아니라 '값을 확인하지 못했다'는 뜻이며, 주주환원 점수는 배점에서 제외됩니다."
+        )
+    elif is_high_dividend_sector and (dps or 0) <= 0 and (sh_return or 0) <= 0:
+        cleaned['dividend_data_unverified'] = True
+        cleaned['dividend_unverified_reason'] = (
+            "이 종목은 리츠·인프라·금융 등 배당 필수 업종인데 DPS(주당배당금)·배당수익률이 모두 0으로 확인되었습니다.<br>"
             "실제로 무배당일 수도 있고 공시 데이터가 아직 반영되지 않았을 수도 있습니다."
         )
 
