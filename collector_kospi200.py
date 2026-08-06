@@ -103,13 +103,19 @@ def _empty_item_info(error_msg):
     }
 
 
-def fetch_naver_item_dps_and_eps(code):
+def fetch_naver_item_dps_and_eps(code, diag_roe_check=False):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
     주요 재무제표 표에서 TIMEFRAME_KEYWORDS 사전을 기반으로 동적 키워드 헤더 타겟팅을 적용합니다.
     (위치 고정 인덱스 iloc[:, 2] 전면 금지, 100% 범용 동적 수집)
 
     반환: dict — 파싱하지 못한 항목은 반드시 None 이며, 실패 사유는 errors 리스트에 누적됩니다.
+
+    Args:
+        diag_roe_check: True면 "주요재무제표" 표의 컬럼명·ROE 행을 진단 로그로 출력합니다.
+            2026-08-06 추가 — Forward ROE 컨센서스가 이 표(이미 매 종목 fetch하는 페이지)에
+            추정치(E) 컬럼과 함께 존재하는지 확인하기 위한 일회성 조사용. 실제 수집 로직/네트워크
+            요청에는 전혀 영향을 주지 않으며, 다음 실제 크롤링 실행 시 로그로만 확인합니다.
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -199,7 +205,23 @@ def fetch_naver_item_dps_and_eps(code):
         parsed_dps = None
         if fin_df_list:
             fin_df = fin_df_list[0]
-            
+
+            # =========================================================
+            # 2026-08-06 추가: Forward ROE 컨센서스 존재 여부 진단 로그 (오너 요청).
+            # 이 표는 이미 매 종목 fetch하는 페이지에서 파싱 중이므로 별도 네트워크 요청이
+            # 전혀 없습니다. 처음 5종목만 찍어서 로그를 과도하게 늘리지 않습니다.
+            # 여기서 "(E)" 등 추정치 컬럼과 ROE 행이 함께 확인되면, 추가 크롤링 없이
+            # utils/scoring.py의 Forward ROE(15점) 항목을 채울 수 있는지 판단할 수 있습니다.
+            # =========================================================
+            if diag_roe_check:
+                print(f"  [진단/ROE컨센서스확인] {code} 재무제표 표 컬럼: {list(fin_df.columns)}")
+                for _di in range(len(fin_df)):
+                    _row_label = str(fin_df.iloc[_di, 0])
+                    if 'ROE' in _row_label.upper():
+                        print(f"  [진단/ROE컨센서스확인] {code} ROE 행 발견: {list(fin_df.iloc[_di].values)}")
+                if not any('ROE' in str(fin_df.iloc[_di, 0]).upper() for _di in range(len(fin_df))):
+                    print(f"  [진단/ROE컨센서스확인] {code}: 이 표에 ROE 행 없음")
+
             # 동적 헤더 시계열 분류
             annual_cols = []
             for idx, col in enumerate(fin_df.columns):
@@ -475,7 +497,8 @@ def enrich_quant_metrics(stocks_raw):
                 print(f"  [우선주 ROE 상속] {name}({code}): 보통주 ROE {inherited_roe}% 적용")
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
-        item = fetch_naver_item_dps_and_eps(code)
+        # diag_roe_check: 처음 5종목만 Forward ROE 컨센서스 존재 여부 진단 로그 출력(2026-08-06, task#4)
+        item = fetch_naver_item_dps_and_eps(code, diag_roe_check=(idx < 5))
         n_t_per = item["t_per"]
         n_t_eps = item["t_eps"]
         n_f_per = item["f_per"]

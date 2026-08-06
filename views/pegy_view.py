@@ -745,8 +745,10 @@ def render_pegy_page():
                 f"<b>{q_score}점</b> / {q_max_val}점 "
                 f"<span style='color:{pct_color}; font-weight:900;'>({pct}%)</span>"
             )
-            score_tooltip_extra = "만점이 종목마다 달라(배점 제외 항목 수에 따라 유동적) 원점수보다 %(달성률)로 비교하는 걸 권장해요.<br>"
-            score_tooltip_extra += (
+            # 배지에 %가 이미 보이므로 툴팁 문구는 원래 길이(1줄)로 유지 — 예전에 설명을
+            # 한 줄 더 추가했더니 툴팁 박스가 길어지면서 옆/아래 카드로 튀어나가는 렌더링
+            # 버그가 생겨(오너 제보, 2026-08-06) 다시 짧게 되돌림.
+            score_tooltip_extra = (
                 f"※ 배점 제외 항목: {', '.join(excluded_items)}" if excluded_items
                 else "모든 항목이 배점에 반영되었습니다."
             )
