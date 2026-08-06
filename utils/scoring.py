@@ -35,6 +35,36 @@ def _population_zscore(value, pop_stats):
     return (value - mean) / std
 
 
+# 성장률 기반 PEGY 점수 보수화 (기저효과 왜곡 방어) 파라미터
+GROWTH_ADJ_THRESHOLD_PCT = 100.0     # 성장률이 이 값을 넘으면 기저효과 왜곡 가능성 보정 시작
+GROWTH_ADJ_SEVERITY_CAP_PCT = 200.0  # 기준선 대비 +200%p 초과분부터는 최대 보정(20%)으로 고정(윈저라이즈)
+GROWTH_ADJ_SCORE_RATIO_MIN = 0.20    # 성장률이 매우 극단적인 경우 PEGY 점수를 만점의 20%까지만 인정
+GROWTH_ADJ_SCORE_RATIO_MAX = 1.00    # 기준선을 막 넘었을 때는 사실상 무보정(100%)
+
+
+def _growth_pegy_score_ratio(growth):
+    """
+    성장률(growth, %)이 100%를 넘으면 애널리스트 컨센서스가 기저효과(base effect)로
+    왜곡됐을 가능성을 의심해 PEGY '점수'만 보수적으로 깎습니다(0.2~1.0 배율).
+
+    ⚠️ 2026-08-06 설계 변경 (오너 지적: "1.5로 고정하는 건 그냥 하드코딩이잖아").
+    예전엔 growth>=100%면 f_pegy 자체를 max(f_pegy*2, 1.5)로 강제로 덮어썼습니다. 그 결과
+    화면에 보이는 목표가·적정가 갭(원래 f_pegy 기준으로 계산)과 배지(덮어써진 f_pegy 기준)가
+    서로 반대 방향을 가리키는 자기모순이 생겼습니다(예: "+150% 상승여력"인데 배지는
+    "고평가 관망"). 이제는 f_pegy 자체는 절대 건드리지 않아 배지·목표가 표시가 항상 서로
+    일관되게 유지되고, 대신 PEGY 카테고리 "점수"만 성장률이 기준선을 얼마나 초과했는지에
+    비례해 절대거리 기준으로 윈저라이즈합니다(population z-score가 아니라 절대 기준을 쓰는
+    이유는 per_extreme·VOL_PENALTY와 동일 — "동종업계 대비 밸류에이션"이 아니라 "이 성장률
+    숫자 자체를 얼마나 신뢰할 수 있는가"를 보는 것이라 다른 종목과 상대비교하는 게 개념적으로
+    안 맞기 때문입니다).
+    """
+    if growth is None or growth < GROWTH_ADJ_THRESHOLD_PCT:
+        return GROWTH_ADJ_SCORE_RATIO_MAX
+    excess = min(growth - GROWTH_ADJ_THRESHOLD_PCT, GROWTH_ADJ_SEVERITY_CAP_PCT)
+    ratio = excess / GROWTH_ADJ_SEVERITY_CAP_PCT
+    return GROWTH_ADJ_SCORE_RATIO_MAX - ratio * (GROWTH_ADJ_SCORE_RATIO_MAX - GROWTH_ADJ_SCORE_RATIO_MIN)
+
+
 def _winsorized_scale(z, best_z, worst_z, pct_best, pct_worst):
     """
     횡단면 z-score를 pct_best~pct_worst 사이로 선형 매핑합니다.
@@ -153,18 +183,14 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
         forward_available = False
         f_pegy = None
 
-    # =========================================================
-    # Guardrail 1-2: 비정상적 고성장률(기저효과 왜곡 등) 패널티 (캡 제거에 따른 방어)
-    # =========================================================
-    if forward_available and growth is not None and growth >= 100.0 and f_pegy is not None:
-        # 비정상적(100% 이상) 성장은 일시적 기저효과일 가능성이 크므로
-        # PEGY 점수를 보수적으로 깎음(극단적 과대평가 방지)
-        f_pegy = max(f_pegy * 2.0, 1.5)
-
     earned = 0
     possible = 0
 
     # 1. PEGY 점수 (35점) — Forward 데이터가 있고 역성장/오염이 아닐 때만 배점
+    #    ⚠️ Guardrail 1-2(비정상적 고성장률/기저효과 왜곡 방어)는 아래에서 "점수만" 보수적으로
+    #    캡합니다 — f_pegy 자체는 건드리지 않아 배지·목표가 표시와 항상 일관됩니다(위
+    #    _growth_pegy_score_ratio() 설명 참고).
+    growth_score_capped = False
     if forward_available and f_pegy is not None:
         if f_pegy < 0.65:
             s_pegy = 35
@@ -178,6 +204,13 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
             s_pegy = 5
         else:
             s_pegy = 0
+
+        growth_score_ratio = _growth_pegy_score_ratio(growth)
+        capped_s_pegy = int(round(35 * growth_score_ratio))
+        if capped_s_pegy < s_pegy:
+            growth_score_capped = True
+            s_pegy = capped_s_pegy
+
         earned += s_pegy
         possible += 35
 
@@ -342,5 +375,6 @@ def calculate_quant_score(f_pegy, f_roe, roic, sh_return, t_roe, vol, f_per=None
         "forward_available": forward_available,
         "badge": badge,
         "badge_bg": badge_bg,
-        "badge_fg": badge_fg
+        "badge_fg": badge_fg,
+        "growth_score_capped": growth_score_capped
     }

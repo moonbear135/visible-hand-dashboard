@@ -644,6 +644,24 @@ def render_pegy_page():
         else:
             roe_gap_badge_html = ""
 
+        # =========================================================
+        # 2026-08-06 추가: 성장률 100% 이상 시 PEGY '점수'만 보수적으로 캡하는 로직
+        # (utils/scoring.py의 growth_score_capped) — 화면에 별도 표시가 없으면 "왜 목표가는
+        # 저평가처럼 보이는데 퀀트 스코어는 낮지?"라는 혼란이 생길 수 있어 경고 배지로 이유를
+        # 설명합니다(오너 지적: 예전엔 f_pegy 자체를 몰래 덮어써서 배지·목표가가 서로
+        # 모순됐음 — 지금은 f_pegy는 그대로 두고 점수만 깎으므로 그 이유를 명시).
+        # =========================================================
+        growth_capped_badge_html = ""
+        if s.get("growth_score_capped"):
+            growth_capped_badge_html = (
+                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+                'vertical-align: middle;">⚠️ 고성장 추정 보수반영<span class="q-tooltiptext">예상 성장률이 100%를 '
+                '넘어 기저효과(일시적 실적 급변) 왜곡 가능성을 의심, 퀀트 스코어의 PEGY 항목 점수만 보수적으로 '
+                '깎았습니다.<br>목표가·적정가 갭은 원래 성장률 그대로 계산되어 있으니(점수만 영향, 값 자체는 '
+                '건드리지 않음) 함께 참고하세요.</span></span>'
+            )
+
         trap_badge_html = ""
         if s.get("value_trap", False):
             trap_badge_html = """
@@ -1007,7 +1025,7 @@ def render_pegy_page():
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                             <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}{growth_capped_badge_html}</div>
                     </div>
                     <div>
                         <div class="comparison-box" style="margin-bottom: 8px; border-color: #38bdf8; width: 100%;">

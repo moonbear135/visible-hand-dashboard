@@ -886,6 +886,7 @@ def enrich_quant_metrics(stocks_raw):
         stock_dict["badge_bg"] = score_res["badge_bg"]
         stock_dict["badge_fg"] = score_res["badge_fg"]
         stock_dict["score_excluded_items"] = score_res.get("excluded_items", [])
+        stock_dict["growth_score_capped"] = score_res.get("growth_score_capped", False)
 
     return enriched_stocks
 
