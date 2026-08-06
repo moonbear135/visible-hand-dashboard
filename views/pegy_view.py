@@ -620,6 +620,30 @@ def render_pegy_page():
         roe_color = "#94a3b8" if t_roe_val is None else ("#f43f5e" if t_roe_val < 8.0 else "#4ade80")
         roic_color = "#94a3b8" if roic_val is None else ("#f43f5e" if roic_val < 6.0 else "#38bdf8")
 
+        # =========================================================
+        # 2026-08-06 추가: Forward ROE 컨센서스 도입(네이버 재무제표 "연간 추정(E)" 컬럼에서
+        # 실측, 추가 크롤링 없음). 반도체 등 경기순환 업종은 Trailing 대비 Forward가 몇 배씩
+        # 뛰는 추정치가 실제로도 정상적으로 나올 수 있어, 값 자체를 지우거나 평균 내지 않고
+        # 그대로 보여주되 격차가 큰 경우에만 옆에 작은 경고 배지로 맥락을 함께 전달합니다
+        # (오너 요청 — "경고 배지 + 설명"이 임의로 값을 손대는 것보다 낫다는 방향).
+        # =========================================================
+        f_roe_val = s.get('f_roe')
+        roe_gap_flag = bool(
+            t_roe_val is not None and f_roe_val is not None and t_roe_val > 0
+            and (f_roe_val >= t_roe_val * 2.5 or (f_roe_val - t_roe_val) >= 25.0)
+        )
+        if roe_gap_flag:
+            roe_gap_badge_html = (
+                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
+                f'vertical-align: middle;">⚡ 추정치 변동 큼<span class="q-tooltiptext">Trailing({t_roe_val:.1f}%) 대비 '
+                f'Forward 추정치가 큰 폭으로 높습니다({f_roe_val:.1f}%).<br>반도체 등 경기순환 업종은 실적 사이클상 '
+                '실제로 이런 추정이 나올 수 있으나, 애널리스트 컨센서스 특성상 오차가 클 수 있으니 참고용으로만 '
+                '활용하세요.</span></span>'
+            )
+        else:
+            roe_gap_badge_html = ""
+
         trap_badge_html = ""
         if s.get("value_trap", False):
             trap_badge_html = """
@@ -962,14 +986,14 @@ def render_pegy_page():
                         <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
                         <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
                     </div>
-                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 1.18x 벌점 반영)</span>
+                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 정도에 비례한 벌점 반영, 1.05~1.40x)</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>애널리스트 컨센서스 예상 ROE. 현재 이 프로젝트는 해당 컨센서스를 수집하지 않으므로 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
+                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
-                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}</div>
+                        <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}{roe_gap_badge_html}</div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
@@ -1069,8 +1093,8 @@ def render_pegy_page():
                     <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(t_roe_val, '%', 1)}</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>애널리스트 컨센서스 기반 예상 ROE 입니다.<br>현재 이 프로젝트는 컨센서스 ROE를 수집하지 않으므로 값을 추정해 채우지 않고 '데이터 없음'으로 표시합니다.</span></span>:
-                    <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(s.get('f_roe'), '%', 1)}</b>
+                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 추정해 채우지 않고 '데이터 없음'으로 표시합니다.</span></span>:
+                    <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(s.get('f_roe'), '%', 1)}</b>{roe_gap_badge_html}
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
                     <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>영업이익 ÷ 투하자본으로 별도 산출해야 하는 지표입니다.<br>현재 이 프로젝트는 해당 원천 데이터를 수집하지 않으므로 '데이터 없음'으로 표시합니다.</span></span>:

@@ -34,7 +34,30 @@ from utils.data_validator import DataValidator, PERIOD_KEYWORDS, INDICATOR_TARGE
 MIN_OUTSTANDING_SHARES = 1_000_000   # 상장주식수 파싱 결과 sanity range check 하한
 VOL_WINDOW = 20                      # 변동성 산출 기간(영업일)
 VOL_THRESHOLD_PCT = 2.0              # 일간수익률 표준편차(%) 기준 '변동성 확대' 판정선
-VOL_PENALTY = 1.18                   # 변동성 확대 시 실효성장률 벌점 배수
+# =========================================================
+# 2026-08-06 개편(오너 지적): 예전엔 기준선(2.0%)만 넘으면 표준편차가 2.01%든 15%든 상관없이
+# 무조건 고정 1.18배를 곱했습니다 — 이건 "하드컷오프"가 아니라 그냥 단순 하드코딩이었습니다.
+# 지금은 기준선 초과분(%p)에 비례해 VOL_PENALTY_MIN~VOL_PENALTY_MAX 사이로 선형 스케일링하고,
+# 초과분이 VOL_PENALTY_SEVERITY_CAP_PCT를 넘으면 그 이상은 최대 벌점으로 윈저라이즈합니다.
+# (utils/scoring.py의 PER 이상치 상한과 동일한 "절대거리 기반 스케일링" 패턴 — 이 값은 전
+# 종목 횡단면 분포가 아니라 PEGY·목표가 계산에 바로 들어가는 입력값이라, 스코어링 하드컷오프처럼
+# 2차 패스로 미룰 수 없어 population z-score 대신 절대거리 기반을 그대로 씁니다.)
+# =========================================================
+VOL_PENALTY_MIN = 1.05               # 기준선을 살짝 넘었을 때 최소 벌점 배수
+VOL_PENALTY_MAX = 1.40               # 변동성이 매우 큰 경우 최대 벌점 배수(상한)
+VOL_PENALTY_SEVERITY_CAP_PCT = 10.0  # 기준선 대비 +10%p 초과분부터는 최대 벌점으로 고정(윈저라이즈)
+
+
+def compute_vol_penalty(vol_std):
+    """
+    측정된 변동성(표준편차 %)이 기준선을 얼마나 초과했는지에 비례해 1.0~VOL_PENALTY_MAX
+    사이의 벌점 배수를 반환합니다. 기준선 미만이거나 측정 불가(None)면 1.0(벌점 없음).
+    """
+    if vol_std is None or vol_std < VOL_THRESHOLD_PCT:
+        return 1.0
+    excess = min(vol_std - VOL_THRESHOLD_PCT, VOL_PENALTY_SEVERITY_CAP_PCT)
+    ratio = excess / VOL_PENALTY_SEVERITY_CAP_PCT
+    return round(VOL_PENALTY_MIN + ratio * (VOL_PENALTY_MAX - VOL_PENALTY_MIN), 3)
 
 
 def fetch_recent_volatility(code):
@@ -98,24 +121,20 @@ def _empty_item_info(error_msg):
     return {
         "t_per": None, "t_eps": None, "f_per": None, "f_eps": None,
         "div_yield": None, "dps": None, "outstanding_shares": None,
-        "t_pbr": None, "ev_ebitda": None, "raw_period": None,
+        "t_pbr": None, "ev_ebitda": None, "f_roe": None, "raw_period": None,
         "errors": [error_msg]
     }
 
 
-def fetch_naver_item_dps_and_eps(code, diag_roe_check=False):
+def fetch_naver_item_dps_and_eps(code):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
     주요 재무제표 표에서 TIMEFRAME_KEYWORDS 사전을 기반으로 동적 키워드 헤더 타겟팅을 적용합니다.
     (위치 고정 인덱스 iloc[:, 2] 전면 금지, 100% 범용 동적 수집)
 
     반환: dict — 파싱하지 못한 항목은 반드시 None 이며, 실패 사유는 errors 리스트에 누적됩니다.
-
-    Args:
-        diag_roe_check: True면 "주요재무제표" 표의 컬럼명·ROE 행을 진단 로그로 출력합니다.
-            2026-08-06 추가 — Forward ROE 컨센서스가 이 표(이미 매 종목 fetch하는 페이지)에
-            추정치(E) 컬럼과 함께 존재하는지 확인하기 위한 일회성 조사용. 실제 수집 로직/네트워크
-            요청에는 전혀 영향을 주지 않으며, 다음 실제 크롤링 실행 시 로그로만 확인합니다.
+    f_roe: "주요재무제표" 표의 연간 추정(E) 컬럼(예: 2026.12(E))에서 뽑은 Forward ROE 컨센서스.
+    (2026-08-06 추가 — 진단 로그로 존재 확인 후 실제 추출 로직으로 전환. 추가 크롤링 요청 없음.)
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -145,7 +164,7 @@ def fetch_naver_item_dps_and_eps(code, diag_roe_check=False):
         soup = BeautifulSoup(res.text, 'html.parser')
 
         t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
-        t_pbr, ev_ebitda = None, None
+        t_pbr, ev_ebitda, f_roe = None, None, None
         raw_period = None          # 실제 파싱한 헤더에서 판정한 수집 기간 (검증 1단계 입력)
         errors = []
 
@@ -207,20 +226,41 @@ def fetch_naver_item_dps_and_eps(code, diag_roe_check=False):
             fin_df = fin_df_list[0]
 
             # =========================================================
-            # 2026-08-06 추가: Forward ROE 컨센서스 존재 여부 진단 로그 (오너 요청).
-            # 이 표는 이미 매 종목 fetch하는 페이지에서 파싱 중이므로 별도 네트워크 요청이
-            # 전혀 없습니다. 처음 5종목만 찍어서 로그를 과도하게 늘리지 않습니다.
-            # 여기서 "(E)" 등 추정치 컬럼과 ROE 행이 함께 확인되면, 추가 크롤링 없이
-            # utils/scoring.py의 Forward ROE(15점) 항목을 채울 수 있는지 판단할 수 있습니다.
+            # 2026-08-06 추가: Forward ROE 컨센서스 — 진단 로그(2026-08-06 밤)로 이 표에
+            # "2026.12(E)" 같은 연간 추정 컬럼 + "ROE(지배주주)" 행이 함께 존재함을 확인했습니다.
+            # 이미 fetch 중인 페이지에서 그대로 뽑아내는 것이라 추가 크롤링 요청이 없습니다.
+            # DataValidator.classify_header_timeframe()이 반환하는 "ANNUAL_EST"(연간+추정)
+            # 컬럼만 동적으로 골라 쓰며(iloc 위치 고정 금지, 기존 원칙 그대로), 분기 추정치
+            # (예: 2026.06(E))는 여기 안 들어가도록 명확히 구분됩니다.
             # =========================================================
-            if diag_roe_check:
-                print(f"  [진단/ROE컨센서스확인] {code} 재무제표 표 컬럼: {list(fin_df.columns)}")
-                for _di in range(len(fin_df)):
-                    _row_label = str(fin_df.iloc[_di, 0])
-                    if 'ROE' in _row_label.upper():
-                        print(f"  [진단/ROE컨센서스확인] {code} ROE 행 발견: {list(fin_df.iloc[_di].values)}")
-                if not any('ROE' in str(fin_df.iloc[_di, 0]).upper() for _di in range(len(fin_df))):
-                    print(f"  [진단/ROE컨센서스확인] {code}: 이 표에 ROE 행 없음")
+            annual_est_cols = []
+            for idx, col in enumerate(fin_df.columns):
+                if DataValidator.classify_header_timeframe(col) == "ANNUAL_EST":
+                    annual_est_cols.append(idx)
+
+            f_roe = None
+            for _di in range(len(fin_df)):
+                _row_label = str(fin_df.iloc[_di, 0])
+                if 'ROE' in _row_label.upper():
+                    for col_i in annual_est_cols:
+                        try:
+                            v_str = str(fin_df.iloc[_di, col_i]).replace(',', '').strip()
+                            if v_str in ('', 'nan', '-', 'ㅡ', '−'):
+                                continue
+                            v = float(v_str)
+                            # 반도체 등 경기순환 업종은 실제로 극단적인 추정 ROE가 나올 수 있어
+                            # 값 자체를 지우지 않되, 상식 밖 범위(±300% 초과)만 데이터 오염
+                            # 의심으로 제외합니다(PER 이상치 가드레일과 동일한 취지).
+                            if abs(v) > 300.0:
+                                errors.append(f"Forward ROE 컨센서스 이상치 의심(범위 초과, {v}%) — 제외")
+                                continue
+                            f_roe = v
+                            break
+                        except (ValueError, TypeError, IndexError):
+                            continue
+                    break
+            if f_roe is None:
+                errors.append("Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)")
 
             # 동적 헤더 시계열 분류
             annual_cols = []
@@ -282,7 +322,7 @@ def fetch_naver_item_dps_and_eps(code, diag_roe_check=False):
             "t_per": t_per, "t_eps": t_eps, "f_per": f_per, "f_eps": f_eps,
             "div_yield": div_yield, "dps": parsed_dps,
             "outstanding_shares": outstanding_shares,
-            "t_pbr": t_pbr, "ev_ebitda": ev_ebitda,
+            "t_pbr": t_pbr, "ev_ebitda": ev_ebitda, "f_roe": f_roe,
             "raw_period": raw_period, "errors": errors
         }
     except Exception as e:
@@ -497,8 +537,7 @@ def enrich_quant_metrics(stocks_raw):
                 print(f"  [우선주 ROE 상속] {name}({code}): 보통주 ROE {inherited_roe}% 적용")
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
-        # diag_roe_check: 처음 5종목만 Forward ROE 컨센서스 존재 여부 진단 로그 출력(2026-08-06, task#4)
-        item = fetch_naver_item_dps_and_eps(code, diag_roe_check=(idx < 5))
+        item = fetch_naver_item_dps_and_eps(code)
         n_t_per = item["t_per"]
         n_t_eps = item["t_eps"]
         n_f_per = item["f_per"]
@@ -619,14 +658,17 @@ def enrich_quant_metrics(stocks_raw):
 
         # =========================================================
         # Forward ROE / ROIC
-        # 별도 컨센서스 출처를 수집하지 않으므로 지어내지 않고 None 으로 둡니다.
-        # (구 버전: f_roe = t_roe × 1.12, roic = t_roe × 0.88, 실패 시 8.5 / 6.8 상수)
-        # TODO(오너): 실제 컨센서스(예: FnGuide/WiseReport 추정 ROE) 수집기를 붙이면
-        #             이 자리에 실측값을 넣고 UI의 '데이터 없음' 표기가 자동으로 사라집니다.
+        # 2026-08-06: Forward ROE는 네이버 "주요재무제표" 표의 연간 추정(E) 컬럼에서 실측
+        # (fetch_naver_item_dps_and_eps 에서 이미 파싱 — 추가 크롤링 요청 없음). 컨센서스
+        # 커버리지가 없는 종목은 그대로 None → '데이터 없음' 유지(지어내지 않음).
+        # ROIC는 영업이익/투하자본 별도 계산이 필요한 원천 데이터를 수집하지 않으므로 계속 None.
+        # (구 버전: f_roe = t_roe × 1.12, roic = t_roe × 0.88, 실패 시 8.5 / 6.8 상수 — 전부 제거됨)
         # =========================================================
-        f_roe = None
+        f_roe = item.get("f_roe")
+        if f_roe is None:
+            data_issues.append("Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)")
         roic = None
-        data_issues.append("Forward ROE/ROIC 컨센서스 미수집 (스코어링 제외)")
+        data_issues.append("ROIC 컨센서스 미수집 (원천 데이터 없음, 스코어링 제외)")
 
         # =========================================================
         # 성장률(growth): 네이버 실측 '추정 EPS' 와 'TTM EPS' 의 실제 증감률로 산출합니다.
@@ -645,16 +687,14 @@ def enrich_quant_metrics(stocks_raw):
         # 변동성: 실제 주가 시계열 표준편차로 판정. 산출 불가 시 벌점 없음.
         # =========================================================
         vol_std = fetch_recent_volatility(code)
+        vol_penalty = compute_vol_penalty(vol_std)
         if vol_std is None:
             vol = "❔ 변동성 데이터 없음"
-            vol_penalty = 1.0
             data_issues.append("변동성 시계열 조회 실패 (벌점/가점 미적용)")
         elif vol_std >= VOL_THRESHOLD_PCT:
-            vol = f"⚡ 변동성 확대 ({vol_std}%)"
-            vol_penalty = VOL_PENALTY
+            vol = f"⚡ 변동성 확대 ({vol_std}%, 벌점 {vol_penalty}x)"
         else:
             vol = f"🟢 정상 ({vol_std}%)"
-            vol_penalty = 1.0
 
         # yfinance 오차 교차검증 — 검증 미수행과 '이상 없음'을 구분 (None = 검증 불가)
         per_discrepancy = None
