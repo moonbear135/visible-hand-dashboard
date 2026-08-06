@@ -5,22 +5,33 @@ from datetime import datetime
 import streamlit as st
 from utils.db import HISTORY_FILE
 
+try:
+    import bcrypt
+    BCRYPT_AVAILABLE = True
+except ImportError:
+    BCRYPT_AVAILABLE = False
+
 def _get_admin_password_hash():
     """
     관리자 비밀번호 해시를 Streamlit secrets 또는 환경변수에서 읽어옵니다.
     (GEMINI_API_KEY 와 동일한 패턴 — 소스코드에 비밀번호/해시를 두지 않습니다.)
 
     ┌──────────────────────────────────────────────────────────────────────────┐
-    │ ⚠️ TODO(오너 조치 필요)                                                   │
-    │ 이전 비밀번호는 소스 주석과 git 히스토리에 평문으로 남아 있었으므로        │
-    │ **유출된 것으로 간주**하고 반드시 새 비밀번호로 교체해야 합니다.           │
+    │ ⚠️ TODO(오너 조치 필요) — 2026-08-06: SHA-256 → bcrypt(솔트 포함) 전환 지원 추가│
     │                                                                          │
-    │ 1) 새 비밀번호의 SHA-256 해시 생성                                        │
-    │    python -c "import hashlib,getpass;print(hashlib.sha256(getpass.getpass().encode()).hexdigest())" │
-    │ 2) Streamlit Cloud → App settings → Secrets 에 아래 한 줄 추가            │
-    │    ADMIN_PASSWORD_HASH = "여기에_생성된_해시값"                           │
-    │    (로컬 실행 시에는 환경변수 ADMIN_PASSWORD_HASH 로 설정)                │
-    │ 3) 설정 전까지 관리자 모드는 비활성화됩니다(누구도 로그인 불가) — 정상입니다.│
+    │ 새 비밀번호를 bcrypt 해시로 설정하려면(권장):                             │
+    │   pip install bcrypt  (requirements.txt 에 이미 추가됨, 재배포 시 자동 설치)│
+    │   python -c "import bcrypt,getpass;print(bcrypt.hashpw(getpass.getpass().encode(),bcrypt.gensalt()).decode())" │
+    │ 위 명령을 **본인 컴퓨터에서 직접** 실행해 새 비밀번호를 입력하세요        │
+    │ (평문 비밀번호가 어디로도 전송되지 않고 로컬에서만 해시로 변환됩니다).     │
+    │ 나온 결과값을 Streamlit Cloud → App settings → Secrets 에:               │
+    │   ADMIN_PASSWORD_HASH = "여기에_생성된_bcrypt_해시값"                     │
+    │ (로컬 실행 시에는 환경변수 ADMIN_PASSWORD_HASH 로 설정)                   │
+    │                                                                          │
+    │ 예전 SHA-256 해시(구 명령: hashlib.sha256(...).hexdigest())도 자동 인식해 │
+    │ 계속 동작하므로, bcrypt로 안 바꿔도 당장 로그인이 끊기지는 않습니다 —     │
+    │ 다만 이전 비밀번호는 git 히스토리에 평문으로 남아있어 유출된 것으로       │
+    │ 간주해야 하니, 아직 새 비밀번호로 안 바꿨다면 위 방법으로 교체 권장.       │
     └──────────────────────────────────────────────────────────────────────────┘
     """
     stored_hash = os.environ.get("ADMIN_PASSWORD_HASH")
@@ -30,6 +41,23 @@ def _get_admin_password_hash():
         except Exception:
             stored_hash = None
     return (stored_hash or "").strip()
+
+
+def _verify_admin_password(input_password, stored_hash):
+    """
+    저장된 해시 형식을 자동 판별해 검증합니다.
+    - bcrypt 해시는 항상 "$2a$"/"$2b$"/"$2y$" 로 시작합니다(솔트가 해시 안에 포함된 표준 형식).
+    - 그 외(64자리 hex 문자열)는 예전 SHA-256 방식으로 간주해 하위호환 처리합니다.
+    """
+    if stored_hash.startswith(("$2a$", "$2b$", "$2y$")):
+        if not BCRYPT_AVAILABLE:
+            return False
+        try:
+            return bcrypt.checkpw(input_password.encode(), stored_hash.encode())
+        except ValueError:
+            return False
+    input_hash = hashlib.sha256(input_password.encode()).hexdigest()
+    return hmac.compare_digest(input_hash, stored_hash)
 
 
 def render_admin_sidebar():
@@ -54,8 +82,7 @@ def render_admin_sidebar():
             )
         return False
 
-    input_hash = hashlib.sha256(admin_password.encode()).hexdigest()
-    admin_mode = bool(admin_password) and hmac.compare_digest(input_hash, stored_hash)
+    admin_mode = bool(admin_password) and _verify_admin_password(admin_password, stored_hash)
     st.session_state.admin_mode = admin_mode
     if admin_mode:
         st.sidebar.success("🔓 관리자 권한 인증 성공")

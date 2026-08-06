@@ -70,15 +70,17 @@ def upload_to_gdrive(local_file_path: str, drive_folder_id: str):
     except Exception as e:
         print(f"❌ [{file_name}] 업로드 실패: {e}")
 
-def upload_file(local_file_path: str, folder_id: str = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"):
+# 2026-08-06: 비밀정보는 아니지만(AUDIT_REPORT.md 보류 항목) 환경변수로 오버라이드 가능하게 전환.
+# 값을 안 넣으면 기존 하드코딩 값과 완전히 동일하게 동작합니다(기능 변화 없음).
+DEFAULT_TARGET_FOLDER_ID = os.environ.get("GDRIVE_TARGET_FOLDER_ID", "1wTMFTI2txGvnzYACkbhWbJZuanxseki7")
+
+def upload_file(local_file_path: str, folder_id: str = None):
     """
     지정한 로컬 파일을 구글 드라이브 폴더로 백업합니다. (scrape_daily.py 호환 전용)
     """
-    return upload_to_gdrive(local_file_path=local_file_path, drive_folder_id=folder_id)
+    return upload_to_gdrive(local_file_path=local_file_path, drive_folder_id=folder_id or DEFAULT_TARGET_FOLDER_ID)
 
 if __name__ == '__main__':
     # 테스트 업로드
     test_file_path = r"C:\Users\crown\.gemini\antigravity\scratch\visible_hand\market_history.csv"
-    TARGET_FOLDER_ID = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"  # Quant_Dashboard_Data 폴더 ID
-
-    upload_file(test_file_path, folder_id=TARGET_FOLDER_ID)
+    upload_file(test_file_path, folder_id=DEFAULT_TARGET_FOLDER_ID)

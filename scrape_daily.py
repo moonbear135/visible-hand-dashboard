@@ -458,11 +458,12 @@ def scrape_and_update(target_date_override=None):
         print(f"⚠️ AI 코멘트 생성 중 에러 발생: {e}")
 
     # 7. 데이터 수집 완료 후 구글 드라이브 자동 백업 실행
-    TARGET_FOLDER_ID = "1wTMFTI2txGvnzYACkbhWbJZuanxseki7"
+    # 2026-08-06: 폴더 ID를 환경변수(GDRIVE_TARGET_FOLDER_ID)로 오버라이드 가능하게 전환.
+    # 값을 안 넣으면 기존과 완전히 동일하게 동작(utils/gdrive_helper.py의 기본값 그대로 사용).
     try:
         from utils.gdrive_helper import upload_file
         print("☁️ 구글 드라이브 자동 백업 시작...")
-        upload_file(HISTORY_FILE, folder_id=TARGET_FOLDER_ID)
+        upload_file(HISTORY_FILE)
     except Exception as e:
         print(f"⚠️ 구글 드라이브 자동 백업 건너뜀: {e}")
 

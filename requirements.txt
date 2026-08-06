@@ -8,6 +8,7 @@ requests
 beautifulsoup4
 lxml
 schedule
+bcrypt
 
 # 아래 패키지들은 일부러 requirements.txt 에 넣지 않았습니다.
 # 코드에서 전부 try/except ImportError 로 감싸져 있어, 없으면 해당 기능만

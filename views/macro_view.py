@@ -16,12 +16,6 @@ def render_clean_html(html_str):
     st.markdown(clean_html, unsafe_allow_html=True)
 
 try:
-    from pykrx import stock
-    PYKRX_AVAILABLE = True
-except ImportError:
-    PYKRX_AVAILABLE = False
-
-try:
     import FinanceDataReader as fdr
     FDR_AVAILABLE = True
 except ImportError:
