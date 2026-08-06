@@ -425,7 +425,10 @@ def scrape_and_update(target_date_override=None):
         "Institution": [institution_flow],
         # 이 행이 실제로 저장되는(= 크롤링이 끝나 반영되는) 시각. 화면의 "마지막 동기화" 표시는
         # 파일 mtime이 아니라 이 값을 사용합니다.
-        "Collected_At": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        # 2026-08-06: 이 파일이 이미 KST를 정의해뒀는데 여기서는 안 쓰고 있어서 GitHub
+        # Actions(UTC 러너)에서는 "마지막 동기화" 표시가 실제보다 9시간 이르게 찍히고
+        # 있었습니다(오너가 collector_kospi200.py에서 같은 유형의 버그를 실데이터로 발견).
+        "Collected_At": [(datetime.now(KST) if KST else datetime.now()).strftime("%Y-%m-%d %H:%M:%S")],
         # 2026-08-06 2차 감사 5-2: 그날 실제로 화면 점수를 만든 시그모이드 변환 후 서브점수·
         # 증폭배율을 함께 저장합니다. macro_view.py가 과거 날짜를 보여줄 때 이 값을 그대로
         # 읽으면(재계산 없이) 화면 표의 기여점수 합이 항상 위에 뜬 종합점수와 일치합니다.

@@ -47,6 +47,14 @@
 
 ## 3. 최근 작업 로그 (요약, 최신순)
 
+- **2026-08-06 밤(7차)** — **타임존(UTC/KST) 버그 전면 수정 (오너가 run #13 실데이터 검증 중 발견:
+  JSON `last_updated_at`이 "08:09" — 실제 KST 완료 17:09와 9시간 차이).** GitHub Actions/Streamlit
+  서버가 기본 UTC라 `datetime.now()`(naive)가 UTC를 반환하는 게 원인. `collector_kospi200.py`는
+  KST 처리가 아예 없었고, `scrape_daily.py`/`utils/db.py`는 KST 변수를 이미 정의해두고도 정작
+  `Collected_At` 저장에는 안 쓰고 있었음. 데이터 저장(collector/scrape_daily/db)과 화면 표시
+  (pegy_view 신선도 계산, macro_view "오늘 날짜"·다운로드 파일명), 그리고 기본 비활성 상태인
+  `utils/scheduler.py`(16시 트리거)까지 전부 `datetime.now(KST)`로 통일. 오너 지시("데이터 쌓아가는데
+  문제가 될 수 있는 표기는 바로바로 처리")에 따라 발견 즉시 처리. 전체 컴파일 통과, 아직 커밋 전.
 - **2026-08-06 밤(6차)** — **`AUDIT_REPORT_V2.md` 27건 전체 처리 완료.** 19건(collector_kospi200.py/
   utils/scoring.py/utils/guardrail.py/views/pegy_view.py + `utils/constants.py` 신설)은 Opus 에이전트가
   처리, 나머지 8건(scrape_daily.py/macro_view.py)은 이어서 직접 처리. 핵심: `utils/macro_scoring.py`

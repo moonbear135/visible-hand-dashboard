@@ -1,6 +1,11 @@
 import os
 import shutil
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
 
 import pandas as pd
 import requests
@@ -147,7 +152,8 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
         "Institution": [institution],
         # 이 행이 실제로 저장되는(= 수집이 끝나 반영되는) 시각. 화면의 "마지막 동기화" 표시는
         # 이 값을 기준으로 하며, 파일 수정시각(mtime)이나 페이지 로드 시각을 쓰지 않습니다.
-        "Collected_At": [datetime.now().strftime("%Y-%m-%d %H:%M:%S")],
+        # 2026-08-06: KST 명시(서버가 UTC 러너일 때 9시간 어긋나는 문제 방지).
+        "Collected_At": [(datetime.now(KST) if KST else datetime.now()).strftime("%Y-%m-%d %H:%M:%S")],
     }
     
     if metrics_dict:

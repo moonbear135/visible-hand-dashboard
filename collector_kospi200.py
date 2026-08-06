@@ -10,6 +10,19 @@ from bs4 import BeautifulSoup
 import pandas as pd
 import re
 
+# 2026-08-06 2차 감사 후속(오너 실데이터 검증 중 발견): GitHub Actions 러너는 기본 UTC라
+# datetime.now()가 KST가 아닌 UTC를 반환합니다. JSON metadata의 last_updated_at이
+# "08:09"처럼 찍혀 실제 KST 완료 시각(17:09)과 9시간 어긋나 있었습니다. scrape_daily.py와
+# 동일한 방식으로 KST를 명시합니다.
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
+
+def _now_kst():
+    return datetime.now(KST) if KST else datetime.now()
+
 from utils.scoring import calculate_quant_score
 
 try:
@@ -163,7 +176,7 @@ def fetch_recent_volatility(code):
     if not HAS_FDR:
         return None
     try:
-        end_dt = datetime.now()
+        end_dt = _now_kst()
         start_dt = end_dt - timedelta(days=120)
         df = fdr.DataReader(code, start_dt.strftime('%Y-%m-%d'), end_dt.strftime('%Y-%m-%d'))
         if df is None or df.empty or 'Close' not in df.columns:
@@ -1346,7 +1359,7 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
 
 def run_kospi200_collector():
     """코스피 시가총액 상위 200 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 코스피 시가총액 상위 200 100% 실데이터 수집 시작...")
+    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피 시가총액 상위 200 100% 실데이터 수집 시작...")
     
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -1391,7 +1404,7 @@ def run_kospi200_collector():
     else:
         status = "FAILED"
 
-    now_str = datetime.now().strftime("%Y-%m-%d %H:%M")
+    now_str = _now_kst().strftime("%Y-%m-%d %H:%M")
     snapshot_payload = {
         "metadata": {
             "last_updated_at": now_str,
@@ -1436,7 +1449,7 @@ def run_kospi200_collector():
     # 쪽(위 stocks 배열에 그대로 포함)에서 이미 보장됩니다.
     update_pegy_summary_history(now_str, visible_stocks)
 
-    print(f"[{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}] 코스피 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
+    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
     return json_path
 
 if __name__ == "__main__":

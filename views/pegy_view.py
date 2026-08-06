@@ -1,6 +1,11 @@
 import os
 import json
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
 import pandas as pd
 import streamlit as st
 
@@ -312,9 +317,13 @@ def render_pegy_page():
         st.stop()
 
     # 스냅샷이 언제 것인지, 수집 품질이 어땠는지 화면에 그대로 노출
+    # 2026-08-06: last_updated_at은 KST 벽시계 값으로 저장됩니다(collector_kospi200.py 수정).
+    # Streamlit 서버 자체가 UTC로 돌 수 있어(datetime.now()는 naive UTC), 비교 기준도
+    # KST 벽시계로 맞춰야 9시간 오차 없이 신선도를 정확히 계산합니다.
     stale_hours = None
     try:
-        stale_hours = (datetime.now() - datetime.strptime(last_updated_at, "%Y-%m-%d %H:%M")).total_seconds() / 3600.0
+        now_kst_naive = datetime.now(KST).replace(tzinfo=None) if KST else datetime.now()
+        stale_hours = (now_kst_naive - datetime.strptime(last_updated_at, "%Y-%m-%d %H:%M")).total_seconds() / 3600.0
     except Exception:
         stale_hours = None
 

@@ -3,6 +3,11 @@ import json
 import time
 import threading
 from datetime import datetime
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
 
 def _get_latest_run_date():
     """returns the date string (YYYY-MM-DD) of the last successful run"""
@@ -23,10 +28,14 @@ def _get_latest_run_date():
 def _scheduler_loop():
     while True:
         try:
-            now = datetime.now()
+            # 2026-08-06: 서버가 UTC로 돌면 naive now()가 UTC라 "16시"가 실제로는 KST 새벽
+            # 1시에 걸려버립니다(같은 유형의 버그를 collector_kospi200.py에서도 발견/수정).
+            # 이 스케줄러는 기본 비활성화(ENABLE_INAPP_SCHEDULER)지만, 나중에 켜도 안전하도록
+            # 지금 같이 고쳐둡니다.
+            now = datetime.now(KST) if KST else datetime.now()
             today_str = now.strftime("%Y-%m-%d")
 
-            # 16:00 (4 PM) 이후이고, 오늘 날짜로 수집된 데이터가 없다면 실행
+            # 16:00 (4 PM, KST) 이후이고, 오늘 날짜로 수집된 데이터가 없다면 실행
             if now.hour >= 16:
                 last_run_date = _get_latest_run_date()
                 if last_run_date != today_str:

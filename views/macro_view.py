@@ -3,10 +3,20 @@ import math
 import requests
 import pandas as pd
 from datetime import datetime, timedelta
+try:
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    KST = None
 from bs4 import BeautifulSoup
 import streamlit as st
 import json
 import plotly.express as px
+
+
+def _today_kst():
+    """UTC로 도는 서버에서도 KST 기준 '오늘'을 반환합니다(2026-08-06, 데이터 정합성 감사)."""
+    return datetime.now(KST).date() if KST else datetime.today().date()
 
 from utils.db import HISTORY_FILE, COL_MAP, save_and_load_history
 from views.admin_view import render_admin_console
@@ -119,7 +129,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         retail_flow = 0
         score = None
 
-        target_date = datetime.today()
+        target_date = _today_kst()
         while target_date.weekday() >= 5:
             target_date -= timedelta(days=1)
         date_key = target_date.strftime("%Y-%m-%d")
@@ -408,7 +418,7 @@ def render_macro_page():
     stale_days = None
     try:
         latest_date = pd.to_datetime(history_df["Date"]).max()
-        stale_days = (pd.Timestamp(datetime.today().date()) - latest_date.normalize()).days
+        stale_days = (pd.Timestamp(_today_kst()) - latest_date.normalize()).days
     except Exception:
         stale_days = None
 
@@ -676,7 +686,7 @@ def render_macro_page():
                 print(f"⚠️ AI 코멘트 파일 로드 실패: {e}")
                 st.warning(f"⚠️ AI 코멘트 파일을 읽지 못했습니다: {e}")
 
-        today_str_kr = datetime.today().strftime("%Y-%m-%d")
+        today_str_kr = _today_kst().strftime("%Y-%m-%d")
         warning_items_html = ""
         for ind in sorted_details:
             raw_key = None
