@@ -673,12 +673,12 @@ def map_pairs_to_fields(pairs):
 # -----------------------------------------------------------------------------
 # 장마감 종가 블록 파싱 (§0-3-1 후행지표 전용 — 프리마켓/애프터마켓 절대 사용 금지)
 # -----------------------------------------------------------------------------
-_CLOSE_LINE_PATTERNS = (
-    re.compile(r"^at close:\s*(.+)$", re.I),
+_CLOSE_ANCHOR_PATTERNS = (
+    re.compile(r"^at close:?\s*(.*)$", re.I),
     re.compile(r"^(.+?)\s*[-–]\s*market closed$", re.I),
 )
 _ET_TIMESTAMP_RE = re.compile(
-    r"([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}),\s*(\d{1,2}:\d{2}\s*[AP]M)\s*(E[DS]T)", re.I
+    r"([A-Z][a-z]{2}\s+\d{1,2},\s+\d{4}),?\s*(\d{1,2}:\d{2}\s*[AP]M)\s*(E[DS]T)", re.I
 )
 
 
@@ -686,9 +686,19 @@ def extract_close_price(html):
     """
     '장마감 종가'와 그 기준 시각을 뽑습니다.
 
-    페이지 상단에는 종가 블록 다음에 프리마켓/애프터마켓 블록이 이어집니다.
-    **가장 먼저 등장하는 종가 마커("At close: ..." 또는 "... - Market closed")** 만 보고,
-    그 직전의 순수 숫자 줄을 종가로 취합니다(등락 줄에는 '%'가 있어 자동 배제됨).
+    페이지 상단에는 종가 블록 다음에(장중 애프터마켓 거래가 있었으면) 애프터마켓 블록이
+    이어집니다. **가장 먼저 등장하는 종가 마커("At close: ..." 또는 "... - Market closed")**
+    만 보고, 그 직전의 순수 숫자 줄을 종가로 취합니다(등락 줄에는 '%'가 있어 자동 배제됨).
+
+    ⚠️ 2026-08-07 수정: 오너가 로컬에서 실측(미국 장마감 후, 애프터마켓 거래 있는 종목 11/12에서
+    실패)한 결과 발견 — "At close:"와 그 뒤의 날짜/시각이 **서로 다른 텍스트 노드**(label span과
+    value span)로 나뉘어 있어, BeautifulSoup의 get_text("\\n")를 거치면 같은 줄에 안 붙고
+    "At close:"만 있는 줄 / "Aug 6, 2026, 4:00 PM EDT"만 있는 줄로 쪼개지는 경우가 있었습니다
+    (애프터마켓 거래가 없는 종목은 우연히 한 줄로 붙어있어 기존 로직이 통과했던 것 — THC만 성공한
+    이유). 이제 마커가 있는 줄 자체에 타임스탬프가 없으면, 그 뒤 몇 줄 안에서
+    ET 타임스탬프 패턴을 별도로 찾습니다(라벨과 값이 분리된 경우 대응). "Market closed"는 여전히
+    대체 마커로 유지(애프터마켓 거래가 아예 없었던 종목의 단순 포맷 대응).
+
     찾지 못하면 값을 지어내지 않고 (None, None, 사유) 를 반환합니다.
 
     반환: (price, asof_text, error)
@@ -700,21 +710,35 @@ def extract_close_price(html):
 
     for i, line in enumerate(lines):
         matched = None
-        for pat in _CLOSE_LINE_PATTERNS:
+        for pat in _CLOSE_ANCHOR_PATTERNS:
             m = pat.match(line)
             if m:
                 matched = m.group(1).strip()
                 break
-        if not matched:
+        if matched is None:
             continue
+
+        # 마커 줄 자체에 ET 타임스탬프가 있으면 그대로 사용, 없으면(라벨/값이 분리된 경우)
+        # 뒤따르는 최대 3줄 안에서 타임스탬프를 찾습니다.
+        asof_text = matched if _ET_TIMESTAMP_RE.search(matched) else None
+        if asof_text is None:
+            for k in range(i + 1, min(len(lines), i + 4)):
+                if _ET_TIMESTAMP_RE.search(lines[k]):
+                    asof_text = lines[k]
+                    break
+        if asof_text is None:
+            # 타임스탬프를 아예 못 찾으면 이 마커는 버리고 다음 후보를 계속 찾습니다
+            # (지어내지 않기 — §0-1).
+            continue
+
         for j in range(i - 1, max(-1, i - 6), -1):
             cand = lines[j]
             if "%" in cand or cand.startswith(("+", "-")):
                 continue
             value = parse_scaled_number(cand)
             if value is not None and value > 0 and re.fullmatch(r"[\d,]+(\.\d+)?", cand):
-                return value, matched, None
-        return None, matched, "종가 마커는 찾았지만 그 앞에서 종가 숫자를 찾지 못함"
+                return value, asof_text, None
+        return None, asof_text, "종가 마커는 찾았지만 그 앞에서 종가 숫자를 찾지 못함"
     return None, None, "장마감 종가 블록('At close:' / 'Market closed')을 찾지 못함"
 
 

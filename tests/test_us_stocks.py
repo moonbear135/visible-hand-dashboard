@@ -344,6 +344,22 @@ HTML_MARKET_CLOSED = """
 </body></html>
 """
 
+# 2026-08-07 추가: 오너가 로컬 실측(장마감 후, 애프터마켓 거래 있는 종목 11/12 실패)으로 발견한
+# 실제 버그 재현 — "At close:"(라벨)와 날짜/시각(값)이 서로 다른 <div>(텍스트 노드)로 분리되고,
+# 그 뒤에 애프터마켓 블록이 이어지는 실제 stockanalysis.com 레이아웃(NVDA 실측으로 확인).
+HTML_AFTERHOURS_SPLIT_LABEL = """
+<html><body>
+<div>NVIDIA Corporation (NVDA)</div>
+<div>218.99</div>
+<div>-0.23 (-0.10%)</div>
+<div>At close:</div>
+<div>Aug 6, 2026, 4:00 PM EDT</div>
+<div>219.42</div>
+<div>+0.43 (0.20%)</div>
+<div>After-hours: Aug 6, 2026, 7:59 PM EDT</div>
+</body></html>
+"""
+
 HTML_TABLE = """
 <html><body><table>
 <tr><td><a href="/x">Market Cap</a></td><td>49.98B</td></tr>
@@ -369,6 +385,11 @@ def test_price_block():
 
     price3, _asof3, err3 = extract_close_price("<html><body><div>no price here</div></body></html>")
     check(price3 is None and err3, "종가를 못 찾으면 지어내지 않고 None + 사유 반환")
+
+    # 2026-08-07 회귀 테스트: 라벨/값이 분리된 애프터마켓 레이아웃 (실측 버그 재현)
+    price4, asof4, err4 = extract_close_price(HTML_AFTERHOURS_SPLIT_LABEL)
+    check(price4 == 218.99, f"라벨/값 분리 + 애프터마켓 병기 레이아웃에서도 종가(218.99) 추출, 애프터마켓(219.42) 아님 (실제 {price4})")
+    check(err4 is None and asof4 and "Aug 6, 2026" in asof4, "분리된 타임스탬프도 뒤 몇 줄에서 재조합해 확보")
 
     check(detect_dividend_statement(HTML_MARKET_CLOSED) == "confirmed_none",
           "'무배당' 문장 탐지 → 무배당 확정과 수집 실패를 구분")
