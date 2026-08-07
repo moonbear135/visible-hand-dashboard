@@ -424,9 +424,40 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
         gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
         bar_color = "#22c55e" if gap_pct >= 0 else "#ef4444"
         bar_width = min(abs(gap_pct), 100)
-        target_cap_badge_html = ""
+        if s.get("f_target_floored"):
+            target_cap_badge_html = (
+                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #7dd3fc; '
+                'background-color: #1e3a5f; border: 1px solid #38bdf8; border-radius: 6px; padding: 1px 6px; '
+                'vertical-align: middle;">🛡️ 장부가 바닥값<span class="q-tooltiptext">PEGY 역산값이 장부가(BPS)보다 '
+                '낮게 나와 BPS를 대신 사용했습니다. 자세한 내용은 위 안내 참고.</span></span>'
+            )
+        else:
+            target_cap_badge_html = ""
     else:
         gap_str, gap_color, bar_color, bar_width, target_cap_badge_html = "측정불가", "#94a3b8", "#64748b", 0, ""
+
+    # ── 목표가 바닥값(장부가/BPS) 적용 배너 — 눈에 크게 띄도록 별도 배너로 표시.
+    # PEGY 역산 공식이 저성장 자본집약형(보험/지주/유틸리티 등) 우량주에서 목표가를
+    # 구조적으로 낮게 계산하는 문제의 보정. ROE·ROIC 우량 게이트를 통과한 종목에만 적용됩니다.
+    floor_banner_html = ""
+    if s.get("f_target_floored"):
+        floor_banner_html = f"""
+        <div style="background: linear-gradient(135deg, rgba(30, 58, 95, 0.55) 0%, rgba(15, 23, 42, 0.95) 100%);
+                    border: 2px solid #38bdf8; border-radius: 10px; padding: 12px 18px; margin-bottom: 14px;
+                    display: flex; align-items: center; gap: 12px;">
+            <span style="font-size: 22px;">🛡️</span>
+            <div>
+                <div style="color: #7dd3fc; font-size: 13.5px; font-weight: 800;">
+                    장부가(BPS) 기준 바닥값 적용됨</div>
+                <div style="color: #cbd5e1; font-size: 12px; font-weight: 500; line-height: 1.5; margin-top: 3px;">
+                    PEGY 역산 공식은 성장률이 낮으면 목표가도 함께 낮아지는 구조라, 보험·지주·유틸리티처럼
+                    실적 성장보다 자본배분·자산가치로 평가받는 저성장 우량주는 목표가가 비정상적으로 낮게
+                    나옵니다. ROE·ROIC가 기준선 이상인 우량 종목에 한해 장부가(BPS)를 참고 하한으로 대신
+                    사용했습니다. ⚠️ 재고·무형자산 손상, 부채 시가평가까지 반영한 진짜 청산가치 실사는
+                    아니므로 참고용으로만 봐주세요.</div>
+            </div>
+        </div>
+        """
 
     # 애널리스트 목표가(소스 실측) — 우리 모델 목표가와 별개로 항상 노출
     analyst_target = s.get("analyst_target")
@@ -564,6 +595,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500;">
                     *애널리스트 컨센서스(Forward PER · 3년 EPS 성장 전망) 기반</span>
             </div>
+            {floor_banner_html}
             <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">

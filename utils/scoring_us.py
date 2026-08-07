@@ -307,6 +307,42 @@ def derive_valuation(stock):
     else:
         out["t_pegy"] = None
 
+    # PBR 바닥가 (현재가 ÷ PBR = 주당순자산) — 순수 사칙연산.
+    # ⚠️ f_target/t_fair 산출보다 먼저 계산합니다 — 아래에서 "장부가 기준 참고 바닥값"으로
+    # 사용하기 위함 (2026-08-07 owner 결정: PEGY 역산 목표가가 BPS보다 낮게 나오는
+    # 자산집약형/저성장 종목은 BPS를 참고 하한으로 삼는다).
+    # ⚠️ 진짜 청산가치(재고 감가상각 방식, 무형자산 손상 여부, 부채 시가평가 등)를 따진 게
+    # 아니라 장부가 그대로를 쓰는 것이므로, "청산가치"라는 확정적 표현은 쓰지 않습니다(§0-1).
+    t_pbr = stock.get("t_pbr")
+    out["floor_price"] = round(price / t_pbr, 2) if (price and t_pbr and t_pbr > 0) else None
+
+    # -------------------------------------------------------------------------
+    # 착시 저평가(value trap) — 코스피와 달리 ROIC 도 실측되므로 두 지표 모두 사용합니다.
+    # ⚠️ f_target/t_fair 의 BPS 바닥값 적용 여부를 가르는 "우량 게이트"로도 재사용합니다
+    # (아래 참고) — 여기로 순서를 당겨온 이유입니다.
+    # -------------------------------------------------------------------------
+    trap_reasons = []
+    if t_roe is not None and t_roe < US_VALUE_TRAP_ROE_PCT:
+        trap_reasons.append(f"Trailing ROE {t_roe}% < 기준선 {US_VALUE_TRAP_ROE_PCT}%")
+    if roic is not None and roic < US_VALUE_TRAP_ROIC_PCT:
+        trap_reasons.append(f"ROIC {roic}% < 기준선 {US_VALUE_TRAP_ROIC_PCT}%")
+    if t_roe is None and roic is None:
+        out["value_trap"] = False
+        out["value_trap_basis"] = "판정 불가 (ROE·ROIC 모두 미수집)"
+    else:
+        out["value_trap"] = bool(trap_reasons)
+        out["value_trap_basis"] = (
+            " · ".join(trap_reasons) if trap_reasons
+            else "ROE·ROIC 모두 기준선 이상 (착시 저평가 아님)"
+        )
+    # BPS 바닥값 적용 자격 — "장부가가 실제 청산가치를 반영한다"는 전제가 성립하려면
+    # 최소한 ROE·ROIC 둘 다 실측되고 value trap 판정을 통과해야 합니다(2026-08-07 owner 결정).
+    # ROE·ROIC 가 하나라도 미수집이면(=판정 불가) 우량 여부를 지어내지 않고 바닥값도 적용하지 않습니다.
+    floor_price_eligible = (
+        t_roe is not None and roic is not None and not out["value_trap"]
+    )
+    out["floor_price_eligible"] = floor_price_eligible
+
     # -------------------------------------------------------------------------
     # 목표주가(f_target) — PEGY 역산. SPEC §5-2 와 같은 2중 캡을 적용하고,
     # 캡에 걸리면 반드시 흔적(*_capped / 사유 / 캡 미적용 원값)을 남깁니다.
@@ -348,8 +384,27 @@ def derive_valuation(stock):
             )
         if f_target_capped or target_per_capped:
             issues.append(f"목표주가 캡 적용: {f_target_cap_reason}")
+    # BPS 바닥값 적용 — 우량 게이트(floor_price_eligible) 통과 종목만.
+    # PEGY 역산 공식이 저성장 자본집약형(보험/지주/유틸리티 등) 우량주에서 구조적으로
+    # 낮은 목표가를 내는 문제의 보정 — 2026-08-07 owner 결정, US 만 적용(§0-1 시장별 분리 원칙).
+    f_target_floored = False
+    if (
+        f_target is not None and floor_price_eligible
+        and out["floor_price"] is not None and out["floor_price"] > f_target
+    ):
+        pre_floor_target = f_target
+        f_target = out["floor_price"]
+        f_target_floored = True
+        floor_note = (
+            f"장부가(BPS) 참고 바닥값 ${out['floor_price']:,.2f} 적용 "
+            f"(PEGY 역산값 ${pre_floor_target:,.2f} 미만 — 저성장 자본집약 우량주 보정, "
+            f"실제 청산가치 실사 아님)"
+        )
+        f_target_cap_reason = ((f_target_cap_reason + " / ") if f_target_cap_reason else "") + floor_note
+        issues.append(f"목표주가 바닥값 적용: {floor_note}")
     out["f_target"] = f_target
     out["f_target_capped"] = f_target_capped
+    out["f_target_floored"] = f_target_floored
     out["f_target_cap_reason"] = f_target_cap_reason
     out["f_target_uncapped"] = f_target_uncapped
     out["target_per"] = round(target_per, 2) if target_per is not None else None
@@ -368,8 +423,16 @@ def derive_valuation(stock):
             t_fair_capped = True
         else:
             t_fair = round(raw_t_fair, 2)
+    t_fair_floored = False
+    if (
+        t_fair is not None and floor_price_eligible
+        and out["floor_price"] is not None and out["floor_price"] > t_fair
+    ):
+        t_fair = out["floor_price"]
+        t_fair_floored = True
     out["t_fair"] = t_fair
     out["t_fair_capped"] = t_fair_capped
+    out["t_fair_floored"] = t_fair_floored
     out["t_fair_uncapped"] = t_fair_uncapped
 
     # -------------------------------------------------------------------------
@@ -385,27 +448,7 @@ def derive_valuation(stock):
             issues.append("그레이엄 넘버 산출 불가 — 적자(EPS ≤ 0)라 제곱근 안이 음수")
     out["graham_is_financial_sector"] = out["is_financial_sector"]
 
-    # PBR 바닥가 (현재가 ÷ PBR = 주당순자산) — 순수 사칙연산
-    t_pbr = stock.get("t_pbr")
-    out["floor_price"] = round(price / t_pbr, 2) if (price and t_pbr and t_pbr > 0) else None
-
-    # -------------------------------------------------------------------------
-    # 착시 저평가(value trap) — 코스피와 달리 ROIC 도 실측되므로 두 지표 모두 사용합니다.
-    # -------------------------------------------------------------------------
-    trap_reasons = []
-    if t_roe is not None and t_roe < US_VALUE_TRAP_ROE_PCT:
-        trap_reasons.append(f"Trailing ROE {t_roe}% < 기준선 {US_VALUE_TRAP_ROE_PCT}%")
-    if roic is not None and roic < US_VALUE_TRAP_ROIC_PCT:
-        trap_reasons.append(f"ROIC {roic}% < 기준선 {US_VALUE_TRAP_ROIC_PCT}%")
-    if t_roe is None and roic is None:
-        out["value_trap"] = False
-        out["value_trap_basis"] = "판정 불가 (ROE·ROIC 모두 미수집)"
-    else:
-        out["value_trap"] = bool(trap_reasons)
-        out["value_trap_basis"] = (
-            " · ".join(trap_reasons) if trap_reasons
-            else "ROE·ROIC 모두 기준선 이상 (착시 저평가 아님)"
-        )
+    # (참고) 착시 저평가(value trap) 판정은 위쪽 floor_price_eligible 게이트 계산부로 이동했습니다.
 
     # 베타는 값만 통과시키고, 없으면 벌점/가점 어느 쪽도 주지 않습니다.
     if beta is None:
