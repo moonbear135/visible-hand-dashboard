@@ -1022,7 +1022,15 @@ def render_us_stocks_page():
         elif "적정가" in preset:
             selected_badges = [b for b in all_badges if "적정가" in b]
         elif "고평가" in preset:
-            selected_badges = [b for b in all_badges if ("고평가" in b or "역성장" in b or "위험" in b or "검증" in b)]
+            # "검증" 키워드는 "PER 검증 실패"(경고) 뿐 아니라 "Trailing만 검증됨"(단순 데이터
+            # 상태 안내, 위험 아님) / "데이터 검증 필요"(fallback 안내)까지 잘못 포함시키므로
+            # 두 정보성 뱃지는 명시적으로 제외한다.
+            _non_warning_badges = ("Trailing만 검증됨", "데이터 검증 필요")
+            selected_badges = [
+                b for b in all_badges
+                if ("고평가" in b or "역성장" in b or "위험" in b or "검증" in b)
+                and not any(nb in b for nb in _non_warning_badges)
+            ]
     with f3:
         only_trap = st.checkbox(
             "⚠️ '착시 저평가' 주의 종목만 보기", value=False, key="us_trap",
