@@ -64,6 +64,7 @@ st.markdown(
 from views.admin_view import render_admin_sidebar
 from views.macro_view import render_macro_page
 from views.pegy_view import render_pegy_page
+from views.us_stocks_view import render_us_stocks_page
 from utils.scheduler import start_scheduler_thread
 
 @st.cache_resource
@@ -101,8 +102,24 @@ def main():
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
 
+    # 3-1. 🇺🇸 미국주식 페이지 (2026-08-07 신설) — ENGINEERING_SPEC.md §0-3-6에 따라
+    #      "완전히 새로운 기능"은 오너 스테이징 승인 전까지 공개 메뉴에 올리지 않습니다.
+    #      그래서 관리자 인증 성공 시에만 사이드바에 진입 체크박스가 보이며,
+    #      일반 방문자에게는 선택지 자체가 노출되지 않습니다(공개 라우팅은 종전 그대로).
+    view_us_stocks = False
+    if admin_mode:
+        view_us_stocks = st.sidebar.checkbox(
+            "🇺🇸 미국주식 (베타, 검토중)",
+            key="admin_view_us_stocks",
+            help="미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 화면입니다. "
+                 "밸류에이션 임계값이 아직 잠정값이라 오너 검토 후 공개 전환 예정입니다."
+        )
+
     # 4. 메인 뷰 라우팅
-    if admin_mode and st.session_state.get("admin_view_macro"):
+    #    ⚠️ 공개(비로그인) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다 — 건드리지 않았습니다.
+    if admin_mode and view_us_stocks:
+        render_us_stocks_page()
+    elif admin_mode and st.session_state.get("admin_view_macro"):
         render_macro_page()
     else:
         render_pegy_page()

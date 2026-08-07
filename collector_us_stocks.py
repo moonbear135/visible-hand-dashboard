@@ -2,9 +2,16 @@
 collector_us_stocks.py
 🇺🇸 미국주식("미국 주식은 이가격") 수집기 — 기초틀 (2026-08-06 착수)
 
-⚠️ 이 파일은 US_STOCKS_WORK_ORDER.md §6 의 1~4번(유니버스 수집·필터, 샘플 수집
-   프로토타입, ET 타임존 헬퍼)까지만 담은 **착수 단계 모듈**입니다.
-   550종목 전수 수집·스코어링·화면 렌더링은 아직 들어있지 않습니다(오너 보고 후 진행).
+2026-08-07 확장: 550종목 **전수 수집(collect)** + 2차 패스 스코어링 + 상단 지수 3종 수집 추가.
+   (스코어링은 `utils/scoring_us.py`, 한글 표기는 `utils/company_names_kr.py`,
+    화면은 `views/us_stocks_view.py` 로 분리되어 있습니다.)
+
+2026-08-07 오후 추가 수정(오너 로컬 실측 2회차에서 드러난 문제 대응):
+  - 지수 3종 소스를 Stooq(HTTP 404 확인됨) → stockanalysis.com ETF 프록시(SPY/ONEQ/DIA)로 교체.
+  - "Index Tracked" 라벨이 표(<table>)가 아니라 표 밖 "About" 섹션에 있어 못 찾던 문제 수정.
+  - 550종목 수집이 HTTP 429로 중간에 끊기는 문제 — 배치 휴지기(60→40종목마다, 90→120초)를
+    보강했지만 여전히 재발할 수 있어, **끊기면 진행상황을 저장하고 다음 실행이 이어서 진행**하는
+    체크포인트(`data/us_collect_checkpoint.json`)를 추가(같은 세션 날짜에서만 재사용, §0-1).
 
 ⚠️ 기존 코스피 파이프라인(`collector_kospi200.py`, `views/pegy_view.py`,
    `utils/scoring.py`, `utils/constants.py`)은 이 파일에서 import 하지도, 수정하지도
@@ -24,6 +31,9 @@ CLI
   python collector_us_stocks.py universe            # 유니버스 CSV 수집 + 필터 + 저장
   python collector_us_stocks.py sample --count 12   # 샘플 종목 수집 프로토타입(소요시간 실측)
   python collector_us_stocks.py sample --tickers BRK.B,JPM,CAVA
+  python collector_us_stocks.py indices             # 상단 지수 3종 소스 점검 (⚠️ 실측 미검증 소스)
+  python collector_us_stocks.py collect --limit 5   # 전수 수집 경로 동작 확인(5종목만)
+  python collector_us_stocks.py collect             # 🇺🇸 550종목 전수 수집 (약 40분, 배치 휴지기 포함)
 """
 
 import argparse
@@ -51,6 +61,9 @@ from utils.constants_us import (
     US_UNIVERSE_MIN_RAW_ROWS,
     US_CRAWL_DELAY_MIN_SEC,
     US_CRAWL_DELAY_MAX_SEC,
+    US_CRAWL_BATCH_SIZE,
+    US_CRAWL_BATCH_COOLDOWN_SEC,
+    US_COLLECT_CHECKPOINT_FILENAME,
     US_REQUEST_TIMEOUT_SEC,
     US_MAX_RETRIES,
     US_RETRY_BASE_DELAY_SEC,
@@ -63,7 +76,16 @@ from utils.constants_us import (
     US_MARKETCAP_CROSSCHECK_TOLERANCE,
     US_UNIVERSE_FILENAME,
     US_SAMPLE_DIRNAME,
+    US_SNAPSHOT_FILENAME,
+    US_RAW_SNAPSHOT_FILENAME,
+    US_SUMMARY_HISTORY_FILENAME,
+    US_VALID_RATIO_SUCCESS,
+    US_VALID_RATIO_DEGRADED,
+    US_INDEX_PROXY_URL_TEMPLATE,
+    US_INDEX_DEFINITIONS,
 )
+from utils.scoring_us import derive_valuation, apply_us_guardrail, score_all
+from utils.company_names_kr import resolve_korean_name
 
 # =============================================================================
 # 0. 타임존 헬퍼 (US_STOCKS_WORK_ORDER.md §5-2 — 이번 작업 최대 함정)
@@ -186,6 +208,19 @@ class USSourceBlockedError(RuntimeError):
 
 def _polite_sleep():
     time.sleep(random.uniform(US_CRAWL_DELAY_MIN_SEC, US_CRAWL_DELAY_MAX_SEC))
+
+
+def _polite_sleep_with_batch_cooldown(request_index):
+    """
+    2026-08-07 추가: 550종목 전수수집 실측에서 187종목째(약 11분)에 HTTP 429 차단을
+    겪은 뒤 도입한 완화책. 종목당 슬립은 그대로 두고, US_CRAWL_BATCH_SIZE개마다 한 번
+    더 긴 휴지기를 얹어 총 요청 '밀도'를 낮춥니다(§0-3-2 정중한 크롤링 정신 연장 —
+    차단된 요청을 재시도하는 게 아니라, 애초에 차단당할 확률 자체를 낮추는 예방책).
+    """
+    _polite_sleep()
+    if request_index % US_CRAWL_BATCH_SIZE == 0:
+        print(f"  💤 배치 휴지기: {request_index}종목 처리 후 {US_CRAWL_BATCH_COOLDOWN_SEC}초 추가 대기")
+        time.sleep(US_CRAWL_BATCH_COOLDOWN_SEC)
 
 
 def _http_get(url, timeout=None):
@@ -1006,6 +1041,463 @@ def run_sample_prototype(symbols, universe_by_symbol=None, out_dir=None, delay=T
 
 
 # =============================================================================
+# 3-1. 상단 지수 3종 수집 (오너 확정: S&P500 / 나스닥종합 / 다우존스)
+#
+# 2026-08-07 교체: 최초 시도했던 Stooq CSV 소스(^spx 등)가 오너 로컬 실행에서 3종 전부
+# HTTP 404 — 무료·무인증이라 골랐지만 실제로는 살아있는 엔드포인트가 아니었습니다.
+# **ETF 프록시** 방식으로 교체합니다: stockanalysis.com 의 ETF 페이지(/etf/{ticker}/)는
+# 개별 종목 통계 페이지와 완전히 동일한 "At close: ..." 종가 블록 구조를 씁니다 — 그래서
+# 이미 검증된 extract_close_price() / extract_label_value_pairs() 를 그대로 재사용합니다
+# (실측 확인: /etf/spy/, /etf/oneq/ 라이브 응답에서 동일 구조 확인, 2026-08-07).
+#
+# ⚠️ 절대가(ETF 주가, 예: SPY $768)는 실제 지수 포인트값(S&P500 ≈ 6,598)과 숫자가 다른
+#    별개 값이라 화면에 노출하지 않고, "당일 등락률(%)"만 계산해 반환합니다(오너 확정
+#    2026-08-07, §0-1 정직 표기). 등락률 = (오늘 종가 − 전일 종가) / 전일 종가 — 두 값
+#    모두 페이지에서 그대로 읽은 실측값이므로 사칙연산만 하는 '계산값' 예외(§0-1
+#    예시2-보충)에 해당하며, change_calculated=True 로 표시합니다.
+# ⚠️ 나스닥종합은 QQQ(나스닥100 추종)로는 정확히 대응되지 않아 ONEQ(Fidelity Nasdaq
+#    Composite Index ETF)를 씁니다. 소스가 나중에 바뀌어도 조용히 틀린 지수를 보여주지
+#    않도록, 페이지의 "Index Tracked" 라벨이 기대 문구를 포함하는지 매번 재확인합니다
+#    (tracked_index_verified).
+# =============================================================================
+def build_index_proxy_url(proxy_symbol):
+    return US_INDEX_PROXY_URL_TEMPLATE.format(symbol=proxy_symbol)
+
+
+def _scan_line_label(html, label_text):
+    """
+    2026-08-07 2차 실측 수정: "Index Tracked"는 종가/Previous Close 가 들어있는 <table> 통계
+    박스가 아니라, 그 아래 "About {ETF명}" 서술 섹션에 있어 `extract_label_value_pairs()`
+    (표 전용)로는 못 찾는다는 걸 오너 로컬 실행 로그로 확인했습니다(등락률은 정상 계산됐지만
+    'Index Tracked' 라벨을 계속 못 찾아 검증 경고가 매번 뜸). 표가 아닌 곳의 "라벨 (+ 값)"을
+    찾기 위한 별도 스캐너 — 라벨과 값이 같은 줄에 붙어있는 경우("Index Tracked NASDAQ
+    Composite Index")와, 서로 다른 줄로 분리된 경우(표 파서가 이미 겪은 것과 같은 패턴) 둘 다
+    지원합니다. 못 찾으면 지어내지 않고 None(§0-1).
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    lines = [ln.strip() for ln in soup.get_text("\n").split("\n") if ln.strip()]
+    pattern = re.compile(r"^" + re.escape(label_text) + r"\s*:?\s*(.*)$", re.I)
+    for i, line in enumerate(lines):
+        m = pattern.match(line)
+        if not m:
+            continue
+        same_line_value = m.group(1).strip()
+        if same_line_value:
+            return same_line_value
+        if i + 1 < len(lines):
+            return lines[i + 1]
+    return None
+
+
+def fetch_one_index_quote(key, label_ko, label_en, proxy_symbol, expected_tracked_phrase):
+    """
+    ETF 프록시 페이지 1개를 수집해 당일 등락률을 계산합니다. 실패해도 예외를 던지지 않고
+    (사유가 담긴 entry dict) 를 반환합니다 — 다른 지수 수집을 막지 않기 위함입니다.
+    (USSourceBlockedError 는 §0-3-2 원칙대로 그대로 위로 던져 즉시 중단시킵니다.)
+    """
+    entry = {
+        "key": key, "label_ko": label_ko, "label_en": label_en,
+        "proxy_symbol": proxy_symbol.upper(), "is_etf_proxy": True,
+        "close": None, "previous_close": None, "session_date": None,
+        "intraday_change_pct": None, "change_calculated": False,
+        "tracked_index_label": None, "tracked_index_verified": False,
+        "error": None, "source": build_index_proxy_url(proxy_symbol),
+    }
+    try:
+        res = _http_get(build_index_proxy_url(proxy_symbol))
+        html = res.text
+    except USSourceBlockedError:
+        raise
+    except Exception as e:
+        entry["error"] = f"페이지 요청 실패: {e}"
+        return entry
+
+    price, asof_text, price_error = extract_close_price(html)
+    asof_dt = parse_close_timestamp(asof_text)
+    by_label = dict(extract_label_value_pairs(html))
+
+    # "Index Tracked"는 표(Previous Close 등이 있는 통계 박스)가 아니라 "About" 서술 섹션에
+    # 있어(2026-08-07 실측 확인), 표 전용 추출이 실패하면 줄 단위 스캐너로 재시도합니다.
+    tracked_raw = by_label.get("index tracked") or _scan_line_label(html, "Index Tracked")
+    if tracked_raw:
+        entry["tracked_index_label"] = tracked_raw
+        entry["tracked_index_verified"] = expected_tracked_phrase in tracked_raw.lower()
+
+    if price is None:
+        entry["error"] = f"종가 수집 실패: {price_error}"
+        return entry
+    entry["close"] = price
+    entry["session_date"] = asof_dt.date().isoformat() if asof_dt else None
+
+    previous_close = parse_scaled_number(by_label.get("previous close"))
+    if previous_close is None or previous_close <= 0:
+        entry["error"] = "전일 종가(Previous Close) 값을 찾지 못해 등락률을 계산하지 못함"
+        return entry
+    entry["previous_close"] = previous_close
+    entry["intraday_change_pct"] = round((price - previous_close) / previous_close * 100.0, 2)
+    entry["change_calculated"] = True
+
+    if not entry["tracked_index_verified"]:
+        note = (
+            f"⚠️ 'Index Tracked' 라벨이 기대 문구('{expected_tracked_phrase}')를 포함하지 않음"
+            f"(실제: '{entry['tracked_index_label']}') — 소스가 바뀌었을 수 있어 확인 필요"
+        )
+        entry["error"] = (entry["error"] + " / " + note) if entry["error"] else note
+
+    return entry
+
+
+def fetch_index_quotes():
+    """
+    상단 지수 3종(S&P500 / 나스닥종합 / 다우존스)을 ETF 프록시로 수집합니다.
+    개별 지수 수집에 실패해도 나머지는 계속 진행하고, 실패한 지수는 값 대신 사유를 남깁니다.
+    """
+    results = {}
+    for key, label_ko, label_en, proxy_symbol, expected_phrase in US_INDEX_DEFINITIONS:
+        entry = fetch_one_index_quote(key, label_ko, label_en, proxy_symbol, expected_phrase)
+        results[key] = entry
+        pct = entry.get("intraday_change_pct")
+        pct_str = f"{pct:+.2f}%" if pct is not None else "-"
+        print(f"  [지수] {label_ko:<10} 등락률={pct_str} ({entry.get('session_date') or '-'}) "
+              f"{'⚠️ ' + entry['error'] if entry.get('error') else ''}")
+        _polite_sleep()
+    return results
+
+
+# =============================================================================
+# 3-2. 전수 수집 (550종목) — 오너 로컬 실행용 메인 경로
+# =============================================================================
+def _median(values):
+    vals = [v for v in values if v is not None]
+    return round(statistics.median(vals), 4) if vals else None
+
+
+def update_us_summary_history(snapshot_time_et, visible_stocks, path):
+    """상단 요약 지표(중앙값 3종)를 누적 기록합니다. 표본이 없으면 값을 지어내지 않습니다."""
+    history = []
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                history = json.load(f)
+            if not isinstance(history, list):
+                history = []
+        except Exception as e:
+            print(f"⚠️ 요약 이력 로드 실패(새로 시작): {e}")
+            history = []
+
+    record = {
+        "collected_at_et": snapshot_time_et,
+        "f_per": _median([s.get("f_per") for s in visible_stocks]),
+        "growth": _median([s.get("growth") for s in visible_stocks]),
+        "pegy": _median([
+            s.get("f_pegy") for s in visible_stocks
+            if s.get("f_pegy") is not None and 0 < s["f_pegy"] < 50.0
+        ]),
+        "sample_count": len(visible_stocks),
+    }
+    history.append(record)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(history, f, ensure_ascii=False, indent=2)
+    print(f"  요약 이력 갱신: {record} -> {path}")
+
+
+def load_collect_checkpoint(path, session_date):
+    """
+    2026-08-07 신설: 550종목 전수수집이 중간에 소스 차단(HTTP 429)으로 끊겼을 때, 다음 실행이
+    처음부터 다시 하지 않고 이어서 하도록 진행상황을 불러옵니다. **오늘(session_date)과 날짜가
+    다른 체크포인트는 절대 재사용하지 않습니다** — 어제 종가와 오늘 종가가 섞이면 §0-1(지어내기
+    금지) 위반이 되기 때문입니다. 없거나 날짜가 다르거나 깨졌으면 빈 상태로 시작합니다.
+    """
+    empty = {"session_date": session_date, "enriched": [], "raw_items": [],
+              "failed_tickers": [], "completed_symbols": []}
+    if not os.path.exists(path):
+        return empty
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        if data.get("session_date") != session_date:
+            print(f"  ℹ️ 체크포인트가 다른 세션 날짜({data.get('session_date')})라 재사용하지 않고 새로 시작합니다.")
+            return empty
+        return {
+            "session_date": session_date,
+            "enriched": data.get("enriched") or [],
+            "raw_items": data.get("raw_items") or [],
+            "failed_tickers": data.get("failed_tickers") or [],
+            "completed_symbols": data.get("completed_symbols") or [],
+        }
+    except Exception as e:
+        print(f"  ⚠️ 체크포인트 로드 실패(새로 시작): {e}")
+        return empty
+
+
+def save_collect_checkpoint(path, session_date, enriched, raw_items, failed_tickers, completed_symbols):
+    try:
+        with open(path, "w", encoding="utf-8") as f:
+            json.dump({
+                "session_date": session_date,
+                "saved_at_et": _now_et().isoformat(),
+                "enriched": enriched,
+                "raw_items": raw_items,
+                "failed_tickers": failed_tickers,
+                "completed_symbols": completed_symbols,
+            }, f, ensure_ascii=False)
+    except Exception as e:
+        print(f"  ⚠️ 체크포인트 저장 실패(진행은 계속합니다): {e}")
+
+
+def clear_collect_checkpoint(path):
+    try:
+        if os.path.exists(path):
+            os.remove(path)
+    except Exception as e:
+        print(f"  ⚠️ 체크포인트 정리 실패(전수 수집 완료엔 지장 없음): {e}")
+
+
+def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=False):
+    """
+    미국주식 전수 수집 배치.
+
+    흐름 (collector_kospi200.run_kospi200_collector 와 같은 순서)
+      1) 직전 스냅샷에서 '어제 추적 중이던 티커' 로드 (히스테리시스 판정용)
+      2) 유니버스 CSV 수집 → 필터 → 히스테리시스 버퍼 적용
+      3) 상단 지수 3종 수집
+      4) 종목별 통계 페이지 수집(1차 패스) → 파생 밸류에이션 산출 → 가드레일
+      5) **2차 패스**: 오늘 수집분 횡단면 population 통계 계산 후 일괄 스코어링
+      6) raw / 가공 스냅샷 분리 저장(§0-3-3) + 요약 이력 갱신
+
+    ⚠️ 실패 종목은 조용히 건너뛰지 않고 `metadata.failed_tickers` 에 사유와 함께 남깁니다(§0-1).
+    ⚠️ 소스가 우리를 차단하면 즉시 중단하고 **기존 스냅샷을 덮어쓰지 않습니다**(§0-3-2).
+    """
+    target_size = target_size or US_TARGET_UNIVERSE_SIZE
+    started_at = time.perf_counter()
+    session = resolve_collection_session_et()
+    print("=" * 70)
+    print(f"[미국주식 전수 수집 시작] 현재 ET {session['now_et']} ({session['tz_abbrev']})")
+    print(f"  대상 세션(계산값): {session['session_date']} | 수집 가능 시각 {session['collect_ready_at_et']}")
+    if not session["is_ready_now"]:
+        # 장마감+30분 전에는 '오늘 종가'가 아직 없습니다. 중단하지는 않되(백필·테스트 목적
+        # 실행이 있을 수 있음) 경고를 크게 남기고, 실제 세션 날짜는 페이지 타임스탬프로 확정합니다.
+        print("  ⚠️ 아직 장마감+30분이 지나지 않았습니다 — 수집되는 종가는 직전 거래일 것입니다.")
+    print("=" * 70)
+
+    snapshot_path = _data_path(US_SNAPSHOT_FILENAME)
+    raw_path = _data_path(US_RAW_SNAPSHOT_FILENAME)
+    history_path = _data_path(US_SUMMARY_HISTORY_FILENAME)
+    checkpoint_path = _data_path(US_COLLECT_CHECKPOINT_FILENAME)
+    os.makedirs(os.path.dirname(snapshot_path), exist_ok=True)
+
+    # 1) 히스테리시스 판정용 직전 추적 목록 (덮어쓰기 전에 먼저 읽습니다)
+    previous_symbols = load_previously_tracked_symbols(snapshot_path)
+    if previous_symbols:
+        print(f"[히스테리시스] 직전 추적 티커 {len(previous_symbols)}개 로드")
+
+    # 2) 유니버스
+    rows = fetch_universe_rows()
+    selected, uni_stats = filter_universe(rows, target_size=target_size)
+    print_universe_stats(uni_stats)
+    tracked = apply_us_hysteresis_buffer(selected, previous_symbols)
+    if not tracked:
+        raise RuntimeError("히스테리시스 적용 후 추적 대상이 0개입니다 — 수집을 중단합니다(기존 스냅샷 유지)")
+    universe_by_symbol = {r["symbol"]: r for r in tracked}
+
+    if limit:
+        tracked = tracked[:limit]
+        print(f"⚠️ --limit {limit} 적용: 상위 {len(tracked)}종목만 수집합니다(테스트 모드, 전수 아님)")
+
+    # 2026-08-07: 이전 실행이 소스 차단(HTTP 429)으로 중간에 끊긴 적이 있으면 이어서 진행합니다.
+    # (오늘과 다른 날짜의 체크포인트는 절대 재사용하지 않음 — load_collect_checkpoint 참고)
+    checkpoint = load_collect_checkpoint(checkpoint_path, session["session_date"])
+    enriched = checkpoint["enriched"]
+    raw_items = checkpoint["raw_items"]
+    failed_tickers = checkpoint["failed_tickers"]
+    completed_symbols = set(checkpoint["completed_symbols"])
+    if completed_symbols:
+        remaining = [r for r in tracked if r["symbol"] not in completed_symbols]
+        print(f"[이어하기] 체크포인트에서 {len(completed_symbols)}종목 완료 상태 로드 "
+              f"— 남은 {len(remaining)}종목부터 계속합니다.")
+        tracked = remaining
+
+    # 3) 상단 지수 (재개 시에도 3건뿐이라 매번 새로 받습니다 — 어차피 오래된 등락률을 재사용하면 안 됨)
+    indices = {}
+    if not skip_indices:
+        print("[지수] 상단 지수 3종 수집")
+        indices = fetch_index_quotes()
+
+    # 4) 1차 패스 — 종목별 수집
+    blocked_error = None
+    total = len(tracked)
+    already_done = len(completed_symbols)
+    grand_total = already_done + total
+    CHECKPOINT_EVERY = 10  # 매 종목마다 저장하면 I/O가 아까워서, 이 개수마다만 저장(+차단 시엔 무조건 저장)
+    for i, row in enumerate(tracked, start=1):
+        symbol = row["symbol"]
+        overall = already_done + i
+        try:
+            r = collect_one(symbol, universe_by_symbol.get(symbol), session)
+        except USSourceBlockedError as e:
+            blocked_error = str(e)
+            print(f"🚨 {e}")
+            break
+        except Exception as e:                     # 예외를 삼키지 않고 사유를 남깁니다
+            failed_tickers.append({"symbol": symbol, "reason": f"예외 발생: {e}"})
+            completed_symbols.add(symbol)
+            print(f"  [{overall:>3}/{grand_total}] {symbol:<8} ❌ 예외: {e}")
+            if i % CHECKPOINT_EVERY == 0:
+                save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
+                                         failed_tickers, sorted(completed_symbols))
+            if delay and i < total:
+                _polite_sleep_with_batch_cooldown(i)
+            continue
+
+        raw_items.append({
+            "symbol": symbol, "url": r.get("url"),
+            "raw_pairs": r.get("raw_pairs", []), "errors": r.get("errors", []),
+        })
+
+        if not r.get("ok"):
+            failed_tickers.append({"symbol": symbol, "reason": "; ".join(r.get("errors") or ["원인 미상"])})
+            completed_symbols.add(symbol)
+            print(f"  [{overall:>3}/{grand_total}] {symbol:<8} ❌ 수집 실패: {r.get('errors')}")
+            if i % CHECKPOINT_EVERY == 0:
+                save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
+                                         failed_tickers, sorted(completed_symbols))
+            if delay and i < total:
+                _polite_sleep_with_batch_cooldown(i)
+            continue
+
+        stock = dict(r["processed"])
+        stock["rank"] = row.get("rank")
+        stock["is_visible"] = row.get("is_visible", True)
+        stock["industry"] = row.get("industry")
+        stock["instrument_kind"] = row.get("instrument_kind")
+        stock["csv_market_cap"] = row.get("csv_market_cap")
+        stock["url"] = r.get("url")
+        stock["collect_errors"] = r.get("errors") or []
+        stock["missing_fields"] = r.get("missing") or {}
+        stock["paywalled_fields"] = r.get("paywalled") or []
+
+        # 한글 표기 (정식 한글명 우선 → 없으면 규칙 기반 음역, §8-7-4 오너 확정)
+        kr = resolve_korean_name(symbol, stock.get("name"))
+        stock["name_kr"] = kr["korean_name"]
+        stock["name_kr_source"] = kr["source"]
+        stock["name_kr_is_transliterated"] = kr["is_transliterated"]
+        stock["name_en_clean"] = kr["english_clean"]
+
+        # 파생 밸류에이션 + 가드레일
+        stock.update(derive_valuation(stock))
+        stock = apply_us_guardrail(stock)
+
+        enriched.append(stock)
+        completed_symbols.add(symbol)
+        flag = " ⚠️" if stock.get("collect_errors") else ""
+        print(f"  [{overall:>3}/{grand_total}] {symbol:<8} px={stock.get('price')} PER={stock.get('t_per')} "
+              f"fPER={stock.get('f_per')} PEGY={stock.get('f_pegy')}{flag}")
+
+        if i % CHECKPOINT_EVERY == 0:
+            save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
+                                     failed_tickers, sorted(completed_symbols))
+        if delay and i < total:
+            _polite_sleep_with_batch_cooldown(i)
+
+    if blocked_error:
+        # 2026-08-07: 차단돼도 지금까지 모은 건 체크포인트에 남겨서, 다음 실행이 처음부터
+        # 다시 하지 않고 이어서 하도록 합니다(§0-3-2 — 차단된 요청을 재시도하는 게 아니라,
+        # 다음 '실행'이 이미 성공한 요청을 반복하지 않게 하는 것뿐입니다).
+        save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
+                                 failed_tickers, sorted(completed_symbols))
+        raise USSourceBlockedError(
+            f"{blocked_error}\n"
+            f"→ {len(enriched)}종목까지 수집한 뒤 중단했습니다. 기존 스냅샷은 덮어쓰지 않았습니다.\n"
+            f"→ 진행상황을 저장했습니다({checkpoint_path}) — 잠시 후 같은 명령을 다시 실행하면 "
+            f"이어서 진행합니다(처음부터 다시 하지 않음)."
+        )
+    if not enriched:
+        raise RuntimeError("수집 성공 종목이 0개입니다 — 기존 스냅샷을 유지하고 중단합니다")
+
+    # 전수 수집이 끝까지 완주됐으므로 체크포인트는 더 이상 필요 없습니다(다음 실행은 새로 시작).
+    clear_collect_checkpoint(checkpoint_path)
+
+    # 5) 2차 패스 — 횡단면 population 통계 후 일괄 스코어링
+    print("-" * 70)
+    print(f"[2차 패스] 횡단면 population 통계 계산 후 {len(enriched)}종목 일괄 스코어링")
+    scoring_meta = score_all(enriched)
+    print(f"  population 표본 {scoring_meta['population_sample_size']}종목 / "
+          f"통계 {scoring_meta['population_stats']}")
+
+    # 6) 저장
+    visible = [s for s in enriched if s.get("is_visible", True)]
+    valid = [s for s in visible if s.get("is_valid") and not s.get("is_unverified")]
+    valid_ratio = (len(valid) / len(visible)) if visible else 0.0
+    if not visible:
+        status = "FAILED"
+    elif valid_ratio >= US_VALID_RATIO_SUCCESS:
+        status = "SUCCESS"
+    elif valid_ratio >= US_VALID_RATIO_DEGRADED:
+        status = "DEGRADED"
+    else:
+        status = "FAILED"
+
+    now_et = _now_et()
+    elapsed_min = (time.perf_counter() - started_at) / 60.0
+    # 실제 세션 날짜의 출처는 언제나 페이지의 "At close:" 타임스탬프입니다(계산값이 아님).
+    source_session_dates = {}
+    for s in enriched:
+        d = s.get("session_date_from_source")
+        if d:
+            source_session_dates[d] = source_session_dates.get(d, 0) + 1
+
+    metadata = {
+        "last_updated_at_et": now_et.strftime("%Y-%m-%d %H:%M"),
+        "last_updated_at_kst": _now_kst().strftime("%Y-%m-%d %H:%M"),
+        "status": status,
+        "elapsed_minutes": round(elapsed_min, 1),
+        "total_count": len(visible),
+        "valid_count": len(valid),
+        "valid_ratio": round(valid_ratio, 3),
+        "tracked_count": len(enriched),
+        "hidden_buffer_count": len(enriched) - len(visible),
+        "failed_tickers": failed_tickers,
+        "failed_count": len(failed_tickers),
+        "session_hint": session,
+        "session_dates_from_source": source_session_dates,
+        "universe_filter_stats": uni_stats,
+        "scoring": scoring_meta,
+        "indices": indices,
+        "valid_ratio_thresholds": {
+            "success": US_VALID_RATIO_SUCCESS, "degraded": US_VALID_RATIO_DEGRADED,
+        },
+        "currency": "USD",
+        "description": (
+            f"미국(나스닥+뉴욕) 시가총액 상위 1~{len(visible)}위 퀀트 스냅샷 "
+            f"(검증 통과 {len(valid)}/{len(visible)} 종목, 상태={status}, 통화 USD)"
+        ),
+    }
+
+    with open(snapshot_path, "w", encoding="utf-8") as f:
+        json.dump({"metadata": metadata, "stocks": enriched}, f, ensure_ascii=False, indent=2)
+    with open(raw_path, "w", encoding="utf-8") as f:
+        json.dump({
+            "metadata": {
+                "collected_at_et": now_et.isoformat(),
+                "note": "크롤링 직후 (라벨, 값) 원문. 가공 결과와 분리 보관 (ENGINEERING_SPEC §0-3-3)",
+            },
+            "items": raw_items,
+        }, f, ensure_ascii=False, indent=2)
+    update_us_summary_history(now_et.strftime("%Y-%m-%d %H:%M"), visible, history_path)
+
+    print("=" * 70)
+    print(f"[완료] {len(visible)}종목 노출 (+버퍼 {metadata['hidden_buffer_count']}) / "
+          f"검증 통과 {len(valid)} ({valid_ratio*100:.1f}%) / 상태 {status} / 소요 {elapsed_min:.1f}분")
+    if failed_tickers:
+        print(f"⚠️ 수집 실패 {len(failed_tickers)}종목: "
+              f"{[f['symbol'] for f in failed_tickers][:20]}{' ...' if len(failed_tickers) > 20 else ''}")
+    print(f"  가공 → {snapshot_path}")
+    print(f"  raw  → {raw_path}")
+    print("=" * 70)
+    return snapshot_path
+
+
+# =============================================================================
 # 4. CLI
 # =============================================================================
 def _data_path(filename):
@@ -1064,6 +1556,34 @@ def cmd_sample(args):
     run_sample_prototype(symbols, universe_by_symbol, delay=not args.no_delay)
 
 
+def cmd_collect(args):
+    run_us_collector(
+        target_size=args.size,
+        limit=args.limit,
+        delay=not args.no_delay,
+        skip_indices=args.skip_indices,
+    )
+
+
+def cmd_indices(_args):
+    """
+    상단 지수 3종만 따로 수집해 파싱이 실제로 되는지 확인합니다.
+    (⚠️ 이 소스는 아직 실측 검증 전입니다 — constants_us.py §8 주석 참고)
+    """
+    print("=" * 70)
+    print("[지수 소스 점검] S&P500 / 나스닥종합 / 다우존스")
+    result = fetch_index_quotes()
+    ok = [k for k, v in result.items() if v.get("close") is not None]
+    print("-" * 70)
+    print(f"  성공 {len(ok)}/{len(result)}")
+    for k, v in result.items():
+        print(f"  {v['label_ko']:<10} {v['source']}")
+        print(f"      close={v['close']} session_date={v['session_date']} error={v['error']}")
+    if len(ok) < len(result):
+        print("  ⚠️ 실패한 지수는 화면에 '데이터 없음'으로 표시됩니다(값을 지어내지 않음, §0-1).")
+    print("=" * 70)
+
+
 def main():
     parser = argparse.ArgumentParser(description="미국주식 수집기 기초틀 (착수 단계)")
     sub = parser.add_subparsers(dest="command", required=True)
@@ -1082,6 +1602,21 @@ def main():
     p_sample.add_argument("--no-delay", action="store_true",
                           help="⚠️ 크롤링 매너 위반 — 오프라인 테스트 외에는 쓰지 마세요")
     p_sample.set_defaults(func=cmd_sample)
+
+    p_collect = sub.add_parser(
+        "collect", help="550종목 전수 수집 + 스코어링 + 스냅샷 저장 "
+                        "(약 40분 소요 — 2026-08-07 HTTP 429 차단 이후 배치 휴지기 추가)")
+    p_collect.add_argument("--size", type=int, default=US_TARGET_UNIVERSE_SIZE)
+    p_collect.add_argument("--limit", type=int, default=None,
+                           help="상위 N종목만 수집(동작 확인용 — 전수 수집이 아님)")
+    p_collect.add_argument("--skip-indices", action="store_true",
+                           help="상단 지수 3종 수집을 건너뜁니다")
+    p_collect.add_argument("--no-delay", action="store_true",
+                           help="⚠️ 크롤링 매너 위반 — 오프라인 테스트 외에는 쓰지 마세요")
+    p_collect.set_defaults(func=cmd_collect)
+
+    p_idx = sub.add_parser("indices", help="상단 지수 3종 소스 점검(실측 미검증 소스 확인용)")
+    p_idx.set_defaults(func=cmd_indices)
 
     args = parser.parse_args()
     args.func(args)

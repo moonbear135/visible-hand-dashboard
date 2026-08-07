@@ -21,6 +21,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from zoneinfo import ZoneInfo
 
+import collector_us_stocks as C
 from collector_us_stocks import (
     classify_instrument,
     filter_universe,
@@ -36,6 +37,8 @@ from collector_us_stocks import (
     derive_fields,
     resolve_collection_session_et,
     apply_us_hysteresis_buffer,
+    fetch_one_index_quote,
+    build_index_proxy_url,
 )
 
 ET = ZoneInfo("America/New_York")
@@ -407,6 +410,92 @@ def test_table_extraction():
     check("ignored single cell" not in d, "셀이 1개뿐인 행은 무시")
 
 
+# =============================================================================
+# 4-d. 지수 3종 ETF 프록시 파싱 (2026-08-07 Stooq 404 → stockanalysis.com ETF 페이지 교체)
+#   ⚠️ 아래 숫자는 2026-08-07 실측(https://stockanalysis.com/etf/oneq/) 라이브 응답에서
+#      그대로 옮긴 실제 값입니다(104.78 / +2.71 (2.66%) / Previous Close 102.07 /
+#      "Index Tracked: NASDAQ Composite Index").
+#   ⚠️ 2026-08-07 2차 실측(오너 로컬 `indices` 실행)에서 "Index Tracked"가 표(<table>)가 아니라
+#      Previous Close 통계 박스 아래 "About {ETF명}" 서술 섹션에 있다는 게 드러났습니다 — 첫 버전
+#      테스트가 실수로 표 구조로 만들어서 이 버그를 못 잡았던 것까지 포함해 재현합니다(아래 두
+#      픽스처는 표 밖 레이아웃만 사용 — 라벨/값이 같은 줄에 붙은 경우와 다른 줄로 분리된 경우 둘 다).
+# =============================================================================
+HTML_INDEX_PROXY_ONEQ_OK = """
+<html><body>
+<h1>Fidelity Nasdaq Composite Index ETF (ONEQ)</h1>
+<div>104.78</div>
+<div>+2.71 (2.66%)</div>
+<div>Aug 4, 2026, 4:00 PM EDT - Market closed</div>
+<table>
+<tr><td>Assets</td><td>$10.27B</td></tr>
+<tr><td>Previous Close</td><td>102.07</td></tr>
+<tr><td>Volume</td><td>670,559</td></tr>
+</table>
+<div class="about">
+<div>Asset Class</div><div>Equity</div>
+<div>Stock Exchange</div><div>NASDAQ</div>
+<div>ETF Provider</div><div>Fidelity</div>
+<div>Index Tracked NASDAQ Composite Index</div>
+</div>
+</body></html>
+"""
+
+# 소스가 바뀌어 엉뚱한 지수를 추종하는 ETF 페이지가 온 경우(방어 확인용 합성 케이스) —
+# 이번엔 라벨/값이 서로 다른 줄로 분리된 레이아웃(표 밖)으로 다른 경로를 검증합니다.
+HTML_INDEX_PROXY_WRONG_INDEX = """
+<html><body>
+<div>50.00</div>
+<div>-0.25 (-0.50%)</div>
+<div>Aug 4, 2026, 4:00 PM EDT - Market closed</div>
+<table><tr><td>Previous Close</td><td>50.25</td></tr></table>
+<div class="about">
+<div>Index Tracked</div>
+<div>Russell 2000 Index</div>
+</div>
+</body></html>
+"""
+
+
+def test_index_proxy():
+    print("\n[4-d] 지수 3종 ETF 프록시 파싱 (Stooq 404 → stockanalysis.com 교체)")
+    check(build_index_proxy_url("oneq") == "https://stockanalysis.com/etf/oneq/",
+          "ETF 프록시 URL 빌더")
+
+    orig_http_get = C._http_get
+    orig_sleep = getattr(C, "_polite_sleep", None)
+    try:
+        C._http_get = lambda url, timeout=None: _FakeResp(HTML_INDEX_PROXY_ONEQ_OK)
+        entry = fetch_one_index_quote("nasdaq", "나스닥 종합", "Nasdaq Composite", "oneq", "nasdaq composite")
+        check(entry["close"] == 104.78, f"ETF 종가 추출 (실제 {entry['close']})")
+        check(entry["previous_close"] == 102.07, f"전일 종가(Previous Close) 라벨 매칭 (실제 {entry['previous_close']})")
+        check(entry["intraday_change_pct"] == 2.66,
+              f"등락률 = (종가-전일종가)/전일종가 계산값 (실제 {entry['intraday_change_pct']}%, 실측 표기 2.66%와 일치)")
+        check(entry["change_calculated"] is True, "등락률에 '계산값' 플래그(§0-1 예시2-보충)")
+        check(entry["is_etf_proxy"] is True, "ETF 프록시 출처임을 표기")
+        check(entry["tracked_index_verified"] is True,
+              "'Index Tracked' 라벨이 기대 문구(nasdaq composite)를 포함 → 검증 통과")
+        check(entry["error"] is None, "정상 케이스는 error 없음")
+
+        C._http_get = lambda url, timeout=None: _FakeResp(HTML_INDEX_PROXY_WRONG_INDEX)
+        entry2 = fetch_one_index_quote("nasdaq", "나스닥 종합", "Nasdaq Composite", "oneq", "nasdaq composite")
+        check(entry2["tracked_index_verified"] is False,
+              "엉뚱한 지수를 추종하는 ETF로 소스가 바뀌면 조용히 넘어가지 않고 검증 실패로 기록")
+        check(entry2["error"] and "Index Tracked" in entry2["error"],
+              "검증 실패 사유가 error 필드에 남음(지어내지 않고 정직하게 표기)")
+
+        C._http_get = lambda url, timeout=None: (_ for _ in ()).throw(RuntimeError("boom"))
+        entry3 = fetch_one_index_quote("dow", "다우존스", "Dow Jones", "dia", "dow jones")
+        check(entry3["close"] is None and entry3["error"], "페이지 요청 자체가 실패해도 예외를 던지지 않고 사유만 기록")
+    finally:
+        C._http_get = orig_http_get
+
+
+class _FakeResp:
+    def __init__(self, text):
+        self.text = text
+        self.status_code = 200
+
+
 def test_derive_fields():
     print("\n[4-c] 파생 필드/교차검증")
     fields = {"f_per": 31.14, "growth_eps_3y": 16.43, "shareholder_yield": 2.07,
@@ -469,6 +558,7 @@ def main():
     test_number_parsers()
     test_price_block()
     test_table_extraction()
+    test_index_proxy()
     test_derive_fields()
     test_session_resolution()
 

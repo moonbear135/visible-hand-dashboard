@@ -1,0 +1,23 @@
+[
+  {
+    "collected_at_et": "2026-08-06 22:25",
+    "f_per": 26.44,
+    "growth": 16.95,
+    "pegy": 1.49,
+    "sample_count": 5
+  },
+  {
+    "collected_at_et": "2026-08-07 00:36",
+    "f_per": 20.21,
+    "growth": 12.71,
+    "pegy": 1.4,
+    "sample_count": 548
+  },
+  {
+    "collected_at_et": "2026-08-07 03:13",
+    "f_per": 20.21,
+    "growth": 12.71,
+    "pegy": 1.395,
+    "sample_count": 548
+  }
+]
