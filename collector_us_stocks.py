@@ -33,7 +33,11 @@ CLI
   python collector_us_stocks.py sample --tickers BRK.B,JPM,CAVA
   python collector_us_stocks.py indices             # 상단 지수 3종 소스 점검 (⚠️ 실측 미검증 소스)
   python collector_us_stocks.py collect --limit 5   # 전수 수집 경로 동작 확인(5종목만)
-  python collector_us_stocks.py collect             # 🇺🇸 550종목 전수 수집 (약 40분, 배치 휴지기 포함)
+  python collector_us_stocks.py collect             # 🇺🇸 550종목 전수 수집 (약 40~56분, 배치 휴지기 포함)
+  python collector_us_stocks.py collect --skip-if-not-ready
+                                                    # 무인 자동화(GitHub Actions) 전용 — 아직 수집
+                                                    # 시점이 아니거나 이미 그 거래일을 수집했으면
+                                                    # 아무것도 안 하고 정상 종료(exit 0)
 """
 
 import argparse
@@ -1253,6 +1257,105 @@ def clear_collect_checkpoint(path):
         print(f"  ⚠️ 체크포인트 정리 실패(전수 수집 완료엔 지장 없음): {e}")
 
 
+# -----------------------------------------------------------------------------
+# 무인 자동화(GitHub Actions) 전용 사전 점검 — 2026-08-07 신설
+#
+# 배경: GitHub Actions 의 cron 은 UTC 고정인데 미국 동부(ET)는 서머타임 때문에
+#   "정규장 마감 16:00 + 30분 = 16:30 ET" 의 UTC 시각이 1년에 두 번 1시간 이동합니다.
+#     · EDT(서머타임, 3~11월, UTC-4): 16:30 ET = 20:30 UTC
+#     · EST(표준시,   11~3월, UTC-5): 16:30 ET = 21:30 UTC
+#   위 두 값은 추측이 아니라 describe_collection_schedule() 을 2026-07-15(EDT)/
+#   2026-01-15(EST) 시각으로 실제 호출해 얻은 `collect_ready_at_utc` 입니다(§0-1).
+#   그래서 워크플로우(.github/workflows/scrape_us.yml)는 cron 을 두 줄 걸어 매일 두 번
+#   트리거하고, 그중 "지금 돌면 안 되는 쪽"을 이 함수가 걸러냅니다.
+#
+# ⚠️ 왜 session["is_ready_now"] 만으로는 부족한가 (코드를 실제로 돌려 확인한 사실):
+#   resolve_collection_session_et() 은 "마감+30분이 지난 가장 최근 평일"을 찾을 때까지
+#   하루씩 거슬러 올라갑니다. 루프 탈출 조건 자체가 `now >= ready_at` 이므로 그 결과의
+#   is_ready_now 는 **어떤 시각을 넣어도 항상 True** 입니다(장중 09:35 ET 로 호출해도
+#   False 가 되지 않고 그냥 '어제 세션'을 가리킵니다). 즉 그 플래그로는 중복 실행을
+#   막을 수 없습니다.
+#   따라서 실제 판정 기준은 **"이번에 담게 될 거래일(session_date)을 기존 스냅샷이
+#   이미 담고 있는가"** 입니다. 이미 담고 있으면 건너뛰고, 아니면 수집합니다.
+#   이 방식은 부수적으로 두 가지를 더 해결합니다.
+#     ① 첫 크론이 HTTP 429 로 중간에 끊겨 스냅샷이 갱신되지 않았으면, 두 번째 크론이
+#        같은 날 자동으로 재시도합니다(체크포인트에서 이어받으므로 처음부터 하지 않음).
+#     ② 오너가 로컬에서 이미 수집해 푸시해둔 날은 액션이 같은 데이터를 다시 크롤링하지
+#        않습니다(§0-3-2 정중한 크롤링).
+# -----------------------------------------------------------------------------
+def snapshot_covered_session_dates(snapshot_path):
+    """
+    기존 스냅샷이 이미 담고 있는 거래일(세션) 날짜 집합을 읽어옵니다.
+
+    - `metadata.session_dates_from_source`: 페이지의 "At close: …" 타임스탬프에서 읽은
+      **실제** 세션 날짜(확정 출처). 이게 있으면 이걸 우선합니다.
+    - `metadata.session_hint.session_date`: 수집 당시의 ET 기준 계산값(보조).
+    - 파일이 없거나 깨졌거나 status 가 FAILED 면 **빈 집합**을 돌려줍니다 —
+      "모르면 건너뛰기"가 아니라 "모르면 수집한다"가 안전한 방향이기 때문입니다
+      (건너뛰면 데이터가 하루 통째로 비고, 수집하면 최악이라도 중복 크롤링 1회).
+    """
+    if not os.path.exists(snapshot_path):
+        return set(), None
+    try:
+        with open(snapshot_path, "r", encoding="utf-8") as f:
+            meta = (json.load(f) or {}).get("metadata") or {}
+    except Exception as e:
+        print(f"  ⚠️ 기존 스냅샷을 읽지 못했습니다({e}) — 이미 수집됐는지 알 수 없어 수집을 진행합니다.")
+        return set(), None
+    if meta.get("status") == "FAILED":
+        # 실패한 수집 결과는 '이미 수집됨'으로 치지 않습니다(다음 크론이 재시도해야 함).
+        return set(), meta.get("last_updated_at_et")
+    covered = set((meta.get("session_dates_from_source") or {}).keys())
+    hint_date = ((meta.get("session_hint") or {}).get("session_date"))
+    if hint_date:
+        covered.add(hint_date)
+    return covered, meta.get("last_updated_at_et")
+
+
+def evaluate_collection_readiness(snapshot_path=None, now_et=None):
+    """
+    "지금 이 실행이 실제로 전수 수집을 해야 하는가"를 판정합니다(무인 자동화 전용).
+
+    반환: dict
+      should_collect        : 실제로 수집을 진행해야 하는가
+      reason                : 사람이 읽을 판정 사유 (건너뛸 때 로그에 그대로 출력)
+      target_session_date   : 지금 수집하면 담기게 될 거래일(ET 계산값)
+      covered_session_dates : 기존 스냅샷이 이미 담고 있는 거래일 목록
+      snapshot_updated_at_et: 기존 스냅샷의 마지막 갱신 시각(없으면 None)
+      session               : resolve_collection_session_et() 원본 결과
+    """
+    session = resolve_collection_session_et(now_et)
+    target = session["session_date"]
+    path = snapshot_path or _data_path(US_SNAPSHOT_FILENAME)
+    covered, updated_at = snapshot_covered_session_dates(path)
+
+    if not session["is_ready_now"]:
+        # 현재 resolve_collection_session_et() 구현상 여기에는 도달하지 않습니다(위 주석 참고).
+        # 그 함수가 나중에 바뀌더라도 '마감 전 수집'을 막도록 남겨두는 2차 방어선입니다.
+        should, reason = False, (
+            f"아직 장마감+{US_COLLECT_AFTER_CLOSE_MINUTES}분 전입니다 "
+            f"(수집 가능 시각 {session['collect_ready_at_et']} ET)"
+        )
+    elif target in covered:
+        should, reason = False, (
+            f"{target} 거래일은 이미 수집되어 스냅샷에 들어있습니다"
+            f"{f' (마지막 갱신 {updated_at} ET)' if updated_at else ''}"
+        )
+    else:
+        should, reason = True, (
+            f"{target} 거래일 데이터가 아직 스냅샷에 없습니다 — 수집을 진행합니다"
+        )
+
+    return {
+        "should_collect": should,
+        "reason": reason,
+        "target_session_date": target,
+        "covered_session_dates": sorted(covered),
+        "snapshot_updated_at_et": updated_at,
+        "session": session,
+    }
+
+
 def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=False):
     """
     미국주식 전수 수집 배치.
@@ -1557,6 +1660,24 @@ def cmd_sample(args):
 
 
 def cmd_collect(args):
+    # 무인 자동화(GitHub Actions)에서만 켜는 사전 점검. 오너가 로컬에서 손으로 돌릴 때는
+    # 이 옵션을 주지 않으므로 언제나 그대로 수집합니다(같은 날 재수집도 막지 않음).
+    if getattr(args, "skip_if_not_ready", False):
+        readiness = evaluate_collection_readiness()
+        s = readiness["session"]
+        print("=" * 70)
+        print("[무인 자동화 사전 점검] --skip-if-not-ready")
+        print(f"  현재 ET               : {s['now_et']} ({s['tz_abbrev']})")
+        print(f"  이번에 담길 거래일     : {readiness['target_session_date']}")
+        print(f"  수집 가능 시각(ET)     : {s['collect_ready_at_et']}")
+        print(f"  스냅샷이 가진 거래일   : {readiness['covered_session_dates'] or '(없음)'}")
+        print(f"  판정                  : {readiness['reason']}")
+        print("=" * 70)
+        if not readiness["should_collect"]:
+            print("⏭️  이번 실행은 아무것도 하지 않고 정상 종료합니다 (오류 아님).")
+            print("   서머타임(EDT/EST) 대응으로 cron 을 두 개 걸어 하루 두 번 트리거되지만,")
+            print("   실제 수집은 이 점검 덕분에 하루 한 번만 일어납니다.")
+            return
     run_us_collector(
         target_size=args.size,
         limit=args.limit,
@@ -1611,6 +1732,11 @@ def main():
                            help="상위 N종목만 수집(동작 확인용 — 전수 수집이 아님)")
     p_collect.add_argument("--skip-indices", action="store_true",
                            help="상단 지수 3종 수집을 건너뜁니다")
+    p_collect.add_argument("--skip-if-not-ready", action="store_true",
+                           help="무인 자동화(GitHub Actions) 전용. 아직 수집 시점이 아니거나 "
+                                "이번에 담길 거래일이 이미 스냅샷에 있으면 아무것도 하지 않고 "
+                                "정상 종료(exit 0)합니다. 서머타임 때문에 cron 2개를 걸어야 하는 "
+                                "구조에서 하루 한 번만 실제 수집되도록 하는 방어 장치입니다.")
     p_collect.add_argument("--no-delay", action="store_true",
                            help="⚠️ 크롤링 매너 위반 — 오프라인 테스트 외에는 쓰지 마세요")
     p_collect.set_defaults(func=cmd_collect)

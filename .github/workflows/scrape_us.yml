@@ -1,0 +1,136 @@
+name: Daily US Stocks Scraper
+
+# =============================================================================
+# 🇺🇸 미국주식("미국 주식은 이가격") 550종목 전수 수집 자동화 (2026-08-07 신설)
+#
+# ⚠️ 코스피용 `scrape.yml` 과 완전히 분리된 별도 워크플로우입니다.
+#    (ENGINEERING_SPEC §0-3-6 신규 기능 모듈 분리 — 이미 잘 돌고 있는 코스피
+#     자동화를 건드리지 않기 위해 파일 자체를 나눴습니다.)
+#
+# ── 왜 cron 이 두 줄인가 ───────────────────────────────────────────────────
+# GitHub Actions 의 cron 은 UTC 고정인데, 미국 동부시간(ET)은 서머타임에 따라
+# UTC 오프셋이 1년에 두 번 바뀝니다. 우리가 수집해야 하는 시각은 언제나
+# "정규장 마감 16:00 ET + 30분 = 16:30 ET" 인데, 이걸 UTC 로 옮기면:
+#
+#   · EDT (서머타임, 3월 둘째 일요일~11월 첫째 일요일, UTC-4) → 16:30 ET = 20:30 UTC
+#   · EST (표준시,   11월 첫째 일요일~3월 둘째 일요일, UTC-5) → 16:30 ET = 21:30 UTC
+#
+# 위 두 값은 추측이 아니라 `python collector_us_stocks.py schedule` 이 쓰는
+# `describe_collection_schedule()` 을 2026-07-15(EDT) / 2026-01-15(EST) 시각으로
+# 실제 호출해 얻은 `collect_ready_at_utc` 입니다 (ENGINEERING_SPEC §0-1 지어내지 않기).
+#
+# 그래서 cron 을 20:35 / 21:35 UTC 두 줄로 겁니다.
+#   (정각·정30분은 깃허브 서버에 작업이 몰려 지연/누락되기 쉬워, 기존 `scrape.yml` 과
+#    같은 관례로 5분 뒤로 밀었습니다.)
+#
+# ── 그러면 하루 두 번 수집되는 것 아닌가? ────────────────────────────────
+# 아닙니다. 수집기 쪽 `--skip-if-not-ready` 방어 로직이 걸러냅니다.
+# 판정 기준은 "이번에 담기게 될 거래일(session_date)을 기존 스냅샷이 이미
+# 담고 있는가" 입니다 (collector_us_stocks.py `evaluate_collection_readiness()`).
+#
+#   [EDT 기간]  20:35 UTC = 16:35 EDT → 대상 세션 = 당일, 스냅샷엔 전일까지만 → ✅ 수집
+#               21:35 UTC = 17:35 EDT → 대상 세션 = 당일, 방금 수집해 이미 있음 → ⏭️ 건너뜀
+#   [EST 기간]  20:35 UTC = 15:35 EST → 아직 장중, 대상 세션 = 전일(이미 있음) → ⏭️ 건너뜀
+#               21:35 UTC = 16:35 EST → 대상 세션 = 당일, 아직 없음          → ✅ 수집
+#
+# 덤으로: 앞쪽 실행이 HTTP 429 차단으로 중간에 끊기면 스냅샷이 갱신되지 않으므로,
+# 뒤쪽 실행이 같은 날 자동으로 재시도합니다(체크포인트에서 이어받아 처음부터 다시
+# 하지 않습니다 — `data/us_collect_checkpoint.json`).
+# =============================================================================
+
+on:
+  schedule:
+    # 서머타임(EDT) 기간에 "미국 장마감 + 30분"이 되는 시각 (16:30 EDT = 20:30 UTC, +5분 여유)
+    - cron: '35 20 * * 1-5'
+    # 표준시(EST) 기간에 "미국 장마감 + 30분"이 되는 시각 (16:30 EST = 21:30 UTC, +5분 여유)
+    - cron: '35 21 * * 1-5'
+  workflow_dispatch:
+    # 깃허브 웹 화면(Actions 탭)에서 수동으로 즉시 실행할 수 있는 버튼 활성화
+    inputs:
+      force:
+        description: '사전 점검을 무시하고 무조건 수집합니다 (같은 거래일을 다시 수집하고 싶을 때만 true)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write # 깃허브에 파일 쓰기 권한 활성화
+
+# 앞선 실행이 아직 돌고 있으면(실측 소요 40~56분, 차단 재시도 시 더 길어질 수 있음)
+# 뒤이은 실행을 취소하지 않고 '대기'시킵니다. 두 실행이 겹쳐서 같은 거래일을 중복
+# 크롤링하는 것을 막기 위한 안전장치입니다 (§0-3-2 정중한 크롤링).
+concurrency:
+  group: us-stocks-collect
+  cancel-in-progress: false
+
+jobs:
+  collect-us:
+    runs-on: ubuntu-latest
+    # 실측 소요 55.5분(TASK_HISTORY #54). HTTP 429 차단 후 체크포인트 이어하기까지
+    # 감안해 넉넉히 90분으로 명시합니다(기본값 6시간은 사고 시 과금/점유가 큼).
+    timeout-minutes: 90
+
+    steps:
+    - name: 저장소 코드 체크아웃
+      uses: actions/checkout@v3
+
+    - name: 파이썬 환경 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 필수 의존 라이브러리 설치
+      # 미국주식 수집기가 실제로 쓰는 외부 패키지는 requests / beautifulsoup4 둘뿐이지만
+      # (나머지는 표준 라이브러리), 코스피 워크플로우와 동일한 관례를 유지하기 위해
+      # 같은 requirements.txt 를 그대로 씁니다.
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 🇺🇸 미국주식 550종목 전수 수집 (data/us_*.json 갱신)
+      # 평소(cron)에는 --skip-if-not-ready 로 사전 점검을 켭니다. 아직 수집 시점이
+      # 아니거나 이미 그 거래일을 수집했으면 아무것도 하지 않고 정상 종료(exit 0)합니다.
+      # 수동 실행에서 force=true 를 고르면 점검 없이 무조건 다시 수집합니다.
+      run: |
+        if [ "${{ github.event.inputs.force }}" = "true" ]; then
+          echo "⚠️ force=true — 사전 점검을 건너뛰고 무조건 수집합니다"
+          python collector_us_stocks.py collect
+        else
+          python collector_us_stocks.py collect --skip-if-not-ready
+        fi
+
+    - name: 갱신된 데이터를 깃허브에 영구 커밋 및 업로드
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        # data/ 아래 미국주식 산출물 전체를 스테이징합니다.
+        #   us_stocks_latest.json      : 가공 스냅샷 (화면이 읽는 파일)
+        #   us_stocks_raw_latest.json  : 크롤링 원문 (§0-3-3 raw/가공 분리 보관)
+        #   us_summary_history.json    : 요약 중앙값 이력
+        #   us_collect_checkpoint.json : HTTP 429 차단 시에만 생기는 이어하기 파일.
+        #     -A 를 쓰는 이유 — 완주하면 이 파일이 '삭제'되는데, 그 삭제까지 커밋해야
+        #     다음 실행이 유령 체크포인트를 물려받지 않습니다.
+        # 사전 점검에 걸려 아무것도 안 했으면 변경분이 없어 아래 commit 에서 그냥 종료됩니다.
+        git add -A data/
+        git commit -m "US Auto Update: $(date +'%Y-%m-%d') [무인 자동화 로봇]" || exit 0
+
+        # 이 작업은 크롤링에 40~56분이 걸리는데, 그 사이 사람이 직접 다른 파일을(코드/문서)
+        # 푸시하거나 코스피 워크플로우(scrape.yml)가 먼저 푸시하면 원격 저장소가 앞서나가
+        # 있어서 그냥 push하면 거부(rejected)됩니다.
+        # 최대 3번까지 최신 내용을 받아와 자동으로 합친 뒤 재시도합니다.
+        for i in 1 2 3; do
+          if git push origin main; then
+            echo "✅ 푸시 성공"
+            exit 0
+          fi
+          echo "⚠️ 푸시 거부됨 (원격이 앞서있음) — 최신 내용 받아와서 재시도 ($i/3)"
+          git fetch origin main
+          if ! git rebase origin/main; then
+            echo "❌ 리베이스 충돌 발생 — 자동 병합 불가, 수동 확인 필요"
+            git rebase --abort
+            exit 1
+          fi
+        done
+        echo "❌ 3회 재시도 후에도 푸시 실패"
+        exit 1
