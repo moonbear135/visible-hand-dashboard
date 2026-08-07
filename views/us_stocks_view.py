@@ -716,7 +716,14 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                              font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px;
                              border: 1px solid {s.get('badge_fg', '#64748b')}; white-space: nowrap;">{s.get('badge', '—')}</span>
                 <span style="font-size: 12px; color: {beta_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6);
-                             padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">{beta_text}</span>
+                             padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">
+                    <span class="q-tooltip" style="color: {beta_color};">{beta_text} ℹ️<span class="q-tooltiptext">
+                    <b>베타(5년)</b> = 이 종목이 시장(S&amp;P 500) 대비 얼마나 크게 출렁이는지 나타내는 지표입니다.<br>
+                    베타 1.0 = 시장과 동일하게 움직임 · 1.0보다 크면 시장보다 더 크게 오르내림 · 1.0보다 작으면 더 완만하게 움직임<br>
+                    (예: 베타 1.47 = 시장이 10% 움직일 때 이 종목은 평균적으로 약 14.7% 움직여온 편)<br>
+                    🟢 저변동(&lt;1.0) · 🟡 시장 수준(1.0~1.5) · ⚡ 고변동(≥1.5) — 저평가·고평가 판단과는 무관하게
+                    순수 변동성(리스크) 지표입니다.</span></span>
+                </span>
                 {trap_badge_html}
                 {sector_badge_html}
             </div>
