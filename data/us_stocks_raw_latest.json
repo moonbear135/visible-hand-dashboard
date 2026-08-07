@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "collected_at_et": "2026-08-07T03:13:59.050752-04:00",
+    "collected_at_et": "2026-08-07T07:21:47.193727-04:00",
     "note": "크롤링 직후 (라벨, 값) 원문. 가공 결과와 분리 보관 (ENGINEERING_SPEC §0-3-3)"
   },
   "items": [
@@ -6044,7 +6044,7 @@
       "raw_pairs": [
         [
           "market cap",
-          "947.12B"
+          "947.11B"
         ],
         [
           "enterprise value",
@@ -7274,7 +7274,7 @@
         ],
         [
           "price target difference",
-          "23.94%"
+          "24.31%"
         ],
         [
           "analyst consensus",
@@ -9979,7 +9979,7 @@
         ],
         [
           "forward ps",
-          "3.48"
+          "3.46"
         ],
         [
           "pb ratio",
@@ -12841,7 +12841,7 @@
         ],
         [
           "dividend yield",
-          "0.49%"
+          "0.50%"
         ],
         [
           "dividend growth (yoy)",
@@ -17582,7 +17582,7 @@
         ],
         [
           "dividend yield",
-          "1.89%"
+          "1.94%"
         ],
         [
           "dividend growth (yoy)",
@@ -18591,7 +18591,7 @@
         ],
         [
           "forward pe",
-          "91.67"
+          "91.69"
         ],
         [
           "ps ratio",
@@ -21497,7 +21497,7 @@
         ],
         [
           "price target difference",
-          "22.72%"
+          "24.08%"
         ],
         [
           "analyst consensus",
@@ -21892,7 +21892,7 @@
         ],
         [
           "dividend yield",
-          "1.09%"
+          "1.11%"
         ],
         [
           "dividend growth (yoy)",
@@ -24917,7 +24917,7 @@
         ],
         [
           "dividend yield",
-          "0.58%"
+          "0.59%"
         ],
         [
           "dividend growth (yoy)",
@@ -27934,7 +27934,7 @@
         ],
         [
           "dividend yield",
-          "2.35%"
+          "2.27%"
         ],
         [
           "dividend growth (yoy)",
@@ -27954,7 +27954,7 @@
         ],
         [
           "shareholder yield",
-          "6.19%"
+          "6.28%"
         ],
         [
           "earnings yield",
@@ -30089,7 +30089,7 @@
         ],
         [
           "dividend yield",
-          "0.12%"
+          "0.13%"
         ],
         [
           "dividend growth (yoy)",
@@ -30109,7 +30109,7 @@
         ],
         [
           "shareholder yield",
-          "-6.55%"
+          "-6.57%"
         ],
         [
           "earnings yield",
@@ -31050,11 +31050,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "183.63B"
+          "183.48B"
         ],
         [
           "enterprise value",
-          "185.45B"
+          "185.30B"
         ],
         [
           "earnings date",
@@ -31070,7 +31070,7 @@
         ],
         [
           "shares outstanding",
-          "162.60M"
+          "162.48M"
         ],
         [
           "shares change (yoy)",
@@ -31086,7 +31086,7 @@
         ],
         [
           "owned by institutions (%)",
-          "79.25%"
+          "79.31%"
         ],
         [
           "float",
@@ -31102,7 +31102,7 @@
         ],
         [
           "ps ratio",
-          "6.73"
+          "6.72"
         ],
         [
           "forward ps",
@@ -31118,11 +31118,11 @@
         ],
         [
           "p/fcf ratio",
-          "50.01"
+          "49.97"
         ],
         [
           "p/ocf ratio",
-          "45.06"
+          "45.03"
         ],
         [
           "peg ratio",
@@ -31130,7 +31130,7 @@
         ],
         [
           "ev / earnings",
-          "28.20"
+          "28.18"
         ],
         [
           "ev / sales",
@@ -31138,15 +31138,15 @@
         ],
         [
           "ev / ebitda",
-          "20.86"
+          "20.84"
         ],
         [
           "ev / ebit",
-          "20.86"
+          "20.84"
         ],
         [
           "ev / fcf",
-          "50.50"
+          "50.46"
         ],
         [
           "current ratio",
@@ -31310,7 +31310,7 @@
         ],
         [
           "net cash per share",
-          "-$11.19"
+          "-$11.20"
         ],
         [
           "equity (book value)",
@@ -31346,7 +31346,7 @@
         ],
         [
           "fcf per share",
-          "$22.58"
+          "$22.60"
         ],
         [
           "gross margin",
@@ -33545,7 +33545,7 @@
         ],
         [
           "dividend yield",
-          "2.23%"
+          "2.28%"
         ],
         [
           "dividend growth (yoy)",
@@ -36163,11 +36163,11 @@
         ],
         [
           "price target",
-          "$28.83"
+          "$28.63"
         ],
         [
           "price target difference",
-          "10.04%"
+          "9.28%"
         ],
         [
           "analyst consensus",
@@ -36709,7 +36709,7 @@
         ],
         [
           "forward pe",
-          "18.27"
+          "18.29"
         ],
         [
           "ps ratio",
@@ -37025,11 +37025,11 @@
         ],
         [
           "price target",
-          "$575.17"
+          "$569.50"
         ],
         [
           "price target difference",
-          "76.16%"
+          "69.66%"
         ],
         [
           "analyst consensus",
@@ -37092,11 +37092,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "142.25B"
+          "140.27B"
         ],
         [
           "enterprise value",
-          "157.85B"
+          "155.87B"
         ],
         [
           "earnings date",
@@ -37112,7 +37112,7 @@
         ],
         [
           "shares outstanding",
-          "1.22B"
+          "1.20B"
         ],
         [
           "shares change (yoy)",
@@ -37124,11 +37124,11 @@
         ],
         [
           "owned by insiders (%)",
-          "0.08%"
+          "0.09%"
         ],
         [
           "owned by institutions (%)",
-          "85.11%"
+          "86.31%"
         ],
         [
           "float",
@@ -37140,15 +37140,15 @@
         ],
         [
           "forward pe",
-          "10.78"
+          "11.83"
         ],
         [
           "ps ratio",
-          "2.22"
+          "2.18"
         ],
         [
           "forward ps",
-          "1.92"
+          "1.89"
         ],
         [
           "pb ratio",
@@ -37156,39 +37156,39 @@
         ],
         [
           "p/tbv ratio",
-          "2.18"
+          "2.15"
         ],
         [
           "p/fcf ratio",
-          "14.13"
+          "13.94"
         ],
         [
           "p/ocf ratio",
-          "6.49"
+          "6.40"
         ],
         [
           "peg ratio",
-          "1.06"
+          "1.16"
         ],
         [
           "ev / earnings",
-          "17.06"
+          "16.84"
         ],
         [
           "ev / sales",
-          "2.47"
+          "2.42"
         ],
         [
           "ev / ebitda",
-          "6.25"
+          "6.17"
         ],
         [
           "ev / ebit",
-          "11.75"
+          "11.60"
         ],
         [
           "ev / fcf",
-          "15.68"
+          "15.49"
         ],
         [
           "current ratio",
@@ -37220,11 +37220,11 @@
         ],
         [
           "return on assets (roa)",
-          "7.31%"
+          "7.53%"
         ],
         [
           "return on invested capital (roic)",
-          "11.29%"
+          "11.63%"
         ],
         [
           "return on capital employed (roce)",
@@ -37236,11 +37236,11 @@
         ],
         [
           "revenue per employee",
-          "$6.47M"
+          "$6.51M"
         ],
         [
           "profits per employee",
-          "$934,848"
+          "$934,646"
         ],
         [
           "employee count",
@@ -37296,7 +37296,7 @@
         ],
         [
           "short % of shares out",
-          "1.70%"
+          "1.72%"
         ],
         [
           "short % of float",
@@ -37308,15 +37308,15 @@
         ],
         [
           "revenue",
-          "64.01B"
+          "64.46B"
         ],
         [
           "gross profit",
-          "30.22B"
+          "30.67B"
         ],
         [
           "operating income",
-          "14.44B"
+          "14.88B"
         ],
         [
           "pretax income",
@@ -37324,7 +37324,7 @@
         ],
         [
           "net income",
-          "9.26B"
+          "9.25B"
         ],
         [
           "ebitda",
@@ -37352,7 +37352,7 @@
         ],
         [
           "net cash per share",
-          "-$12.80"
+          "-$12.98"
         ],
         [
           "equity (book value)",
@@ -37388,23 +37388,23 @@
         ],
         [
           "fcf per share",
-          "$8.26"
+          "$8.38"
         ],
         [
           "gross margin",
-          "47.21%"
+          "47.57%"
         ],
         [
           "operating margin",
-          "22.56%"
+          "23.08%"
         ],
         [
           "pretax margin",
-          "22.84%"
+          "22.68%"
         ],
         [
           "profit margin",
-          "14.50%"
+          "14.40%"
         ],
         [
           "ebitda margin",
@@ -37416,7 +37416,7 @@
         ],
         [
           "fcf margin",
-          "15.72%"
+          "15.61%"
         ],
         [
           "dividend per share",
@@ -37448,11 +37448,11 @@
         ],
         [
           "earnings yield",
-          "6.51%"
+          "6.60%"
         ],
         [
           "fcf yield",
-          "7.07%"
+          "7.17%"
         ],
         [
           "price target",
@@ -37460,7 +37460,7 @@
         ],
         [
           "price target difference",
-          "21.17%"
+          "21.21%"
         ],
         [
           "analyst consensus",
@@ -37508,11 +37508,11 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "3.1"
         ],
         [
           "piotroski f-score",
-          "5"
+          "6"
         ]
       ],
       "errors": []
@@ -41458,7 +41458,7 @@
         ],
         [
           "forward pe",
-          "31.14"
+          "30.95"
         ],
         [
           "ps ratio",
@@ -41486,7 +41486,7 @@
         ],
         [
           "peg ratio",
-          "2.83"
+          "2.81"
         ],
         [
           "ev / earnings",
@@ -41774,11 +41774,11 @@
         ],
         [
           "price target",
-          "$1,072.09"
+          "$1,075.17"
         ],
         [
           "price target difference",
-          "-1.90%"
+          "0.50%"
         ],
         [
           "analyst consensus",
@@ -41889,7 +41889,7 @@
         ],
         [
           "forward pe",
-          "13.32"
+          "13.33"
         ],
         [
           "ps ratio",
@@ -44906,7 +44906,7 @@
         ],
         [
           "forward pe",
-          "50.92"
+          "50.62"
         ],
         [
           "ps ratio",
@@ -44934,7 +44934,7 @@
         ],
         [
           "peg ratio",
-          "2.02"
+          "2.01"
         ],
         [
           "ev / earnings",
@@ -45210,7 +45210,7 @@
         ],
         [
           "shareholder yield",
-          "1.24%"
+          "1.23%"
         ],
         [
           "earnings yield",
@@ -45226,7 +45226,7 @@
         ],
         [
           "price target difference",
-          "8.82%"
+          "10.13%"
         ],
         [
           "analyst consensus",
@@ -45860,7 +45860,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "6.20%"
+          "6.23%"
         ],
         [
           "revenue per employee",
@@ -45892,7 +45892,7 @@
         ],
         [
           "beta (5y)",
-          "0.56"
+          "0.57"
         ],
         [
           "52-week price change",
@@ -46199,7 +46199,7 @@
         ],
         [
           "forward pe",
-          "10.32"
+          "10.46"
         ],
         [
           "ps ratio",
@@ -46227,7 +46227,7 @@
         ],
         [
           "peg ratio",
-          "0.30"
+          "0.72"
         ],
         [
           "ev / earnings",
@@ -49105,7 +49105,7 @@
         ],
         [
           "price target difference",
-          "12.56%"
+          "12.64%"
         ],
         [
           "analyst consensus",
@@ -50086,7 +50086,7 @@
         ],
         [
           "forward pe",
-          "195.03"
+          "194.39"
         ],
         [
           "ps ratio",
@@ -50094,7 +50094,7 @@
         ],
         [
           "forward ps",
-          "33.71"
+          "31.75"
         ],
         [
           "pb ratio",
@@ -50114,7 +50114,7 @@
         ],
         [
           "peg ratio",
-          "3.92"
+          "3.91"
         ],
         [
           "ev / earnings",
@@ -50390,7 +50390,7 @@
         ],
         [
           "shareholder yield",
-          "-2.02%"
+          "n/a"
         ],
         [
           "earnings yield",
@@ -50402,11 +50402,11 @@
         ],
         [
           "price target",
-          "$279.00"
+          "$288.34"
         ],
         [
           "price target difference",
-          "-5.38%"
+          "1.38%"
         ],
         [
           "analyst consensus",
@@ -51663,7 +51663,7 @@
         ],
         [
           "dividend yield",
-          "3.13%"
+          "3.17%"
         ],
         [
           "dividend growth (yoy)",
@@ -52237,7 +52237,7 @@
         ],
         [
           "pe ratio",
-          "459.60"
+          "462.27"
         ],
         [
           "forward pe",
@@ -52561,7 +52561,7 @@
         ],
         [
           "price target difference",
-          "20.53%"
+          "21.89%"
         ],
         [
           "analyst consensus",
@@ -52956,7 +52956,7 @@
         ],
         [
           "dividend yield",
-          "0.86%"
+          "0.88%"
         ],
         [
           "dividend growth (yoy)",
@@ -52976,7 +52976,7 @@
         ],
         [
           "shareholder yield",
-          "0.95%"
+          "0.93%"
         ],
         [
           "earnings yield",
@@ -53530,7 +53530,7 @@
         ],
         [
           "pe ratio",
-          "18.65"
+          "18.60"
         ],
         [
           "forward pe",
@@ -53917,11 +53917,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "93.24B"
+          "92.51B"
         ],
         [
           "enterprise value",
-          "117.24B"
+          "116.51B"
         ],
         [
           "earnings date",
@@ -53933,11 +53933,11 @@
         ],
         [
           "current share class",
-          "357.10M"
+          "354.31M"
         ],
         [
           "shares outstanding",
-          "357.10M"
+          "354.31M"
         ],
         [
           "shares change (yoy)",
@@ -53949,11 +53949,11 @@
         ],
         [
           "owned by insiders (%)",
-          "0.22%"
+          "0.23%"
         ],
         [
           "owned by institutions (%)",
-          "75.79%"
+          "76.38%"
         ],
         [
           "float",
@@ -53961,7 +53961,7 @@
         ],
         [
           "pe ratio",
-          "27.31"
+          "25.28"
         ],
         [
           "forward pe",
@@ -53969,27 +53969,27 @@
         ],
         [
           "ps ratio",
-          "2.98"
-        ],
-        [
-          "forward ps",
-          "2.62"
-        ],
-        [
-          "pb ratio",
           "2.96"
         ],
         [
+          "forward ps",
+          "2.60"
+        ],
+        [
+          "pb ratio",
+          "2.94"
+        ],
+        [
           "p/tbv ratio",
-          "4.56"
+          "4.52"
         ],
         [
           "p/fcf ratio",
-          "316.07"
+          "313.59"
         ],
         [
           "p/ocf ratio",
-          "22.17"
+          "21.99"
         ],
         [
           "peg ratio",
@@ -53997,23 +53997,23 @@
         ],
         [
           "ev / earnings",
-          "33.84"
+          "33.63"
         ],
         [
           "ev / sales",
-          "3.75"
+          "3.73"
         ],
         [
           "ev / ebitda",
-          "14.19"
+          "14.10"
         ],
         [
           "ev / ebit",
-          "25.51"
+          "25.35"
         ],
         [
           "ev / fcf",
-          "397.43"
+          "394.96"
         ],
         [
           "current ratio",
@@ -54057,7 +54057,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "8.67%"
+          "8.66%"
         ],
         [
           "revenue per employee",
@@ -54121,7 +54121,7 @@
         ],
         [
           "short % of shares out",
-          "2.98%"
+          "3.01%"
         ],
         [
           "short % of float",
@@ -54177,7 +54177,7 @@
         ],
         [
           "net cash per share",
-          "-$67.22"
+          "-$67.75"
         ],
         [
           "equity (book value)",
@@ -54273,7 +54273,7 @@
         ],
         [
           "earnings yield",
-          "3.72%"
+          "3.75%"
         ],
         [
           "fcf yield",
@@ -54360,7 +54360,7 @@
         ],
         [
           "ex-dividend date",
-          "Jun 9, 2026"
+          "Sep 9, 2026"
         ],
         [
           "current share class",
@@ -57302,7 +57302,7 @@
         ],
         [
           "price target difference",
-          "2.37%"
+          "3.95%"
         ],
         [
           "analyst consensus",
@@ -57733,7 +57733,7 @@
         ],
         [
           "price target difference",
-          "4.43%"
+          "5.01%"
         ],
         [
           "analyst consensus",
@@ -58702,7 +58702,7 @@
         ],
         [
           "pe ratio",
-          "34.33"
+          "34.32"
         ],
         [
           "forward pe",
@@ -58994,7 +58994,7 @@
         ],
         [
           "dividend growth (yoy)",
-          "4.03%"
+          "5.21%"
         ],
         [
           "years of dividend growth",
@@ -59022,11 +59022,11 @@
         ],
         [
           "price target",
-          "$168.85"
+          "$169.81"
         ],
         [
           "price target difference",
-          "7.61%"
+          "8.22%"
         ],
         [
           "analyst consensus",
@@ -59457,7 +59457,7 @@
         ],
         [
           "price target difference",
-          "17.09%"
+          "17.00%"
         ],
         [
           "analyst consensus",
@@ -60283,7 +60283,7 @@
         ],
         [
           "dividend yield",
-          "1.46%"
+          "1.49%"
         ],
         [
           "dividend growth (yoy)",
@@ -62869,7 +62869,7 @@
         ],
         [
           "dividend yield",
-          "1.83%"
+          "1.87%"
         ],
         [
           "dividend growth (yoy)",
@@ -62889,7 +62889,7 @@
         ],
         [
           "shareholder yield",
-          "3.50%"
+          "3.46%"
         ],
         [
           "earnings yield",
@@ -70196,7 +70196,7 @@
         ],
         [
           "dividend yield",
-          "1.13%"
+          "1.16%"
         ],
         [
           "dividend growth (yoy)",
@@ -70216,7 +70216,7 @@
         ],
         [
           "shareholder yield",
-          "3.03%"
+          "3.00%"
         ],
         [
           "earnings yield",
@@ -73688,7 +73688,7 @@
         ],
         [
           "price target difference",
-          "18.72%"
+          "18.76%"
         ],
         [
           "analyst consensus",
@@ -75001,11 +75001,11 @@
         ],
         [
           "lynch fair value",
-          "Upgrade"
+          "$47.81"
         ],
         [
           "lynch upside",
-          "Upgrade"
+          "-85.15%"
         ],
         [
           "graham number",
@@ -75384,7 +75384,7 @@
         ],
         [
           "dividend yield",
-          "4.00%"
+          "4.06%"
         ],
         [
           "dividend growth (yoy)",
@@ -75404,7 +75404,7 @@
         ],
         [
           "shareholder yield",
-          "4.11%"
+          "4.06%"
         ],
         [
           "earnings yield",
@@ -75531,7 +75531,7 @@
         ],
         [
           "forward pe",
-          "26.40"
+          "26.39"
         ],
         [
           "ps ratio",
@@ -75559,7 +75559,7 @@
         ],
         [
           "peg ratio",
-          "2.39"
+          "2.50"
         ],
         [
           "ev / earnings",
@@ -75847,11 +75847,11 @@
         ],
         [
           "price target",
-          "$516.64"
+          "$519.36"
         ],
         [
           "price target difference",
-          "8.98%"
+          "9.55%"
         ],
         [
           "analyst consensus",
@@ -78840,7 +78840,7 @@
         ],
         [
           "dividend yield",
-          "2.10%"
+          "2.12%"
         ],
         [
           "dividend growth (yoy)",
@@ -78860,7 +78860,7 @@
         ],
         [
           "shareholder yield",
-          "2.04%"
+          "2.02%"
         ],
         [
           "earnings yield",
@@ -81573,7 +81573,7 @@
         ],
         [
           "forward pe",
-          "10.25"
+          "10.00"
         ],
         [
           "ps ratio",
@@ -81889,11 +81889,11 @@
         ],
         [
           "price target",
-          "$258.09"
+          "$262.27"
         ],
         [
           "price target difference",
-          "-6.19%"
+          "-4.67%"
         ],
         [
           "analyst consensus",
@@ -82739,7 +82739,7 @@
         ],
         [
           "shareholder yield",
-          "-0.56%"
+          "-0.55%"
         ],
         [
           "earnings yield",
@@ -83253,7 +83253,7 @@
         ],
         [
           "enterprise value",
-          "95.35B"
+          "95.36B"
         ],
         [
           "earnings date",
@@ -83297,7 +83297,7 @@
         ],
         [
           "forward pe",
-          "490.71"
+          "319.69"
         ],
         [
           "ps ratio",
@@ -83337,7 +83337,7 @@
         ],
         [
           "ev / ebitda",
-          "25.07"
+          "25.08"
         ],
         [
           "ev / ebit",
@@ -83497,7 +83497,7 @@
         ],
         [
           "cash & cash equivalents",
-          "3.30B"
+          "3.28B"
         ],
         [
           "total debt",
@@ -83505,7 +83505,7 @@
         ],
         [
           "net cash",
-          "-29.17B"
+          "-29.19B"
         ],
         [
           "net cash per share",
@@ -84115,7 +84115,7 @@
         ],
         [
           "enterprise value",
-          "64.68B"
+          "64.69B"
         ],
         [
           "earnings date",
@@ -84131,7 +84131,7 @@
         ],
         [
           "shares outstanding",
-          "316.94M"
+          "316.95M"
         ],
         [
           "shares change (yoy)",
@@ -84159,7 +84159,7 @@
         ],
         [
           "forward pe",
-          "18.11"
+          "18.24"
         ],
         [
           "ps ratio",
@@ -84207,7 +84207,7 @@
         ],
         [
           "ev / fcf",
-          "25.91"
+          "25.92"
         ],
         [
           "current ratio",
@@ -84407,7 +84407,7 @@
         ],
         [
           "fcf per share",
-          "$7.88"
+          "$7.87"
         ],
         [
           "gross margin",
@@ -84479,7 +84479,7 @@
         ],
         [
           "price target difference",
-          "61.80%"
+          "56.31%"
         ],
         [
           "analyst consensus",
@@ -85883,7 +85883,7 @@
         ],
         [
           "forward pe",
-          "17.44"
+          "17.16"
         ],
         [
           "ps ratio",
@@ -85911,7 +85911,7 @@
         ],
         [
           "peg ratio",
-          "1.90"
+          "1.95"
         ],
         [
           "ev / earnings",
@@ -86203,7 +86203,7 @@
         ],
         [
           "price target difference",
-          "-7.07%"
+          "-7.00%"
         ],
         [
           "analyst consensus",
@@ -86634,7 +86634,7 @@
         ],
         [
           "price target difference",
-          "17.08%"
+          "17.35%"
         ],
         [
           "analyst consensus",
@@ -87559,11 +87559,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "64.31B"
+          "63.75B"
         ],
         [
           "enterprise value",
-          "91.12B"
+          "84.96B"
         ],
         [
           "earnings date",
@@ -87579,23 +87579,23 @@
         ],
         [
           "shares outstanding",
-          "643.44M"
+          "637.80M"
         ],
         [
           "shares change (yoy)",
-          "-5.03%"
+          "-4.58%"
         ],
         [
           "shares change (qoq)",
-          "-0.98%"
+          "-1.34%"
         ],
         [
           "owned by insiders (%)",
-          "0.22%"
+          "0.23%"
         ],
         [
           "owned by institutions (%)",
-          "77.95%"
+          "78.63%"
         ],
         [
           "float",
@@ -87603,27 +87603,27 @@
         ],
         [
           "pe ratio",
-          "19.38"
+          "19.16"
         ],
         [
           "forward pe",
-          "9.49"
+          "9.48"
         ],
         [
           "ps ratio",
-          "0.83"
-        ],
-        [
-          "forward ps",
           "0.80"
         ],
         [
+          "forward ps",
+          "0.79"
+        ],
+        [
           "pb ratio",
-          "2.36"
+          "2.32"
         ],
         [
           "p/tbv ratio",
-          "3.62"
+          "3.56"
         ],
         [
           "p/fcf ratio",
@@ -87631,7 +87631,7 @@
         ],
         [
           "p/ocf ratio",
-          "4.14"
+          "4.11"
         ],
         [
           "peg ratio",
@@ -87639,19 +87639,19 @@
         ],
         [
           "ev / earnings",
-          "26.53"
+          "24.69"
         ],
         [
           "ev / sales",
-          "1.17"
+          "1.07"
         ],
         [
           "ev / ebitda",
-          "10.66"
+          "9.94"
         ],
         [
           "ev / ebit",
-          "10.66"
+          "9.94"
         ],
         [
           "ev / fcf",
@@ -87659,19 +87659,19 @@
         ],
         [
           "current ratio",
-          "2.09"
+          "4.20"
         ],
         [
           "quick ratio",
-          "1.75"
+          "3.98"
         ],
         [
           "debt / equity",
-          "1.78"
+          "1.45"
         ],
         [
           "debt / ebitda",
-          "5.79"
+          "4.74"
         ],
         [
           "debt / fcf",
@@ -87679,11 +87679,11 @@
         ],
         [
           "interest coverage",
-          "8.01"
+          "7.84"
         ],
         [
           "return on equity (roe)",
-          "13.01%"
+          "13.09%"
         ],
         [
           "return on assets (roa)",
@@ -87691,23 +87691,23 @@
         ],
         [
           "return on invested capital (roic)",
-          "4.54%"
+          "5.44%"
         ],
         [
           "return on capital employed (roce)",
-          "1.23%"
+          "1.16%"
         ],
         [
           "weighted average cost of capital (wacc)",
-          "5.48%"
+          "5.95%"
         ],
         [
           "revenue per employee",
-          "$1.69M"
+          "$1.73M"
         ],
         [
           "profits per employee",
-          "$74,652"
+          "$74,804"
         ],
         [
           "employee count",
@@ -87723,11 +87723,11 @@
         ],
         [
           "income tax",
-          "1.20B"
+          "1.21B"
         ],
         [
           "effective tax rate",
-          "24.91%"
+          "24.85%"
         ],
         [
           "beta (5y)",
@@ -87763,7 +87763,7 @@
         ],
         [
           "short % of shares out",
-          "1.99%"
+          "2.00%"
         ],
         [
           "short % of float",
@@ -87775,23 +87775,23 @@
         ],
         [
           "revenue",
-          "77.58B"
+          "79.40B"
         ],
         [
           "gross profit",
-          "18.43B"
+          "18.91B"
         ],
         [
           "operating income",
-          "5.19B"
+          "5.27B"
         ],
         [
           "pretax income",
-          "4.81B"
+          "4.87B"
         ],
         [
           "net income",
-          "3.43B"
+          "3.44B"
         ],
         [
           "ebitda",
@@ -87803,35 +87803,35 @@
         ],
         [
           "earnings per share (eps)",
-          "$5.16"
+          "$5.22"
         ],
         [
           "cash & cash equivalents",
-          "27.64B"
+          "27.32B"
         ],
         [
           "total debt",
-          "49.49B"
+          "40.51B"
         ],
         [
           "net cash",
-          "-26.80B"
+          "-21.21B"
         ],
         [
           "net cash per share",
-          "-$41.66"
+          "-$33.26"
         ],
         [
           "equity (book value)",
-          "27.80B"
+          "27.96B"
         ],
         [
           "book value per share",
-          "42.30"
+          "43.02"
         ],
         [
           "working capital",
-          "49.32B"
+          "62.95B"
         ],
         [
           "operating cash flow",
@@ -87859,19 +87859,19 @@
         ],
         [
           "gross margin",
-          "23.75%"
+          "23.81%"
         ],
         [
           "operating margin",
-          "6.69%"
+          "6.64%"
         ],
         [
           "pretax margin",
-          "6.20%"
+          "6.13%"
         ],
         [
           "profit margin",
-          "4.66%"
+          "4.57%"
         ],
         [
           "ebitda margin",
@@ -87907,15 +87907,15 @@
         ],
         [
           "buyback yield",
-          "5.03%"
+          "4.58%"
         ],
         [
           "shareholder yield",
-          "7.41%"
+          "6.95%"
         ],
         [
           "earnings yield",
-          "5.34%"
+          "5.40%"
         ],
         [
           "fcf yield",
@@ -87923,11 +87923,11 @@
         ],
         [
           "price target",
-          "$98.94"
+          "$100.44"
         ],
         [
           "price target difference",
-          "-1.01%"
+          "0.49%"
         ],
         [
           "analyst consensus",
@@ -87979,7 +87979,7 @@
         ],
         [
           "piotroski f-score",
-          "6"
+          "7"
         ]
       ],
       "errors": []
@@ -88038,7 +88038,7 @@
         ],
         [
           "forward pe",
-          "16.88"
+          "16.90"
         ],
         [
           "ps ratio",
@@ -88354,11 +88354,11 @@
         ],
         [
           "price target",
-          "$366.25"
+          "$367.25"
         ],
         [
           "price target difference",
-          "12.69%"
+          "13.00%"
         ],
         [
           "analyst consensus",
@@ -90513,7 +90513,7 @@
         ],
         [
           "price target difference",
-          "1.53%"
+          "2.47%"
         ],
         [
           "analyst consensus",
@@ -91810,11 +91810,11 @@
         ],
         [
           "price target",
-          "$68.01"
+          "$68.06"
         ],
         [
           "price target difference",
-          "9.06%"
+          "9.14%"
         ],
         [
           "analyst consensus",
@@ -93222,7 +93222,7 @@
         ],
         [
           "pe ratio",
-          "54.23"
+          "55.21"
         ],
         [
           "forward pe",
@@ -94471,11 +94471,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "57.57B"
+          "57.52B"
         ],
         [
           "enterprise value",
-          "76.61B"
+          "76.55B"
         ],
         [
           "earnings date",
@@ -94491,7 +94491,7 @@
         ],
         [
           "shares outstanding",
-          "214.64M"
+          "214.43M"
         ],
         [
           "shares change (yoy)",
@@ -94507,7 +94507,7 @@
         ],
         [
           "owned by institutions (%)",
-          "97.32%"
+          "97.42%"
         ],
         [
           "float",
@@ -94519,7 +94519,7 @@
         ],
         [
           "forward pe",
-          "22.23"
+          "22.53"
         ],
         [
           "ps ratio",
@@ -94527,7 +94527,7 @@
         ],
         [
           "forward ps",
-          "2.69"
+          "2.68"
         ],
         [
           "pb ratio",
@@ -94535,39 +94535,39 @@
         ],
         [
           "p/tbv ratio",
-          "61.56"
+          "61.50"
         ],
         [
           "p/fcf ratio",
-          "219.83"
+          "219.61"
         ],
         [
           "p/ocf ratio",
-          "15.55"
+          "15.53"
         ],
         [
           "peg ratio",
-          "1.22"
+          "1.24"
         ],
         [
           "ev / earnings",
-          "33.95"
+          "33.92"
         ],
         [
           "ev / sales",
-          "4.58"
+          "4.57"
         ],
         [
           "ev / ebitda",
-          "13.91"
+          "13.90"
         ],
         [
           "ev / ebit",
-          "19.97"
+          "19.96"
         ],
         [
           "ev / fcf",
-          "292.50"
+          "292.28"
         ],
         [
           "current ratio",
@@ -94731,7 +94731,7 @@
         ],
         [
           "net cash per share",
-          "-$88.67"
+          "-$88.75"
         ],
         [
           "equity (book value)",
@@ -94803,7 +94803,7 @@
         ],
         [
           "dividend yield",
-          "1.92%"
+          "1.86%"
         ],
         [
           "dividend growth (yoy)",
@@ -94831,7 +94831,7 @@
         ],
         [
           "fcf yield",
-          "0.45%"
+          "0.46%"
         ],
         [
           "price target",
@@ -94839,7 +94839,7 @@
         ],
         [
           "price target difference",
-          "10.83%"
+          "10.87%"
         ],
         [
           "analyst consensus",
@@ -97101,11 +97101,11 @@
         ],
         [
           "pe ratio",
-          "16.49"
+          "8.60"
         ],
         [
           "forward pe",
-          "12.82"
+          "12.91"
         ],
         [
           "ps ratio",
@@ -97421,11 +97421,11 @@
         ],
         [
           "price target",
-          "$64.78"
+          "$65.00"
         ],
         [
           "price target difference",
-          "15.60%"
+          "15.99%"
         ],
         [
           "analyst consensus",
@@ -97536,7 +97536,7 @@
         ],
         [
           "forward pe",
-          "16.00"
+          "14.81"
         ],
         [
           "ps ratio",
@@ -97852,11 +97852,11 @@
         ],
         [
           "price target",
-          "$305.00"
+          "$304.95"
         ],
         [
           "price target difference",
-          "14.55%"
+          "14.74%"
         ],
         [
           "analyst consensus",
@@ -99212,11 +99212,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "53.20B"
+          "53.10B"
         ],
         [
           "enterprise value",
-          "65.36B"
+          "65.25B"
         ],
         [
           "earnings date",
@@ -99232,7 +99232,7 @@
         ],
         [
           "shares outstanding",
-          "280.57M"
+          "280.02M"
         ],
         [
           "shares change (yoy)",
@@ -99244,11 +99244,11 @@
         ],
         [
           "owned by insiders (%)",
-          "26.96%"
+          "27.01%"
         ],
         [
           "owned by institutions (%)",
-          "68.74%"
+          "68.87%"
         ],
         [
           "float",
@@ -99264,7 +99264,7 @@
         ],
         [
           "ps ratio",
-          "3.25"
+          "3.27"
         ],
         [
           "forward ps",
@@ -99280,11 +99280,11 @@
         ],
         [
           "p/fcf ratio",
-          "13.32"
+          "13.30"
         ],
         [
           "p/ocf ratio",
-          "5.25"
+          "5.24"
         ],
         [
           "peg ratio",
@@ -99292,23 +99292,23 @@
         ],
         [
           "ev / earnings",
-          "44.80"
+          "44.76"
         ],
         [
           "ev / sales",
-          "4.00"
+          "4.02"
         ],
         [
           "ev / ebitda",
-          "10.34"
+          "10.32"
         ],
         [
           "ev / ebit",
-          "60.40"
+          "60.31"
         ],
         [
           "ev / fcf",
-          "16.36"
+          "16.34"
         ],
         [
           "current ratio",
@@ -99332,7 +99332,7 @@
         ],
         [
           "interest coverage",
-          "3.95"
+          "3.71"
         ],
         [
           "return on equity (roe)",
@@ -99340,11 +99340,11 @@
         ],
         [
           "return on assets (roa)",
-          "1.29%"
+          "1.31%"
         ],
         [
           "return on invested capital (roic)",
-          "2.14%"
+          "2.17%"
         ],
         [
           "return on capital employed (roce)",
@@ -99352,15 +99352,15 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "5.64%"
+          "5.66%"
         ],
         [
           "revenue per employee",
-          "$9.28M"
+          "$9.22M"
         ],
         [
           "profits per employee",
-          "$828,036"
+          "$827,469"
         ],
         [
           "employee count",
@@ -99372,7 +99372,7 @@
         ],
         [
           "inventory turnover",
-          "50.77"
+          "49.36"
         ],
         [
           "income tax",
@@ -99416,7 +99416,7 @@
         ],
         [
           "short % of shares out",
-          "3.27%"
+          "3.28%"
         ],
         [
           "short % of float",
@@ -99428,15 +99428,15 @@
         ],
         [
           "revenue",
-          "16.35B"
+          "16.25B"
         ],
         [
           "gross profit",
-          "11.73B"
+          "11.76B"
         ],
         [
           "operating income",
-          "1.47B"
+          "1.49B"
         ],
         [
           "pretax income",
@@ -99472,7 +99472,7 @@
         ],
         [
           "net cash per share",
-          "-$43.31"
+          "-$43.40"
         ],
         [
           "equity (book value)",
@@ -99508,23 +99508,23 @@
         ],
         [
           "fcf per share",
-          "$14.24"
+          "$14.26"
         ],
         [
           "gross margin",
-          "71.74%"
+          "72.35%"
         ],
         [
           "operating margin",
-          "8.99%"
+          "9.16%"
         ],
         [
           "pretax margin",
-          "11.30%"
+          "11.37%"
         ],
         [
           "profit margin",
-          "8.97%"
+          "9.03%"
         ],
         [
           "ebitda margin",
@@ -99536,7 +99536,7 @@
         ],
         [
           "fcf margin",
-          "24.43%"
+          "24.58%"
         ],
         [
           "dividend per share",
@@ -99544,7 +99544,7 @@
         ],
         [
           "dividend yield",
-          "2.36%"
+          "2.32%"
         ],
         [
           "dividend growth (yoy)",
@@ -99568,11 +99568,11 @@
         ],
         [
           "earnings yield",
-          "2.74%"
+          "2.75%"
         ],
         [
           "fcf yield",
-          "7.51%"
+          "7.52%"
         ],
         [
           "price target",
@@ -102597,7 +102597,7 @@
         ],
         [
           "price target difference",
-          "21.53%"
+          "21.84%"
         ],
         [
           "analyst consensus",
@@ -104432,7 +104432,7 @@
         ],
         [
           "forward pe",
-          "10.76"
+          "10.77"
         ],
         [
           "ps ratio",
@@ -104716,7 +104716,7 @@
         ],
         [
           "dividend yield",
-          "0.97%"
+          "0.94%"
         ],
         [
           "dividend growth (yoy)",
@@ -104859,7 +104859,7 @@
         ],
         [
           "pe ratio",
-          "23.10"
+          "22.73"
         ],
         [
           "forward pe",
@@ -107401,11 +107401,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "45.36B"
+          "45.37B"
         ],
         [
           "enterprise value",
-          "55.26B"
+          "55.31B"
         ],
         [
           "earnings date",
@@ -107437,7 +107437,7 @@
         ],
         [
           "owned by institutions (%)",
-          "50.76%"
+          "50.74%"
         ],
         [
           "float",
@@ -107445,7 +107445,7 @@
         ],
         [
           "pe ratio",
-          "43.67"
+          "43.37"
         ],
         [
           "forward pe",
@@ -107469,11 +107469,11 @@
         ],
         [
           "p/fcf ratio",
-          "30.00"
+          "29.35"
         ],
         [
           "p/ocf ratio",
-          "22.77"
+          "22.78"
         ],
         [
           "peg ratio",
@@ -107481,7 +107481,7 @@
         ],
         [
           "ev / earnings",
-          "79.74"
+          "78.90"
         ],
         [
           "ev / sales",
@@ -107489,15 +107489,15 @@
         ],
         [
           "ev / ebitda",
-          "19.46"
+          "19.48"
         ],
         [
           "ev / ebit",
-          "30.43"
+          "30.46"
         ],
         [
           "ev / fcf",
-          "36.55"
+          "35.78"
         ],
         [
           "current ratio",
@@ -107505,7 +107505,7 @@
         ],
         [
           "quick ratio",
-          "2.34"
+          "2.45"
         ],
         [
           "debt / equity",
@@ -107513,15 +107513,15 @@
         ],
         [
           "debt / ebitda",
-          "4.43"
+          "4.45"
         ],
         [
           "debt / fcf",
-          "8.32"
+          "8.18"
         ],
         [
           "interest coverage",
-          "2.37"
+          "2.33"
         ],
         [
           "return on equity (roe)",
@@ -107529,11 +107529,11 @@
         ],
         [
           "return on assets (roa)",
-          "2.94%"
+          "3.01%"
         ],
         [
           "return on invested capital (roic)",
-          "4.96%"
+          "5.08%"
         ],
         [
           "return on capital employed (roce)",
@@ -107549,7 +107549,7 @@
         ],
         [
           "profits per employee",
-          "$15,400"
+          "$15,578"
         ],
         [
           "employee count",
@@ -107625,7 +107625,7 @@
         ],
         [
           "operating income",
-          "1.78B"
+          "1.83B"
         ],
         [
           "pretax income",
@@ -107633,7 +107633,7 @@
         ],
         [
           "net income",
-          "693.00M"
+          "701.00M"
         ],
         [
           "ebitda",
@@ -107645,23 +107645,23 @@
         ],
         [
           "earnings per share (eps)",
-          "$0.79"
+          "$0.80"
         ],
         [
           "cash & cash equivalents",
-          "2.68B"
+          "2.70B"
         ],
         [
           "total debt",
-          "12.58B"
+          "12.64B"
         ],
         [
           "net cash",
-          "-9.90B"
+          "-9.94B"
         ],
         [
           "net cash per share",
-          "-$7.53"
+          "-$7.56"
         ],
         [
           "equity (book value)",
@@ -107681,7 +107681,7 @@
         ],
         [
           "capital expenditures",
-          "-480.00M"
+          "-446.00M"
         ],
         [
           "depreciation & amortization",
@@ -107689,15 +107689,15 @@
         ],
         [
           "net borrowing",
-          "-4.13B"
+          "-4.11B"
         ],
         [
           "free cash flow",
-          "1.51B"
+          "1.55B"
         ],
         [
           "fcf per share",
-          "$1.15"
+          "$1.18"
         ],
         [
           "gross margin",
@@ -107705,7 +107705,7 @@
         ],
         [
           "operating margin",
-          "5.96%"
+          "6.10%"
         ],
         [
           "pretax margin",
@@ -107725,7 +107725,7 @@
         ],
         [
           "fcf margin",
-          "5.05%"
+          "5.16%"
         ],
         [
           "dividend per share",
@@ -107757,11 +107757,11 @@
         ],
         [
           "earnings yield",
-          "1.53%"
+          "1.55%"
         ],
         [
           "fcf yield",
-          "3.33%"
+          "3.41%"
         ],
         [
           "price target",
@@ -109209,7 +109209,7 @@
         ],
         [
           "peg ratio",
-          "2.31"
+          "2.27"
         ],
         [
           "ev / earnings",
@@ -109932,7 +109932,7 @@
         ],
         [
           "price target difference",
-          "5.51%"
+          "7.07%"
         ],
         [
           "analyst consensus",
@@ -110327,7 +110327,7 @@
         ],
         [
           "dividend yield",
-          "3.86%"
+          "3.91%"
         ],
         [
           "dividend growth (yoy)",
@@ -110905,7 +110905,7 @@
         ],
         [
           "forward pe",
-          "38.04"
+          "37.90"
         ],
         [
           "ps ratio",
@@ -110933,7 +110933,7 @@
         ],
         [
           "peg ratio",
-          "2.75"
+          "2.74"
         ],
         [
           "ev / earnings",
@@ -111767,7 +111767,7 @@
         ],
         [
           "forward pe",
-          "18.44"
+          "18.43"
         ],
         [
           "ps ratio",
@@ -114780,11 +114780,11 @@
         ],
         [
           "pe ratio",
-          "26.09"
+          "26.69"
         ],
         [
           "forward pe",
-          "21.55"
+          "21.06"
         ],
         [
           "ps ratio",
@@ -115104,7 +115104,7 @@
         ],
         [
           "price target difference",
-          "22.03%"
+          "22.36%"
         ],
         [
           "analyst consensus",
@@ -115199,11 +115199,11 @@
         ],
         [
           "owned by insiders (%)",
-          "0.22%"
+          "0.23%"
         ],
         [
           "owned by institutions (%)",
-          "98.49%"
+          "99.52%"
         ],
         [
           "float",
@@ -115215,7 +115215,7 @@
         ],
         [
           "forward pe",
-          "9.55"
+          "9.48"
         ],
         [
           "ps ratio",
@@ -115223,7 +115223,7 @@
         ],
         [
           "forward ps",
-          "1.41"
+          "1.38"
         ],
         [
           "pb ratio",
@@ -115243,7 +115243,7 @@
         ],
         [
           "peg ratio",
-          "1.70"
+          "1.69"
         ],
         [
           "ev / earnings",
@@ -115511,7 +115511,7 @@
         ],
         [
           "payout ratio",
-          "35.12%"
+          "35.95%"
         ],
         [
           "buyback yield",
@@ -115535,7 +115535,7 @@
         ],
         [
           "price target difference",
-          "10.73%"
+          "10.92%"
         ],
         [
           "analyst consensus",
@@ -116397,7 +116397,7 @@
         ],
         [
           "price target difference",
-          "52.07%"
+          "50.96%"
         ],
         [
           "analyst consensus",
@@ -118615,11 +118615,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "41.32B"
+          "41.33B"
         ],
         [
           "enterprise value",
-          "69.78B"
+          "73.50B"
         ],
         [
           "earnings date",
@@ -118651,7 +118651,7 @@
         ],
         [
           "owned by institutions (%)",
-          "102.95%"
+          "102.94%"
         ],
         [
           "float",
@@ -118663,7 +118663,7 @@
         ],
         [
           "forward pe",
-          "12.44"
+          "12.45"
         ],
         [
           "ps ratio",
@@ -118683,7 +118683,7 @@
         ],
         [
           "p/fcf ratio",
-          "20.97"
+          "20.98"
         ],
         [
           "p/ocf ratio",
@@ -118691,27 +118691,27 @@
         ],
         [
           "peg ratio",
-          "1.33"
+          "1.31"
         ],
         [
           "ev / earnings",
-          "51.88"
+          "54.65"
         ],
         [
           "ev / sales",
-          "3.47"
+          "3.66"
         ],
         [
           "ev / ebitda",
-          "16.50"
+          "17.38"
         ],
         [
           "ev / ebit",
-          "21.41"
+          "22.55"
         ],
         [
           "ev / fcf",
-          "35.42"
+          "37.31"
         ],
         [
           "current ratio",
@@ -118723,19 +118723,19 @@
         ],
         [
           "debt / equity",
-          "0.89"
+          "1.00"
         ],
         [
           "debt / ebitda",
-          "7.09"
+          "7.97"
         ],
         [
           "debt / fcf",
-          "15.22"
+          "17.10"
         ],
         [
           "interest coverage",
-          "3.13"
+          "3.46"
         ],
         [
           "return on equity (roe)",
@@ -118743,11 +118743,11 @@
         ],
         [
           "return on assets (roa)",
-          "2.99%"
+          "3.27%"
         ],
         [
           "return on invested capital (roic)",
-          "4.17%"
+          "4.42%"
         ],
         [
           "return on capital employed (roce)",
@@ -118755,7 +118755,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "4.88%"
+          "4.54%"
         ],
         [
           "revenue per employee",
@@ -118775,7 +118775,7 @@
         ],
         [
           "inventory turnover",
-          "3.55"
+          "3.44"
         ],
         [
           "income tax",
@@ -118835,11 +118835,11 @@
         ],
         [
           "gross profit",
-          "9.92B"
+          "10.24B"
         ],
         [
           "operating income",
-          "3.40B"
+          "3.71B"
         ],
         [
           "pretax income",
@@ -118867,15 +118867,15 @@
         ],
         [
           "total debt",
-          "29.98B"
+          "33.69B"
         ],
         [
           "net cash",
-          "-28.46B"
+          "-32.18B"
         ],
         [
           "net cash per share",
-          "-$20.92"
+          "-$23.64"
         ],
         [
           "equity (book value)",
@@ -118915,11 +118915,11 @@
         ],
         [
           "gross margin",
-          "49.39%"
+          "50.96%"
         ],
         [
           "operating margin",
-          "16.91%"
+          "18.47%"
         ],
         [
           "pretax margin",
@@ -118971,7 +118971,7 @@
         ],
         [
           "earnings yield",
-          "3.26%"
+          "3.25%"
         ],
         [
           "fcf yield",
@@ -119031,7 +119031,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "0.75"
         ],
         [
           "piotroski f-score",
@@ -119062,11 +119062,11 @@
         ],
         [
           "current share class",
-          "345.20M"
+          "345.21M"
         ],
         [
           "shares outstanding",
-          "345.20M"
+          "345.21M"
         ],
         [
           "shares change (yoy)",
@@ -119306,7 +119306,7 @@
         ],
         [
           "net cash per share",
-          "-$83.37"
+          "-$83.36"
         ],
         [
           "equity (book value)",
@@ -120248,7 +120248,7 @@
         ],
         [
           "dividend yield",
-          "2.02%"
+          "2.08%"
         ],
         [
           "dividend growth (yoy)",
@@ -120826,7 +120826,7 @@
         ],
         [
           "forward pe",
-          "17.12"
+          "17.11"
         ],
         [
           "ps ratio",
@@ -121142,11 +121142,11 @@
         ],
         [
           "price target",
-          "$111.85"
+          "$111.50"
         ],
         [
           "price target difference",
-          "2.66%"
+          "2.34%"
         ],
         [
           "analyst consensus",
@@ -122071,11 +122071,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "38.01B"
+          "38.11B"
         ],
         [
           "enterprise value",
-          "37.14B"
+          "37.24B"
         ],
         [
           "earnings date",
@@ -122087,11 +122087,11 @@
         ],
         [
           "current share class",
-          "143.22M"
+          "143.61M"
         ],
         [
           "shares outstanding",
-          "143.22M"
+          "143.61M"
         ],
         [
           "shares change (yoy)",
@@ -122103,11 +122103,11 @@
         ],
         [
           "owned by insiders (%)",
-          "2.92%"
+          "2.91%"
         ],
         [
           "owned by institutions (%)",
-          "95.85%"
+          "95.58%"
         ],
         [
           "float",
@@ -122123,11 +122123,11 @@
         ],
         [
           "ps ratio",
-          "14.04"
+          "14.08"
         ],
         [
           "forward ps",
-          "13.16"
+          "13.19"
         ],
         [
           "pb ratio",
@@ -122135,15 +122135,15 @@
         ],
         [
           "p/tbv ratio",
-          "28.79"
+          "28.87"
         ],
         [
           "p/fcf ratio",
-          "363.66"
+          "364.67"
         ],
         [
           "p/ocf ratio",
-          "180.11"
+          "180.61"
         ],
         [
           "peg ratio",
@@ -122155,7 +122155,7 @@
         ],
         [
           "ev / sales",
-          "13.72"
+          "13.76"
         ],
         [
           "ev / ebitda",
@@ -122167,7 +122167,7 @@
         ],
         [
           "ev / fcf",
-          "355.36"
+          "356.36"
         ],
         [
           "current ratio",
@@ -122275,7 +122275,7 @@
         ],
         [
           "short % of shares out",
-          "3.47%"
+          "3.46%"
         ],
         [
           "short % of float",
@@ -122331,7 +122331,7 @@
         ],
         [
           "net cash per share",
-          "$6.06"
+          "$6.05"
         ],
         [
           "equity (book value)",
@@ -122427,7 +122427,7 @@
         ],
         [
           "earnings yield",
-          "-0.51%"
+          "-0.50%"
         ],
         [
           "fcf yield",
@@ -122435,11 +122435,11 @@
         ],
         [
           "price target",
-          "$291.43"
+          "$292.38"
         ],
         [
           "price target difference",
-          "6.59%"
+          "10.17%"
         ],
         [
           "analyst consensus",
@@ -123301,7 +123301,7 @@
         ],
         [
           "price target difference",
-          "43.87%"
+          "40.62%"
         ],
         [
           "analyst consensus",
@@ -124127,7 +124127,7 @@
         ],
         [
           "dividend yield",
-          "1.67%"
+          "1.66%"
         ],
         [
           "dividend growth (yoy)",
@@ -124147,7 +124147,7 @@
         ],
         [
           "shareholder yield",
-          "5.63%"
+          "5.64%"
         ],
         [
           "earnings yield",
@@ -125025,7 +125025,7 @@
         ],
         [
           "price target difference",
-          "3.68%"
+          "3.76%"
         ],
         [
           "analyst consensus",
@@ -125895,7 +125895,7 @@
         ],
         [
           "price target difference",
-          "10.99%"
+          "18.48%"
         ],
         [
           "analyst consensus",
@@ -127726,11 +127726,11 @@
         ],
         [
           "pe ratio",
-          "21.52"
+          "18.54"
         ],
         [
           "forward pe",
-          "15.29"
+          "15.33"
         ],
         [
           "ps ratio",
@@ -127758,7 +127758,7 @@
         ],
         [
           "peg ratio",
-          "6.16"
+          "6.51"
         ],
         [
           "ev / earnings",
@@ -128046,11 +128046,11 @@
         ],
         [
           "price target",
-          "$118.67"
+          "$118.60"
         ],
         [
           "price target difference",
-          "9.21%"
+          "9.15%"
         ],
         [
           "analyst consensus",
@@ -128684,7 +128684,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "11.59%"
+          "11.51%"
         ],
         [
           "revenue per employee",
@@ -133617,7 +133617,7 @@
         ],
         [
           "dividend yield",
-          "1.73%"
+          "1.69%"
         ],
         [
           "dividend growth (yoy)",
@@ -134578,11 +134578,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "32.81B"
+          "32.92B"
         ],
         [
           "enterprise value",
-          "41.18B"
+          "41.05B"
         ],
         [
           "earnings date",
@@ -134598,23 +134598,23 @@
         ],
         [
           "shares outstanding",
-          "573.00M"
+          "575.00M"
         ],
         [
           "shares change (yoy)",
-          "-3.92%"
+          "-3.88%"
         ],
         [
           "shares change (qoq)",
-          "+0.03%"
+          "+0.01%"
         ],
         [
           "owned by insiders (%)",
-          "6.15%"
+          "6.13%"
         ],
         [
           "owned by institutions (%)",
-          "83.68%"
+          "83.31%"
         ],
         [
           "float",
@@ -134622,27 +134622,27 @@
         ],
         [
           "pe ratio",
-          "32.60"
+          "30.71"
         ],
         [
           "forward pe",
-          "10.70"
+          "10.68"
         ],
         [
           "ps ratio",
-          "12.94"
+          "12.98"
         ],
         [
           "forward ps",
-          "9.46"
+          "9.49"
         ],
         [
           "pb ratio",
-          "3.69"
+          "3.74"
         ],
         [
           "p/tbv ratio",
-          "5.50"
+          "5.57"
         ],
         [
           "p/fcf ratio",
@@ -134650,7 +134650,7 @@
         ],
         [
           "p/ocf ratio",
-          "11.02"
+          "11.06"
         ],
         [
           "peg ratio",
@@ -134658,19 +134658,19 @@
         ],
         [
           "ev / earnings",
-          "50.58"
+          "50.55"
         ],
         [
           "ev / sales",
-          "16.24"
+          "16.19"
         ],
         [
           "ev / ebitda",
-          "27.15"
+          "27.07"
         ],
         [
           "ev / ebit",
-          "27.24"
+          "27.15"
         ],
         [
           "ev / fcf",
@@ -134678,19 +134678,19 @@
         ],
         [
           "current ratio",
-          "n/a"
+          "2.80"
         ],
         [
           "quick ratio",
-          "n/a"
+          "2.79"
         ],
         [
           "debt / equity",
-          "0.90"
+          "0.92"
         ],
         [
           "debt / ebitda",
-          "5.92"
+          "5.91"
         ],
         [
           "debt / fcf",
@@ -134698,23 +134698,23 @@
         ],
         [
           "interest coverage",
-          "4.18"
+          "4.19"
         ],
         [
           "return on equity (roe)",
-          "n/a"
+          "13.97%"
         ],
         [
           "return on assets (roa)",
-          "n/a"
+          "5.09%"
         ],
         [
           "return on invested capital (roic)",
-          "5.37%"
+          "5.35%"
         ],
         [
           "return on capital employed (roce)",
-          "n/a"
+          "7.88%"
         ],
         [
           "weighted average cost of capital (wacc)",
@@ -134726,7 +134726,7 @@
         ],
         [
           "profits per employee",
-          "$8.14M"
+          "$8.12M"
         ],
         [
           "employee count",
@@ -134734,7 +134734,7 @@
         ],
         [
           "asset turnover",
-          "n/a"
+          "0.13"
         ],
         [
           "inventory turnover",
@@ -134782,7 +134782,7 @@
         ],
         [
           "short % of shares out",
-          "2.12%"
+          "2.11%"
         ],
         [
           "short % of float",
@@ -134802,7 +134802,7 @@
         ],
         [
           "operating income",
-          "1.57B"
+          "1.55B"
         ],
         [
           "pretax income",
@@ -134810,7 +134810,7 @@
         ],
         [
           "net income",
-          "814.11M"
+          "811.99M"
         ],
         [
           "ebitda",
@@ -134822,35 +134822,35 @@
         ],
         [
           "earnings per share (eps)",
-          "$1.76"
+          "$1.86"
         ],
         [
           "cash & cash equivalents",
-          "608.30M"
+          "836.99M"
         ],
         [
           "total debt",
-          "8.97B"
+          "8.96B"
         ],
         [
           "net cash",
-          "-8.37B"
+          "-8.12B"
         ],
         [
           "net cash per share",
-          "-$14.60"
+          "-$14.13"
         ],
         [
           "equity (book value)",
-          "9.94B"
+          "9.79B"
         ],
         [
           "book value per share",
-          "15.53"
+          "15.33"
         ],
         [
           "working capital",
-          "n/a"
+          "1.13B"
         ],
         [
           "operating cash flow",
@@ -134862,7 +134862,7 @@
         ],
         [
           "depreciation & amortization",
-          "4.82M"
+          "4.94M"
         ],
         [
           "net borrowing",
@@ -134878,19 +134878,19 @@
         ],
         [
           "gross margin",
-          "95.83%"
+          "95.82%"
         ],
         [
           "operating margin",
-          "61.75%"
+          "61.22%"
         ],
         [
           "pretax margin",
-          "53.21%"
+          "53.11%"
         ],
         [
           "profit margin",
-          "32.10%"
+          "32.02%"
         ],
         [
           "ebitda margin",
@@ -134926,15 +134926,15 @@
         ],
         [
           "buyback yield",
-          "3.92%"
+          "3.88%"
         ],
         [
           "shareholder yield",
-          "5.56%"
+          "5.52%"
         ],
         [
           "earnings yield",
-          "2.48%"
+          "2.47%"
         ],
         [
           "fcf yield",
@@ -134942,11 +134942,11 @@
         ],
         [
           "price target",
-          "$63.25"
+          "$63.75"
         ],
         [
           "price target difference",
-          "10.46%"
+          "11.33%"
         ],
         [
           "analyst consensus",
@@ -134994,11 +134994,11 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "1.73"
         ],
         [
           "piotroski f-score",
-          "3"
+          "6"
         ]
       ],
       "errors": []
@@ -135053,7 +135053,7 @@
         ],
         [
           "pe ratio",
-          "34.97"
+          "13.23"
         ],
         [
           "forward pe",
@@ -135065,7 +135065,7 @@
         ],
         [
           "forward ps",
-          "4.32"
+          "4.30"
         ],
         [
           "pb ratio",
@@ -136215,7 +136215,7 @@
         ],
         [
           "payout ratio",
-          "23.14%"
+          "23.01%"
         ],
         [
           "buyback yield",
@@ -136239,7 +136239,7 @@
         ],
         [
           "price target difference",
-          "11.33%"
+          "10.94%"
         ],
         [
           "analyst consensus",
@@ -136642,7 +136642,7 @@
         ],
         [
           "dividend yield",
-          "5.76%"
+          "5.67%"
         ],
         [
           "dividend growth (yoy)",
@@ -139667,7 +139667,7 @@
         ],
         [
           "dividend yield",
-          "1.61%"
+          "1.64%"
         ],
         [
           "dividend growth (yoy)",
@@ -140565,7 +140565,7 @@
         ],
         [
           "price target difference",
-          "42.60%"
+          "40.26%"
         ],
         [
           "analyst consensus",
@@ -140996,7 +140996,7 @@
         ],
         [
           "price target difference",
-          "-9.65%"
+          "-9.27%"
         ],
         [
           "analyst consensus",
@@ -144124,7 +144124,7 @@
         ],
         [
           "forward pe",
-          "19.47"
+          "19.54"
         ],
         [
           "ps ratio",
@@ -144152,7 +144152,7 @@
         ],
         [
           "peg ratio",
-          "2.47"
+          "2.48"
         ],
         [
           "ev / earnings",
@@ -145701,7 +145701,7 @@
         ],
         [
           "dividend yield",
-          "2.62%"
+          "2.60%"
         ],
         [
           "dividend growth (yoy)",
@@ -145721,7 +145721,7 @@
         ],
         [
           "shareholder yield",
-          "8.61%"
+          "8.63%"
         ],
         [
           "earnings yield",
@@ -146710,7 +146710,7 @@
         ],
         [
           "forward pe",
-          "31.58"
+          "31.71"
         ],
         [
           "ps ratio",
@@ -147030,7 +147030,7 @@
         ],
         [
           "price target difference",
-          "9.07%"
+          "11.34%"
         ],
         [
           "analyst consensus",
@@ -147425,7 +147425,7 @@
         ],
         [
           "dividend yield",
-          "1.22%"
+          "1.23%"
         ],
         [
           "dividend growth (yoy)",
@@ -148442,7 +148442,7 @@
         ],
         [
           "forward pe",
-          "7.11"
+          "7.22"
         ],
         [
           "ps ratio",
@@ -148470,7 +148470,7 @@
         ],
         [
           "peg ratio",
-          "1.44"
+          "1.83"
         ],
         [
           "ev / earnings",
@@ -148762,7 +148762,7 @@
         ],
         [
           "price target difference",
-          "20.26%"
+          "19.24%"
         ],
         [
           "analyst consensus",
@@ -148869,7 +148869,7 @@
         ],
         [
           "pe ratio",
-          "23.39"
+          "23.35"
         ],
         [
           "forward pe",
@@ -150929,11 +150929,11 @@
         ],
         [
           "revenue growth forecast (3y)",
-          "9.51%"
+          "12.58%"
         ],
         [
           "eps growth forecast (3y)",
-          "16.98%"
+          "22.34%"
         ],
         [
           "lynch fair value",
@@ -151886,7 +151886,7 @@
         ],
         [
           "pe ratio",
-          "25.49"
+          "25.37"
         ],
         [
           "forward pe",
@@ -152317,7 +152317,7 @@
         ],
         [
           "pe ratio",
-          "2,907.44"
+          "670.96"
         ],
         [
           "forward pe",
@@ -153159,11 +153159,11 @@
         ],
         [
           "shares change (yoy)",
-          "-3.74%"
+          "-3.98%"
         ],
         [
           "shares change (qoq)",
-          "-0.05%"
+          "-0.22%"
         ],
         [
           "owned by insiders (%)",
@@ -153179,7 +153179,7 @@
         ],
         [
           "pe ratio",
-          "65.55"
+          "65.54"
         ],
         [
           "forward pe",
@@ -153195,7 +153195,7 @@
         ],
         [
           "pb ratio",
-          "16.20"
+          "16.23"
         ],
         [
           "p/tbv ratio",
@@ -153403,7 +153403,7 @@
         ],
         [
           "book value per share",
-          "13.80"
+          "13.77"
         ],
         [
           "working capital",
@@ -153483,11 +153483,11 @@
         ],
         [
           "buyback yield",
-          "3.74%"
+          "3.98%"
         ],
         [
           "shareholder yield",
-          "3.74%"
+          "3.98%"
         ],
         [
           "earnings yield",
@@ -155622,7 +155622,7 @@
         ],
         [
           "dividend yield",
-          "0.97%"
+          "0.95%"
         ],
         [
           "dividend growth (yoy)",
@@ -155769,7 +155769,7 @@
         ],
         [
           "forward pe",
-          "15.57"
+          "15.41"
         ],
         [
           "ps ratio",
@@ -155797,7 +155797,7 @@
         ],
         [
           "peg ratio",
-          "3.32"
+          "3.29"
         ],
         [
           "ev / earnings",
@@ -159078,7 +159078,7 @@
         ],
         [
           "dividend yield",
-          "2.64%"
+          "2.63%"
         ],
         [
           "dividend growth (yoy)",
@@ -160802,7 +160802,7 @@
         ],
         [
           "dividend yield",
-          "1.10%"
+          "1.11%"
         ],
         [
           "dividend growth (yoy)",
@@ -160822,7 +160822,7 @@
         ],
         [
           "shareholder yield",
-          "4.41%"
+          "4.40%"
         ],
         [
           "earnings yield",
@@ -165259,7 +165259,7 @@
         ],
         [
           "forward pe",
-          "13.69"
+          "13.70"
         ],
         [
           "ps ratio",
@@ -165575,7 +165575,7 @@
         ],
         [
           "price target",
-          "$438.50"
+          "$442.07"
         ],
         [
           "price target difference",
@@ -167845,7 +167845,7 @@
         ],
         [
           "forward pe",
-          "11.69"
+          "11.68"
         ],
         [
           "ps ratio",
@@ -169861,7 +169861,7 @@
         ],
         [
           "dividend yield",
-          "0.78%"
+          "0.80%"
         ],
         [
           "dividend growth (yoy)",
@@ -169881,7 +169881,7 @@
         ],
         [
           "shareholder yield",
-          "5.82%"
+          "5.80%"
         ],
         [
           "earnings yield",
@@ -170340,7 +170340,7 @@
         ],
         [
           "revenue growth forecast (3y)",
-          "14.67%"
+          "15.41%"
         ],
         [
           "eps growth forecast (3y)",
@@ -171301,7 +171301,7 @@
         ],
         [
           "forward pe",
-          "10.70"
+          "10.74"
         ],
         [
           "ps ratio",
@@ -171581,11 +171581,11 @@
         ],
         [
           "dividend per share",
-          "$0.56"
+          "$0.58"
         ],
         [
           "dividend yield",
-          "0.96%"
+          "0.94%"
         ],
         [
           "dividend growth (yoy)",
@@ -171605,7 +171605,7 @@
         ],
         [
           "shareholder yield",
-          "5.68%"
+          "5.73%"
         ],
         [
           "earnings yield",
@@ -171669,7 +171669,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "3.31"
         ],
         [
           "piotroski f-score",
@@ -175033,7 +175033,7 @@
         ],
         [
           "dividend yield",
-          "0.55%"
+          "0.54%"
         ],
         [
           "dividend growth (yoy)",
@@ -176038,7 +176038,7 @@
         ],
         [
           "pe ratio",
-          "20.20"
+          "20.32"
         ],
         [
           "forward pe",
@@ -176134,7 +176134,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "6.12%"
+          "6.13%"
         ],
         [
           "revenue per employee",
@@ -176166,7 +176166,7 @@
         ],
         [
           "beta (5y)",
-          "0.58"
+          "0.59"
         ],
         [
           "52-week price change",
@@ -177188,7 +177188,7 @@
         ],
         [
           "dividend yield",
-          "0.89%"
+          "0.91%"
         ],
         [
           "dividend growth (yoy)",
@@ -177224,7 +177224,7 @@
         ],
         [
           "price target difference",
-          "-0.99%"
+          "-0.48%"
         ],
         [
           "analyst consensus",
@@ -177619,7 +177619,7 @@
         ],
         [
           "dividend yield",
-          "0.54%"
+          "0.53%"
         ],
         [
           "dividend growth (yoy)",
@@ -180783,7 +180783,7 @@
         ],
         [
           "forward pe",
-          "18.20"
+          "18.18"
         ],
         [
           "ps ratio",
@@ -182459,11 +182459,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "23.56B"
+          "23.58B"
         ],
         [
           "enterprise value",
-          "24.60B"
+          "24.63B"
         ],
         [
           "earnings date",
@@ -182479,23 +182479,23 @@
         ],
         [
           "shares outstanding",
-          "59.52M"
+          "59.58M"
         ],
         [
           "shares change (yoy)",
-          "-5.32%"
+          "-2.32%"
         ],
         [
           "shares change (qoq)",
-          "-3.06%"
+          "-1.13%"
         ],
         [
           "owned by insiders (%)",
-          "32.64%"
+          "32.60%"
         ],
         [
           "owned by institutions (%)",
-          "66.41%"
+          "66.34%"
         ],
         [
           "float",
@@ -182503,11 +182503,11 @@
         ],
         [
           "pe ratio",
-          "24.20"
+          "24.95"
         ],
         [
           "forward pe",
-          "20.43"
+          "20.28"
         ],
         [
           "ps ratio",
@@ -182515,7 +182515,7 @@
         ],
         [
           "forward ps",
-          "2.70"
+          "2.71"
         ],
         [
           "pb ratio",
@@ -182523,39 +182523,39 @@
         ],
         [
           "p/tbv ratio",
-          "13.61"
+          "13.62"
         ],
         [
           "p/fcf ratio",
-          "22.58"
+          "22.61"
         ],
         [
           "p/ocf ratio",
-          "17.88"
+          "17.90"
         ],
         [
           "peg ratio",
-          "1.43"
+          "1.37"
         ],
         [
           "ev / earnings",
-          "25.03"
+          "25.05"
         ],
         [
           "ev / sales",
-          "2.94"
+          "2.95"
         ],
         [
           "ev / ebitda",
-          "16.57"
+          "16.59"
         ],
         [
           "ev / ebit",
-          "19.71"
+          "19.73"
         ],
         [
           "ev / fcf",
-          "23.58"
+          "23.61"
         ],
         [
           "current ratio",
@@ -182663,7 +182663,7 @@
         ],
         [
           "short % of shares out",
-          "5.46%"
+          "5.45%"
         ],
         [
           "short % of float",
@@ -182703,7 +182703,7 @@
         ],
         [
           "earnings per share (eps)",
-          "$16.35"
+          "$15.87"
         ],
         [
           "cash & cash equivalents",
@@ -182719,7 +182719,7 @@
         ],
         [
           "net cash per share",
-          "-$17.51"
+          "-$17.49"
         ],
         [
           "equity (book value)",
@@ -182755,7 +182755,7 @@
         ],
         [
           "fcf per share",
-          "$17.53"
+          "$17.51"
         ],
         [
           "gross margin",
@@ -182803,15 +182803,15 @@
         ],
         [
           "payout ratio",
-          "24.46%"
+          "25.21%"
         ],
         [
           "buyback yield",
-          "5.32%"
+          "2.32%"
         ],
         [
           "shareholder yield",
-          "6.33%"
+          "3.34%"
         ],
         [
           "earnings yield",
@@ -182819,15 +182819,15 @@
         ],
         [
           "fcf yield",
-          "4.43%"
+          "4.42%"
         ],
         [
           "price target",
-          "$429.74"
+          "$437.38"
         ],
         [
           "price target difference",
-          "7.99%"
+          "10.50%"
         ],
         [
           "analyst consensus",
@@ -182875,7 +182875,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "6.04"
         ],
         [
           "piotroski f-score",
@@ -182934,7 +182934,7 @@
         ],
         [
           "pe ratio",
-          "387.24"
+          "383.46"
         ],
         [
           "forward pe",
@@ -183800,7 +183800,7 @@
         ],
         [
           "forward pe",
-          "24.72"
+          "24.70"
         ],
         [
           "ps ratio",
@@ -187248,7 +187248,7 @@
         ],
         [
           "forward pe",
-          "20.80"
+          "20.76"
         ],
         [
           "ps ratio",
@@ -187276,7 +187276,7 @@
         ],
         [
           "peg ratio",
-          "1.09"
+          "1.05"
         ],
         [
           "ev / earnings",
@@ -187328,11 +187328,11 @@
         ],
         [
           "return on assets (roa)",
-          "5.83%"
+          "5.74%"
         ],
         [
           "return on invested capital (roic)",
-          "10.33%"
+          "10.17%"
         ],
         [
           "return on capital employed (roce)",
@@ -187424,7 +187424,7 @@
         ],
         [
           "operating income",
-          "1.31B"
+          "1.29B"
         ],
         [
           "pretax income",
@@ -187504,7 +187504,7 @@
         ],
         [
           "operating margin",
-          "3.27%"
+          "3.22%"
         ],
         [
           "pretax margin",
@@ -187552,7 +187552,7 @@
         ],
         [
           "shareholder yield",
-          "5.40%"
+          "n/a"
         ],
         [
           "earnings yield",
@@ -187564,11 +187564,11 @@
         ],
         [
           "price target",
-          "$108.06"
+          "$109.19"
         ],
         [
           "price target difference",
-          "-0.91%"
+          "2.08%"
         ],
         [
           "analyst consensus",
@@ -187616,7 +187616,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "4.54"
         ],
         [
           "piotroski f-score",
@@ -188928,7 +188928,7 @@
         ],
         [
           "enterprise value",
-          "28.69B"
+          "27.12B"
         ],
         [
           "earnings date",
@@ -188972,7 +188972,7 @@
         ],
         [
           "forward pe",
-          "9.78"
+          "10.27"
         ],
         [
           "ps ratio",
@@ -189004,23 +189004,23 @@
         ],
         [
           "ev / earnings",
-          "17.03"
+          "16.09"
         ],
         [
           "ev / sales",
-          "1.68"
+          "1.58"
         ],
         [
           "ev / ebitda",
-          "7.64"
+          "7.22"
         ],
         [
           "ev / ebit",
-          "8.58"
+          "8.11"
         ],
         [
           "ev / fcf",
-          "19.55"
+          "18.47"
         ],
         [
           "current ratio",
@@ -189340,7 +189340,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "3.31"
         ],
         [
           "piotroski f-score",
@@ -189830,11 +189830,11 @@
         ],
         [
           "pe ratio",
-          "112.51"
+          "64.31"
         ],
         [
           "forward pe",
-          "57.56"
+          "52.98"
         ],
         [
           "ps ratio",
@@ -189846,7 +189846,7 @@
         ],
         [
           "pb ratio",
-          "8.29"
+          "7.89"
         ],
         [
           "p/tbv ratio",
@@ -189862,7 +189862,7 @@
         ],
         [
           "peg ratio",
-          "191.87"
+          "176.59"
         ],
         [
           "ev / earnings",
@@ -191079,11 +191079,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "28.73B"
+          "28.93B"
         ],
         [
           "enterprise value",
-          "28.31B"
+          "28.51B"
         ],
         [
           "earnings date",
@@ -191099,7 +191099,7 @@
         ],
         [
           "shares outstanding",
-          "216.75M"
+          "218.28M"
         ],
         [
           "shares change (yoy)",
@@ -191115,7 +191115,7 @@
         ],
         [
           "owned by institutions (%)",
-          "96.72%"
+          "96.04%"
         ],
         [
           "float",
@@ -191131,11 +191131,11 @@
         ],
         [
           "ps ratio",
-          "25.25"
+          "25.43"
         ],
         [
           "forward ps",
-          "14.70"
+          "14.81"
         ],
         [
           "pb ratio",
@@ -191143,7 +191143,7 @@
         ],
         [
           "p/tbv ratio",
-          "54.42"
+          "54.81"
         ],
         [
           "p/fcf ratio",
@@ -191163,7 +191163,7 @@
         ],
         [
           "ev / sales",
-          "24.88"
+          "25.06"
         ],
         [
           "ev / ebitda",
@@ -191283,7 +191283,7 @@
         ],
         [
           "short % of shares out",
-          "5.36%"
+          "5.33%"
         ],
         [
           "short % of float",
@@ -191323,7 +191323,7 @@
         ],
         [
           "loss per share",
-          "-$4.09"
+          "-$4.08"
         ],
         [
           "cash & cash equivalents",
@@ -191339,7 +191339,7 @@
         ],
         [
           "net cash per share",
-          "$1.94"
+          "$1.93"
         ],
         [
           "equity (book value)",
@@ -191375,7 +191375,7 @@
         ],
         [
           "fcf per share",
-          "-$4.25"
+          "-$4.22"
         ],
         [
           "gross margin",
@@ -191435,19 +191435,19 @@
         ],
         [
           "earnings yield",
-          "-3.05%"
+          "-3.03%"
         ],
         [
           "fcf yield",
-          "-3.21%"
+          "-3.19%"
         ],
         [
           "price target",
-          "$197.91"
+          "$197.82"
         ],
         [
           "price target difference",
-          "48.90%"
+          "49.24%"
         ],
         [
           "analyst consensus",
@@ -191495,7 +191495,7 @@
         ],
         [
           "altman z-score",
-          "n/a"
+          "9.79"
         ],
         [
           "piotroski f-score",
@@ -192851,7 +192851,7 @@
         ],
         [
           "forward pe",
-          "19.43"
+          "19.13"
         ],
         [
           "ps ratio",
@@ -192879,7 +192879,7 @@
         ],
         [
           "peg ratio",
-          "0.62"
+          "0.57"
         ],
         [
           "ev / earnings",
@@ -193167,11 +193167,11 @@
         ],
         [
           "price target",
-          "$408.62"
+          "$411.31"
         ],
         [
           "price target difference",
-          "39.48%"
+          "41.19%"
         ],
         [
           "analyst consensus",
@@ -195326,7 +195326,7 @@
         ],
         [
           "price target difference",
-          "13.20%"
+          "13.57%"
         ],
         [
           "analyst consensus",
@@ -195433,7 +195433,7 @@
         ],
         [
           "pe ratio",
-          "21.20"
+          "21.27"
         ],
         [
           "forward pe",
@@ -195868,7 +195868,7 @@
         ],
         [
           "forward pe",
-          "20.21"
+          "19.95"
         ],
         [
           "ps ratio",
@@ -195896,7 +195896,7 @@
         ],
         [
           "peg ratio",
-          "1.99"
+          "1.97"
         ],
         [
           "ev / earnings",
@@ -197161,7 +197161,7 @@
         ],
         [
           "forward pe",
-          "40.50"
+          "37.85"
         ],
         [
           "ps ratio",
@@ -197189,7 +197189,7 @@
         ],
         [
           "peg ratio",
-          "1.09"
+          "1.02"
         ],
         [
           "ev / earnings",
@@ -197477,11 +197477,11 @@
         ],
         [
           "price target",
-          "$397.08"
+          "$395.89"
         ],
         [
           "price target difference",
-          "31.64%"
+          "31.25%"
         ],
         [
           "analyst consensus",
@@ -197592,7 +197592,7 @@
         ],
         [
           "forward pe",
-          "19.02"
+          "19.04"
         ],
         [
           "ps ratio",
@@ -197876,7 +197876,7 @@
         ],
         [
           "dividend yield",
-          "1.63%"
+          "1.67%"
         ],
         [
           "dividend growth (yoy)",
@@ -197912,7 +197912,7 @@
         ],
         [
           "price target difference",
-          "18.06%"
+          "17.88%"
         ],
         [
           "analyst consensus",
@@ -199344,7 +199344,7 @@
         ],
         [
           "peg ratio",
-          "1.97"
+          "1.95"
         ],
         [
           "ev / earnings",
@@ -200214,7 +200214,7 @@
         ],
         [
           "peg ratio",
-          "1.95"
+          "n/a"
         ],
         [
           "ev / earnings",
@@ -203072,7 +203072,7 @@
         ],
         [
           "dividend yield",
-          "2.40%"
+          "2.43%"
         ],
         [
           "dividend growth (yoy)",
@@ -203219,7 +203219,7 @@
         ],
         [
           "forward pe",
-          "18.07"
+          "19.49"
         ],
         [
           "ps ratio",
@@ -203247,7 +203247,7 @@
         ],
         [
           "peg ratio",
-          "1.37"
+          "1.48"
         ],
         [
           "ev / earnings",
@@ -203646,11 +203646,11 @@
         ],
         [
           "pe ratio",
-          "42.64"
+          "42.65"
         ],
         [
           "forward pe",
-          "25.15"
+          "25.04"
         ],
         [
           "ps ratio",
@@ -203678,7 +203678,7 @@
         ],
         [
           "peg ratio",
-          "1.51"
+          "1.50"
         ],
         [
           "ev / earnings",
@@ -203970,7 +203970,7 @@
         ],
         [
           "price target difference",
-          "14.95%"
+          "15.27%"
         ],
         [
           "analyst consensus",
@@ -204508,7 +204508,7 @@
         ],
         [
           "pe ratio",
-          "503.22"
+          "511.02"
         ],
         [
           "forward pe",
@@ -206987,7 +206987,7 @@
         ],
         [
           "price target difference",
-          "23.69%"
+          "23.95%"
         ],
         [
           "analyst consensus",
@@ -208675,7 +208675,7 @@
         ],
         [
           "dividend yield",
-          "0.23%"
+          "0.26%"
         ],
         [
           "dividend growth (yoy)",
@@ -208711,7 +208711,7 @@
         ],
         [
           "price target difference",
-          "53.48%"
+          "52.33%"
         ],
         [
           "analyst consensus",
@@ -210439,11 +210439,11 @@
         ],
         [
           "price target",
-          "$57.71"
+          "$57.82"
         ],
         [
           "price target difference",
-          "17.45%"
+          "18.29%"
         ],
         [
           "analyst consensus",
@@ -212274,11 +212274,11 @@
         ],
         [
           "pe ratio",
-          "40.09"
+          "43.05"
         ],
         [
           "forward pe",
-          "17.01"
+          "17.12"
         ],
         [
           "ps ratio",
@@ -212290,7 +212290,7 @@
         ],
         [
           "pb ratio",
-          "3.52"
+          "3.61"
         ],
         [
           "p/tbv ratio",
@@ -212306,7 +212306,7 @@
         ],
         [
           "peg ratio",
-          "2.25"
+          "2.28"
         ],
         [
           "ev / earnings",
@@ -212594,11 +212594,11 @@
         ],
         [
           "price target",
-          "$158.21"
+          "$157.91"
         ],
         [
           "price target difference",
-          "33.45%"
+          "33.20%"
         ],
         [
           "analyst consensus",
@@ -214749,11 +214749,11 @@
         ],
         [
           "price target",
-          "$392.50"
+          "$399.00"
         ],
         [
           "price target difference",
-          "7.76%"
+          "9.54%"
         ],
         [
           "analyst consensus",
@@ -217885,7 +217885,7 @@
         ],
         [
           "pe ratio",
-          "47.65"
+          "50.30"
         ],
         [
           "forward pe",
@@ -218747,7 +218747,7 @@
         ],
         [
           "pe ratio",
-          "18.03"
+          "17.99"
         ],
         [
           "forward pe",
@@ -219502,7 +219502,7 @@
         ],
         [
           "price target difference",
-          "7.51%"
+          "9.29%"
         ],
         [
           "analyst consensus",
@@ -220336,7 +220336,7 @@
         ],
         [
           "dividend yield",
-          "2.44%"
+          "2.41%"
         ],
         [
           "dividend growth (yoy)",
@@ -221246,11 +221246,11 @@
         ],
         [
           "revenue growth forecast (3y)",
-          "51.69%"
+          "51.83%"
         ],
         [
           "eps growth forecast (3y)",
-          "50.50%"
+          "49.60%"
         ],
         [
           "lynch fair value",
@@ -222068,7 +222068,7 @@
         ],
         [
           "dividend yield",
-          "5.21%"
+          "5.23%"
         ],
         [
           "dividend growth (yoy)",
@@ -223504,7 +223504,7 @@
         ],
         [
           "pe ratio",
-          "21.19"
+          "17.89"
         ],
         [
           "forward pe",
@@ -224366,7 +224366,7 @@
         ],
         [
           "pe ratio",
-          "1,287.81"
+          "1,317.25"
         ],
         [
           "forward pe",
@@ -224690,7 +224690,7 @@
         ],
         [
           "price target difference",
-          "24.82%"
+          "25.73%"
         ],
         [
           "analyst consensus",
@@ -225085,7 +225085,7 @@
         ],
         [
           "dividend yield",
-          "1.86%"
+          "1.88%"
         ],
         [
           "dividend growth (yoy)",
@@ -225105,7 +225105,7 @@
         ],
         [
           "shareholder yield",
-          "-46.33%"
+          "-46.34%"
         ],
         [
           "earnings yield",
@@ -225536,7 +225536,7 @@
         ],
         [
           "payout ratio",
-          "120.83%"
+          "119.62%"
         ],
         [
           "buyback yield",
@@ -225556,11 +225556,11 @@
         ],
         [
           "price target",
-          "$158.60"
+          "$160.60"
         ],
         [
           "price target difference",
-          "-0.88%"
+          "0.38%"
         ],
         [
           "analyst consensus",
@@ -226533,7 +226533,7 @@
         ],
         [
           "forward pe",
-          "10.95"
+          "10.99"
         ],
         [
           "ps ratio",
@@ -226561,7 +226561,7 @@
         ],
         [
           "peg ratio",
-          "1.97"
+          "1.98"
         ],
         [
           "ev / earnings",
@@ -226849,11 +226849,11 @@
         ],
         [
           "price target",
-          "$148.27"
+          "$149.60"
         ],
         [
           "price target difference",
-          "9.62%"
+          "10.60%"
         ],
         [
           "analyst consensus",
@@ -227284,7 +227284,7 @@
         ],
         [
           "price target difference",
-          "19.38%"
+          "19.78%"
         ],
         [
           "analyst consensus",
@@ -227367,7 +227367,7 @@
         ],
         [
           "shares outstanding",
-          "47.90M"
+          "47.91M"
         ],
         [
           "shares change (yoy)",
@@ -227383,7 +227383,7 @@
         ],
         [
           "owned by institutions (%)",
-          "84.73%"
+          "84.70%"
         ],
         [
           "float",
@@ -227395,7 +227395,7 @@
         ],
         [
           "forward pe",
-          "10.20"
+          "9.66"
         ],
         [
           "ps ratio",
@@ -227403,7 +227403,7 @@
         ],
         [
           "forward ps",
-          "3.28"
+          "3.29"
         ],
         [
           "pb ratio",
@@ -227411,11 +227411,11 @@
         ],
         [
           "p/tbv ratio",
-          "10.03"
+          "10.06"
         ],
         [
           "p/fcf ratio",
-          "36.50"
+          "36.51"
         ],
         [
           "p/ocf ratio",
@@ -227423,7 +227423,7 @@
         ],
         [
           "peg ratio",
-          "0.25"
+          "0.23"
         ],
         [
           "ev / earnings",
@@ -227435,15 +227435,15 @@
         ],
         [
           "ev / ebitda",
-          "66.53"
+          "66.54"
         ],
         [
           "ev / ebit",
-          "290.30"
+          "290.36"
         ],
         [
           "ev / fcf",
-          "57.54"
+          "57.55"
         ],
         [
           "current ratio",
@@ -227475,11 +227475,11 @@
         ],
         [
           "return on assets (roa)",
-          "0.74%"
+          "0.92%"
         ],
         [
           "return on invested capital (roic)",
-          "0.99%"
+          "1.23%"
         ],
         [
           "return on capital employed (roce)",
@@ -227571,7 +227571,7 @@
         ],
         [
           "operating income",
-          "123.00M"
+          "153.00M"
         ],
         [
           "pretax income",
@@ -227595,7 +227595,7 @@
         ],
         [
           "cash & cash equivalents",
-          "231.00M"
+          "232.00M"
         ],
         [
           "total debt",
@@ -227607,7 +227607,7 @@
         ],
         [
           "net cash per share",
-          "-$195.01"
+          "-$194.97"
         ],
         [
           "equity (book value)",
@@ -227651,7 +227651,7 @@
         ],
         [
           "operating margin",
-          "3.29%"
+          "4.09%"
         ],
         [
           "pretax margin",
@@ -229878,7 +229878,7 @@
         ],
         [
           "price target difference",
-          "10.78%"
+          "11.34%"
         ],
         [
           "analyst consensus",
@@ -229941,11 +229941,11 @@
       "raw_pairs": [
         [
           "market cap",
-          "17.81B"
+          "17.96B"
         ],
         [
           "enterprise value",
-          "17.70B"
+          "17.84B"
         ],
         [
           "earnings date",
@@ -229957,11 +229957,11 @@
         ],
         [
           "current share class",
-          "436.53M"
+          "439.99M"
         ],
         [
           "shares outstanding",
-          "436.53M"
+          "439.99M"
         ],
         [
           "shares change (yoy)",
@@ -229973,11 +229973,11 @@
         ],
         [
           "owned by insiders (%)",
-          "2.57%"
+          "2.55%"
         ],
         [
           "owned by institutions (%)",
-          "65.85%"
+          "65.33%"
         ],
         [
           "float",
@@ -229989,15 +229989,15 @@
         ],
         [
           "forward pe",
-          "32.84"
+          "31.17"
         ],
         [
           "ps ratio",
-          "8.78"
+          "8.85"
         ],
         [
           "forward ps",
-          "7.87"
+          "7.94"
         ],
         [
           "pb ratio",
@@ -230009,15 +230009,15 @@
         ],
         [
           "p/fcf ratio",
-          "33.09"
+          "33.35"
         ],
         [
           "p/ocf ratio",
-          "32.17"
+          "32.43"
         ],
         [
           "peg ratio",
-          "1.38"
+          "1.31"
         ],
         [
           "ev / earnings",
@@ -230025,7 +230025,7 @@
         ],
         [
           "ev / sales",
-          "8.73"
+          "8.80"
         ],
         [
           "ev / ebitda",
@@ -230037,7 +230037,7 @@
         ],
         [
           "ev / fcf",
-          "32.88"
+          "33.14"
         ],
         [
           "current ratio",
@@ -230081,7 +230081,7 @@
         ],
         [
           "weighted average cost of capital (wacc)",
-          "13.73%"
+          "13.74%"
         ],
         [
           "revenue per employee",
@@ -230145,7 +230145,7 @@
         ],
         [
           "short % of shares out",
-          "7.76%"
+          "7.70%"
         ],
         [
           "short % of float",
@@ -230237,7 +230237,7 @@
         ],
         [
           "fcf per share",
-          "$1.23"
+          "$1.22"
         ],
         [
           "gross margin",
@@ -230297,19 +230297,19 @@
         ],
         [
           "earnings yield",
-          "-3.30%"
+          "-3.27%"
         ],
         [
           "fcf yield",
-          "3.02%"
+          "3.00%"
         ],
         [
           "price target",
-          "$38.63"
+          "$39.31"
         ],
         [
           "price target difference",
-          "-9.68%"
+          "-3.68%"
         ],
         [
           "analyst consensus",
@@ -231183,11 +231183,11 @@
         ],
         [
           "revenue growth forecast (3y)",
-          "12.38%"
+          "12.64%"
         ],
         [
           "eps growth forecast (3y)",
-          "13.23%"
+          "13.61%"
         ],
         [
           "lynch fair value",
@@ -232571,7 +232571,7 @@
         ],
         [
           "pe ratio",
-          "21.78"
+          "22.01"
         ],
         [
           "forward pe",
@@ -233864,7 +233864,7 @@
         ],
         [
           "pe ratio",
-          "16.55"
+          "16.58"
         ],
         [
           "forward pe",
@@ -234619,7 +234619,7 @@
         ],
         [
           "price target difference",
-          "11.64%"
+          "12.28%"
         ],
         [
           "analyst consensus",
@@ -236307,7 +236307,7 @@
         ],
         [
           "dividend yield",
-          "5.47%"
+          "5.45%"
         ],
         [
           "dividend growth (yoy)",
@@ -236339,11 +236339,11 @@
         ],
         [
           "price target",
-          "$81.43"
+          "$82.57"
         ],
         [
           "price target difference",
-          "10.67%"
+          "12.22%"
         ],
         [
           "analyst consensus",
