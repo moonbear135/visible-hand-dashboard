@@ -903,6 +903,16 @@ def render_us_stocks_page():
                     ⚠️ 모든 투자 결정과 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있습니다.
                     환율 변동 위험은 이 화면에 반영되어 있지 않습니다(가격은 전부 USD 표기).</div>
             </div>
+            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #475569; border-radius: 12px;
+                        padding: 12px 22px; margin: 0 auto 24px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);">
+                <div style="font-size: 15px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px;">
+                    📘 [학습용 보조 도구 안내]</div>
+                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
+                    '잘 보면 보이는 손'은 정식 금융기관의 서비스가 아니며, 주식 초보자의 직관적인 밸류에이션 이해를 돕는 <b>참고용 프로젝트</b>입니다.</div>
+                <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 3px;">
+                    ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다.<br>
+                    제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.</div>
+            </div>
             <div style="font-size: 15.5px; color: #64748b; font-weight: 600;">
                 미국(나스닥+뉴욕) 시가총액 상위 550개 종목 Trailing vs Forward PEGY & 퀀트 종합점수 리포트<br>
                 <span style="font-size: 13px; color: #475569;">
