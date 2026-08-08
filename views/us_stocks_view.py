@@ -860,8 +860,9 @@ def render_us_stocks_page():
         <style>
         .q-tooltip { position: relative; display: inline-flex; align-items: center; cursor: help;
             color: #94a3b8; border-bottom: 1px dotted #64748b; font-weight: 500; }
-        .q-tooltip .q-tooltiptext { visibility: hidden; width: max-content; max-width: 380px;
-            word-break: keep-all; line-height: 1.5; background-color: #0f172a; color: #f1f5f9;
+        .q-tooltip .q-tooltiptext { visibility: hidden; width: 300px; box-sizing: border-box;
+            white-space: normal; overflow-wrap: break-word; word-break: keep-all; line-height: 1.5;
+            background-color: #0f172a; color: #f1f5f9;
             text-align: left; border-radius: 8px; padding: 12px 15px; position: absolute; z-index: 9999;
             bottom: 130%; left: 50%; transform: translateX(-50%); opacity: 0;
             transition: opacity 0.2s ease-in-out, visibility 0.2s; border: 1px solid #38bdf8;

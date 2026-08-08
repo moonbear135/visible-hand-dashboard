@@ -136,8 +136,10 @@ def render_pegy_page():
         }
         .q-tooltip .q-tooltiptext {
             visibility: hidden;
-            width: max-content;
-            max-width: 380px;
+            width: 300px;
+            box-sizing: border-box;
+            white-space: normal;
+            overflow-wrap: break-word;
             word-break: keep-all;
             line-height: 1.4;
             background-color: #0f172a;
@@ -521,7 +523,7 @@ def render_pegy_page():
 
     # 줄간격 및 수평 여백이 보정된 넉넉한 가이드 박스
     guide_box_html = """
-    <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #0284c7; border-radius: 12px; padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <div style="background-color: #0f172a; border: 1px solid #0284c7; border-radius: 12px; padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
         <div style="font-size: 15px; font-weight: 800; color: #38bdf8; margin-bottom: 10px;">
             💡 '착시 저평가 (가치주 덫)' 및 퀀트 스코어 가이드
         </div>
