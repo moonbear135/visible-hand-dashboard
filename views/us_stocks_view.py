@@ -2,8 +2,10 @@
 views/us_stocks_view.py
 🇺🇸 "미국 주식은 이가격" — 미국(나스닥+뉴욕) 시가총액 상위 550종목 밸류에이션 화면
 
-⚠️ ENGINEERING_SPEC §0-3-6 (신규 기능 스테이징): 이 화면은 아직 공개 메뉴가 아닙니다.
-   `visiblehand.py` 의 관리자 전용 메뉴에서만 진입할 수 있으며, 오너 승인 후 공개 전환합니다.
+✅ 2026-08-08 공개 전환 완료 (ENGINEERING_SPEC §0-3-6 스테이징 절차 종료).
+   오너 승인으로 `visiblehand.py` 사이드바 상단의 **공개 메뉴**에서 누구나 진입할 수 있습니다.
+   (승인 전제조건이던 임계값 재캘리브레이션 = `utils/constants_us.py` §5 전 항목 확정,
+    수집 자동화 = `.github/workflows/scrape_us.yml` 무인 실행 — 둘 다 2026-08-07 완료)
 
 ⚠️ 기존 코스피 화면(`views/pegy_view.py`)은 한 줄도 수정하지 않았습니다. 카드 레이아웃 구조는
    오너 확정(§8-7-5)에 따라 코스피와 동일하게 맞추되, 코스피 전용 요소(원화 표기, 네이버 문구,
@@ -845,7 +847,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
 # 3. 페이지 렌더링
 # =============================================================================
 def render_us_stocks_page():
-    """'🇺🇸 미국 주식은 이가격' 화면 (관리자 전용 베타 — §0-3-6 스테이징 승인 전)"""
+    """'🇺🇸 미국 주식은 이가격' 화면 (2026-08-08 오너 승인으로 공개 전환 — §0-3-6 절차 종료)"""
     st.markdown("<div id='us-top-anchor'></div>", unsafe_allow_html=True)
 
     metadata, all_stocks = load_us_snapshot()
@@ -880,23 +882,18 @@ def render_us_stocks_page():
         unsafe_allow_html=True,
     )
 
-    # 타이틀 + 베타/투자주의 배너
+    # 타이틀 + 투자주의 배너
+    #    2026-08-08: 오너 승인(§0-3-6)으로 공개 전환하면서 "🧪 [베타 · 검토중] 아직 공개되지 않은
+    #    화면입니다" 배너를 제거했습니다. 그 배너가 알리던 내용("임계값이 아직 잠정값")은 2026-08-07
+    #    실측 548종목 분포 기반 재캘리브레이션으로 해소됐습니다(`utils/constants_us.py` §5 전 항목 확정).
+    #    아래 투자주의 경고 배너는 공개 화면인 코스피(`views/pegy_view.py`)와 동일하게 그대로 둡니다.
     st.markdown(
         """
         <div style="text-align: center; margin-bottom: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <h1 style="font-size: 36px; font-weight: 800; color: #d97706; margin: 0 0 6px 0; letter-spacing: -0.5px;">
                 🇺🇸 미국 주식은 이가격</h1>
-            <div style="background: linear-gradient(135deg, #312e81 0%, #1e1b4b 100%); border: 2px solid #818cf8;
-                        border-radius: 12px; padding: 10px 22px; margin: 8px auto 12px auto; max-width: 860px;">
-                <div style="font-size: 14.5px; font-weight: 800; color: #c7d2fe;">
-                    🧪 [베타 · 검토중] 아직 공개되지 않은 화면입니다</div>
-                <div style="font-size: 13px; color: #e0e7ff; font-weight: 600; margin-top: 4px; line-height: 1.5;">
-                    밸류에이션 임계값(목표 PER 상한, ROE 기준선 등)이 아직 <b>잠정값</b>이라
-                    점수·배지를 확정된 평가로 받아들이면 안 됩니다.<br>
-                    550종목 전수 수집 결과의 실제 분포를 보고 재조정한 뒤 공개 전환합니다.</div>
-            </div>
             <div style="background: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%); border: 2px solid #ef4444;
-                        border-radius: 12px; padding: 12px 22px; margin: 0 auto 14px auto; max-width: 860px;">
+                        border-radius: 12px; padding: 12px 22px; margin: 10px auto 14px auto; max-width: 860px;">
                 <div style="font-size: 15px; font-weight: 800; color: #fca5a5;">🚨 [투자 주의 경고 및 분석 안내]</div>
                 <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
                     본 리포트의 수치는 <b>공개된 재무 데이터를 퀀트 알고리즘이 자동 계산한 단순 참고용 정보</b>입니다.<br>

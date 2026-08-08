@@ -10,7 +10,11 @@
 실행: python tests/test_us_stocks.py
 """
 import io
+import json
+import os
+import shutil
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -545,6 +549,130 @@ def test_session_resolution():
     check(s5["holiday_calendar_applied"] is False, "휴장일 캘린더 미적용 사실을 정직하게 표기")
 
 
+# =============================================================================
+# 6. 무인 자동화(GitHub Actions) 사전 점검 — 2026-08-07 신설
+#
+#    서머타임(EDT/EST) 때문에 cron 을 두 줄 걸어 하루 두 번 트리거되는데,
+#    실제 수집은 하루 한 번만 일어나야 합니다. 그 판정을 하는
+#    `evaluate_collection_readiness()` 를 실제 워크플로우의 두 크론 시각
+#    (20:35 UTC / 21:35 UTC)으로 시뮬레이션해 검증합니다.
+# =============================================================================
+UTC = ZoneInfo("UTC")
+
+
+def _write_fake_snapshot(path, session_date, status="SUCCESS"):
+    """기존 스냅샷을 흉내낸 최소 구조 파일을 씁니다(수집 없이 판정 로직만 검증)."""
+    payload = {
+        "metadata": {
+            "status": status,
+            "last_updated_at_et": f"{session_date} 16:40",
+            "session_hint": {"session_date": session_date},
+            "session_dates_from_source": {session_date: 548},
+        },
+        "stocks": [],
+    }
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f)
+
+
+def _readiness_at_utc(snapshot_path, y, m, d, hh, mm):
+    now_et = datetime(y, m, d, hh, mm, tzinfo=UTC).astimezone(ET)
+    return C.evaluate_collection_readiness(snapshot_path=snapshot_path, now_et=now_et)
+
+
+def test_automation_readiness():
+    print("\n[6] 무인 자동화 사전 점검 (--skip-if-not-ready)")
+    tmpdir = tempfile.mkdtemp(prefix="us_readiness_test_")
+    snap = os.path.join(tmpdir, "us_stocks_latest.json")
+
+    # --- 스냅샷이 아예 없는 첫 실행 → 무조건 수집 -----------------------------
+    r = _readiness_at_utc(snap, 2026, 7, 15, 20, 35)
+    check(r["should_collect"] is True, "스냅샷이 없으면(첫 실행) 수집 진행")
+    check(r["covered_session_dates"] == [], "없는 파일을 읽고 지어내지 않음(빈 목록)")
+
+    # --- EDT 기간(7월): 20:35 UTC = 16:35 EDT → 당일 수집, 21:35 UTC 는 건너뜀 ---
+    _write_fake_snapshot(snap, "2026-07-14")            # 어제까지만 수집돼 있는 상태
+    r1 = _readiness_at_utc(snap, 2026, 7, 15, 20, 35)
+    check(r1["should_collect"] is True and r1["target_session_date"] == "2026-07-15",
+          f"[EDT] 20:35 UTC(=16:35 EDT) 크론은 당일 세션을 수집 (대상 {r1['target_session_date']})")
+
+    _write_fake_snapshot(snap, "2026-07-15")            # 위 실행이 성공해 오늘까지 들어간 상태
+    r2 = _readiness_at_utc(snap, 2026, 7, 15, 21, 35)
+    check(r2["should_collect"] is False and r2["target_session_date"] == "2026-07-15",
+          "[EDT] 21:35 UTC(=17:35 EDT) 크론은 이미 수집된 거래일이라 건너뜀")
+    check("이미 수집" in r2["reason"], f"건너뛴 사유를 사람이 읽을 수 있게 남김 ({r2['reason']})")
+
+    # --- EST 기간(1월): 20:35 UTC 는 아직 장중 → 건너뜀, 21:35 UTC 가 실제 수집 ---
+    _write_fake_snapshot(snap, "2026-01-14")            # 전 거래일까지 수집돼 있는 상태
+    r3 = _readiness_at_utc(snap, 2026, 1, 15, 20, 35)
+    check(r3["should_collect"] is False and r3["target_session_date"] == "2026-01-14",
+          f"[EST] 20:35 UTC(=15:35 EST, 장중)는 대상이 전 거래일이라 건너뜀 (대상 {r3['target_session_date']})")
+    r4 = _readiness_at_utc(snap, 2026, 1, 15, 21, 35)
+    check(r4["should_collect"] is True and r4["target_session_date"] == "2026-01-15",
+          f"[EST] 21:35 UTC(=16:35 EST)는 당일 세션을 수집 (대상 {r4['target_session_date']})")
+
+    # --- 앞 크론이 HTTP 429 로 끊겨 스냅샷이 그대로면 뒤 크론이 같은 날 재시도 ---
+    _write_fake_snapshot(snap, "2026-07-14")
+    r5 = _readiness_at_utc(snap, 2026, 7, 15, 21, 35)
+    check(r5["should_collect"] is True,
+          "앞 크론이 실패해 스냅샷이 갱신 안 됐으면 뒤 크론이 같은 날 재시도")
+
+    # --- status=FAILED 인 스냅샷은 '이미 수집됨'으로 치지 않음 ------------------
+    _write_fake_snapshot(snap, "2026-07-15", status="FAILED")
+    r6 = _readiness_at_utc(snap, 2026, 7, 15, 21, 35)
+    check(r6["should_collect"] is True, "status=FAILED 스냅샷은 재수집 대상으로 판정")
+
+    # --- 깨진 스냅샷은 '모르면 수집' 쪽으로 안전하게 넘어감 --------------------
+    with open(snap, "w", encoding="utf-8") as f:
+        f.write("{ 깨진 JSON")
+    r7 = _readiness_at_utc(snap, 2026, 7, 15, 21, 35)
+    check(r7["should_collect"] is True, "스냅샷이 깨졌으면 건너뛰지 않고 수집(하루 통째 결측 방지)")
+
+    # --- 주말 크론은 이미 금요일이 수집돼 있으므로 아무 일도 하지 않음 ----------
+    #     (cron 은 UTC 월~금이라 토·일엔 안 돌지만, 수동 실행 대비 확인)
+    _write_fake_snapshot(snap, "2026-07-17")            # 금요일까지 수집 완료
+    r8 = _readiness_at_utc(snap, 2026, 7, 18, 21, 35)   # 토요일
+    check(r8["should_collect"] is False and r8["target_session_date"] == "2026-07-17",
+          "주말 실행은 대상이 직전 금요일이고 이미 수집돼 있어 건너뜀")
+
+    # --- CLI 에 옵션이 실제로 배선돼 있는지 -----------------------------------
+    check(any(a.dest == "skip_if_not_ready" for a in _collect_subparser_actions()),
+          "collect 서브커맨드에 --skip-if-not-ready 옵션이 등록됨")
+
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def _collect_subparser_actions():
+    """main() 이 만드는 argparse 구조를 그대로 재현하지 않고, 실제 파서를 꺼내 확인합니다."""
+    import argparse
+    original_parse = argparse.ArgumentParser.parse_args
+    captured = {}
+
+    def _capture(self, *a, **kw):
+        captured["parser"] = self
+        raise SystemExit(0)   # 실제 실행으로 넘어가지 않게 즉시 중단
+
+    argparse.ArgumentParser.parse_args = _capture
+    argv_backup = sys.argv[:]
+    sys.argv = ["collector_us_stocks.py", "collect"]
+    try:
+        C.main()
+    except SystemExit:
+        pass
+    finally:
+        argparse.ArgumentParser.parse_args = original_parse
+        sys.argv = argv_backup
+
+    parser = captured.get("parser")
+    if parser is None:
+        return []
+    for action in parser._actions:
+        if isinstance(action, argparse._SubParsersAction):
+            collect = action.choices.get("collect")
+            return collect._actions if collect else []
+    return []
+
+
 def main():
     print("=" * 70)
     print("🇺🇸 미국주식 수집기 기초틀 오프라인 검증")
@@ -561,6 +689,7 @@ def main():
     test_index_proxy()
     test_derive_fields()
     test_session_resolution()
+    test_automation_readiness()
 
     print("\n" + "=" * 70)
     if FAILURES:

@@ -125,10 +125,11 @@ def _linear_premium(value, baseline, up_range, down_range, prem_max, prem_min):
 
 # =============================================================================
 # 1. 배점 앵커 (미국 시장 기준으로 새로 잡은 값 — 코스피 값을 베끼지 않았습니다)
-#    🚧 전부 잠정값입니다. 550종목 전수 수집 후 실제 분포로 재캘리브레이션 필요(TODO).
+#    ✅ 2026-08-07: 앵커가 참조하는 `utils/constants_us.py` §5 기준선들이 실측 548종목 분포로
+#       확정되면서 이 배점 곡선도 함께 확정됐습니다(값은 전부 constants_us.py 단일 출처에서 옵니다).
 # =============================================================================
 # Trailing ROE 15점: 0%(손익분기)=0점, 미국 자기자본비용 하단(9%)=10점,
-#   S&P500 중앙값 수준(US_ROE_PREMIUM_BASELINE_PCT=15%) 이상=만점.
+#   실측 중앙값 수준(US_ROE_PREMIUM_BASELINE_PCT=16%) 이상=만점.
 US_ROE_SCORE_KNOTS = [(0.0, 0.0), (US_VALUE_TRAP_ROE_PCT, 10.0), (US_ROE_PREMIUM_BASELINE_PCT, 15.0)]
 # ROIC 15점: 0%=0점, WACC 하단(8%)=10점, WACC 상단+여유(12%) 이상=만점.
 US_ROIC_SCORE_KNOTS = [(0.0, 0.0), (US_VALUE_TRAP_ROIC_PCT, 10.0), (US_ROIC_PREMIUM_BASELINE_PCT, 15.0)]
