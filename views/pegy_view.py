@@ -10,6 +10,11 @@ import pandas as pd
 import streamlit as st
 
 from utils.db import HISTORY_FILE, COL_MAP
+from utils.stock_export import (
+    build_export_filename,
+    build_stock_csv_bytes,
+    build_stock_json_bytes,
+)
 
 
 def load_latest_kospi_usd():
@@ -101,6 +106,110 @@ def load_pegy_summary_history():
             except Exception:
                 pass
     return []
+
+
+def render_stock_download_tool(stocks):
+    """
+    ⬇️ 종목별 데이터 다운로드 도구 (2026-08-08 신설, TASK_HISTORY #63)
+
+    한 종목을 검색해 고르면 그 종목의 **전체 레코드**(카드에 보이는 지표 + 수집 원본 필드 +
+    파생 계산 필드 + 내부 진단 필드 전부)를 CSV / JSON으로 내려받게 합니다.
+    필드를 선별하거나 요약하지 않습니다(ENGINEERING_SPEC §0-1).
+
+    ⚠️ 이 도구는 아래 카드 목록·페이지네이션과 **완전히 분리**돼 있습니다.
+    검색창도 카드 목록용 `search_query`와 공유하지 않고 전용 위젯(`pegy_download_search`)을
+    따로 둡니다 — 같은 입력을 공유하면 "파일 하나 받으려고 친 검색어" 때문에 200종목 카드
+    목록이 통째로 필터링돼 버려서, 기존 화면 동작이 바뀌기 때문입니다(회귀 위험 최소화).
+    """
+    with st.expander("⬇️ 종목별 데이터 다운로드 — 한 종목의 전체 데이터를 CSV / JSON으로 받기", expanded=False):
+        st.caption(
+            "검색해서 종목을 고르면, 화면 카드에 보이는 지표뿐 아니라 **수집·계산된 모든 항목**"
+            "(수집 실패 사유, 목표주가 상한 적용 여부 같은 내부 진단 필드 포함)을 그대로 내보냅니다. "
+            "이 검색창은 다운로드 전용이라 아래 종목 카드 목록에는 영향을 주지 않습니다."
+        )
+        dl_query = st.text_input(
+            "🔍 종목명 / 종목코드 검색",
+            placeholder="예: 삼성전자, 005930",
+            key="pegy_download_search",
+        ).strip()
+
+        if not dl_query:
+            st.info("📌 종목명 또는 종목코드를 입력하면 후보 목록이 나타납니다.")
+            return
+
+        matches = [
+            s for s in stocks
+            if dl_query.lower() in (s.get("name") or "").lower() or dl_query in (s.get("code") or "")
+        ]
+        if not matches:
+            st.warning(
+                f"🔎 '{dl_query}' 검색 결과가 없습니다. 종목명 일부 또는 6자리 종목코드로 다시 검색해 주세요. "
+                "(이 화면은 시가총액 상위 200종목만 담고 있습니다.)"
+            )
+            return
+
+        if len(matches) == 1:
+            target = matches[0]
+        else:
+            labels = [f"{s.get('name')} ({s.get('code')})" for s in matches]
+            picked = st.selectbox(
+                f"📋 검색 결과 {len(matches)}개 — 다운로드할 종목을 선택하세요",
+                labels,
+                index=0,
+            )
+            target = matches[labels.index(picked)]
+
+        code = target.get("code") or "nocode"
+        name = target.get("name") or "종목명 없음"
+        price_text = fmt_num(target.get("price"), suffix="원", digits=0)
+        badge_text = target.get("badge") or "뱃지 없음"
+        if target.get("quant_score") is None:
+            score_text = "데이터 없음"
+        elif target.get("score_max"):
+            score_text = f"{target['quant_score']}점 / {target['score_max']}점 만점"
+        else:
+            score_text = f"{target['quant_score']}점"
+
+        summary_html = f"""
+        <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 1px solid #0284c7; border-radius: 10px; padding: 14px 18px; margin: 6px 0 12px 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+                <span style="font-size: 19px; font-weight: 800; color: #e2e8f0;">{name}</span>
+                <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">({code})</span>
+                <span style="font-size: 12.5px; color: #7dd3fc; font-weight: 700;">{badge_text}</span>
+            </div>
+            <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600;">
+                현재가 <b style="color: #38bdf8;">{price_text}</b>
+                &nbsp;·&nbsp; 퀀트 스코어 <b style="color: #fef08a;">{score_text}</b>
+                &nbsp;·&nbsp; 내보낼 항목 <b>{len(target)}</b>개
+            </div>
+        </div>
+        """
+        st.markdown("\n".join([line.strip() for line in summary_html.split("\n") if line.strip()]), unsafe_allow_html=True)
+
+        date_str = datetime.now().strftime("%Y%m%d")
+        col_csv, col_json = st.columns(2)
+        with col_csv:
+            st.download_button(
+                label="⬇ CSV로 다운로드",
+                # utf-8-sig(BOM) — 그냥 utf-8로 주면 윈도우 엑셀에서 한글이 깨집니다.
+                data=build_stock_csv_bytes(target),
+                file_name=build_export_filename(name, code, date_str, "csv"),
+                mime="text/csv",
+                key=f"pegy_dl_csv_{code}",
+            )
+        with col_json:
+            st.download_button(
+                label="⬇ JSON으로 다운로드",
+                data=build_stock_json_bytes(target),
+                file_name=build_export_filename(name, code, date_str, "json"),
+                mime="application/json",
+                key=f"pegy_dl_json_{code}",
+            )
+        st.caption(
+            "※ CSV는 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM) 로 저장되며, 항목명 1열 / 값 1열의 "
+            "세로형입니다. 값이 비어 있는 항목은 **수집하지 못한 항목**이며 임의의 숫자로 채우지 않습니다."
+        )
+
 
 def render_pegy_page():
     """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 & 누적 히스토리 연동) 화면 렌더링"""
@@ -546,6 +655,9 @@ def render_pegy_page():
     """
     clean_guide_html = "\n".join([line.strip() for line in guide_box_html.split("\n") if line.strip()])
     st.markdown(clean_guide_html, unsafe_allow_html=True)
+
+    # 종목별 데이터 다운로드 도구 (2026-08-08 신설) — 아래 카드 목록/페이지네이션과 완전히 분리된 섹션입니다.
+    render_stock_download_tool(processed_stocks)
 
     filtered_stocks = processed_stocks
     if search_query:

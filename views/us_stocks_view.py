@@ -28,6 +28,12 @@ from datetime import datetime
 import streamlit as st
 
 from utils.constants_us import US_PAGE_SIZE, US_SNAPSHOT_FILENAME, US_SUMMARY_HISTORY_FILENAME
+from utils.stock_export import (
+    build_export_filename,
+    build_stock_csv_bytes,
+    build_stock_json_bytes,
+    sanitize_filename_part,
+)
 
 _DATA_DIR = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
 
@@ -844,6 +850,127 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
 
 
 # =============================================================================
+# 2-1. 종목별 데이터 다운로드 도구 (2026-08-08 신설, TASK_HISTORY #63)
+# =============================================================================
+def _render_stock_download_tool(stocks):
+    """
+    ⬇️ 한 종목을 검색해 고르면 그 종목의 **전체 레코드**(수집 원본 + 파생 계산 + 내부 진단 필드
+    전부)를 CSV / JSON으로 내려받게 합니다. 필드를 선별하거나 요약하지 않습니다(§0-1).
+
+    코스피 화면(`views/pegy_view.py`)의 같은 이름 도구와 **파일 형식이 완전히 동일**합니다
+    (공통 로직은 `utils/stock_export.py`).
+
+    ⚠️ 아래 카드 목록·페이지네이션과 완전히 분리된 섹션입니다. 검색창도 카드 목록용
+    `us_search`와 공유하지 않고 전용 위젯(`us_download_search`)을 따로 둡니다 — 공유하면
+    파일 하나 받으려고 친 검색어 때문에 550종목 카드 목록이 통째로 필터링돼 기존 화면 동작이
+    바뀌기 때문입니다(회귀 위험 최소화).
+    """
+    with st.expander("⬇️ 종목별 데이터 다운로드 — 한 종목의 전체 데이터를 CSV / JSON으로 받기", expanded=False):
+        st.caption(
+            "검색해서 종목을 고르면, 화면 카드에 보이는 지표뿐 아니라 **수집·계산된 모든 항목**"
+            "(수집 실패 사유, 목표주가 상한 적용 여부 같은 내부 진단 필드 포함)을 그대로 내보냅니다. "
+            "이 검색창은 다운로드 전용이라 아래 종목 카드 목록에는 영향을 주지 않습니다."
+        )
+        dl_query = st.text_input(
+            "🔍 종목명 / 티커 검색",
+            placeholder="예: 엔비디아, NVIDIA, NVDA",
+            key="us_download_search",
+        ).strip()
+
+        if not dl_query:
+            st.info("📌 종목명(한글·영문) 또는 티커를 입력하면 후보 목록이 나타납니다.")
+            return
+
+        q = dl_query.lower()
+        matches = [
+            s for s in stocks
+            if q in (s.get("name") or "").lower()
+            or q in (s.get("name_kr") or "")
+            or q in (s.get("symbol") or "").lower()
+        ]
+        if not matches:
+            st.warning(
+                f"🔎 '{dl_query}' 검색 결과가 없습니다. 종목명 일부(한글·영문) 또는 티커로 다시 검색해 주세요. "
+                "(이 화면은 미국 시가총액 상위 종목만 담고 있습니다.)"
+            )
+            return
+
+        def _label(s):
+            return f"{s.get('name_kr') or s.get('name_en_clean') or s.get('name') or '?'} ({s.get('symbol')})"
+
+        if len(matches) == 1:
+            target = matches[0]
+        else:
+            labels = [_label(s) for s in matches]
+            picked = st.selectbox(
+                f"📋 검색 결과 {len(matches)}개 — 다운로드할 종목을 선택하세요",
+                labels,
+                index=0,
+            )
+            target = matches[labels.index(picked)]
+
+        symbol = target.get("symbol") or "nosymbol"
+        display_name = target.get("name_kr") or target.get("name_en_clean") or target.get("name") or "종목명 없음"
+        name_en = target.get("name_en_clean") or target.get("name") or NA_TEXT
+        price_text = fmt_usd(target.get("price"))
+        badge_text = target.get("badge") or "뱃지 없음"
+        if target.get("quant_score") is None:
+            score_text = NA_TEXT
+        elif target.get("score_max"):
+            score_text = f"{target['quant_score']}점 / {target['score_max']}점 만점"
+        else:
+            score_text = f"{target['quant_score']}점"
+
+        st.markdown(
+            _clean_html(f"""
+            <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 1px solid #0284c7;
+                        border-radius: 10px; padding: 14px 18px; margin: 6px 0 12px 0;
+                        font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap; margin-bottom: 6px;">
+                    <span style="font-size: 19px; font-weight: 800; color: #e2e8f0;">{display_name}</span>
+                    <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">{name_en} · {symbol}</span>
+                    <span style="font-size: 12.5px; color: #7dd3fc; font-weight: 700;">{badge_text}</span>
+                </div>
+                <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600;">
+                    현재가 <b style="color: #38bdf8;">{price_text}</b>
+                    &nbsp;·&nbsp; 퀀트 스코어 <b style="color: #fef08a;">{score_text}</b>
+                    &nbsp;·&nbsp; 내보낼 항목 <b>{len(target)}</b>개
+                </div>
+            </div>
+            """),
+            unsafe_allow_html=True,
+        )
+
+        date_str = datetime.now().strftime("%Y%m%d")
+        # 위젯 key에도 티커를 넣어 종목이 바뀌면 버튼이 새 데이터로 갱신되게 합니다.
+        # (BRK/B 처럼 '/'가 든 티커는 파일명과 같은 규칙으로 치환해 key를 안전하게 만듭니다.)
+        key_symbol = sanitize_filename_part(symbol, fallback="nosymbol")
+        col_csv, col_json = st.columns(2)
+        with col_csv:
+            st.download_button(
+                label="⬇ CSV로 다운로드",
+                # utf-8-sig(BOM) — 그냥 utf-8로 주면 윈도우 엑셀에서 한글이 깨집니다.
+                data=build_stock_csv_bytes(target),
+                # BRK/B 같은 티커의 '/'는 파일명에 못 쓰므로 '_'로 치환됩니다.
+                file_name=build_export_filename(display_name, symbol, date_str, "csv"),
+                mime="text/csv",
+                key=f"us_dl_csv_{key_symbol}",
+            )
+        with col_json:
+            st.download_button(
+                label="⬇ JSON으로 다운로드",
+                data=build_stock_json_bytes(target),
+                file_name=build_export_filename(display_name, symbol, date_str, "json"),
+                mime="application/json",
+                key=f"us_dl_json_{key_symbol}",
+            )
+        st.caption(
+            "※ CSV는 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM) 로 저장되며, 항목명 1열 / 값 1열의 "
+            "세로형입니다. 값이 비어 있는 항목은 **수집하지 못한 항목**이며 임의의 숫자로 채우지 않습니다."
+        )
+
+
+# =============================================================================
 # 3. 페이지 렌더링
 # =============================================================================
 def render_us_stocks_page():
@@ -1105,6 +1232,9 @@ def render_us_stocks_page():
         """),
         unsafe_allow_html=True,
     )
+
+    # 종목별 데이터 다운로드 도구 (2026-08-08 신설) — 아래 카드 목록/페이지네이션과 완전히 분리된 섹션입니다.
+    _render_stock_download_tool(all_stocks)
 
     filtered = all_stocks
     if search_query:
