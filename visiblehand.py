@@ -17,8 +17,25 @@ st.markdown(
     }
 
     /* 참고: 2026-08-05 매크로 화면 관리자 전용 전환 시 사이드바 공개 메뉴(서비스 선택 라디오)를
-       완전히 없앴습니다. 그때 그 라디오 전용 스타일(옛 규칙 2~4번)이 죽은 CSS로 남아있던 걸
-       2026-08-06 정리 과정에서 제거했습니다 — 실제 화면엔 아무 영향 없는 정리입니다. */
+       완전히 없앴고, 죽은 CSS로 남아있던 그 라디오 전용 스타일을 2026-08-06에 제거했습니다.
+       2026-08-08 한국/미국 리포트 선택 라디오가 다시 생기면서 아래 규칙 2번을 새로 넣었습니다.
+       ⚠️ 옛 규칙과 달리 `[data-testid="stRadio"]` 안쪽으로 범위를 좁혔습니다 — 옛 규칙은
+       사이드바의 모든 위젯 라벨(관리자 비밀번호 입력창 라벨 등)까지 같이 건드렸는데,
+       지금은 이 라디오 하나에만 적용되게 해서 관리자 메뉴 모양은 그대로 두었습니다.
+       (테마/버전 차이로 셀렉터가 안 맞으면 기본 스타일로 렌더링될 뿐 깨지지 않습니다.) */
+
+    /* 2. 시장 선택 라디오 항목 글자 가시성 강화 + 동그라미 버튼 상단 정렬 */
+    [data-testid="stSidebar"] [data-testid="stRadio"] [data-baseweb="radio"] [data-testid="stMarkdownContainer"] p {
+        font-size: 15px !important;
+        font-weight: 700 !important;
+        line-height: 1.6 !important;
+        margin: 0 !important;
+    }
+    [data-testid="stSidebar"] [data-testid="stRadio"] [data-baseweb="radio"] {
+        align-items: flex-start !important;
+        padding-top: 4px !important;
+        padding-bottom: 4px !important;
+    }
 
     .main-title {
         font-size: 32px; 
@@ -89,22 +106,40 @@ def main():
     )
     st.sidebar.markdown("---")
 
-    # 2. 공개 서비스 메뉴 (사이드바 상단)
-    #    공개 서비스는 두 개입니다 — 기본 화면인 "💡 사실 이 가격이에요(코스피 밸류에이션 리포트)"와,
-    #    2026-08-08 오너 승인(ENGINEERING_SPEC.md §0-3-6)으로 공개 전환된 "🇺🇸 미국 주식은 이가격".
+    # 2. 공개 서비스 메뉴 (사이드바 상단) — 대분류 1개 아래 시장별 중분류 2개
+    #      대분류: 💡 사실 이 가격이에요
+    #        중분류: 🇰🇷 한국 주식은 이가격이에요  → render_pegy_page()      (기본값)
+    #        중분류: 🇺🇸 미국 주식은 이가격이에요  → render_us_stocks_page()
+    #    2026-08-08(오전) 공개 전환 때는 미국주식을 체크박스 하나로 켜는 구조였는데, 그러면
+    #    "코스피가 본체고 미국은 부가 옵션"처럼 읽힙니다. 오너 요청으로 둘을 대등한 두 리포트로
+    #    보이게 라디오(택1) 구조로 바꿨습니다 — 위젯도 이 프로젝트가 예전에 쓰던 사이드바
+    #    서비스 선택 방식(st.sidebar.radio)과 동일하고, 화면 안의 다른 택1 UI(페이지 이동 라디오,
+    #    빠른 필터 selectbox)와도 결이 맞습니다.
+    #    ⚠️ 대분류 헤더는 위쪽 브랜드 타이틀("🏢 잘 보면 보이는 손" = 매크로 방공망, 별개 화면)과
+    #       혼동되지 않게 크기·색·좌측 액센트바로 시각적으로 구분했습니다.
     #    "🏢 잘 보면 보이는 손(매크로 방공망)"은 2026-08-05 오너 지침(ENGINEERING_SPEC.md §0-3-1)에 따라
     #    후행지표 원칙에 맞지 않는 추정 프록시 지표 위주라 공개 화면에서는 제외하고,
     #    관리자 인증 후 사이드바 하단의 "⚙️ 관리자 전용 메뉴"에서만 볼 수 있게 이동했습니다.
     #    (일반 방문자에게는 매크로 메뉴 선택지 자체가 보이지 않습니다 — 후행지표로 재설계 전까지 비공개)
-    #    2026-08-06: 타이틀 아래에 "현재 공개 서비스" 캡션을 잠깐 추가했다가 되돌렸습니다 — 곧
-    #    해외주식 페이지가 추가되면 여기 자리는 정적 캡션이 아니라 실제 페이지 네비게이션 메뉴로
-    #    채워져야 하는데, 지금 하드코딩 문구를 넣으면 그때 다시 지워야 하는 이중작업이 됩니다.
-    #    2026-08-08: 예고한 대로 그 빈 자리를 아래 실제 네비게이션 메뉴로 채웠습니다.
-    view_us_stocks = st.sidebar.checkbox(
-        "🇺🇸 미국 주식은 이가격 (미국 밸류에이션 리포트)",
-        key="view_us_stocks",
-        help="체크하면 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 화면으로 이동합니다. "
-             "체크를 해제하면 기본 화면인 '💡 사실 이 가격이에요'(코스피)로 돌아옵니다."
+    st.sidebar.markdown(
+        """
+        <div style="border-left: 4px solid #14b8a6; padding: 2px 0 2px 10px; margin: 2px 0 10px 0;">
+            <div style="font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">💡 사실 이 가격이에요</div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;">시장별 밸류에이션 리포트</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+    MARKET_KR = "🇰🇷 한국 주식은 이가격이에요"
+    MARKET_US = "🇺🇸 미국 주식은 이가격이에요"
+    selected_market = st.sidebar.radio(
+        "시장 선택",
+        [MARKET_KR, MARKET_US],
+        index=0,  # 첫 진입 기본값은 예전과 동일하게 한국(코스피)
+        key="selected_market",
+        help="어느 시장의 밸류에이션 리포트를 볼지 고릅니다.\n\n"
+             f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
+             f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
     )
     st.sidebar.markdown("---")
 
@@ -112,9 +147,9 @@ def main():
     admin_mode = render_admin_sidebar()
 
     # 4. 메인 뷰 라우팅
-    #    ⚠️ 기본(아무것도 선택하지 않은) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
-    #    ⚠️ 매크로 화면은 여전히 관리자 인증 후에만 진입 가능합니다 — 이번 공개 전환과 무관합니다.
-    if view_us_stocks:
+    #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
+    #    ⚠️ 매크로 화면은 여전히 관리자 인증 후에만 진입 가능합니다 — 이번 메뉴 개편과 무관합니다.
+    if selected_market == MARKET_US:
         render_us_stocks_page()
     elif admin_mode and st.session_state.get("admin_view_macro"):
         render_macro_page()
