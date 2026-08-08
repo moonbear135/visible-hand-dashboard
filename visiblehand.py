@@ -130,8 +130,8 @@ def main():
         """,
         unsafe_allow_html=True
     )
-    MARKET_KR = "🇰🇷 한국 주식은 이가격이에요"
-    MARKET_US = "🇺🇸 미국 주식은 이가격이에요"
+    MARKET_KR = "한국 주식은 이가격이에요"
+    MARKET_US = "미국 주식은 이가격이에요"
     selected_market = st.sidebar.radio(
         "시장 선택",
         [MARKET_KR, MARKET_US],
