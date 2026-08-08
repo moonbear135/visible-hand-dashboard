@@ -298,11 +298,11 @@ def render_pegy_page():
             <div style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap; max-width: 860px; margin-left: auto; margin-right: auto;">
                 <div style="flex: 1 1 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155; border-radius: 14px; padding: 16px 20px;">
                     <div style="font-size: 13px; color: #94a3b8; font-weight: 700;">📈 코스피 지수{date_label}</div>
-                    <div style="font-size: 30px; color: #f8fafc; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['kospi']:,.0f}</div>
+                    <div style="font-size: 34px; color: #4ade80; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['kospi']:,.0f}</div>
                 </div>
                 <div style="flex: 1 1 240px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155; border-radius: 14px; padding: 16px 20px;">
                     <div style="font-size: 13px; color: #94a3b8; font-weight: 700;">💵 원/달러 환율{date_label}</div>
-                    <div style="font-size: 30px; color: #f8fafc; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['usd']:,.0f}<span style="font-size: 18px; font-weight: 700;">원</span></div>
+                    <div style="font-size: 34px; color: #4ade80; font-weight: 800; letter-spacing: -1px; margin-top: 4px;">{market_snapshot['usd']:,.0f}<span style="font-size: 20px; font-weight: 700;">원</span></div>
                 </div>
             </div>
             """,

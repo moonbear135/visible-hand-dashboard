@@ -1076,7 +1076,7 @@ def render_us_stocks_page():
 
     st.markdown(
         _clean_html("""
-        <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #0284c7; border-radius: 12px;
+        <div style="background-color: #0f172a; border: 1px solid #0284c7; border-radius: 12px;
                     padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
             <div style="font-size: 15px; font-weight: 800; color: #38bdf8; margin-bottom: 10px;">
                 💡 미국주식 퀀트 스코어 / 코스피 화면과 다른 점</div>
