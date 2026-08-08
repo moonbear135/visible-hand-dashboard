@@ -12,8 +12,16 @@ import streamlit as st
 from utils.db import HISTORY_FILE, COL_MAP
 from utils.stock_export import (
     build_export_filename,
-    build_stock_csv_bytes,
-    build_stock_json_bytes,
+    build_history_csv_bytes,
+    build_history_json_bytes,
+    history_date_range,
+)
+from utils.stock_history import (
+    KOSPI_HISTORY_FIELDS,
+    KOSPI_HISTORY_FILENAME,
+    KOSPI_KEY_FIELD,
+    load_stock_history,
+    stock_history_path,
 )
 
 
@@ -110,22 +118,29 @@ def load_pegy_summary_history():
 
 def render_stock_download_tool(stocks):
     """
-    ⬇️ 종목별 데이터 다운로드 도구 (2026-08-08 신설, TASK_HISTORY #63)
+    ⬇️ 종목별 데이터 다운로드 도구
+    (2026-08-08 신설 TASK_HISTORY #63 → 2026-08-09 전면 재작업 TASK_HISTORY #64)
 
-    한 종목을 검색해 고르면 그 종목의 **전체 레코드**(카드에 보이는 지표 + 수집 원본 필드 +
-    파생 계산 필드 + 내부 진단 필드 전부)를 CSV / JSON으로 내려받게 합니다.
-    필드를 선별하거나 요약하지 않습니다(ENGINEERING_SPEC §0-1).
+    한 종목을 검색해 고르면 그 종목의 **날짜별 이력 표**(날짜=행 / 지표=열)를 CSV·JSON으로
+    내려받게 합니다. 내보내는 항목은 **카드 화면에 실제로 보이는 재무 지표만**이고, 헤더는
+    영문 변수명이 아니라 한국어 라벨입니다(단일 출처 `utils/stock_history.py`).
+    `badge_bg` 같은 색상값, `f_target_cap_reason`·`data_issues` 같은 내부 진단 필드는
+    내보내지 않습니다 — 코딩 디버깅용이지 투자 분석용이 아니기 때문입니다(오너 지적).
+
+    ⚠️ 이력은 이 기능이 도입된 뒤 **첫 수집부터** 쌓입니다. 과거 스냅샷을 종목 단위로
+    보관한 적이 없어 과거 날짜를 소급 생성하지 않습니다(ENGINEERING_SPEC §0-1).
+    그래서 아직 이력이 없으면 파일을 만들어 주는 대신 그 사실을 그대로 안내합니다.
 
     ⚠️ 이 도구는 아래 카드 목록·페이지네이션과 **완전히 분리**돼 있습니다.
     검색창도 카드 목록용 `search_query`와 공유하지 않고 전용 위젯(`pegy_download_search`)을
     따로 둡니다 — 같은 입력을 공유하면 "파일 하나 받으려고 친 검색어" 때문에 200종목 카드
     목록이 통째로 필터링돼 버려서, 기존 화면 동작이 바뀌기 때문입니다(회귀 위험 최소화).
     """
-    with st.expander("⬇️ 종목별 데이터 다운로드 — 한 종목의 전체 데이터를 CSV / JSON으로 받기", expanded=False):
+    with st.expander("⬇️ 종목별 데이터 다운로드 — 한 종목의 날짜별 데이터(시계열)를 CSV / JSON으로 받기", expanded=False):
         st.caption(
-            "검색해서 종목을 고르면, 화면 카드에 보이는 지표뿐 아니라 **수집·계산된 모든 항목**"
-            "(수집 실패 사유, 목표주가 상한 적용 여부 같은 내부 진단 필드 포함)을 그대로 내보냅니다. "
-            "이 검색창은 다운로드 전용이라 아래 종목 카드 목록에는 영향을 주지 않습니다."
+            "검색해서 종목을 고르면, 그 종목의 **날짜별 이력**(하루 한 줄)을 표로 내보냅니다. "
+            "항목은 카드에 보이는 재무 지표(PER·PBR·ROE·배당·목표주가·퀀트 스코어 등)이고 "
+            "열 이름은 한국어입니다. 이 검색창은 다운로드 전용이라 아래 종목 카드 목록에는 영향을 주지 않습니다."
         )
         dl_query = st.text_input(
             "🔍 종목명 / 종목코드 검색",
@@ -161,14 +176,24 @@ def render_stock_download_tool(stocks):
 
         code = target.get("code") or "nocode"
         name = target.get("name") or "종목명 없음"
+
+        # 이력 파일(data/kospi200_stock_history.csv)에서 이 종목 행만 날짜순으로 뽑습니다.
+        history_rows = load_stock_history(
+            stock_history_path(KOSPI_HISTORY_FILENAME), KOSPI_KEY_FIELD, code
+        )
+        if not history_rows:
+            st.warning(
+                f"📭 '{name}({code})'의 날짜별 이력이 아직 없습니다.\n\n"
+                "종목별 이력은 **이 기능이 도입된 뒤 첫 수집분부터** 쌓이기 시작합니다. "
+                "과거 데이터는 종목 단위로 보관해 둔 적이 없어 소급해서 만들어내지 않습니다"
+                "(없는 숫자를 지어내지 않는다는 원칙). 다음 수집이 끝나면 이 자리에서 받을 수 있습니다."
+            )
+            return
+
+        first_date, last_date = history_date_range(history_rows)
         price_text = fmt_num(target.get("price"), suffix="원", digits=0)
         badge_text = target.get("badge") or "뱃지 없음"
-        if target.get("quant_score") is None:
-            score_text = "데이터 없음"
-        elif target.get("score_max"):
-            score_text = f"{target['quant_score']}점 / {target['score_max']}점 만점"
-        else:
-            score_text = f"{target['quant_score']}점"
+        period_text = first_date if first_date == last_date else f"{first_date} ~ {last_date}"
 
         summary_html = f"""
         <div style="background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%); border: 1px solid #0284c7; border-radius: 10px; padding: 14px 18px; margin: 6px 0 12px 0; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -178,9 +203,10 @@ def render_stock_download_tool(stocks):
                 <span style="font-size: 12.5px; color: #7dd3fc; font-weight: 700;">{badge_text}</span>
             </div>
             <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600;">
-                현재가 <b style="color: #38bdf8;">{price_text}</b>
-                &nbsp;·&nbsp; 퀀트 스코어 <b style="color: #fef08a;">{score_text}</b>
-                &nbsp;·&nbsp; 내보낼 항목 <b>{len(target)}</b>개
+                최신 현재가 <b style="color: #38bdf8;">{price_text}</b>
+                &nbsp;·&nbsp; 이력 기간 <b style="color: #fef08a;">{period_text}</b>
+                &nbsp;·&nbsp; 기록일수 <b>{len(history_rows)}</b>일
+                &nbsp;·&nbsp; 지표 <b>{len(KOSPI_HISTORY_FIELDS) - 1}</b>개
             </div>
         </div>
         """
@@ -192,7 +218,7 @@ def render_stock_download_tool(stocks):
             st.download_button(
                 label="⬇ CSV로 다운로드",
                 # utf-8-sig(BOM) — 그냥 utf-8로 주면 윈도우 엑셀에서 한글이 깨집니다.
-                data=build_stock_csv_bytes(target),
+                data=build_history_csv_bytes(history_rows, KOSPI_HISTORY_FIELDS),
                 file_name=build_export_filename(name, code, date_str, "csv"),
                 mime="text/csv",
                 key=f"pegy_dl_csv_{code}",
@@ -200,16 +226,16 @@ def render_stock_download_tool(stocks):
         with col_json:
             st.download_button(
                 label="⬇ JSON으로 다운로드",
-                data=build_stock_json_bytes(target),
+                data=build_history_json_bytes(history_rows, KOSPI_HISTORY_FIELDS),
                 file_name=build_export_filename(name, code, date_str, "json"),
                 mime="application/json",
                 key=f"pegy_dl_json_{code}",
             )
         st.caption(
-            "※ CSV는 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM) 로 저장되며, 항목명 1열 / 값 1열의 "
-            "세로형입니다. 값이 비어 있는 항목은 **수집하지 못한 항목**이며 임의의 숫자로 채우지 않습니다."
+            "※ 한 줄이 하루입니다(날짜=행 / 지표=열). CSV는 엑셀에서 한글이 깨지지 않도록 UTF-8(BOM)로 "
+            "저장됩니다. 값이 비어 있는 칸은 **그날 수집하지 못한 항목**이며 임의의 숫자로 채우지 않습니다. "
+            "이력은 이 기능 도입 이후부터 쌓이므로, 시작 초기에는 줄 수가 적은 게 정상입니다."
         )
-
 
 def render_pegy_page():
     """'💡 사실 이 가격이에요' (배치 수집 JSON 동적 요약 지표 & 누적 히스토리 연동) 화면 렌더링"""

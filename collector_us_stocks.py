@@ -89,6 +89,14 @@ from utils.constants_us import (
     US_INDEX_DEFINITIONS,
 )
 from utils.scoring_us import derive_valuation, apply_us_guardrail, score_all
+# 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
+# 단일 출처는 utils/stock_history.py 이며, 기존 수집 로직은 한 줄도 바뀌지 않았습니다
+# (아래 run_us_collector 맨 끝, 스냅샷 저장이 끝난 뒤에 '추가'로만 호출).
+from utils.stock_history import (
+    US_HISTORY_FIELDS,
+    US_HISTORY_FILENAME,
+    record_daily_history,
+)
 from utils.company_names_kr import resolve_korean_name
 
 # =============================================================================
@@ -1587,6 +1595,38 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
             "items": raw_items,
         }, f, ensure_ascii=False, indent=2)
     update_us_summary_history(now_et.strftime("%Y-%m-%d %H:%M"), visible, history_path)
+
+    # ── 종목별 시계열 이력 누적 (2026-08-09 신설, TASK_HISTORY #64) ──────────────────
+    # 여기까지 도달했다는 건 유니버스 수집·전수 크롤링·스코어링·스냅샷 저장이 예외 없이
+    # 끝났다는 뜻입니다. 소스 차단(USSourceBlockedError)이나 수집 0건은 위에서 예외로
+    # 중단되어 이 줄에 도달하지 못하므로, 차단당한 날은 이력에 아무것도 쌓이지 않습니다.
+    # 그 위에 한 겹 더, status 가 FAILED 면 record_daily_history 가 기록을 거부합니다(§0-1).
+    #
+    # 날짜 기준은 '언제 돌렸나'가 아니라 **그 데이터가 속한 거래일**입니다 — 페이지의
+    # "At close: …" 타임스탬프에서 뽑은 session_date_from_source 의 최빈값을 씁니다
+    # (source_session_dates 는 바로 위 metadata 계산에서 이미 집계해 둔 값).
+    # 실측 세션 날짜가 하나도 없으면 계산값 session['session_date'] 로 폴백합니다.
+    #
+    # ⚠️ 버퍼 구간(is_visible=False) 종목도 함께 기록합니다 — 순위가 잠깐 밀렸다고
+    #    그 종목의 시계열에 구멍이 나면 안 되기 때문입니다.
+    if source_session_dates:
+        history_date = max(source_session_dates.items(), key=lambda kv: kv[1])[0]
+    else:
+        history_date = session["session_date"]
+    try:
+        history_result = record_daily_history(
+            path=_data_path(US_HISTORY_FILENAME),
+            stocks=enriched,
+            date_str=history_date,
+            fields=US_HISTORY_FIELDS,
+            status=status,
+        )
+        if history_result["recorded"]:
+            print(f"  종목별 시계열 이력 누적: {history_result['reason']} -> {US_HISTORY_FILENAME}")
+        else:
+            print(f"  ⚠️ 종목별 시계열 이력 미기록: {history_result['reason']}")
+    except Exception as e:
+        print(f"  ⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
 
     print("=" * 70)
     print(f"[완료] {len(visible)}종목 노출 (+버퍼 {metadata['hidden_buffer_count']}) / "

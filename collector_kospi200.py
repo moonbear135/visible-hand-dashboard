@@ -47,6 +47,15 @@ from utils.constants import (
     ROIC_PREMIUM_BASELINE_PCT,
     VALUE_TRAP_ROE_PCT,
 )
+# 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
+# 단일 출처는 utils/stock_history.py 이며, 기존 수집 로직은 한 줄도 바뀌지 않았습니다
+# (아래 run_kospi200_collector 맨 끝, 스냅샷 저장이 끝난 뒤에 '추가'로만 호출).
+from utils.stock_history import (
+    KOSPI_HISTORY_FIELDS,
+    KOSPI_HISTORY_FILENAME,
+    record_daily_history,
+    stock_history_path,
+)
 
 # =============================================================================
 # 데이터 무결성 상수 (ENGINEERING_SPEC §0-1 "하드코딩 및 더미 데이터 금지" 준수)
@@ -1448,6 +1457,33 @@ def run_kospi200_collector():
     # 기준이 어긋나지 않게 맞춰야 합니다. 버퍼 구간 종목의 이력 연속성은 kospi200_pegy_latest.json
     # 쪽(위 stocks 배열에 그대로 포함)에서 이미 보장됩니다.
     update_pegy_summary_history(now_str, visible_stocks)
+
+    # ── 종목별 시계열 이력 누적 (2026-08-09 신설, TASK_HISTORY #64) ──────────────────
+    # 여기까지 도달했다는 건 목록 스크래핑·히스테리시스·종목별 수집·스코어링·스냅샷 저장이
+    # 예외 없이 끝났다는 뜻입니다(중간 실패는 위에서 RuntimeError 로 중단되어 이 줄에 오지
+    # 못합니다). 그 위에 한 겹 더, status 가 FAILED 면 record_daily_history 가 스스로
+    # 기록을 거부합니다 — 오염된 하루가 영구 이력에 박히면 되돌릴 수 없기 때문입니다(§0-1).
+    #
+    # ⚠️ 버퍼 구간(is_visible=False, 201~230위) 종목도 함께 기록합니다. 순위가 잠깐
+    #    200위 밖으로 밀렸다고 그 종목의 시계열에 구멍이 나면 안 되기 때문입니다
+    #    (몇 위였는지는 '시가총액 순위' 컬럼에 그대로 남습니다).
+    #
+    # ⚠️ 이력 기록이 실패해도 이미 저장된 스냅샷과 수집 결과는 건드리지 않습니다
+    #    (수집 성공을 이력 파일 I/O 때문에 실패로 만들지 않음).
+    try:
+        history_result = record_daily_history(
+            path=stock_history_path(KOSPI_HISTORY_FILENAME),
+            stocks=enriched_stocks,
+            date_str=_now_kst().strftime('%Y-%m-%d'),
+            fields=KOSPI_HISTORY_FIELDS,
+            status=status,
+        )
+        if history_result['recorded']:
+            print(f"종목별 시계열 이력 누적: {history_result['reason']} -> {KOSPI_HISTORY_FILENAME}")
+        else:
+            print(f"⚠️ 종목별 시계열 이력 미기록: {history_result['reason']}")
+    except Exception as e:
+        print(f"⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
 
     print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
     return json_path
