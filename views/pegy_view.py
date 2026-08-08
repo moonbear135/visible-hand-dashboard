@@ -329,9 +329,13 @@ def render_pegy_page():
     except Exception:
         stale_hours = None
 
-    if stale_hours is not None and stale_hours >= 24:
+    # 2026-08-08: "자동 수집이 멈춰 있는지 확인해 주세요"는 운영자가 조치할 수 있는 지시문이라
+    # 일반 방문자에게는 의미가 없고 오히려 서비스가 고장난 것처럼 오해를 살 수 있어 관리자 전용으로
+    # 전환했습니다(관리자 인증 시에만 노출). 실제 데이터 시점 자체는 바로 아래 "마지막 동기화" 배너에
+    # 이미 정직하게 표기되어 있으므로, 일반 사용자에게 숨기는 정보는 없습니다(§0-1).
+    if stale_hours is not None and stale_hours >= 24 and st.session_state.get("admin_mode", False):
         st.error(
-            f"🚨 마지막 수집이 **{stale_hours/24:.1f}일 전({last_updated_at})** 입니다. "
+            f"🚨 [관리자 전용] 마지막 수집이 **{stale_hours/24:.1f}일 전({last_updated_at})** 입니다. "
             "아래 수치는 최신 시세가 아닙니다. 자동 수집이 멈춰 있는지 확인해 주세요."
         )
 
