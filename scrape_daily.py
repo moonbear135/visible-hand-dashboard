@@ -42,6 +42,8 @@ HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
 #    외국계 증권사 매도세 / 풋옵션 매수 강도)는 점수 계산에서 제거되어 **더 이상 새로 기록되지
 #    않습니다.** 그래도 매핑을 지우지 않는 이유는, 이미 쌓인 과거 행의 한글 컬럼을 읽어
 #    영문 컬럼으로 되돌리려면 이 표가 그대로 필요하기 때문입니다(과거 기록 개변 금지).
+# ⚠️ 2026-08-10 (#72): `Short_Ratio`(공매도 거래 비중) / `Stock_Short_Balance`(공매도 잔고)도
+#    같은 상태가 됐습니다 — 새로 기록되지 않지만 과거 행 복원을 위해 매핑은 그대로 둡니다.
 COL_MAP = {
     "Date": "날짜",
     "Score": "종합 위험 점수",
@@ -137,8 +139,9 @@ def scrape_and_update(target_date_override=None):
     # 아래에서 의존 지표를 배점 제외합니다.
     kospi_change = None
     usd_change = None
-    volatility = None
-    dist_from_high = None
+    # (2026-08-10 #72: volatility / dist_from_high 선언 제거 — 이 두 값을 쓰던 공매도 2개
+    #  지표가 점수에서 빠져 참조하는 코드가 남지 않았습니다. 아래 FDR 조회 블록의 계산과
+    #  "이 값이 없으면 수집 중단" 하드 실패 게이트도 함께 제거했습니다.)
     # 2026-08-10 (#68): 예전엔 여기서 곧바로 kospi_5d_base(= 0.5 - 2.5×수익률)라는 임의 선형식
     # 결과만 들고 다녔습니다. 이제 실측 원값(5영업일 수익률)과 그 정규화 기준선(과거 1년 분포)을
     # 따로 보관하고, 점수화는 아래 "4. 리스크 지표 연산"에서 한 번만 합니다.
@@ -170,14 +173,13 @@ def scrape_and_update(target_date_override=None):
                     if idx_k >= 1:
                         kospi_prev = float(valid_kospi.iloc[idx_k-1]['Close'])
                         kospi_change = (kospi_close - kospi_prev) / kospi_prev
-                        # 최근 10 영업일 표준편차 변동성 계산
-                        returns = valid_kospi['Close'].pct_change().dropna()
-                        volatility = float(returns.tail(10).std()) * 100
-                    
-                    # 52주 고점 계산
-                    high_52w = float(kospi_data['Close'].tail(252).max()) # 전체 범위 유지
-                    dist_from_high = (high_52w - kospi_close) / high_52w
-                    
+                    # 2026-08-10 (#72): 여기 있던 '최근 10영업일 변동성'과 '52주 고점 대비 낙폭'
+                    # 계산을 제거했습니다. 이 두 값을 쓰던 곳은 `Short_Ratio`(공매도 비중)와
+                    # `Stock_Short_Balance`(공매도 잔고)뿐이었는데, 그 2개 지표가 이번에
+                    # 점수에서 빠지면서 두 값을 참조하는 코드가 하나도 남지 않았습니다.
+                    # 안 쓰는 계산을 남겨두면 "이 값이 어딘가 쓰이나?" 하는 오해만 남기므로
+                    # 계산 자체를 지웁니다(§0-1, #69에서 els_base 등을 지운 것과 같은 원칙).
+
                     latest_usd = valid_usd.iloc[-1]
                     usd_close = float(latest_usd['Close'])
                     idx_u = valid_usd.index.get_loc(valid_usd.index[-1])
@@ -222,8 +224,10 @@ def scrape_and_update(target_date_override=None):
     # 목적으로 존재하므로(정상적인 하루 지연 보정 시 몇 % 괴리는 흔하고 정상), 괴리를 이유로
     # 덮어쓰기를 막으면 이 블록의 존재 목적 자체가 무력화됩니다. 대신 큰 괴리가 있으면
     # kospi_change(전일 대비 변화율)도 네이버 종가 기준으로 재계산해, "저장된 종가"와
-    # "점수 계산에 쓰인 변화율"이 서로 다른 시점 값이 되는 문제만 없앱니다(volatility·
-    # dist_from_high는 장기 시계열 기반이라 하루 지연의 영향이 미미해 그대로 둡니다).
+    # "점수 계산에 쓰인 변화율"이 서로 다른 시점 값이 되는 문제만 없앱니다.
+    # (2026-08-10 #72: 예전엔 여기에 "volatility·dist_from_high는 장기 시계열 기반이라
+    #  하루 지연 영향이 미미해 그대로 둔다"는 단서가 붙어 있었는데, 그 두 값 자체가
+    #  이번에 제거되어 더 이상 해당 사항이 없습니다.)
     NAVER_DEVIATION_WARN_THRESHOLD = 0.01  # 1% — 이 이상이면 "다른 시점 값일 수 있다"는 흔적을 남김
     kospi_close_fdr = kospi_close
 
@@ -278,15 +282,17 @@ def scrape_and_update(target_date_override=None):
             f"(KOSPI={kospi_close}, USD={usd_close})"
         )
 
-    # 변동성·고점대비낙폭이 없으면 2개 지표(공매도 비중/공매도 잔고)가
-    # 시드 상수로 계산되어 버리므로, 아예 수집을 중단합니다.
-    # (2026-08-10 #69: 여기 있던 'ELS 낙인'은 지표 자체가 제거되어 목록에서 뺐습니다.
-    #  2026-08-10 #70: '공포지수'(VKOSPI_Skew)도 이제 volatility를 쓰지 않고 KRX 실측
-    #  VKOSPI 지수값을 쓰므로 이 목록에서 빠졌습니다.)
-    if volatility is None or dist_from_high is None:
-        raise RuntimeError(
-            f"{date_key} 변동성/고점대비낙폭 산출 실패 — 임의 상수(1.2 / 0.08)로 대체하지 않고 당일 수집을 중단합니다."
-        )
+    # 2026-08-10 (#72): 여기 있던 "변동성/고점대비낙폭 산출 실패 시 수집 중단" 하드 실패
+    # 게이트를 제거했습니다.
+    #   · 원래 목적: 이 두 값이 없으면 공매도 2개 지표(Short_Ratio / Stock_Short_Balance)가
+    #     시드 상수(1.2 / 0.08)로 계산되어 '정상처럼 보이는 가짜 점수'가 만들어지므로 그걸 막는 것.
+    #   · 이번 #72로 그 2개 지표 자체가 점수에서 빠지면서 두 값을 쓰는 코드가 하나도 남지
+    #     않았습니다. 그런데 게이트만 남으면 **아무 데도 쓰이지 않는 값 때문에 그날 수집 전체가
+    #     죽는** 불필요한 실패 경로가 됩니다(예: 상장 초기 구간이라 표본이 모자라는 경우).
+    #   · 따라서 계산·선언과 함께 게이트도 제거했습니다. KOSPI/환율 종가 결측 방어(바로 위)는
+    #     그대로 살아 있으므로 "실패를 조용히 메우지 않는다"는 §0-1 방어는 유지됩니다.
+    # (이력: #69에서 'ELS 낙인'이, #70에서 '공포지수'가 이 목록에서 빠졌고, #72에 남은
+    #  공매도 2개가 빠지면서 게이트 전체가 목적을 잃었습니다.)
 
     # 3. 네이버 금융 외국인/기관 수급 데이터 크롤링
     retail_flow = None
@@ -346,10 +352,19 @@ def scrape_and_update(target_date_override=None):
     # 임의 선형식(skew_base = 0.4+0.4×(Vol/5)-0.2×KOSPI_change / synth_base = 0.5+0.3×(USD-1300)/200)을
     # 제거하고 KRX OPEN API 실측값으로 교체했습니다(아래 [실측 지표 ③④]).
     # 남은 4개(fx/put/short/bal)는 이번 단계 범위 밖이라 **한 줄도 건드리지 않았습니다.**
+    #
+    # 2026-08-10 (#72): 공매도 2개 지표(`Short_Ratio` / `Stock_Short_Balance`)의 계산식
+    # (short_base = 0.4+0.4×(변동성/5) / bal_base = 0.5+0.3×고점대비낙폭)을 제거하고 두 지표를
+    # 점수에서 뺐습니다. **#69의 6개와는 사유가 다릅니다** — 데이터가 없어서가 아니라,
+    # 실측값을 얻을 수 있는 유일한 무료 경로(pykrx)가 data.krx.co.kr의 로그인 요구를 Referer
+    # 헤더 스푸핑으로 우회하는 방식이라 §0-3-2(로그인 우회 크롤링 금지)와 충돌하기 때문입니다.
+    # KRX 공식 OPEN API에는 공매도 서비스가 아예 없습니다(#66 전수 확인). 오너가 예외를 허용하지
+    # 않고 "실측 불가로 재분류"하기로 결정(옵션②)했고, 두 지표의 설명·공부법은 화면
+    # "📚 공부용 참고" 섹션(views/macro_view.py STUDY_ONLY_INDICATORS)으로 **이동**했습니다.
+    # ⚠️ market_history.csv의 기존 두 컬럼은 과거 기록 보존을 위해 그대로 둡니다(앞으로만 안 씀).
+    # 이제 남은 프록시는 2개(fx/put)뿐이고 나머지 4개는 전부 실측입니다.
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300  # usd_close 자체는 위에서 이미 None 방어됨
     put_base = None if kospi_change is None else (0.5 - 0.4 * kospi_change)
-    short_base = 0.4 + 0.4 * (volatility / 5.0)
-    bal_base = 0.5 + 0.3 * dist_from_high
 
     # -------------------------------------------------------------------------
     # [실측 지표 ①] Stock_Net_Sell — 3주체 순매수 '금액'을 과거 분포 대비 정규화
@@ -453,11 +468,7 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)),
             "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))
         },
-        "Short_Ratio": {
-            "Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)),
-            "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)),
-            "Retail": clip(short_base - 0.2)
-        },
+        # (2026-08-10 #72: 여기 있던 "Short_Ratio" 항목 제거 — 공부용 참고 섹션으로 이동)
         # 실측 지표 ③: VKOSPI 지수값. 시장 전체가 하나의 값으로 매기는 변동성 기대라
         # 주체별로 다를 수 없습니다 → 3주체 동일값(KOSPI_5D_Return과 같은 취급).
         # (예전엔 외국인 +0.05 / 개인 -0.2 같은 근거 없는 오프셋이 붙어 있었습니다.)
@@ -468,9 +479,7 @@ def scrape_and_update(target_date_override=None):
         "Synthetic_Futures": None if basis_base is None else {
             "Foreigner": clip(basis_base), "Institution": clip(basis_base), "Retail": clip(basis_base)
         },
-        "Stock_Short_Balance": {
-            "Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)
-        },
+        # (2026-08-10 #72: 여기 있던 "Stock_Short_Balance" 항목 제거 — 공부용 참고 섹션으로 이동)
         # 실측 지표 ①: 주체별 실제 순매수 금액을 각각 정규화한 값을 그대로 씁니다.
         "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {
             "Foreigner": clip(stock_net_risks["Foreigner"]),

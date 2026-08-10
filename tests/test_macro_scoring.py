@@ -243,13 +243,36 @@ WEIGHTS_BEFORE_69 = {
     "Stock_Short_Balance": 3.0, "Put_Buy_Simple": 3.0, "Stock_Net_Sell": 3.0,
     "KOSPI_5D_Return": 12.0,
 }
-# 점수에서 뺀 6개 (4개는 화면 '공부용 참고' 섹션으로, 2개는 개념 중복이라 완전 제외)
+# #69에서 뺀 6개 (4개는 화면 '공부용 참고' 섹션으로, 2개는 개념 중복이라 완전 제외)
 RETIRED_EXPECTED = {
     "ELS_KnockIn", "NDF_Night_Rate", "Futures_Net_Sell", "Non_Arbitrage_Ratio",
     "Foreign_Broker_Dump", "Put_Buy_Simple",
 }
-STUDY_EXPECTED = {"ELS_KnockIn", "NDF_Night_Rate", "Futures_Net_Sell", "Non_Arbitrage_Ratio"}
+
+# =============================================================================
+# 2026-08-10 (#72) — 공매도 2종 '실측 불가' 재분류 + 가중치 재분배 검증
+# =============================================================================
+# #69 직후(= #72 직전)의 가중치 8개, 합계 100.00. 이번 재분배의 기준선입니다.
+WEIGHTS_AFTER_69 = {
+    "FX_Swap_Point": 19.35, "Put_OTM_OI": 12.90, "Short_Ratio": 9.68,
+    "VKOSPI_Skew": 9.68, "Synthetic_Futures": 19.35, "Stock_Short_Balance": 4.84,
+    "Stock_Net_Sell": 4.84, "KOSPI_5D_Return": 19.36,
+}
+# ⚠️ 이 2개는 #69의 6개와 **뺀 이유가 다릅니다.** 데이터가 없어서가 아니라, 유일한 무료
+#    경로(pykrx)가 data.krx.co.kr 로그인 우회라 §0-3-2 원칙상 쓰지 않기로 한 것입니다.
+#    그래서 '완전 삭제(DROPPED)'가 아니라 **공부 섹션에 남습니다.**
+RETIRED_IN_72 = {"Short_Ratio", "Stock_Short_Balance"}
+# 현재(= #72 이후) 점수에서 빠져 있는 전체 목록
+RETIRED_EXPECTED_NOW = RETIRED_EXPECTED | RETIRED_IN_72
+STUDY_EXPECTED = {
+    "ELS_KnockIn", "NDF_Night_Rate", "Futures_Net_Sell", "Non_Arbitrage_Ratio",
+    "Short_Ratio", "Stock_Short_Balance",
+}
 DROPPED_EXPECTED = {"Foreign_Broker_Dump", "Put_Buy_Simple"}
+ACTIVE_EXPECTED = {
+    "FX_Swap_Point", "Put_OTM_OI", "VKOSPI_Skew", "Synthetic_Futures",
+    "Stock_Net_Sell", "KOSPI_5D_Return",
+}
 
 
 def _literal_from_source(path, name):
@@ -268,56 +291,82 @@ def _literal_from_source(path, name):
 
 
 def test_weight_redistribution():
-    print("\n[8] 가중치 재분배 — 6개를 뺀 뒤 합이 정확히 100인가 (#69)")
+    print("\n[8] 가중치 재분배 — 6개(#69)에 이어 공매도 2개(#72)를 뺀 뒤 합이 정확히 100인가")
     from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
 
     total = sum(RISK_WEIGHTS.values())
     check(abs(total - 100.0) < 1e-9, f"RISK_WEIGHTS 합계 = 100.00 (실제: {total!r})")
-    check(len(RISK_WEIGHTS) == 8, f"활성 지표는 8개 (실제: {len(RISK_WEIGHTS)}개)")
+    check(len(RISK_WEIGHTS) == 6, f"활성 지표는 6개 (실제: {len(RISK_WEIGHTS)}개)")
+    check(set(RISK_WEIGHTS) == ACTIVE_EXPECTED, f"활성 지표 목록이 예상과 일치 (실제: {sorted(RISK_WEIGHTS)})")
     check(all(v > 0 for v in RISK_WEIGHTS.values()), "모든 가중치가 양수")
 
-    # 개정 전 표가 정말 102.0이었는지(제안서 §4-1 주장)와, 제외분이 40.0인지 실제로 더해봅니다.
+    # --- #69 산수 재검산 (그때의 기록이 실제로 맞았는지 계속 못박아 둡니다) ---
     check(abs(sum(WEIGHTS_BEFORE_69.values()) - 102.0) < 1e-9,
-          f"개정 전 14개 합계 = 102.0 (실제: {sum(WEIGHTS_BEFORE_69.values())})")
+          f"#69 개정 전 14개 합계 = 102.0 (실제: {sum(WEIGHTS_BEFORE_69.values())})")
     dropped_sum = sum(WEIGHTS_BEFORE_69[k] for k in RETIRED_EXPECTED)
     kept_sum = sum(v for k, v in WEIGHTS_BEFORE_69.items() if k not in RETIRED_EXPECTED)
-    check(abs(dropped_sum - 40.0) < 1e-9, f"제외한 6개 합계 = 40.0 (실제: {dropped_sum})")
-    check(abs(kept_sum - 62.0) < 1e-9, f"남은 8개의 개정 전 합계 = 62.0 (실제: {kept_sum})")
-
-    # 비례 재분배 검산: 각 지표 = 개정 전 값 × 100/62 (소수 둘째 자리 반올림)
-    factor = 100.0 / kept_sum
-    for key, new_w in sorted(RISK_WEIGHTS.items()):
-        expected = round(WEIGHTS_BEFORE_69[key] * factor, 2)
+    check(abs(dropped_sum - 40.0) < 1e-9, f"#69에서 제외한 6개 합계 = 40.0 (실제: {dropped_sum})")
+    check(abs(kept_sum - 62.0) < 1e-9, f"#69 이후 남은 8개의 개정 전 합계 = 62.0 (실제: {kept_sum})")
+    factor_69 = 100.0 / kept_sum
+    for key, w69 in sorted(WEIGHTS_AFTER_69.items()):
+        expected = round(WEIGHTS_BEFORE_69[key] * factor_69, 2)
         if key == "KOSPI_5D_Return":
             # 단순 반올림 합이 99.99라, 잔여 0.01을 '유일하게 실측이 검증된' 이 지표에 배정했습니다.
-            check(abs(new_w - (expected + 0.01)) < 1e-9,
-                  f"{key}: {WEIGHTS_BEFORE_69[key]}×100/62={expected} + 반올림 잔여 0.01 = {new_w}")
+            check(abs(w69 - (expected + 0.01)) < 1e-9,
+                  f"#69 {key}: {WEIGHTS_BEFORE_69[key]}×100/62={expected} + 반올림 잔여 0.01 = {w69}")
         else:
-            check(abs(new_w - expected) < 1e-9,
-                  f"{key}: {WEIGHTS_BEFORE_69[key]}×100/62 = {expected} (실제: {new_w})")
+            check(abs(w69 - expected) < 1e-9,
+                  f"#69 {key}: {WEIGHTS_BEFORE_69[key]}×100/62 = {expected} (실제: {w69})")
+    check(abs(sum(WEIGHTS_AFTER_69.values()) - 100.0) < 1e-9,
+          f"#69 결과 8개 합계 = 100.00 (실제: {sum(WEIGHTS_AFTER_69.values())})")
 
-    # 상대 비중 보존(이번 단계는 '6개 제거'만 하고 지표 간 우열은 건드리지 않았음).
-    # 반올림 잔여 0.01이 붙은 KOSPI_5D_Return은 오차 허용치를 조금 크게 둡니다.
+    # --- #72 재분배 검산: 남은 6개 × 100/85.48 ---
+    dropped_72 = sum(WEIGHTS_AFTER_69[k] for k in RETIRED_IN_72)
+    kept_72 = sum(v for k, v in WEIGHTS_AFTER_69.items() if k not in RETIRED_IN_72)
+    check(abs(dropped_72 - 14.52) < 1e-9,
+          f"#72에서 제외한 공매도 2개 합계 = 14.52 (9.68 + 4.84, 실제: {round(dropped_72, 2)})")
+    check(abs(kept_72 - 85.48) < 1e-9, f"남은 6개의 개정 전 합계 = 85.48 (실제: {round(kept_72, 2)})")
+
+    factor_72 = 100.0 / kept_72
+    naive_sum = 0.0
+    for key, new_w in sorted(RISK_WEIGHTS.items()):
+        expected = round(WEIGHTS_AFTER_69[key] * factor_72, 2)
+        naive_sum += expected
+        check(abs(new_w - expected) < 1e-9,
+              f"{key}: {WEIGHTS_AFTER_69[key]}×100/85.48 = {expected} (실제: {new_w})")
+    # ⚠️ #69와 달리 이번에는 단순 반올림 합이 그대로 100.00이라 잔여 조정을 하지 않았습니다.
+    #    (이 체크가 깨지면 "어딘가에 잔여분을 붙였다"는 뜻이므로 주석과 코드가 어긋난 것입니다.)
+    check(abs(naive_sum - 100.0) < 1e-9,
+          f"단순 반올림 합계가 그대로 100.00 → 잔여 조정 불필요 (실제: {round(naive_sum, 6)})")
+
+    # 상대 비중 보존 — 이번 단계도 '2개 제거'만 하고 지표 간 우열은 건드리지 않았습니다.
     ref = "FX_Swap_Point"
     for key in RISK_WEIGHTS:
-        before_ratio = WEIGHTS_BEFORE_69[key] / WEIGHTS_BEFORE_69[ref]
+        before_ratio = WEIGHTS_AFTER_69[key] / WEIGHTS_AFTER_69[ref]
         after_ratio = RISK_WEIGHTS[key] / RISK_WEIGHTS[ref]
         check(abs(before_ratio - after_ratio) < 0.002,
               f"{key}/{ref} 비율 보존: 개정 전 {before_ratio:.4f} ≈ 개정 후 {after_ratio:.4f}")
 
-    check(set(RETIRED_RISK_INDICATORS) == RETIRED_EXPECTED,
-          "RETIRED_RISK_INDICATORS가 제외한 6개와 정확히 일치")
-    check(not (set(RISK_WEIGHTS) & RETIRED_EXPECTED),
-          "제외한 6개가 RISK_WEIGHTS에 하나도 남아있지 않음")
+    # 공매도 2개는 활성 목록에서 사라지고, 은퇴 목록에는 '개정 전 몫'과 함께 남아야 합니다.
+    for key in sorted(RETIRED_IN_72):
+        check(key not in RISK_WEIGHTS, f"'{key}' 가 RISK_WEIGHTS 에 더 이상 없음")
+        check(key in RETIRED_RISK_INDICATORS, f"'{key}' 가 RETIRED_RISK_INDICATORS 에 기록됨")
+        check(abs(RETIRED_RISK_INDICATORS.get(key, -1) - WEIGHTS_AFTER_69[key]) < 1e-9,
+              f"'{key}' 의 은퇴 시점 가중치 {WEIGHTS_AFTER_69[key]} 가 그대로 기록됨")
+
+    check(set(RETIRED_RISK_INDICATORS) == RETIRED_EXPECTED_NOW,
+          "RETIRED_RISK_INDICATORS가 제외한 8개(#69 6개 + #72 2개)와 정확히 일치")
+    check(not (set(RISK_WEIGHTS) & RETIRED_EXPECTED_NOW),
+          "제외한 8개가 RISK_WEIGHTS에 하나도 남아있지 않음")
 
 
 def test_retired_indicators_removed_from_code():
-    print("\n[9] 코드 제거 — 뺀 지표의 계산식이 정말 사라졌는가 (#69)")
+    print("\n[9] 코드 제거 — 뺀 지표의 계산식이 정말 사라졌는가 (#69, #72)")
     scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
     view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
 
     # market_scores / market_scores_raw 항목이 남아있으면 CSV에 계속 값이 쌓입니다.
-    for key in sorted(RETIRED_EXPECTED):
+    for key in sorted(RETIRED_EXPECTED_NOW):
         for fname, src in (("scrape_daily.py", scrape_src), ("views/macro_view.py", view_src)):
             has_entry = (f'"{key}": {{' in src or f'"{key}": None if' in src
                          or f'"{key}": clip' in src)
@@ -327,13 +376,28 @@ def test_retired_indicators_removed_from_code():
     # ⚠️ 단순 문자열 포함이 아니라 '대입/사용' 패턴으로 봅니다 — 두 파일 모두 "왜 지웠는지"를
     #    설명하는 주석에 변수 이름을 그대로 적어두었기 때문입니다(그 흔적은 남기는 게 맞습니다).
     import re
-    for var in ("els_base", "ndf_base", "fut_base", "non_base", "dump_base", "put_buy_base"):
+    # (#72 추가: short_base / bal_base — 공매도 2종의 임의 선형식)
+    for var in ("els_base", "ndf_base", "fut_base", "non_base", "dump_base", "put_buy_base",
+                "short_base", "bal_base"):
         pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b|{var}\s+is\s+None", re.MULTILINE)
         check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
         check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
 
+    # #72: short_base/bal_base 의 입력이던 변동성·고점대비낙폭 계산도 함께 사라져야 합니다.
+    # (남겨두면 아무 데도 안 쓰이는 죽은 계산이 되고, 그 값을 이유로 수집 전체를 막는
+    #  하드 실패 게이트가 되살아날 여지가 생깁니다.)
+    for var in ("volatility", "dist_from_high"):
+        pattern = re.compile(rf"^\s*{var}\s*=|{var}\s+is\s+None", re.MULTILINE)
+        check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+    check("임의 상수(1.2 / 0.08)로 대체하지 않고" not in scrape_src,
+          "쓰이지 않는 값(변동성·낙폭) 때문에 수집 전체가 죽던 하드 실패 게이트(raise)가 제거됨")
+    # 반대로 KOSPI/환율 종가 결측 방어(§0-1의 핵심)는 그대로 살아 있어야 합니다.
+    check("전일 값으로 메우지 않고 당일 수집을 중단합니다" in scrape_src,
+          "KOSPI·환율 종가 결측 시 수집 중단하는 방어는 그대로 유지")
+
     # 반대로, 과거 CSV 를 읽으려면 한글 컬럼 매핑은 반드시 남아 있어야 합니다(기록 보존).
-    for key in sorted(RETIRED_EXPECTED):
+    for key in sorted(RETIRED_EXPECTED_NOW):
         check(f'"{key}":' in scrape_src, f"scrape_daily.py COL_MAP 에 '{key}' 한글 매핑은 보존")
 
     # 화면 문구가 지표 개수를 하드코딩하고 있으면 개수가 바뀔 때마다 거짓말이 됩니다.
@@ -342,7 +406,7 @@ def test_retired_indicators_removed_from_code():
 
 
 def test_study_section_matches_code():
-    print("\n[10] 문서-코드 일치 — 화면 공부 섹션 목록 == 실제로 뺀 목록 (#69)")
+    print("\n[10] 문서-코드 일치 — 화면 공부 섹션 목록 == 실제로 뺀 목록 (#69, #72)")
     from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
 
     view_path = REPO_ROOT / "views" / "macro_view.py"
@@ -350,7 +414,7 @@ def test_study_section_matches_code():
     dropped = _literal_from_source(view_path, "DROPPED_AS_DUPLICATE")
     friendly = _literal_from_source(view_path, "FRIENDLY_NAMES")
 
-    check(study is not None and len(study) == 4, f"공부용 섹션에 4개 지표가 실림 (실제: {len(study or [])}개)")
+    check(study is not None and len(study) == 6, f"공부용 섹션에 6개 지표가 실림 (실제: {len(study or [])}개)")
     study_keys = {d["key"] for d in (study or [])}
     check(study_keys == STUDY_EXPECTED, f"공부용 목록이 예상과 일치 (실제: {sorted(study_keys)})")
 
@@ -359,13 +423,13 @@ def test_study_section_matches_code():
     for key in sorted(DROPPED_EXPECTED):
         check(key in dropped_text, f"'{key}' 가 완전 제외 안내 목록에 이유와 함께 표기됨")
 
-    # 핵심: 공부 섹션 + 완전 제외 = 실제로 코드에서 뺀 6개. 어긋나면 화면이 거짓말을 하게 됩니다.
+    # 핵심: 공부 섹션 + 완전 제외 = 실제로 코드에서 뺀 8개. 어긋나면 화면이 거짓말을 하게 됩니다.
     check(study_keys | DROPPED_EXPECTED == set(RETIRED_RISK_INDICATORS),
-          "공부 섹션(4) + 완전 제외(2) = RETIRED_RISK_INDICATORS(6) 정확히 일치")
+          "공부 섹션(6) + 완전 제외(2) = RETIRED_RISK_INDICATORS(8) 정확히 일치")
     check(not (study_keys & set(RISK_WEIGHTS)),
           "공부 섹션 지표가 활성 지표와 겹치지 않음(점수에 두 번 들어가지 않음)")
     check(set(friendly or {}) == set(RISK_WEIGHTS),
-          "화면 표기명(FRIENDLY_NAMES) 키가 활성 지표 8개와 정확히 일치")
+          "화면 표기명(FRIENDLY_NAMES) 키가 활성 지표 6개와 정확히 일치")
 
     # 공부 섹션은 '설명'만 있어야 합니다 — 없는 데이터로 예시 숫자를 그리면 §0-1 위반입니다.
     for item in (study or []):
@@ -767,16 +831,97 @@ def test_krx_wiring():
     check(krx_src.count("AUTH_KEY") >= 1 and 'headers = {KRX_AUTH_HEADER: key' in krx_src,
           "인증키를 요청 '헤더'로 전달(공식 규격 — URL에 실으면 로그에 남음)")
 
-    # ⚠️ 이번 단계에서도 가중치는 손대지 않았습니다 ([8]에서 합계·비율을 이미 검증)
+    # ⚠️ #70 자체는 가중치를 손대지 않았습니다(그때 값 = #69 값 9.68 / 19.35).
+    #    지금 값은 #72의 **비례 재분배**를 한 번 거친 결과라 숫자가 달라졌지만, 그건 '실측
+    #    전환 때문에 올린 것'이 아니라 '공매도 2개를 뺀 몫이 기계적으로 분배된 것'입니다.
+    #    상대 비중이 그대로인지는 [8]에서 검증합니다.
     from utils.constants import RISK_WEIGHTS
-    check(RISK_WEIGHTS["VKOSPI_Skew"] == 9.68 and RISK_WEIGHTS["Synthetic_Futures"] == 19.35,
-          "#70 에서도 두 지표의 가중치는 #69 값 그대로 (프록시→실측 전환과 가중치 재설계는 별개)")
+    check(WEIGHTS_AFTER_69["VKOSPI_Skew"] == 9.68 and WEIGHTS_AFTER_69["Synthetic_Futures"] == 19.35,
+          "#70 당시 두 지표의 가중치는 #69 값 그대로였음 (프록시→실측 전환과 가중치 재설계는 별개)")
+    check(RISK_WEIGHTS["VKOSPI_Skew"] == 11.32 and RISK_WEIGHTS["Synthetic_Futures"] == 22.64,
+          "#72 재분배 후 값(11.32 / 22.64) — 임의 상향이 아니라 × 100/85.48 기계적 결과")
+
+
+def test_short_indicators_reclassified():
+    print("\n[16] 공매도 2종 재분류 — '데이터 없음'이 아니라 '경로를 안 쓰기로 함'인가 (#72)")
+    from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
+
+    view_path = REPO_ROOT / "views" / "macro_view.py"
+    study = _literal_from_source(view_path, "STUDY_ONLY_INDICATORS") or []
+    by_key = {d["key"]: d for d in study}
+    dropped = _literal_from_source(view_path, "DROPPED_AS_DUPLICATE") or []
+    dropped_text = " ".join(name for name, _ in dropped)
+
+    for key in sorted(RETIRED_IN_72):
+        # ① 점수에서 빠졌는가
+        check(key not in RISK_WEIGHTS, f"'{key}' 가 활성 가중치에 없음")
+        check(key in RETIRED_RISK_INDICATORS, f"'{key}' 가 은퇴 목록에 기록됨")
+        # ② 삭제가 아니라 '이동'인가 — 공부 섹션에 반드시 있어야 합니다
+        check(key in by_key, f"'{key}' 가 공부용 참고 섹션에 실려 있음(삭제가 아니라 이동)")
+        # ③ 개념 중복으로 완전 삭제한 2개와 섞이지 않았는가
+        check(key not in dropped_text,
+              f"'{key}' 가 '완전 제외(개념 중복)' 목록에 잘못 들어가 있지 않음")
+
+        item = by_key.get(key, {})
+        for field in ("title", "one_liner", "why_it_matters", "missing_data",
+                      "hypothetical_weight", "weight_reasoning"):
+            check(bool(item.get(field)), f"{key}: '{field}' 설명이 비어있지 않음")
+        check(len(item.get("how_to_study", [])) >= 3,
+              f"{key}: 구체적인 공부 방법이 3개 이상")
+
+        # ④ 핵심 — 사유가 #69의 4개("데이터 자체가 없음")와 다르다는 것을 정직하게 적었는가.
+        #    pykrx / 로그인 전환 시점 / §0-3-2 원칙이 전부 언급돼야 합니다.
+        missing = item.get("missing_data", "")
+        check("pykrx" in missing, f"{key}: 실제로 데이터를 얻을 수 있는 경로(pykrx)를 밝힘")
+        check("data.krx.co.kr" in missing, f"{key}: 로그인 전환된 출처(data.krx.co.kr)를 밝힘")
+        check("2025-12-27" in missing, f"{key}: 로그인 전환 시점(2025-12-27)을 밝힘")
+        check("0-3-2" in missing, f"{key}: 근거 원칙(§0-3-2)을 밝힘")
+        check("데이터 자체는 존재합니다" in missing or "데이터가 없는 게" in missing,
+              f"{key}: '데이터가 없어서'가 아님을 명시(#69의 4개와 사유가 다름)")
+
+        # ⑤ 공부법에 'pykrx는 이 프로젝트에서 쓰지 않는다'는 단서가 붙어 있는가
+        study_text = " ".join(item.get("how_to_study", []))
+        check("pykrx" in study_text, f"{key}: 공부법에 pykrx 라이브러리 학습 안내 포함")
+        check("쓰지 않습니다" in study_text,
+              f"{key}: 다만 이 프로젝트에서는 원칙상 쓰지 않는다는 단서를 함께 명시")
+        check("공매도" in study_text and ("KRX 정보데이터시스템" in study_text or "data.krx.co.kr" in study_text),
+              f"{key}: KRX에서 공매도 통계를 직접 보는 방법을 안내")
+
+        # ⑥ 가중치는 확정치가 아니라 '참고 범위'여야 합니다(#69 패턴 그대로)
+        check("참고 범위" in item.get("hypothetical_weight", ""),
+              f"{key}: 가중치를 확정치가 아닌 '참고 범위'로 표기")
+        check("확정 가중치가 아닙니다" in item.get("weight_reasoning", ""),
+              f"{key}: 근거 설명에도 확정치가 아님을 명시")
+
+    # ⑦ 공부 섹션이 **옛 가중치를 인용한 채로** 남아있지 않은가.
+    #    (재분배 때마다 놓치기 쉬운 곳입니다 — "지금 활성 지표 A는 4.84" 같은 문장이 남으면
+    #     화면이 실제 가중치와 다른 숫자를 말하게 됩니다. 괄호 인용 형태만 검사합니다.)
+    stale = {f"({v:.2f})" for v in WEIGHTS_AFTER_69.values()} - {f"({v:.2f})" for v in RISK_WEIGHTS.values()}
+    for item in study:
+        text = item.get("weight_reasoning", "")
+        for token in sorted(stale):
+            check(token not in text,
+                  f"{item['key']}: 옛 가중치 인용 {token} 이 weight_reasoning 에 남아있지 않음")
+
+    # ⑧ 화면 문구가 옛 개수(8개)를 그대로 말하고 있지 않은가
+    view_src = view_path.read_text(encoding="utf-8")
+    check("8개 중 6개" not in view_src, "화면 경고문이 옛 개수('8개 중 6개')를 말하지 않음")
+    check("2026-08-10 기준 8개 지표" not in view_src, "거버넌스 선언문의 지표 개수가 갱신됨")
+
+    # ⑨ 문서에도 기록이 남았는가 (TASK_HISTORY / PROJECT_STATUS)
+    task_history = (REPO_ROOT / "TASK_HISTORY.md").read_text(encoding="utf-8")
+    check("72." in task_history and "공매도" in task_history,
+          "TASK_HISTORY.md 에 72번 항목이 기록됨")
+    status = (REPO_ROOT / "PROJECT_STATUS.md").read_text(encoding="utf-8")
+    check("85.48" in task_history or "85.48" in status,
+          "재분배 계산 근거(85.48)가 문서에 남아 있음")
 
 
 def main():
     print("=" * 74)
     print("🛡️ 매크로 실측 지표 정규화(#68) + 실측불가 6개 제외·가중치 재분배(#69)")
-    print("   + KRX OPEN API 실측 연결(#70, VKOSPI·선물 베이시스) 검증")
+    print("   + KRX OPEN API 실측 연결(#70, VKOSPI·선물 베이시스)")
+    print("   + 공매도 2종 실측불가 재분류·가중치 재분배(#72) 검증")
     print("=" * 74)
     test_direction_kospi_5d()
     test_magnitude_net_sell()
@@ -794,6 +939,8 @@ def main():
     test_krx_end_to_end_success()
     test_krx_failure_modes()
     test_krx_wiring()
+    # --- 2026-08-10 (#72) 공매도 2종 실측 불가 재분류 ---
+    test_short_indicators_reclassified()
 
     print("\n" + "=" * 74)
     if FAILURES:
