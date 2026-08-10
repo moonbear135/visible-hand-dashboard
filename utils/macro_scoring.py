@@ -147,6 +147,32 @@ def measured_downside_risk(value, pop_stats):
     return round(min(1.0, max(0.0, risk)), 4)
 
 
+def measured_upside_risk(value, pop_stats):
+    """
+    "값이 **클수록** 위험이 큰" 실측 지표를 0~1 위험도로 변환합니다.
+    (2026-08-10 #70 신설 — VKOSPI 레벨이 이 방향입니다: 변동성 기대가 높을수록 위험)
+
+    ⚠️ 왜 measured_downside_risk 와 따로 두었나 (방향을 잘못 잡으면 점수가 정확히 거꾸로 됩니다)
+       #68에서 만든 measured_downside_risk 는 "많이 빠질수록/많이 팔수록 위험"(수익률·순매수)
+       전용입니다. VKOSPI는 **수익률이 아니라 레벨 그 자체가 이미 '시장이 매긴 향후 30일
+       변동성 기대'** 라서, 값이 높을수록 위험이 큽니다. 같은 함수에 부호만 뒤집어 넣는(-value)
+       꼼수를 쓰면 "평균 대비 몇 σ"의 기준선까지 같이 뒤집혀 헷갈리므로, 매핑 방향만 바꾼
+       별도 함수로 명시합니다. 정규화 방법론 자체는 #68과 **완전히 동일**합니다
+       (population z-score → ±MEASURED_WINSOR_Z 를 [0,1]로 선형 매핑 후 윈저라이즈).
+
+    - value가 None → None (산출 불가. 호출부에서 배점 자체를 제외합니다)
+    - pop_stats가 None(표본 부족) → 0.5 중립 (지어내지 않고 안전 대체)
+    - 그 외 → z = (value - mean) / std 를 [-3σ → 0.0, +3σ → 1.0] 으로 선형 매핑 후 윈저라이즈
+    """
+    if value is None:
+        return None
+    z = _population_zscore(value, pop_stats)
+    risk = _winsorized_scale(
+        z, best_z=-MEASURED_WINSOR_Z, worst_z=MEASURED_WINSOR_Z, pct_best=0.0, pct_worst=1.0
+    )
+    return round(min(1.0, max(0.0, risk)), 4)
+
+
 def rolling_return_population(closes, window=5, lookback=RETURN_POP_LOOKBACK,
                               min_sample=RETURN_POP_MIN_SAMPLE):
     """
@@ -174,10 +200,20 @@ def rolling_return_population(closes, window=5, lookback=RETURN_POP_LOOKBACK,
     return compute_population_stats(rets, min_sample)
 
 
-def net_flow_population(history_df, column, min_sample=NET_FLOW_MIN_SAMPLE):
+def history_column_population(history_df, column, min_sample=NET_FLOW_MIN_SAMPLE):
     """
-    누적 이력(market_history.csv)에서 특정 주체의 순매수 금액(억원) 과거 분포를 만듭니다.
+    누적 이력(market_history.csv)의 특정 컬럼에서 과거 분포(평균, 표준편차)를 만듭니다.
     컬럼이 없거나 표본이 부족하면 None(→ 호출부에서 중립 0.5 처리).
+
+    2026-08-10 (#70): 원래 net_flow_population(순매수 금액 전용)이던 함수를 이름만 일반화했습니다.
+    #70에서 새로 쌓기 시작하는 `VKOSPI_Level_Raw`·`Futures_Basis_Raw` 원값 컬럼도 정확히 같은
+    방식으로 분포를 만들어야 하는데(새 방법론 발명 금지), '순매수 전용'처럼 보이는 이름을
+    그대로 쓰면 나중에 읽는 사람이 다른 함수인 줄 알고 또 하나 만들게 되기 때문입니다.
+    net_flow_population 은 아래에 얇은 별칭으로 남겨 기존 호출부·테스트를 그대로 통과시킵니다.
+
+    ⚠️ 이 분포는 **우리가 CSV에 쌓아온 이력**으로만 만듭니다. 과거 분포를 빨리 채우겠다고
+       KRX API로 과거 N일을 하루씩 조회하면 1회 실행에 수십~수백 건을 호출하게 되어
+       크롤링 매너(§0-3-2)에 어긋납니다. 표본이 찰 때까지는 중립 0.5가 나오는 편이 맞습니다.
     """
     try:
         if history_df is None or len(history_df) == 0 or column not in history_df.columns:
@@ -186,6 +222,11 @@ def net_flow_population(history_df, column, min_sample=NET_FLOW_MIN_SAMPLE):
     except Exception:
         return None
     return compute_population_stats(values, min_sample)
+
+
+def net_flow_population(history_df, column, min_sample=NET_FLOW_MIN_SAMPLE):
+    """3주체 순매수 금액(억원)의 과거 분포. history_column_population 의 별칭입니다."""
+    return history_column_population(history_df, column, min_sample)
 
 
 def compute_historical_stats(history_df, weight_keys):

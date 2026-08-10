@@ -70,6 +70,13 @@ COL_MAP = {
     # 2026-08-10 (#68): scrape_daily.py가 점수와 함께 저장하는 실측 원값 컬럼.
     # 여기에 같은 매핑을 두지 않으면 CSV를 다시 읽을 때 한글 컬럼명이 영문으로 복원되지 않습니다.
     "KOSPI_5D_Return_Pct": "KOSPI 5일 수익률 (%, 실측 원값)",
+    # 2026-08-10 (#70): KRX OPEN API 실측 원값 + 그 값의 기준 거래일(as-of).
+    # scrape_daily.py 의 COL_MAP 과 **글자 하나까지 같아야** 합니다 — 저장(scrape_daily)과
+    # 읽기(이 파일/macro_view)가 서로 다른 한글 헤더를 쓰면 컬럼이 복원되지 않습니다.
+    "VKOSPI_Level_Raw": "VKOSPI 지수값 (실측 원값, KRX OPEN API)",
+    "VKOSPI_Level_AsOf": "VKOSPI 기준 거래일",
+    "Futures_Basis_Raw": "선물 베이시스 (KOSPI200 선물 종가 − 지수 종가, 실측 원값)",
+    "Futures_Basis_AsOf": "선물 베이시스 기준 거래일",
     # 2026-08-06: '동기화/업데이트' 표기를 파일 mtime(배포·재시작 시각) 대신
     # 실제 크롤링이 끝나고 이 행이 저장된 시각으로 통일하기 위해 추가.
     "Collected_At": "데이터 수집 완료 시각",

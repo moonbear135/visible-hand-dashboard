@@ -58,12 +58,17 @@ FRIENDLY_NAMES = {
     "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
     "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 배팅한 투기자본)",
     "Short_Ratio": "공매도 거래 비중 (주도권을 쥐어짜려는 매도세)",
-    "VKOSPI_Skew": "공포지수 비대칭성 (투자자들의 불안 심리 강도)",
-    "Synthetic_Futures": "합성선물 가격차이 (외국인의 파생상품 하방 압력)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     # ✅ 아래 2개는 추정 프록시가 아니라 실제 측정값 기반입니다 (2026-08-10 #68)
     "Stock_Net_Sell": "주식 현물 순매도 규모 (3주체 순매수 금액 · 실측)",
-    "KOSPI_5D_Return": "KOSPI 5일 수익률 (지수 낙폭 · 실측)"
+    "KOSPI_5D_Return": "KOSPI 5일 수익률 (지수 낙폭 · 실측)",
+    # ✅ 아래 2개도 실측으로 전환됐습니다 (2026-08-10 #70, KRX OPEN API).
+    # ⚠️ 내부 키(`VKOSPI_Skew`/`Synthetic_Futures`)는 일부러 그대로 둡니다 — 키를 바꾸면
+    #    market_history.csv 의 기존 컬럼과 연결이 끊겨 과거 기록을 읽을 수 없게 됩니다.
+    #    **화면에 보이는 이름은 실제 내용대로** 바꿔, 라벨과 내용이 어긋나지 않게 합니다.
+    #    (예전 이름: "공포지수 비대칭성" / "합성선물 가격차이" — 둘 다 실제로는 변동성·환율이었음)
+    "VKOSPI_Skew": "VKOSPI 공포지수 (시장이 매긴 향후 변동성 기대 · 실측)",
+    "Synthetic_Futures": "선물 베이시스 (KOSPI200 선물 − 지수, 마이너스일수록 하방 압력 · 실측)",
 }
 
 # =============================================================================
@@ -339,11 +344,17 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     # scrape_daily.py와 **동시에** 제거했습니다. 두 파일의 산식이 갈라지면 화면 미리보기와
     # 실제 저장값이 또 어긋나므로, 이 블록은 항상 scrape_daily.py "4. 리스크 지표 연산"과
     # 1:1로 같아야 합니다. 이 지표들의 설명은 아래 "📚 공부용 참고" 섹션에만 남습니다.
+    #
+    # 2026-08-10 (#70): `VKOSPI_Skew`/`Synthetic_Futures` 의 임의 선형식을 scrape_daily.py와
+    # **동시에** 제거했습니다. 두 지표는 이제 KRX OPEN API 실측값(VKOSPI 지수 / 선물 베이시스)
+    # 으로만 산출되는데, 이 화면의 이 분기는 "아직 수집 전 미리보기"라 그 실측값이 없습니다.
+    # ⚠️ 여기서 Streamlit 렌더링 중에 KRX API를 호출하지는 않습니다 — 화면을 새로고침할 때마다
+    #    외부 API를 두드리는 건 크롤링 매너(§0-3-2)에도, 인증키 관리에도 맞지 않습니다.
+    #    대신 두 지표를 '산출 불가(None)'로 두어 기존 unavailable_metrics 경로로 빠지게 합니다.
+    #    (예전처럼 환율·변동성으로 대체 계산하면 그게 바로 §0-3-1이 금지한 프록시입니다.)
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
     short_base = (0.4 + 0.4 * (volatility / 5.0)) if volatility is not None else None
-    skew_base = (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change) if volatility is not None else None
-    synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
     bal_base = (0.5 + 0.3 * dist_from_high) if dist_from_high is not None else None
 
     # =====================================================================
@@ -399,9 +410,16 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "FX_Swap_Point": "0.55 × clip(0.5 + 0.3×(USD-1200)/300 + 0.1×USD_change) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
         "Put_OTM_OI": "0.55 × clip(0.5 - 0.4×KOSPI_change + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base + Ret_Sign)",
         "Short_Ratio": "0.55 × clip(0.4 + 0.4×(Vol/5) + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base - 0.2)",
-        "VKOSPI_Skew": "0.55 × clip(0.4 + 0.4×(Vol/5) - 0.2×KOSPI_change + 0.05) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
-        "Synthetic_Futures": "0.55 × clip(0.5 + 0.3×(USD-1300)/200 + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
         "Stock_Short_Balance": "0.55 × clip(0.5 + 0.3×Dist_High + 0.05) + 0.37 × clip(base + 0.05) + 0.08 × clip(base - 0.2)",
+        # ✅ 실측 2종 추가 (2026-08-10 #70, KRX OPEN API — 추정 프록시 아님)
+        "VKOSPI_Skew": "실측: KRX 파생상품지수 API의 VKOSPI(코스피200 변동성지수) 종가를 "
+                       "누적 이력 대비 z-score → ±3σ를 0~1로 윈저라이즈 (값이 **높을수록** 위험). "
+                       "3주체 동일값(시장 전체가 매기는 하나의 값이라 주체별로 다를 수 없음). "
+                       "표본 20행 미만이면 중립 0.5",
+        "Synthetic_Futures": "실측: (KOSPI200 선물 근월물 종가 − KOSPI200 지수 종가) = 베이시스를 "
+                             "누적 이력 대비 z-score → ±3σ를 0~1로 윈저라이즈 "
+                             "(값이 **낮을수록**=백워데이션일수록 위험). 3주체 동일값. "
+                             "표본 20행 미만이면 중립 0.5",
         # ✅ 실측 2종 (추정 프록시 아님 — 실제 측정값을 과거 분포 대비 정규화)
         "Stock_Net_Sell": "실측: 주체별 순매수 금액(억원)을 과거 이력 대비 z-score → ±3σ를 0~1로 윈저라이즈 "
                           "(0.55×외국인 + 0.37×기관 + 0.08×개인, 표본 20행 미만이면 중립 0.5)",
@@ -423,8 +441,10 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             "FX_Swap_Point": {"Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)},
             "Put_OTM_OI": {"Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)), "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))},
             "Short_Ratio": None if short_base is None else {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
-            "VKOSPI_Skew": None if skew_base is None else {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
-            "Synthetic_Futures": {"Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)), "Institution": clip(synth_base), "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))},
+            # 2026-08-10 (#70): 이 둘은 KRX OPEN API 실측 전용이 되었고, 미리보기 분기에는
+            # 그 값이 없습니다. 프록시로 채우지 않고 산출 불가로 둡니다(§0-1).
+            "VKOSPI_Skew": None,
+            "Synthetic_Futures": None,
             "Stock_Short_Balance": None if bal_base is None else {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
             "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {"Foreigner": clip(stock_net_risks["Foreigner"]), "Institution": clip(stock_net_risks["Institution"]), "Retail": clip(stock_net_risks["Retail"])},
             "KOSPI_5D_Return": None if kospi_5d_base is None else {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}

@@ -20,6 +20,7 @@
 실행: python tests/test_macro_scoring.py
 """
 import io
+import os
 import sys
 from pathlib import Path
 
@@ -377,9 +378,405 @@ def test_study_section_matches_code():
               f"{item['key']}: 가중치를 확정치가 아닌 '참고 범위'로 표기")
 
 
+# =============================================================================
+# 2026-08-10 (#70) — KRX OPEN API 실측 연결 검증 (VKOSPI 레벨 / KOSPI200 선물 베이시스)
+# =============================================================================
+# ⚠️ 이 저장소의 개발 환경은 외부 네트워크가 막혀 있어 **실제 KRX 서버 응답을 한 번도 받아본
+#    적이 없습니다.** 그래서 여기서는 미국주식 수집기 때와 같은 방식으로, HTTP 호출 지점
+#    (`utils.krx_openapi._http_get_json`) 하나만 가짜로 바꿔 배선 전체(요청 구성 → 상태코드
+#    분기 → 파싱 → 행 선택 → 정규화)를 end-to-end로 검증합니다.
+#    **실서버 규격이 맞는지는 이 테스트로 증명되지 않습니다** — 그건 오너의 Actions 수동 실행
+#    로그로만 확인할 수 있고, 그 전까지는 "실서버 미검증"입니다.
+
+FAKE_KEY = "TEST-KEY-NOT-A-REAL-CREDENTIAL"
+
+
+def _fake_kospi_rows(bas_dd="20260807"):
+    """KOSPI 시리즈 응답 흉내. 'coincidence 함정'으로 '코스피 200 TR' 을 일부러 섞습니다."""
+    return [
+        {"BAS_DD": bas_dd, "IDX_CLSS": "KOSPI", "IDX_NM": "코스피", "CLSPRC_IDX": "2,540.12"},
+        {"BAS_DD": bas_dd, "IDX_CLSS": "KOSPI", "IDX_NM": "코스피 200", "CLSPRC_IDX": "345.67"},
+        {"BAS_DD": bas_dd, "IDX_CLSS": "KOSPI", "IDX_NM": "코스피 200 TR", "CLSPRC_IDX": "5,432.10"},
+        {"BAS_DD": bas_dd, "IDX_CLSS": "KOSPI", "IDX_NM": "코스피 200 중소형주", "CLSPRC_IDX": "1,210.00"},
+    ]
+
+
+def _fake_deriv_rows(bas_dd="20260807"):
+    return [
+        {"BAS_DD": bas_dd, "IDX_CLSS": "파생상품지수", "IDX_NM": "코스피 200 선물지수", "CLSPRC_IDX": "1,234.56"},
+        {"BAS_DD": bas_dd, "IDX_CLSS": "파생상품지수", "IDX_NM": "코스피 200 변동성지수", "CLSPRC_IDX": "18.42"},
+    ]
+
+
+def _fake_futures_rows(bas_dd="20260807"):
+    return [
+        {"BAS_DD": bas_dd, "ISU_CD": "KR4101X90009", "ISU_NM": "코스피200 F 202609",
+         "PROD_NM": "코스피200 선물", "TDD_CLSPRC": "346.10", "SPOT_PRC": "345.67",
+         "ACC_TRDVOL": "180,000", "ACC_OPNINT_QTY": "310,000"},
+        {"BAS_DD": bas_dd, "ISU_CD": "KR4101X90017", "ISU_NM": "코스피200 F 202612",
+         "PROD_NM": "코스피200 선물", "TDD_CLSPRC": "348.90", "SPOT_PRC": "345.67",
+         "ACC_TRDVOL": "5,100", "ACC_OPNINT_QTY": "12,000"},
+        {"BAS_DD": bas_dd, "ISU_CD": "KR4106X90007", "ISU_NM": "미니 코스피200 F 202609",
+         "PROD_NM": "미니 코스피200 선물", "TDD_CLSPRC": "346.05", "SPOT_PRC": "345.67",
+         "ACC_TRDVOL": "900,000", "ACC_OPNINT_QTY": "88,000"},
+        {"BAS_DD": bas_dd, "ISU_CD": "KR4201X00000", "ISU_NM": "3년국채 F 202609",
+         "PROD_NM": "3년국채 선물", "TDD_CLSPRC": "106.20", "ACC_TRDVOL": "120,000"},
+    ]
+
+
+class _FakeKrxServer:
+    """
+    `_http_get_json` 을 대신하는 가짜 서버. 엔드포인트별 응답을 시나리오로 지정합니다.
+    호출 기록(calls)을 남겨 "요청을 몇 번 보냈는지"(크롤링 매너)까지 검증합니다.
+    """
+
+    def __init__(self, plan):
+        # plan: {endpoint_path: [(status, payload), ...]}  — 호출 순서대로 소비
+        self.plan = {k: list(v) for k, v in plan.items()}
+        self.calls = []
+
+    def __call__(self, url, headers, params, timeout, session):
+        endpoint = url.rsplit("/", 1)[-1]
+        self.calls.append({
+            "endpoint": endpoint, "url": url,
+            "headers": dict(headers or {}), "params": dict(params or {}),
+        })
+        queue = self.plan.get(endpoint)
+        if not queue:
+            return 200, {"OutBlock_1": []}
+        item = queue.pop(0) if len(queue) > 1 else queue[0]
+        if isinstance(item, Exception):
+            raise item
+        return item
+
+
+def _install_fake_server(server):
+    """가짜 서버를 꽂고, 테스트가 느려지지 않게 대기 시간을 0으로 만듭니다."""
+    from utils import krx_openapi
+    krx_openapi._http_get_json = server
+    krx_openapi.KRX_REQUEST_DELAY_SEC = 0
+    krx_openapi.KRX_RETRY_DELAY_SEC = 0
+    return krx_openapi
+
+
+def test_upside_risk_direction():
+    print("\n[11] VKOSPI 방향 — '값이 클수록 위험'이 제대로 뒤집혀 있는가 (#70)")
+    from utils.macro_scoring import measured_upside_risk
+
+    # 합성 VKOSPI 분포: 평균 18, 표준편차 4 (실제 VKOSPI가 대략 15~25 사이에서 움직이는 스케일)
+    pop = (18.0, 4.0)
+    panic = measured_upside_risk(32.0, pop)   # 공포 급등
+    high = measured_upside_risk(24.0, pop)
+    normal = measured_upside_risk(18.0, pop)  # 평균
+    calm = measured_upside_risk(12.0, pop)    # 이례적 안정
+
+    check(panic > high > normal > calm,
+          f"공포급등 > 높음 > 평균 > 안정 (실제: {panic} > {high} > {normal} > {calm})")
+    check(abs(normal - 0.5) < 1e-9, f"평균과 같은 VKOSPI는 정확히 중립 0.5 (실제: {normal})")
+    check(all(_in_unit_range(v) for v in (panic, high, normal, calm)), "네 시나리오 모두 [0, 1] 범위")
+    check(measured_upside_risk(1e9, pop) == 1.0 and measured_upside_risk(-1e9, pop) == 0.0,
+          "극단 입력도 [0,1]로 윈저라이즈")
+
+    # 방향이 downside 와 정확히 거울상인지 (부호 실수 방지)
+    for v in (10.0, 14.0, 18.0, 22.0, 30.0):
+        up = measured_upside_risk(v, pop)
+        down = measured_downside_risk(v, pop)
+        check(abs(up + down - 1.0) < 1e-9,
+              f"VKOSPI={v}: upside({up}) + downside({down}) = 1.0 (정확히 반대 방향)")
+
+    seq = [measured_upside_risk(v, pop) for v in range(5, 41, 5)]
+    check(all(a <= b for a, b in zip(seq, seq[1:])), "VKOSPI가 커질수록 위험도가 단조 증가")
+
+    check(measured_upside_risk(None, pop) is None, "원값 없음 → None (배점 제외)")
+    check(measured_upside_risk(20.0, None) == 0.5, "표본 부족 → 임의 상수 아닌 중립 0.5")
+    check(measured_upside_risk(20.0, (18.0, 0.0)) == 0.5, "표준편차 0 → 0으로 나누지 않고 중립 0.5")
+
+
+def test_krx_parsers():
+    print("\n[12] KRX 응답 파서·선택기 — 못 찾으면 '고르지 않는가' (#70)")
+    from utils import krx_openapi as kx
+
+    check(kx.to_float("1,234.56") == 1234.56, "천단위 쉼표가 있는 숫자 파싱")
+    check(kx.to_float("-") is None and kx.to_float("") is None and kx.to_float(None) is None,
+          "'-'/빈문자/None 은 0.0이 아니라 None (없음과 0은 다른 사실)")
+    check(kx.to_float("abc") is None, "숫자가 아니면 None")
+    check(kx.to_float(float("nan")) is None, "NaN도 None")
+
+    check(kx.to_date_param("2026-08-07") == "20260807", "'YYYY-MM-DD' → 'YYYYMMDD'")
+    check(kx.to_date_param("20260807") == "20260807", "이미 YYYYMMDD면 그대로")
+    try:
+        kx.to_date_param("2026-8-7")
+        check(False, "잘못된 날짜 형식은 ValueError")
+    except ValueError:
+        check(True, "잘못된 날짜 형식은 ValueError")
+
+    # --- 지수 선택: 이름이 비슷한 함정(코스피 200 TR / 중소형주)을 피하는가 ---
+    row, note = kx.select_index_row(_fake_kospi_rows(), kx.KOSPI200_NAME_CANDIDATES)
+    check(row is not None and row["IDX_NM"] == "코스피 200",
+          f"'코스피 200 TR'/'중소형주'가 섞여 있어도 정확히 '코스피 200'만 고름 ({note})")
+    check(kx.to_float(row["CLSPRC_IDX"]) == 345.67, "선택한 행에서 지수 종가를 읽음")
+
+    v_row, v_note = kx.select_index_row(
+        _fake_deriv_rows(), kx.VKOSPI_NAME_CANDIDATES, fallback_keyword=kx.VKOSPI_NAME_FALLBACK_KEYWORD)
+    check(v_row is not None and v_row["IDX_NM"] == "코스피 200 변동성지수", f"VKOSPI 정확일치 ({v_note})")
+
+    # 후보와 정확히 일치하는 이름이 없어도, '변동성' 포함이 유일하면 부분일치로 찾는다
+    renamed = [{"IDX_NM": "코스피 200 변동성지수(신규)", "CLSPRC_IDX": "19.1"},
+               {"IDX_NM": "코스피 200 선물지수", "CLSPRC_IDX": "1200"}]
+    r2, n2 = kx.select_index_row(renamed, kx.VKOSPI_NAME_CANDIDATES,
+                                 fallback_keyword=kx.VKOSPI_NAME_FALLBACK_KEYWORD)
+    check(r2 is not None and "변동성" in r2["IDX_NM"], f"이름이 조금 바뀌어도 부분일치로 찾음 ({n2})")
+
+    # '변동성'이 둘 이상이면 **고르지 않는다** (아무거나 집으면 그게 지어내기)
+    ambiguous = [{"IDX_NM": "코스피 200 변동성지수A", "CLSPRC_IDX": "19.1"},
+                 {"IDX_NM": "코스닥 150 변동성지수", "CLSPRC_IDX": "24.4"}]
+    r3, n3 = kx.select_index_row(ambiguous, kx.VKOSPI_NAME_CANDIDATES,
+                                 fallback_keyword=kx.VKOSPI_NAME_FALLBACK_KEYWORD)
+    check(r3 is None and "2개" in n3, f"후보가 여러 개면 임의로 고르지 않고 None ({n3})")
+
+    r4, n4 = kx.select_index_row([{"IDX_NM": "코스피", "CLSPRC_IDX": "2500"}],
+                                 kx.KOSPI200_NAME_CANDIDATES)
+    check(r4 is None and "코스피" in n4,
+          "못 찾으면 None + 응답에 실제로 있던 지수명을 로그에 남김(오너가 확정할 수 있게)")
+    check(kx.select_index_row([], kx.KOSPI200_NAME_CANDIDATES)[0] is None, "빈 응답 → None")
+
+    # --- 선물 근월물 선택 ---
+    f_row, f_note = kx.select_front_month_future(_fake_futures_rows())
+    check(f_row is not None and f_row["ISU_NM"] == "코스피200 F 202609",
+          f"거래량이 가장 많은 종목을 근월물로 선택 ({f_note})")
+    check(f_row["PROD_NM"] == "코스피200 선물",
+          "거래량이 더 많은 '미니 코스피200 선물'(900,000)에 낚이지 않음 — 상품이 다르므로 제외")
+    check("202612" not in f_row["ISU_NM"], "원월물(거래량 5,100)을 고르지 않음")
+
+    # 상품명이 조금 달라도 부분일치로 잡되, '미니'는 제외되는가
+    variant = [
+        {"ISU_NM": "K200 F 202609", "PROD_NM": "코스피200 선물(주간)", "TDD_CLSPRC": "346.1", "ACC_TRDVOL": "1,000"},
+        {"ISU_NM": "미니 F", "PROD_NM": "미니 코스피200 선물", "TDD_CLSPRC": "346.0", "ACC_TRDVOL": "999,999"},
+    ]
+    v_row2, v_note2 = kx.select_front_month_future(variant)
+    check(v_row2 is not None and v_row2["PROD_NM"] == "코스피200 선물(주간)",
+          f"부분일치 경로에서도 '미니'는 제외 ({v_note2})")
+
+    check(kx.select_front_month_future([{"PROD_NM": "3년국채 선물", "TDD_CLSPRC": "1", "ACC_TRDVOL": "1"}])[0] is None,
+          "KOSPI200 선물이 아예 없으면 None")
+    check(kx.select_front_month_future(
+        [{"PROD_NM": "코스피200 선물", "TDD_CLSPRC": "346.1"}])[0] is None,
+        "거래량 필드가 없으면 근월물을 판정할 수 없어 None (아무거나 고르지 않음)")
+    check(kx.select_front_month_future(
+        [{"PROD_NM": "코스피200 선물", "TDD_CLSPRC": "-", "ACC_TRDVOL": "100"}])[0] is None,
+        "종가를 읽을 수 없으면 None")
+
+
+def test_krx_end_to_end_success():
+    print("\n[13] KRX 배선 end-to-end — 정상 응답에서 값이 끝까지 흘러오는가 (#70)")
+    server = _FakeKrxServer({
+        "kospi_dd_trd": [(200, {"OutBlock_1": _fake_kospi_rows()})],
+        "drvprod_dd_trd": [(200, {"OutBlock_1": _fake_deriv_rows()})],
+        "fut_bydd_trd": [(200, {"OutBlock_1": _fake_futures_rows()})],
+    })
+    kx = _install_fake_server(server)
+
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(out["api_key_present"] is True, "인증키 인식")
+    check(out["as_of"] == "2026-08-07", f"as-of 기준일 기록 (실제: {out['as_of']})")
+    check(out["vkospi_level"] == 18.42, f"VKOSPI 실측값 {out['vkospi_level']}")
+    check(out["kospi200_close"] == 345.67, f"KOSPI200 지수 종가 {out['kospi200_close']}")
+    check(out["futures_close"] == 346.10, f"선물 근월물 종가 {out['futures_close']}")
+    check(abs(out["futures_basis"] - (346.10 - 345.67)) < 1e-9,
+          f"베이시스 = 선물 − 지수 = {out['futures_basis']:.4f} (순수 뺄셈, 가정 없음)")
+    check(not out["errors"], f"정상 응답에서는 오류 목록이 비어야 함 (실제: {out['errors']})")
+
+    # 요청 구성 검증 — 인증키는 반드시 '헤더'로만 가야 합니다(URL에 실리면 로그에 남음).
+    check(len(server.calls) == 3, f"1회 실행 = 3회 호출 (실제: {len(server.calls)}회)")
+    for call in server.calls:
+        check(call["headers"].get("AUTH_KEY") == FAKE_KEY,
+              f"{call['endpoint']}: 인증키를 AUTH_KEY 헤더로 전달")
+        check("AUTH_KEY" not in call["params"] and "AUTH_KEY" not in call["url"],
+              f"{call['endpoint']}: 인증키가 URL/쿼리스트링에 절대 실리지 않음")
+        check(call["params"].get("basDd") == "20260807", f"{call['endpoint']}: basDd=20260807")
+    check(server.calls[0]["url"].startswith("https://data-dbg.krx.co.kr/svc/apis/idx/"),
+          "지수 엔드포인트 경로가 규격대로 구성됨")
+
+    # 실측 원값 → 위험도 정규화까지 (부트스트랩 포함)
+    from utils.macro_scoring import measured_upside_risk
+    check(measured_upside_risk(out["vkospi_level"], None) == 0.5,
+          "이력이 없으면(첫날) VKOSPI도 값을 지어내지 않고 중립 0.5")
+    check(measured_upside_risk(out["vkospi_level"], (15.0, 3.0)) > 0.5,
+          "이력이 쌓여 평균 15인 상황에서 18.42는 중립보다 위험(방향 정상)")
+    check(measured_downside_risk(out["futures_basis"], (1.5, 0.5)) > 0.5,
+          "평균 베이시스 1.5 대비 0.43은 중립보다 위험(백워데이션 방향 정상)")
+
+
+def test_krx_failure_modes():
+    print("\n[14] KRX 실패 모드 — 어떤 오류에도 크래시 없이 '그 지표만' 빠지는가 (#70)")
+    from utils import krx_openapi as kx
+
+    # ① 인증키가 아예 없을 때 (환경변수도 비움)
+    saved = os.environ.pop(kx.KRX_API_KEY_ENV, None)
+    try:
+        out = kx.collect_krx_risk_inputs("2026-08-07", api_key=None)
+        check(out["api_key_present"] is False, "인증키 없음을 명시")
+        check(out["vkospi_level"] is None and out["futures_basis"] is None,
+              "키가 없으면 프록시로 폴백하지 않고 두 지표 모두 None")
+        check(any(kx.KRX_API_KEY_ENV in e for e in out["errors"]),
+              "왜 산출 불가인지 사유를 남김")
+    finally:
+        if saved is not None:
+            os.environ[kx.KRX_API_KEY_ENV] = saved
+
+    # ② 인증 실패(401) — 서비스 승인 전 상태. 재시도하지 않아야 합니다.
+    server = _FakeKrxServer({"kospi_dd_trd": [(401, {"message": "unauthorized"})]})
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(out["vkospi_level"] is None and out["futures_basis"] is None, "401 → 두 지표 모두 None")
+    check(len(server.calls) == 1, f"401은 재시도하지 않음 (호출 {len(server.calls)}회, §0-3-2)")
+    check(any("승인" in e for e in out["errors"]), "401 사유에 '서비스별 이용신청 승인' 안내 포함")
+
+    # ③ 호출 한도 초과(429) — 역시 재시도 금지
+    server = _FakeKrxServer({"kospi_dd_trd": [(429, {})]})
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(len(server.calls) == 1, "429도 재시도하지 않음")
+
+    # ④ 네트워크 오류 — 1회만 재시도하고 포기
+    server = _FakeKrxServer({"kospi_dd_trd": [ConnectionError("network down")]})
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(len(server.calls) == kx.KRX_NETWORK_RETRY + 1,
+          f"네트워크 오류는 {kx.KRX_NETWORK_RETRY}회만 재시도 (총 {len(server.calls)}회 호출)")
+    check(out["vkospi_level"] is None, "네트워크 오류 → None")
+
+    # ⑤ 응답 규격이 바뀐 경우 (OutBlock_1 없음)
+    server = _FakeKrxServer({"kospi_dd_trd": [(200, {"Result": []})]})
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(out["vkospi_level"] is None and any("OutBlock_1" in e for e in out["errors"]),
+          "응답 최상위 키가 다르면 사유를 남기고 None")
+
+    # ⑥ 휴장일/미공개 — 하루씩 거슬러 올라가 데이터가 있는 거래일을 찾는가
+    calls_by_date = {"count": 0}
+
+    def _weekend_server(url, headers, params, timeout, session):
+        calls_by_date["count"] += 1
+        endpoint = url.rsplit("/", 1)[-1]
+        day = params["basDd"]
+        if endpoint == "kospi_dd_trd":
+            return (200, {"OutBlock_1": _fake_kospi_rows(day)}) if day == "20260807" else (200, {"OutBlock_1": []})
+        if endpoint == "drvprod_dd_trd":
+            return 200, {"OutBlock_1": _fake_deriv_rows(day)}
+        return 200, {"OutBlock_1": _fake_futures_rows(day)}
+
+    _install_fake_server(_weekend_server)
+    out = kx.collect_krx_risk_inputs("2026-08-10", api_key=FAKE_KEY)   # 월요일 → 금요일 데이터
+    check(out["as_of"] == "2026-08-07",
+          f"주말/미공개를 건너뛰고 직전 거래일을 as-of로 잡음 (실제: {out['as_of']})")
+    check(out["vkospi_level"] == 18.42, "거슬러 올라간 거래일 기준으로 값이 정상 수집됨")
+    check(calls_by_date["count"] <= 10,
+          f"1회 실행 호출 수가 상한(10회) 이내 (실제 {calls_by_date['count']}회, 크롤링 매너)")
+
+    # ⑦ 아무리 거슬러 올라가도 데이터가 없으면 포기 (무한 루프 금지)
+    server = _FakeKrxServer({"kospi_dd_trd": [(200, {"OutBlock_1": []})]})
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-10", api_key=FAKE_KEY)
+    check(out["as_of"] is None and out["vkospi_level"] is None, "거래일을 못 찾으면 값 없음")
+    check(len(server.calls) == kx.KRX_MAX_LOOKBACK_DAYS + 1,
+          f"탐색 횟수가 상한({kx.KRX_MAX_LOOKBACK_DAYS + 1}회)에서 멈춤 (실제 {len(server.calls)}회)")
+
+    # ⑧ 지수는 왔는데 VKOSPI 이름을 못 찾는 경우 — 베이시스는 살아있어야 합니다(독립 실패)
+    server = _FakeKrxServer({
+        "kospi_dd_trd": [(200, {"OutBlock_1": _fake_kospi_rows()})],
+        "drvprod_dd_trd": [(200, {"OutBlock_1": [{"IDX_NM": "코스피 200 선물지수", "CLSPRC_IDX": "1200"}]})],
+        "fut_bydd_trd": [(200, {"OutBlock_1": _fake_futures_rows()})],
+    })
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(out["vkospi_level"] is None, "VKOSPI를 특정 못하면 그 지표만 None")
+    check(out["futures_basis"] is not None, "그래도 선물 베이시스는 정상 산출(지표별 독립 실패)")
+
+    # ⑨ 필드명이 바뀐 경우 (종가 필드 없음)
+    server = _FakeKrxServer({
+        "kospi_dd_trd": [(200, {"OutBlock_1": [{"IDX_NM": "코스피 200", "CLOSE": "345.67"}]})],
+        "drvprod_dd_trd": [(200, {"OutBlock_1": _fake_deriv_rows()})],
+        "fut_bydd_trd": [(200, {"OutBlock_1": _fake_futures_rows()})],
+    })
+    _install_fake_server(server)
+    out = kx.collect_krx_risk_inputs("2026-08-07", api_key=FAKE_KEY)
+    check(out["kospi200_close"] is None and out["futures_basis"] is None,
+          "종가 필드가 없으면 베이시스를 계산하지 않음(엉뚱한 값 대입 금지)")
+    check(out["vkospi_level"] == 18.42, "그래도 VKOSPI는 독립적으로 살아있음")
+    check(any("CLSPRC_IDX" in e for e in out["errors"]),
+          "어느 필드를 못 읽었는지 오류 메시지에 남김(다음 디버깅용)")
+
+
+def test_krx_wiring():
+    print("\n[15] 배선·기록 — 두 파일이 같은 방식으로 바뀌었고 가중치는 그대로인가 (#70)")
+    scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
+    db_src = (REPO_ROOT / "utils" / "db.py").read_text(encoding="utf-8")
+    wf_src = (REPO_ROOT / ".github" / "workflows" / "scrape.yml").read_text(encoding="utf-8")
+
+    check("collect_krx_risk_inputs" in scrape_src, "scrape_daily.py 가 KRX 실측 수집기를 호출")
+    check("measured_upside_risk" in scrape_src, "scrape_daily.py 가 VKOSPI 방향 함수를 사용")
+
+    # 옛 프록시 계산식이 두 파일 모두에서 사라졌는가 (주석 설명은 남아도 되므로 '대입/사용' 패턴으로)
+    import re
+    for var in ("skew_base", "synth_base"):
+        pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b|{var}\s+is\s+None", re.MULTILINE)
+        check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+    check("0.3 * (usd_close - 1300)" not in scrape_src and "0.3 * (usd_close - 1300)" not in view_src,
+          "'합성선물'을 환율로 계산하던 식(0.3×(USD-1300)/200)이 두 파일 모두에서 사라짐")
+
+    # 미리보기 화면이 프록시로 되살아나지 않았는지
+    check('"VKOSPI_Skew": None,' in view_src and '"Synthetic_Futures": None,' in view_src,
+          "미리보기 분기는 두 지표를 산출 불가(None)로 두고 프록시로 채우지 않음")
+
+    # 신설 원값 컬럼이 저장 쪽·읽기 쪽 COL_MAP 에 **같은 한글 이름**으로 있어야 복원됩니다
+    for col in ("VKOSPI_Level_Raw", "VKOSPI_Level_AsOf", "Futures_Basis_Raw", "Futures_Basis_AsOf"):
+        check(f'"{col}"' in scrape_src, f"scrape_daily.py COL_MAP 에 '{col}' 존재")
+        check(f'"{col}"' in db_src, f"utils/db.py COL_MAP 에 '{col}' 존재")
+
+    from scrape_daily import COL_MAP as SCRAPE_COL_MAP
+    db_col_map = _literal_from_source(REPO_ROOT / "utils" / "db.py", "COL_MAP")
+    shared = set(SCRAPE_COL_MAP) & set(db_col_map or {})
+    mismatched = [k for k in shared if SCRAPE_COL_MAP[k] != db_col_map[k]]
+    check(not mismatched, f"두 COL_MAP 의 공통 키가 전부 같은 한글 이름 (불일치: {mismatched})")
+
+    # 기존 키의 한글 이름은 절대 바뀌면 안 됩니다(과거 CSV 헤더 복원용)
+    check(SCRAPE_COL_MAP["VKOSPI_Skew"] == "공포지수 비대칭도 (투자자들의 불안 심리 강도)",
+          "VKOSPI_Skew 의 CSV 한글 헤더는 과거 기록 복원을 위해 그대로 유지")
+    check(SCRAPE_COL_MAP["Synthetic_Futures"] == "합성선물 가격 차이 (외국인의 파생상품 하방 압력)",
+          "Synthetic_Futures 의 CSV 한글 헤더도 그대로 유지")
+
+    # 화면 표기명은 반대로, 실제 내용대로 바뀌어야 합니다(라벨과 내용 불일치 방지)
+    friendly = _literal_from_source(REPO_ROOT / "views" / "macro_view.py", "FRIENDLY_NAMES")
+    check("VKOSPI" in friendly["VKOSPI_Skew"] and "실측" in friendly["VKOSPI_Skew"],
+          f"화면 표기명이 실제 내용(VKOSPI 실측)을 반영: {friendly['VKOSPI_Skew']!r}")
+    check("베이시스" in friendly["Synthetic_Futures"] and "실측" in friendly["Synthetic_Futures"],
+          f"화면 표기명이 실제 내용(선물 베이시스 실측)을 반영: {friendly['Synthetic_Futures']!r}")
+
+    # 워크플로우가 시크릿을 넘겨주는가 (넘기지 않으면 Actions에서는 영원히 산출 불가)
+    check("KRX_OPENAPI_KEY: ${{ secrets.KRX_OPENAPI_KEY }}" in wf_src,
+          "scrape.yml 이 KRX_OPENAPI_KEY 시크릿을 환경변수로 전달")
+    check(wf_src.index("KRX_OPENAPI_KEY:") < wf_src.index("python scrape_daily.py"),
+          "그 env 블록이 scrape_daily.py 실행 스텝에 붙어 있음")
+
+    # 인증키가 코드/워크플로우에 하드코딩되어 있지 않은지 (형식적이지만 사고 방지)
+    krx_src = (REPO_ROOT / "utils" / "krx_openapi.py").read_text(encoding="utf-8")
+    check("os.environ" in krx_src or "os.getenv" in krx_src, "인증키는 환경변수에서만 읽음")
+    check(krx_src.count("AUTH_KEY") >= 1 and 'headers = {KRX_AUTH_HEADER: key' in krx_src,
+          "인증키를 요청 '헤더'로 전달(공식 규격 — URL에 실으면 로그에 남음)")
+
+    # ⚠️ 이번 단계에서도 가중치는 손대지 않았습니다 ([8]에서 합계·비율을 이미 검증)
+    from utils.constants import RISK_WEIGHTS
+    check(RISK_WEIGHTS["VKOSPI_Skew"] == 9.68 and RISK_WEIGHTS["Synthetic_Futures"] == 19.35,
+          "#70 에서도 두 지표의 가중치는 #69 값 그대로 (프록시→실측 전환과 가중치 재설계는 별개)")
+
+
 def main():
     print("=" * 74)
-    print("🛡️ 매크로 실측 지표 정규화(#68) + 실측불가 6개 제외·가중치 재분배(#69) 검증")
+    print("🛡️ 매크로 실측 지표 정규화(#68) + 실측불가 6개 제외·가중치 재분배(#69)")
+    print("   + KRX OPEN API 실측 연결(#70, VKOSPI·선물 베이시스) 검증")
     print("=" * 74)
     test_direction_kospi_5d()
     test_magnitude_net_sell()
@@ -391,6 +788,12 @@ def main():
     test_weight_redistribution()
     test_retired_indicators_removed_from_code()
     test_study_section_matches_code()
+    # --- 2026-08-10 (#70) KRX OPEN API 실측 연결 ---
+    test_upside_risk_direction()
+    test_krx_parsers()
+    test_krx_end_to_end_success()
+    test_krx_failure_modes()
+    test_krx_wiring()
 
     print("\n" + "=" * 74)
     if FAILURES:

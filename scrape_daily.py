@@ -27,7 +27,12 @@ from utils.macro_scoring import (
     # 2026-08-10 (#68): 실측 지표(5일 수익률·3주체 순매수) 정규화 — 자세한 배경은 해당 모듈 주석 참고
     measured_downside_risk, net_flow_population, rolling_return_population,
     NET_FLOW_MIN_SAMPLE, RETURN_POP_MIN_SAMPLE,
+    # 2026-08-10 (#70): VKOSPI 레벨처럼 "값이 클수록 위험"인 실측 지표용 + 이력 컬럼 분포 생성기
+    measured_upside_risk, history_column_population,
 )
+# 2026-08-10 (#70): KRX OPEN API(공식 무료) 실측 수집. 인증키(환경변수 KRX_OPENAPI_KEY)가 없거나
+# 호출이 실패하면 예외를 던지지 않고 값이 None으로 돌아와, 해당 지표만 배점에서 빠집니다.
+from utils.krx_openapi import collect_krx_risk_inputs
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
@@ -61,7 +66,17 @@ COL_MAP = {
     "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)",
     # 2026-08-10 (#68): 점수(0~1)만 남기지 않고 그 점수를 만든 실측 원값도 그대로 남깁니다
     # (디버깅·투명성 목적. 기존 컬럼은 이름 변경/삭제 없이 그대로 유지).
-    "KOSPI_5D_Return_Pct": "KOSPI 5일 수익률 (%, 실측 원값)"
+    "KOSPI_5D_Return_Pct": "KOSPI 5일 수익률 (%, 실측 원값)",
+    # 2026-08-10 (#70): KRX OPEN API 실측 원값 + 그 값의 **실제 기준 거래일(as-of)**.
+    # ⚠️ 기존 키(`VKOSPI_Skew`/`Synthetic_Futures`)의 한글 이름은 **바꾸지 않습니다.**
+    #    CSV를 다시 읽을 때 한글 헤더 → 영문 컬럼 복원이 이 표로 이뤄지는데, 값을 바꾸면
+    #    이미 저장된 과거 행의 헤더가 매칭되지 않아 과거 기록을 못 읽게 됩니다(개변 금지).
+    #    "지금 그 자리에 무엇이 들어있는가"는 화면 표기(views/macro_view.py FRIENDLY_NAMES)와
+    #    아래 신설 원값 컬럼으로 정직하게 드러냅니다.
+    "VKOSPI_Level_Raw": "VKOSPI 지수값 (실측 원값, KRX OPEN API)",
+    "VKOSPI_Level_AsOf": "VKOSPI 기준 거래일",
+    "Futures_Basis_Raw": "선물 베이시스 (KOSPI200 선물 종가 − 지수 종가, 실측 원값)",
+    "Futures_Basis_AsOf": "선물 베이시스 기준 거래일",
 }
 
 # (SPEC §3: 개별 크롤러의 PERIOD_KEYWORDS 사본 하드코딩 금지.
@@ -263,9 +278,11 @@ def scrape_and_update(target_date_override=None):
             f"(KOSPI={kospi_close}, USD={usd_close})"
         )
 
-    # 변동성·고점대비낙폭이 없으면 3개 지표(공매도 비중/공포지수/공매도 잔고)가
+    # 변동성·고점대비낙폭이 없으면 2개 지표(공매도 비중/공매도 잔고)가
     # 시드 상수로 계산되어 버리므로, 아예 수집을 중단합니다.
-    # (2026-08-10 #69: 여기 있던 'ELS 낙인'은 지표 자체가 제거되어 목록에서 뺐습니다.)
+    # (2026-08-10 #69: 여기 있던 'ELS 낙인'은 지표 자체가 제거되어 목록에서 뺐습니다.
+    #  2026-08-10 #70: '공포지수'(VKOSPI_Skew)도 이제 volatility를 쓰지 않고 KRX 실측
+    #  VKOSPI 지수값을 쓰므로 이 목록에서 빠졌습니다.)
     if volatility is None or dist_from_high is None:
         raise RuntimeError(
             f"{date_key} 변동성/고점대비낙폭 산출 실패 — 임의 상수(1.2 / 0.08)로 대체하지 않고 당일 수집을 중단합니다."
@@ -324,11 +341,14 @@ def scrape_and_update(target_date_override=None):
     # 통째로 제거했습니다. 가중치만 지우고 계산을 남겨두면 믿지 않는 값이 계속 CSV에 쌓이므로,
     # 계산 자체를 하지 않는 편이 §0-1(지어내지 않기)에 맞습니다.
     # ⚠️ market_history.csv의 기존 컬럼은 과거 기록 보존을 위해 삭제하지 않습니다(앞으로만 안 씀).
+    #
+    # 2026-08-10 (#70): `VKOSPI_Skew`(공포지수)와 `Synthetic_Futures`(합성선물) 두 자리의
+    # 임의 선형식(skew_base = 0.4+0.4×(Vol/5)-0.2×KOSPI_change / synth_base = 0.5+0.3×(USD-1300)/200)을
+    # 제거하고 KRX OPEN API 실측값으로 교체했습니다(아래 [실측 지표 ③④]).
+    # 남은 4개(fx/put/short/bal)는 이번 단계 범위 밖이라 **한 줄도 건드리지 않았습니다.**
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300  # usd_close 자체는 위에서 이미 None 방어됨
     put_base = None if kospi_change is None else (0.5 - 0.4 * kospi_change)
     short_base = 0.4 + 0.4 * (volatility / 5.0)
-    skew_base = None if kospi_change is None else (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change)
-    synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
     bal_base = 0.5 + 0.3 * dist_from_high
 
     # -------------------------------------------------------------------------
@@ -362,6 +382,59 @@ def scrape_and_update(target_date_override=None):
     # 이제는 "평소 5일 수익률 분포 대비 몇 표준편차나 빠졌는가"로 재고, ±3σ를 [0, 1]에 매핑합니다.
     kospi_5d_base = measured_downside_risk(kospi_5d_return, kospi_5d_pop)
 
+    # -------------------------------------------------------------------------
+    # [실측 지표 ③④] VKOSPI 레벨 / KOSPI200 선물 베이시스 — KRX OPEN API (2026-08-10 #70)
+    # -------------------------------------------------------------------------
+    # 예전 식(전부 제거됨):
+    #   VKOSPI_Skew      = 0.4 + 0.4×(변동성/5) - 0.2×코스피등락률   ← 이름만 '공포지수'
+    #   Synthetic_Futures = 0.5 + 0.3×(환율-1300)/200                ← 이름만 '합성선물', 실은 환율
+    # 지금:
+    #   VKOSPI_Level  = KRX가 산출·공표하는 코스피200 변동성지수 값 그 자체(실측)
+    #   Futures_Basis = KOSPI200 선물 근월물 종가 − KOSPI200 지수 종가 (실측 2개의 순수 뺄셈)
+    #
+    # ⚠️ 방향이 서로 반대입니다 — 부호를 뒤집어 쓰면 점수가 정확히 거꾸로 나옵니다.
+    #    · VKOSPI: **높을수록** 위험(시장이 향후 변동성을 크게 본다)   → measured_upside_risk
+    #    · 베이시스: **낮을수록**(백워데이션) 위험(선물이 현물보다 싸다) → measured_downside_risk
+    #
+    # ⚠️ 분포(정규화 기준선)는 우리가 CSV에 쌓아온 원값 컬럼으로만 만듭니다. 과거치를 빨리
+    #    채우려고 KRX에 하루씩 수십 번 조회하는 건 크롤링 매너(§0-3-2) 위반이라 하지 않습니다.
+    #    → 이력 20행이 쌓일 때까지는 중립 0.5가 나옵니다(#68 순매수와 완전히 같은 부트스트랩).
+    #
+    # ⚠️ 시점(as-of): KRX는 전일 확정치를 익일 08:00에 공개하므로, 16:05 수집 시점에는 보통
+    #    '전 거래일' 값이 들어옵니다. 그 기준일을 함께 저장해(아래 *_AsOf 컬럼) 서로 다른
+    #    지연을 가진 값이 한 행에 섞여 있다는 사실을 숨기지 않습니다.
+    #
+    # ⚠️ collect_krx_risk_inputs()는 설계상 예외를 던지지 않지만(모든 실패를 errors 목록으로
+    #    돌려줌), 신설 코드의 예상 못 한 버그 하나로 **매일 도는 전체 수집이 죽는 것**만은
+    #    막아야 하므로 한 겹 더 감쌉니다. 여기서 무슨 일이 나도 두 지표만 빠집니다.
+    try:
+        krx_inputs = collect_krx_risk_inputs(date_key)
+    except Exception as e:
+        krx_inputs = {"logs": [], "errors": [f"예상치 못한 오류로 KRX 수집을 건너뜁니다: {type(e).__name__}: {e}"]}
+    for _line in krx_inputs.get("logs", []):
+        print(f"  ↳ [KRX] {_line}")
+    for _line in krx_inputs.get("errors", []):
+        print(f"⚠️ [KRX] {_line}")
+
+    vkospi_level = krx_inputs.get("vkospi_level")
+    futures_basis = krx_inputs.get("futures_basis")
+    krx_as_of = krx_inputs.get("as_of")
+
+    vkospi_pop = history_column_population(history_df, "VKOSPI_Level_Raw")
+    basis_pop = history_column_population(history_df, "Futures_Basis_Raw")
+    if vkospi_level is not None and vkospi_pop is None:
+        print(f"⚠️ VKOSPI 정규화 표본 부족(과거 {NET_FLOW_MIN_SAMPLE}행 미만) — 중립(0.5)으로 처리합니다. "
+              f"오늘 원값 {vkospi_level} 는 CSV에 그대로 쌓입니다.")
+    if futures_basis is not None and basis_pop is None:
+        print(f"⚠️ 선물 베이시스 정규화 표본 부족(과거 {NET_FLOW_MIN_SAMPLE}행 미만) — 중립(0.5)으로 "
+              f"처리합니다. 오늘 원값 {futures_basis:.4f} 는 CSV에 그대로 쌓입니다.")
+
+    vkospi_base = measured_upside_risk(vkospi_level, vkospi_pop)
+    basis_base = measured_downside_risk(futures_basis, basis_pop)
+    if vkospi_level is not None or futures_basis is not None:
+        print(f"✅ KRX 실측 반영 (기준일 {krx_as_of}): VKOSPI={vkospi_level} → 위험도 {vkospi_base} / "
+              f"베이시스={futures_basis} → 위험도 {basis_base}")
+
     # 가중 위험 지표 계산 및 합산 (2026-08-06 2차 감사 5-1: 가중치 단일 출처로 통일 —
     # scrape_daily.py/macro_view.py 양쪽 다 utils.constants.RISK_WEIGHTS만 참조합니다)
     investor_weights = dict(INVESTOR_WEIGHTS)
@@ -385,13 +458,15 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)),
             "Retail": clip(short_base - 0.2)
         },
-        "VKOSPI_Skew": None if skew_base is None else {
-            "Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)
+        # 실측 지표 ③: VKOSPI 지수값. 시장 전체가 하나의 값으로 매기는 변동성 기대라
+        # 주체별로 다를 수 없습니다 → 3주체 동일값(KOSPI_5D_Return과 같은 취급).
+        # (예전엔 외국인 +0.05 / 개인 -0.2 같은 근거 없는 오프셋이 붙어 있었습니다.)
+        "VKOSPI_Skew": None if vkospi_base is None else {
+            "Foreigner": clip(vkospi_base), "Institution": clip(vkospi_base), "Retail": clip(vkospi_base)
         },
-        "Synthetic_Futures": {
-            "Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)),
-            "Institution": clip(synth_base),
-            "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))
+        # 실측 지표 ④: 선물 베이시스. 역시 시장 가격이라 주체별로 다를 수 없습니다.
+        "Synthetic_Futures": None if basis_base is None else {
+            "Foreigner": clip(basis_base), "Institution": clip(basis_base), "Retail": clip(basis_base)
         },
         "Stock_Short_Balance": {
             "Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)
@@ -468,6 +543,18 @@ def scrape_and_update(target_date_override=None):
     # 2026-08-10 (#68): 점수화되기 전의 실측 원값도 같이 남깁니다(투명성·디버깅용).
     # 산출하지 못했으면 0.0으로 채우지 않고 결측(None)으로 둡니다(§0-1).
     new_data["KOSPI_5D_Return_Pct"] = [None if kospi_5d_return is None else round(kospi_5d_return * 100, 3)]
+
+    # 2026-08-10 (#70): KRX 실측 원값과 그 기준 거래일(as-of).
+    # ⚠️ 원값을 남기는 이유가 두 가지입니다.
+    #    ① 투명성/디버깅 (점수만 보고는 무엇 때문에 그 점수인지 알 수 없음)
+    #    ② **이 컬럼 자체가 내일의 정규화 기준선(과거 분포)이 됩니다.** 즉 이 값을 안 쌓으면
+    #       VKOSPI/베이시스는 영원히 중립 0.5에 머뭅니다.
+    # 산출 못 했으면 0.0으로 채우지 않고 결측(None)으로 둡니다 — compute_population_stats 가
+    # None/NaN을 알아서 걸러내므로 표본만 그만큼 줄어듭니다(§0-1).
+    new_data["VKOSPI_Level_Raw"] = [None if vkospi_level is None else round(vkospi_level, 4)]
+    new_data["Futures_Basis_Raw"] = [None if futures_basis is None else round(futures_basis, 4)]
+    new_data["VKOSPI_Level_AsOf"] = [krx_as_of if vkospi_level is not None else None]
+    new_data["Futures_Basis_AsOf"] = [krx_as_of if futures_basis is not None else None]
 
     for k, v in metrics_dict.items():
         new_data[k] = [round(v, 3)]

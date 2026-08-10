@@ -43,6 +43,12 @@ jobs:
     - name: 거시경제/수급 데이터 수집 (market_history.csv 갱신)
       env:
         GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+        # 2026-08-10 (TASK_HISTORY #70): KRX OPEN API 인증키.
+        # VKOSPI 지수값과 KOSPI200 선물 베이시스를 실측으로 받아오는 데 씁니다.
+        # ⚠️ 값 자체는 저장소 Secrets 에만 있고 코드·로그·문서 어디에도 남기지 않습니다.
+        #    Secret 이 없거나 서비스 승인이 안 났으면(401) 그 두 지표만 '산출 불가'로 빠지고
+        #    나머지 수집은 정상 진행됩니다(값을 지어내지 않음, ENGINEERING_SPEC §0-1).
+        KRX_OPENAPI_KEY: ${{ secrets.KRX_OPENAPI_KEY }}
       run: |
         python scrape_daily.py "${{ github.event.inputs.target_date }}"
 
