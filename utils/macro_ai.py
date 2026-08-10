@@ -4,6 +4,10 @@ import time
 import google.generativeai as genai
 
 # 한글 이름 매핑 (scrape_daily.py와 맞춤)
+# ⚠️ 2026-08-10 (#69): 아래 6개(ELS_KnockIn / NDF_Night_Rate / Futures_Net_Sell /
+#    Non_Arbitrage_Ratio / Foreign_Broker_Dump / Put_Buy_Simple)는 점수 계산에서 제외되어
+#    더 이상 metrics_dict 에 담겨 오지 않습니다. 이 표에 남겨두는 이유는 이미 생성된
+#    data/macro_commentary.json 의 과거 코멘트 키를 읽을 때 이름이 필요하기 때문입니다.
 FRIENDLY_NAMES = {
     "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
     "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 베팅한 대기자금)",
@@ -23,7 +27,8 @@ FRIENDLY_NAMES = {
 
 def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
     """
-    14개 매크로 지표에 대해 개별적으로 루프를 돌며 초보자용 AI 코멘트를 생성합니다.
+    현재 활성 매크로 지표(metrics_dict에 담겨 온 것들)에 대해 개별적으로 루프를 돌며
+    초보자용 AI 코멘트를 생성합니다. (2026-08-10 #69 이후 8개)
     """
     print("🤖 AI 매크로 코멘트 생성을 시작합니다...")
     
@@ -63,8 +68,12 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
 
     # 오늘 날짜
     today_str = time.strftime("%Y-%m-%d")
-    if commentary_data.get("date") == today_str and len(commentary_data.get("comments", {})) == 14:
-        # 여기서 return 하지 않으면 매 실행마다 14회씩 API를 다시 호출합니다(비용/쿼터 낭비).
+    # 2026-08-10 (#69): 예전에는 `len(comments) == 14`로 판단했는데, 지표 개수가 8개로 바뀌면서
+    # 이 조건이 영원히 참/거짓 한쪽으로 굳을 수 있었습니다(과거 파일에는 옛 14개 키가 남아 있음).
+    # 개수를 세는 대신 "오늘 요청할 지표가 전부 이미 있는가"로 판단합니다.
+    _existing = commentary_data.get("comments", {})
+    if commentary_data.get("date") == today_str and metrics_dict and all(k in _existing for k in metrics_dict):
+        # 여기서 return 하지 않으면 매 실행마다 지표 수만큼 API를 다시 호출합니다(비용/쿼터 낭비).
         print("ℹ️ 이미 오늘의 AI 코멘트가 모두 생성되어 있습니다. 재호출을 건너뜁니다.")
         return
 

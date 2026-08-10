@@ -228,15 +228,158 @@ def test_wiring():
               f"{name} 에 옛 임의 계수식(0.5 - 2.5×수익률)이 남아있지 않음")
     check("stock_net_base" not in scrape_src and "stock_net_base" not in view_src,
           "옛 상수 기반 stock_net_base 변수가 두 파일 모두에서 사라짐")
-    # 이번 단계에서 가중치는 손대지 않기로 했으므로, 값이 그대로인지 같이 못박습니다.
-    from utils.constants import RISK_WEIGHTS
-    check(RISK_WEIGHTS["KOSPI_5D_Return"] == 12.0 and RISK_WEIGHTS["Stock_Net_Sell"] == 3.0,
-          "RISK_WEIGHTS는 이번 단계에서 변경하지 않음 (12.0 / 3.0 유지)")
+
+
+# =============================================================================
+# 2026-08-10 (#69) — 실측 불가 6개 지표 제외 + 가중치 비례 재분배 검증
+# =============================================================================
+# 개정 전 가중치(합 102.0). 이 표는 "그때 실제로 이랬다"는 기록이자, 아래 비례 재분배가
+# 정말로 상대 비중을 보존했는지 검산하기 위한 기준선입니다.
+WEIGHTS_BEFORE_69 = {
+    "FX_Swap_Point": 12.0, "Put_OTM_OI": 8.0, "Short_Ratio": 6.0, "ELS_KnockIn": 7.0,
+    "VKOSPI_Skew": 6.0, "Synthetic_Futures": 12.0, "NDF_Night_Rate": 12.0,
+    "Futures_Net_Sell": 6.0, "Non_Arbitrage_Ratio": 6.0, "Foreign_Broker_Dump": 6.0,
+    "Stock_Short_Balance": 3.0, "Put_Buy_Simple": 3.0, "Stock_Net_Sell": 3.0,
+    "KOSPI_5D_Return": 12.0,
+}
+# 점수에서 뺀 6개 (4개는 화면 '공부용 참고' 섹션으로, 2개는 개념 중복이라 완전 제외)
+RETIRED_EXPECTED = {
+    "ELS_KnockIn", "NDF_Night_Rate", "Futures_Net_Sell", "Non_Arbitrage_Ratio",
+    "Foreign_Broker_Dump", "Put_Buy_Simple",
+}
+STUDY_EXPECTED = {"ELS_KnockIn", "NDF_Night_Rate", "Futures_Net_Sell", "Non_Arbitrage_Ratio"}
+DROPPED_EXPECTED = {"Foreign_Broker_Dump", "Put_Buy_Simple"}
+
+
+def _literal_from_source(path, name):
+    """
+    파일을 import 하지 않고(=streamlit 등 의존성 없이) 모듈 최상단 리터럴 할당값만 꺼냅니다.
+    views/macro_view.py 는 streamlit 의존이라 오프라인 테스트에서 import 할 수 없습니다.
+    """
+    import ast
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for tgt in node.targets:
+                if isinstance(tgt, ast.Name) and tgt.id == name:
+                    return ast.literal_eval(node.value)
+    return None
+
+
+def test_weight_redistribution():
+    print("\n[8] 가중치 재분배 — 6개를 뺀 뒤 합이 정확히 100인가 (#69)")
+    from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
+
+    total = sum(RISK_WEIGHTS.values())
+    check(abs(total - 100.0) < 1e-9, f"RISK_WEIGHTS 합계 = 100.00 (실제: {total!r})")
+    check(len(RISK_WEIGHTS) == 8, f"활성 지표는 8개 (실제: {len(RISK_WEIGHTS)}개)")
+    check(all(v > 0 for v in RISK_WEIGHTS.values()), "모든 가중치가 양수")
+
+    # 개정 전 표가 정말 102.0이었는지(제안서 §4-1 주장)와, 제외분이 40.0인지 실제로 더해봅니다.
+    check(abs(sum(WEIGHTS_BEFORE_69.values()) - 102.0) < 1e-9,
+          f"개정 전 14개 합계 = 102.0 (실제: {sum(WEIGHTS_BEFORE_69.values())})")
+    dropped_sum = sum(WEIGHTS_BEFORE_69[k] for k in RETIRED_EXPECTED)
+    kept_sum = sum(v for k, v in WEIGHTS_BEFORE_69.items() if k not in RETIRED_EXPECTED)
+    check(abs(dropped_sum - 40.0) < 1e-9, f"제외한 6개 합계 = 40.0 (실제: {dropped_sum})")
+    check(abs(kept_sum - 62.0) < 1e-9, f"남은 8개의 개정 전 합계 = 62.0 (실제: {kept_sum})")
+
+    # 비례 재분배 검산: 각 지표 = 개정 전 값 × 100/62 (소수 둘째 자리 반올림)
+    factor = 100.0 / kept_sum
+    for key, new_w in sorted(RISK_WEIGHTS.items()):
+        expected = round(WEIGHTS_BEFORE_69[key] * factor, 2)
+        if key == "KOSPI_5D_Return":
+            # 단순 반올림 합이 99.99라, 잔여 0.01을 '유일하게 실측이 검증된' 이 지표에 배정했습니다.
+            check(abs(new_w - (expected + 0.01)) < 1e-9,
+                  f"{key}: {WEIGHTS_BEFORE_69[key]}×100/62={expected} + 반올림 잔여 0.01 = {new_w}")
+        else:
+            check(abs(new_w - expected) < 1e-9,
+                  f"{key}: {WEIGHTS_BEFORE_69[key]}×100/62 = {expected} (실제: {new_w})")
+
+    # 상대 비중 보존(이번 단계는 '6개 제거'만 하고 지표 간 우열은 건드리지 않았음).
+    # 반올림 잔여 0.01이 붙은 KOSPI_5D_Return은 오차 허용치를 조금 크게 둡니다.
+    ref = "FX_Swap_Point"
+    for key in RISK_WEIGHTS:
+        before_ratio = WEIGHTS_BEFORE_69[key] / WEIGHTS_BEFORE_69[ref]
+        after_ratio = RISK_WEIGHTS[key] / RISK_WEIGHTS[ref]
+        check(abs(before_ratio - after_ratio) < 0.002,
+              f"{key}/{ref} 비율 보존: 개정 전 {before_ratio:.4f} ≈ 개정 후 {after_ratio:.4f}")
+
+    check(set(RETIRED_RISK_INDICATORS) == RETIRED_EXPECTED,
+          "RETIRED_RISK_INDICATORS가 제외한 6개와 정확히 일치")
+    check(not (set(RISK_WEIGHTS) & RETIRED_EXPECTED),
+          "제외한 6개가 RISK_WEIGHTS에 하나도 남아있지 않음")
+
+
+def test_retired_indicators_removed_from_code():
+    print("\n[9] 코드 제거 — 뺀 지표의 계산식이 정말 사라졌는가 (#69)")
+    scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
+
+    # market_scores / market_scores_raw 항목이 남아있으면 CSV에 계속 값이 쌓입니다.
+    for key in sorted(RETIRED_EXPECTED):
+        for fname, src in (("scrape_daily.py", scrape_src), ("views/macro_view.py", view_src)):
+            has_entry = (f'"{key}": {{' in src or f'"{key}": None if' in src
+                         or f'"{key}": clip' in src)
+            check(not has_entry, f"{fname} 의 점수 사전에 '{key}' 항목이 없음")
+
+    # 계산에 쓰이던 임시 변수들도 함께 사라져야 합니다(남아 있으면 죽은 코드).
+    # ⚠️ 단순 문자열 포함이 아니라 '대입/사용' 패턴으로 봅니다 — 두 파일 모두 "왜 지웠는지"를
+    #    설명하는 주석에 변수 이름을 그대로 적어두었기 때문입니다(그 흔적은 남기는 게 맞습니다).
+    import re
+    for var in ("els_base", "ndf_base", "fut_base", "non_base", "dump_base", "put_buy_base"):
+        pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b|{var}\s+is\s+None", re.MULTILINE)
+        check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+
+    # 반대로, 과거 CSV 를 읽으려면 한글 컬럼 매핑은 반드시 남아 있어야 합니다(기록 보존).
+    for key in sorted(RETIRED_EXPECTED):
+        check(f'"{key}":' in scrape_src, f"scrape_daily.py COL_MAP 에 '{key}' 한글 매핑은 보존")
+
+    # 화면 문구가 지표 개수를 하드코딩하고 있으면 개수가 바뀔 때마다 거짓말이 됩니다.
+    check("14개 변동성 지표별" not in view_src,
+          "화면 제목이 '14개'로 하드코딩되어 있지 않음(len(RISK_WEIGHTS) 사용)")
+
+
+def test_study_section_matches_code():
+    print("\n[10] 문서-코드 일치 — 화면 공부 섹션 목록 == 실제로 뺀 목록 (#69)")
+    from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
+
+    view_path = REPO_ROOT / "views" / "macro_view.py"
+    study = _literal_from_source(view_path, "STUDY_ONLY_INDICATORS")
+    dropped = _literal_from_source(view_path, "DROPPED_AS_DUPLICATE")
+    friendly = _literal_from_source(view_path, "FRIENDLY_NAMES")
+
+    check(study is not None and len(study) == 4, f"공부용 섹션에 4개 지표가 실림 (실제: {len(study or [])}개)")
+    study_keys = {d["key"] for d in (study or [])}
+    check(study_keys == STUDY_EXPECTED, f"공부용 목록이 예상과 일치 (실제: {sorted(study_keys)})")
+
+    # 완전 제외 2개는 '왜 뺐는지'가 화면에 남아 있어야 합니다(조용히 사라지지 않게).
+    dropped_text = " ".join(name for name, _ in (dropped or []))
+    for key in sorted(DROPPED_EXPECTED):
+        check(key in dropped_text, f"'{key}' 가 완전 제외 안내 목록에 이유와 함께 표기됨")
+
+    # 핵심: 공부 섹션 + 완전 제외 = 실제로 코드에서 뺀 6개. 어긋나면 화면이 거짓말을 하게 됩니다.
+    check(study_keys | DROPPED_EXPECTED == set(RETIRED_RISK_INDICATORS),
+          "공부 섹션(4) + 완전 제외(2) = RETIRED_RISK_INDICATORS(6) 정확히 일치")
+    check(not (study_keys & set(RISK_WEIGHTS)),
+          "공부 섹션 지표가 활성 지표와 겹치지 않음(점수에 두 번 들어가지 않음)")
+    check(set(friendly or {}) == set(RISK_WEIGHTS),
+          "화면 표기명(FRIENDLY_NAMES) 키가 활성 지표 8개와 정확히 일치")
+
+    # 공부 섹션은 '설명'만 있어야 합니다 — 없는 데이터로 예시 숫자를 그리면 §0-1 위반입니다.
+    for item in (study or []):
+        for field in ("title", "one_liner", "why_it_matters", "missing_data",
+                      "hypothetical_weight", "weight_reasoning"):
+            check(bool(item.get(field)), f"{item['key']}: '{field}' 설명이 비어있지 않음")
+        check(len(item.get("how_to_study", [])) >= 2,
+              f"{item['key']}: 구체적인 공부 방법이 2개 이상")
+        check("참고 범위" in item["hypothetical_weight"],
+              f"{item['key']}: 가중치를 확정치가 아닌 '참고 범위'로 표기")
 
 
 def main():
     print("=" * 74)
-    print("🛡️ 매크로 실측 지표(KOSPI_5D_Return / Stock_Net_Sell) 정규화 검증")
+    print("🛡️ 매크로 실측 지표 정규화(#68) + 실측불가 6개 제외·가중치 재분배(#69) 검증")
     print("=" * 74)
     test_direction_kospi_5d()
     test_magnitude_net_sell()
@@ -245,6 +388,9 @@ def main():
     test_population_builders()
     test_real_history_spot_check()
     test_wiring()
+    test_weight_redistribution()
+    test_retired_indicators_removed_from_code()
+    test_study_section_matches_code()
 
     print("\n" + "=" * 74)
     if FAILURES:

@@ -33,6 +33,10 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
 
 # 한글 파일 보관용 컬럼 매핑 딕셔너리
+# ⚠️ 2026-08-10 (#69): 아래 6개(ELS 낙인 / 야간 역외환율 / 선물 순매도 / 비차익 프로그램 /
+#    외국계 증권사 매도세 / 풋옵션 매수 강도)는 점수 계산에서 제거되어 **더 이상 새로 기록되지
+#    않습니다.** 그래도 매핑을 지우지 않는 이유는, 이미 쌓인 과거 행의 한글 컬럼을 읽어
+#    영문 컬럼으로 되돌리려면 이 표가 그대로 필요하기 때문입니다(과거 기록 개변 금지).
 COL_MAP = {
     "Date": "날짜",
     "Score": "종합 위험 점수",
@@ -259,8 +263,9 @@ def scrape_and_update(target_date_override=None):
             f"(KOSPI={kospi_close}, USD={usd_close})"
         )
 
-    # 변동성·고점대비낙폭이 없으면 4개 지표(공매도 비중/ELS 낙인/공포지수/공매도 잔고)가
+    # 변동성·고점대비낙폭이 없으면 3개 지표(공매도 비중/공포지수/공매도 잔고)가
     # 시드 상수로 계산되어 버리므로, 아예 수집을 중단합니다.
+    # (2026-08-10 #69: 여기 있던 'ELS 낙인'은 지표 자체가 제거되어 목록에서 뺐습니다.)
     if volatility is None or dist_from_high is None:
         raise RuntimeError(
             f"{date_key} 변동성/고점대비낙폭 산출 실패 — 임의 상수(1.2 / 0.08)로 대체하지 않고 당일 수집을 중단합니다."
@@ -312,18 +317,19 @@ def scrape_and_update(target_date_override=None):
     # 2026-08-06 2차 감사 4-4: kospi_change/usd_change가 None이면(전일 종가 비교 불가)
     # 그걸 입력으로 쓰는 지표들도 값을 지어내지 않고 None으로 둡니다(아래 market_scores
     # 구성 단계에서 자동으로 배점 제외됩니다).
+    #
+    # 2026-08-10 (#69): 실측 경로가 아예 없다고 판정된 6개 지표(ELS_KnockIn / NDF_Night_Rate /
+    # Futures_Net_Sell / Non_Arbitrage_Ratio / Foreign_Broker_Dump / Put_Buy_Simple)의
+    # 계산식(els_base / ndf_base / fut_base / non_base / dump_base / put_buy_base)을 여기서
+    # 통째로 제거했습니다. 가중치만 지우고 계산을 남겨두면 믿지 않는 값이 계속 CSV에 쌓이므로,
+    # 계산 자체를 하지 않는 편이 §0-1(지어내지 않기)에 맞습니다.
+    # ⚠️ market_history.csv의 기존 컬럼은 과거 기록 보존을 위해 삭제하지 않습니다(앞으로만 안 씀).
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300  # usd_close 자체는 위에서 이미 None 방어됨
     put_base = None if kospi_change is None else (0.5 - 0.4 * kospi_change)
     short_base = 0.4 + 0.4 * (volatility / 5.0)
-    els_base = 0.1 + 0.7 * dist_from_high
     skew_base = None if kospi_change is None else (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change)
     synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
-    ndf_base = None if usd_change is None else (0.4 + 0.5 * usd_change)
-    fut_base = None if kospi_change is None else (0.5 - 0.3 * kospi_change)
-    non_base = 0.5 + (0.2 if institution_flow < 0 else -0.1)
-    dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
     bal_base = 0.5 + 0.3 * dist_from_high
-    put_buy_base = None if kospi_change is None else (0.4 - 0.3 * kospi_change)
 
     # -------------------------------------------------------------------------
     # [실측 지표 ①] Stock_Net_Sell — 3주체 순매수 '금액'을 과거 분포 대비 정규화
@@ -379,9 +385,6 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)),
             "Retail": clip(short_base - 0.2)
         },
-        "ELS_KnockIn": {
-            "Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)
-        },
         "VKOSPI_Skew": None if skew_base is None else {
             "Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)
         },
@@ -390,27 +393,8 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(synth_base),
             "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))
         },
-        "NDF_Night_Rate": None if ndf_base is None else {
-            "Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)
-        },
-        "Futures_Net_Sell": None if fut_base is None else {
-            "Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)),
-            "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)),
-            "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))
-        },
-        "Non_Arbitrage_Ratio": {
-            "Foreigner": clip(non_base + 0.05), "Institution": clip(non_base + 0.1), "Retail": clip(non_base - 0.2)
-        },
-        "Foreign_Broker_Dump": {
-            "Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)
-        },
         "Stock_Short_Balance": {
             "Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)
-        },
-        "Put_Buy_Simple": None if put_buy_base is None else {
-            "Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)),
-            "Institution": clip(put_buy_base),
-            "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))
         },
         # 실측 지표 ①: 주체별 실제 순매수 금액을 각각 정규화한 값을 그대로 씁니다.
         "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {
@@ -502,7 +486,7 @@ def scrape_and_update(target_date_override=None):
     history_df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
     print("💾 market_history.csv 파일 누적 갱신 성공!")
 
-    # 6.5. AI 젬민이 코멘트 생성 (14개 지표 개별 루프)
+    # 6.5. AI 젬민이 코멘트 생성 (현재 활성 지표 개별 루프 — 2026-08-10 #69 이후 8개)
     try:
         from utils.macro_ai import generate_macro_commentary
         generate_macro_commentary(metrics_dict, score, kospi_close, usd_close)

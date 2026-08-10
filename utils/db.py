@@ -16,13 +16,18 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
 HISTORY_BACKUP_FILE = HISTORY_FILE + ".bak"
 
-# 14개 세부 위험 지표 컬럼 (누적 CSV 스키마)
-METRIC_COLUMNS = [
-    "FX_Swap_Point", "Put_OTM_OI", "Short_Ratio", "ELS_KnockIn",
-    "VKOSPI_Skew", "Synthetic_Futures", "NDF_Night_Rate", "Futures_Net_Sell",
-    "Non_Arbitrage_Ratio", "Foreign_Broker_Dump", "Stock_Short_Balance",
-    "Put_Buy_Simple", "Stock_Net_Sell", "KOSPI_5D_Return"
-]
+# 현재 살아있는 세부 위험 지표 컬럼 (누적 CSV 스키마)
+# ⚠️ 2026-08-10 (#69): 14개 → 8개. utils/constants.py의 RISK_WEIGHTS와 항상 같은 목록이어야
+#    하므로 직접 나열하지 않고 그 사전에서 가져옵니다(두 곳에 적어두면 언젠가 어긋납니다).
+from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
+
+METRIC_COLUMNS = list(RISK_WEIGHTS.keys())
+
+# 점수 계산에서 제외된 옛 지표 컬럼 — **새로 만들지 않습니다.**
+# 이미 CSV에 쌓여 있는 과거 값은 기록 보존을 위해 그대로 두고(삭제 금지), 아래 COL_MAP에도
+# 한글 매핑을 남겨둡니다(과거 행을 다시 읽을 때 필요). 다만 신규 파일에 빈 컬럼을 만들지는
+# 않으므로 ensure_metric_columns() 대상에서는 뺐습니다.
+RETIRED_METRIC_COLUMNS = list(RETIRED_RISK_INDICATORS.keys())
 
 
 def _safe_write_history(df):
@@ -49,6 +54,8 @@ COL_MAP = {
     "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
     "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 베팅한 대기자금)",
     "Short_Ratio": "공매도 거래 비중 (주가를 떨어뜨리려는 매도세)",
+    # ↓ 2026-08-10 (#69) 점수 계산에서 제외된 6개. 새로 기록되지는 않지만, 이미 저장된 과거
+    #   행의 한글 컬럼을 영문으로 되돌리려면 이 매핑이 그대로 필요해 남겨둡니다.
     "ELS_KnockIn": "ELS 낙인 위험 (대규모 원금손실 구간 진입 여부)",
     "VKOSPI_Skew": "공포지수 비대칭도 (투자자들의 불안 심리 강도)",
     "Synthetic_Futures": "합성선물 가격 차이 (외국인의 파생상품 하방 압력)",
@@ -70,7 +77,8 @@ COL_MAP = {
 
 def ensure_metric_columns(df):
     """
-    구형 CSV 에 14가지 세부 지표 컬럼이 없을 때 '컬럼만' 추가하고 값은 결측(NaN)으로 둡니다.
+    구형 CSV 에 현행 세부 지표 컬럼이 없을 때 '컬럼만' 추가하고 값은 결측(NaN)으로 둡니다.
+    (2026-08-10 #69 이후 대상은 RISK_WEIGHTS의 8개. 제외된 6개는 새로 만들지 않습니다.)
 
     ⚠️ 과거 버전(`backfill_missing_metrics`)은 KOSPI·환율만 가지고 '외환 스왑포인트',
        '공매도 잔고' 같은 지표를 소급 생성해 CSV에 저장했고, 저장된 뒤에는 당일 실수집분과

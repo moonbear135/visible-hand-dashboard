@@ -58,19 +58,157 @@ FRIENDLY_NAMES = {
     "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
     "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 배팅한 투기자본)",
     "Short_Ratio": "공매도 거래 비중 (주도권을 쥐어짜려는 매도세)",
-    "ELS_KnockIn": "ELS 녹인 위험 (대규모 원금손실 구간 진입 여부)",
     "VKOSPI_Skew": "공포지수 비대칭성 (투자자들의 불안 심리 강도)",
     "Synthetic_Futures": "합성선물 가격차이 (외국인의 파생상품 하방 압력)",
-    "NDF_Night_Rate": "야간 환율스왑 변동 (원/달러 환율 급등 위험)",
-    "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 투기)",
-    "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도세)",
-    "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
-    "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 쏠림 배팅 규모)",
     # ✅ 아래 2개는 추정 프록시가 아니라 실제 측정값 기반입니다 (2026-08-10 #68)
     "Stock_Net_Sell": "주식 현물 순매도 규모 (3주체 순매수 금액 · 실측)",
     "KOSPI_5D_Return": "KOSPI 5일 수익률 (지수 낙폭 · 실측)"
 }
+
+# =============================================================================
+# 📚 공부용 참고 — 지금 점수에 넣지 않는 지표들 (2026-08-10 #69)
+# =============================================================================
+# 왜 이 표가 여기 있나:
+#   아래 4개는 실제 금융시장에서 통용되는 정식 개념이지만, 무료로 구할 수 있는 일별
+#   데이터가 없어서 예전에는 "코스피 등락률·환율·수급 부호"를 그럴듯한 이름으로 바꿔
+#   부르는 식으로 계산되고 있었습니다. 그건 지표가 아니라 이름표라, 점수에서 뺐습니다.
+#   대신 관심 있는 사람이 직접 공부할 수 있도록 "무엇이 필요하고 어디를 보면 되는지"를
+#   화면에 남깁니다(오너 요청, 2026-08-10).
+#
+# ⚠️ `hypothetical_weight`는 **확정 가중치가 아닙니다.** 데이터가 아직 없는데 정확한
+#    숫자를 약속하는 건 지어내는 것이므로, "지금 살아있는 지표들이 4.84~19.36 사이에
+#    분포한다"는 사실에 기대어 **범위**로만 적었습니다. 실제 RISK_WEIGHTS에는 들어가지
+#    않습니다(utils/constants.py 참고).
+STUDY_ONLY_INDICATORS = [
+    {
+        "key": "ELS_KnockIn",
+        "title": "ELS 낙인(Knock-In) 위험",
+        "one_liner": "원금이 깨지기 시작하는 선(낙인 배리어) 아래로 기초지수가 내려간 ELS가 "
+                     "얼마나 쌓여 있는지를 보는 지표입니다.",
+        "why_it_matters": "ELS는 '지수가 일정 선(보통 최초 기준가의 45~65%) 아래로만 안 떨어지면 "
+                          "이자를 준다'는 구조의 상품입니다. 그 선을 건드리면 원금 손실이 확정될 수 "
+                          "있어 투자자 손실이 한꺼번에 터지고, 그 상품을 판 증권사도 헤지 포지션을 "
+                          "급하게 정리하느라 시장에 추가 매물이 나옵니다. 실제로 홍콩H지수(HSCEI)를 "
+                          "기초자산으로 한 ELS에서 대규모 손실 사태가 반복해서 벌어졌고, 2020년 3월 "
+                          "폭락 때는 증권사들이 ELS 헤지 과정에서 마진콜(추가 증거금 요구)을 맞아 "
+                          "달러 자금 조달난까지 겪었습니다.",
+        "missing_data": "개별 ELS의 ① 낙인 배리어 수준, ② 기초자산(코스피200·S&P500·H지수 등)의 "
+                        "현재가 대비 여유, ③ 그 조건별 미상환 잔액 — 이 세 가지가 한 세트로 "
+                        "매일 공개되어야 '오늘 얼마나 위험한가'를 셀 수 있는데, 무료로 공개되는 건 "
+                        "월 단위 발행·미상환 집계뿐입니다.",
+        "how_to_study": [
+            "예탁결제원 증권정보포털(SEIBro) → '파생결합증권(ELS/DLS) 발행·미상환 현황' — "
+            "월 단위지만 잔액 규모와 기초자산 구성을 볼 수 있습니다.",
+            "한국은행 「금융안정보고서」 — ELS 관련 위험을 정기적으로 분석한 챕터가 실립니다. "
+            "검색어: '금융안정보고서 ELS 낙인'.",
+            "금융감독원 보도자료 검색어: 'ELS 미상환 잔액', 'ELS 손실 가능 규모'.",
+            "개념 학습 검색어: '낙인(Knock-In) 배리어', '스텝다운형 ELS 구조', 'ELS 헤지 마진콜'.",
+        ],
+        "hypothetical_weight": "대략 5~10 정도 (참고 범위)",
+        "weight_reasoning": "평상시엔 거의 움직이지 않다가 특정 국면에서만 급격히 의미가 생기는 "
+                            "'잔고성' 지표라, 지금 활성 지표 중 성격이 가장 비슷한 공매도 잔고(4.84)와 "
+                            "시장 전체 파생 지표(9.68) 사이가 자연스러워 보입니다. 다만 데이터가 "
+                            "월 단위라면 매일 점수에 넣기보다 '경보 플래그'로 쓰는 편이 정직합니다.",
+    },
+    {
+        "key": "NDF_Night_Rate",
+        "title": "야간 역외 원/달러 환율 (NDF)",
+        "one_liner": "한국 시장이 문을 닫은 밤사이 해외에서 거래된 원/달러 환율입니다. "
+                     "다음 날 아침 시가가 어디서 열릴지를 미리 보여줍니다.",
+        "why_it_matters": "NDF(차액결제선물환)는 원화를 실제로 주고받지 않고 차액만 정산하는 "
+                          "역외 거래라, 외국인이 원화 자산에서 발을 뺄 때 가장 먼저 반응하는 곳 중 "
+                          "하나입니다. 밤사이 NDF 환율이 크게 뛰면 다음 날 국내 증시가 갭하락으로 "
+                          "시작하는 경우가 잦습니다.",
+        "missing_data": "일별 NDF 종가(보통 1개월물)를 무료로 공표하는 곳을 찾지 못했습니다. "
+                        "서울외국환중개 홈페이지의 NDF 페이지에는 상품 설명만 있고 시세표가 "
+                        "없다는 것을 직접 열어 확인했습니다(2026-08-09). 인포맥스·로이터 같은 "
+                        "유료 단말 영역입니다.",
+        "how_to_study": [
+            "서울외국환중개(smbs.biz) — 환율·스왑포인트 고시가 어떤 형태로 공개되는지 구경해 보세요. "
+            "같은 회사 페이지인데 F/X Swap POINT는 조회가 되고 NDF는 안 되는 차이가 보입니다.",
+            "한국은행 경제통계시스템(ECOS) — 환율·외환 관련 통계표 목록 훑어보기. 검색어: "
+            "'ECOS 환율 통계', '한국은행 외환시장 동향'.",
+            "언론 검색어: '역외 NDF 환율', '역외 원화 환율 상승', '차액결제선물환'.",
+            "제도 배경 검색어: '외환시장 구조 개선', '국내 외환시장 개장시간 연장', 'RFI 제도' — "
+            "국내 외환시장 운영시간이 새벽까지 늘어나면서 NDF의 역할이 예전과 어떻게 달라졌는지가 "
+            "그 자체로 좋은 공부거리입니다.",
+        ],
+        "hypothetical_weight": "대략 8~12 정도 (참고 범위)",
+        "weight_reasoning": "다음 날 갭하락과 직결되는 강한 신호지만, 지금 살아있는 "
+                            "외환 스왑포인트(19.35)와 **같은 '달러 자금·환율' 채널**입니다. "
+                            "둘을 따로 세면 같은 위험을 두 번 세는 셈이라, NDF가 들어온다면 그 채널 "
+                            "안에서 스왑포인트와 비중을 나눠 갖는 형태가 맞습니다.",
+    },
+    {
+        "key": "Futures_Net_Sell",
+        "title": "투자자별 코스피200 선물 순매도",
+        "one_liner": "외국인·기관이 선물시장에서 얼마나 순매도했는지입니다. "
+                     "현물보다 먼저 방향을 트는 경우가 많아 뉴스에 자주 등장합니다.",
+        "why_it_matters": "선물은 현물보다 적은 돈으로 큰 포지션을 잡을 수 있어, 방향에 대한 "
+                          "베팅이 먼저 나타나는 시장입니다. '외국인 선물 O천 계약 순매도' 같은 "
+                          "기사가 나오는 이유이고, 선물 매도는 프로그램(차익) 매매를 통해 "
+                          "현물 매도로 옮겨붙기도 합니다.",
+        "missing_data": "투자자 유형별 선물 순매수/순매도 계약수. KRX 정보데이터시스템 화면에는 "
+                        "있지만 2025-12-27부터 로그인이 필요해졌고, 무료 KRX OPEN API에는 "
+                        "'투자자별 파생상품 매매' 서비스가 아예 없습니다(7개 카테고리 전수 확인). "
+                        "종목별 매매정보만 제공되어 주체 구분이 불가능합니다.",
+        "how_to_study": [
+            "KRX 정보데이터시스템(data.krx.co.kr) → '파생상품 > 투자자별 거래실적' 화면을 "
+            "직접 눈으로 보면 어떤 필드가 있는지 감이 옵니다(회원 가입 필요).",
+            "개념 검색어: '선물 미결제약정', '베이시스(선물-현물 가격차)', '백워데이션', "
+            "'콘탱고', '만기일 롤오버'.",
+            "매일 장 마감 후 나오는 '외국인 선물 순매수 동향' 기사와 다음 날 지수를 짝지어 "
+            "직접 기록해 보면, 이 지표가 실제로 얼마나 먼저 움직이는지 스스로 확인할 수 있습니다.",
+        ],
+        "hypothetical_weight": "대략 6~10 정도 (참고 범위)",
+        "weight_reasoning": "지금 활성 지표 중 성격이 비슷한 공매도 거래 비중·공포지수가 9.68을 "
+                            "받고 있어 그 언저리가 출발점입니다. 다만 선물 베이시스"
+                            "(현재 'Synthetic_Futures' 자리, 19.35)와 정보가 상당히 겹치므로, "
+                            "둘을 같이 쓴다면 합쳐서 보고 각각은 낮추는 편이 맞습니다.",
+    },
+    {
+        "key": "Non_Arbitrage_Ratio",
+        "title": "비차익 프로그램 매매 비중",
+        "one_liner": "여러 종목을 한 번에 묶어서 사고파는 '바스켓 주문' 중, 선물과의 가격차를 "
+                     "노린 차익거래가 아닌 순수 방향성 주문이 얼마나 되는지입니다.",
+        "why_it_matters": "프로그램매매는 차익(선물-현물 가격차를 먹는 기계적 거래)과 비차익"
+                          "(그냥 바스켓으로 사고파는 것)으로 나뉩니다. 비차익 순매도가 크게 나오면 "
+                          "외국인·기관이 '한국 주식 전체'를 줄이고 있다는 뜻이라, 개별 종목 악재와 "
+                          "구분되는 시장 전체 신호로 읽힙니다.",
+        "missing_data": "차익/비차익을 구분한 프로그램매매 통계. KRX 정보데이터시스템 화면 "
+                        "전용이고(현재 로그인 필수), KRX OPEN API에는 제공되지 않습니다.",
+        "how_to_study": [
+            "KRX 정보데이터시스템 → '주식 > 프로그램매매' 화면에서 차익/비차익 구분을 확인.",
+            "개념 검색어: '차익거래', '비차익 프로그램매매', '바스켓 매매', "
+            "'프로그램 매매 순매수 상위'.",
+            "심화: 프로그램 차익거래가 선물 베이시스와 어떻게 연결되는지 — 검색어 "
+            "'베이시스 축소 프로그램 매도'. 선물·현물·프로그램 3개가 한 덩어리로 움직이는 "
+            "구조를 이해하면 위 '선물 순매도'와 함께 묶어서 보입니다.",
+        ],
+        "hypothetical_weight": "대략 3~6 정도 (참고 범위)",
+        "weight_reasoning": "비차익 프로그램매매는 '외국인 현물 순매도가 실행되는 통로'에 가까워, "
+                            "이미 실측으로 살아있는 주식 현물 순매도(4.84)와 상당 부분 같은 사건을 "
+                            "가리킵니다. 새로운 정보가 얹히는 폭이 크지 않다고 보아 활성 지표 중 "
+                            "가장 낮은 구간에 두는 것이 정직합니다.",
+    },
+]
+
+# 점수에서 뺐고 **공부 목록에도 넣지 않은** 2개 — 왜 뺐는지는 밝혀 둡니다.
+# (지표가 조용히 사라지는 것도 정직한 표시가 아니므로)
+DROPPED_AS_DUPLICATE = [
+    ("외국계 증권사 매도세 (Foreign_Broker_Dump)",
+     "계산식이 `0.5 ± (외국인이 순매수인지 순매도인지)`뿐이라, 이미 실측으로 살아있는 "
+     "'주식 현물 순매도'의 외국인 항목과 **같은 숫자를 이름만 바꿔 다시 센 것**이었습니다. "
+     "'외국계 창구에 매도 물량이 나왔다더라'는 개념 자체도 투자자 유형별 수급(외국인)과 "
+     "대부분 겹치고, 창구 주인과 실제 투자자가 일치하지도 않아 별도 지표로 세울 근거가 "
+     "약하다고 판단했습니다."),
+    ("풋옵션 매수 강도 (Put_Buy_Simple)",
+     "'풋옵션 수요'라는 개념은 지금도 살아있는 '풋옵션 미결제약정(Put_OTM_OI)'이 이미 "
+     "다루고 있습니다. 둘을 따로 두면 같은 하락 베팅을 두 번 세게 되고, 투자자별 옵션 "
+     "매매 데이터는 어차피 무료로 공개되지 않습니다. 풋옵션 공부는 활성 지표 쪽 설명을 "
+     "보시면 됩니다."),
+]
 
 def _load_history_df():
     """읽기 전용으로 누적 이력 CSV 를 로드합니다 (실패 시 빈 DataFrame)."""
@@ -196,18 +334,17 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     # =====================================================================
     # 지표 산출 — 입력이 없는 지표는 '중립값 0.5'를 넣지 않고 산출 대상에서 제외합니다.
     # =====================================================================
+    # 2026-08-10 (#69): 실측 경로가 없다고 판정된 6개 지표(ELS 낙인 / 야간 역외환율 /
+    # 선물 순매도 / 비차익 프로그램 / 외국계 증권사 매도세 / 풋옵션 매수 강도)의 계산식을
+    # scrape_daily.py와 **동시에** 제거했습니다. 두 파일의 산식이 갈라지면 화면 미리보기와
+    # 실제 저장값이 또 어긋나므로, 이 블록은 항상 scrape_daily.py "4. 리스크 지표 연산"과
+    # 1:1로 같아야 합니다. 이 지표들의 설명은 아래 "📚 공부용 참고" 섹션에만 남습니다.
     fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300
     put_base = 0.5 - 0.4 * kospi_change
     short_base = (0.4 + 0.4 * (volatility / 5.0)) if volatility is not None else None
-    els_base = (0.1 + 0.7 * dist_from_high) if dist_from_high is not None else None
     skew_base = (0.4 + 0.4 * (volatility / 5.0) - 0.2 * kospi_change) if volatility is not None else None
     synth_base = 0.5 + 0.3 * (usd_close - 1300) / 200
-    ndf_base = 0.4 + 0.5 * usd_change
-    fut_base = 0.5 - 0.3 * kospi_change
-    non_base = 0.5 + (0.2 if institution_flow < 0 else -0.1)
-    dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
     bal_base = (0.5 + 0.3 * dist_from_high) if dist_from_high is not None else None
-    put_buy_base = 0.4 - 0.3 * kospi_change
 
     # =====================================================================
     # 실측 지표 2종 (2026-08-10 #68) — 임의 상수(0.5 ± 0.3, 계수 2.5) 제거
@@ -262,15 +399,9 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "FX_Swap_Point": "0.55 × clip(0.5 + 0.3×(USD-1200)/300 + 0.1×USD_change) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
         "Put_OTM_OI": "0.55 × clip(0.5 - 0.4×KOSPI_change + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base + Ret_Sign)",
         "Short_Ratio": "0.55 × clip(0.4 + 0.4×(Vol/5) + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base - 0.2)",
-        "ELS_KnockIn": "0.55 × clip(0.1 + 0.7×Dist_High) + 0.37 × clip(base + 0.1) + 0.08 × clip(base - 0.1)",
         "VKOSPI_Skew": "0.55 × clip(0.4 + 0.4×(Vol/5) - 0.2×KOSPI_change + 0.05) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
         "Synthetic_Futures": "0.55 × clip(0.5 + 0.3×(USD-1300)/200 + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
-        "NDF_Night_Rate": "0.55 × clip(0.4 + 0.5×USD_change + 0.1) + 0.37 × clip(base) + 0.08 × clip(base - 0.2)",
-        "Futures_Net_Sell": "0.55 × clip(0.5 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base + Inst_Sign) + 0.08 × clip(base + Ret_Sign)",
-        "Non_Arbitrage_Ratio": "Base = 0.5 + (기관 순매도시 +0.2 / 순매수시 -0.1)",
-        "Foreign_Broker_Dump": "Base = 0.5 + (외인 순매도시 +0.3 / 순매수시 -0.2)",
         "Stock_Short_Balance": "0.55 × clip(0.5 + 0.3×Dist_High + 0.05) + 0.37 × clip(base + 0.05) + 0.08 × clip(base - 0.2)",
-        "Put_Buy_Simple": "0.55 × clip(0.4 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
         # ✅ 실측 2종 (추정 프록시 아님 — 실제 측정값을 과거 분포 대비 정규화)
         "Stock_Net_Sell": "실측: 주체별 순매수 금액(억원)을 과거 이력 대비 z-score → ±3σ를 0~1로 윈저라이즈 "
                           "(0.55×외국인 + 0.37×기관 + 0.08×개인, 표본 20행 미만이면 중립 0.5)",
@@ -292,15 +423,9 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             "FX_Swap_Point": {"Foreigner": clip(fx_base + 0.1 * usd_change), "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)},
             "Put_OTM_OI": {"Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)), "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))},
             "Short_Ratio": None if short_base is None else {"Foreigner": clip(short_base + (0.1 if foreigner_flow < 0 else -0.05)), "Institution": clip(short_base + (0.05 if institution_flow < 0 else -0.05)), "Retail": clip(short_base - 0.2)},
-            "ELS_KnockIn": None if els_base is None else {"Foreigner": clip(els_base), "Institution": clip(els_base + 0.1), "Retail": clip(els_base - 0.1)},
             "VKOSPI_Skew": None if skew_base is None else {"Foreigner": clip(skew_base + 0.05), "Institution": clip(skew_base), "Retail": clip(skew_base - 0.2)},
             "Synthetic_Futures": {"Foreigner": clip(synth_base + (0.15 if foreigner_flow < 0 else -0.1)), "Institution": clip(synth_base), "Retail": clip(synth_base + (0.05 if retail_flow > 0 else -0.05))},
-            "NDF_Night_Rate": {"Foreigner": clip(ndf_base + 0.1), "Institution": clip(ndf_base), "Retail": clip(ndf_base - 0.2)},
-            "Futures_Net_Sell": {"Foreigner": clip(fut_base + (0.2 if foreigner_flow < 0 else -0.15)), "Institution": clip(fut_base + (0.1 if institution_flow < 0 else -0.1)), "Retail": clip(fut_base + (0.15 if retail_flow > 0 else -0.1))},
-            "Non_Arbitrage_Ratio": {"Foreigner": clip(non_base + 0.05), "Institution": clip(non_base + 0.1), "Retail": clip(non_base - 0.2)},
-            "Foreign_Broker_Dump": {"Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)},
             "Stock_Short_Balance": None if bal_base is None else {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
-            "Put_Buy_Simple": {"Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)), "Institution": clip(put_buy_base), "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))},
             "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {"Foreigner": clip(stock_net_risks["Foreigner"]), "Institution": clip(stock_net_risks["Institution"]), "Retail": clip(stock_net_risks["Retail"])},
             "KOSPI_5D_Return": None if kospi_5d_base is None else {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
         }
@@ -409,6 +534,113 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     status_text = f"KOSPI: {kospi_close:.2f} ({kospi_change*100:+.2f}%) | 환율: {usd_close:.2f}원 ({usd_change*100:+.2f}%)"
     return display_date, is_live_connected, f"{data_source_log} | {status_text}", score, details, history_df
 
+
+def render_study_only_section():
+    """
+    📚 "지금은 점수에 넣지 않는 지표" 공부용 안내 섹션 (2026-08-10 #69).
+
+    ⚠️ 이 함수는 **어떤 값도 계산하지 않습니다.** 모듈 상단의 STUDY_ONLY_INDICATORS /
+       DROPPED_AS_DUPLICATE 설명 텍스트를 그대로 렌더링할 뿐입니다. 데이터가 없는 지표에
+       예시 숫자를 그럴듯하게 그려 넣으면 그 자체가 §0-1 위반이라, 화면에는 '무엇이 없는지'와
+       '어디서 공부하면 되는지'만 적습니다.
+    """
+    active_weights = sorted(RISK_WEIGHTS.values())
+    w_min, w_max = active_weights[0], active_weights[-1]
+
+    with st.expander("📚 공부용 참고 — 지금은 다루지 않는 지표 (직접 공부해보고 싶다면)"):
+        st.info(
+            "ℹ️ **아래 지표들은 현재 데이터가 부족해 이 화면의 점수에서 다루지 않고 있습니다.** "
+            "예전에는 점수에 들어가 있었지만, 실제로는 실측 데이터 없이 '코스피 등락률·환율·수급 부호'를 "
+            "그럴듯한 이름으로 바꿔 부르는 수준이어서 2026-08-10에 빼냈습니다.\n\n"
+            "지우지 않고 여기 남겨두는 이유는, **개인적으로 공부해보고 싶은 분이 어디서부터 찾아보면 되는지** "
+            "알 수 있게 하기 위해서입니다. 전부 실제 금융시장에서 통용되는 개념이라 알아두면 시장 기사를 "
+            "읽을 때 확실히 도움이 됩니다."
+        )
+
+        for item in STUDY_ONLY_INDICATORS:
+            study_list_html = "".join(
+                f'<li style="margin-bottom:6px;">{s}</li>' for s in item["how_to_study"]
+            )
+            card_html = f"""
+            <div style="background: linear-gradient(135deg, #0f172a, #1e293b); border: 1.5px solid #334155;
+                        border-left: 5px solid #38bdf8; border-radius: 12px; padding: 18px 20px;
+                        margin-bottom: 16px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <div style="font-size: 17px; font-weight: 800; color: #f1f5f9; margin-bottom: 6px;">
+                    📕 {item['title']}
+                    <span style="font-size: 12px; color: #64748b; font-weight: 600;">({item['key']})</span>
+                </div>
+                <div style="font-size: 14.5px; color: #cbd5e1; line-height: 1.6; margin-bottom: 14px;">
+                    {item['one_liner']}
+                </div>
+
+                <div style="font-size: 13.5px; font-weight: 700; color: #38bdf8; margin-bottom: 4px;">
+                    ① 왜 시장에서 중요하게 보나요?
+                </div>
+                <div style="font-size: 14px; color: #e2e8f0; line-height: 1.65; margin-bottom: 14px;">
+                    {item['why_it_matters']}
+                </div>
+
+                <div style="font-size: 13.5px; font-weight: 700; color: #fbbf24; margin-bottom: 4px;">
+                    ② 지금 왜 못 다루나요? (부족한 데이터)
+                </div>
+                <div style="font-size: 14px; color: #e2e8f0; line-height: 1.65; margin-bottom: 14px;">
+                    {item['missing_data']}
+                </div>
+
+                <div style="font-size: 13.5px; font-weight: 700; color: #86efac; margin-bottom: 4px;">
+                    ③ 어떻게 공부하면 좋을까요?
+                </div>
+                <ul style="font-size: 14px; color: #e2e8f0; line-height: 1.6; margin: 0 0 14px 0; padding-left: 20px;">
+                    {study_list_html}
+                </ul>
+
+                <div style="background-color: rgba(56, 189, 248, 0.08); border: 1px dashed #38bdf8;
+                            border-radius: 8px; padding: 12px 14px;">
+                    <div style="font-size: 13.5px; font-weight: 700; color: #7dd3fc; margin-bottom: 4px;">
+                        ④ 만약 데이터를 구할 수 있다면 가중치는? — {item['hypothetical_weight']}
+                    </div>
+                    <div style="font-size: 13.5px; color: #cbd5e1; line-height: 1.6;">
+                        {item['weight_reasoning']}
+                    </div>
+                    <div style="font-size: 12.5px; color: #94a3b8; margin-top: 6px;">
+                        ⚠️ 이 숫자는 <b>확정 가중치가 아니라 참고 범위</b>입니다. 실제 데이터를 받아보기 전에는
+                        정확한 값을 정할 수 없어서, 지금 살아있는 지표들의 분포({w_min:.2f}~{w_max:.2f})에 비춰
+                        "대략 이 정도가 합리적일 것"이라고만 적었습니다. 실제 점수 계산에는 들어가지 않습니다.
+                    </div>
+                </div>
+            </div>
+            """
+            render_clean_html(card_html)
+
+        dropped_html = "".join(
+            f'<li style="margin-bottom:10px; line-height:1.6;"><b style="color:#fca5a5;">{name}</b><br>'
+            f'<span style="color:#cbd5e1;">{reason}</span></li>'
+            for name, reason in DROPPED_AS_DUPLICATE
+        )
+        render_clean_html(
+            f"""
+            <div style="background-color: #1e293b; border: 1.5px solid #7f1d1d; border-radius: 12px;
+                        padding: 18px 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+                <div style="font-size: 15.5px; font-weight: 800; color: #fecaca; margin-bottom: 8px;">
+                    🗑️ 공부 목록에도 넣지 않고 완전히 뺀 지표 2개
+                </div>
+                <div style="font-size: 13.5px; color: #94a3b8; margin-bottom: 12px; line-height: 1.6;">
+                    아래 2개는 데이터가 없어서가 아니라, <b>이미 쓰고 있는 다른 지표와 같은 것을 두 번 세고
+                    있었기 때문에</b> 뺐습니다. 지표가 조용히 사라지면 그것도 정직한 표시가 아니라서 이유를
+                    남겨둡니다.
+                </div>
+                <ul style="font-size: 14px; margin: 0; padding-left: 20px;">{dropped_html}</ul>
+            </div>
+            """
+        )
+
+        st.caption(
+            "출처 조사 근거: `MACRO_REDESIGN_PROPOSAL.md` §2 판정표 · §2-1 출처 링크 (2026-08-09 조사). "
+            "KRX 정보데이터시스템은 2025-12-27부터 로그인이 필요하고, 무료 KRX OPEN API에는 공매도·"
+            "투자자별 파생상품·프로그램매매 통계가 제공되지 않습니다."
+        )
+
+
 def render_macro_page():
     """'🏢 잘 보면 보이는 손' 메인 방공망 대시보드 화면 전체 렌더링"""
     render_clean_html(
@@ -422,10 +654,10 @@ def render_macro_page():
 
     st.warning(
         "🔒 이 화면은 현재 **관리자 전용**이며 공개 화면에는 노출되지 않습니다. "
-        "14개 위험 지표 중 **12개**가 아직 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 "
+        "위험 지표 **8개 중 6개**가 아직 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 "
         "의존하고 있어, ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용)에 맞게 재설계될 때까지 비공개 상태로 둡니다. "
-        "(2026-08-10 기준 **KOSPI 5일 수익률 · 주식 현물 순매도 2개는 실측값 정규화로 전환 완료** — "
-        "나머지 12개는 재설계 대기 중)"
+        "(2026-08-10 기준 **KOSPI 5일 수익률 · 주식 현물 순매도 2개는 실측값 정규화로 전환 완료**, "
+        "실측 경로가 없던 **6개 지표는 점수에서 제외** — 아래 '📚 공부용 참고' 섹션 참조)"
     )
 
     admin_mode = st.session_state.get("admin_mode", False)
@@ -635,18 +867,26 @@ def render_macro_page():
 
 
 
-    with st.expander("🔍 14개 변동성 지표별 위험 기여도 상세 분석표 보기"):
-        st.markdown("#### 📊 14개 변동성 지표별 위험 기여도 및 산출 공식")
+    # 지표 개수는 하드코딩하지 않고 실제 가중치 사전 길이를 씁니다
+    # (2026-08-10 #69에서 14개 → 8개로 바뀌었고, 앞으로도 또 바뀔 수 있어 문구가 코드와
+    #  어긋나지 않도록 단일 출처를 그대로 읽습니다).
+    n_indicators = len(RISK_WEIGHTS)
+    with st.expander(f"🔍 {n_indicators}개 변동성 지표별 위험 기여도 상세 분석표 보기"):
+        st.markdown(f"#### 📊 {n_indicators}개 변동성 지표별 위험 기여도 및 산출 공식")
         st.caption("수급 가중치(외국인 55%, 기관 37%, 개인 8%)를 적용하여 산출된 개별 위험도 및 수학적 모델입니다.")
         st.info(
-            "ℹ️ **지표 산출 방식 안내** — 아래 14개 수치는 실제 파생상품·공매도 시장에서 직접 수집한 값이 아니라, "
-            "**KOSPI 종가 · 원/달러 환율 · 두 값의 전일 대비 변화율 · 투자자 3주체 수급** 5개 실측값으로부터 "
-            "위 '산출 공식'에 따라 계산한 **추정 프록시(대용치)** 입니다. "
-            "'데이터 없음'으로 표시된 지표는 입력값이 없어 산출하지 못한 것이며, 종합 점수의 가중평균에서도 제외됩니다."
+            f"ℹ️ **지표 산출 방식 안내** — 아래 {n_indicators}개 중 **6개**는 실제 파생상품·공매도 시장에서 직접 "
+            "수집한 값이 아니라, **KOSPI 종가 · 원/달러 환율 · 두 값의 전일 대비 변화율 · 투자자 3주체 수급** "
+            "5개 실측값으로부터 위 '산출 공식'에 따라 계산한 **추정 프록시(대용치)** 입니다. "
+            "**'실측' 표기가 붙은 2개(KOSPI 5일 수익률 · 주식 현물 순매도)만** 실제 측정값을 과거 분포 대비 "
+            "정규화한 값입니다. "
+            "'데이터 없음'으로 표시된 지표는 입력값이 없어 산출하지 못한 것이며, 종합 점수의 가중평균에서도 제외됩니다. "
+            "\n\n2026-08-10부터, 실측 경로가 아예 없어 '이름만 파생상품'이던 6개 지표는 점수 계산에서 "
+            "제외했습니다(아래 '📚 공부용 참고' 섹션에 이유와 공부법을 남겼습니다)."
         )
         n_missing = len([d for d in details if d["위험도 (0~1)"] is None])
         if n_missing:
-            st.warning(f"⚠️ 14개 중 {n_missing}개 지표를 산출하지 못했습니다 (아래 표에 '데이터 없음'으로 표기).")
+            st.warning(f"⚠️ {n_indicators}개 중 {n_missing}개 지표를 산출하지 못했습니다 (아래 표에 '데이터 없음'으로 표기).")
 
         if details:
             html_table = """
@@ -800,7 +1040,7 @@ def render_macro_page():
                 {level_comment}
             </div>
             <div style="font-size: 14px; font-weight: 700; color: #e9d5ff; margin-bottom: 10px;">
-                📊 14개 매크로 방공망 지표별 AI 심층 코멘트:
+                📊 {len(RISK_WEIGHTS)}개 매크로 방공망 지표별 AI 심층 코멘트:
             </div>
             <ul style="margin: 0; padding-left: 20px; color: #cbd5e1;">
                 {warning_items_html}
@@ -821,7 +1061,13 @@ def render_macro_page():
         clean_ai_html = "\n".join([line.strip() for line in ai_html.split("\n") if line.strip()])
         st.markdown(clean_ai_html, unsafe_allow_html=True)
 
-
+    # =========================================================================
+    # 📚 공부용 참고 — 지금 다루지 않는 지표 (2026-08-10 #69)
+    # =========================================================================
+    # 오너 요청: "실측 불가 지표는 삭제하지 말고 별도로 구분해두고, 관심 있는 사람이 직접
+    # 공부할 수 있게 안내해달라." 여기 있는 내용은 전부 **설명 텍스트**이며, 어떤 값도
+    # 계산하거나 점수에 반영하지 않습니다(§0-1 — 없는 데이터로 숫자를 만들지 않습니다).
+    render_study_only_section()
 
     with st.expander("📈 방공망 리스크 지수(INDEX) 역사적 트렌드 차트"):
         if not history_df.empty:
@@ -890,15 +1136,39 @@ def render_macro_page():
         st.markdown(
             """
             ### ⚖️ 수식 파라미터 거버넌스 선언
-            본 대시보드에 탑재된 14가지 시장 위험지수 공식과 가중치는 무작위로 변경되지 않으며, 
+            본 대시보드에 탑재된 시장 위험지수 공식과 가중치(2026-08-10 기준 8개 지표)는 무작위로 변경되지 않으며,
             시장 레벨 변동에 따른 파라미터 튜닝(Calibration) 집행 시 **5W1H(육하원칙)**에 의거하여 아래와 같이 버전 이력이 철저히 기록 및 관리됩니다.
             이는 과거 백데이터 점수의 왜곡 방지 및 시계열 연속성 검증을 위한 중대 사안입니다.
             """
         )
         
-        tab_new, tab0, tab1, tab2, tab3 = st.tabs(
-            ["📄 v1.5.0 (2차 감사·가중치 단일화)", "📄 v1.4.0 (데이터 무결성 감사 반영)", "📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거 시도)", "📄 v1.0.0 (최초 배포)"]
+        tab_69, tab_new, tab0, tab1, tab2, tab3 = st.tabs(
+            ["📄 v1.6.0 (실측불가 6개 제외·가중치 재분배)", "📄 v1.5.0 (2차 감사·가중치 단일화)", "📄 v1.4.0 (데이터 무결성 감사 반영)", "📄 v1.3.1 (로직 원복)", "📄 v1.2.0 (더미 제거 시도)", "📄 v1.0.0 (최초 배포)"]
         )
+
+        with tab_69:
+            st.markdown(
+                """
+                #### 🏷️ [v1.6.0] - 2026년 08월 10일 (실측 불가 6개 지표 제외 · 가중치 비례 재분배)
+                * **언제 (When)**: 2026년 08월 10일 (`MACRO_REDESIGN_PROPOSAL.md` §5 구현순서 2번)
+                * **누가 (Who)**: 보이는 손 엔지니어링 (오너 지시 — "실측 불가 지표는 삭제하지 말고 별도 구분")
+                * **어디를 (Where)**: `utils/constants.py` / `scrape_daily.py` / `views/macro_view.py` / `utils/db.py`
+                * **무엇을 (What)**:
+                    * 14개 → **8개**. 무료 경로로 실측이 불가능하다고 판정된 6개를 점수 계산에서 제외:
+                      ELS 낙인 / 야간 역외환율(NDF) / 선물 순매도 / 비차익 프로그램 / 외국계 증권사 매도세 / 풋옵션 매수 강도
+                    * 그중 4개는 **📚 공부용 참고 섹션**으로 이동(설명·공부법만 남기고 계산은 하지 않음),
+                      2개(외국계 증권사 매도세 · 풋옵션 매수 강도)는 살아있는 지표와 **개념이 중복**되어 완전 제외
+                    * 남은 8개 가중치는 **기계적 비례 재분배**(× 100/62)로 합계 100.00에 맞춤 —
+                      지표 간 상대 비중은 개정 전과 **정확히 동일**합니다
+                * **왜 (Why)**: 이 6개는 라벨만 파생상품이고 실제 입력은 '환율 레벨·지수 등락률·수급 부호'라,
+                  같은 입력을 이름만 바꿔 여러 번 세는 중복 계산이었습니다(ENGINEERING_SPEC §0-3-1 위반).
+                  값을 지어내느니 지표를 빼고, 왜 뺐는지를 화면에 밝히는 편이 정직합니다.
+                * **어떻게 (How)**: 남은 8개 합 62.0 → × 100/62 = 1.6129… 후 소수 둘째 자리 반올림.
+                  단순 반올림 합이 99.99라 잔여 0.01은 **유일하게 실측이 검증된** KOSPI 5일 수익률에 배정(19.35 → 19.36).
+                  §4-3의 '실측 직접성 기준 재설계안'은 나머지 지표가 아직 프록시 상태라 **적용하지 않았습니다**
+                  (KRX OPEN API 연결이 끝난 뒤 한 번에 적용 예정).
+                """
+            )
 
         with tab_new:
             st.markdown(
