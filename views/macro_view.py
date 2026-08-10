@@ -25,6 +25,9 @@ from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
 from utils.macro_scoring import (
     compute_historical_stats, compute_sub_scores, compute_final_score,
     EXTREME_SUB_SCORE_HIGH, EXTREME_SUB_SCORE_LOW,
+    # 2026-08-10 (#68): 실측 지표(3주체 순매수 금액 / KOSPI 5일 수익률) 정규화 —
+    # scrape_daily.py(저장)와 이 화면(미리보기)이 반드시 같은 함수를 써야 척도가 어긋나지 않습니다.
+    measured_downside_risk, net_flow_population, rolling_return_population,
 )
 
 def render_clean_html(html_str):
@@ -64,8 +67,9 @@ FRIENDLY_NAMES = {
     "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 쏠림 배팅 규모)",
-    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 하락에 따른 직접 지표)"
+    # ✅ 아래 2개는 추정 프록시가 아니라 실제 측정값 기반입니다 (2026-08-10 #68)
+    "Stock_Net_Sell": "주식 현물 순매도 규모 (3주체 순매수 금액 · 실측)",
+    "KOSPI_5D_Return": "KOSPI 5일 수익률 (지수 낙폭 · 실측)"
 }
 
 def _load_history_df():
@@ -204,22 +208,47 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
     dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
     bal_base = (0.5 + 0.3 * dist_from_high) if dist_from_high is not None else None
     put_buy_base = 0.4 - 0.3 * kospi_change
-    stock_net_base = 0.5
 
-    # KOSPI 5일 모멘텀: 누적 이력에서 5영업일 전 종가를 실제로 조회해 산출합니다.
+    # =====================================================================
+    # 실측 지표 2종 (2026-08-10 #68) — 임의 상수(0.5 ± 0.3, 계수 2.5) 제거
+    # =====================================================================
+    # 이 두 지표는 추정 프록시가 아니라 실제로 측정된 값(3주체 순매수 금액 / 코스피 5일
+    # 수익률)입니다. scrape_daily.py와 똑같은 utils/macro_scoring 함수를 호출해, 원값을
+    # 과거 분포 대비 z-score로 정규화한 뒤 ±3σ를 0~1 위험도로 매핑합니다.
+    # 과거 표본이 부족하면 값을 지어내지 않고 중립(0.5)으로 안전 대체됩니다.
+    _hist_for_measured = _load_history_df()
+    try:
+        if not _hist_for_measured.empty and "Date" in _hist_for_measured.columns:
+            # 정규화 기준선은 '과거' 표본이어야 하므로 지금 계산 중인 날짜 행은 제외합니다.
+            _past_rows = _hist_for_measured[_hist_for_measured["Date"] != str(date_key)]
+        else:
+            _past_rows = _hist_for_measured
+    except Exception:
+        _past_rows = _hist_for_measured
+
+    stock_net_risks = {
+        "Foreigner": measured_downside_risk(foreigner_flow, net_flow_population(_past_rows, "Foreigner")),
+        "Institution": measured_downside_risk(institution_flow, net_flow_population(_past_rows, "Institution")),
+        "Retail": measured_downside_risk(retail_flow, net_flow_population(_past_rows, "Retail")),
+    }
+
+    # KOSPI 5일 수익률: 누적 이력에서 5영업일 전 종가를 실제로 조회해 산출합니다.
     # (과거 버전은 정의되지 않은 변수 kospi_df 를 참조해 항상 NameError → 0.5 고정이었습니다.)
     kospi_5d_base = None
     try:
-        hist_for_5d = _load_history_df()
+        hist_for_5d = _hist_for_measured
         if not hist_for_5d.empty and "KOSPI" in hist_for_5d.columns:
             hist_sorted = hist_for_5d.sort_values(by="Date").reset_index(drop=True)
             past = hist_sorted[hist_sorted["Date"] <= str(date_key)]
             if len(past) >= 6:
                 k_5d_prev = float(past.iloc[-6]["KOSPI"])
                 if k_5d_prev > 0:
-                    kospi_5d_base = 0.5 - 2.5 * ((kospi_close - k_5d_prev) / k_5d_prev)
+                    kospi_5d_base = measured_downside_risk(
+                        (kospi_close - k_5d_prev) / k_5d_prev,
+                        rolling_return_population(list(past["KOSPI"])),
+                    )
     except Exception as e:
-        print(f"⚠️ KOSPI 5일 모멘텀 산출 실패: {e}")
+        print(f"⚠️ KOSPI 5일 수익률 산출 실패: {e}")
         kospi_5d_base = None
 
     # 2026-08-06 2차 감사 5-1: scrape_daily.py가 실제로 쓰는 것과 같은 단일 출처를 참조합니다
@@ -242,8 +271,11 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         "Foreign_Broker_Dump": "Base = 0.5 + (외인 순매도시 +0.3 / 순매수시 -0.2)",
         "Stock_Short_Balance": "0.55 × clip(0.5 + 0.3×Dist_High + 0.05) + 0.37 × clip(base + 0.05) + 0.08 × clip(base - 0.2)",
         "Put_Buy_Simple": "0.55 × clip(0.4 - 0.3×KOSPI_change + Fore_Sign) + 0.37 × clip(base) + 0.08 × clip(base + Ret_Sign)",
-        "Stock_Net_Sell": "Base = 0.5 + (수급 주체 순매도시 +0.3 / 순매수시 -0.3)",
-        "KOSPI_5D_Return": "clip(0.5 - 2.5 × KOSPI_5D_Return)"
+        # ✅ 실측 2종 (추정 프록시 아님 — 실제 측정값을 과거 분포 대비 정규화)
+        "Stock_Net_Sell": "실측: 주체별 순매수 금액(억원)을 과거 이력 대비 z-score → ±3σ를 0~1로 윈저라이즈 "
+                          "(0.55×외국인 + 0.37×기관 + 0.08×개인, 표본 20행 미만이면 중립 0.5)",
+        "KOSPI_5D_Return": "실측: (종가 - 5영업일 전 종가)/5영업일 전 종가 를 과거 1년 5일수익률 분포 대비 "
+                           "z-score → ±3σ를 0~1로 윈저라이즈 (표본 부족 시 중립 0.5)"
     }
 
     sub_scores = {}
@@ -269,7 +301,7 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
             "Foreign_Broker_Dump": {"Foreigner": clip(dump_base + 0.15), "Institution": clip(dump_base - 0.1), "Retail": clip(dump_base - 0.3)},
             "Stock_Short_Balance": None if bal_base is None else {"Foreigner": clip(bal_base + 0.05), "Institution": clip(bal_base + 0.05), "Retail": clip(bal_base - 0.2)},
             "Put_Buy_Simple": {"Foreigner": clip(put_buy_base + (0.05 if foreigner_flow < 0 else -0.05)), "Institution": clip(put_buy_base), "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))},
-            "Stock_Net_Sell": {"Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)), "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)), "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))},
+            "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {"Foreigner": clip(stock_net_risks["Foreigner"]), "Institution": clip(stock_net_risks["Institution"]), "Retail": clip(stock_net_risks["Retail"])},
             "KOSPI_5D_Return": None if kospi_5d_base is None else {"Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)}
         }
 
@@ -390,8 +422,10 @@ def render_macro_page():
 
     st.warning(
         "🔒 이 화면은 현재 **관리자 전용**이며 공개 화면에는 노출되지 않습니다. "
-        "14개 위험 지표 중 다수가 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 의존하고 있어, "
-        "ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용)에 맞게 재설계될 때까지 비공개 상태로 둡니다."
+        "14개 위험 지표 중 **12개**가 아직 실데이터가 아닌 추정 프록시 공식(코스피·환율·수급 5개 값으로 계산)에 "
+        "의존하고 있어, ENGINEERING_SPEC.md §0-3-1 원칙(후행지표 전용)에 맞게 재설계될 때까지 비공개 상태로 둡니다. "
+        "(2026-08-10 기준 **KOSPI 5일 수익률 · 주식 현물 순매도 2개는 실측값 정규화로 전환 완료** — "
+        "나머지 12개는 재설계 대기 중)"
     )
 
     admin_mode = st.session_state.get("admin_mode", False)

@@ -20,8 +20,13 @@ utils/macro_scoring.py
    양쪽에만 씁니다.
 """
 import math
+import statistics
 
 from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
+# 2026-08-10 (#68): "실측값을 0~1 위험도로 바꾸는" 방법론을 새로 발명하지 않고, 이 프로젝트가
+# 이미 종목 스코어링에서 쓰고 있는 population z-score + 윈저라이즈 패턴을 그대로 재사용합니다.
+# (utils/scoring.py 상단 주석 참고 — Barra/Fama-French류 정규화 + winsorize)
+from utils.scoring import _population_zscore, _winsorized_scale
 
 # 시그모이드 변환 민감도. z-score 1 단위당 곡선이 얼마나 가파르게 0~100으로 펼쳐지는지를
 # 정합니다(과거 "50점대 지표가 계속 애매하게 몰리는" 문제 완화를 위해 v1.4.0에서 도입).
@@ -56,6 +61,125 @@ def compute_shock_amplifier(extreme_signal_count, total_indicators):
     span = SHOCK_AMPLIFIER_MAX_RATIO - SHOCK_AMPLIFIER_START_RATIO
     progress = (ratio - SHOCK_AMPLIFIER_START_RATIO) / span
     return round(1.0 + progress * (SHOCK_AMPLIFIER_MAX - 1.0), 4)
+
+
+# =============================================================================
+# 실측 지표(measured indicator) 정규화 — 2026-08-10 (#68)
+# =============================================================================
+# 왜 필요한가:
+#   14개 위험 지표 중 `KOSPI_5D_Return`(코스피 5영업일 수익률)과 `Stock_Net_Sell`(외국인·기관·
+#   개인 순매수 금액)은 **이미 매일 실제로 측정하고 있는 값**인데도, 나머지 12개 추정 프록시와
+#   똑같이 `0.5 + 임의계수 × 값` 형태의 선형식에 넣고 clip(0~1)으로 잘라 쓰고 있었습니다.
+#   특히 순매수는 `0.5 ± 0.3`(부호만 반영)이라 "1천억 순매도"와 "3조 순매도"가 완전히 동점이었고,
+#   5일 수익률은 계수 2.5가 어디서 나온 숫자인지 근거가 없었습니다(= 크기 정보 폐기).
+#
+# 어떻게 고쳤나:
+#   실측 원값을 **그 지표 자신의 과거 분포** 대비 z-score로 표준화한 뒤(_population_zscore),
+#   ±MEASURED_WINSOR_Z 구간을 0~1 위험도로 선형 매핑하고 그 바깥은 윈저라이즈합니다
+#   (_winsorized_scale). 두 함수 모두 utils/scoring.py에 이미 있던 것을 그대로 씁니다.
+#   → 크기가 커질수록 점수도 단조적으로 커지고, 어떤 입력이 와도 결과는 항상 [0, 1]입니다.
+#
+# 표본이 부족하면(§0-1: 없는 데이터를 지어내지 않는다):
+#   population 통계를 만들지 못하면 z=None이 되고, _winsorized_scale이 (0.0+1.0)/2 = 0.5
+#   중립값을 돌려줍니다. 이는 utils/scoring.py가 이미 쓰는 "population 통계 없으면 중간값으로
+#   안전 대체" 패턴과 동일합니다(크래시도, 임의 상수 대입도 하지 않음).
+#
+# ±3.0 표준편차: utils/scoring.py의 밸류에이션 z-score 윈저라이즈 경계(worst_z=±3.0)와 같은
+#   기준을 씁니다 — "3표준편차를 벗어나면 그 이상은 정도를 더 구분하지 않는다".
+MEASURED_WINSOR_Z = 3.0
+
+# 순매수 금액 정규화에 필요한 최소 과거 표본(행). 이 파일을 쓰는 scrape_daily.py/macro_view.py가
+# 이미 "누적 이력 20행 미만이면 정규화 표본 부족"이라고 경고하고 있어 같은 기준을 그대로 씁니다.
+NET_FLOW_MIN_SAMPLE = 20
+
+# 5일 수익률 분포 추정에 쓰는 과거 창(영업일)과 최소 표본.
+#   252 = 약 1년(52주 고점 계산에 이미 쓰고 있는 창과 동일)
+#   60  = 약 3개월. 이보다 짧으면 "평소 대비 얼마나 빠졌나"를 말할 만한 분포가 못 됩니다.
+RETURN_POP_LOOKBACK = 252
+RETURN_POP_MIN_SAMPLE = 60
+
+
+def compute_population_stats(values, min_sample):
+    """
+    실측값 목록의 (평균, 표준편차)를 반환합니다. 표본이 min_sample 미만이거나 표준편차가
+    0이면 None을 반환합니다 — 호출부는 None을 받으면 중립(0.5)으로 안전 대체해야 합니다.
+    """
+    clean = []
+    for v in values or []:
+        if v is None:
+            continue
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            continue
+        if f != f:  # NaN
+            continue
+        clean.append(f)
+    if len(clean) < max(2, int(min_sample)):
+        return None
+    std = statistics.stdev(clean)
+    if not std or std <= 0:
+        return None
+    return (statistics.fmean(clean), std)
+
+
+def measured_downside_risk(value, pop_stats):
+    """
+    "값이 작을수록(더 마이너스일수록) 위험이 큰" 실측 지표를 0~1 위험도로 변환합니다.
+    (코스피 5일 수익률, 주체별 순매수 금액이 모두 이 방향입니다 — 많이 빠질수록/많이 팔수록 위험)
+
+    - value가 None → None (산출 불가. 호출부에서 배점 자체를 제외합니다)
+    - pop_stats가 None(표본 부족) → 0.5 중립 (지어내지 않고 안전 대체)
+    - 그 외 → z = (value - mean) / std 를 [+3σ → 0.0, -3σ → 1.0] 으로 선형 매핑 후 윈저라이즈
+    """
+    if value is None:
+        return None
+    z = _population_zscore(value, pop_stats)
+    risk = _winsorized_scale(
+        z, best_z=MEASURED_WINSOR_Z, worst_z=-MEASURED_WINSOR_Z, pct_best=0.0, pct_worst=1.0
+    )
+    return round(min(1.0, max(0.0, risk)), 4)
+
+
+def rolling_return_population(closes, window=5, lookback=RETURN_POP_LOOKBACK,
+                              min_sample=RETURN_POP_MIN_SAMPLE):
+    """
+    종가 시계열에서 겹치는 `window` 영업일 수익률 표본을 만들어 (평균, 표준편차)를 반환합니다.
+    (5일 수익률을 "평소 5일 수익률 분포"와 비교하기 위한 기준선. 표본 부족 시 None)
+    """
+    clean = []
+    for c in closes or []:
+        try:
+            f = float(c)
+        except (TypeError, ValueError):
+            continue
+        if f != f or f <= 0:
+            continue
+        clean.append(f)
+    if len(clean) <= window:
+        return None
+    rets = []
+    for i in range(window, len(clean)):
+        prev = clean[i - window]
+        if prev > 0:
+            rets.append((clean[i] - prev) / prev)
+    if lookback:
+        rets = rets[-int(lookback):]
+    return compute_population_stats(rets, min_sample)
+
+
+def net_flow_population(history_df, column, min_sample=NET_FLOW_MIN_SAMPLE):
+    """
+    누적 이력(market_history.csv)에서 특정 주체의 순매수 금액(억원) 과거 분포를 만듭니다.
+    컬럼이 없거나 표본이 부족하면 None(→ 호출부에서 중립 0.5 처리).
+    """
+    try:
+        if history_df is None or len(history_df) == 0 or column not in history_df.columns:
+            return None
+        values = list(history_df[column])
+    except Exception:
+        return None
+    return compute_population_stats(values, min_sample)
 
 
 def compute_historical_stats(history_df, weight_keys):

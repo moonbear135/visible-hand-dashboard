@@ -22,7 +22,12 @@ except ImportError:
 # 2026-08-06 2차 감사 5-1/5-2/4-1: 가중치·정규화·증폭기 로직을 macro_view.py와 공유하는
 # 단일 출처로 이전(utils/macro_scoring.py, utils/constants.py 참고).
 from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
-from utils.macro_scoring import compute_historical_stats, compute_sub_scores, compute_final_score
+from utils.macro_scoring import (
+    compute_historical_stats, compute_sub_scores, compute_final_score,
+    # 2026-08-10 (#68): 실측 지표(5일 수익률·3주체 순매수) 정규화 — 자세한 배경은 해당 모듈 주석 참고
+    measured_downside_risk, net_flow_population, rolling_return_population,
+    NET_FLOW_MIN_SAMPLE, RETURN_POP_MIN_SAMPLE,
+)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 HISTORY_FILE = os.path.join(BASE_DIR, "market_history.csv")
@@ -49,7 +54,10 @@ COL_MAP = {
     "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
     "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
     "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
+    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)",
+    # 2026-08-10 (#68): 점수(0~1)만 남기지 않고 그 점수를 만든 실측 원값도 그대로 남깁니다
+    # (디버깅·투명성 목적. 기존 컬럼은 이름 변경/삭제 없이 그대로 유지).
+    "KOSPI_5D_Return_Pct": "KOSPI 5일 수익률 (%, 실측 원값)"
 }
 
 # (SPEC §3: 개별 크롤러의 PERIOD_KEYWORDS 사본 하드코딩 금지.
@@ -112,7 +120,11 @@ def scrape_and_update(target_date_override=None):
     usd_change = None
     volatility = None
     dist_from_high = None
-    kospi_5d_base = None
+    # 2026-08-10 (#68): 예전엔 여기서 곧바로 kospi_5d_base(= 0.5 - 2.5×수익률)라는 임의 선형식
+    # 결과만 들고 다녔습니다. 이제 실측 원값(5영업일 수익률)과 그 정규화 기준선(과거 1년 분포)을
+    # 따로 보관하고, 점수화는 아래 "4. 리스크 지표 연산"에서 한 번만 합니다.
+    kospi_5d_return = None   # 실측 5영업일 수익률 (예: -0.032 = -3.2%)
+    kospi_5d_pop = None      # (평균, 표준편차) — 과거 5일 수익률 분포. 표본 부족 시 None
 
 
     # KOSPI & USD_KRW 조회
@@ -154,17 +166,28 @@ def scrape_and_update(target_date_override=None):
                         usd_prev = float(valid_usd.iloc[idx_u-1]['Close'])
                         usd_change = (usd_close - usd_prev) / usd_prev
                     
-                    # 5일 낙폭 모멘텀 계산
+                    # 5일 낙폭 모멘텀 — 실측 원값 수집
                     # 2026-08-06 2차 감사 4-2: 5영업일 이력이 부족하면 0.0(변화 없음)으로
-                    # 채우지 않고 None으로 둡니다 — 아래 죽어있던 가드(kospi_5d_base is None)가
-                    # 실제로 작동해 이 지표를 배점에서 제외하게 됩니다.
+                    # 채우지 않고 None으로 둡니다 — 아래 가드가 실제로 작동해 이 지표를
+                    # 배점에서 제외하게 됩니다.
+                    # 2026-08-10 (#68): 여기서는 "실제로 일어난 5일 수익률"만 재고, 0~1 위험도
+                    # 변환은 아래 4번에서 과거 분포 대비 z-score로 수행합니다.
+                    # ⚠️ 이 두 종가(현재/5영업일 전)는 둘 다 FDR 시계열에서 가져오므로 서로
+                    #    같은 시점 기준입니다. 아래 네이버 재조회 블록이 kospi_close를 덮어써도
+                    #    이 수익률은 다시 계산하지 않습니다 — 한쪽만 하루 뒤 값으로 바뀌면
+                    #    "5영업일 간격"이라는 전제 자체가 깨지기 때문입니다.
                     if len(valid_kospi) >= 6:
                         k_5d_ago = float(valid_kospi.iloc[-6]['Close'])
-                        kospi_5d_return = (kospi_close - k_5d_ago) / k_5d_ago
-                        kospi_5d_base = 0.5 - 2.5 * kospi_5d_return
-                    else:
-                        kospi_5d_base = None
-                    
+                        if k_5d_ago > 0:
+                            kospi_5d_return = (kospi_close - k_5d_ago) / k_5d_ago
+                    # 정규화 기준선: 같은 시계열의 5일 수익률 분포(당일 포함 최근 약 1년).
+                    # 5일 수익률은 창이 겹치므로 '당일만 완전히 배제한 표본'을 만들 수 없고,
+                    # 252개 표본에서 1개가 포함되는 영향은 무시할 수준이라 그대로 씁니다.
+                    kospi_5d_pop = rolling_return_population(list(valid_kospi['Close']))
+                    if kospi_5d_return is not None and kospi_5d_pop is None:
+                        print(f"⚠️ KOSPI 5일 수익률 정규화 표본 부족(과거 5일 수익률 {RETURN_POP_MIN_SAMPLE}개 미만) "
+                              f"— 이 지표는 중립(0.5)으로 처리합니다.")
+
                     print(f"✅ 야후 파이낸스(FDR) 시장 데이터 조회 성공 ({date_key}) KOSPI={kospi_close:.2f}")
                 else:
                     raise ValueError(f"{date_key} 이전의 데이터를 찾을 수 없습니다.")
@@ -301,17 +324,37 @@ def scrape_and_update(target_date_override=None):
     dump_base = 0.5 + (0.3 if foreigner_flow < 0 else -0.2)
     bal_base = 0.5 + 0.3 * dist_from_high
     put_buy_base = None if kospi_change is None else (0.4 - 0.3 * kospi_change)
-    # 2026-08-06 2차 감사 4-3: 예전엔 순수 상수 0.5(방향성만 반영, 규모 미반영)였습니다.
-    # 정확한 매매대금 대비 순매도 '비중' 데이터는 아직 수집하지 않아 완전한 규모화는
-    # 어렵지만, 최소한 3주체 수급 규모 대비 개인 수급이 차지하는 상대적 비중만큼은
-    # 반영해 "방향만 있고 크기는 무시"하는 문제를 완화합니다. 세 흐름이 전부 0이면(드묾)
-    # 중립 0.5를 유지합니다.
-    _flow_denom = abs(retail_flow) + abs(foreigner_flow) + abs(institution_flow)
-    if _flow_denom > 0:
-        _retail_share = abs(retail_flow) / _flow_denom  # 0~1: 개인 수급이 전체에서 차지하는 비중
-        stock_net_base = 0.5 + (0.3 if retail_flow < 0 else -0.3) * _retail_share
-    else:
-        stock_net_base = 0.5
+
+    # -------------------------------------------------------------------------
+    # [실측 지표 ①] Stock_Net_Sell — 3주체 순매수 '금액'을 과거 분포 대비 정규화
+    # -------------------------------------------------------------------------
+    # 2026-08-06 2차 감사 4-3까지는 `0.5 ± 0.3`(부호) × 개인 비중이었습니다. 즉 외국인·기관은
+    # "팔았다/샀다"만 반영되고 1천억 순매도와 3조 순매도가 완전히 동점이었습니다.
+    # 2026-08-10 (#68): 이미 매일 크롤링해서 CSV에 저장까지 하고 있던 **실제 순매수 금액(억원)**을
+    # 그 주체 자신의 과거 분포(누적 이력 CSV) 대비 z-score로 표준화해 0~1 위험도로 바꿉니다.
+    # 순매도가 클수록(더 마이너스일수록) 위험도가 커집니다 — 세 주체 모두 같은 방향입니다.
+    # ⚠️ history_df 는 위 1번에서 '오늘 날짜 행을 이미 제거한' 상태라 순수 과거 표본입니다.
+    stock_net_pop = {
+        "Foreigner": net_flow_population(history_df, "Foreigner"),
+        "Institution": net_flow_population(history_df, "Institution"),
+        "Retail": net_flow_population(history_df, "Retail"),
+    }
+    stock_net_risks = {
+        "Foreigner": measured_downside_risk(foreigner_flow, stock_net_pop["Foreigner"]),
+        "Institution": measured_downside_risk(institution_flow, stock_net_pop["Institution"]),
+        "Retail": measured_downside_risk(retail_flow, stock_net_pop["Retail"]),
+    }
+    _flow_pop_missing = [k for k, v in stock_net_pop.items() if v is None]
+    if _flow_pop_missing:
+        print(f"⚠️ 순매수 정규화 표본 부족(과거 {NET_FLOW_MIN_SAMPLE}행 미만): "
+              f"{', '.join(_flow_pop_missing)} — 해당 주체는 중립(0.5)으로 처리합니다.")
+
+    # -------------------------------------------------------------------------
+    # [실측 지표 ②] KOSPI_5D_Return — 5영업일 수익률을 과거 1년 분포 대비 정규화
+    # -------------------------------------------------------------------------
+    # 예전 식: 0.5 - 2.5 × 수익률 (계수 2.5의 근거 없음 + ±20% 밖은 clip으로 잘려 정보 소멸).
+    # 이제는 "평소 5일 수익률 분포 대비 몇 표준편차나 빠졌는가"로 재고, ±3σ를 [0, 1]에 매핑합니다.
+    kospi_5d_base = measured_downside_risk(kospi_5d_return, kospi_5d_pop)
 
     # 가중 위험 지표 계산 및 합산 (2026-08-06 2차 감사 5-1: 가중치 단일 출처로 통일 —
     # scrape_daily.py/macro_view.py 양쪽 다 utils.constants.RISK_WEIGHTS만 참조합니다)
@@ -369,11 +412,13 @@ def scrape_and_update(target_date_override=None):
             "Institution": clip(put_buy_base),
             "Retail": clip(put_buy_base + (0.1 if retail_flow > 0 else -0.1))
         },
-        "Stock_Net_Sell": {
-            "Foreigner": clip(stock_net_base + (0.3 if foreigner_flow < 0 else -0.3)),
-            "Institution": clip(stock_net_base + (0.2 if institution_flow < 0 else -0.2)),
-            "Retail": clip(stock_net_base + (0.3 if retail_flow < 0 else -0.3))
+        # 실측 지표 ①: 주체별 실제 순매수 금액을 각각 정규화한 값을 그대로 씁니다.
+        "Stock_Net_Sell": None if any(v is None for v in stock_net_risks.values()) else {
+            "Foreigner": clip(stock_net_risks["Foreigner"]),
+            "Institution": clip(stock_net_risks["Institution"]),
+            "Retail": clip(stock_net_risks["Retail"])
         },
+        # 실측 지표 ②: 지수 수익률은 주체별로 다를 수 없으므로 3주체 동일값(기존과 동일).
         "KOSPI_5D_Return": None if kospi_5d_base is None else {
             "Foreigner": clip(kospi_5d_base), "Institution": clip(kospi_5d_base), "Retail": clip(kospi_5d_base)
         }
@@ -435,6 +480,10 @@ def scrape_and_update(target_date_override=None):
         "Multiplier": [multiplier],
         "ExtremeSignalCount": [extreme_signal_count],
     }
+
+    # 2026-08-10 (#68): 점수화되기 전의 실측 원값도 같이 남깁니다(투명성·디버깅용).
+    # 산출하지 못했으면 0.0으로 채우지 않고 결측(None)으로 둡니다(§0-1).
+    new_data["KOSPI_5D_Return_Pct"] = [None if kospi_5d_return is None else round(kospi_5d_return * 100, 3)]
 
     for k, v in metrics_dict.items():
         new_data[k] = [round(v, 3)]
