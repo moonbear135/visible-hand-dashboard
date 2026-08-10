@@ -43,17 +43,22 @@ jobs:
         run: |
           URL="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/"
           echo "방문: $URL"
+          # 2026-08-10 수정: 최초 버전은 -L(리다이렉트 추적)이 없어서 Streamlit이
+          # 반환하는 303 응답을 그대로 실패로 처리했습니다(실측 확인 — 3회 전부 303).
+          # curl은 기본적으로 리다이렉트를 따라가지 않으므로 반드시 -L이 필요합니다.
           # 최대 3회 재시도(연속 실패해도 다음 8시간 뒤 다시 시도하므로 여기서
-          # 너무 오래 붙잡고 있을 필요는 없음). 앱이 마침 자고 있으면 첫 응답이
-          # "깨우는 중" 페이지일 수 있어 두 번째 요청까지 살짝 텀을 둠.
+          # 너무 오래 붙잡고 있을 필요는 없음). 200뿐 아니라 2xx 전체를 성공으로 봄
+          # (리다이렉트를 다 따라간 뒤의 최종 상태 코드 기준).
           for i in 1 2 3; do
-            code=$(curl -sS -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo "000")
-            echo "시도 $i: HTTP $code"
-            if [ "$code" = "200" ]; then
-              echo "✅ 정상 응답"
-              exit 0
-            fi
+            code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo "000")
+            echo "시도 $i: 최종 HTTP $code"
+            case "$code" in
+              2??)
+                echo "✅ 정상 응답"
+                exit 0
+                ;;
+            esac
             sleep 15
           done
-          echo "⚠️ 3회 시도 후에도 200 응답을 못 받음 — 다음 8시간 뒤 다시 시도됩니다. (실패해도 데이터엔 영향 없음)"
+          echo "⚠️ 3회 시도 후에도 2xx 응답을 못 받음 — 다음 8시간 뒤 다시 시도됩니다. (실패해도 기존 자동화·데이터엔 영향 없음. 참고: 이 핑은 '잠들기 전에 미리 방문'하는 예방용이라, 이미 완전히 잠든 앱을 이 핑 하나로 반드시 깨운다는 보장은 없습니다 — 지금 잠들어 있다면 오너가 직접 앱에서 'Yes, get this app back up!'을 눌러야 합니다.)"
           exit 1
