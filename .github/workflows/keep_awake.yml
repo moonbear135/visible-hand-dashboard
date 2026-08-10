@@ -6,22 +6,30 @@ name: Keep App Awake
 # 무료 호스팅(Streamlit Community Cloud)은 12시간 동안 아무도 방문하지 않으면
 # 앱을 재웁니다(원래 24시간이었다가 2025-03 12시간으로 단축됨 — 공식 문서 기준).
 # 도메인(visiblehand.co.kr)을 사도 호스팅 자체는 그대로 무료 티어라 이 정책이 그대로
-# 적용됩니다. 이 워크플로우는 그 12시간 타이머가 다 차기 전에 주기적으로 실제 앱
-# URL을 방문(HTTP GET)해서 깨어있는 상태를 유지시킵니다.
+# 적용됩니다. 이 워크플로우는 그 12시간 타이머가 다 차기 전에 주기적으로 실제 앱을
+# 방문해서 깨어있는 상태를 유지시킵니다.
+#
+# ⚠️ 2026-08-09 최초 버전은 curl로 URL만 호출했는데, 2026-08-10 실측(Actions 로그)에서
+#    `curl: (47) Maximum (50) redirects followed`로 전부 실패하는 걸 확인했습니다.
+#    원인: Streamlit의 "Yes, get this app back up!" 깨우기는 브라우저에서 JavaScript로
+#    버튼을 눌러야 실행되는 클라이언트 사이드 동작이라, 순수 HTTP 요청은 그 핸드셰이크를
+#    완료 못 하고 리다이렉트만 계속 받습니다. 그래서 헤드리스 브라우저(Selenium + Chrome,
+#    `keep_awake_ping.py`)로 실제 페이지를 열고 버튼이 보이면 클릭하는 방식으로 교체.
 #
 # ⚠️ 커스텀 도메인(visiblehand.co.kr)이 아니라 **실제 Streamlit 앱 주소**를 직접
-#    호출합니다. 커스텀 도메인은 index.html이 그 주소를 iframe으로 감싸는 구조라,
-#    curl로 커스텀 도메인만 열면 그 껍데기 HTML만 받아올 뿐 iframe 안의 실제
-#    Streamlit 앱까지는 도달하지 않아 깨우기 효과가 없습니다.
+#    엽니다. 커스텀 도메인은 index.html이 그 주소를 iframe으로 감싸는 구조라, 커스텀
+#    도메인만 열면 그 껍데기 HTML만 받아올 뿐 iframe 안의 실제 앱(과 깨우기 버튼)까지는
+#    도달하지 않습니다.
 #
-# ⚠️ 이건 Streamlit이 공식 제공하는 기능이 아니라 흔히 쓰이는 우회법입니다
-#    (discuss.streamlit.io에서 자주 나오는 방법). Streamlit이 정책을 더 조이면
-#    (예: 단순 HTTP 요청은 "방문"으로 안 쳐주는 식으로) 무력화될 수 있습니다 —
-#    그런 경우 앱이 다시 잠드는 것을 발견하면 이 파일을 다시 봐야 합니다.
+# ⚠️ 이건 Streamlit이 공식 제공하는 기능이 아니라 커뮤니티에서 흔히 쓰는 우회법입니다
+#    (discuss.streamlit.io / dev.to에서 검증). Streamlit이 정책을 더 조이면 무력화될
+#    수 있습니다 — 그런 경우 앱이 다시 잠드는 것을 발견하면 이 파일을 다시 봐야 합니다.
 #
-# 코스피/미국주식 수집 워크플로우와는 완전히 무관합니다. 데이터 수집도, 깃허브
-# 커밋도 하지 않고 그냥 사이트를 열어보고 끝나는 작업이라 실패해도 데이터에
-# 영향이 없습니다.
+# 코스피/미국주식 수집 워크플로우와는 완전히 무관합니다. 데이터 수집도, 깃허브 커밋도
+# 하지 않고 그냥 사이트를 열어보고(필요하면 버튼만 누르고) 끝나는 작업이라 실패해도
+# 데이터에 영향이 없습니다. `selenium`/`webdriver-manager`는 앱 실행에 쓰는
+# requirements.txt에는 넣지 않고 이 워크플로우 안에서만 따로 설치합니다(앱 배포와
+# 완전히 분리하기 위함).
 # =============================================================================
 
 on:
@@ -36,29 +44,22 @@ on:
 jobs:
   ping:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    # 헤드리스 크롬 기동 + 페이지 로드 + (필요시) 앱 부팅 대기까지 포함해 넉넉히 잡음.
+    timeout-minutes: 8
 
     steps:
-      - name: 실제 Streamlit 앱 URL 방문 (깨어있는 상태 유지)
+      - name: 저장소 코드 체크아웃 (keep_awake_ping.py 사용)
+        uses: actions/checkout@v3
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Selenium 관련 패키지만 별도 설치 (앱용 requirements.txt는 안 건드림)
         run: |
-          URL="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/"
-          echo "방문: $URL"
-          # 2026-08-10 수정: 최초 버전은 -L(리다이렉트 추적)이 없어서 Streamlit이
-          # 반환하는 303 응답을 그대로 실패로 처리했습니다(실측 확인 — 3회 전부 303).
-          # curl은 기본적으로 리다이렉트를 따라가지 않으므로 반드시 -L이 필요합니다.
-          # 최대 3회 재시도(연속 실패해도 다음 8시간 뒤 다시 시도하므로 여기서
-          # 너무 오래 붙잡고 있을 필요는 없음). 200뿐 아니라 2xx 전체를 성공으로 봄
-          # (리다이렉트를 다 따라간 뒤의 최종 상태 코드 기준).
-          for i in 1 2 3; do
-            code=$(curl -sSL -o /dev/null -w '%{http_code}' --max-time 30 "$URL" || echo "000")
-            echo "시도 $i: 최종 HTTP $code"
-            case "$code" in
-              2??)
-                echo "✅ 정상 응답"
-                exit 0
-                ;;
-            esac
-            sleep 15
-          done
-          echo "⚠️ 3회 시도 후에도 2xx 응답을 못 받음 — 다음 8시간 뒤 다시 시도됩니다. (실패해도 기존 자동화·데이터엔 영향 없음. 참고: 이 핑은 '잠들기 전에 미리 방문'하는 예방용이라, 이미 완전히 잠든 앱을 이 핑 하나로 반드시 깨운다는 보장은 없습니다 — 지금 잠들어 있다면 오너가 직접 앱에서 'Yes, get this app back up!'을 눌러야 합니다.)"
-          exit 1
+          python -m pip install --upgrade pip
+          pip install selenium webdriver-manager
+
+      - name: 헤드리스 브라우저로 앱 방문 + 필요시 깨우기 버튼 클릭
+        run: python keep_awake_ping.py
