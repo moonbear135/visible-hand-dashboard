@@ -46,6 +46,8 @@ from utils.scorecard_db import (
     sign_in,
     sign_out,
     sign_up,
+    sort_holding_rows,
+    SORT_FIELD_OPTIONS,
     supabase_status,
     update_holding,
     user_id_of,
@@ -305,6 +307,22 @@ def _row_label(row):
     return f"{name} ({row['ticker']})" if name else row["ticker"]
 
 
+def _colored_pct(value):
+    """
+    2026-08-11 오너 요청 — 수익률을 국내 증시 관례대로 **오르면 빨강 / 내리면 파랑**으로
+    색칠해 한눈에 들어오게 합니다(0%는 색 없이 그대로). Streamlit 마크다운의 `:red[..]`/
+    `:blue[..]` 문법을 씁니다(별도 CSS·unsafe_allow_html 불필요).
+    """
+    if value is None:
+        return "—"
+    text = f"{value:+.2f}%"
+    if value > 0:
+        return f":red[{text}]"
+    if value < 0:
+        return f":blue[{text}]"
+    return text
+
+
 def _render_currency_block(client, user_id, group, indexes):
     currency = group["currency"]
     st.markdown(f"### {CURRENCY_TITLES.get(currency, currency)}")
@@ -319,8 +337,11 @@ def _render_currency_block(client, user_id, group, indexes):
         col2.metric("평가금액 합계", format_amount(group["total_value"], currency))
         profit = group["total_profit"]
         base = group["total_cost_priced"]
-        pct = f"{profit / base * 100:+.2f}%" if base else "—"
-        col3.metric("평가손익", format_amount(profit, currency), pct)
+        # 2026-08-11 오너 지시 — 해외 관례(초록/빨강)보다 국내 증시 관례(빨강/파랑)로 화면
+        # 전체를 통일. st.metric 내장 delta 색은 초록/빨강만 지원해서(파랑 옵션 없음) 끄고
+        # (`delta_color="off"`), 아래 행과 같은 `_colored_pct()`로 직접 빨강/파랑을 입힙니다.
+        col3.metric("평가손익", format_amount(profit, currency), delta_color="off")
+        col3.markdown(_colored_pct(profit / base * 100 if base else None))
     else:
         col2.metric("평가금액 합계", "—")
         col3.metric("평가손익", "—")
@@ -330,6 +351,24 @@ def _render_currency_block(client, user_id, group, indexes):
             f"평가금액·비중 계산에서 빠졌습니다: {', '.join(group['unpriced_tickers'])}. "
             "v1은 상위 200(한국)/550(미국) 밖 종목의 시세를 조회하지 않습니다 — 추정하지 않고 비웁니다."
         )
+
+    # ---- 정렬 (2026-08-11 오너 요청) -------------------------------------------
+    # 기본은 "기본순서"(추가한 순서 그대로) — 사용자가 고를 때만 정렬을 적용합니다.
+    sort_col1, sort_col2 = st.columns([2, 1])
+    with sort_col1:
+        sort_label = st.selectbox(
+            "정렬 기준",
+            ["기본순서"] + [label for label, _ in SORT_FIELD_OPTIONS],
+            key=f"scorecard_sort_field_{currency}",
+        )
+    with sort_col2:
+        sort_ascending = st.radio(
+            "정렬 방향", ["내림차순", "오름차순"],
+            key=f"scorecard_sort_dir_{currency}", horizontal=True,
+        ) == "오름차순"
+    if sort_label != "기본순서":
+        sort_field = dict(SORT_FIELD_OPTIONS)[sort_label]
+        rows = sort_holding_rows(rows, sort_field, ascending=sort_ascending)
 
     # ---- 표 (종목별 ✏️ 수정 / 🗑️ 삭제 버튼 포함) -------------------------------
     # 2026-08-11: 오너 요청 — 별도 "삭제할 종목 고르기" 드롭다운 대신, 각 종목 줄
@@ -381,7 +420,7 @@ def _render_currency_block(client, user_id, group, indexes):
                 format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
             )
             cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
-            cols[5].write(f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—")
+            cols[5].markdown(_colored_pct(row.get("profit_pct")))
             cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
             # 2026-08-11: 이모지(✏️/🗑️)를 버튼 라벨 텍스트로 쓰면 글꼴마다 글리프 자체의
             # 여백이 삐뚤어서 CSS로 중앙 정렬해도 박스 안에서 치우쳐 보이는 문제(오너 스크린샷
@@ -522,14 +561,18 @@ def _render_currency_block(client, user_id, group, indexes):
             )
 
         # 2026-08-11: 오너 요청 — "내 평균매입가 vs 현재가" 비교를 잿빛 캡션이 아니라
-        # 손익 방향에 따라 초록/빨강으로 색이 바뀌는 큰 배너로 바꿔 가시성을 확실히 했습니다.
+        # 손익 방향에 따라 색이 바뀌는 큰 배너로 바꿔 가시성을 확실히 했습니다. 처음엔
+        # 초록(오름)/빨강(내림)의 해외 관례로 만들었는데, 오너가 "국내 관례로 통일하자"고
+        # 지시해서 **빨강(오름)/파랑(내림)** 으로 바꿨습니다. Streamlit에는 파랑 계열 강조
+        # 박스가 `st.info` 하나뿐이라, `st.error`(빨강)=이득 / `st.info`(파랑)=손실로
+        # "에러/정보"라는 원래 이름과 무관하게 **색상만 빌려 씁니다**(실제 에러가 아님에 주의).
         price = summary.get("price")
         avg_price = row.get("avg_purchase_price")
         if price is not None and avg_price:
             diff = price - avg_price
             diff_pct = (diff / avg_price) * 100
             arrow = "📈" if diff >= 0 else "📉"
-            banner = st.success if diff >= 0 else st.error
+            banner = st.error if diff >= 0 else st.info
             banner(
                 f"{arrow} **내 평균매입가 {format_amount(avg_price, currency)} VS "
                 f"현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)**"

@@ -64,6 +64,7 @@ from utils.scorecard_db import (  # noqa: E402
     normalize_ticker,
     resolve_stock_query,
     sign_in,
+    sort_holding_rows,
     split_by_currency,
     supabase_status,
     update_holding,
@@ -586,6 +587,50 @@ def test_portfolio():
 
 
 # =============================================================================
+# 5-1. 보유종목 표 정렬 (2026-08-11 오너 요청 — 오름차순/내림차순 필터)
+# =============================================================================
+def test_sort_holding_rows():
+    print("\n[5-1] 보유종목 표 정렬 — sort_holding_rows (값 없는 행은 항상 맨 뒤)")
+    prices = {"005930": 100000.0, "051910": 250000.0, "000660": None}
+    portfolio = build_portfolio(
+        [
+            {"market": "KR", "ticker": "005930", "stock_name": "합성전자",
+             "quantity": 10, "avg_purchase_price": 80000, "currency": "KRW"},
+            {"market": "KR", "ticker": "051910", "stock_name": "합성화학",
+             "quantity": 5, "avg_purchase_price": 300000, "currency": "KRW"},
+            {"market": "KR", "ticker": "000660", "stock_name": "합성미검증",
+             "quantity": 3, "avg_purchase_price": 10000, "currency": "KRW"},
+        ],
+        lambda market, ticker: prices.get(ticker),
+    )[CURRENCY_KRW]
+    rows = portfolio["rows"]
+
+    by_pct_asc = sdb.sort_holding_rows(rows, "profit_pct", ascending=True)
+    check([r["ticker"] for r in by_pct_asc] == ["051910", "005930", "000660"],
+          "수익률 오름차순 — 손실(화학, -16.67%) → 이익(전자, +25%), 현재가 없는 종목은 항상 맨 뒤")
+
+    by_pct_desc = sdb.sort_holding_rows(rows, "profit_pct", ascending=False)
+    check([r["ticker"] for r in by_pct_desc] == ["005930", "051910", "000660"],
+          "수익률 내림차순 — 방향만 뒤집히고 값 없는 종목은 여전히 맨 뒤")
+
+    by_qty_asc = sdb.sort_holding_rows(rows, "quantity", ascending=True)
+    check([r["ticker"] for r in by_qty_asc] == ["000660", "051910", "005930"],
+          "수량은 전 종목이 값이 있으므로 순서대로 전부 정렬됨(3<5<10)")
+
+    by_name = sdb.sort_holding_rows(rows, "_label", ascending=True)
+    check([r["ticker"] for r in by_name] == ["000660", "005930", "051910"],
+          "종목명 가나다순 정렬(합성미검증<합성전자<합성화학)")
+
+    check(sdb.sort_holding_rows(rows, "weight_pct", ascending=True) is not rows,
+          "원본 리스트를 바꾸지 않고 새 리스트를 반환함")
+    check(rows[0]["ticker"] == "005930", "원본 rows 순서는 정렬 후에도 그대로 보존됨")
+
+    labels = [label for label, _field in sdb.SORT_FIELD_OPTIONS]
+    check("수익률" in labels and "종목명" in labels and "비중" in labels,
+          "화면 정렬 selectbox 옵션에 수익률·종목명·비중이 전부 있음")
+
+
+# =============================================================================
 # 6. Supabase 미설정 폴백 — "준비중"이 에러가 아니어야 함
 # =============================================================================
 def _clear_supabase_env():
@@ -848,6 +893,12 @@ def test_view_and_routing():
     check("update_holding" in view_src, "종목별 인라인 수정(값 덮어쓰기) 기능 연동")
     check('help="수정"' in view_src and 'help="삭제"' in view_src,
           "종목 줄마다 수정/삭제 버튼이 바로 붙어있음")
+    check('icon=":material/edit:"' in view_src and 'icon=":material/delete:"' in view_src,
+          "수정/삭제 버튼이 이모지 대신 Material 아이콘을 씀(글꼴 여백 때문에 중앙정렬 안 되던 문제 근본 수정)")
+    check("sort_holding_rows" in view_src and "SORT_FIELD_OPTIONS" in view_src,
+          "보유종목 표 정렬(오름차순/내림차순) 기능 연동")
+    check("_colored_pct" in view_src and ":red[" in view_src and ":blue[" in view_src,
+          "수익률을 국내 증시 관례대로 오르면 빨강/내리면 파랑으로 표시")
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,
@@ -968,6 +1019,7 @@ def main():
     test_name_lookup()
     test_resolve_stock_query()
     test_portfolio()
+    test_sort_holding_rows()
     test_supabase_fallback()
     test_crud_with_fake_client()
     test_sql_schema()

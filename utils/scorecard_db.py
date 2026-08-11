@@ -409,6 +409,40 @@ def build_portfolio(holdings, price_lookup):
     return result
 
 
+# 2026-08-11 오너 요청 — 보유종목 표에 정렬(오름차순/내림차순) 기능. 화면에 보여줄 라벨과
+# build_portfolio() 가 만든 행 딕셔너리의 실제 키를 한 곳에서 짝지어둡니다(화면 쪽 selectbox
+# 옵션도 이 목록에서 그대로 뽑아 씁니다 — 문자열 두 곳에 따로 안 둠).
+SORT_FIELD_OPTIONS = [
+    ("종목명", "_label"),
+    ("수량", "quantity"),
+    ("평균매입가", "avg_purchase_price"),
+    ("현재가", "current_price"),
+    ("평가손익", "profit"),
+    ("수익률", "profit_pct"),
+    ("비중", "weight_pct"),
+]
+
+
+def sort_holding_rows(rows, field, ascending=True):
+    """
+    보유 종목 표를 지정한 필드로 정렬합니다(원본 리스트는 바꾸지 않고 새 리스트를 돌려줍니다).
+
+    ⚠️ §0-1: 현재가를 모르는 종목은 평가손익·수익률·비중이 전부 None 입니다. 정렬 방향을
+    바꿀 때마다 그 종목들이 위로 갔다 아래로 갔다 하면 혼란스럽고, 없는 값에 순위를 매기는
+    것 자체가 지어내는 셈이라 — **값이 없는 행은 오름차순/내림차순과 무관하게 항상 맨 뒤**에
+    둡니다.
+    """
+    def key_of(row):
+        if field == "_label":
+            return row.get("stock_name") or row.get("ticker") or ""
+        return row.get(field)
+
+    with_value = [r for r in rows if key_of(r) is not None]
+    without_value = [r for r in rows if key_of(r) is None]
+    with_value.sort(key=key_of, reverse=not ascending)
+    return with_value + without_value
+
+
 # =============================================================================
 # C. 기존 PEGY 스냅샷 조회 (읽기 전용 재사용)
 # =============================================================================
