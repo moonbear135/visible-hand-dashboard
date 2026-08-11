@@ -383,9 +383,14 @@ def _render_currency_block(client, user_id, group, indexes):
             cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
             cols[5].write(f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—")
             cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
-            if cols[7].button("✏️", key=f"scorecard_edit_btn_{row_id}", help="수정"):
+            # 2026-08-11: 이모지(✏️/🗑️)를 버튼 라벨 텍스트로 쓰면 글꼴마다 글리프 자체의
+            # 여백이 삐뚤어서 CSS로 중앙 정렬해도 박스 안에서 치우쳐 보이는 문제(오너 스크린샷
+            # 3연속 확인)가 있었습니다. 근본 원인이 이모지 폰트 렌더링이라 CSS로는 못 고치고,
+            # Streamlit이 지원하는 `icon=` 파라미터(Material Symbols, 폰트가 아니라 일정한
+            # 벡터 아이콘)로 바꿔서 항상 정중앙에 오도록 했습니다.
+            if cols[7].button("", key=f"scorecard_edit_btn_{row_id}", help="수정", icon=":material/edit:"):
                 st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-            if cols[8].button("🗑️", key=f"scorecard_del_btn_{row_id}", help="삭제"):
+            if cols[8].button("", key=f"scorecard_del_btn_{row_id}", help="삭제", icon=":material/delete:"):
                 if not row_id:
                     st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
                 else:
