@@ -528,6 +528,105 @@ def test_kr_ticker_master_collector():
           "__main__ 에서 이 보조 수집을 try/except 로 감쌈(실패해도 핵심 수집 결과는 그대로)")
 
 
+def test_kr_all_market_prices_collector():
+    print("\n[4-2] 코스피+코스닥 전 종목 종가 수집기 (2026-08-11, TASK_HISTORY #84 — 실제 함수 호출)")
+    import collector_kospi200 as K
+    from urllib.parse import urlparse, parse_qs
+
+    def _row_html(name, code, price):
+        return (
+            f"<tr><td>1</td><td><a href='/item/main.naver?code={code}'>{name}</a></td>"
+            f"<td>{price}</td>" + "<td></td>" * 9 + "</tr>"
+        )
+
+    def _table_html(rows_html):
+        return f"<html><body><table class='type_2'>{''.join(rows_html)}</table></body></html>"
+
+    EMPTY_TABLE_HTML = "<html><body><table class='type_2'><tr><td colspan='12'>헤더행</td></tr></table></body></html>"
+    NO_TABLE_HTML = "<html><body>표를 찾을 수 없는 응답</body></html>"
+
+    kospi_page1 = _table_html([_row_html("합성전자", "111111", "10,000"), _row_html("합성ETF", "222222", "9,500")])
+    kosdaq_page1 = _table_html([_row_html("합성코스닥", "333333", "3,000")])
+    kosdaq_page3 = _table_html([_row_html("합성코스닥3", "444444", "7,000")])
+
+    call_log = []
+
+    class _FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    def _fake_get(url, headers=None, timeout=None):
+        call_log.append(url)
+        qs = parse_qs(urlparse(url).query)
+        sosok = qs.get("sosok", ["0"])[0]
+        page = int(qs.get("page", ["1"])[0])
+        if sosok == "0":
+            return _FakeResponse(kospi_page1 if page == 1 else EMPTY_TABLE_HTML)
+        if page == 1:
+            return _FakeResponse(kosdaq_page1)
+        if page == 2:
+            return _FakeResponse(NO_TABLE_HTML)  # 이 페이지만 재시도 끝에 실패 → 건너뜀
+        if page == 3:
+            return _FakeResponse(kosdaq_page3)
+        return _FakeResponse(EMPTY_TABLE_HTML)
+
+    class _FakeRequestsModule:
+        get = staticmethod(_fake_get)
+
+    orig_requests = K.requests
+    orig_sleep = K.time.sleep
+    tmpdir = tempfile.mkdtemp()
+    try:
+        K.requests = _FakeRequestsModule()
+        K.time.sleep = lambda s: None  # 재시도/페이지 간 딜레이를 테스트에서는 생략(로직 검증엔 불필요)
+
+        result_path = K.run_kr_all_market_prices_collector(data_dir=tmpdir, max_pages_per_market=10)
+        check(result_path is not None, "정상 응답이 하나라도 있으면 파일 경로를 반환")
+
+        with open(result_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        by_code = {s["code"]: s for s in payload["stocks"]}
+        check(set(by_code) == {"111111", "222222", "333333", "444444"},
+              "코스피 1페이지 + 코스닥 1·3페이지(2페이지 실패는 건너뜀) 종목이 모두 반영됨")
+        check(by_code["111111"]["price"] == 10000.0, "콤마 섞인 가격 문자열이 숫자로 파싱됨")
+        check(by_code["111111"]["market"] == "KOSPI" and by_code["333333"]["market"] == "KOSDAQ",
+              "시장 구분이 정확히 반영됨")
+        check("price" in by_code["111111"] and "t_per" not in by_code["111111"],
+              "밸류에이션 필드(PER 등)는 없음 — 가격 전용 목적")
+        check(payload["metadata"]["count"] == 4, "metadata.count 가 실제 반영 건수와 일치")
+
+        kospi_pages = sorted(int(parse_qs(urlparse(u).query)["page"][0]) for u in call_log if "sosok=0" in u)
+        kosdaq_pages = sorted(int(parse_qs(urlparse(u).query)["page"][0]) for u in call_log if "sosok=1" in u)
+        check(kospi_pages == [1, 2],
+              "코스피는 1페이지(성공) 후 2페이지(빈 표=마지막 페이지)에서 멈춤 — 재시도 없이 각 1번")
+        check(kosdaq_pages == [1, 2, 2, 2, 3, 4],
+              "코스닥 2페이지는 실패해서 3번 재시도(합계 3번 호출)하고 건너뛴 뒤 3페이지로 이어서 진행, "
+              "4페이지(빈 표)에서 멈춤 — 5페이지는 아예 요청되지 않음")
+
+        # 완전 실패 시나리오: 두 시장 다 표를 못 찾으면 파일을 만들지 않음
+        class _AlwaysBrokenRequestsModule:
+            get = staticmethod(lambda url, headers=None, timeout=None: _FakeResponse(NO_TABLE_HTML))
+        K.requests = _AlwaysBrokenRequestsModule()
+        broken_result = K.run_kr_all_market_prices_collector(
+            data_dir=tempfile.mkdtemp(), max_pages_per_market=3
+        )
+        check(broken_result is None,
+              "코스피·코스닥 둘 다 완전히 실패하면 파일을 만들지 않고 조용히 None 반환(크래시 안 함)")
+    finally:
+        K.requests = orig_requests
+        K.time.sleep = orig_sleep
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # 배선 확인: __main__ 에서 핵심 수집·전체 상장종목 목록 수집 '뒤에' 실행되고,
+    # try/except로 감싸져 있어 이 보조 기능이 실패해도 앞 두 단계 결과에 영향이 없는지.
+    k_src = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
+    check(k_src.index("run_kr_ticker_master_collector()") < k_src.index("run_kr_all_market_prices_collector()"),
+          "전 종목 종가 수집은 전체 상장종목 목록 수집 뒤에 실행됨")
+    check("except Exception as e:" in k_src.split("run_kr_all_market_prices_collector()")[-1][:200],
+          "__main__ 에서 이 보조 수집도 try/except 로 감쌈(실패해도 앞 단계 결과는 그대로)")
+
+
 def main():
     print("=" * 70)
     print("📈 종목별 시계열 이력 · 다운로드 오프라인 검증")
@@ -537,6 +636,7 @@ def main():
     test_status_guard()
     test_collector_blocked_scenarios()
     test_kr_ticker_master_collector()
+    test_kr_all_market_prices_collector()
     test_append_and_dedup()
     test_export_end_to_end()
     test_wiring()

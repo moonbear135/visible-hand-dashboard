@@ -533,6 +533,31 @@ def load_kr_ticker_master(data_dir=None):
     return build_universe_index(payload, MARKET_KR), (payload or {}).get("metadata")
 
 
+KR_ALL_MARKET_PRICES_FILENAME = "kr_all_market_prices.json"
+
+
+def load_kr_all_market_prices(data_dir=None):
+    """
+    2026-08-11 오너 요청(TASK_HISTORY #84) — 코스피 상위 200 밖(코스닥·ETF 포함) 종목도
+    "현재가 없음" 대신 실제 종가를 보여줄 수 있게 하는 보조 가격 목록을 읽습니다.
+
+    ⚠️ 이것도 `load_kr_ticker_master()`와 마찬가지로 `indexes`(상위 200/550 밸류에이션
+    스냅샷)와는 **의도적으로 분리**된 별도 구조입니다 — PEGY/퀀트 밸류에이션은 없고 오직
+    현재가만 담습니다. `make_price_lookup()`에 `broad_kr_prices`로 전달해 "1차: 상위 200
+    유니버스 → 2차(없으면): 이 전 종목 종가 목록" 순서의 폴백으로만 씁니다.
+
+    (index, metadata) 반환. 파일이 없으면(아직 수집 전, 또는 이번 수집 실패) 빈 dict —
+    이 보조 기능만 조용히 비활성화되고 나머지 화면은 그대로 정상 작동합니다.
+    """
+    directory = data_dir or default_data_dir()
+    path = os.path.join(directory, KR_ALL_MARKET_PRICES_FILENAME)
+    if not os.path.exists(path):
+        return {}, None
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return build_universe_index(payload, MARKET_KR), (payload or {}).get("metadata")
+
+
 def find_ticker_by_name(market, name, indexes):
     """
     2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
@@ -652,11 +677,17 @@ def resolve_stock_query(market, query, indexes, broad_index=None):
     )
 
 
-def make_price_lookup(indexes):
+def make_price_lookup(indexes, broad_kr_prices=None):
     """
     build_portfolio 에 넘길 현재가 조회 함수를 만듭니다.
     indexes: {"KR": {...}, "US": {...}}
     유니버스 밖 종목·가격 결측은 None 을 돌려줍니다(추정 금지).
+
+    broad_kr_prices: (2026-08-11, TASK_HISTORY #84 신설, 기본값 None으로 하위호환 유지)
+    `load_kr_all_market_prices()`가 반환한 인덱스. 한국 종목이 상위 200 유니버스(`indexes["KR"]`)
+    안에 없을 때만 2차로 확인하는 폴백입니다 — **가격만** 쓰고 밸류에이션은 여전히 없습니다
+    (`valuation_summary()`는 이 폴백을 타지 않으므로 "밸류에이션 정보 없음" 문구는 그대로 정확합니다).
+    미국 종목(US)에는 적용하지 않습니다(이 목록 자체가 국내 전용).
     """
     def lookup(market, ticker):
         try:
@@ -665,6 +696,8 @@ def make_price_lookup(indexes):
         except ValueError:
             return None
         stock = (indexes.get(market_code) or {}).get(key)
+        if not stock and broad_kr_prices and market_code == MARKET_KR:
+            stock = broad_kr_prices.get(key)
         if not stock:
             return None
         price = stock.get("price")

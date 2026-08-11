@@ -325,6 +325,135 @@ def run_kr_ticker_master_collector(data_dir=None):
     return json_path
 
 
+# =============================================================================
+# 코스피+코스닥 전 종목 종가 수집기 (2026-08-11, "내 성적표" 유니버스 밖 종목 현재가 보조용)
+# =============================================================================
+KR_ALL_MARKET_PRICES_FILENAME = "kr_all_market_prices.json"
+
+
+def _fetch_naver_market_sum_page(sosok, page):
+    """
+    네이버 금융 '시가총액 순위' 한 페이지(sosok=0 코스피/1 코스닥, 페이지당 최대 50종목)를
+    받아 (코드, 이름, 종가) 튜플 리스트로 파싱합니다.
+
+    ⚠️ fetch_kospi200_real_market_data()와 같은 페이지·같은 표 구조를 쓰지만, 여기는
+    ETF/펀드 필터링을 하지 않고 순위 컷도 없습니다 — "전 종목(ETF 포함) 종가"가 목적이라
+    코스피 200 랭킹용 필터링 로직과는 목적이 다릅니다.
+
+    반환: (rows, error) — 성공하면 error=None, 실패(재시도 소진)하면 rows=[]와 에러 메시지.
+    """
+    url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
+    headers = {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+    }
+    last_error = None
+    for attempt in range(3):
+        try:
+            res = requests.get(url, headers=headers, timeout=5)
+            if res.status_code != 200:
+                last_error = f"HTTP {res.status_code}"
+                time.sleep(1.5 * (attempt + 1))
+                continue
+            soup = BeautifulSoup(res.text, 'html.parser')
+            table = soup.select_one('table.type_2')
+            if table is None:
+                last_error = "시가총액 표(table.type_2)를 찾지 못함"
+                time.sleep(1.5 * (attempt + 1))
+                continue
+
+            rows = []
+            for r in table.select('tr'):
+                cols = r.select('td')
+                if len(cols) < 3:
+                    continue
+                name_elem = cols[1].select_one('a')
+                if not name_elem:
+                    continue
+                name = name_elem.text.strip()
+                href = name_elem.get('href', '')
+                code = href.split('code=')[-1] if 'code=' in href else ''
+                try:
+                    price = float(cols[2].text.strip().replace(',', ''))
+                except ValueError:
+                    price = 0.0
+                if price <= 0 or not code:
+                    continue
+                rows.append((code, name, price))
+            return rows, None
+        except Exception as e:
+            last_error = str(e)
+            time.sleep(1.5 * (attempt + 1))
+    return [], last_error
+
+
+def run_kr_all_market_prices_collector(data_dir=None, max_pages_per_market=120):
+    """
+    코스피(sosok=0)+코스닥(sosok=1) 전 종목(ETF 포함)의 현재가만 네이버 금융 시가총액 순위
+    페이지를 끝까지 페이지네이션하며 모아 `data/kr_all_market_prices.json`으로 저장합니다.
+
+    ⚠️ §0-1: 이 파일은 "종목코드↔이름↔현재가"만 담습니다. PEGY/퀀트 밸류에이션은 여전히
+    기존 상위 200 유니버스 안에서만 제공됩니다 — 이건 "내 성적표"에서 유니버스 밖 종목이
+    계속 "현재가 없음"으로만 뜨던 걸 줄이기 위한 보조 목적입니다.
+
+    ⚠️ `fetch_kospi200_real_market_data()`(코스피 200 랭킹용)와 달리 순위 무결성이 필요
+    없으므로, 페이지 하나가 재시도 끝에 실패해도 그 페이지만 건너뛰고 계속 진행합니다
+    (중간 50종목이 이번 회차에 빠질 뿐, 전체를 중단하지 않음 — 어차피 다음 실행 때 다시
+    시도되고, 실패한 종목은 그냥 "이번엔 갱신 안 됨"일 뿐 잘못된 값이 저장되지 않습니다).
+    정상 응답인데 종목이 0개인 페이지를 만나면 그 시장의 마지막 페이지로 보고 멈춥니다.
+    `max_pages_per_market`은 그 판정이 실패했을 때(예: 응답 형식이 계속 바뀌는 경우)
+    무한 루프를 막는 안전장치입니다.
+    """
+    entries = {}
+    market_labels = {0: "KOSPI", 1: "KOSDAQ"}
+    any_market_succeeded = False
+
+    for sosok, market_label in market_labels.items():
+        page = 1
+        market_had_success = False
+        failed_page_count = 0
+        while page <= max_pages_per_market:
+            rows, error = _fetch_naver_market_sum_page(sosok, page)
+            if error is not None and not rows:
+                failed_page_count += 1
+                print(f"⚠️ [전 종목 종가] {market_label} {page}페이지 수집 실패({error}) — 이 페이지만 건너뜁니다")
+                page += 1
+                time.sleep(random.uniform(2.0, 3.0))
+                continue
+            if not rows:
+                # 정상 응답인데 0건 = 이 시장의 마지막 페이지를 지났다고 판단하고 종료
+                break
+            for code, name, price in rows:
+                entries[code] = {"code": code, "name": name, "price": price, "market": market_label}
+            market_had_success = True
+            page += 1
+            time.sleep(random.uniform(2.0, 3.0))
+
+        if market_had_success:
+            any_market_succeeded = True
+        print(f"[전 종목 종가] {market_label} 수집 완료(실패 페이지 {failed_page_count}건 건너뜀) — 누적 {len(entries)}건")
+
+    if not any_market_succeeded:
+        print("⚠️ [전 종목 종가] 코스피·코스닥 둘 다 수집 실패 — 파일을 만들지 않습니다(기존 파일 유지)")
+        return None
+
+    resolved_data_dir = data_dir or os.path.join(os.path.dirname(__file__), "data")
+    os.makedirs(resolved_data_dir, exist_ok=True)
+    json_path = os.path.join(resolved_data_dir, KR_ALL_MARKET_PRICES_FILENAME)
+    payload = {
+        "metadata": {
+            "generated_at": _now_kst().strftime("%Y-%m-%d %H:%M"),
+            "source": "네이버 금융 시가총액 순위 페이지(finance.naver.com/sise/sise_market_sum.naver) 전체 페이지",
+            "count": len(entries),
+            "description": "코스피+코스닥 전 종목(ETF 포함) 현재가 — 밸류에이션 없음, 유니버스 밖 종목 현재가 표시 보조용",
+        },
+        "stocks": list(entries.values()),
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"[전 종목 종가] {len(entries)}건 저장 완료 -> {json_path}")
+    return json_path
+
+
 def _empty_item_info(error_msg):
     """종목 상세 수집 실패 시 반환 구조 (모든 수치는 None = '데이터 없음')"""
     return {
@@ -1589,3 +1718,9 @@ if __name__ == "__main__":
         run_kr_ticker_master_collector()
     except Exception as e:
         print(f"⚠️ [전체 상장종목 목록] 수집 중 예외 발생(핵심 수집 결과에는 영향 없음): {e}")
+    # 2026-08-11(TASK_HISTORY #84): 마찬가지로 핵심 수집과 완전히 독립 — 실패해도 위 두 단계
+    # 결과는 그대로 유지됩니다. 페이지가 많아(코스피+코스닥 전체) 몇 분 더 걸립니다.
+    try:
+        run_kr_all_market_prices_collector()
+    except Exception as e:
+        print(f"⚠️ [전 종목 종가] 수집 중 예외 발생(핵심 수집 결과에는 영향 없음): {e}")

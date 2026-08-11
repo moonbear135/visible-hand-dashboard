@@ -371,6 +371,20 @@ def test_universe_lookup():
         check(lookup(MARKET_US, "NOPRICE") is None, "price 결측 종목도 None")
         check(lookup(MARKET_KR, "") is None, "빈 티커는 예외 없이 None")
 
+        # 2026-08-11(TASK_HISTORY #84) — broad_kr_prices 폴백(하위호환: 기본값 None이면 위 동작 그대로)
+        broad_kr_prices = {"777777": {"code": "777777", "name": "합성전종목", "price": 5000.0, "market": "KOSDAQ"},
+                            "999999": {"code": "999999", "name": "유니버스밖상위매치", "price": 1234.0, "market": "KOSPI"}}
+        broad_lookup = make_price_lookup(indexes, broad_kr_prices=broad_kr_prices)
+        check(broad_lookup(MARKET_KR, "5930") == 100000.0,
+              "상위 200 유니버스 안에 있으면 broad_kr_prices보다 그쪽을 우선 사용")
+        check(broad_lookup(MARKET_KR, "999999") == 1234.0,
+              "상위 200 밖이지만 broad_kr_prices에 있으면 2차로 그 가격 사용")
+        check(broad_lookup(MARKET_KR, "777777") == 5000.0, "broad_kr_prices 전용 종목도 조회됨")
+        check(broad_lookup(MARKET_KR, "000000") is None, "broad_kr_prices에도 없으면 여전히 None(추정 금지)")
+        check(broad_lookup(MARKET_US, "fake") == 200.0, "미국 시장은 broad_kr_prices 영향 없이 그대로 동작")
+        check(lookup(MARKET_KR, "999999") is None,
+              "broad_kr_prices=None(기본값)인 기존 lookup은 이전 동작 그대로 — 하위호환 확인")
+
         found = valuation_summary(MARKET_KR, "005930", indexes)
         check(found["found"] and found["verified"], "유니버스 안 종목은 요약 반환")
         check(found["t_pegy"] == 0.50 and found["badge"] == "🟢 강력 저평가",
@@ -454,6 +468,40 @@ def test_kr_ticker_master():
         print(f"  ℹ️ 저장소에 이미 kr_ticker_master.json 존재 — {len(real_master)}건")
     else:
         print("  ℹ️ 저장소에 kr_ticker_master.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
+
+
+# =============================================================================
+# 4-0-2. 코스피+코스닥 전 종목 종가 (2026-08-11, TASK_HISTORY #84)
+# =============================================================================
+def test_kr_all_market_prices():
+    print("\n[4-0-2] 전 종목 종가 목록 — load_kr_all_market_prices (밸류에이션 없이 가격만)")
+    synthetic_prices = {
+        "metadata": {"generated_at": "2026-08-11 17:00", "count": 2,
+                      "source": "네이버 금융 시가총액 순위 페이지 전체 페이지"},
+        "stocks": [
+            {"code": "005380", "name": "합성모터스", "price": 250000.0, "market": "KOSPI"},
+            {"code": "247540", "name": "합성코스닥종목", "price": 15000.0, "market": "KOSDAQ"},
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "kr_all_market_prices.json"), "w", encoding="utf-8") as f:
+            json.dump(synthetic_prices, f, ensure_ascii=False)
+
+        price_index, price_meta = sdb.load_kr_all_market_prices(data_dir=tmp)
+        check(set(price_index.keys()) == {"005380", "247540"}, "코드 2개 전부 인덱싱됨")
+        check(price_index["005380"]["price"] == 250000.0, "종가가 그대로 보존됨")
+        check(price_meta.get("count") == 2, "metadata 도 함께 반환")
+
+        empty_index, empty_meta = sdb.load_kr_all_market_prices(data_dir=os.path.join(tmp, "없음"))
+        check(empty_index == {} and empty_meta is None,
+              "파일이 아직 없으면(다음 자동 수집 전) 에러 대신 빈 dict")
+
+    # 저장소에 실제 파일이 아직 없을 수 있습니다(이번 세션에서 신설).
+    real_prices, real_meta = sdb.load_kr_all_market_prices()
+    if real_prices:
+        print(f"  ℹ️ 저장소에 이미 kr_all_market_prices.json 존재 — {len(real_prices)}건")
+    else:
+        print("  ℹ️ 저장소에 kr_all_market_prices.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
 
 
 # =============================================================================
@@ -984,6 +1032,9 @@ def test_view_and_routing():
           "(2026-08-11, TASK_HISTORY #83)")
     check("broad_index=broad_kr_index if market == MARKET_KR else None" in view_src,
           "전체 상장종목 목록은 한국에서만 쓰임(미국은 아직 상위 550까지만)")
+    check("load_kr_all_market_prices" in view_src and "broad_kr_prices=kr_all_prices" in view_src,
+          "코스피 상위 200 밖 종목도 실제 종가를 보여주는 전 종목 종가 목록 연동"
+          "(2026-08-11, TASK_HISTORY #84)")
     check("NAME_LOOKUP_MARKETS" not in view_src,
           "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
     check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
@@ -1124,6 +1175,7 @@ def main():
     test_currency_separation()
     test_universe_lookup()
     test_kr_ticker_master()
+    test_kr_all_market_prices()
     test_name_lookup()
     test_resolve_stock_query()
     test_portfolio()

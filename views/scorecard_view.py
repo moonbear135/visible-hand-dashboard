@@ -41,6 +41,7 @@ from utils.scorecard_db import (
     fetch_holdings,
     format_amount,
     load_kr_ticker_master,
+    load_kr_all_market_prices,
     load_universe_index,
     make_price_lookup,
     resolve_stock_query,
@@ -723,6 +724,13 @@ def render_scorecard_page():
     # 이름 검색 범위만 상위 200으로 좁아집니다.
     kr_ticker_master, _kr_master_meta = load_kr_ticker_master()
 
+    # 2026-08-11 오너 요청(TASK_HISTORY #84) — 코스피 상위 200 밖 종목도 "현재가 없음" 대신
+    # 실제 종가를 보여주기 위한 보조 가격 목록. ⚠️ 이것도 밸류에이션은 없고 가격만 — 위
+    # `kr_ticker_master`(이름 검색용)와는 또 다른 별도 파일입니다. 파일이 아직 없으면
+    # 빈 dict — 이 화면은 그대로 정상 작동하고 유니버스 밖 종목은 이전처럼 "현재가 없음"으로
+    # 표시됩니다.
+    kr_all_prices, _kr_all_prices_meta = load_kr_all_market_prices()
+
     if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
         st.rerun()
 
@@ -742,7 +750,7 @@ def render_scorecard_page():
             "🚫 밸류에이션 스냅샷(data/*.json)을 읽지 못했습니다. 현재가·수익률을 계산할 수 없습니다."
         )
 
-    portfolio = build_portfolio(holdings, make_price_lookup(indexes))
+    portfolio = build_portfolio(holdings, make_price_lookup(indexes, broad_kr_prices=kr_all_prices))
     for currency in ("KRW", "USD"):
         group = portfolio.get(currency)
         if group:
