@@ -210,8 +210,10 @@ def _parse_positive_number(raw, label):
 
 def _reset_input_fields():
     """추가 성공 후 다음 입력을 위해 입력창을 비웁니다(직전 값이 계속 남아있던 버그 수정,
-    2026-08-11). st.rerun() 전에 session_state 키를 지워야 다음 렌더에서 빈 값으로 시작합니다."""
-    for key in ("scorecard_query", "scorecard_qty", "scorecard_price"):
+    2026-08-11). st.rerun() 전에 session_state 키를 지워야 다음 렌더에서 빈 값으로 시작합니다.
+    빠른 검색 selectbox(시장별로 키가 다름, `scorecard_picker_{market}`)도 함께 비웁니다."""
+    for key in ("scorecard_query", "scorecard_qty", "scorecard_price",
+                f"scorecard_picker_{MARKET_KR}", f"scorecard_picker_{MARKET_US}"):
         st.session_state.pop(key, None)
 
 
@@ -239,6 +241,28 @@ def _render_input_form(client, user_id, holdings, indexes):
             help="통화는 시장에서 자동으로 정해집니다(한국=원, 미국=달러). 환율 변환은 하지 않습니다.",
         )
     with col2:
+        # 2026-08-11 오너 요청 — "롯데까지만 쳐도 관련 종목이 좌르르 나오게" 해달라는 요청.
+        # Streamlit selectbox는 클릭 후 타이핑하면 옵션을 그 자리에서 자동으로 필터링해주는
+        # 내장 기능이 있어(별도 자바스크립트·API 호출 없이) 이걸로 "이름 일부만 쳐도 후보가
+        # 좌르르 나오는" 빠른 검색을 만듭니다. 유니버스(상위 200/550) 안 종목만 나오므로
+        # (§0-1: 모르는 종목을 지어내지 않음), 그 밖 종목은 아래 칸에 코드를 직접 입력하는
+        # 기존 방법이 그대로 남아있습니다 — 이 검색창은 어디까지나 "빠른 선택" 보조 수단.
+        picker_placeholder = "🔍 이름 일부만 쳐도 후보가 나옵니다 (선택하면 아래 칸에 자동 입력)"
+        picker_key = f"scorecard_picker_{market}"
+        candidate_names = sorted({
+            stock.get("name") for stock in (indexes.get(market) or {}).values()
+            if stock.get("name")
+        })
+        picked = st.selectbox(
+            "종목 빠른 검색 (상위 200/550 종목만 — 그 밖은 아래 칸에 코드를 직접 입력)",
+            [picker_placeholder] + candidate_names,
+            key=picker_key,
+        )
+        if picked != picker_placeholder:
+            st.session_state["scorecard_query"] = picked
+            st.session_state.pop(picker_key, None)
+            st.rerun()
+
         # ⚠️ 2026-08-11 오너 지시: "종목코드 / 티커 / 종목명 이게 전부 다 한곳에서 기능할 수
         # 있게 해야지" — 코드를 쳐도, 이름을 쳐도(한글 포함) 한 칸에서 알아서 찾습니다.
         # 유니버스 밖 종목은 코드를 알면 그대로 받아들여서 "현재가 없음"으로 정직하게 표시합니다.

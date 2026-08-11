@@ -886,6 +886,12 @@ def test_view_and_routing():
           "종목 입력창이 코드/티커/이름 통합 단일 필드임")
     check('key="scorecard_ticker"' not in view_src and 'key="scorecard_name"' not in view_src,
           "예전 종목코드/종목명 분리 필드는 제거됨")
+    check('scorecard_picker_' in view_src and "st.selectbox" in view_src,
+          "이름 일부만 쳐도 후보가 나오는 빠른 검색 selectbox 연동(2026-08-11 오너 요청)")
+    check('st.session_state["scorecard_query"] = picked' in view_src,
+          "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐")
+    check("scorecard_picker_{market}" in view_src,
+          "빠른 검색 키가 시장별로 분리됨(한국/미국 선택 바뀔 때 후보 목록도 같이 바뀜)")
     check("NAME_LOOKUP_MARKETS" not in view_src,
           "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
     check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
@@ -975,13 +981,18 @@ def test_view_and_routing():
 
             fake_state = {"scorecard_query": "005930",
                           "scorecard_qty": "10", "scorecard_price": "70000",
-                          "scorecard_market": module.MARKET_KR}
+                          "scorecard_market": module.MARKET_KR,
+                          f"scorecard_picker_{module.MARKET_KR}": "삼성전자 (005930)",
+                          f"scorecard_picker_{module.MARKET_US}": "Apple (AAPL)"}
             module.st.session_state = fake_state
             module._reset_input_fields()
             check(
                 all(k not in fake_state
-                    for k in ("scorecard_query", "scorecard_qty", "scorecard_price")),
-                "추가 성공 후 입력 필드(통합 종목칸 포함)가 session_state 에서 지워짐(다음 입력이 이어붙지 않게)",
+                    for k in ("scorecard_query", "scorecard_qty", "scorecard_price",
+                              f"scorecard_picker_{module.MARKET_KR}",
+                              f"scorecard_picker_{module.MARKET_US}")),
+                "추가 성공 후 입력 필드(통합 종목칸·빠른 검색 selectbox 포함)가 session_state 에서 지워짐"
+                "(다음 입력이 이어붙지 않게)",
             )
             check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
         finally:
