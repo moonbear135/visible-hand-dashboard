@@ -30,6 +30,7 @@ from utils.scorecard_db import (
     MARKET_KR,
     MARKET_LABELS,
     MARKET_US,
+    NO_FEES_TAXES_NOTICE,
     NO_FX_CONVERSION_NOTICE,
     ScorecardError,
     add_lot,
@@ -421,6 +422,7 @@ def render_scorecard_page():
         "입력한 데이터는 Supabase 에 저장되며, 본인만 조회할 수 있도록 DB 정책(RLS)이 걸려 있습니다."
     )
     st.info(NO_FX_CONVERSION_NOTICE)
+    st.info(NO_FEES_TAXES_NOTICE)
 
     status = supabase_status()
     if not status.available:
