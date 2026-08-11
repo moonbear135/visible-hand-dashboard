@@ -518,7 +518,7 @@ def _render_currency_block(client, user_id, group, indexes):
             arrow = "📈" if diff >= 0 else "📉"
             banner = st.success if diff >= 0 else st.error
             banner(
-                f"{arrow} **내 평균매입가 {format_amount(avg_price, currency)} → "
+                f"{arrow} **내 평균매입가 {format_amount(avg_price, currency)} VS "
                 f"현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)**"
             )
         else:
