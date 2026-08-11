@@ -23,6 +23,7 @@ v1 범위 (SCORECARD_WORK_ORDER.md §2)
 """
 
 import os
+import re
 
 import streamlit as st
 
@@ -39,6 +40,7 @@ from utils.scorecard_db import (
     current_user,
     delete_holding,
     fetch_holdings,
+    find_ticker_by_name,
     format_amount,
     load_universe_index,
     make_price_lookup,
@@ -49,6 +51,14 @@ from utils.scorecard_db import (
     user_id_of,
     valuation_summary,
 )
+
+# 한국 종목코드로 봐도 되는 형식(숫자로 시작하는 영숫자 1~6자). 한글이 섞여 있으면
+# "종목명을 코드 칸에 잘못 넣었다"고 보고 막습니다(2026-08-11, 오너 실사용 중 발견).
+_KR_TICKER_LIKE = re.compile(r"[0-9][0-9A-Za-z]{0,5}$")
+
+# 종목명으로 티커를 자동으로 찾아주는 기능은 **미국 주식에서만** 켭니다(2026-08-11 오너 지시).
+# 한국은 6자리 코드가 이미 익숙하고 짧아서 코드 직접 입력이 더 명확하고 실수도 적습니다.
+NAME_LOOKUP_MARKETS = {MARKET_US}
 
 # 원형차트는 plotly 로 그립니다(이미 requirements.txt 에 있고 매크로 화면에서도 사용 중).
 # 그래도 없을 때 화면 전체가 죽지 않도록 감싸두고, 없으면 표로 대체합니다.
@@ -187,72 +197,153 @@ def _render_auth(client):
                     )
 
 
+def _parse_positive_number(raw, label):
+    """
+    텍스트 입력 → 양수 float. 콤마(1,664,333)와 앞뒤 공백을 허용합니다.
+    ⚠️ 값을 지어내지 않습니다 — 비어있거나 숫자가 아니면 그대로 예외를 던집니다.
+    """
+    text = str(raw or "").strip().replace(",", "")
+    if not text:
+        raise ValueError(f"{label}을(를) 입력해 주세요.")
+    try:
+        number = float(text)
+    except ValueError:
+        raise ValueError(f"{label}은(는) 숫자로 입력해 주세요: {raw!r}")
+    if number <= 0:
+        raise ValueError(f"{label}은(는) 0보다 커야 합니다.")
+    return number
+
+
+def _reset_input_fields():
+    """추가 성공 후 다음 입력을 위해 입력창을 비웁니다(직전 값이 계속 남아있던 버그 수정,
+    2026-08-11). st.rerun() 전에 session_state 키를 지워야 다음 렌더에서 빈 값으로 시작합니다."""
+    for key in ("scorecard_ticker", "scorecard_name", "scorecard_qty", "scorecard_price"):
+        st.session_state.pop(key, None)
+
+
 # =============================================================================
 # 2. 보유 종목 입력
 # =============================================================================
-def _render_input_form(client, user_id, holdings):
+def _render_input_form(client, user_id, holdings, indexes):
     st.markdown("#### ✍️ 보유 종목 입력")
     st.caption(
         "같은 종목을 여러 번 입력하면(증권사 계좌가 여러 개인 경우) 삭제·덮어쓰기가 아니라 "
         "**수량 가중평균**으로 매입가가 다시 계산됩니다. "
         "예) 10주 100,000원 + 3주 70,000원 → 13주 평균 93,076원"
     )
-    with st.form("scorecard_add_form"):
-        col1, col2 = st.columns([1, 2])
-        with col1:
-            market = st.radio(
-                "시장", [MARKET_KR, MARKET_US],
-                format_func=lambda m: MARKET_LABELS[m],
-                key="scorecard_market",
-                help="통화는 시장에서 자동으로 정해집니다(한국=원, 미국=달러). 환율 변환은 하지 않습니다.",
+    # ⚠️ 2026-08-11: 일부러 st.form 을 쓰지 않습니다 — st.form 안에서는 Enter 키가 곧바로
+    # "제출" 버튼을 누른 것과 같이 동작해서, 다음 종목을 입력하려고 습관적으로 Enter를 치면
+    # 그때까지 입력한 값이 그대로 추가돼버리는 사고가 실사용 중 확인됐습니다. 폼을 쓰지 않으면
+    # Enter는 그 입력창의 값만 확정할 뿐 아무것도 제출하지 않고, 아래 버튼을 실제로 눌러야만
+    # 추가됩니다.
+    col1, col2 = st.columns([1, 2])
+    with col1:
+        market = st.radio(
+            "시장", [MARKET_KR, MARKET_US],
+            format_func=lambda m: MARKET_LABELS[m],
+            key="scorecard_market",
+            help="통화는 시장에서 자동으로 정해집니다(한국=원, 미국=달러). 환율 변환은 하지 않습니다.",
+        )
+    name_lookup_on = market in NAME_LOOKUP_MARKETS
+    with col2:
+        ticker = st.text_input(
+            "종목코드 / 티커",
+            key="scorecard_ticker",
+            placeholder="예: 005930" if market == MARKET_KR else "예: NVDA",
+            help=(
+                "한국은 6자리 종목코드(예: 005930)를 입력하세요."
+                if market == MARKET_KR else
+                "티커를 아시면 여기에 입력하세요(예: NVDA). 모르면 비워두고 아래 종목명만 입력해도 됩니다."
+            ),
+        )
+        if name_lookup_on:
+            stock_name = st.text_input(
+                "종목명 (코드 모르면 이곳에 입력 — 자동으로 찾아봅니다)",
+                key="scorecard_name",
+                placeholder="예: NVIDIA",
             )
-        with col2:
-            ticker = st.text_input(
-                "종목코드 / 티커",
-                key="scorecard_ticker",
-                help="한국은 6자리 종목코드(예: 005930), 미국은 티커(예: NVDA)를 입력하세요.",
+        else:
+            stock_name = st.text_input(
+                "종목명 (선택, 표시용)",
+                key="scorecard_name",
+                placeholder="예: 삼성전자",
+                help="여기는 표시용 이름일 뿐입니다 — 한국 주식은 위 종목코드 칸에 실제 코드를 입력해야 합니다.",
             )
-            stock_name = st.text_input("종목명 (선택)", key="scorecard_name")
-        col3, col4 = st.columns(2)
-        with col3:
-            quantity = st.number_input(
-                "수량", min_value=0.0, value=0.0, step=1.0, format="%.6f",
-                key="scorecard_qty",
-            )
-        with col4:
-            price = st.number_input(
-                "매입가 (1주당)", min_value=0.0, value=0.0, step=1.0, format="%.6f",
-                key="scorecard_price",
-                help="총 매입금액이 아니라 **1주당 매입 단가**입니다.",
-            )
-        submitted = st.form_submit_button("➕ 추가 / 평균단가 재계산")
+    col3, col4 = st.columns(2)
+    with col3:
+        quantity_raw = st.text_input(
+            "수량", key="scorecard_qty", placeholder="예: 10",
+        )
+    with col4:
+        price_raw = st.text_input(
+            "매입가 (1주당)", key="scorecard_price", placeholder="예: 70,000",
+            help="총 매입금액이 아니라 **1주당 매입 단가**입니다. 콤마(,)를 넣어 입력해도 됩니다.",
+        )
+    submitted = st.button("➕ 추가 / 평균단가 재계산", key="scorecard_add_btn")
 
     if not submitted:
         return False
-    if not ticker.strip():
-        st.error("🚫 종목코드/티커를 입력해 주세요.")
+
+    ticker_input = ticker.strip()
+    name_input = stock_name.strip()
+    resolved_ticker = None
+    resolved_name = None
+    lookup_note = None
+
+    if ticker_input:
+        if market == MARKET_KR and not _KR_TICKER_LIKE.fullmatch(ticker_input.upper()):
+            st.error(
+                "🚫 종목코드 칸에는 6자리 코드(예: 005930)를 입력해 주세요. "
+                "종목명(예: 삼성전자)을 여기 넣으면 코드로 인식되지 않아 계속 '현재가 없음'으로 남습니다."
+            )
+            return False
+        resolved_ticker = ticker_input
+        resolved_name = name_input or None
+    elif name_input and name_lookup_on:
+        found_ticker, found_name, reason = find_ticker_by_name(market, name_input, indexes)
+        if not found_ticker:
+            st.error(f"🚫 종목코드를 찾지 못했습니다 — {reason}")
+            return False
+        resolved_ticker = found_ticker
+        resolved_name = found_name
+        lookup_note = f"'{name_input}' → {found_name} ({found_ticker}) 로 인식했습니다."
+    elif name_input and not name_lookup_on:
+        st.error(
+            "🚫 한국 주식은 종목명만으로 찾을 수 없습니다 — 종목코드(6자리, 예: 005930)를 "
+            "직접 입력해 주세요."
+        )
         return False
-    if quantity <= 0:
-        st.error("🚫 수량은 0보다 커야 합니다.")
+    else:
+        st.error("🚫 종목코드(또는 미국 주식은 종목명)를 입력해 주세요.")
         return False
+
+    try:
+        quantity = _parse_positive_number(quantity_raw, "수량")
+        price = _parse_positive_number(price_raw, "매입가")
+    except ValueError as exc:
+        st.error(f"🚫 {exc}")
+        return False
+
     try:
         action, merged = add_lot(
-            client, user_id, market, ticker, quantity, price,
-            stock_name=stock_name, holdings=holdings,
+            client, user_id, market, resolved_ticker, quantity, price,
+            stock_name=resolved_name, holdings=holdings,
         )
     except (ScorecardError, ValueError) as exc:
         st.error(f"🚫 저장하지 못했습니다: {exc}")
         return False
 
     currency = merged["currency"]
+    prefix = f"ℹ️ {lookup_note}\n\n" if lookup_note else ""
     if action == "merge":
         st.success(
-            f"✅ 기존 보유분과 합쳐 평균단가를 다시 계산했습니다 — "
+            f"{prefix}✅ 기존 보유분과 합쳐 평균단가를 다시 계산했습니다 — "
             f"{merged['ticker']} {merged['quantity']:,.6g}주 / "
             f"평균 {format_amount(merged['avg_purchase_price'], currency)}"
         )
     else:
-        st.success(f"✅ {merged['ticker']} 을(를) 추가했습니다.")
+        st.success(f"{prefix}✅ {merged['ticker']} 을(를) 추가했습니다.")
+    _reset_input_fields()
     return True
 
 
@@ -304,6 +395,28 @@ def _render_currency_block(client, user_id, group, indexes):
             "비중": f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—",
         })
     st.dataframe(table, use_container_width=True, hide_index=True)
+
+    # ---- 삭제 -----------------------------------------------------------------
+    # 2026-08-11: 예전엔 이 화면 맨 아래(밸류에이션 카드 다음)에 접혀 있어 눈에 잘 안
+    # 띄었습니다("잘못 입력한 걸 고칠 방법이 없다"는 실사용 피드백) — 표 바로 아래로 옮기고
+    # 기본으로 펼쳐둡니다.
+    labels_for_delete = {_row_label(r): r for r in rows}
+    with st.expander("🗑️ 잘못 입력한 종목 삭제", expanded=True):
+        target = st.selectbox(
+            "삭제할 종목", list(labels_for_delete.keys()), key=f"scorecard_del_{currency}",
+        )
+        if st.button("삭제", key=f"scorecard_del_btn_{currency}"):
+            row_to_delete = labels_for_delete[target]
+            if not row_to_delete.get("id"):
+                st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
+            else:
+                try:
+                    delete_holding(client, user_id, row_to_delete["id"])
+                except ScorecardError as exc:
+                    st.error(f"🚫 {exc}")
+                else:
+                    st.success("✅ 삭제했습니다.")
+                    st.rerun()
 
     # ---- 원형차트 2종 --------------------------------------------------------
     priced = [r for r in rows if r["price_available"]]
@@ -393,24 +506,6 @@ def _render_currency_block(client, user_id, group, indexes):
                 for issue in summary["data_issues"]:
                     st.markdown(f"- {issue}")
 
-    # ---- 삭제 ----------------------------------------------------------------
-    with st.expander("🗑️ 보유 종목 삭제"):
-        target = st.selectbox(
-            "삭제할 종목", list(labels.keys()), key=f"scorecard_del_{currency}",
-        )
-        if st.button("삭제", key=f"scorecard_del_btn_{currency}"):
-            row_to_delete = labels[target]
-            if not row_to_delete.get("id"):
-                st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
-            else:
-                try:
-                    delete_holding(client, user_id, row_to_delete["id"])
-                except ScorecardError as exc:
-                    st.error(f"🚫 {exc}")
-                else:
-                    st.success("✅ 삭제했습니다.")
-                    st.rerun()
-
 
 # =============================================================================
 # 4. 메인 렌더러
@@ -467,17 +562,19 @@ def render_scorecard_page():
         st.error(f"🚫 {exc}")
         return
 
-    if _render_input_form(client, user_id, holdings):
+    # 기존 스냅샷(읽기 전용) 로드 — 현재가·밸류에이션의 유일한 출처이자, 입력 폼의
+    # "종목명으로 찾기"(미국 주식 한정)에도 쓰이므로 입력 폼을 그리기 전에 먼저 불러옵니다.
+    kr_index, kr_meta = load_universe_index(MARKET_KR)
+    us_index, us_meta = load_universe_index(MARKET_US)
+    indexes = {MARKET_KR: kr_index, MARKET_US: us_index}
+
+    if _render_input_form(client, user_id, holdings, indexes):
         st.rerun()
 
     if not holdings:
         st.info("아직 등록한 보유 종목이 없습니다. 위 입력창에서 추가해 주세요.")
         return
 
-    # 기존 스냅샷(읽기 전용) 로드 — 현재가·밸류에이션의 유일한 출처입니다.
-    kr_index, kr_meta = load_universe_index(MARKET_KR)
-    us_index, us_meta = load_universe_index(MARKET_US)
-    indexes = {MARKET_KR: kr_index, MARKET_US: us_index}
     stamps = []
     if kr_meta and kr_meta.get("last_updated_at"):
         stamps.append(f"한국 {kr_meta['last_updated_at']}")

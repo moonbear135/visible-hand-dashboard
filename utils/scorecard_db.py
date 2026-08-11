@@ -472,6 +472,44 @@ def load_universe_index(market, data_dir=None):
     return build_universe_index(payload, market), payload.get("metadata")
 
 
+def find_ticker_by_name(market, name, indexes):
+    """
+    2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
+
+    ⚠️ §0-1(지어내지 않기): 정확히 일치하는 종목이 **하나뿐**이면 그걸 쓰고, 그렇지 않으면
+    (0개 또는 여러 개) 절대 추측하지 않고 이유와 함께 실패를 돌려줍니다. 정확 일치가 없으면
+    부분 일치를 시도하되, 그 결과도 **유일할 때만** 채택합니다(기존 `krx_openapi.py`의
+    지수명 매칭과 동일한 원칙 — 정확일치 → 유일한 부분일치 → 그 외엔 후보를 보여주고 포기).
+
+    반환: (ticker 또는 None, matched_name 또는 None, reason 또는 None)
+    """
+    market_code = normalize_market(market)
+    query = str(name or "").strip()
+    if not query:
+        return None, None, "종목명이 비어 있습니다."
+
+    index = indexes.get(market_code) or {}
+    exact = [(key, stock) for key, stock in index.items()
+             if str(stock.get("name", "")).strip() == query]
+    if len(exact) == 1:
+        key, stock = exact[0]
+        return key, stock.get("name"), None
+    if len(exact) > 1:
+        return None, None, "같은 이름의 종목이 여러 개 있습니다 — 종목코드를 직접 입력해 주세요."
+
+    partial = [(key, stock) for key, stock in index.items()
+               if query in str(stock.get("name", ""))]
+    if len(partial) == 1:
+        key, stock = partial[0]
+        return key, stock.get("name"), None
+    if len(partial) > 1:
+        names = sorted({str(stock.get("name", "")) for _, stock in partial})
+        return None, None, "이름이 비슷한 종목이 여러 개 있어 특정할 수 없습니다: " + ", ".join(names[:10])
+
+    universe_label = "코스피 시가총액 상위 200" if market_code == MARKET_KR else "미국 시가총액 상위 550"
+    return None, None, f"이 이름과 일치하는 종목을 찾지 못했습니다({universe_label} 유니버스 밖일 수 있음)."
+
+
 def make_price_lookup(indexes):
     """
     build_portfolio 에 넘길 현재가 조회 함수를 만듭니다.

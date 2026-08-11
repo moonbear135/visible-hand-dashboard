@@ -53,6 +53,7 @@ from utils.scorecard_db import (  # noqa: E402
     evaluate_holding,
     fetch_holdings,
     find_holding,
+    find_ticker_by_name,
     format_amount,
     insert_holding,
     load_universe_index,
@@ -414,6 +415,56 @@ def test_universe_lookup():
 
 
 # =============================================================================
+# 4-1. 종목명으로 티커 찾기 (2026-08-11, 오너 실사용 피드백)
+# =============================================================================
+def test_name_lookup():
+    print("\n[4-1] 종목명으로 티커 찾기 — §0-1(정확 일치 → 유일한 부분일치 → 그 외엔 포기)")
+    kr_index = build_universe_index(SYNTHETIC_KR_SNAPSHOT, MARKET_KR)
+    us_index = build_universe_index(SYNTHETIC_US_SNAPSHOT, MARKET_US)
+    indexes = {MARKET_KR: kr_index, MARKET_US: us_index}
+
+    ticker, name, reason = find_ticker_by_name(MARKET_KR, "합성전자", indexes)
+    check(ticker == "005930" and name == "합성전자" and reason is None, "정확히 일치하면 그 종목")
+
+    ticker, name, reason = find_ticker_by_name(MARKET_US, "Fake", indexes)
+    check(ticker == "FAKE" and reason is None, "부분 일치가 유일하면 그 종목으로 채택")
+
+    ticker, name, reason = find_ticker_by_name(MARKET_KR, "존재하지않는이름", indexes)
+    check(ticker is None and name is None and reason, "일치하는 게 없으면 None + 이유(추측 안 함)")
+
+    ticker, name, reason = find_ticker_by_name(MARKET_KR, "", indexes)
+    check(ticker is None and "비어" in (reason or ""), "빈 이름은 즉시 실패")
+
+    # 부분 일치인데 여러 개 걸리는 경우 — 절대 아무거나 골라잡지 않는지
+    # (쿼리와 완전히 일치하는 항목은 하나도 없어야 '부분 일치' 분기까지 내려갑니다)
+    dup_snapshot = {
+        "metadata": {}, "stocks": [
+            {"name": "겹치는이름공통A", "code": "111111", "price": 1000.0},
+            {"name": "겹치는이름공통B", "code": "222222", "price": 2000.0},
+        ],
+    }
+    dup_index = build_universe_index(dup_snapshot, MARKET_KR)
+    ticker, name, reason = find_ticker_by_name(
+        MARKET_KR, "겹치는이름공통", {MARKET_KR: dup_index, MARKET_US: {}}
+    )
+    check(ticker is None and "여러 개" in (reason or ""),
+          "부분 일치가 여러 개면 추측하지 않고 명시적으로 실패")
+
+    exact_dup_snapshot = {
+        "metadata": {}, "stocks": [
+            {"name": "완전동일이름", "code": "333333", "price": 1000.0},
+            {"name": "완전동일이름", "code": "444444", "price": 2000.0},
+        ],
+    }
+    exact_dup_index = build_universe_index(exact_dup_snapshot, MARKET_KR)
+    ticker, name, reason = find_ticker_by_name(
+        MARKET_KR, "완전동일이름", {MARKET_KR: exact_dup_index, MARKET_US: {}}
+    )
+    check(ticker is None and "여러 개" in (reason or ""),
+          "완전 일치도 여러 개면 골라잡지 않음")
+
+
+# =============================================================================
 # 5. 포트폴리오 계산 (비중 / 수익 비중 / 현재가 결측)
 # =============================================================================
 def test_portfolio():
@@ -720,6 +771,16 @@ def test_view_and_routing():
           "Supabase 클라이언트를 캐시하지 않음(세션 공유 사고 방지)")
     check("st.session_state" in view_src, "클라이언트/세션은 st.session_state 에 보관")
     check(not re.search(r"open\([^)]*['\"]w", view_src), "화면 코드가 파일을 쓰지 않음(읽기 전용)")
+
+    # 2026-08-11 오너 실사용 피드백 반영 회귀 방지 -----------------------------
+    check('st.form("scorecard_add_form")' not in view_src,
+          "보유종목 입력은 더 이상 st.form 을 안 씀(Enter 키 오submit 방지)")
+    check('st.button("➕ 추가 / 평균단가 재계산"' in view_src,
+          "입력은 명시적 버튼 클릭으로만 제출됨")
+    check("_reset_input_fields" in view_src, "추가 성공 후 입력창을 비우는 로직 존재")
+    check("find_ticker_by_name" in view_src, "종목명으로 티커 찾기 연동")
+    check("NAME_LOOKUP_MARKETS = {MARKET_US}" in view_src,
+          "종목명 자동조회는 미국 주식 전용(한국은 코드 직접 입력)")
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,
@@ -761,6 +822,42 @@ def test_view_and_routing():
             os.environ["SCORECARD_ENABLED"] = "1"
             importlib.reload(module)
             check(module.is_scorecard_enabled() is True, "플래그를 켜면 활성화됨")
+
+            # 2026-08-11 오너 실사용 피드백 반영분 — UI 헬퍼 단위 검증 -----------
+            check(module._parse_positive_number("1,664,333", "매입가") == 1664333.0,
+                  "콤마 섞인 숫자 입력도 파싱됨")
+            check(module._parse_positive_number(" 10 ", "수량") == 10.0,
+                  "앞뒤 공백은 무시하고 파싱")
+            expect_raises(lambda: module._parse_positive_number("", "수량"), ValueError,
+                          "빈 값은 예외(0으로 채우지 않음)")
+            expect_raises(lambda: module._parse_positive_number("하이닉스", "매입가"), ValueError,
+                          "숫자가 아닌 값은 예외")
+            expect_raises(lambda: module._parse_positive_number("0", "수량"), ValueError,
+                          "0은 거부(수량·매입가 모두 0보다 커야 함)")
+            expect_raises(lambda: module._parse_positive_number("-5", "수량"), ValueError,
+                          "음수는 거부")
+
+            check(bool(module._KR_TICKER_LIKE.fullmatch("005930")), "6자리 숫자 코드는 코드로 인정")
+            check(bool(module._KR_TICKER_LIKE.fullmatch("00680K")), "영숫자 우선주 코드도 코드로 인정")
+            check(not module._KR_TICKER_LIKE.fullmatch("하이닉스"),
+                  "한글 종목명은 코드 형식으로 인정하지 않음(오너가 겪은 실사용 버그 재현 방지)")
+            check(not module._KR_TICKER_LIKE.fullmatch("삼성전자우"),
+                  "한글 종목명(우선주 포함)도 코드로 인정하지 않음")
+
+            check(module.NAME_LOOKUP_MARKETS == {module.MARKET_US},
+                  "종목명 자동조회 대상 시장은 미국뿐")
+
+            fake_state = {"scorecard_ticker": "005930", "scorecard_name": "삼성전자",
+                          "scorecard_qty": "10", "scorecard_price": "70000",
+                          "scorecard_market": module.MARKET_KR}
+            module.st.session_state = fake_state
+            module._reset_input_fields()
+            check(
+                all(k not in fake_state
+                    for k in ("scorecard_ticker", "scorecard_name", "scorecard_qty", "scorecard_price")),
+                "추가 성공 후 입력 필드 4개가 session_state 에서 지워짐(다음 입력이 이어붙지 않게)",
+            )
+            check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
         finally:
             _restore_env(saved_env)
             importlib.reload(module)
@@ -797,6 +894,7 @@ def main():
     test_weighted_average()
     test_currency_separation()
     test_universe_lookup()
+    test_name_lookup()
     test_portfolio()
     test_supabase_fallback()
     test_crud_with_fake_client()
