@@ -10,6 +10,12 @@ lxml
 schedule
 bcrypt
 
+# 2026-08-11 — 📊 "내 성적표" 모듈(3번째 모듈, 스테이징)용 Supabase 클라이언트.
+# 이 패키지가 없어도 앱은 정상 작동합니다: utils/scorecard_db.py 가 try/except ImportError
+# 로 감싸고 있어, 없으면 "내 성적표" 화면만 "준비중" 안내를 띄우고 기존 두 모듈
+# (한국/미국 밸류에이션)은 아무 영향 없이 그대로 돕니다.
+supabase
+
 # 2026-08-10 (TASK_HISTORY #70) — KRX OPEN API 연동에 **새 의존성을 추가하지 않았습니다.**
 # 후보였던 `pykrx-openapi`(PyPI)의 소스를 직접 읽고 비교한 결과, ① 인증키를 공식 규격(HTTP
 # 헤더 AUTH_KEY)이 아니라 쿼리스트링에 실어 보내고(키가 URL·로그에 남음), ② 우리가 쓰는 건

@@ -84,6 +84,20 @@ from views.pegy_view import render_pegy_page
 from views.us_stocks_view import render_us_stocks_page
 from utils.scheduler import start_scheduler_thread
 
+# 📊 "내 성적표"(3번째 모듈)는 2026-08-11 신설된 **스테이징 상태** 화면입니다
+# (ENGINEERING_SPEC.md §0-3-6 — 오너 승인 전까지 공개 메뉴에 노출하지 않음).
+# 아래 import 를 try/except 로 감싼 이유: 이 모듈은 선택적 의존성(supabase 패키지)과
+# 엮여 있어서, 어떤 이유로든 로드에 실패하더라도 **기존 두 공개 화면은 반드시 살아있어야**
+# 하기 때문입니다. 실패를 조용히 삼키지 않도록 실패 사유는 보관해뒀다가
+# 관리자 모드 사이드바에만 표시합니다(일반 방문자 화면은 예전과 100% 동일).
+try:
+    from views.scorecard_view import is_scorecard_visible, render_scorecard_page
+    SCORECARD_IMPORT_ERROR = None
+except Exception as _scorecard_import_exc:  # noqa: BLE001
+    is_scorecard_visible = None
+    render_scorecard_page = None
+    SCORECARD_IMPORT_ERROR = str(_scorecard_import_exc)
+
 @st.cache_resource
 def init_background_jobs():
     start_scheduler_thread()
@@ -146,10 +160,30 @@ def main():
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
 
+    # 3-1. 📊 내 성적표 (스테이징, 2026-08-11 신설)
+    #      ⚠️ 기본값은 **숨김**입니다. 아래 두 경우에만 사이드바에 진입 체크박스가 생깁니다.
+    #         ① 관리자 인증 상태(미리보기)  ② SCORECARD_ENABLED 플래그를 명시적으로 켠 경우
+    #      일반 방문자에게는 메뉴 자체가 보이지 않으므로 공개 화면 동작은 예전과 100% 동일합니다.
+    #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영)
+    show_scorecard = False
+    if render_scorecard_page is not None and is_scorecard_visible(admin_mode):
+        st.sidebar.markdown("---")
+        show_scorecard = st.sidebar.checkbox(
+            "📊 내 성적표 (준비중 · 미리보기)",
+            key="view_scorecard",
+            help="내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보는 신규 모듈입니다. "
+                 "오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
+        )
+    elif admin_mode and SCORECARD_IMPORT_ERROR:
+        # 실패를 조용히 삼키지 않되(§0-1), 일반 방문자 화면은 건드리지 않습니다.
+        st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
+
     # 4. 메인 뷰 라우팅
     #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
     #    ⚠️ 매크로 화면은 여전히 관리자 인증 후에만 진입 가능합니다 — 이번 메뉴 개편과 무관합니다.
-    if selected_market == MARKET_US:
+    if show_scorecard:
+        render_scorecard_page()
+    elif selected_market == MARKET_US:
         render_us_stocks_page()
     elif admin_mode and st.session_state.get("admin_view_macro"):
         render_macro_page()
