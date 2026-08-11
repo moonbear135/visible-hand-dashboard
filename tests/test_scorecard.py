@@ -417,6 +417,46 @@ def test_universe_lookup():
 
 
 # =============================================================================
+# 4-0-1. 코스피+코스닥+ETF 전체 상장종목 마스터 목록 (2026-08-11, TASK_HISTORY #83)
+# =============================================================================
+def test_kr_ticker_master():
+    print("\n[4-0-1] 전체 상장종목 마스터 목록 — load_kr_ticker_master (가격 없이 이름↔코드만)")
+    synthetic_master = {
+        "metadata": {"generated_at": "2026-08-11 16:05", "count": 3,
+                      "source": "FinanceDataReader StockListing('KRX') + StockListing('ETF/KR')"},
+        "stocks": [
+            {"code": "005380", "name": "합성모터스", "market": "KOSPI", "type": "STOCK"},
+            {"code": "247540", "name": "합성코스닥종목", "market": "KOSDAQ", "type": "STOCK"},
+            {"code": "069500", "name": "합성ETF200", "market": "KOSPI", "type": "ETF"},
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "kr_ticker_master.json"), "w", encoding="utf-8") as f:
+            json.dump(synthetic_master, f, ensure_ascii=False)
+
+        master_index, master_meta = sdb.load_kr_ticker_master(data_dir=tmp)
+        check(set(master_index.keys()) == {"005380", "247540", "069500"},
+              "코드 3개(코스피 주식/코스닥 주식/ETF) 전부 인덱싱됨")
+        check(master_index["069500"]["type"] == "ETF", "ETF도 type 필드와 함께 포함됨(오너 요청)")
+        check(master_index["247540"]["market"] == "KOSDAQ", "코스닥 종목도 포함됨(오너 요청)")
+        check("price" not in master_index["005380"] or master_index["005380"].get("price") is None,
+              "가격 필드가 없음 — 이 목록은 이름↔코드 조회 전용, 밸류에이션 출처가 아님")
+        check(master_meta.get("count") == 3, "metadata 도 함께 반환")
+
+        empty_index, empty_meta = sdb.load_kr_ticker_master(data_dir=os.path.join(tmp, "없음"))
+        check(empty_index == {} and empty_meta is None,
+              "파일이 아직 없으면(다음 자동 수집 전) 에러 대신 빈 dict — 화면은 정상 작동")
+
+    # 저장소에 실제 파일이 아직 없을 수 있습니다(이번 세션에서 신설 — 다음 자동 수집 후 생성).
+    # 있으면 개수만 참고로 출력하고, 없어도 실패로 치지 않습니다(collector가 그렇게 설계됨).
+    real_master, real_meta = sdb.load_kr_ticker_master()
+    if real_master:
+        print(f"  ℹ️ 저장소에 이미 kr_ticker_master.json 존재 — {len(real_master)}건")
+    else:
+        print("  ℹ️ 저장소에 kr_ticker_master.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
+
+
+# =============================================================================
 # 4-1. 종목명으로 티커 찾기 (2026-08-11, 오너 실사용 피드백)
 # =============================================================================
 def test_name_lookup():
@@ -520,6 +560,49 @@ def test_resolve_stock_query():
     )
     check(ticker is None and "여러 개" in (reason or ""),
           "이름이 여러 종목과 겹치면(코드 형식도 아니므로) 추측하지 않고 실패")
+
+    # -- broad_index (2026-08-11, TASK_HISTORY #83) — 상위 200 밖(코스닥·ETF 포함) 종목 --
+    broad_snapshot = {
+        "metadata": {}, "stocks": [
+            {"code": "005380", "name": "합성모터스", "market": "KOSPI", "type": "STOCK"},
+            {"code": "069500", "name": "합성ETF200", "market": "KOSPI", "type": "ETF"},
+            {"code": "111111", "name": "겹치는이름", "market": "KOSDAQ", "type": "STOCK"},
+            {"code": "222222", "name": "겹치는이름", "market": "KOSDAQ", "type": "STOCK"},
+        ],
+    }
+    broad_index = build_universe_index(broad_snapshot, MARKET_KR)
+
+    # 005380은 앞서(line 497 부근) broad_index 없이는 이름을 모른 채(코드만) 채택됐던 코드.
+    # 이제 broad_index를 넘기면 같은 코드라도 이름까지 알아냅니다.
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "005380", indexes, broad_index=broad_index)
+    check(ticker == "005380" and name == "합성모터스" and reason is None,
+          "상위 200 밖 코드도 broad_index에 있으면 이름까지 알아냄(코드 직접 일치)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "합성모터스", indexes, broad_index=broad_index)
+    check(ticker == "005380" and name == "합성모터스" and reason is None,
+          "상위 200 밖 종목도 broad_index 안에서는 이름만으로 찾을 수 있음")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "합성ETF200", indexes, broad_index=broad_index)
+    check(ticker == "069500" and name == "합성ETF200" and reason is None,
+          "ETF도 이름으로 찾을 수 있음(오너 요청 — \"ETF까지 포함해야하니까\")")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "겹치는이름", indexes, broad_index=broad_index)
+    check(ticker is None and "여러 개" in (reason or ""),
+          "broad_index 안에서도 이름이 여러 개면 추측하지 않고 실패")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "존재하지않는이름", indexes, broad_index=broad_index)
+    check(ticker is None and "코스피·코스닥·국내ETF 전체" in (reason or ""),
+          "broad_index까지 다 뒤졌는데도 없으면 '상위 200 밖일 수도'가 아니라 "
+          "더 정확한 문구로 실패 이유를 알려줌(이미 훨씬 넓게 찾아봤으므로)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "999000", indexes, broad_index=broad_index)
+    check(ticker == "999000" and name is None,
+          "broad_index에도 없지만 코드 형식이면(정말 아무 목록에도 없는 신규상장 등) "
+          "여전히 코드 그대로 채택됨(기존 동작 유지)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "005380", indexes, broad_index=None)
+    check(ticker == "005380" and name is None,
+          "broad_index를 안 넘기면(기존 호출부) 예전과 완전히 동일하게 동작(하위 호환)")
 
 
 # =============================================================================
@@ -892,6 +975,15 @@ def test_view_and_routing():
           "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐")
     check("scorecard_picker_{market}" in view_src,
           "빠른 검색 키가 시장별로 분리됨(한국/미국 선택 바뀔 때 후보 목록도 같이 바뀜)")
+    check("@media (max-width: 640px)" in view_src and "overflow-x: auto" in view_src,
+          "좁은 화면(모바일)에서 표가 세로로 쌓여 깨지는 대신 가로 스크롤로 유지됨(2026-08-11 오너 지적)")
+    check("_row_label_html" in view_src and "<br>" in view_src,
+          "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
+    check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,
+          "코스피 상위 200 밖(코스닥·ETF 포함) 종목도 이름으로 찾는 전체 상장종목 목록 연동"
+          "(2026-08-11, TASK_HISTORY #83)")
+    check("broad_index=broad_kr_index if market == MARKET_KR else None" in view_src,
+          "전체 상장종목 목록은 한국에서만 쓰임(미국은 아직 상위 550까지만)")
     check("NAME_LOOKUP_MARKETS" not in view_src,
           "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
     check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
@@ -1031,6 +1123,7 @@ def main():
     test_weighted_average()
     test_currency_separation()
     test_universe_lookup()
+    test_kr_ticker_master()
     test_name_lookup()
     test_resolve_stock_query()
     test_portfolio()

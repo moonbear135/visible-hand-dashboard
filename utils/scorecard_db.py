@@ -506,6 +506,33 @@ def load_universe_index(market, data_dir=None):
     return build_universe_index(payload, market), payload.get("metadata")
 
 
+KR_TICKER_MASTER_FILENAME = "kr_ticker_master.json"
+
+
+def load_kr_ticker_master(data_dir=None):
+    """
+    2026-08-11 오너 요청(TASK_HISTORY #83) — 코스피 상위 200 밖(코스닥·ETF 포함) 종목도
+    이름으로 찾을 수 있게 하는 보조 조회용 전체 상장종목 코드↔이름 목록을 읽습니다.
+
+    ⚠️ **가격·밸류에이션 정보가 전혀 없습니다** — 그래서 `valuation_summary()`/
+    `make_price_lookup()`이 참조하는 `indexes`(상위 200/550 스냅샷)와는 **의도적으로 분리**된
+    별도 구조입니다. 여기 담긴 종목을 그 두 함수에 섞어 넣으면 "밸류에이션 정보 없음"이라는
+    정직한 메시지 대신 빈 값투성이인데 "찾음"으로 잘못 표시될 위험이 있어, `resolve_stock_query()`의
+    이름/코드 조회 용도로만 별도로 씁니다.
+
+    (index, metadata) 반환 — `load_universe_index()`와 같은 형태. 파일이 없으면(아직 수집
+    전, 또는 이번 수집에서 실패) 에러가 아니라 빈 dict — 이 보조 기능만 조용히 비활성화되고
+    나머지 화면은 그대로 정상 작동합니다.
+    """
+    directory = data_dir or default_data_dir()
+    path = os.path.join(directory, KR_TICKER_MASTER_FILENAME)
+    if not os.path.exists(path):
+        return {}, None
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return build_universe_index(payload, MARKET_KR), (payload or {}).get("metadata")
+
+
 def find_ticker_by_name(market, name, indexes):
     """
     2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
@@ -551,19 +578,28 @@ KR_TICKER_LIKE = re.compile(r"[0-9][0-9A-Za-z]{0,5}$")
 US_TICKER_LIKE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{0,9}$")
 
 
-def resolve_stock_query(market, query, indexes):
+def resolve_stock_query(market, query, indexes, broad_index=None):
     """
     2026-08-11 오너 요청 — "종목코드/티커/종목명이 전부 한 입력창에서 다 되게" 해달라는 실사용
     피드백 반영. 사용자가 코드를 입력했든 이름을 입력했든 이 함수 하나로 알아서 찾습니다.
 
+    `broad_index`: (2026-08-11, TASK_HISTORY #83 신설) 코스피 상위 200/미국 상위 550 밸류에이션
+    유니버스 **밖**의 종목도 이름으로 찾게 해주는 보조 목록(`load_kr_ticker_master()`, 현재는
+    한국만 — 코스피+코스닥+ETF). 가격·밸류에이션은 없고 이름↔코드만 있습니다. 안 넘기면(None)
+    이 단계는 그냥 건너뛰고 기존 동작과 완전히 동일합니다(하위 호환).
+
     순서(모두 §0-1: 추측하지 않고, 확실할 때만 채택):
-      1) 코드로 바로 해석해서 **유니버스(스냅샷) 안에 있으면** 그 종목으로 확정 — 가장 확실한 경로.
-      2) 실패하면 이름으로 찾습니다(`find_ticker_by_name`) — 정확일치 → 유일한 부분일치만 채택.
-      3) 그것도 실패했는데 입력이 "코드처럼 생긴 형식"이면, 유니버스 밖 종목의 코드를 직접 입력한
-         것으로 보고 **코드 자체는 그대로 받아들입니다**(이름은 모름 → None). 나중에 화면에서
-         "현재가 없음"으로 정직하게 표시됩니다 — 이 프로젝트는 코스피 상위200/미국 상위550만
-         추적하므로 그 밖의 종목도 보유 기록 자체는 남길 수 있어야 합니다.
-      4) 코드처럼도 안 생기고 이름으로도 못 찾으면 포기하고 이유를 돌려줍니다(지어내지 않음).
+      1) 코드로 바로 해석해서 **밸류에이션 유니버스(상위200/550) 안에 있으면** 그 종목으로 확정
+         — 가장 확실한 경로(현재가까지 아는 종목).
+      2) 실패하면 그 유니버스 안에서 이름으로 찾습니다(`find_ticker_by_name`) — 정확일치 →
+         유일한 부분일치만 채택.
+      3) 그것도 실패했는데 `broad_index`(전체 상장종목 목록)가 주어졌으면, 거기서 코드 직접
+         일치 → 이름 일치(마찬가지로 정확일치 → 유일한 부분일치) 순으로 찾습니다. 여기서
+         찾아도 **가격은 여전히 모릅니다** — 화면에는 그대로 "현재가 없음"으로 표시됩니다.
+         이 단계는 "종목 자체가 뭔지"만 정직하게 확인해줄 뿐입니다.
+      4) 그마저 실패했는데 입력이 "코드처럼 생긴 형식"이면, 아무 목록에도 없는 종목의 코드를
+         직접 입력한 것으로 보고 **코드 자체는 그대로 받아들입니다**(이름은 모름 → None).
+      5) 코드처럼도 안 생기고 어디서도 못 찾으면 포기하고 이유를 돌려줍니다(지어내지 않음).
 
     반환: (ticker 또는 None, 종목명 또는 None, 실패 이유 또는 None)
     """
@@ -585,6 +621,24 @@ def resolve_stock_query(market, query, indexes):
     found_ticker, found_name, name_reason = find_ticker_by_name(market_code, text, indexes)
     if found_ticker:
         return found_ticker, found_name, None
+
+    if broad_index:
+        if candidate and candidate in broad_index:
+            stock = broad_index[candidate]
+            return candidate, stock.get("name"), None
+        broad_ticker, broad_name, broad_reason = find_ticker_by_name(
+            market_code, text, {market_code: broad_index}
+        )
+        if broad_ticker:
+            return broad_ticker, broad_name, None
+        if broad_reason and "여러 개" in broad_reason:
+            # 모호한 경우(같은 이름 여러 개)는 그대로 전달 — 사용자에게 유용한 정보입니다.
+            name_reason = broad_reason
+        else:
+            # find_ticker_by_name()의 기본 실패 문구는 "상위 200/550 유니버스 밖일 수 있음"인데,
+            # 이미 그 유니버스보다 훨씬 넓은 전체 상장종목 목록까지 확인한 뒤라 그대로 쓰면
+            # 오히려 덜 뒤져본 것처럼 오해를 줍니다 — 더 정확한 문구로 바꿉니다.
+            name_reason = "코스피·코스닥·국내ETF 전체 상장종목에서도 이 이름과 일치하는 종목을 찾지 못했습니다."
 
     looks_like_code = bool(candidate) and (
         KR_TICKER_LIKE.fullmatch(candidate) if market_code == MARKET_KR

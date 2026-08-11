@@ -445,6 +445,89 @@ def test_value_round_trip():
     check(to_display_value("n/a", "num") == "n/a", "숫자로 못 바꾸면 값을 버리지 않고 원문 유지")
 
 
+def test_kr_ticker_master_collector():
+    print("\n[4-1] 코스피+코스닥+ETF 전체 상장종목 마스터 목록 수집기 "
+          "(2026-08-11, TASK_HISTORY #83 — 실제 함수 호출)")
+    import collector_kospi200 as K
+    import pandas as pd
+
+    def _fake_stock_listing(market_key):
+        if market_key == "KRX":
+            return pd.DataFrame([
+                {"Code": "005930", "Name": "삼성전자", "Market": "KOSPI"},
+                {"Code": "247540", "Name": "코스닥종목", "Market": "KOSDAQ"},
+            ])
+        if market_key == "ETF/KR":
+            return pd.DataFrame([
+                {"Code": "069500", "Name": "KODEX 200", "Market": "KOSPI"},
+            ])
+        raise ValueError(f"예상 못한 인자: {market_key}")
+
+    class _FakeFdr:
+        StockListing = staticmethod(_fake_stock_listing)
+
+    orig_has_fdr = K.HAS_FDR
+    orig_fdr = getattr(K, "fdr", None)
+    tmpdir = tempfile.mkdtemp()
+    try:
+        K.HAS_FDR = True
+        K.fdr = _FakeFdr()
+        result_path = K.run_kr_ticker_master_collector(data_dir=tmpdir)
+        check(result_path is not None, "정상 응답이면 파일 경로를 반환")
+
+        with open(result_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        stocks_by_code = {s["code"]: s for s in payload["stocks"]}
+        check(set(stocks_by_code) == {"005930", "247540", "069500"},
+              "StockListing('KRX') + StockListing('ETF/KR') 결과가 하나로 합쳐져 저장됨")
+        check(stocks_by_code["069500"]["type"] == "ETF" and stocks_by_code["005930"]["type"] == "STOCK",
+              "ETF/일반 주식 type 구분이 정확히 반영됨")
+        check(stocks_by_code["247540"]["market"] == "KOSDAQ", "코스닥 종목의 시장 구분도 보존됨")
+        check("price" not in stocks_by_code["005930"], "가격 필드는 아예 안 담음(밸류에이션 출처 아님)")
+        check(payload["metadata"]["count"] == 3, "metadata.count 가 실제 반영 건수와 일치")
+
+        # 컬럼 구조가 예상과 다른 경우(FDR API 변경 시뮬레이션) — 죽지 않고 그냥 건너뜀
+        class _BrokenFdr:
+            @staticmethod
+            def StockListing(market_key):
+                return pd.DataFrame([{"엉뚱한컬럼": "x"}])
+        K.fdr = _BrokenFdr()
+        broken_result = K.run_kr_ticker_master_collector(data_dir=tempfile.mkdtemp())
+        check(broken_result is None,
+              "컬럼 구조가 예상과 다르면(0건) 파일을 만들지 않고 조용히 None 반환(크래시 안 함)")
+
+        # FDR 자체가 예외를 던지는 경우(네트워크 장애 등)도 마찬가지
+        class _RaisingFdr:
+            @staticmethod
+            def StockListing(market_key):
+                raise RuntimeError("네트워크 장애 시뮬레이션")
+        K.fdr = _RaisingFdr()
+        raising_result = K.run_kr_ticker_master_collector(data_dir=tempfile.mkdtemp())
+        check(raising_result is None,
+              "FDR 호출 자체가 예외를 던져도 예외를 밖으로 던지지 않고 조용히 건너뜀"
+              "(핵심 수집을 막지 않음)")
+
+        # FinanceDataReader 미설치 상황
+        K.HAS_FDR = False
+        check(K.run_kr_ticker_master_collector(data_dir=tempfile.mkdtemp()) is None,
+              "FinanceDataReader 미설치 시에도 예외 없이 None 반환")
+    finally:
+        K.HAS_FDR = orig_has_fdr
+        if orig_fdr is not None:
+            K.fdr = orig_fdr
+        elif hasattr(K, "fdr"):
+            del K.fdr
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # 배선 확인: __main__ 에서 핵심 수집(run_kospi200_collector) '뒤에' 실행되고, try/except로
+    # 감싸져 있어 이 보조 기능이 실패해도 핵심 수집 결과에 영향이 없는지.
+    k_src = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
+    check(k_src.index("run_kospi200_collector()") < k_src.index("run_kr_ticker_master_collector()"),
+          "전체 상장종목 목록 수집은 핵심 수집(코스피 200) 뒤에 실행됨")
+    check("except Exception as e:" in k_src.split("run_kr_ticker_master_collector()")[1][:200],
+          "__main__ 에서 이 보조 수집을 try/except 로 감쌈(실패해도 핵심 수집 결과는 그대로)")
+
+
 def main():
     print("=" * 70)
     print("📈 종목별 시계열 이력 · 다운로드 오프라인 검증")
@@ -453,6 +536,7 @@ def main():
     test_row_from_real_snapshot()
     test_status_guard()
     test_collector_blocked_scenarios()
+    test_kr_ticker_master_collector()
     test_append_and_dedup()
     test_export_end_to_end()
     test_wiring()

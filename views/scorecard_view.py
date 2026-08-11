@@ -40,6 +40,7 @@ from utils.scorecard_db import (
     delete_holding,
     fetch_holdings,
     format_amount,
+    load_kr_ticker_master,
     load_universe_index,
     make_price_lookup,
     resolve_stock_query,
@@ -220,7 +221,7 @@ def _reset_input_fields():
 # =============================================================================
 # 2. 보유 종목 입력
 # =============================================================================
-def _render_input_form(client, user_id, holdings, indexes):
+def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
     st.markdown("#### ✍️ 보유 종목 입력")
     st.caption(
         "같은 종목을 여러 번 입력하면(증권사 계좌가 여러 개인 경우) 삭제·덮어쓰기가 아니라 "
@@ -244,18 +245,26 @@ def _render_input_form(client, user_id, holdings, indexes):
         # 2026-08-11 오너 요청 — "롯데까지만 쳐도 관련 종목이 좌르르 나오게" 해달라는 요청.
         # Streamlit selectbox는 클릭 후 타이핑하면 옵션을 그 자리에서 자동으로 필터링해주는
         # 내장 기능이 있어(별도 자바스크립트·API 호출 없이) 이걸로 "이름 일부만 쳐도 후보가
-        # 좌르르 나오는" 빠른 검색을 만듭니다. 유니버스(상위 200/550) 안 종목만 나오므로
-        # (§0-1: 모르는 종목을 지어내지 않음), 그 밖 종목은 아래 칸에 코드를 직접 입력하는
-        # 기존 방법이 그대로 남아있습니다 — 이 검색창은 어디까지나 "빠른 선택" 보조 수단.
+        # 좌르르 나오는" 빠른 검색을 만듭니다. 후보는 §0-1대로 실제 상장종목 목록에서만 뽑습니다.
+        # 한국은 코스피 상위 200 유니버스 + 전체 상장종목 마스터(코스피·코스닥·ETF, TASK_HISTORY
+        # #83)를 합쳐서 훨씬 넓게 찾을 수 있고, 미국은 아직 상위 550까지만(추가 마스터 목록 없음).
         picker_placeholder = "🔍 이름 일부만 쳐도 후보가 나옵니다 (선택하면 아래 칸에 자동 입력)"
         picker_key = f"scorecard_picker_{market}"
-        candidate_names = sorted({
+        candidate_names = {
             stock.get("name") for stock in (indexes.get(market) or {}).values()
             if stock.get("name")
-        })
+        }
+        if market == MARKET_KR and broad_kr_index:
+            candidate_names |= {
+                stock.get("name") for stock in broad_kr_index.values() if stock.get("name")
+            }
+        picker_scope_label = (
+            "코스피·코스닥·국내ETF 전체" if market == MARKET_KR and broad_kr_index
+            else "상위 200/550 종목만"
+        )
         picked = st.selectbox(
-            "종목 빠른 검색 (상위 200/550 종목만 — 그 밖은 아래 칸에 코드를 직접 입력)",
-            [picker_placeholder] + candidate_names,
+            f"종목 빠른 검색 ({picker_scope_label} — 그 밖은 아래 칸에 코드를 직접 입력)",
+            [picker_placeholder] + sorted(candidate_names),
             key=picker_key,
         )
         if picked != picker_placeholder:
@@ -287,7 +296,10 @@ def _render_input_form(client, user_id, holdings, indexes):
     if not submitted:
         return False
 
-    resolved_ticker, resolved_name, resolve_error = resolve_stock_query(market, query, indexes)
+    resolved_ticker, resolved_name, resolve_error = resolve_stock_query(
+        market, query, indexes,
+        broad_index=broad_kr_index if market == MARKET_KR else None,
+    )
     if not resolved_ticker:
         st.error(f"🚫 {resolve_error}")
         return False
@@ -329,6 +341,21 @@ def _render_input_form(client, user_id, holdings, indexes):
 def _row_label(row):
     name = row.get("stock_name")
     return f"{name} ({row['ticker']})" if name else row["ticker"]
+
+
+def _row_label_html(row):
+    """
+    2026-08-11 오너 요청 — 표의 "종목" 칸에서 이름+코드를 억지로 한 줄에 구겨넣다가 옆
+    "수량" 칸과 겹쳐 보이는 문제. `<br>`로 항상 "종목명 / (코드)" 두 줄로 강제 줄바꿈합니다.
+    표 전체에 걸어둔 `white-space: nowrap`(2026-08-11, ✏️/🗑️ 버튼 처짐 방지용)은 **자동**
+    줄바꿈만 막을 뿐이라, 이렇게 명시적으로 넣은 `<br>` 은 그대로 줄바꿈됩니다 — 두 CSS가
+    서로 충돌하지 않습니다.
+    """
+    name = row.get("stock_name")
+    ticker = row["ticker"]
+    if name:
+        return f"{name}<br>({ticker})"
+    return ticker
 
 
 def _colored_pct(value):
@@ -420,6 +447,21 @@ def _render_currency_block(client, user_id, group, indexes):
         .st-key-{table_key} button p {{
             margin: 0; line-height: 1; font-size: 1.05rem;
         }}
+        /* 2026-08-11 오너 지적 — 모바일처럼 화면이 좁아지면 Streamlit이 이 표의 9개 칸을
+           세로로 쌓아버려서(내장 반응형 규칙) 글자가 겹쳐 보이고 표 모양이 완전히 깨집니다.
+           표를 세로로 쌓는 대신 **가로 스크롤이 되는 표**로 유지되도록, 좁은 화면에서만
+           칸이 안 쌓이게 강제하고(min-width로 표 전체 너비를 확보) 그 바깥을 가로로
+           스크롤되게 감쌉니다. 다른 화면(입력 폼 등)은 그대로 세로로 쌓이는 게 정상입니다 —
+           이 규칙은 표 영역에만 스코프되어 있습니다.
+        */
+        .st-key-{table_key} {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+        @media (max-width: 640px) {{
+            .st-key-{table_key} [data-testid="stHorizontalBlock"] {{
+                flex-direction: row !important;
+                flex-wrap: nowrap !important;
+                min-width: 700px;
+            }}
+        }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -437,7 +479,7 @@ def _render_currency_block(client, user_id, group, indexes):
             row_id = row.get("id")
             edit_key = f"scorecard_editing_{row_id}"
             cols = st.columns(_COL_RATIOS)
-            cols[0].write(_row_label(row))
+            cols[0].markdown(_row_label_html(row), unsafe_allow_html=True)
             cols[1].write(f"{row['quantity']:,.6g}")
             cols[2].write(format_amount(row["avg_purchase_price"], currency))
             cols[3].write(
@@ -669,12 +711,19 @@ def render_scorecard_page():
         return
 
     # 기존 스냅샷(읽기 전용) 로드 — 현재가·밸류에이션의 유일한 출처이자, 입력 폼의
-    # "종목명으로 찾기"(미국 주식 한정)에도 쓰이므로 입력 폼을 그리기 전에 먼저 불러옵니다.
+    # "이름으로 찾기"에도 쓰이므로 입력 폼을 그리기 전에 먼저 불러옵니다.
     kr_index, kr_meta = load_universe_index(MARKET_KR)
     us_index, us_meta = load_universe_index(MARKET_US)
     indexes = {MARKET_KR: kr_index, MARKET_US: us_index}
 
-    if _render_input_form(client, user_id, holdings, indexes):
+    # 2026-08-11 오너 요청(TASK_HISTORY #83) — 코스피 상위 200 밖(코스닥·ETF 포함) 종목도
+    # 이름으로 찾을 수 있게 하는 보조 목록. ⚠️ 가격·밸류에이션은 없음 — 위 `indexes`와
+    # 절대 섞지 않고 별도로 `_render_input_form`에 넘깁니다(scorecard_db.load_kr_ticker_master
+    # 문서 참고). 파일이 아직 없으면(다음 자동 수집 전) 빈 dict — 이 화면은 그대로 정상 작동하고
+    # 이름 검색 범위만 상위 200으로 좁아집니다.
+    kr_ticker_master, _kr_master_meta = load_kr_ticker_master()
+
+    if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
         st.rerun()
 
     if not holdings:

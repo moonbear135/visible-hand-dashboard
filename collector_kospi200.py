@@ -232,6 +232,99 @@ def _load_outstanding_shares_lookup():
         return {}
 
 
+KR_TICKER_MASTER_FILENAME = "kr_ticker_master.json"
+
+
+def run_kr_ticker_master_collector(data_dir=None):
+    """
+    2026-08-11 오너 요청(TASK_HISTORY #83) — "내 성적표" 모듈에서 코스피 시가총액 상위 200
+    **밖** 종목(코스닥 포함, ETF 포함)도 이름만으로 찾을 수 있게 하는 보조 조회용 전체
+    상장종목 코드↔이름 목록을 만듭니다.
+
+    ⚠️ 이 파일에는 **가격·밸류에이션이 전혀 없습니다** — 그건 여전히 위 run_kospi200_collector()가
+    만드는 상위 200 스냅샷에만 있습니다. 이 목록은 오직 "이 이름이 실제로 어떤 종목코드인가"만
+    정직하게 알려주는 용도이고(§0-1: 지어내지 않기 — 실제 상장사 목록만), 유니버스 밖 종목의
+    현재가는 여전히 "현재가 없음"으로 정직하게 표시됩니다.
+
+    코스피 200 수집(가격 크롤링 20~30분)과 완전히 분리된, FinanceDataReader의 **구조화 상장종목
+    목록 1~2회 호출**뿐이라 훨씬 가볍습니다. 실패해도(FDR API 변경·일시 장애 등) 예외를 밖으로
+    던지지 않고 그냥 건너뜁니다 — 이 보조 기능 하나 때문에 매일의 핵심 수집(코스피 200 밸류에이션)이
+    막히면 안 되기 때문입니다.
+
+    ⚠️ **미검증 주의**: 이 함수는 샌드박스에 네트워크가 없어 FinanceDataReader 실제 응답으로
+    검증하지 못했습니다(코드는 `_load_outstanding_shares_lookup()`의 기존 방어적 컬럼 감지
+    패턴을 그대로 따름). 처음 실행 후 GitHub Actions 로그에서 "[전체 상장종목 목록]" 줄로
+    실제 컬럼명·건수를 확인해야 합니다(과거 `utils/krx_openapi.py`도 같은 방식으로 검증함).
+
+    `data_dir`: 테스트에서 실제 저장소 data/ 폴더를 건드리지 않고 임시 폴더로 리다이렉트할 때만
+    씁니다(운영 시에는 항상 None → 이 파일과 같은 경로의 data/, 기존 run_kospi200_collector()와
+    동일한 기본 경로 규칙).
+    """
+    if not HAS_FDR:
+        print("⚠️ [전체 상장종목 목록] FinanceDataReader 미설치 — 건너뜁니다(핵심 수집엔 영향 없음)")
+        return None
+
+    entries = {}
+
+    def _ingest(df, source_label, type_label):
+        if df is None or not hasattr(df, "columns"):
+            print(f"⚠️ [전체 상장종목 목록] {source_label} 응답이 비어있거나 형식이 다릅니다")
+            return 0
+        code_col = next((c for c in ("Code", "Symbol", "Ticker") if c in df.columns), None)
+        name_col = next((c for c in ("Name", "Name_KR") if c in df.columns), None)
+        market_col = next((c for c in ("Market", "Dept") if c in df.columns), None)
+        if code_col is None or name_col is None:
+            print(f"⚠️ [전체 상장종목 목록] {source_label} 컬럼 구조가 예상과 다릅니다: {list(df.columns)}")
+            return 0
+        cols = [code_col, name_col] + ([market_col] if market_col else [])
+        added = 0
+        for _, row in df[cols].dropna(subset=[code_col, name_col]).iterrows():
+            code = str(row[code_col]).strip()
+            name = str(row[name_col]).strip()
+            if not code or not name:
+                continue
+            market_value = str(row[market_col]).strip() if market_col and pd.notna(row.get(market_col)) else None
+            # ⚠️ 여기서는 6자리 zfill 등 코드 정규화를 하지 않습니다 — 읽는 쪽(utils/scorecard_db.py의
+            # build_universe_index → normalize_ticker)이 이미 그 정규화를 담당합니다(코스피 200
+            # 스냅샷도 같은 방식). 수집기(공개 저장소 코드)가 "내 성적표" 모듈 내부 함수를 몰라도
+            # 되도록 두 영역의 의존 방향을 한쪽으로만 유지하기 위함입니다.
+            entries[code] = {"code": code, "name": name, "market": market_value, "type": type_label}
+            added += 1
+        print(f"  [전체 상장종목 목록] {source_label} {added}건 반영(컬럼: code={code_col}, name={name_col}, market={market_col})")
+        return added
+
+    try:
+        _ingest(fdr.StockListing('KRX'), "StockListing('KRX') (코스피+코스닥 주식)", "STOCK")
+    except Exception as e:
+        print(f"⚠️ [전체 상장종목 목록] StockListing('KRX') 실패: {e}")
+
+    try:
+        _ingest(fdr.StockListing('ETF/KR'), "StockListing('ETF/KR') (국내 ETF)", "ETF")
+    except Exception as e:
+        print(f"⚠️ [전체 상장종목 목록] StockListing('ETF/KR') 실패: {e}")
+
+    if not entries:
+        print("⚠️ [전체 상장종목 목록] 수집된 종목이 0건이라 파일을 만들지 않습니다(기존 파일 유지)")
+        return None
+
+    resolved_data_dir = data_dir or os.path.join(os.path.dirname(__file__), "data")
+    os.makedirs(resolved_data_dir, exist_ok=True)
+    json_path = os.path.join(resolved_data_dir, KR_TICKER_MASTER_FILENAME)
+    payload = {
+        "metadata": {
+            "generated_at": _now_kst().strftime("%Y-%m-%d %H:%M"),
+            "source": "FinanceDataReader StockListing('KRX') + StockListing('ETF/KR')",
+            "count": len(entries),
+            "description": "코스피+코스닥+국내ETF 전체 상장종목 코드↔이름 목록 — 가격/밸류에이션 없음, 이름 검색 보조용",
+        },
+        "stocks": list(entries.values()),
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"[전체 상장종목 목록] {len(entries)}건 저장 완료 -> {json_path}")
+    return json_path
+
+
 def _empty_item_info(error_msg):
     """종목 상세 수집 실패 시 반환 구조 (모든 수치는 None = '데이터 없음')"""
     return {
@@ -1490,3 +1583,9 @@ def run_kospi200_collector():
 
 if __name__ == "__main__":
     run_kospi200_collector()
+    # 2026-08-11(TASK_HISTORY #83): 핵심 수집(위 줄)이 끝난 뒤 별도로 실행합니다 — 이 보조
+    # 목록 수집이 실패해도(FDR API 변경 등) 이미 저장된 핵심 스냅샷은 절대 건드리지 않습니다.
+    try:
+        run_kr_ticker_master_collector()
+    except Exception as e:
+        print(f"⚠️ [전체 상장종목 목록] 수집 중 예외 발생(핵심 수집 결과에는 영향 없음): {e}")
