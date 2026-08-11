@@ -297,10 +297,16 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
     if not submitted:
         return False
 
+    # ⚠️⚠️⚠️ 임시 디버그 (2026-08-11) — 원인 찾으면 바로 제거합니다. ⚠️⚠️⚠️
+    st.warning(f"🔧 DEBUG 1/4: 버튼 클릭 감지됨. market={market!r}, query={query!r}, "
+               f"quantity_raw={quantity_raw!r}, price_raw={price_raw!r}, holdings 기존 {len(holdings)}건")
+
     resolved_ticker, resolved_name, resolve_error = resolve_stock_query(
         market, query, indexes,
         broad_index=broad_kr_index if market == MARKET_KR else None,
     )
+    st.warning(f"🔧 DEBUG 2/4: resolve_stock_query 결과 → ticker={resolved_ticker!r}, "
+               f"name={resolved_name!r}, error={resolve_error!r}")
     if not resolved_ticker:
         st.error(f"🚫 {resolve_error}")
         return False
@@ -312,15 +318,18 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
     except ValueError as exc:
         st.error(f"🚫 {exc}")
         return False
+    st.warning(f"🔧 DEBUG 3/4: 파싱된 값 → quantity={quantity!r}, price={price!r}")
 
     try:
         action, merged = add_lot(
             client, user_id, market, resolved_ticker, quantity, price,
             stock_name=resolved_name, holdings=holdings,
         )
-    except (ScorecardError, ValueError) as exc:
-        st.error(f"🚫 저장하지 못했습니다: {exc}")
+    except Exception as exc:  # noqa: BLE001 — 디버그 목적으로 모든 예외 타입을 잡아 화면에 노출
+        st.error(f"🚫 DEBUG: add_lot 에서 예외 발생 — {type(exc).__name__}: {exc}")
         return False
+    st.warning(f"🔧 DEBUG 4/4: add_lot 결과 → action={action!r}, merged={merged!r}")
+    # ⚠️⚠️⚠️ 임시 디버그 끝 ⚠️⚠️⚠️
 
     currency = merged["currency"]
     prefix = f"ℹ️ {lookup_note}\n\n" if lookup_note else ""
@@ -731,8 +740,9 @@ def render_scorecard_page():
     # 표시됩니다.
     kr_all_prices, _kr_all_prices_meta = load_kr_all_market_prices()
 
-    if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
-        st.rerun()
+    # ⚠️⚠️⚠️ 임시 디버그 (2026-08-11): st.rerun()을 잠깐 꺼서 위 DEBUG 메시지들이 화면에서
+    # 바로 사라지지 않고 보이도록 합니다. 원인 찾으면 원래대로(if ...: st.rerun()) 되돌립니다. ⚠️⚠️⚠️
+    _render_input_form(client, user_id, holdings, indexes, kr_ticker_master)
 
     if not holdings:
         st.info("아직 등록한 보유 종목이 없습니다. 위 입력창에서 추가해 주세요.")
