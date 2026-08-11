@@ -349,6 +349,14 @@ def _render_currency_block(client, user_id, group, indexes):
         .st-key-{table_key} [data-testid="stMarkdownContainer"] p {{
             white-space: nowrap; margin-bottom: 0;
         }}
+        /* 2026-08-11: ✏️/🗑️ 이모지가 버튼 네모칸 한가운데 오지 않고 구석에 치우쳐 보이는
+           문제(오너 스크린샷으로 확인) — 버튼 내부를 flex로 완전히 중앙 정렬합니다. */
+        .st-key-{table_key} button {{
+            display: flex; align-items: center; justify-content: center;
+        }}
+        .st-key-{table_key} button p {{
+            margin: 0; line-height: 1; font-size: 1.05rem;
+        }}
         </style>
         """,
         unsafe_allow_html=True,
