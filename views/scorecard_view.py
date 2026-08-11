@@ -336,73 +336,91 @@ def _render_currency_block(client, user_id, group, indexes):
     # 바로 옆에 수정·삭제 버튼을 둡니다. 예전엔 st.dataframe 표 하나 + 화면 맨 아래
     # 접힌 삭제 전용 expander였는데("잘못 입력한 걸 고칠 방법이 없다"는 실사용
     # 피드백), 표를 직접 그리는 방식으로 바꿔 종목당 바로 옆에서 처리하게 했습니다.
-    _COL_RATIOS = [2, 1, 1.2, 1.2, 1.1, 0.9, 0.8, 0.6, 0.6]
-    header_cols = st.columns(_COL_RATIOS)
-    for col, label in zip(
-        header_cols, ["종목", "수량", "평균매입가", "현재가", "평가손익", "수익률", "비중", "", ""]
-    ):
-        if label:
-            col.caption(f"**{label}**")
+    # 2026-08-11: ✏️/🗑️ 버튼이 옆 셀보다 아래로 처져 보이는 문제(오너 스크린샷으로 확인) —
+    # "비중" 칸이 좁아 "100.0%"가 두 줄로 줄바꿈되면서 그 옆 버튼이 밀려 내려간 것이 원인.
+    # ① 값 칸 줄바꿈을 CSS로 막고 ② 행 전체를 세로 중앙 정렬해서 어떤 경우에도 어긋나지
+    # 않게 합니다. st.container(key=...) 는 Streamlit이 `.st-key-<key>` 클래스를 붙여주므로
+    # 이 표에만 스코프된 CSS를 걸 수 있습니다(다른 화면·다른 표에는 영향 없음).
+    table_key = f"scorecard_rows_{currency}"
+    st.markdown(
+        f"""
+        <style>
+        .st-key-{table_key} [data-testid="stHorizontalBlock"] {{ align-items: center; }}
+        .st-key-{table_key} [data-testid="stMarkdownContainer"] p {{
+            white-space: nowrap; margin-bottom: 0;
+        }}
+        </style>
+        """,
+        unsafe_allow_html=True,
+    )
+    with st.container(key=table_key):
+        _COL_RATIOS = [2, 1, 1.2, 1.2, 1.1, 1.0, 1.0, 0.6, 0.6]
+        header_cols = st.columns(_COL_RATIOS)
+        for col, label in zip(
+            header_cols, ["종목", "수량", "평균매입가", "현재가", "평가손익", "수익률", "비중", "", ""]
+        ):
+            if label:
+                col.caption(f"**{label}**")
 
-    for row in rows:
-        row_id = row.get("id")
-        edit_key = f"scorecard_editing_{row_id}"
-        cols = st.columns(_COL_RATIOS)
-        cols[0].write(_row_label(row))
-        cols[1].write(f"{row['quantity']:,.6g}")
-        cols[2].write(format_amount(row["avg_purchase_price"], currency))
-        cols[3].write(
-            format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
-        )
-        cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
-        cols[5].write(f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—")
-        cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
-        if cols[7].button("✏️", key=f"scorecard_edit_btn_{row_id}", help="수정"):
-            st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-        if cols[8].button("🗑️", key=f"scorecard_del_btn_{row_id}", help="삭제"):
-            if not row_id:
-                st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
-            else:
-                try:
-                    delete_holding(client, user_id, row_id)
-                except ScorecardError as exc:
-                    st.error(f"🚫 {exc}")
+        for row in rows:
+            row_id = row.get("id")
+            edit_key = f"scorecard_editing_{row_id}"
+            cols = st.columns(_COL_RATIOS)
+            cols[0].write(_row_label(row))
+            cols[1].write(f"{row['quantity']:,.6g}")
+            cols[2].write(format_amount(row["avg_purchase_price"], currency))
+            cols[3].write(
+                format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
+            )
+            cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
+            cols[5].write(f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—")
+            cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
+            if cols[7].button("✏️", key=f"scorecard_edit_btn_{row_id}", help="수정"):
+                st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+            if cols[8].button("🗑️", key=f"scorecard_del_btn_{row_id}", help="삭제"):
+                if not row_id:
+                    st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
                 else:
-                    st.success(f"✅ {_row_label(row)} 삭제했습니다.")
-                    st.rerun()
-
-        if st.session_state.get(edit_key):
-            with st.container(border=True):
-                st.caption(
-                    f"✏️ **{_row_label(row)} 수정** — 다른 계좌분과 합쳐 평균을 내는 게 아니라, "
-                    "값을 그대로 덮어씁니다(잘못 입력한 걸 바로잡을 때 사용)."
-                )
-                ecol1, ecol2, ecol3, ecol4 = st.columns([1.2, 1.2, 0.7, 0.7])
-                new_qty_raw = ecol1.text_input(
-                    "수량", value=f"{row['quantity']:g}", key=f"scorecard_edit_qty_{row_id}",
-                )
-                new_price_raw = ecol2.text_input(
-                    "매입가 (1주당)", value=f"{row['avg_purchase_price']:g}",
-                    key=f"scorecard_edit_price_{row_id}",
-                )
-                if ecol3.button("저장", key=f"scorecard_edit_save_{row_id}"):
                     try:
-                        new_qty = _parse_positive_number(new_qty_raw, "수량")
-                        new_price = _parse_positive_number(new_price_raw, "매입가")
-                    except ValueError as exc:
+                        delete_holding(client, user_id, row_id)
+                    except ScorecardError as exc:
                         st.error(f"🚫 {exc}")
                     else:
+                        st.success(f"✅ {_row_label(row)} 삭제했습니다.")
+                        st.rerun()
+
+            if st.session_state.get(edit_key):
+                with st.container(border=True):
+                    st.caption(
+                        f"✏️ **{_row_label(row)} 수정** — 다른 계좌분과 합쳐 평균을 내는 게 아니라, "
+                        "값을 그대로 덮어씁니다(잘못 입력한 걸 바로잡을 때 사용)."
+                    )
+                    ecol1, ecol2, ecol3, ecol4 = st.columns([1.2, 1.2, 0.7, 0.7])
+                    new_qty_raw = ecol1.text_input(
+                        "수량", value=f"{row['quantity']:g}", key=f"scorecard_edit_qty_{row_id}",
+                    )
+                    new_price_raw = ecol2.text_input(
+                        "매입가 (1주당)", value=f"{row['avg_purchase_price']:g}",
+                        key=f"scorecard_edit_price_{row_id}",
+                    )
+                    if ecol3.button("저장", key=f"scorecard_edit_save_{row_id}"):
                         try:
-                            update_holding(client, user_id, row_id, new_qty, new_price)
-                        except ScorecardError as exc:
+                            new_qty = _parse_positive_number(new_qty_raw, "수량")
+                            new_price = _parse_positive_number(new_price_raw, "매입가")
+                        except ValueError as exc:
                             st.error(f"🚫 {exc}")
                         else:
-                            st.session_state[edit_key] = False
-                            st.success("✅ 수정했습니다.")
-                            st.rerun()
-                if ecol4.button("취소", key=f"scorecard_edit_cancel_{row_id}"):
-                    st.session_state[edit_key] = False
-                    st.rerun()
+                            try:
+                                update_holding(client, user_id, row_id, new_qty, new_price)
+                            except ScorecardError as exc:
+                                st.error(f"🚫 {exc}")
+                            else:
+                                st.session_state[edit_key] = False
+                                st.success("✅ 수정했습니다.")
+                                st.rerun()
+                    if ecol4.button("취소", key=f"scorecard_edit_cancel_{row_id}"):
+                        st.session_state[edit_key] = False
+                        st.rerun()
     st.divider()
 
     # ---- 원형차트 2종 --------------------------------------------------------
@@ -476,18 +494,39 @@ def _render_currency_block(client, user_id, group, indexes):
         c4.metric("퀀트 점수", f"{score} / {score_max}" if score is not None and score_max else "—")
         if summary.get("badge"):
             st.markdown(f"**판정:** {summary['badge']}")
-        target_bits = []
-        if summary.get("t_fair") is not None:
-            target_bits.append(f"Trailing 적정가 {format_amount(summary['t_fair'], currency)}")
-        if summary.get("f_target") is not None:
-            target_bits.append(f"Forward 목표가 {format_amount(summary['f_target'], currency)}")
-        if target_bits:
-            st.markdown(" · ".join(target_bits))
-        st.caption(
-            f"내 평균매입가 {format_amount(row['avg_purchase_price'], currency)} vs "
-            f"현재가 {format_amount(summary.get('price'), currency)} — "
-            "판단은 각자의 몫입니다(매수/매도 권유가 아닙니다)."
-        )
+
+        # 2026-08-11: 오너 요청 — 적정가/목표가가 너무 작게 보여서, 위 c1~c4 지표들과
+        # 같은 st.metric 카드로 맞춰 눈에 띄게 키웠습니다.
+        if summary.get("t_fair") is not None or summary.get("f_target") is not None:
+            d1, d2 = st.columns(2)
+            d1.metric(
+                "Trailing 적정가",
+                format_amount(summary["t_fair"], currency) if summary.get("t_fair") is not None else "—",
+            )
+            d2.metric(
+                "Forward 목표가",
+                format_amount(summary["f_target"], currency) if summary.get("f_target") is not None else "—",
+            )
+
+        # 2026-08-11: 오너 요청 — "내 평균매입가 vs 현재가" 비교를 잿빛 캡션이 아니라
+        # 손익 방향에 따라 초록/빨강으로 색이 바뀌는 큰 배너로 바꿔 가시성을 확실히 했습니다.
+        price = summary.get("price")
+        avg_price = row.get("avg_purchase_price")
+        if price is not None and avg_price:
+            diff = price - avg_price
+            diff_pct = (diff / avg_price) * 100
+            arrow = "📈" if diff >= 0 else "📉"
+            banner = st.success if diff >= 0 else st.error
+            banner(
+                f"{arrow} **내 평균매입가 {format_amount(avg_price, currency)} → "
+                f"현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)**"
+            )
+        else:
+            st.info(
+                f"내 평균매입가 {format_amount(avg_price, currency)} vs "
+                f"현재가 {format_amount(price, currency)}"
+            )
+        st.caption("판단은 각자의 몫입니다(매수/매도 권유가 아닙니다).")
         if summary.get("data_issues"):
             with st.expander("이 종목 수집 시 남은 경고"):
                 for issue in summary["data_issues"]:
