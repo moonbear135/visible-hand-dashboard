@@ -897,6 +897,10 @@ def test_view_and_routing():
           "수정/삭제 버튼이 이모지 대신 Material 아이콘을 씀(글꼴 여백 때문에 중앙정렬 안 되던 문제 근본 수정)")
     check("sort_holding_rows" in view_src and "SORT_FIELD_OPTIONS" in view_src,
           "보유종목 표 정렬(오름차순/내림차순) 기능 연동")
+    check("banner = st.error if diff >= 0 else st.info" in view_src,
+          "손익 배너가 국내 증시 관례(빨강=오름/파랑=내림)로 통일됨(해외 관례 초록/빨강 아님)")
+    check('delta_color="off"' in view_src,
+          "평가손익 요약의 st.metric 내장 delta 색(초록/빨강)을 끄고 _colored_pct 로 직접 색칠")
     check("_colored_pct" in view_src and ":red[" in view_src and ":blue[" in view_src,
           "수익률을 국내 증시 관례대로 오르면 빨강/내리면 파랑으로 표시")
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
