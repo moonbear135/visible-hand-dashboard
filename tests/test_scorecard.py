@@ -1023,6 +1023,26 @@ def test_view_and_routing():
           "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐")
     check("scorecard_picker_{market}" in view_src,
           "빠른 검색 키가 시장별로 분리됨(한국/미국 선택 바뀔 때 후보 목록도 같이 바뀜)")
+    # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰 지적) — 위 체크는 주석에 적힌 리터럴 문구만
+    # 봐도 통과해버리는 취약한 체크였습니다. 실제 nonce 키 조립 코드와, "정적 키를 pop해서
+    # 재사용"하던 예전 방식으로 되돌아가지 않았는지를 직접 확인하는 체크를 추가합니다.
+    check('picker_key = f"scorecard_picker_{market}_{picker_nonce}"' in view_src,
+          "빠른 검색 selectbox가 실제로 nonce를 포함한 키를 조립함(주석이 아니라 코드 자체 확인, "
+          "2026-08-11 TASK_HISTORY #85 — 정적 키 재사용 시 클릭이 씹히던 버그 수정)")
+    check("st.session_state.pop(picker_key" not in view_src,
+          "selectbox를 정적 키 pop() 방식으로 초기화하던 예전 코드로 되돌아가지 않음"
+          "(pop()은 브라우저에 값 변경을 알리지 않아 같은 버그가 재발함 — 오푸스 리뷰로 확인)")
+    check('st.session_state["scorecard_pending_reset"] = True' in view_src
+          and 'st.session_state.pop("scorecard_pending_reset", False)' in view_src,
+          "텍스트 입력 3종(종목/수량/매입가)도 pop()이 아니라 '다음 렌더 맨 앞에서 대입'하는 "
+          "방식으로 초기화됨(2026-08-11, TASK_HISTORY #85 오푸스 리뷰로 발견 — pop()만으로는 "
+          "브라우저에 남은 직전 값이 되돌아와 종목이 중복 합산될 위험이 있었음)")
+    check('st.session_state["scorecard_flash"]' in view_src,
+          "추가 성공 메시지를 재실행 이후에도 실제로 볼 수 있도록 session_state에 남겨 다음 "
+          "렌더에서 그림(2026-08-11, TASK_HISTORY #85 — 예전엔 st.rerun() 직후 지워져 사실상 "
+          "안 보였음)")
+    check("DEBUG" not in view_src,
+          "원인 추적용으로 잠깐 배포했던 임시 디버그 코드가 남아있지 않음(2026-08-11)")
     check("@media (max-width: 640px)" in view_src and "overflow-x: auto" in view_src,
           "좁은 화면(모바일)에서 표가 세로로 쌓여 깨지는 대신 가로 스크롤로 유지됨(2026-08-11 오너 지적)")
     check("_row_label_html" in view_src and "<br>" in view_src,
@@ -1122,22 +1142,68 @@ def test_view_and_routing():
             check(not hasattr(module, "NAME_LOOKUP_MARKETS"),
                   "종목명 자동조회를 특정 시장으로 제한하던 상수는 제거됨(2026-08-11 오너 지시)")
 
-            fake_state = {"scorecard_query": "005930",
-                          "scorecard_qty": "10", "scorecard_price": "70000",
-                          "scorecard_market": module.MARKET_KR,
-                          f"scorecard_picker_{module.MARKET_KR}": "삼성전자 (005930)",
-                          f"scorecard_picker_{module.MARKET_US}": "Apple (AAPL)"}
-            module.st.session_state = fake_state
-            module._reset_input_fields()
-            check(
-                all(k not in fake_state
-                    for k in ("scorecard_query", "scorecard_qty", "scorecard_price",
-                              f"scorecard_picker_{module.MARKET_KR}",
-                              f"scorecard_picker_{module.MARKET_US}")),
-                "추가 성공 후 입력 필드(통합 종목칸·빠른 검색 selectbox 포함)가 session_state 에서 지워짐"
-                "(다음 입력이 이어붙지 않게)",
-            )
-            check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
+            # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 발견) — module.st.session_state를
+            # 직접 덮어쓰면 streamlit이 진짜로 설치된 환경에서는 그 프로세스의 진짜
+            # streamlit 모듈 상태까지 오염시킬 수 있습니다(스텁이 없으면 module.st는 진짜
+            # streamlit). finally에서 반드시 원래 값으로 되돌립니다.
+            _original_session_state = getattr(module.st, "session_state", None)
+            try:
+                fake_state = {"scorecard_query": "005930",
+                              "scorecard_qty": "10", "scorecard_price": "70000",
+                              "scorecard_market": module.MARKET_KR,
+                              f"scorecard_picker_nonce_{module.MARKET_KR}": 2,
+                              f"scorecard_picker_{module.MARKET_KR}_2": "삼성전자 (005930)",
+                              f"scorecard_picker_{module.MARKET_US}_0": "Apple (AAPL)"}
+                module.st.session_state = fake_state
+                module._reset_input_fields()
+                check(
+                    fake_state.get("scorecard_pending_reset") is True,
+                    "추가 성공 시 입력 필드를 바로 지우지 않고 '다음 렌더에서 지워달라'는 표시만 "
+                    "남김(2026-08-11, TASK_HISTORY #85 오푸스 리뷰로 발견 — 위젯 생성 후에는 "
+                    "session_state를 대입해도 pop()과 마찬가지로 브라우저에 전달되지 않아, "
+                    "실제 초기화는 다음 렌더 맨 앞 `_consume_pending_reset()`에서 위젯 생성 "
+                    "전에 이뤄져야 함)",
+                )
+                check(
+                    fake_state.get(f"scorecard_picker_nonce_{module.MARKET_KR}") == 3
+                    and fake_state.get(f"scorecard_picker_nonce_{module.MARKET_US}") == 1,
+                    "빠른 검색 selectbox는 nonce가 올라가 다음 렌더에서 완전히 새 위젯으로 그려짐"
+                    "(2026-08-11, TASK_HISTORY #85 — 정적 키 pop 방식에서 나타난 '버튼 눌러도 "
+                    "반응 없음' 버그 수정. 이전 위젯 인스턴스(...MARKET_KR}_2)는 더 이상 쓰이지 않게 됨)",
+                )
+                check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
+
+                # _consume_pending_reset() 자체도 직접 검증 — 표시가 있을 때만 지우고,
+                # 없으면 아무 것도 건드리지 않는지(2026-08-11, TASK_HISTORY #85).
+                consume_state = {"scorecard_pending_reset": True,
+                                  "scorecard_query": "005930", "scorecard_qty": "10",
+                                  "scorecard_price": "70000", "scorecard_market": module.MARKET_KR}
+                module.st.session_state = consume_state
+                module._consume_pending_reset()
+                check(
+                    consume_state.get("scorecard_query") == ""
+                    and consume_state.get("scorecard_qty") == ""
+                    and consume_state.get("scorecard_price") == ""
+                    and "scorecard_pending_reset" not in consume_state
+                    and consume_state.get("scorecard_market") == module.MARKET_KR,
+                    "_consume_pending_reset(): 표시가 있으면 입력 3종을 빈 문자열로 '대입'해서 "
+                    "지우고(pop이 아님 — 대입이라야 프런트엔드까지 전달됨), 표시 자체도 소비하며, "
+                    "시장 선택은 건드리지 않음",
+                )
+                no_flag_state = {"scorecard_query": "005930"}
+                module.st.session_state = no_flag_state
+                module._consume_pending_reset()
+                check(no_flag_state.get("scorecard_query") == "005930",
+                      "_consume_pending_reset(): 표시가 없으면 아무 것도 지우지 않음(불필요한 "
+                      "리셋으로 타이핑 중인 값을 날리지 않음)")
+            finally:
+                if _original_session_state is not None:
+                    module.st.session_state = _original_session_state
+                else:
+                    try:
+                        del module.st.session_state
+                    except AttributeError:
+                        pass
         finally:
             _restore_env(saved_env)
             importlib.reload(module)

@@ -211,18 +211,53 @@ def _parse_positive_number(raw, label):
 
 
 def _reset_input_fields():
-    """추가 성공 후 다음 입력을 위해 입력창을 비웁니다(직전 값이 계속 남아있던 버그 수정,
-    2026-08-11). st.rerun() 전에 session_state 키를 지워야 다음 렌더에서 빈 값으로 시작합니다.
-    빠른 검색 selectbox(시장별로 키가 다름, `scorecard_picker_{market}`)도 함께 비웁니다."""
-    for key in ("scorecard_query", "scorecard_qty", "scorecard_price",
-                f"scorecard_picker_{MARKET_KR}", f"scorecard_picker_{MARKET_US}"):
-        st.session_state.pop(key, None)
+    """추가 성공 후 다음 입력을 위해 입력창을 비웁니다.
+
+    ⚠️ 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 발견) — 이전에는 텍스트 입력 3종을
+    `st.session_state.pop(key, None)`으로 지우려 했지만, **pop()은 서버 쪽 상태만 지울
+    뿐 브라우저에는 값이 바뀌었다고 알리지 않습니다**(Streamlit은 위젯 키에 값을 "대입"할
+    때만 프런트엔드로 갱신을 내려보냅니다). 그래서 브라우저가 들고 있던 직전 입력값이
+    다음 상호작용(다음 "추가" 클릭) 때 그대로 서버로 되돌아올 수 있었고, 최악의 경우 같은
+    종목이 의도치 않게 중복 합산될 위험이 있었습니다(§0-1). 이걸 고치려면 "대입"이 필요한데,
+    위젯이 이미 만들어진 뒤(이 함수가 불리는 시점)에는 대입이 금지돼 있어 여기서 바로 할 수
+    없습니다 — 그래서 "다음 렌더 맨 앞에서 비워달라"는 표시만 남기고, 실제 대입은
+    `_render_input_form()` 맨 위(위젯을 만들기 전)에서 수행합니다.
+
+    빠른 검색 selectbox는 nonce 기반 키를 씁니다(2026-08-11, TASK_HISTORY #85) — 여기서
+    nonce를 올려두면 다음 렌더에서 완전히 새 위젯 인스턴스로 그려져 항상 placeholder부터
+    시작합니다. selectbox도 같은 이유(pop은 프런트에 안 알려짐)로 "추가" 버튼을 눌러도
+    처리 코드에 스크립트가 도달하지 못하는 증상이 있었는데, 이건 무한 루프가 아니라
+    **클릭할 때마다 재실행이 1번씩만 일어나면서 그 처리 코드 도달 전에 매번 멈추는
+    현상**이었습니다(오푸스 리뷰로 정정 — Streamlit 1.50 소스 대조 확인)."""
+    st.session_state["scorecard_pending_reset"] = True
+    for m in (MARKET_KR, MARKET_US):
+        nonce_key = f"scorecard_picker_nonce_{m}"
+        st.session_state[nonce_key] = st.session_state.get(nonce_key, 0) + 1
 
 
 # =============================================================================
 # 2. 보유 종목 입력
 # =============================================================================
+def _consume_pending_reset():
+    """`_reset_input_fields()`가 남겨둔 표시를 보고, 위젯을 만들기 **전에** 입력 필드를
+    빈 값으로 되돌립니다(2026-08-11, TASK_HISTORY #85). 위젯이 이미 만들어진 뒤에는
+    session_state 대입이 금지돼 있고, 대입이라야 프런트엔드까지 실제로 전달되므로
+    (`_reset_input_fields()` 문서 참고), 반드시 `_render_input_form()`이 위젯을 하나도
+    만들기 전에 호출해야 합니다. 표시가 없으면 아무 일도 하지 않습니다."""
+    if not st.session_state.pop("scorecard_pending_reset", False):
+        return
+    st.session_state["scorecard_query"] = ""
+    st.session_state["scorecard_qty"] = ""
+    st.session_state["scorecard_price"] = ""
+
+
 def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
+    _consume_pending_reset()
+
+    flash = st.session_state.pop("scorecard_flash", None)
+    if flash:
+        (st.success if flash["kind"] == "success" else st.error)(flash["text"])
+
     st.markdown("#### ✍️ 보유 종목 입력")
     st.caption(
         "같은 종목을 여러 번 입력하면(증권사 계좌가 여러 개인 경우) 삭제·덮어쓰기가 아니라 "
@@ -250,7 +285,23 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
         # 한국은 코스피 상위 200 유니버스 + 전체 상장종목 마스터(코스피·코스닥·ETF, TASK_HISTORY
         # #83)를 합쳐서 훨씬 넓게 찾을 수 있고, 미국은 아직 상위 550까지만(추가 마스터 목록 없음).
         picker_placeholder = "🔍 이름 일부만 쳐도 후보가 나옵니다 (선택하면 아래 칸에 자동 입력)"
-        picker_key = f"scorecard_picker_{market}"
+        # ⚠️ 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 원인 정확히 확인) — 고정된 키
+        # (`scorecard_picker_{market}`)를 `pop()`만 하고 재사용하면, **pop()은 서버 쪽
+        # 상태만 지울 뿐 브라우저에는 값이 바뀌었다고 알리지 않습니다**(Streamlit은 위젯
+        # 키에 값을 "대입"할 때만 프런트엔드에 갱신을 내려보냅니다 — `set_value` 플래그는
+        # `is_new_state_value`가 참일 때만 켜지고, 이건 대입에서만 참이 됩니다). 그래서
+        # 브라우저가 들고 있던 "선택된 값"이 다음 상호작용(예: "추가" 버튼 클릭) 때 그대로
+        # 서버로 되돌아왔습니다. 이 값이 되돌아오면 `picked != picker_placeholder`가 다시
+        # 참이 되어 이 블록이 또 `st.rerun()`을 걸어버리므로, **클릭할 때마다 재실행이
+        # 딱 1번씩 일어나면서도 그 아래 "추가" 버튼 처리 코드에는 매번 도달하지 못하고
+        # 멈추는 현상**이었습니다(무한 루프가 아니라 클릭이 조용히 씹히는 현상 — 버튼을
+        # 눌러도 반응이 없던 실사용 버그의 정확한 원인).
+        # nonce를 키에 포함시켜 선택을 소비할 때마다 완전히 새로운 위젯 인스턴스(다른
+        # element id)를 만들면, 이전 위젯은 서버·브라우저 양쪽에서 비활성 처리돼 정리되고
+        # 새 위젯은 애초에 프런트에 값이 없어 항상 placeholder부터 시작합니다.
+        picker_nonce_key = f"scorecard_picker_nonce_{market}"
+        picker_nonce = st.session_state.get(picker_nonce_key, 0)
+        picker_key = f"scorecard_picker_{market}_{picker_nonce}"
         candidate_names = {
             stock.get("name") for stock in (indexes.get(market) or {}).values()
             if stock.get("name")
@@ -270,7 +321,7 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
         )
         if picked != picker_placeholder:
             st.session_state["scorecard_query"] = picked
-            st.session_state.pop(picker_key, None)
+            st.session_state[picker_nonce_key] = picker_nonce + 1
             st.rerun()
 
         # ⚠️ 2026-08-11 오너 지시: "종목코드 / 티커 / 종목명 이게 전부 다 한곳에서 기능할 수
@@ -297,16 +348,10 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
     if not submitted:
         return False
 
-    # ⚠️⚠️⚠️ 임시 디버그 (2026-08-11) — 원인 찾으면 바로 제거합니다. ⚠️⚠️⚠️
-    st.warning(f"🔧 DEBUG 1/4: 버튼 클릭 감지됨. market={market!r}, query={query!r}, "
-               f"quantity_raw={quantity_raw!r}, price_raw={price_raw!r}, holdings 기존 {len(holdings)}건")
-
     resolved_ticker, resolved_name, resolve_error = resolve_stock_query(
         market, query, indexes,
         broad_index=broad_kr_index if market == MARKET_KR else None,
     )
-    st.warning(f"🔧 DEBUG 2/4: resolve_stock_query 결과 → ticker={resolved_ticker!r}, "
-               f"name={resolved_name!r}, error={resolve_error!r}")
     if not resolved_ticker:
         st.error(f"🚫 {resolve_error}")
         return False
@@ -318,29 +363,32 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
     except ValueError as exc:
         st.error(f"🚫 {exc}")
         return False
-    st.warning(f"🔧 DEBUG 3/4: 파싱된 값 → quantity={quantity!r}, price={price!r}")
 
     try:
         action, merged = add_lot(
             client, user_id, market, resolved_ticker, quantity, price,
             stock_name=resolved_name, holdings=holdings,
         )
-    except Exception as exc:  # noqa: BLE001 — 디버그 목적으로 모든 예외 타입을 잡아 화면에 노출
-        st.error(f"🚫 DEBUG: add_lot 에서 예외 발생 — {type(exc).__name__}: {exc}")
+    except (ScorecardError, ValueError) as exc:
+        st.error(f"🚫 저장하지 못했습니다: {exc}")
         return False
-    st.warning(f"🔧 DEBUG 4/4: add_lot 결과 → action={action!r}, merged={merged!r}")
-    # ⚠️⚠️⚠️ 임시 디버그 끝 ⚠️⚠️⚠️
 
     currency = merged["currency"]
     prefix = f"ℹ️ {lookup_note}\n\n" if lookup_note else ""
     if action == "merge":
-        st.success(
+        flash_text = (
             f"{prefix}✅ 기존 보유분과 합쳐 평균단가를 다시 계산했습니다 — "
             f"{merged['ticker']} {merged['quantity']:,.6g}주 / "
             f"평균 {format_amount(merged['avg_purchase_price'], currency)}"
         )
     else:
-        st.success(f"{prefix}✅ {merged['ticker']} 을(를) 추가했습니다.")
+        flash_text = f"{prefix}✅ {merged['ticker']} 을(를) 추가했습니다."
+    # ⚠️ 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 발견) — 여기서 바로 st.success()를
+    # 부르면, 곧바로 호출부에서 st.rerun()이 걸려 그 메시지가 화면에 그려지기도 전에
+    # 다음 렌더로 교체돼버려 사용자에게 사실상 안 보였습니다("성공 메시지가 없다"는
+    # 실사용 신고와 일치). session_state에 남겨두고 다음 렌더(재실행 후) 맨 위에서
+    # 그려주면 실제로 화면에 남아 보입니다.
+    st.session_state["scorecard_flash"] = {"kind": "success", "text": flash_text}
     _reset_input_fields()
     return True
 
@@ -740,9 +788,8 @@ def render_scorecard_page():
     # 표시됩니다.
     kr_all_prices, _kr_all_prices_meta = load_kr_all_market_prices()
 
-    # ⚠️⚠️⚠️ 임시 디버그 (2026-08-11): st.rerun()을 잠깐 꺼서 위 DEBUG 메시지들이 화면에서
-    # 바로 사라지지 않고 보이도록 합니다. 원인 찾으면 원래대로(if ...: st.rerun()) 되돌립니다. ⚠️⚠️⚠️
-    _render_input_form(client, user_id, holdings, indexes, kr_ticker_master)
+    if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
+        st.rerun()
 
     if not holdings:
         st.info("아직 등록한 보유 종목이 없습니다. 위 입력창에서 추가해 주세요.")
