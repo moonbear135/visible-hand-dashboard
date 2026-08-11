@@ -167,8 +167,8 @@ def _render_auth(client):
             email = st.text_input("이메일", key="scorecard_signup_email")
             password = st.text_input(
                 "비밀번호", type="password", key="scorecard_signup_pw",
-                help="8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다."
             )
+            st.caption("8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.")
             password2 = st.text_input("비밀번호 확인", type="password", key="scorecard_signup_pw2")
             submitted = st.form_submit_button("회원가입")
         if submitted:
