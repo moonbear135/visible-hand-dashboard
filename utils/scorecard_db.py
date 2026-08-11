@@ -510,6 +510,60 @@ def find_ticker_by_name(market, name, indexes):
     return None, None, f"이 이름과 일치하는 종목을 찾지 못했습니다({universe_label} 유니버스 밖일 수 있음)."
 
 
+# "코드처럼 생겼다"를 판별하는 형식(추측이 아니라 형식 판정입니다 — §0-1과 무관, 그냥 정규식).
+# 한국: 숫자로 시작하는 영숫자 1~6자(우선주 코드 00680K 등 포함). 미국: 점·하이픈 포함 영숫자 1~10자.
+# 둘 다 한글 등 비ASCII 문자가 섞이면 매치되지 않습니다 — 그러면 "이름"으로 간주합니다.
+KR_TICKER_LIKE = re.compile(r"[0-9][0-9A-Za-z]{0,5}$")
+US_TICKER_LIKE = re.compile(r"[A-Za-z0-9][A-Za-z0-9.\-]{0,9}$")
+
+
+def resolve_stock_query(market, query, indexes):
+    """
+    2026-08-11 오너 요청 — "종목코드/티커/종목명이 전부 한 입력창에서 다 되게" 해달라는 실사용
+    피드백 반영. 사용자가 코드를 입력했든 이름을 입력했든 이 함수 하나로 알아서 찾습니다.
+
+    순서(모두 §0-1: 추측하지 않고, 확실할 때만 채택):
+      1) 코드로 바로 해석해서 **유니버스(스냅샷) 안에 있으면** 그 종목으로 확정 — 가장 확실한 경로.
+      2) 실패하면 이름으로 찾습니다(`find_ticker_by_name`) — 정확일치 → 유일한 부분일치만 채택.
+      3) 그것도 실패했는데 입력이 "코드처럼 생긴 형식"이면, 유니버스 밖 종목의 코드를 직접 입력한
+         것으로 보고 **코드 자체는 그대로 받아들입니다**(이름은 모름 → None). 나중에 화면에서
+         "현재가 없음"으로 정직하게 표시됩니다 — 이 프로젝트는 코스피 상위200/미국 상위550만
+         추적하므로 그 밖의 종목도 보유 기록 자체는 남길 수 있어야 합니다.
+      4) 코드처럼도 안 생기고 이름으로도 못 찾으면 포기하고 이유를 돌려줍니다(지어내지 않음).
+
+    반환: (ticker 또는 None, 종목명 또는 None, 실패 이유 또는 None)
+    """
+    market_code = normalize_market(market)
+    text = str(query or "").strip()
+    if not text:
+        return None, None, "종목(코드 또는 이름)을 입력해 주세요."
+
+    try:
+        candidate = normalize_ticker(market_code, text)
+    except ValueError:
+        candidate = None
+
+    index = indexes.get(market_code) or {}
+    if candidate and candidate in index:
+        stock = index[candidate]
+        return candidate, stock.get("name"), None
+
+    found_ticker, found_name, name_reason = find_ticker_by_name(market_code, text, indexes)
+    if found_ticker:
+        return found_ticker, found_name, None
+
+    looks_like_code = bool(candidate) and (
+        KR_TICKER_LIKE.fullmatch(candidate) if market_code == MARKET_KR
+        else US_TICKER_LIKE.fullmatch(candidate)
+    )
+    if looks_like_code:
+        return candidate, None, None
+
+    return None, None, (
+        f"'{text}'와 일치하는 종목을 코드로도 이름으로도 찾지 못했습니다 — {name_reason}"
+    )
+
+
 def make_price_lookup(indexes):
     """
     build_portfolio 에 넘길 현재가 조회 함수를 만듭니다.

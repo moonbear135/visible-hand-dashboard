@@ -23,7 +23,6 @@ v1 범위 (SCORECARD_WORK_ORDER.md §2)
 """
 
 import os
-import re
 
 import streamlit as st
 
@@ -40,25 +39,18 @@ from utils.scorecard_db import (
     current_user,
     delete_holding,
     fetch_holdings,
-    find_ticker_by_name,
     format_amount,
     load_universe_index,
     make_price_lookup,
+    resolve_stock_query,
     sign_in,
     sign_out,
     sign_up,
     supabase_status,
+    update_holding,
     user_id_of,
     valuation_summary,
 )
-
-# 한국 종목코드로 봐도 되는 형식(숫자로 시작하는 영숫자 1~6자). 한글이 섞여 있으면
-# "종목명을 코드 칸에 잘못 넣었다"고 보고 막습니다(2026-08-11, 오너 실사용 중 발견).
-_KR_TICKER_LIKE = re.compile(r"[0-9][0-9A-Za-z]{0,5}$")
-
-# 종목명으로 티커를 자동으로 찾아주는 기능은 **미국 주식에서만** 켭니다(2026-08-11 오너 지시).
-# 한국은 6자리 코드가 이미 익숙하고 짧아서 코드 직접 입력이 더 명확하고 실수도 적습니다.
-NAME_LOOKUP_MARKETS = {MARKET_US}
 
 # 원형차트는 plotly 로 그립니다(이미 requirements.txt 에 있고 매크로 화면에서도 사용 중).
 # 그래도 없을 때 화면 전체가 죽지 않도록 감싸두고, 없으면 표로 대체합니다.
@@ -217,7 +209,7 @@ def _parse_positive_number(raw, label):
 def _reset_input_fields():
     """추가 성공 후 다음 입력을 위해 입력창을 비웁니다(직전 값이 계속 남아있던 버그 수정,
     2026-08-11). st.rerun() 전에 session_state 키를 지워야 다음 렌더에서 빈 값으로 시작합니다."""
-    for key in ("scorecard_ticker", "scorecard_name", "scorecard_qty", "scorecard_price"):
+    for key in ("scorecard_query", "scorecard_qty", "scorecard_price"):
         st.session_state.pop(key, None)
 
 
@@ -244,31 +236,16 @@ def _render_input_form(client, user_id, holdings, indexes):
             key="scorecard_market",
             help="통화는 시장에서 자동으로 정해집니다(한국=원, 미국=달러). 환율 변환은 하지 않습니다.",
         )
-    name_lookup_on = market in NAME_LOOKUP_MARKETS
     with col2:
-        ticker = st.text_input(
-            "종목코드 / 티커",
-            key="scorecard_ticker",
-            placeholder="예: 005930" if market == MARKET_KR else "예: NVDA",
-            help=(
-                "한국은 6자리 종목코드(예: 005930)를 입력하세요."
-                if market == MARKET_KR else
-                "티커를 아시면 여기에 입력하세요(예: NVDA). 모르면 비워두고 아래 종목명만 입력해도 됩니다."
-            ),
+        # ⚠️ 2026-08-11 오너 지시: "종목코드 / 티커 / 종목명 이게 전부 다 한곳에서 기능할 수
+        # 있게 해야지" — 코드를 쳐도, 이름을 쳐도(한글 포함) 한 칸에서 알아서 찾습니다.
+        # 유니버스 밖 종목은 코드를 알면 그대로 받아들여서 "현재가 없음"으로 정직하게 표시합니다.
+        query = st.text_input(
+            "종목 (종목코드 / 티커 / 종목명 — 아무거나 입력하세요)",
+            key="scorecard_query",
+            placeholder="예: 005930 또는 삼성전자" if market == MARKET_KR else "예: NVDA 또는 NVIDIA",
+            help="종목코드를 아시면 코드로, 모르시면 이름으로 입력하세요 — 둘 다 자동으로 찾아드립니다.",
         )
-        if name_lookup_on:
-            stock_name = st.text_input(
-                "종목명 (코드 모르면 이곳에 입력 — 자동으로 찾아봅니다)",
-                key="scorecard_name",
-                placeholder="예: NVIDIA",
-            )
-        else:
-            stock_name = st.text_input(
-                "종목명 (선택, 표시용)",
-                key="scorecard_name",
-                placeholder="예: 삼성전자",
-                help="여기는 표시용 이름일 뿐입니다 — 한국 주식은 위 종목코드 칸에 실제 코드를 입력해야 합니다.",
-            )
     col3, col4 = st.columns(2)
     with col3:
         quantity_raw = st.text_input(
@@ -284,38 +261,11 @@ def _render_input_form(client, user_id, holdings, indexes):
     if not submitted:
         return False
 
-    ticker_input = ticker.strip()
-    name_input = stock_name.strip()
-    resolved_ticker = None
-    resolved_name = None
-    lookup_note = None
-
-    if ticker_input:
-        if market == MARKET_KR and not _KR_TICKER_LIKE.fullmatch(ticker_input.upper()):
-            st.error(
-                "🚫 종목코드 칸에는 6자리 코드(예: 005930)를 입력해 주세요. "
-                "종목명(예: 삼성전자)을 여기 넣으면 코드로 인식되지 않아 계속 '현재가 없음'으로 남습니다."
-            )
-            return False
-        resolved_ticker = ticker_input
-        resolved_name = name_input or None
-    elif name_input and name_lookup_on:
-        found_ticker, found_name, reason = find_ticker_by_name(market, name_input, indexes)
-        if not found_ticker:
-            st.error(f"🚫 종목코드를 찾지 못했습니다 — {reason}")
-            return False
-        resolved_ticker = found_ticker
-        resolved_name = found_name
-        lookup_note = f"'{name_input}' → {found_name} ({found_ticker}) 로 인식했습니다."
-    elif name_input and not name_lookup_on:
-        st.error(
-            "🚫 한국 주식은 종목명만으로 찾을 수 없습니다 — 종목코드(6자리, 예: 005930)를 "
-            "직접 입력해 주세요."
-        )
+    resolved_ticker, resolved_name, resolve_error = resolve_stock_query(market, query, indexes)
+    if not resolved_ticker:
+        st.error(f"🚫 {resolve_error}")
         return False
-    else:
-        st.error("🚫 종목코드(또는 미국 주식은 종목명)를 입력해 주세요.")
-        return False
+    lookup_note = f"{resolved_name} ({resolved_ticker}) 로 인식했습니다." if resolved_name else None
 
     try:
         quantity = _parse_positive_number(quantity_raw, "수량")
@@ -381,42 +331,79 @@ def _render_currency_block(client, user_id, group, indexes):
             "v1은 상위 200(한국)/550(미국) 밖 종목의 시세를 조회하지 않습니다 — 추정하지 않고 비웁니다."
         )
 
-    # ---- 표 -----------------------------------------------------------------
-    table = []
-    for row in rows:
-        table.append({
-            "종목": _row_label(row),
-            "수량": f"{row['quantity']:,.6g}",
-            "평균매입가": format_amount(row["avg_purchase_price"], currency),
-            "현재가": format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음",
-            "평가금액": format_amount(row["market_value"], currency) if row["price_available"] else "—",
-            "평가손익": format_amount(row["profit"], currency) if row["price_available"] else "—",
-            "수익률": f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—",
-            "비중": f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—",
-        })
-    st.dataframe(table, use_container_width=True, hide_index=True)
+    # ---- 표 (종목별 ✏️ 수정 / 🗑️ 삭제 버튼 포함) -------------------------------
+    # 2026-08-11: 오너 요청 — 별도 "삭제할 종목 고르기" 드롭다운 대신, 각 종목 줄
+    # 바로 옆에 수정·삭제 버튼을 둡니다. 예전엔 st.dataframe 표 하나 + 화면 맨 아래
+    # 접힌 삭제 전용 expander였는데("잘못 입력한 걸 고칠 방법이 없다"는 실사용
+    # 피드백), 표를 직접 그리는 방식으로 바꿔 종목당 바로 옆에서 처리하게 했습니다.
+    _COL_RATIOS = [2, 1, 1.2, 1.2, 1.1, 0.9, 0.8, 0.6, 0.6]
+    header_cols = st.columns(_COL_RATIOS)
+    for col, label in zip(
+        header_cols, ["종목", "수량", "평균매입가", "현재가", "평가손익", "수익률", "비중", "", ""]
+    ):
+        if label:
+            col.caption(f"**{label}**")
 
-    # ---- 삭제 -----------------------------------------------------------------
-    # 2026-08-11: 예전엔 이 화면 맨 아래(밸류에이션 카드 다음)에 접혀 있어 눈에 잘 안
-    # 띄었습니다("잘못 입력한 걸 고칠 방법이 없다"는 실사용 피드백) — 표 바로 아래로 옮기고
-    # 기본으로 펼쳐둡니다.
-    labels_for_delete = {_row_label(r): r for r in rows}
-    with st.expander("🗑️ 잘못 입력한 종목 삭제", expanded=True):
-        target = st.selectbox(
-            "삭제할 종목", list(labels_for_delete.keys()), key=f"scorecard_del_{currency}",
+    for row in rows:
+        row_id = row.get("id")
+        edit_key = f"scorecard_editing_{row_id}"
+        cols = st.columns(_COL_RATIOS)
+        cols[0].write(_row_label(row))
+        cols[1].write(f"{row['quantity']:,.6g}")
+        cols[2].write(format_amount(row["avg_purchase_price"], currency))
+        cols[3].write(
+            format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
         )
-        if st.button("삭제", key=f"scorecard_del_btn_{currency}"):
-            row_to_delete = labels_for_delete[target]
-            if not row_to_delete.get("id"):
+        cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
+        cols[5].write(f"{row['profit_pct']:+.2f}%" if row.get("profit_pct") is not None else "—")
+        cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
+        if cols[7].button("✏️", key=f"scorecard_edit_btn_{row_id}", help="수정"):
+            st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+        if cols[8].button("🗑️", key=f"scorecard_del_btn_{row_id}", help="삭제"):
+            if not row_id:
                 st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
             else:
                 try:
-                    delete_holding(client, user_id, row_to_delete["id"])
+                    delete_holding(client, user_id, row_id)
                 except ScorecardError as exc:
                     st.error(f"🚫 {exc}")
                 else:
-                    st.success("✅ 삭제했습니다.")
+                    st.success(f"✅ {_row_label(row)} 삭제했습니다.")
                     st.rerun()
+
+        if st.session_state.get(edit_key):
+            with st.container(border=True):
+                st.caption(
+                    f"✏️ **{_row_label(row)} 수정** — 다른 계좌분과 합쳐 평균을 내는 게 아니라, "
+                    "값을 그대로 덮어씁니다(잘못 입력한 걸 바로잡을 때 사용)."
+                )
+                ecol1, ecol2, ecol3, ecol4 = st.columns([1.2, 1.2, 0.7, 0.7])
+                new_qty_raw = ecol1.text_input(
+                    "수량", value=f"{row['quantity']:g}", key=f"scorecard_edit_qty_{row_id}",
+                )
+                new_price_raw = ecol2.text_input(
+                    "매입가 (1주당)", value=f"{row['avg_purchase_price']:g}",
+                    key=f"scorecard_edit_price_{row_id}",
+                )
+                if ecol3.button("저장", key=f"scorecard_edit_save_{row_id}"):
+                    try:
+                        new_qty = _parse_positive_number(new_qty_raw, "수량")
+                        new_price = _parse_positive_number(new_price_raw, "매입가")
+                    except ValueError as exc:
+                        st.error(f"🚫 {exc}")
+                    else:
+                        try:
+                            update_holding(client, user_id, row_id, new_qty, new_price)
+                        except ScorecardError as exc:
+                            st.error(f"🚫 {exc}")
+                        else:
+                            st.session_state[edit_key] = False
+                            st.success("✅ 수정했습니다.")
+                            st.rerun()
+                if ecol4.button("취소", key=f"scorecard_edit_cancel_{row_id}"):
+                    st.session_state[edit_key] = False
+                    st.rerun()
+    st.divider()
 
     # ---- 원형차트 2종 --------------------------------------------------------
     priced = [r for r in rows if r["price_available"]]

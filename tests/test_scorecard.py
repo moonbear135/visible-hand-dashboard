@@ -62,6 +62,7 @@ from utils.scorecard_db import (  # noqa: E402
     merge_lot_into_holding,
     normalize_market,
     normalize_ticker,
+    resolve_stock_query,
     sign_in,
     split_by_currency,
     supabase_status,
@@ -464,6 +465,62 @@ def test_name_lookup():
           "완전 일치도 여러 개면 골라잡지 않음")
 
 
+def test_resolve_stock_query():
+    print("\n[4-2] 통합 종목 입력(코드/티커/이름 한 칸) — resolve_stock_query "
+          "(2026-08-11 오너 지시: \"종목코드/티커/종목명 이게 전부 다 한곳에서\")")
+    kr_index = build_universe_index(SYNTHETIC_KR_SNAPSHOT, MARKET_KR)
+    us_index = build_universe_index(SYNTHETIC_US_SNAPSHOT, MARKET_US)
+    indexes = {MARKET_KR: kr_index, MARKET_US: us_index}
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "005930", indexes)
+    check(ticker == "005930" and name == "합성전자" and reason is None,
+          "한국: 6자리 코드 직접 입력 → 즉시 확정")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "5930", indexes)
+    check(ticker == "005930" and name == "합성전자",
+          "한국: 앞자리 0 빠진 코드도 복원해서 인식")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "합성전자", indexes)
+    check(ticker == "005930" and name == "합성전자" and reason is None,
+          "한국: 종목명만 입력해도 인식(2026-08-11 전에는 미국 전용이었던 제한 해제)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "FAKE", indexes)
+    check(ticker == "FAKE" and reason is None, "미국: 티커 직접 입력 → 즉시 확정")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "Fake Corp", indexes)
+    check(ticker == "FAKE" and name == "Fake Corp" and reason is None,
+          "미국: 회사 이름으로 입력해도 인식")
+
+    # 유니버스 밖 종목 — 코드처럼 생겼으면 이름을 몰라도 그대로 받아들입니다(§0-1: 지어내지
+    # 않되, 정직한 '현재가 없음' 표시로 넘어갈 수 있게 코드 자체는 거부하지 않음).
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "005380", indexes)
+    check(ticker == "005380" and name is None and reason is None,
+          "한국: 유니버스 밖이라도 코드 형식이면 그대로 채택(현재가 없음으로 표시될 예정)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "AAPL", indexes)
+    check(ticker == "AAPL" and name is None and reason is None,
+          "미국: 유니버스 밖이라도 티커 형식이면 그대로 채택")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "존재하지않는이름", indexes)
+    check(ticker is None and reason, "코드 형식도 아니고 이름도 못 찾으면 추측하지 않고 실패")
+
+    ticker, name, reason = resolve_stock_query(MARKET_KR, "", indexes)
+    check(ticker is None and "입력해" in (reason or ""), "빈 입력은 즉시 실패")
+
+    exact_dup_snapshot = {
+        "metadata": {}, "stocks": [
+            {"name": "완전동일이름", "code": "333333", "price": 1000.0},
+            {"name": "완전동일이름", "code": "444444", "price": 2000.0},
+        ],
+    }
+    exact_dup_index = build_universe_index(exact_dup_snapshot, MARKET_KR)
+    ticker, name, reason = resolve_stock_query(
+        MARKET_KR, "완전동일이름", {MARKET_KR: exact_dup_index, MARKET_US: {}}
+    )
+    check(ticker is None and "여러 개" in (reason or ""),
+          "이름이 여러 종목과 겹치면(코드 형식도 아니므로) 추측하지 않고 실패")
+
+
 # =============================================================================
 # 5. 포트폴리오 계산 (비중 / 수익 비중 / 현재가 결측)
 # =============================================================================
@@ -778,9 +835,19 @@ def test_view_and_routing():
     check('st.button("➕ 추가 / 평균단가 재계산"' in view_src,
           "입력은 명시적 버튼 클릭으로만 제출됨")
     check("_reset_input_fields" in view_src, "추가 성공 후 입력창을 비우는 로직 존재")
-    check("find_ticker_by_name" in view_src, "종목명으로 티커 찾기 연동")
-    check("NAME_LOOKUP_MARKETS = {MARKET_US}" in view_src,
-          "종목명 자동조회는 미국 주식 전용(한국은 코드 직접 입력)")
+    check("resolve_stock_query" in view_src,
+          "종목코드/티커/종목명 통합 조회 연동(2026-08-11 오너 지시 — 한 칸에서 전부 인식)")
+    check('key="scorecard_query"' in view_src,
+          "종목 입력창이 코드/티커/이름 통합 단일 필드임")
+    check('key="scorecard_ticker"' not in view_src and 'key="scorecard_name"' not in view_src,
+          "예전 종목코드/종목명 분리 필드는 제거됨")
+    check("NAME_LOOKUP_MARKETS" not in view_src,
+          "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
+    check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
+          "드롭다운으로 고른 뒤 지우는 예전 방식은 제거됨")
+    check("update_holding" in view_src, "종목별 인라인 수정(값 덮어쓰기) 기능 연동")
+    check('help="수정"' in view_src and 'help="삭제"' in view_src,
+          "종목 줄마다 수정/삭제 버튼이 바로 붙어있음")
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,
@@ -837,25 +904,29 @@ def test_view_and_routing():
             expect_raises(lambda: module._parse_positive_number("-5", "수량"), ValueError,
                           "음수는 거부")
 
-            check(bool(module._KR_TICKER_LIKE.fullmatch("005930")), "6자리 숫자 코드는 코드로 인정")
-            check(bool(module._KR_TICKER_LIKE.fullmatch("00680K")), "영숫자 우선주 코드도 코드로 인정")
-            check(not module._KR_TICKER_LIKE.fullmatch("하이닉스"),
+            # 코드 형식 판정 정규식은 utils/scorecard_db.py 로 옮겨졌습니다(2026-08-11 통합 입력창
+            # 리디자인 — resolve_stock_query 가 코드/이름을 함께 판단하기 위해 필요).
+            check(bool(sdb.KR_TICKER_LIKE.fullmatch("005930")), "6자리 숫자 코드는 코드로 인정")
+            check(bool(sdb.KR_TICKER_LIKE.fullmatch("00680K")), "영숫자 우선주 코드도 코드로 인정")
+            check(not sdb.KR_TICKER_LIKE.fullmatch("하이닉스"),
                   "한글 종목명은 코드 형식으로 인정하지 않음(오너가 겪은 실사용 버그 재현 방지)")
-            check(not module._KR_TICKER_LIKE.fullmatch("삼성전자우"),
+            check(not sdb.KR_TICKER_LIKE.fullmatch("삼성전자우"),
                   "한글 종목명(우선주 포함)도 코드로 인정하지 않음")
+            check(bool(sdb.US_TICKER_LIKE.fullmatch("AAPL")), "미국 티커도 코드 형식으로 인정")
+            check(bool(sdb.US_TICKER_LIKE.fullmatch("BRK.B")), "점 포함 미국 티커도 코드로 인정")
 
-            check(module.NAME_LOOKUP_MARKETS == {module.MARKET_US},
-                  "종목명 자동조회 대상 시장은 미국뿐")
+            check(not hasattr(module, "NAME_LOOKUP_MARKETS"),
+                  "종목명 자동조회를 특정 시장으로 제한하던 상수는 제거됨(2026-08-11 오너 지시)")
 
-            fake_state = {"scorecard_ticker": "005930", "scorecard_name": "삼성전자",
+            fake_state = {"scorecard_query": "005930",
                           "scorecard_qty": "10", "scorecard_price": "70000",
                           "scorecard_market": module.MARKET_KR}
             module.st.session_state = fake_state
             module._reset_input_fields()
             check(
                 all(k not in fake_state
-                    for k in ("scorecard_ticker", "scorecard_name", "scorecard_qty", "scorecard_price")),
-                "추가 성공 후 입력 필드 4개가 session_state 에서 지워짐(다음 입력이 이어붙지 않게)",
+                    for k in ("scorecard_query", "scorecard_qty", "scorecard_price")),
+                "추가 성공 후 입력 필드(통합 종목칸 포함)가 session_state 에서 지워짐(다음 입력이 이어붙지 않게)",
             )
             check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
         finally:
@@ -895,6 +966,7 @@ def main():
     test_currency_separation()
     test_universe_lookup()
     test_name_lookup()
+    test_resolve_stock_query()
     test_portfolio()
     test_supabase_fallback()
     test_crud_with_fake_client()
