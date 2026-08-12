@@ -170,44 +170,48 @@ def main():
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
 
-    # 3-1. 📊 내 성적표 (스테이징, 2026-08-11 신설)
+    # 3-1. 📊 내 성적표 (스테이징, 2026-08-11 신설) + 📈 리포트(2026-08-12 신설, 그 하위 탭)
     #      ⚠️ 기본값은 **숨김**입니다. 아래 두 경우에만 사이드바에 진입 체크박스가 생깁니다.
     #         ① 관리자 인증 상태(미리보기)  ② SCORECARD_ENABLED 플래그를 명시적으로 켠 경우
     #      일반 방문자에게는 메뉴 자체가 보이지 않으므로 공개 화면 동작은 예전과 100% 동일합니다.
     #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영)
+    #      리포트는 "내 성적표" 체크박스를 켰을 때만 그 밑에 라디오(하위 탭)로 고를 수 있습니다
+    #      (2026-08-12 오너 요청 — 원래는 형제 체크박스 2개였는데, 둘 다 켜고 안 보는 쪽을 매번
+    #      꺼야 해서 쓰기 불편하다는 피드백으로 중첩 구조로 변경). 코드/데이터는 여전히 완전히
+    #      독립된 별도 모듈입니다 — 메뉴 배치만 바뀐 것입니다.
     show_scorecard = False
+    show_report = False
     if render_scorecard_page is not None and is_scorecard_visible(admin_mode):
         st.sidebar.markdown("---")
         show_scorecard = st.sidebar.checkbox(
             "📊 내 성적표 (준비중 · 미리보기)",
             key="view_scorecard",
-            help="내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보는 신규 모듈입니다. "
+            help="내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보고, "
+                 "쌓인 기록으로 리포트도 보는 신규 모듈입니다. "
                  "오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
         )
+        if show_scorecard:
+            report_available = render_report_page is not None and is_report_visible(admin_mode)
+            if report_available:
+                SCORECARD_TAB = "📊 내 보유종목"
+                REPORT_TAB = "📈 리포트"
+                scorecard_subpage = st.sidebar.radio(
+                    "내 성적표 하위 메뉴",
+                    [SCORECARD_TAB, REPORT_TAB],
+                    key="scorecard_subpage",
+                    help="같은 로그인 세션을 공유합니다 — 한 번만 로그인하면 됩니다.",
+                )
+                show_report = scorecard_subpage == REPORT_TAB
+            elif admin_mode and REPORT_IMPORT_ERROR:
+                st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
     elif admin_mode and SCORECARD_IMPORT_ERROR:
         # 실패를 조용히 삼키지 않되(§0-1), 일반 방문자 화면은 건드리지 않습니다.
         st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
 
-    # 3-2. 📈 리포트 (스테이징, 2026-08-12 신설) — 내 성적표와 완전히 같은 패턴.
-    #      ⚠️ 기본값은 **숨김**입니다. ① 관리자 인증 상태(미리보기) ② REPORT_ENABLED 플래그를
-    #      명시적으로 켠 경우에만 사이드바에 진입 체크박스가 생깁니다(§0-3-6).
-    show_report = False
-    if render_report_page is not None and is_report_visible(admin_mode):
-        st.sidebar.markdown("---")
-        show_report = st.sidebar.checkbox(
-            "📈 리포트 (준비중 · 미리보기)",
-            key="view_report",
-            help="매일 쌓인 보유종목 평가금액 스냅샷으로 일간·주간·월간·분기·반기·연간 리포트와 "
-                 "벤치마크(코스피/S&P500·나스닥 프록시) 비교를 보여주는 신규 모듈입니다. "
-                 "오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
-        )
-    elif admin_mode and REPORT_IMPORT_ERROR:
-        st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
-
     # 4. 메인 뷰 라우팅
     #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
     #    ⚠️ 매크로 화면은 여전히 관리자 인증 후에만 진입 가능합니다 — 이번 메뉴 개편과 무관합니다.
-    if show_report:
+    if show_scorecard and show_report:
         render_report_page()
     elif show_scorecard:
         render_scorecard_page()
