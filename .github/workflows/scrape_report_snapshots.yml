@@ -105,14 +105,27 @@ jobs:
         fi
 
     - name: 벤치마크 이력 파일을 깃허브에 커밋
-      # 커밋 대상은 이 워크플로우가 만드는 공개 데이터 한 파일뿐입니다.
+      # 커밋 대상은 이 워크플로우가 만드는 공개 데이터 **한 파일뿐**입니다.
       #   data/us_index_history.json : 미국 벤치마크 일별 종가(개인정보 아님)
       # 사용자 스냅샷은 git 이 아니라 Supabase 에만 저장됩니다(개인 금융정보).
+      # 그래서 다른 워크플로우처럼 `-A` 옵션으로 data 폴더를 통째로 담지 않습니다
+      # — 코스피/미국주식 수집기의 산출물이나 다른 파일이 이 커밋에 딸려오면 안 됩니다.
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
 
-        git add data/us_index_history.json
+        # ⚠️ 2026-08-12 수정: 파일명을 그냥 `git add` 하면 파일이 없을 때
+        #    `fatal: pathspec ... did not match any files` 로 **잡 전체가 죽습니다**(exit 128).
+        #    수집기는 "두 지수 다 실패하면 기존 값 보존을 위해 파일을 아예 건드리지 않는"
+        #    정상 동작이 있어서(§0-1), 파일 없음은 사고가 아니라 예상 가능한 상태입니다.
+        #    있으면만 add 하고, 없으면 조용히 넘어갑니다.
+        if [ -f data/us_index_history.json ]; then
+          git add data/us_index_history.json
+        else
+          echo "ℹ️ data/us_index_history.json 이 아직 없습니다(수집 실패 또는 첫 실행) — 커밋 없이 넘어갑니다"
+        fi
+
+        # 변경분이 없으면(같은 날 재실행 등) commit 이 실패하는데, 이것도 정상이라 조용히 종료합니다.
         git commit -m "Report Benchmark Update: $(date +'%Y-%m-%d') [무인 자동화 로봇]" || exit 0
 
         # 다른 워크플로우(코스피/미국주식)나 사람이 그 사이 푸시했으면 원격이 앞서 있어

@@ -532,44 +532,78 @@ def test_benchmark_files():
 # =============================================================================
 # 7. 미국 지수 수집기 (순수 파싱 로직)
 # =============================================================================
-# 아래 페이로드는 2026-08-12 실제 응답(ONEQ)의 **구조와 키 이름을 그대로 옮긴 축소본**입니다
-# (원문 전체가 아니라 값 3일치만 남긴 재구성이며, 값 자체는 실응답에서 복사했습니다):
-#   "name":"Fidelity Nasdaq Composite Index ETF"
-#   {"a":104.16,"c":104.16,"h":105.28,"l":103.91,"o":105.28,"t":"2026-08-11","v":194370,"ch":-0.6}
-# devalue 포맷: 모든 값이 평평한 배열에 담기고 컨테이너는 인덱스로 서로를 참조합니다.
-SAMPLE_HISTORY_PAYLOAD = json.dumps({
-    "type": "data",
-    "nodes": [
-        {"type": "data", "data": [{"info": 1}, {"name": 2, "ticker": 3}, "Fidelity Nasdaq Composite Index ETF", "ONEQ"]},
-        {"type": "data", "data": [
-            {"data": 1},                       # 0: 최상위
-            [2, 6, 10],                        # 1: 행 목록
-            {"a": 3, "c": 3, "t": 4, "v": 5},  # 2
-            104.16, "2026-08-11", 194370,      # 3~5
-            {"a": 6, "c": 7, "t": 8, "v": 9},  # 6  (a 가 자기 자신을 가리키는 기형 → None)
-            104.79, "2026-08-10", 186762,      # 7~9
-            {"c": 11, "t": 12},                # 10
-            105.184, "2026-08-07",             # 11~12
-        ]},
-    ],
-})
+# 아래 두 픽스처는 2026-08-12 stockanalysis.com 과거주가 엔드포인트
+# (`/etf/SPY/history/__data.json`, `/etf/ONEQ/history/__data.json`)에서 **실제로 받은 응답의
+# 앞부분을 그대로 잘라낸 것**입니다(기존 스크리너 픽스처와 같은 관례). 값은 한 글자도 손대지
+# 않았고 뒤쪽 116행·뉴스·화면 메타데이터만 잘라냈습니다 — 그래서 행 인덱스 목록은 실제 그대로
+# 125개인데 살아 있는 행은 앞 9개뿐이고, 잘려나간 뒤쪽을 가리키는 인덱스는 None 으로
+# 디코딩됩니다(응답이 잘려도 크래시 대신 결측 처리되는지까지 함께 확인).
+#
+# ⚠️ 왜 실제 원문으로 바꿨는가(2026-08-12 #96):
+#    v1 의 합성 페이로드는 행 목록을 노드 **최상위 바로 아래**에 뒀는데, 실제 응답은 한 겹 더
+#    안쪽이었습니다 — {"data": {"symbol":"SPY","source":"tiingo","data":[행…]}, "news":…}.
+#    그래서 오프라인 테스트는 통과했는데 첫 자동 실행이
+#    "응답에서 일별 시세 행을 찾지 못했습니다"로 실패했습니다. 같은 종류의 사고를 막으려면
+#    파싱 검증은 **실응답 원문**으로 해야 합니다(§0-1).
+def _history_fixture(symbol):
+    """실제로 받은 과거주가 응답 원문(앞부분)을 읽어옵니다."""
+    return (REPO_ROOT / "tests" / "fixtures"
+            / f"us_index_history_{symbol.lower()}_data_json_head.json").read_text(encoding="utf-8")
 
 
 def test_us_index_collector_parsing():
-    print("\n[7] 미국 지수 수집기 파싱 로직 (네트워크 불필요)")
+    print("\n[7] 미국 지수 수집기 파싱 로직 (2026-08-12 실제 응답 원문 · 네트워크 불필요)")
 
-    nodes = cui.decode_sveltekit_data_json(SAMPLE_HISTORY_PAYLOAD)
-    check(len(nodes) == 2, "devalue 노드 2개를 펼침(#92 디코더 재사용)")
-    check(cui.extract_proxy_name(nodes) == "Fidelity Nasdaq Composite Index ETF",
-          "응답에서 프록시 ETF 이름을 찾음(엉뚱한 종목 방지용 확인값)")
+    nodes = cui.decode_sveltekit_data_json(_history_fixture("SPY"))
+    check(len(nodes) == 1, "devalue 데이터 노드를 펼침(#92 디코더 재사용, skip 노드는 건너뜀)")
 
-    rows = cui.extract_history_rows(nodes)
-    check(len(rows) == 3, "일별 시세 행 목록을 '행의 생김새'로 찾아냄(노드 순서에 의존 안 함)")
+    rows, block = cui.extract_history_block(nodes)
+    check(len(rows) == 125,
+          "행 목록을 '행의 생김새'로 찾아냄 — 최상위가 아니라 **한 겹 안쪽**에 있어도 찾음(#96 회귀)")
+    check(block.get("symbol") == "SPY",
+          "행을 담고 있던 블록(심볼·공급자 메타데이터)까지 같이 돌려줌 — 종목 확인용")
+
+    info = cui.extract_source_info(nodes, block)
+    check(info["source_symbol"] == "SPY" and info["source_provider"] == "tiingo",
+          "응답이 스스로 말하는 티커·공급자를 읽음")
+    check(info["proxy_name"] is None,
+          "이 엔드포인트에는 ETF 이름이 없음 — 지어내지 않고 None(확인 불가)")
 
     normalized = cui.normalize_history_rows(rows)
-    check([r["date"] for r in normalized] == ["2026-08-07", "2026-08-10", "2026-08-11"],
+    check(len(normalized) == 9,
+          "잘려나간 뒤쪽(None)은 버리고 살아 있는 9행만 정규화 — 응답이 잘려도 죽지 않음")
+    check([r["date"] for r in normalized[-3:]] == ["2026-08-07", "2026-08-10", "2026-08-11"],
           "날짜 오름차순 정렬")
-    check(approx(normalized[-1]["close"], 104.16), "미조정 종가(c)를 씀 — 조정가(a)가 아님")
+    check(approx(normalized[-1]["close"], 770.56), "SPY 최신 종가(2026-08-11 = 770.56)")
+
+    oneq_nodes = cui.decode_sveltekit_data_json(_history_fixture("ONEQ"))
+    oneq_rows, oneq_block = cui.extract_history_block(oneq_nodes)
+    oneq_norm = cui.normalize_history_rows(oneq_rows)
+    check(oneq_block.get("symbol") == "ONEQ" and oneq_block.get("source") == "spg",
+          "⚠️ ONEQ 의 공급자는 tiingo 가 아니라 spg — 공급자 이름을 조건으로 걸면 안 됨(#96)")
+    check(approx(oneq_norm[-1]["close"], 104.16), "ONEQ 최신 종가(2026-08-11 = 104.16)")
+    check(approx(oneq_norm[-3]["close"], 105.184),
+          "미조정 종가(c=105.184)를 씀 — 조정가(a=105.1844)가 아님")
+
+    # ⚠️ #96 의 핵심: 같은 응답 안에는 c/h/l/o/v 로 **글자가 겹치는** '지금 시세(quote)'
+    #    스키마가 함께 옵니다. 날짜(t)가 없으면 시세 행으로 인정하지 않습니다.
+    quote_like = {"c": 1.2, "e": 0, "h": 774.61, "l": 769.2, "o": 774.53,
+                  "p": 770.56, "u": 0, "v": 36740555, "cl": 770.56}
+    check(cui.looks_like_history_rows([quote_like]) is False,
+          "날짜(t) 없는 quote 스키마는 시세 행이 아님(키 글자가 겹쳐도 속지 않음)")
+    check(cui.extract_history_rows([{
+        "quote": [quote_like],
+        "data": {"symbol": "SPY", "source": "tiingo",
+                 "data": [{"t": "2026-08-11", "c": 770.56}]},
+    }]) == [{"t": "2026-08-11", "c": 770.56}],
+          "quote 블록과 이력 블록이 같이 와도 날짜가 있는 쪽을 고름")
+    check(cui.extract_history_rows([{
+        "decoy": [{"t": "1999-01-01", "c": 1.0}, {"t": "1999-01-02", "c": 2.0},
+                  {"t": "1999-01-03", "c": 3.0}],
+        "data": {"symbol": "SPY", "source": "tiingo", "updated": "…",
+                 "data": [{"t": "2026-08-11", "c": 770.56}]},
+    }]) == [{"t": "2026-08-11", "c": 770.56}],
+          "메타데이터(심볼·공급자)가 붙은 블록을 더 긴 후보보다 우선(오탐 방어)")
 
     check(cui.looks_like_history_rows([{"t": "2026-08-11", "c": 1.0}]) is True,
           "행 판정: 날짜(t)+종가(c) 가 있으면 시세 행")
@@ -618,17 +652,23 @@ def test_us_index_collector_parsing():
 
 
 def test_us_index_collector_run():
-    """수집기 본체를 **가짜 응답**으로 직접 호출해 파일 쓰기·병합·차단 경로까지 확인합니다."""
-    print("\n[7-2] 미국 지수 수집기 실행 경로 (가짜 응답)")
+    """
+    수집기 본체를 **실제 응답 원문**(위 픽스처)으로 직접 호출해 파일 쓰기·병합·차단 경로까지
+    확인합니다. 티커에 맞는 응답을 돌려줘, CI 가 실제로 밟는 경로를 그대로 재현합니다(#96).
+    """
+    print("\n[7-2] 미국 지수 수집기 실행 경로 (실제 응답 원문)")
 
     class _FakeResponse:
         def __init__(self, text):
             self.text = text
 
+    def _respond(url, timeout=None):
+        return _FakeResponse(_history_fixture("SPY" if "/spy/" in url else "ONEQ"))
+
     original_http_get = cui._http_get
     with tempfile.TemporaryDirectory() as tmp:
         try:
-            cui._http_get = lambda url, timeout=None: _FakeResponse(SAMPLE_HISTORY_PAYLOAD)
+            cui._http_get = _respond
             path = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
             check(path and os.path.exists(path), "수집 결과 파일 생성")
 
@@ -637,25 +677,34 @@ def test_us_index_collector_run():
             check(set(indices) == {"SP500_PROXY_SPY", "NASDAQ_PROXY_ONEQ"},
                   "두 벤치마크가 모두 저장됨")
             oneq = indices["NASDAQ_PROXY_ONEQ"]
-            check(oneq["closes"] == {"2026-08-07": 105.184, "2026-08-10": 104.79,
+            check(oneq["closes"] == {"2026-07-30": 98.8, "2026-07-31": 100.03,
+                                     "2026-08-03": 102.07, "2026-08-04": 104.78,
+                                     "2026-08-05": 103.88, "2026-08-06": 103.84,
+                                     "2026-08-07": 105.184, "2026-08-10": 104.79,
                                      "2026-08-11": 104.16},
                   "날짜→종가 형태로 저장(미조정 종가)")
-            check(oneq["last_date"] == "2026-08-11" and oneq["count"] == 3,
+            check(oneq["last_date"] == "2026-08-11" and oneq["count"] == 9,
                   "최신 날짜·건수 메타데이터")
-            check(oneq["proxy_name_verified"] is True,
-                  "ONEQ 는 이름에 'nasdaq composite' 가 있어 검증 통과")
-            check(indices["SP500_PROXY_SPY"]["proxy_name_verified"] is False,
-                  "이름이 기대와 다르면 검증 실패로 표시(조용히 넘어가지 않음)")
-            check(any("기대 문구" in w for w in payload["metadata"]["warnings"]),
-                  "검증 실패 사유가 metadata.warnings 에 남음")
+            spy = indices["SP500_PROXY_SPY"]
+            check(approx(spy["closes"].get("2026-08-11"), 770.56) and spy["count"] == 9,
+                  "실응답에서 SPY 종가가 실제로 추출됨(#96 회귀 — 예전엔 0행이라 수집 실패)")
+            check(spy["proxy_symbol_verified"] is True
+                  and oneq["proxy_symbol_verified"] is True,
+                  "응답이 말하는 티커로 종목 확인(SPY/ONEQ)")
+            check(spy["source_provider"] == "tiingo" and oneq["source_provider"] == "spg",
+                  "공급자가 종목마다 다르다는 사실을 그대로 기록(조건으로 쓰지 않음)")
+            check(payload["metadata"]["warnings"] == [],
+                  "정상 응답에는 경고가 하나도 붙지 않음(거짓 경고 없음)")
             check(payload["metadata"]["is_etf_proxy"] is True
                   and payload["metadata"]["close_kind"] == "unadjusted_close",
                   "프록시·미조정 종가라는 사실이 파일에 명시됨")
 
             # 2회차 — 같은 날짜에 다른 값이 오면 덮어쓰지 않고 충돌로 기록
-            conflicting = json.loads(SAMPLE_HISTORY_PAYLOAD)
-            conflicting["nodes"][1]["data"][3] = 999.0
-            cui._http_get = lambda url, timeout=None: _FakeResponse(json.dumps(conflicting))
+            conflicting = json.loads(_history_fixture("ONEQ"))
+            conflicting["nodes"][2]["data"][9] = 999.0   # 2026-08-11 종가(104.16) 자리
+            conflicting_text = json.dumps(conflicting)
+            cui._http_get = lambda url, timeout=None: _FakeResponse(
+                _history_fixture("SPY") if "/spy/" in url else conflicting_text)
             cui.run_us_index_history_collector(data_dir=tmp, delay=False)
             payload2 = json.loads(Path(path).read_text(encoding="utf-8"))
             oneq2 = payload2["indices"]["NASDAQ_PROXY_ONEQ"]
@@ -677,6 +726,20 @@ def test_us_index_collector_run():
             cui._http_get = lambda url, timeout=None: _FakeResponse('{"type":"data","nodes":[]}')
             result2 = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
             check(result2 is None, "노드를 못 찾으면 파일을 쓰지 않음(빈 값으로 덮지 않음)")
+
+            # 노드는 멀쩡한데 '지금 시세(quote)'만 있고 일별 이력이 없을 때 —
+            # 키 글자가 겹친다고 오늘 값 하나를 이력으로 둔갑시키지 않습니다(#96).
+            quote_only = json.dumps({"type": "data", "nodes": [{"type": "data", "data": [
+                {"quote": 1}, {"c": 2, "h": 3, "l": 4, "o": 5, "v": 6},
+                1.2, 774.61, 769.2, 774.53, 36740555,
+            ]}]})
+            cui._http_get = lambda url, timeout=None: _FakeResponse(quote_only)
+            result3 = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
+            check(result3 is None,
+                  "quote 스키마만 있는 응답은 '수집 실패'로 처리(엉뚱한 값을 이력으로 담지 않음)")
+            payload4 = json.loads(Path(path).read_text(encoding="utf-8"))
+            check(payload4["indices"]["SP500_PROXY_SPY"]["closes"].get("2026-08-11") == 770.56,
+                  "그 뒤에도 기존 데이터는 그대로 남아 있음")
         finally:
             cui._http_get = original_http_get
 
@@ -938,6 +1001,16 @@ def test_workflow():
     check("git add data/us_index_history.json" in yml, "커밋 대상은 공개 벤치마크 파일 하나뿐")
     check("git add -A data/" not in yml and "git add data/ " not in yml,
           "다른 데이터 파일을 통째로 커밋하지 않음(다른 워크플로우 산출물 침범 방지)")
+    # ⚠️ 2026-08-12 #96: 파일이 없을 때 `git add <파일명>` 이 exit 128 로 잡을 통째로
+    #    죽였습니다. 수집기가 "둘 다 실패하면 파일을 건드리지 않는" 정상 동작을 갖고 있어서
+    #    파일 없음은 예상 가능한 상태입니다 — 있으면만 add 해야 합니다.
+    check("if [ -f data/us_index_history.json ]; then" in yml,
+          "파일이 없으면 add 를 건너뜀(없다고 잡 전체가 죽지 않음)")
+    check(yml.index("if [ -f data/us_index_history.json ]; then")
+          < yml.index("git add data/us_index_history.json"),
+          "존재 확인이 add 보다 먼저 옴")
+    check("git commit -m \"Report Benchmark Update" in yml and "|| exit 0" in yml,
+          "변경분이 없으면 커밋 실패를 조용히 넘김(기존 워크플로우 관례)")
     check("market_history.csv" not in yml, "매크로 파일을 건드리지 않음")
     check("timeout-minutes:" in yml and "concurrency:" in yml,
           "타임아웃·동시성 가드(기존 워크플로우 관례)")

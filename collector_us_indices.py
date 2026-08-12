@@ -19,10 +19,16 @@ REPORT_WORK_ORDER.md §4 / §9-①(벤치마크 소스 조사) 의 산출물입�
       "과거 주가(History)" 데이터 엔드포인트가 살아 있습니다:
           https://stockanalysis.com/etf/{symbol}/history/__data.json
       2026-08-12 실응답(ONEQ):
-          "name":"Fidelity Nasdaq Composite Index ETF", "exchange":"NASDAQ",
+          {"symbol":"ONEQ", "source":"spg", "updated":"Wed, 12 Aug 2026 01:53:52 GMT",
+           "data":[ 행… ]}
           행 예시 {"a":104.16,"c":104.16,"h":105.28,"l":103.91,"o":105.28,
                   "t":"2026-08-11","v":194370,"ch":-0.6}
-          → 한 번의 요청으로 **약 6개월치 일별 종가**가 옵니다(125행 확인).
+          → 한 번의 요청으로 **약 6개월치 일별 종가**가 옵니다(2026-08-12 재확인 기준
+            SPY·ONEQ 모두 125행 = 2026-02-11 ~ 2026-08-11).
+      ⚠️ 2026-08-12 재확인(#96): 이 엔드포인트에는 **ETF 이름이 없습니다**(초기 구축 때
+         적어 둔 `"name":"Fidelity …"` 는 다른 페이지의 값이었습니다). 종목 확인은 응답이
+         스스로 말하는 `symbol` 로 합니다. 또 시세 공급자는 종목마다 달라서
+         (SPY=`tiingo`, ONEQ=`spg`) 공급자 이름을 조건으로 걸지 않습니다.
       응답 포맷은 스크리너와 똑같은 SvelteKit "devalue" 직렬화라, #92 에서 만든
       `decode_sveltekit_data_json()` 을 **그대로 재사용**합니다(디코더 중복 구현 없음).
 
@@ -122,6 +128,25 @@ HISTORY_ADJ_CLOSE_KEY = "a"   # 배당 조정가 — 일부러 저장하지 않�
 
 _DATE_PATTERN = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 
+# -----------------------------------------------------------------------------
+# 시세 이력 '블록'을 알아보는 단서 (2026-08-12 버그 수정 #96 — 실응답 재확인)
+# -----------------------------------------------------------------------------
+# 실제 응답에서 행 목록은 **최상위 바로 아래가 아니라 한 겹 더 안쪽**에 있습니다:
+#     {"data": {"id":120, "symbol":"SPY", "source":"tiingo",
+#               "updated":"Wed, 12 Aug 2026 12:41:52 GMT", "timestamp":"...",
+#               "data":[ {…행…}, {…행…}, … ]},
+#      "news":[…], "other":{…}, "source":"tiingo", "trust":{…}}
+# 그래서 아래 탐색은 **깊이 우선으로 응답 전체를 훑고**, 행 목록을 담고 있던 dict 에
+# 심볼·공급자 같은 메타데이터가 붙어 있으면 가점해 오탐을 줄입니다.
+#
+# ⚠️ 공급자 이름을 조건으로 걸지 않은 이유: 같은 날 실응답에서 SPY 는 `"source":"tiingo"`
+#    였지만 **ONEQ 는 `"source":"spg"`(S&P Global Market Intelligence)** 였습니다.
+#    "tiingo 인 노드만" 같은 조건을 걸었다면 나스닥 쪽이 통째로 빠졌을 겁니다(§0-1).
+HISTORY_BLOCK_HINT_KEYS = ("symbol", "source", "updated", "timestamp")
+
+# 응답이 아무리 깊어도 이만큼만 파고듭니다(예기치 못한 구조에서 무한정 도는 것 방지).
+MAX_SEARCH_DEPTH = 12
+
 # 지나치게 낡은 값이 섞여 들어오는 걸 막는 최소한의 형식 검증(§0-1 범위 검증 습관).
 MIN_REASONABLE_CLOSE = 0.01
 MAX_REASONABLE_CLOSE = 1_000_000.0
@@ -140,12 +165,19 @@ def build_history_url(symbol):
 # =============================================================================
 def looks_like_history_rows(value):
     """
-    과거 주가 표의 '행 목록'인지 판정합니다 — 첫 행이 날짜(t)와 종가(c)를 가진 dict 인가.
+    과거 주가 표의 '행 목록'인지 판정합니다 — 첫 행이 **거래일 날짜(t)** 와 종가(c)를 가진
+    dict 인가.
 
     ⚠️ 노드 순서/키 이름("data"/"stockData" 등 페이지마다 다름)에 의존하지 않고 **행의
     생김새**로 찾습니다. 사이트가 필드를 더하거나 노드 구성을 바꿔도 잘 버티고, 못 찾으면
     빈 목록을 돌려줘 호출 쪽이 "이번 수집 실패"로 처리합니다(엉뚱한 배열을 억지로 행으로
     해석하지 않음).
+
+    ⚠️ **날짜(t)를 반드시 요구하는 이유**(2026-08-12 #96): 같은 응답 안에는 "지금 이 순간의
+    시세(quote)"처럼 `c`/`h`/`l`/`o`/`v` 로 **글자가 겹치는** 다른 스키마가 함께 옵니다.
+    그쪽은 날짜별 배열이 아니라 오늘 값 하나뿐이고 `t`(거래일)가 없습니다. 그래서
+    "YYYY-MM-DD 형식의 t 를 가진 dict 들의 목록"만 일별 시세 행으로 인정합니다 —
+    이름이 비슷한 다른 블록을 시세 이력으로 착각하지 않기 위한 핵심 조건입니다.
     """
     if not isinstance(value, list) or not value:
         return False
@@ -157,19 +189,107 @@ def looks_like_history_rows(value):
     return bool(_DATE_PATTERN.match(str(head.get(HISTORY_DATE_KEY) or "")))
 
 
+def _history_block_score(container):
+    """
+    행 목록을 담고 있던 dict 가 '진짜 시세 이력 블록'처럼 생겼는지 점수로 매깁니다.
+    (심볼·공급자·갱신시각 같은 메타데이터가 붙어 있을수록 높음 — 위 상수 주석 참고)
+    """
+    if not isinstance(container, dict):
+        return 0
+    score = 0
+    for key in HISTORY_BLOCK_HINT_KEYS:
+        value = container.get(key)
+        if isinstance(value, str) and value.strip():
+            score += 1
+        elif isinstance(value, (int, float)) and not isinstance(value, bool):
+            score += 1
+    return score
+
+
+def iter_history_row_candidates(value, depth=0, seen=None):
+    """
+    응답 구조를 깊이 우선으로 훑으며 (행 목록, 그 목록을 담고 있던 dict) 후보를 모두 냅니다.
+
+    ⚠️ 이전 버전은 노드의 **최상위 값만** 훑었습니다. 그런데 실제 응답은 행 목록이 한 겹
+    더 안쪽(`{"data": {"symbol": ..., "data": [행…]}}`)에 있어서 한 건도 찾지 못했고,
+    2026-08-12 첫 자동 실행이 "응답에서 일별 시세 행을 찾지 못했습니다"로 실패했습니다.
+    구조가 또 바뀌어도 버티도록 여기서는 **깊이에 의존하지 않고** 재귀로 훑습니다.
+    """
+    if depth > MAX_SEARCH_DEPTH or not isinstance(value, (dict, list)):
+        return
+    if seen is None:
+        seen = set()
+    marker = id(value)
+    if marker in seen:  # devalue 는 같은 객체를 여러 곳에서 공유합니다(중복 순회·순환 방지)
+        return
+    seen.add(marker)
+
+    children = value.values() if isinstance(value, dict) else value
+    container = value if isinstance(value, dict) else {}
+    for child in children:
+        if looks_like_history_rows(child):
+            yield child, container
+        else:
+            yield from iter_history_row_candidates(child, depth + 1, seen)
+
+
+def extract_history_block(decoded_nodes):
+    """
+    펼쳐진 노드들에서 일별 시세 행 목록과 **그 목록을 담고 있던 블록**을 찾습니다.
+
+    후보가 여럿이면 ① 블록 메타데이터 점수(심볼·공급자 등)가 높은 쪽, ② 그다음 긴 목록
+    순으로 고릅니다(뉴스·배당 등 다른 배열이 우연히 비슷하게 생겼을 때의 방어).
+
+    반환: (rows, block) — 못 찾으면 ([], {}).
+    """
+    best_rows, best_block, best_rank = [], {}, None
+    for node_data in decoded_nodes:
+        for rows, container in iter_history_row_candidates(node_data):
+            rank = (_history_block_score(container), len(rows))
+            if best_rank is None or rank > best_rank:
+                best_rows, best_block, best_rank = rows, container, rank
+    return best_rows, best_block
+
+
 def extract_history_rows(decoded_nodes):
+    """일별 시세 행 목록만 필요할 때 쓰는 얇은 껍데기(`extract_history_block` 참고)."""
+    return extract_history_block(decoded_nodes)[0]
+
+
+def extract_source_info(decoded_nodes, block=None):
     """
-    펼쳐진 노드들에서 일별 시세 행 목록을 찾습니다. 후보가 여럿이면 **가장 긴 목록**을
-    고릅니다(뉴스·배당 등 다른 배열이 우연히 비슷하게 생겼을 때의 방어).
+    "엉뚱한 종목을 담고 있지 않은지" 확인할 근거를 응답에서 모읍니다.
+
+    · source_symbol   : 블록이 스스로 말하는 티커("SPY"/"ONEQ") — 가장 확실한 확인값입니다.
+    · source_provider : 시세 공급자("tiingo"/"spg" 등, 종목마다 다름 — 조건으로 쓰지 않음)
+    · source_updated  : 소스가 말하는 갱신 시각(사람이 볼 참고값)
+    · proxy_name      : ETF 이름. ⚠️ 2026-08-12 실응답 기준 **과거주가 엔드포인트에는 이름이
+                        없습니다.** 없으면 지어내지 않고 None 을 돌려주고, 호출 쪽은 이름
+                        검증을 '확인 불가'로 남깁니다(없다고 경고를 띄우지는 않습니다).
     """
-    best = []
+    info = {"source_symbol": None, "source_provider": None,
+            "source_updated": None, "proxy_name": None}
+
+    if isinstance(block, dict):
+        symbol = block.get("symbol")
+        if isinstance(symbol, str) and symbol.strip():
+            info["source_symbol"] = symbol.strip().upper()
+        for key in ("source", "updated"):
+            value = block.get(key)
+            if isinstance(value, str) and value.strip():
+                info[f"source_{'provider' if key == 'source' else 'updated'}"] = value.strip()
+
     for node_data in decoded_nodes:
         if not isinstance(node_data, dict):
             continue
-        for value in node_data.values():
-            if looks_like_history_rows(value) and len(value) > len(best):
-                best = value
-    return best
+        if info["source_provider"] is None and isinstance(node_data.get("source"), str):
+            info["source_provider"] = node_data["source"].strip() or None
+        node_info = node_data.get("info")
+        if info["proxy_name"] is None and isinstance(node_info, dict):
+            name = node_info.get("name") or node_info.get("titleName")
+            if name:
+                info["proxy_name"] = str(name)
+    return info
 
 
 def extract_proxy_name(decoded_nodes):
@@ -178,15 +298,7 @@ def extract_proxy_name(decoded_nodes):
     소스가 바뀌어 엉뚱한 종목을 담는 사고를 막기 위한 확인용이며, 못 찾으면 None 입니다
     (지어내지 않습니다 — 호출 쪽이 '확인 불가'로 기록합니다).
     """
-    for node_data in decoded_nodes:
-        if not isinstance(node_data, dict):
-            continue
-        info = node_data.get("info")
-        if isinstance(info, dict):
-            name = info.get("name") or info.get("titleName")
-            if name:
-                return str(name)
-    return None
+    return extract_source_info(decoded_nodes)["proxy_name"]
 
 
 def normalize_history_rows(rows):
@@ -262,9 +374,9 @@ def fetch_index_history(proxy_symbol):
     """
     프록시 ETF 하나의 과거 종가를 받아옵니다.
 
-    반환: (rows, proxy_name)
-      rows       : normalize_history_rows() 결과 (날짜 오름차순)
-      proxy_name : 응답에서 읽은 ETF 이름(없으면 None)
+    반환: (rows, source_info)
+      rows        : normalize_history_rows() 결과 (날짜 오름차순)
+      source_info : `extract_source_info()` 결과(티커·공급자·갱신시각·이름, 없으면 None)
 
     차단(403/429 등)은 `_http_get()` 이 USSourceBlockedError 로 즉시 올립니다(§0-3-2).
     그 밖의 실패는 예외로 올려 호출 쪽이 "이 지수만 건너뛸지"를 판단하게 합니다.
@@ -273,10 +385,15 @@ def fetch_index_history(proxy_symbol):
     decoded_nodes = decode_sveltekit_data_json(res.text)
     if not decoded_nodes:
         raise ValueError("응답에서 SvelteKit 데이터 노드를 찾지 못했습니다(소스 구조 변경 가능성)")
-    rows = extract_history_rows(decoded_nodes)
-    if not rows:
+    raw_rows, block = extract_history_block(decoded_nodes)
+    if not raw_rows:
         raise ValueError("응답에서 일별 시세 행을 찾지 못했습니다(소스 구조 변경 가능성)")
-    return normalize_history_rows(rows), extract_proxy_name(decoded_nodes)
+    rows = normalize_history_rows(raw_rows)
+    if not rows:
+        # 행은 찾았는데 날짜·종가를 하나도 못 읽은 경우 — 빈 값으로 파일을 덮지 않습니다(§0-1).
+        raise ValueError("일별 시세 행을 찾았지만 날짜·종가를 하나도 읽지 못했습니다"
+                         "(소스 구조 변경 가능성)")
+    return rows, extract_source_info(decoded_nodes, block)
 
 
 def run_us_index_history_collector(data_dir=None, delay=True):
@@ -320,7 +437,7 @@ def run_us_index_history_collector(data_dir=None, delay=True):
         })
 
         try:
-            rows, proxy_name = fetch_index_history(proxy_symbol)
+            rows, source_info = fetch_index_history(proxy_symbol)
         except USSourceBlockedError as exc:
             blocked = True
             entry["last_error"] = f"소스가 요청을 차단했습니다: {exc}"
@@ -335,12 +452,34 @@ def run_us_index_history_collector(data_dir=None, delay=True):
             print(f"  ⚠️ {label_ko}: 수집 실패 — {exc}")
             continue
 
-        # 엉뚱한 ETF 를 담고 있지 않은지 이름으로 확인(§0-1 — 소스가 바뀌면 조용히 틀린 값을
-        # 쌓지 않고 경고를 남깁니다). 값 자체는 그대로 저장하되, 검증 실패 사실을 붙입니다.
-        name_verified = bool(proxy_name) and expected_phrase in proxy_name.lower()
+        # 엉뚱한 ETF 를 담고 있지 않은지 확인합니다(§0-1 — 소스가 바뀌면 조용히 틀린 값을
+        # 쌓지 않고 경고를 남깁니다). 값 자체는 그대로 저장하되, 검증 결과를 붙입니다.
+        #
+        # 1순위는 **응답이 스스로 말하는 티커**입니다. 2026-08-12 실응답 확인 결과 과거주가
+        # 엔드포인트에는 ETF 이름이 아예 없고(`{"symbol":"SPY", "source":"tiingo", …}`),
+        # 이름으로만 검증하면 정상 응답에도 매번 거짓 경고가 붙습니다.
+        source_symbol = source_info.get("source_symbol")
+        proxy_name = source_info.get("proxy_name")
+        symbol_verified = (source_symbol == proxy_symbol.upper()) if source_symbol else None
+        entry["source_symbol"] = source_symbol
+        entry["source_provider"] = source_info.get("source_provider")
+        entry["source_updated"] = source_info.get("source_updated")
+        entry["proxy_symbol_verified"] = symbol_verified
         entry["proxy_name"] = proxy_name
-        entry["proxy_name_verified"] = name_verified
-        if not name_verified:
+        # 이름은 응답에 없을 수 있어 **있을 때만** 검증합니다(없으면 None = 확인 불가).
+        entry["proxy_name_verified"] = (
+            expected_phrase in proxy_name.lower() if proxy_name else None
+        )
+        if symbol_verified is False:
+            note = (f"응답이 말하는 티커가 요청과 다릅니다"
+                    f"(요청 {proxy_symbol.upper()} / 응답 {source_symbol!r}) — 확인 필요")
+            warnings.append(f"{key}: {note}")
+            print(f"  ⚠️ {label_ko}: {note}")
+        elif symbol_verified is None:
+            note = "응답에서 티커를 찾지 못해 종목 확인을 하지 못했습니다(값은 그대로 저장)"
+            warnings.append(f"{key}: {note}")
+            print(f"  ⚠️ {label_ko}: {note}")
+        if entry["proxy_name_verified"] is False:
             note = (f"프록시 ETF 이름이 기대 문구('{expected_phrase}')를 포함하지 않습니다"
                     f"(실제: {proxy_name!r}) — 소스가 바뀌었을 수 있어 확인 필요")
             warnings.append(f"{key}: {note}")
@@ -420,7 +559,9 @@ def cmd_show(_args):
         closes = entry.get("closes") or {}
         last = entry.get("last_date")
         print(f"  · {key:<20} {entry.get('label_ko')}")
-        print(f"      프록시 {entry.get('proxy_symbol')} ({entry.get('proxy_name')}) "
+        print(f"      프록시 {entry.get('proxy_symbol')} (응답 티커 {entry.get('source_symbol')}"
+              f" / 공급자 {entry.get('source_provider')}) "
+              f"티커검증={entry.get('proxy_symbol_verified')} "
               f"이름검증={entry.get('proxy_name_verified')}")
         print(f"      {entry.get('first_date')} ~ {last} / {len(closes)}일 "
               f"/ 최신 종가 {closes.get(last)}")
