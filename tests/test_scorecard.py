@@ -1019,8 +1019,12 @@ def test_view_and_routing():
           "예전 종목코드/종목명 분리 필드는 제거됨")
     check('scorecard_picker_' in view_src and "st.selectbox" in view_src,
           "이름 일부만 쳐도 후보가 나오는 빠른 검색 selectbox 연동(2026-08-11 오너 요청)")
-    check('st.session_state["scorecard_query"] = picked' in view_src,
-          "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐")
+    check('st.session_state["scorecard_query"] = candidate_map[picked]' in view_src,
+          "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐(2026-08-13부터는 라벨이 아니라 "
+          "candidate_map으로 매핑한 실제 티커/코드 값을 채움 — 아래 참고)")
+    check('candidate_map[f"{ticker} · {name}"] = ticker' in view_src,
+          "빠른 검색 후보 라벨에 티커를 포함(2026-08-13 오너 지적 — 이름만 있으면 Streamlit의 "
+          "퍼지 매칭이 티커 검색을 이름 속 우연한 글자 순서와 혼동해 관계없는 결과를 잔뜩 보여줌)")
     check("scorecard_picker_{market}" in view_src,
           "빠른 검색 키가 시장별로 분리됨(한국/미국 선택 바뀔 때 후보 목록도 같이 바뀜)")
     # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰 지적) — 위 체크는 주석에 적힌 리터럴 문구만
@@ -1072,6 +1076,11 @@ def test_view_and_routing():
           "평가손익 요약의 st.metric 내장 delta 색(초록/빨강)을 끄고 _colored_pct 로 직접 색칠")
     check("_colored_pct" in view_src and ":red[" in view_src and ":blue[" in view_src,
           "수익률을 국내 증시 관례대로 오르면 빨강/내리면 파랑으로 표시")
+    check("_row_chart_label" in view_src and "def _row_chart_label" in view_src,
+          "원형차트(보유 비중/수익 비중) 범례는 종목코드 없이 이름만 표시"
+          "(2026-08-13, 표·기타 텍스트는 코드 병기 유지)")
+    check(view_src.count("names=[_row_chart_label(r)") == 2,
+          "두 원형차트(보유 비중, 수익 비중) 모두 차트 전용 라벨 함수를 씀")
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,

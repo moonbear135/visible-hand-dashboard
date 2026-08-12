@@ -302,25 +302,34 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
         picker_nonce_key = f"scorecard_picker_nonce_{market}"
         picker_nonce = st.session_state.get(picker_nonce_key, 0)
         picker_key = f"scorecard_picker_{market}_{picker_nonce}"
-        candidate_names = {
-            stock.get("name") for stock in (indexes.get(market) or {}).values()
-            if stock.get("name")
-        }
+        # 2026-08-13 오너 지적 — 미국 종목을 티커("XOM")로 검색했더니 관련 없는 회사 이름들이
+        # 잔뜩 나옴. 원인: 후보 라벨에 **종목명만** 들어있고 티커가 아예 없었던 탓에, Streamlit
+        # selectbox의 내장 필터가 "X, O, M이 이 순서로 어딘가에 등장하는지"만 보는 퍼지(fuzzy)
+        # 매칭이라 "eXpress cOMpany"처럼 우연히 순서가 맞는 이름들까지 걸려버렸던 것 — 진짜
+        # 티커 일치가 아니었습니다. 라벨을 "티커 · 종목명"으로 바꿔 티커 자체를 검색 대상 텍스트에
+        # 포함시키면, 티커를 그대로 치면 라벨 맨 앞부터 정확히 일치해 최상단에 뜨고, 이름을 쳐도
+        # 여전히 그대로 찾아집니다(§0-1 — 후보는 실제 유니버스에서만 뽑으므로 지어낸 게 아님).
+        candidate_map = {}  # 화면에 보이는 라벨 -> 실제로 입력칸에 채워줄 값(티커/코드)
+        for ticker, stock in (indexes.get(market) or {}).items():
+            name = stock.get("name")
+            if name:
+                candidate_map[f"{ticker} · {name}"] = ticker
         if market == MARKET_KR and broad_kr_index:
-            candidate_names |= {
-                stock.get("name") for stock in broad_kr_index.values() if stock.get("name")
-            }
+            for code, stock in broad_kr_index.items():
+                name = stock.get("name")
+                if name:
+                    candidate_map.setdefault(f"{code} · {name}", code)
         picker_scope_label = (
             "코스피·코스닥·국내ETF 전체" if market == MARKET_KR and broad_kr_index
             else "상위 200/550 종목만"
         )
         picked = st.selectbox(
             f"종목 빠른 검색 ({picker_scope_label} — 그 밖은 아래 칸에 코드를 직접 입력)",
-            [picker_placeholder] + sorted(candidate_names),
+            [picker_placeholder] + sorted(candidate_map.keys()),
             key=picker_key,
         )
         if picked != picker_placeholder:
-            st.session_state["scorecard_query"] = picked
+            st.session_state["scorecard_query"] = candidate_map[picked]
             st.session_state[picker_nonce_key] = picker_nonce + 1
             st.rerun()
 
@@ -399,6 +408,18 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
 def _row_label(row):
     name = row.get("stock_name")
     return f"{name} ({row['ticker']})" if name else row["ticker"]
+
+
+def _row_chart_label(row):
+    """
+    2026-08-13 오너 요청 — 아래 원형차트(보유 비중/수익 비중) 범례에는 종목코드까지 붙어
+    있으면 글자가 작고 복잡해 보여, 차트 라벨에서만 종목명만 쓰도록 분리했습니다. 표
+    (`_row_label_html`)·그 외 텍스트(`_row_label`)는 코드 병기를 그대로 유지합니다 —
+    이 함수는 차트 전용입니다. 종목명이 없는 종목(유니버스 밖이라 이름을 못 찾은 경우)은
+    지어내지 않고 코드 그대로 보여줍니다(§0-1).
+    """
+    name = row.get("stock_name")
+    return name if name else row["ticker"]
 
 
 def _row_label_html(row):
@@ -608,7 +629,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.caption("현재가를 아는 종목이 없어 비중 차트를 그릴 수 없습니다.")
         elif PLOTLY_AVAILABLE:
             fig = px.pie(
-                names=[_row_label(r) for r in priced],
+                names=[_row_chart_label(r) for r in priced],
                 values=[r["market_value"] for r in priced],
                 hole=0.35,
             )
@@ -616,7 +637,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.plotly_chart(fig, use_container_width=True)
         else:  # pragma: no cover
             st.dataframe(
-                [{"종목": _row_label(r), "비중(%)": round(r["weight_pct"], 2)} for r in priced],
+                [{"종목": _row_chart_label(r), "비중(%)": round(r["weight_pct"], 2)} for r in priced],
                 use_container_width=True, hide_index=True,
             )
 
@@ -627,7 +648,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.caption("이익이 난 종목이 없어 수익 비중 차트를 그릴 수 없습니다.")
         elif PLOTLY_AVAILABLE:
             fig = px.pie(
-                names=[_row_label(r) for r in gainers],
+                names=[_row_chart_label(r) for r in gainers],
                 values=[r["profit"] for r in gainers],
                 hole=0.35,
             )
@@ -635,7 +656,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.plotly_chart(fig, use_container_width=True)
         else:  # pragma: no cover
             st.dataframe(
-                [{"종목": _row_label(r), "수익비중(%)": round(r["profit_share_pct"], 2)}
+                [{"종목": _row_chart_label(r), "수익비중(%)": round(r["profit_share_pct"], 2)}
                  for r in gainers],
                 use_container_width=True, hide_index=True,
             )
