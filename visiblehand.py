@@ -130,7 +130,19 @@ def main():
     )
     st.sidebar.markdown("---")
 
-    # 2. 공개 서비스 메뉴 (사이드바 상단) — 대분류 1개 아래 시장별 중분류 2개
+    # 2. 관리자 로그인 시스템을 먼저 배치합니다 (2026-08-12, TASK_HISTORY #103 — 순서 수정).
+    #    ⚠️ 예전에는 이 위치가 아래쪽(§4 근처)이었는데, 그러면 관리자가 방금 로그인해도
+    #    바로 아래에서 만드는 "대분류 라디오"가 **한 실행(run) 지난 값**을 보게 됩니다
+    #    (`st.session_state["admin_mode"]`는 render_admin_sidebar() 안에서만 갱신되므로,
+    #    이 함수보다 먼저 만든 라디오는 로그인 직후 첫 렌더에서 옛 상태를 봄 — 오너가 겪은
+    #    "로그인 성공은 뜨는데 리포트/내 성적표가 안 보인다" 버그의 실제 원인이었습니다).
+    #    함수를 먼저 호출해 **항상 최신 admin_mode**를 쓰도록 순서를 바꿨습니다. 사이드바
+    #    시각적 순서가 "관리자 메뉴 → 사실 이 가격이에요/내 성적표"로 바뀌지만, 일반 방문자에게는
+    #    관리자 로그인 폼 UI 자체가 아주 작아서 체감 차이가 크지 않고, 정확성이 우선입니다.
+    admin_mode = render_admin_sidebar()
+    st.sidebar.markdown("---")
+
+    # 3. 공개 서비스 메뉴 (사이드바 상단) — 대분류 1개 아래 시장별 중분류 2개
     #      대분류: 💡 사실 이 가격이에요
     #        중분류: 🇰🇷 한국 주식은 이가격이에요  → render_pegy_page()      (기본값)
     #        중분류: 🇺🇸 미국 주식은 이가격이에요  → render_us_stocks_page()
@@ -151,11 +163,8 @@ def main():
     #    되고, 중분류는 고른 대분류 밑에서만 나타납니다.
     TOP_VALUATION = "💡 사실 이 가격이에요"
     TOP_SCORECARD = "📊 내 성적표 (준비중 · 미리보기)"
-    # `admin_mode` 는 이 라디오보다 나중에(§3) 확정되지만, `is_scorecard_visible()` 이 실제로 보는
-    # 값은 st.session_state["admin_mode"] 하나뿐이라 여기서 미리 읽어도 안전합니다(매 실행마다
-    # 이전 실행 값이 세션에 남아있는 Streamlit 특성).
-    admin_mode_hint = st.session_state.get("admin_mode", False)
-    scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)
+    # admin_mode 는 위 §2 에서 이미 이번 실행(run) 기준 최신 값으로 확정됐습니다(스테일 버그 수정).
+    scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode)
 
     top_options = [TOP_VALUATION]
     if scorecard_available:
@@ -202,12 +211,9 @@ def main():
                  f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
         )
 
-    if not scorecard_available and admin_mode_hint and SCORECARD_IMPORT_ERROR:
+    if not scorecard_available and admin_mode and SCORECARD_IMPORT_ERROR:
         st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
     st.sidebar.markdown("---")
-
-    # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
-    admin_mode = render_admin_sidebar()
 
     # 3-1. 📈 리포트(2026-08-12 신설) — "내 성적표"를 고른 뒤 그 밑에 나오는 중분류(하위 탭)입니다.
     #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영. 코드/데이터는
