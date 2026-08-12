@@ -1236,22 +1236,23 @@ def test_view_and_routing():
           "service_role 키를 읽는 코드 없음")
 
     # 라우팅: 기본 숨김 + 기존 두 화면 무손상
-    # 2026-08-12(TASK_HISTORY #103): render_admin_sidebar() 를 대분류 라디오보다 **먼저**
-    # 호출하도록 순서를 고쳤습니다(로그인 직후 첫 렌더에서 admin_mode 가 한 실행 지난 값을
-    # 봐서 "로그인 성공은 뜨는데 리포트가 안 보인다"는 실사용 버그가 있었음). 그래서 라디오는
-    # 이제 admin_mode_hint 가 아니라 **항상 최신인 admin_mode** 를 직접 씁니다.
+    # 2026-08-12(TASK_HISTORY #105): 관리자 메뉴는 사이드바 맨 아래에 있어야 한다는 오너 방침이라
+    # render_admin_sidebar() 호출은 대분류 라디오보다 **뒤**에 남아있습니다(#103과 반대). 대신
+    # 대분류 라디오는 `admin_mode_hint`(st.session_state 를 미리 읽은 값, 한 실행 지연 가능)로
+    # 그리고, admin_mode_hint 와 실제 admin_mode 가 다르면 즉시 `st.rerun()`해서 위치는 유지하면서
+    # 정확성도 지킵니다("로그인 성공은 뜨는데 메뉴가 안 보인다"던 #103 버그의 재발 방지책).
     app_src = (REPO_ROOT / "visiblehand.py").read_text(encoding="utf-8")
     check("render_scorecard_page" in app_src, "visiblehand.py 에 내 성적표 라우팅 추가")
     check("show_scorecard = top_choice == TOP_SCORECARD" in app_src,
           "내 성적표 표시 여부는 최상위 라디오 선택 결과로만 결정됨(기본값은 선택 안 됨=False)")
-    check("scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode)" in app_src,
+    check("admin_mode_hint = st.session_state.get(\"admin_mode\", False)" in app_src,
+          "대분류 라디오는 admin_mode 를 세션에서 미리 읽어(hint) 판단함")
+    check("scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)" in app_src,
           "관리자 미리보기/명시 플래그일 때만 최상위 라디오에 내 성적표 선택지가 추가됨")
     check("top_options.append(TOP_SCORECARD)" in app_src,
           "내 성적표는 최상위 라디오에 조건부로만 합류함(무조건 노출 아님)")
-    admin_call_pos = app_src.find("admin_mode = render_admin_sidebar()")
-    top_radio_pos = app_src.find('key="top_nav_choice"')
-    check(admin_call_pos != -1 and top_radio_pos != -1 and admin_call_pos < top_radio_pos,
-          "render_admin_sidebar() 가 대분류 라디오보다 먼저 실행됨(스테일 admin_mode 재발 방지)")
+    check("if admin_mode != admin_mode_hint:" in app_src and "st.rerun()" in app_src,
+          "hint 와 실제 admin_mode 가 다르면 즉시 재실행해 화면을 최신 상태로 맞춤(스테일 재발 방지)")
     check("except Exception as _scorecard_import_exc" in app_src,
           "모듈 로드 실패해도 기존 화면이 죽지 않도록 import 가드")
     for legacy in ("render_us_stocks_page()", "render_macro_page()", "render_pegy_page()"):
