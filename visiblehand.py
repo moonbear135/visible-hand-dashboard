@@ -98,6 +98,16 @@ except Exception as _scorecard_import_exc:  # noqa: BLE001
     render_scorecard_page = None
     SCORECARD_IMPORT_ERROR = str(_scorecard_import_exc)
 
+# 📈 "리포트"(5번째 모듈)는 2026-08-12 신설된 **스테이징 상태** 화면입니다(§0-3-6).
+# "내 성적표"와 완전히 같은 패턴 — import 실패해도 기존 화면은 그대로 살아있어야 합니다.
+try:
+    from views.report_view import is_report_visible, render_report_page
+    REPORT_IMPORT_ERROR = None
+except Exception as _report_import_exc:  # noqa: BLE001
+    is_report_visible = None
+    render_report_page = None
+    REPORT_IMPORT_ERROR = str(_report_import_exc)
+
 @st.cache_resource
 def init_background_jobs():
     start_scheduler_thread()
@@ -178,10 +188,28 @@ def main():
         # 실패를 조용히 삼키지 않되(§0-1), 일반 방문자 화면은 건드리지 않습니다.
         st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
 
+    # 3-2. 📈 리포트 (스테이징, 2026-08-12 신설) — 내 성적표와 완전히 같은 패턴.
+    #      ⚠️ 기본값은 **숨김**입니다. ① 관리자 인증 상태(미리보기) ② REPORT_ENABLED 플래그를
+    #      명시적으로 켠 경우에만 사이드바에 진입 체크박스가 생깁니다(§0-3-6).
+    show_report = False
+    if render_report_page is not None and is_report_visible(admin_mode):
+        st.sidebar.markdown("---")
+        show_report = st.sidebar.checkbox(
+            "📈 리포트 (준비중 · 미리보기)",
+            key="view_report",
+            help="매일 쌓인 보유종목 평가금액 스냅샷으로 일간·주간·월간·분기·반기·연간 리포트와 "
+                 "벤치마크(코스피/S&P500·나스닥 프록시) 비교를 보여주는 신규 모듈입니다. "
+                 "오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
+        )
+    elif admin_mode and REPORT_IMPORT_ERROR:
+        st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
+
     # 4. 메인 뷰 라우팅
     #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
     #    ⚠️ 매크로 화면은 여전히 관리자 인증 후에만 진입 가능합니다 — 이번 메뉴 개편과 무관합니다.
-    if show_scorecard:
+    if show_report:
+        render_report_page()
+    elif show_scorecard:
         render_scorecard_page()
     elif selected_market == MARKET_US:
         render_us_stocks_page()
