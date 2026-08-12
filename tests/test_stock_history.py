@@ -833,6 +833,135 @@ def test_us_all_market_prices_collector():
           "않기 위한 §0-3-1(후행지표 전용) 방어")
 
 
+def test_us_etf_screener_devalue_decoder():
+    print("\n[4-5] 미국 ETF 스크리너 devalue 디코더 (2026-08-12, TASK_HISTORY #93 — 실제 응답 원문으로 검증)")
+    import collector_us_stocks as U
+
+    # ⚠️ 이 픽스처는 2026-08-12 stockanalysis.com **ETF** 스크리너 데이터 엔드포인트
+    # (`/etf/screener/__data.json`)에서 실제로 받은 응답에서 잘라낸 것입니다. 값(티커/펀드명/
+    # 자산군/순자산/가격/등락률/거래량/보유종목수)은 한 글자도 손대지 않았고, 뒤쪽 5,470여 행과
+    # 화면 메타데이터만 잘라낸 뒤 닫는 괄호를 붙였습니다. 그래서 `count` 는 실제 그대로 5480 인데
+    # 행은 7개뿐이고, 잘려나간 뒤쪽을 가리키는 인덱스(country/dataPoints/perPage)는 None 이 됩니다.
+    fixture = (REPO_ROOT / "tests" / "fixtures" / "us_etf_screener_data_json_head.json").read_text(encoding="utf-8")
+    nodes = U.decode_sveltekit_data_json(fixture)
+    check(len(nodes) == 2, "주식 스크리너와 똑같이 노드 2개(레이아웃 + 스크리너 페이지)를 전부 펼침")
+
+    rows, total_count = U.extract_screener_rows(nodes)
+    check(total_count == 5480,
+          "소스가 알려준 전체 ETF 수(count=5480)를 그대로 읽음 — '한 요청에 전 종목' 판정의 근거")
+    check(len(rows) == 7, "잘라낸 픽스처에 담긴 7개 행을 모두 찾음")
+
+    by_symbol = {r["s"]: r for r in rows}
+    check(by_symbol["VOO"]["price"] == 691.59 and by_symbol["VOO"]["n"] == "Vanguard S&P 500 ETF",
+          "ETF 행도 티커(s)·펀드명(n)·현재가(price) 키가 주식과 동일 — 별도 컬럼 매핑이 필요 없음")
+    check(by_symbol["VUG"]["price"] == 86.885,
+          "소수점 셋째 자리 가격(86.885)도 반올림 없이 그대로 복원")
+    check(all(r.get("assetClass") == "Equity" for r in rows),
+          "7개 행이 공유하는 자산군 값(devalue 의 인덱스 공유)을 전부 올바르게 되풀어냄")
+    check(by_symbol["QQQ"]["holdings"] == 106 and by_symbol["SPY"]["aum"] == 783071884104,
+          "ETF 전용 필드(보유종목수·순자산)도 구조상 정상 디코딩됨(다만 저장은 하지 않음)")
+    check(nodes[1]["country"] is None and nodes[1]["dataPoints"] is None and nodes[1]["perPage"] is None,
+          "잘려나간 뒤쪽을 가리키는 인덱스는 크래시 대신 None(결측)")
+
+    etfs = U.normalize_screener_rows(rows)
+    check([s["symbol"] for s in etfs] == ["VOO", "IVV", "SPY", "VTI", "QQQ", "VEA", "VUG"],
+          "순자산 순서 그대로 티커 목록으로 정규화됨")
+    check(set(etfs[0]) == {"symbol", "name", "price"},
+          "가격 전용 파일 목적대로 3개 필드만 남김 — assetClass/aum/holdings 는 일부러 버림"
+          "(주식 파일과 구조를 똑같이 유지)")
+
+
+def test_us_all_market_etf_prices_collector():
+    print("\n[4-6] 미국 ETF 현재가 수집기 (2026-08-12, TASK_HISTORY #93 — 실제 함수 호출)")
+    import collector_us_stocks as U
+    import requests as real_requests
+    from utils.constants_us import US_ETF_SCREENER_DATA_JSON_URL, US_SCREENER_DATA_JSON_URL
+
+    class _FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    fixture = (REPO_ROOT / "tests" / "fixtures" / "us_etf_screener_data_json_head.json").read_text(encoding="utf-8")
+
+    orig_requests = U.requests
+    orig_sleep = U.time.sleep
+    try:
+        U.time.sleep = lambda s: None
+
+        # ── 시나리오 A: 실제 ETF 응답(픽스처)을 그대로 돌려주는 소스 ──────────────────────
+        call_log = []
+
+        def _get_a(url, headers=None, timeout=None):
+            call_log.append(url)
+            return _FakeResponse(fixture)
+
+        class _FakeRequestsModule:
+            get = staticmethod(_get_a)
+            exceptions = real_requests.exceptions
+        U.requests = _FakeRequestsModule()
+
+        tmp_a = tempfile.mkdtemp()
+        path_a = U.run_us_all_market_etf_prices_collector(data_dir=tmp_a, max_pages=50)
+        check(all(u.startswith(US_ETF_SCREENER_DATA_JSON_URL) for u in call_log),
+              "주식 스크리너가 아니라 **ETF 스크리너** 엔드포인트로 요청함")
+        check(not any(u.startswith(US_SCREENER_DATA_JSON_URL + "?") or u == US_SCREENER_DATA_JSON_URL
+                      for u in call_log),
+              "주식 스크리너 주소는 단 한 번도 부르지 않음(수집기 두 개가 섞이지 않음)")
+        check(len(call_log) == 2,
+              "같은 목록이 다시 오면 즉시 멈춤 — 소스가 알려준 5480건에 못 미쳐도 무한 요청하지 않음")
+
+        check(os.path.basename(path_a) == "us_all_etf_prices.json",
+              "ETF는 주식과 **별도 파일**(us_all_etf_prices.json)로 저장됨")
+        check(not os.path.exists(os.path.join(tmp_a, "us_all_market_prices.json")),
+              "주식 파일(us_all_market_prices.json)은 건드리지 않음 — 한쪽 수집이 다른 쪽을 지우지 않는 구조")
+
+        with open(path_a, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        by_symbol = {s["symbol"]: s for s in payload["stocks"]}
+        check(set(by_symbol) == {"VOO", "IVV", "SPY", "VTI", "QQQ", "VEA", "VUG"},
+              "실제 응답에 있던 ETF 7종이 전부 저장됨")
+        check(by_symbol["VOO"]["price"] == 691.59 and by_symbol["VOO"]["name"] == "Vanguard S&P 500 ETF",
+              "티커·펀드명·현재가가 그대로 보존됨")
+        check("t_per" not in by_symbol["VOO"] and "aum" not in by_symbol["VOO"],
+              "밸류에이션도, ETF 전용 필드(순자산 등)도 없음 — 가격 전용 목적")
+        check(payload["metadata"]["source"] == US_ETF_SCREENER_DATA_JSON_URL,
+              "metadata 의 소스 주소가 ETF 스크리너로 기록됨(파일만 보고도 출처를 알 수 있음)")
+        check(payload["metadata"]["count"] == 7 and payload["metadata"]["source_reported_count"] == 5480,
+              "실제 저장 건수와 소스가 알려준 전체 ETF 수가 각각 정직하게 기록됨")
+        check(payload["metadata"]["source_blocked"] is False and payload["metadata"]["currency"] == "USD",
+              "차단 없이 끝난 회차 + 통화는 USD")
+        shutil.rmtree(tmp_a, ignore_errors=True)
+
+        # ── 시나리오 B: 처음부터 끝까지 실패하면 파일을 만들지 않음(기존 파일 보존) ────────
+        class _FakeBroken:
+            get = staticmethod(lambda url, headers=None, timeout=None: _FakeResponse("깨진 응답", status_code=500))
+            exceptions = real_requests.exceptions
+        U.requests = _FakeBroken()
+        tmp_b = tempfile.mkdtemp()
+        broken = U.run_us_all_market_etf_prices_collector(data_dir=tmp_b, max_pages=2)
+        check(broken is None and not os.path.exists(os.path.join(tmp_b, "us_all_etf_prices.json")),
+              "한 건도 못 받으면 빈 파일조차 만들지 않고 조용히 None 반환(직전 파일 보존)")
+        shutil.rmtree(tmp_b, ignore_errors=True)
+    finally:
+        U.requests = orig_requests
+        U.time.sleep = orig_sleep
+
+    # 배선 확인: 주식 현재가 수집 '뒤에', 각자의 try/except 로, 사전 점검 통과 후에만 실행.
+    u_src = (REPO_ROOT / "collector_us_stocks.py").read_text(encoding="utf-8")
+    collect_body = u_src.split("def cmd_collect(")[1].split("\ndef ")[0]
+    check(collect_body.index("run_us_all_market_prices_collector()")
+          < collect_body.index("run_us_all_market_etf_prices_collector()"),
+          "ETF 현재가 수집은 주식 현재가 수집 뒤에 실행됨")
+    check("except Exception as e:" in collect_body.split("run_us_all_market_etf_prices_collector()")[-1][:200],
+          "ETF 수집도 자기 try/except 로 감싸짐(실패해도 앞 단계 결과는 그대로)")
+    check(collect_body.index('if not readiness["should_collect"]')
+          < collect_body.index("run_us_all_market_etf_prices_collector()"),
+          "사전 점검(--skip-if-not-ready)에 걸린 실행에서는 아예 돌지 않음 — §0-3-1(후행지표 전용)")
+    check(collect_body.count("try:") >= 2,
+          "주식/ETF 가 하나의 try 에 묶여 있지 않음 — 한쪽이 죽어도 다른 쪽은 시도됨")
+
+
 def main():
     print("=" * 70)
     print("📈 종목별 시계열 이력 · 다운로드 오프라인 검증")
@@ -845,6 +974,8 @@ def main():
     test_kr_all_market_prices_collector()
     test_us_screener_devalue_decoder()
     test_us_all_market_prices_collector()
+    test_us_etf_screener_devalue_decoder()
+    test_us_all_market_etf_prices_collector()
     test_append_and_dedup()
     test_export_end_to_end()
     test_wiring()

@@ -45,6 +45,7 @@ from utils.scorecard_db import (
     load_kr_all_market_prices,
     load_universe_index,
     load_us_all_market_prices,
+    load_us_all_etf_prices,
     make_price_lookup,
     resolve_stock_query,
     sign_in,
@@ -885,6 +886,17 @@ def render_scorecard_page():
     # 미국 상위 550 밖 종목도 "현재가 없음" 대신 실제 종가를 보여줍니다. 마찬가지로 밸류에이션은
     # 없고 가격만 — `indexes`와 섞지 않고 `make_price_lookup`의 2차 폴백으로만 넘깁니다.
     us_all_prices, _us_all_prices_meta = load_us_all_market_prices()
+
+    # 2026-08-12 오너 지시(TASK_HISTORY #93) — 미국은 ETF로 투자하는 비중도 무시할 수 없어
+    # 위 '전 종목(보통주)' 목록에 **ETF 현재가 목록**을 더합니다(예: KORU 같은 ETF가 계속
+    # "현재가 없음"으로 뜨던 문제). 수집기가 소스별로 파일을 나눠 저장하므로(한쪽 실패가 다른
+    # 쪽을 지우지 않도록) 합치는 일은 여기서 합니다 — 미국 티커 공간에서 주식과 ETF는 겹치지
+    # 않지만, 만에 하나 겹치면 보통주 쪽을 우선합니다. ETF 파일이 아직 없으면 아무 일도 일어나지
+    # 않고 이전과 똑같이 동작합니다. ⚠️ 여기서도 넘어가는 건 **가격뿐**이라 밸류에이션 문구
+    # ("밸류에이션 정보 없음")는 ETF에서 그대로 정확합니다.
+    us_etf_prices, _us_etf_prices_meta = load_us_all_etf_prices()
+    if us_etf_prices:
+        us_all_prices = {**us_etf_prices, **us_all_prices}
 
     if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
         st.rerun()

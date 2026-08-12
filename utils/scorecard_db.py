@@ -584,6 +584,37 @@ def load_us_all_market_prices(data_dir=None):
     return build_universe_index(payload, MARKET_US), (payload or {}).get("metadata")
 
 
+US_ALL_ETF_PRICES_FILENAME = "us_all_etf_prices.json"
+
+
+def load_us_all_etf_prices(data_dir=None):
+    """
+    2026-08-12 오너 지시(TASK_HISTORY #93) — 위 `load_us_all_market_prices()`의 **ETF판**입니다.
+    미국은 개별주식뿐 아니라 ETF로 투자하는 비중도 무시할 수 없다는 오너 판단에 따라, 그동안
+    의도적으로 제외해 온 ETF도 "현재가 없음" 대신 실제 종가를 보여주기 위한 보조 가격 목록
+    (`data/us_all_etf_prices.json`, 수집기는 `collector_us_stocks.py`)을 읽습니다.
+
+    ⚠️ 왜 주식 파일과 나눠져 있는가 — 소스(스크리너)가 주식용·ETF용 두 개라, 한 파일에 합치면
+    한쪽만 성공한 회차에 다른 쪽이 통째로 사라지거나 수집 시각이 뒤섞입니다. 파일별 metadata가
+    그 파일 내용과 1:1로 맞도록 나눠 두고, **읽는 쪽에서 합칩니다**
+    (`views/scorecard_view.py` — 티커 공간이 겹치지 않아 그냥 합쳐도 안전합니다).
+
+    ⚠️ 여기에도 밸류에이션은 없습니다. ETF에는 EPS/ROE 같은 기업 재무제표가 아예 없어서
+    PEGY/퀀트점수를 만들어내면 §0-1(지어내지 않기) 위반입니다 — 화면에서 ETF는 "현재가는 있고
+    밸류에이션 정보는 없음"으로 정직하게 표시됩니다.
+
+    (index, metadata) 반환. 파일이 없으면(아직 수집 전, 또는 이번 수집 실패) 빈 dict —
+    이 보조 기능만 조용히 비활성화되고 나머지 화면은 그대로 정상 작동합니다.
+    """
+    directory = data_dir or default_data_dir()
+    path = os.path.join(directory, US_ALL_ETF_PRICES_FILENAME)
+    if not os.path.exists(path):
+        return {}, None
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return build_universe_index(payload, MARKET_US), (payload or {}).get("metadata")
+
+
 def find_ticker_by_name(market, name, indexes):
     """
     2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
@@ -716,7 +747,9 @@ def make_price_lookup(indexes, broad_kr_prices=None, broad_us_prices=None):
 
     broad_us_prices: (2026-08-12, TASK_HISTORY #92 신설, 기본값 None으로 하위호환 유지)
     위와 완전히 같은 역할의 미국판(`load_us_all_market_prices()`). 미국 종목이 상위 550
-    유니버스 안에 없을 때만 2차로 확인합니다.
+    유니버스 안에 없을 때만 2차로 확인합니다. 2026-08-12(TASK_HISTORY #93)부터는 화면 쪽에서
+    ETF 목록(`load_us_all_etf_prices()`)까지 합쳐 넘기므로 ETF 보유 종목도 여기서 잡힙니다
+    (미국 티커 공간에서 주식과 ETF는 겹치지 않아 그냥 합쳐도 안전).
 
     ⚠️ 두 폴백은 시장별로 엄격히 분리됩니다 — 한국 목록을 미국 티커 조회에, 또는 그 반대로
     쓰는 경로는 없습니다(원/달러 혼용 차단, 이 모듈 상단 '환율 변환 없음' 원칙과 같은 맥락).

@@ -562,6 +562,53 @@ def test_us_all_market_prices():
 
 
 # =============================================================================
+# 4-0-4. 미국 상장 ETF 현재가 (2026-08-12, TASK_HISTORY #93)
+# =============================================================================
+def test_us_all_etf_prices():
+    print("\n[4-0-4] 미국 ETF 현재가 목록 — load_us_all_etf_prices (오너 지시로 ETF 제외 정책 뒤집음)")
+    synthetic_etfs = {
+        "metadata": {"collected_at_kst": "2026-08-12 06:11", "count": 2,
+                      "source": "https://stockanalysis.com/etf/screener/__data.json", "currency": "USD"},
+        "stocks": [
+            {"symbol": "KORU", "name": "Direxion Daily MSCI South Korea Bull 3X ETF", "price": 17.36},
+            {"symbol": "VOO", "name": "Vanguard S&P 500 ETF", "price": 691.59},
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "us_all_etf_prices.json"), "w", encoding="utf-8") as f:
+            json.dump(synthetic_etfs, f, ensure_ascii=False)
+
+        etf_index, etf_meta = sdb.load_us_all_etf_prices(data_dir=tmp)
+        check(set(etf_index.keys()) == {"KORU", "VOO"}, "ETF 티커 2개 전부 인덱싱됨")
+        check(etf_index["KORU"]["price"] == 17.36, "ETF 현재가가 그대로 보존됨(오너 실사용 사례: 코러)")
+        check(etf_meta.get("count") == 2, "metadata 도 함께 반환")
+
+        # 주식 목록과 **파일이 다르다**는 사실 확인 — 한쪽만 있어도 다른 쪽은 조용히 빈 dict.
+        stock_index, _ = sdb.load_us_all_market_prices(data_dir=tmp)
+        check(stock_index == {},
+              "ETF 파일만 있고 주식 파일이 없으면 주식 쪽은 빈 dict — 두 파일이 서로 독립")
+
+        empty_index, empty_meta = sdb.load_us_all_etf_prices(data_dir=os.path.join(tmp, "없음"))
+        check(empty_index == {} and empty_meta is None,
+              "파일이 아직 없으면(다음 자동 수집 전) 에러 대신 빈 dict")
+
+        # 화면(scorecard_view)이 하는 것과 같은 방식으로 두 목록을 합쳐 현재가 조회가 되는지.
+        us_index = build_universe_index(SYNTHETIC_US_SNAPSHOT, MARKET_US)
+        merged = {**etf_index}
+        lookup = make_price_lookup({MARKET_KR: {}, MARKET_US: us_index}, broad_us_prices=merged)
+        check(lookup(MARKET_US, "koru") == 17.36,
+              "상위 550 유니버스 밖 ETF도 소문자 입력으로 현재가 조회됨 — '현재가 없음' 폴백 대체")
+        check(lookup(MARKET_KR, "KORU") is None,
+              "한국 시장 조회에는 미국 ETF 목록이 절대 쓰이지 않음(원/달러 혼용 차단)")
+
+    real_etfs, real_meta = sdb.load_us_all_etf_prices()
+    if real_etfs:
+        print(f"  ℹ️ 저장소에 이미 us_all_etf_prices.json 존재 — {len(real_etfs)}건")
+    else:
+        print("  ℹ️ 저장소에 us_all_etf_prices.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
+
+
+# =============================================================================
 # 4-1. 종목명으로 티커 찾기 (2026-08-11, 오너 실사용 피드백)
 # =============================================================================
 def test_name_lookup():
@@ -1119,6 +1166,9 @@ def test_view_and_routing():
     check("load_us_all_market_prices" in view_src and "broad_us_prices=us_all_prices" in view_src,
           "미국 상위 550 밖 종목도 실제 종가를 보여주는 전 종목 현재가 목록 연동"
           "(2026-08-12, TASK_HISTORY #92)")
+    check("load_us_all_etf_prices" in view_src and "us_all_prices = {**us_etf_prices, **us_all_prices}" in view_src,
+          "미국 ETF 현재가 목록도 같은 폴백에 합쳐져 들어감 — ETF 보유 종목(예: KORU)이 "
+          "'현재가 없음'으로 뜨지 않음(2026-08-12, TASK_HISTORY #93)")
     check("NAME_LOOKUP_MARKETS" not in view_src,
           "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
     check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
@@ -1394,6 +1444,7 @@ def main():
     test_kr_ticker_master()
     test_kr_all_market_prices()
     test_us_all_market_prices()
+    test_us_all_etf_prices()
     test_name_lookup()
     test_resolve_stock_query()
     test_portfolio()

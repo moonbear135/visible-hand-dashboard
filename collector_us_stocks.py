@@ -21,6 +21,14 @@ collector_us_stocks.py
   - 밸류에이션은 일부러 담지 않습니다 — "내 성적표"에서 상위 550 밖 종목의 **현재가만**
     보여주기 위한 보조 목록입니다(코스피 `kr_all_market_prices.json` 과 같은 역할).
 
+2026-08-12 추가(TASK_HISTORY #93): 위 수집 범위를 **ETF까지** 넓혔습니다(오너 지시로
+  기존 "ETF 제외" 원안을 명시적으로 뒤집음 — 미국은 ETF로 투자하는 비중도 무시할 수 없음).
+  - `run_us_all_market_etf_prices_collector()` → `data/us_all_etf_prices.json`.
+  - 같은 사이트의 **ETF 스크리너** 엔드포인트라 devalue 디코더·행 정규화는 그대로 재사용하고,
+    URL/파일명/라벨만 바꿔 끼웁니다(§3-2의 `_run_us_screener_prices_collector`).
+  - 파일은 주식(`us_all_market_prices.json`)과 **분리**합니다 — 근거는 §3-2 주석 참고.
+  - 여기에도 밸류에이션은 없습니다. ETF에는 EPS/ROE 자체가 없어 PEGY를 만들어내면 §0-1 위반.
+
 ⚠️ 기존 코스피 파이프라인(`collector_kospi200.py`, `views/pegy_view.py`,
    `utils/scoring.py`, `utils/constants.py`)은 이 파일에서 import 하지도, 수정하지도
    않습니다 (ENGINEERING_SPEC §0-3-6 신규 기능 모듈 분리 원칙).
@@ -105,6 +113,9 @@ from utils.constants_us import (
     US_SCREENER_NAME_KEY,
     US_SCREENER_PRICE_KEY,
     US_SCREENER_TOTAL_COUNT_KEYS,
+    # 2026-08-12 신설(TASK_HISTORY #93) — 미국 상장 ETF 현재가 (constants_us §9-1)
+    US_ALL_ETF_PRICES_FILENAME,
+    US_ETF_SCREENER_DATA_JSON_URL,
 )
 from utils.scoring_us import derive_valuation, apply_us_guardrail, score_all
 # 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
@@ -1791,9 +1802,13 @@ def normalize_screener_rows(rows):
     return normalized
 
 
-def fetch_us_screener_page(page):
+def fetch_us_screener_page(page, base_url=US_SCREENER_DATA_JSON_URL):
     """
     스크리너 데이터 엔드포인트 한 페이지를 받아 파싱합니다.
+
+    base_url: 주식 스크리너(기본값)와 ETF 스크리너를 같은 코드로 쓰기 위한 소스 주소입니다
+    (2026-08-12, TASK_HISTORY #93). 두 스크리너는 응답 포맷도 행의 키 이름(s/n/price)도
+    똑같아서 — 실응답으로 확인, constants_us §9-1 주석 참고 — 주소만 바꿔 끼우면 됩니다.
 
     반환: (stocks, raw_row_count, total_count)
       · stocks         : normalize_screener_rows() 결과
@@ -1807,7 +1822,7 @@ def fetch_us_screener_page(page):
     가릅니다 — 응답 자체를 못 받거나 JSON/노드 구조를 못 알아보면 **실패**(건너뛰고 계속),
     구조는 멀쩡한데 표에 행이 없으면 **마지막 페이지**로 봅니다.
     """
-    url = US_SCREENER_DATA_JSON_URL if page <= 1 else f"{US_SCREENER_DATA_JSON_URL}?p={page}"
+    url = base_url if page <= 1 else f"{base_url}?p={page}"
     res = _http_get(url)
     decoded_nodes = decode_sveltekit_data_json(res.text)
     if not decoded_nodes:
@@ -1816,9 +1831,16 @@ def fetch_us_screener_page(page):
     return normalize_screener_rows(rows), len(rows), total_count
 
 
-def run_us_all_market_prices_collector(data_dir=None, max_pages=None):
+def _run_us_screener_prices_collector(label, base_url, filename, description,
+                                      data_dir=None, max_pages=None):
     """
-    미국 상장 전 종목의 현재가만 모아 `data/us_all_market_prices.json`으로 저장합니다.
+    stockanalysis.com 스크리너에서 **현재가만** 모아 `data/<filename>`으로 저장합니다.
+
+    2026-08-12(TASK_HISTORY #93)에 주식 전용이던 본체를 그대로 승격시킨 공용 루틴입니다 —
+    주식 스크리너와 ETF 스크리너는 응답 포맷·행 키가 같아서 소스 주소(base_url)·저장 파일명
+    (filename)·로그 라벨(label)·설명문(description)만 다릅니다. 공개 진입점은 바로 아래
+    `run_us_all_market_prices_collector()`(주식)와
+    `run_us_all_market_etf_prices_collector()`(ETF) 두 개입니다.
 
     ⚠️ `run_us_collector()`(상위 550종목 밸류에이션)와 완전히 독립입니다 — 이 함수가 실패해도
     이미 저장된 550종목 스냅샷은 손대지 않습니다.
@@ -1843,18 +1865,18 @@ def run_us_all_market_prices_collector(data_dir=None, max_pages=None):
     blocked = False
 
     print("=" * 70)
-    print("[미국 전 종목 현재가] 스크리너 데이터 엔드포인트에서 가격만 수집합니다(밸류에이션 없음)")
+    print(f"[{label}] 스크리너 데이터 엔드포인트에서 가격만 수집합니다(밸류에이션 없음)")
 
     while page <= limit_pages:
         try:
-            stocks, raw_row_count, total_count = fetch_us_screener_page(page)
+            stocks, raw_row_count, total_count = fetch_us_screener_page(page, base_url=base_url)
         except USSourceBlockedError as e:
             blocked = True
-            print(f"⚠️ [미국 전 종목 현재가] 소스가 요청을 차단해 여기서 중단합니다: {e}")
+            print(f"⚠️ [{label}] 소스가 요청을 차단해 여기서 중단합니다: {e}")
             break
         except Exception as e:
             failed_page_count += 1
-            print(f"⚠️ [미국 전 종목 현재가] {page}페이지 수집 실패({e}) — 이 페이지만 건너뜁니다")
+            print(f"⚠️ [{label}] {page}페이지 수집 실패({e}) — 이 페이지만 건너뜁니다")
             page += 1
             _polite_sleep()
             continue
@@ -1884,36 +1906,81 @@ def run_us_all_market_prices_collector(data_dir=None, max_pages=None):
         _polite_sleep()
 
     if not entries:
-        print("⚠️ [미국 전 종목 현재가] 한 종목도 수집하지 못해 파일을 만들지 않습니다"
+        print(f"⚠️ [{label}] 한 종목도 수집하지 못해 파일을 만들지 않습니다"
               "(기존 파일이 있으면 그대로 유지).")
         print("=" * 70)
         return None
 
     resolved_data_dir = data_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
     os.makedirs(resolved_data_dir, exist_ok=True)
-    json_path = os.path.join(resolved_data_dir, US_ALL_MARKET_PRICES_FILENAME)
+    json_path = os.path.join(resolved_data_dir, filename)
     payload = {
         "metadata": {
             "collected_at_et": _now_et().isoformat(),
             "collected_at_kst": _now_kst().isoformat(),
-            "source": US_SCREENER_DATA_JSON_URL,
+            "source": base_url,
             "count": len(entries),
             "source_reported_count": reported_total,
             "pages_fetched": pages_fetched,
             "failed_page_count": failed_page_count,
             "source_blocked": blocked,
             "currency": "USD",
-            "description": "미국 상장 전 종목 현재가(장마감 종가) — 밸류에이션 없음, "
-                           "상위 550 유니버스 밖 종목의 현재가 표시 보조용",
+            "description": description,
         },
         "stocks": list(entries.values()),
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"[미국 전 종목 현재가] {len(entries)}건 저장 완료 "
+    print(f"[{label}] {len(entries)}건 저장 완료 "
           f"(요청 {pages_fetched}페이지 / 실패 {failed_page_count}페이지) -> {json_path}")
     print("=" * 70)
     return json_path
+
+
+def run_us_all_market_prices_collector(data_dir=None, max_pages=None):
+    """
+    미국 상장 **전 종목(보통주)**의 현재가만 모아 `data/us_all_market_prices.json`으로 저장합니다.
+    (2026-08-12, TASK_HISTORY #92 — 실측 5,607개가 한 번의 요청에 옵니다)
+    """
+    return _run_us_screener_prices_collector(
+        label="미국 전 종목 현재가",
+        base_url=US_SCREENER_DATA_JSON_URL,
+        filename=US_ALL_MARKET_PRICES_FILENAME,
+        description="미국 상장 전 종목 현재가(장마감 종가) — 밸류에이션 없음, "
+                    "상위 550 유니버스 밖 종목의 현재가 표시 보조용",
+        data_dir=data_dir,
+        max_pages=max_pages,
+    )
+
+
+def run_us_all_market_etf_prices_collector(data_dir=None, max_pages=None):
+    """
+    미국 상장 **ETF**의 현재가만 모아 `data/us_all_etf_prices.json`으로 저장합니다
+    (2026-08-12, TASK_HISTORY #93 — 오너 지시로 기존 "ETF 제외" 원안을 뒤집은 결과).
+
+    ⚠️ 왜 위 `us_all_market_prices.json`에 합치지 않고 **파일을 나눴는가** — 두 수집이 서로를
+    망가뜨리지 않게 하기 위해서입니다. 한 파일에 합치면 ETF 수집만 성공한 회차에 주식 5,600개가
+    통째로 날아가거나, 반대로 주식만 성공한 회차에 ETF가 사라집니다(읽어서 합쳐 다시 쓰는 방식은
+    "언제 수집된 값인지"가 뒤섞여 §0-1에 어긋납니다). 파일을 나누면 각 파일의 metadata(수집시각·
+    소스 URL·건수·차단여부)가 그 파일 내용과 1:1로 정직하게 맞고, 한쪽이 실패해도 다른 쪽은
+    직전 값 그대로 남습니다. 화면 쪽에서는 `views/scorecard_view.py`가 두 목록을 하나로 합쳐
+    `make_price_lookup()`에 넘기므로, 조회하는 입장에서는 차이가 없습니다.
+    (한국 `kr_all_market_prices.json`은 코스피·코스닥·ETF가 **하나의 소스·하나의 수집 루프**에서
+     나오기 때문에 한 파일인 것이고, 여기는 소스가 둘이라 사정이 다릅니다.)
+
+    ⚠️ 밸류에이션은 여기에도 없습니다 — ETF에는 EPS/ROE 같은 기업 재무제표가 없어서 PEGY를
+    계산하는 시늉만 해도 §0-1(지어내지 않기) 위반입니다. 성적표 화면에서 ETF는 "현재가는 있고
+    밸류에이션 정보는 없음"으로 정직하게 표시됩니다.
+    """
+    return _run_us_screener_prices_collector(
+        label="미국 ETF 현재가",
+        base_url=US_ETF_SCREENER_DATA_JSON_URL,
+        filename=US_ALL_ETF_PRICES_FILENAME,
+        description="미국 상장 ETF 현재가(장마감 종가) — 밸류에이션 없음, "
+                    "ETF 보유 종목의 현재가 표시 보조용",
+        data_dir=data_dir,
+        max_pages=max_pages,
+    )
 
 
 # =============================================================================
@@ -2010,6 +2077,13 @@ def cmd_collect(args):
         run_us_all_market_prices_collector()
     except Exception as e:
         print(f"⚠️ [미국 전 종목 현재가] 수집 중 예외 발생(550종목 수집 결과에는 영향 없음): {e}")
+    # 2026-08-12(TASK_HISTORY #93): ETF 현재가도 같은 원칙으로 이어서 수집합니다.
+    #   · try/except 를 **따로** 둡니다 — 주식 수집이 실패해도 ETF는 시도하고, 그 반대도 마찬가지.
+    #   · 요청은 스크리너 1~2회뿐이라 서버 부하는 사실상 그대로입니다(§0-3-2).
+    try:
+        run_us_all_market_etf_prices_collector()
+    except Exception as e:
+        print(f"⚠️ [미국 ETF 현재가] 수집 중 예외 발생(앞 단계 수집 결과에는 영향 없음): {e}")
 
 
 def cmd_prices(args):
@@ -2019,6 +2093,14 @@ def cmd_prices(args):
     쓰는 진입점입니다. 밸류에이션 550종목 수집(40~56분)은 전혀 건드리지 않습니다.
     """
     run_us_all_market_prices_collector(max_pages=args.max_pages)
+
+
+def cmd_etf_prices(args):
+    """
+    미국 상장 ETF 현재가만 따로 수집합니다(2026-08-12, TASK_HISTORY #93).
+    위 `prices`와 완전히 대칭인 단독 점검용 진입점입니다(평소에는 `collect` 뒤에 자동으로 붙어 돕니다).
+    """
+    run_us_all_market_etf_prices_collector(max_pages=args.max_pages)
 
 
 def cmd_indices(_args):
@@ -2083,6 +2165,14 @@ def main():
                           help="페이지 루프 상한(기본값은 constants_us.US_ALL_MARKET_MAX_PAGES). "
                                "지금 소스는 한 응답에 전 종목을 주므로 실제로는 1페이지에서 끝납니다.")
     p_prices.set_defaults(func=cmd_prices)
+
+    p_etf = sub.add_parser(
+        "etf-prices", help="미국 상장 ETF '현재가만' 수집 → data/us_all_etf_prices.json "
+                           "(밸류에이션 없음. 주식과 같은 스크리너 구조라 역시 몇 초면 끝납니다)")
+    p_etf.add_argument("--max-pages", type=int, default=None,
+                       help="페이지 루프 상한(기본값은 constants_us.US_ALL_MARKET_MAX_PAGES). "
+                            "지금 소스는 한 응답에 전 종목을 주므로 실제로는 1페이지에서 끝납니다.")
+    p_etf.set_defaults(func=cmd_etf_prices)
 
     p_idx = sub.add_parser("indices", help="상단 지수 3종 소스 점검(실측 미검증 소스 확인용)")
     p_idx.set_defaults(func=cmd_indices)
