@@ -1236,18 +1236,19 @@ def test_view_and_routing():
           "service_role 키를 읽는 코드 없음")
 
     # 라우팅: 기본 숨김 + 기존 두 화면 무손상
-    # 2026-08-12(TASK_HISTORY #101): 형제 체크박스였던 "내 성적표" 진입점이 시장 선택 라디오의
-    # 세 번째 선택지로 합쳐졌습니다(전환을 클릭 한 번으로 만들기 위해). show_scorecard 는 이제
-    # "SCORECARD_OPTION 이 선택됐는가"로 계산되고, 그 선택지 자체가 is_scorecard_visible() 이
-    # True 일 때만 라디오 목록에 추가되므로 "기본 숨김 + 관리자 게이팅" 의미는 그대로입니다.
+    # 2026-08-12(TASK_HISTORY #102): 대분류 2개("💡 사실 이 가격이에요" / "📊 내 성적표")를
+    # 고르는 최상위 라디오 밑에, 각각 자기 중분류(한국/미국, 내 보유종목/리포트)가 있는 2단
+    # 트리 구조입니다(오너가 그림으로 확정). show_scorecard 는 "TOP_SCORECARD 가 선택됐는가"로
+    # 계산되고, 그 선택지 자체가 is_scorecard_visible() 이 True 일 때만 최상위 라디오 목록에
+    # 추가되므로 "기본 숨김 + 관리자 게이팅" 의미는 그대로입니다.
     app_src = (REPO_ROOT / "visiblehand.py").read_text(encoding="utf-8")
     check("render_scorecard_page" in app_src, "visiblehand.py 에 내 성적표 라우팅 추가")
-    check("show_scorecard = selected_market == SCORECARD_OPTION" in app_src,
-          "내 성적표 표시 여부는 라디오 선택 결과로만 결정됨(기본값은 선택 안 됨=False)")
+    check("show_scorecard = top_choice == TOP_SCORECARD" in app_src,
+          "내 성적표 표시 여부는 최상위 라디오 선택 결과로만 결정됨(기본값은 선택 안 됨=False)")
     check("scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)" in app_src,
-          "관리자 미리보기/명시 플래그일 때만 라디오에 내 성적표 선택지가 추가됨")
-    check("market_options.append(SCORECARD_OPTION)" in app_src,
-          "내 성적표는 시장 선택 라디오에 조건부로만 합류함(무조건 노출 아님)")
+          "관리자 미리보기/명시 플래그일 때만 최상위 라디오에 내 성적표 선택지가 추가됨")
+    check("top_options.append(TOP_SCORECARD)" in app_src,
+          "내 성적표는 최상위 라디오에 조건부로만 합류함(무조건 노출 아님)")
     check("except Exception as _scorecard_import_exc" in app_src,
           "모듈 로드 실패해도 기존 화면이 죽지 않도록 import 가드")
     for legacy in ("render_us_stocks_page()", "render_macro_page()", "render_pegy_page()"):

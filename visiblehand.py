@@ -145,55 +145,71 @@ def main():
     #    후행지표 원칙에 맞지 않는 추정 프록시 지표 위주라 공개 화면에서는 제외하고,
     #    관리자 인증 후 사이드바 하단의 "⚙️ 관리자 전용 메뉴"에서만 볼 수 있게 이동했습니다.
     #    (일반 방문자에게는 매크로 메뉴 선택지 자체가 보이지 않습니다 — 후행지표로 재설계 전까지 비공개)
-    st.sidebar.markdown(
-        """
-        <div style="border-left: 4px solid #14b8a6; padding: 2px 0 2px 10px; margin: 2px 0 10px 0;">
-            <div style="font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">💡 사실 이 가격이에요</div>
-            <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;">시장별 밸류에이션 리포트</div>
-        </div>
-        """,
-        unsafe_allow_html=True
-    )
-    MARKET_KR = "한국 주식은 이가격이에요"
-    MARKET_US = "미국 주식은 이가격이에요"
-    SCORECARD_OPTION = "📊 내 성적표 (준비중 · 미리보기)"
-    # ⚠️ 2026-08-12: 예전엔 "시장 선택 라디오"와 "내 성적표 체크박스"가 서로 다른 위젯이라,
-    #    성적표를 보려면 체크하고, 시장 리포트로 돌아가려면 그 체크를 다시 풀어야 했습니다
-    #    (오너 피드백: "좀 더 빠르게 전환될 수 있게 할 수는 없을까?"). 그래서 **하나의 라디오**로
-    #    합쳤습니다 — 셋 중 하나를 고르는 단일 선택이라 전환이 클릭 한 번으로 끝납니다.
-    #    `admin_mode` 는 이 라디오보다 나중에(§3) 확정되지만, `is_scorecard_visible()` 이 실제로
-    #    보는 값은 st.session_state["admin_mode"] 하나뿐이라 여기서 미리 읽어도 안전합니다
-    #    (매 실행마다 이전 실행 값이 세션에 남아있는 Streamlit 특성).
+    # ⚠️ 2026-08-12(TASK_HISTORY #102): 오너가 원한 구조는 대분류 2개가 나란히 있고("💡 사실 이
+    #    가격이에요" / "📊 내 성적표"), 각각 그 밑에 중분류(한국/미국, 내 보유종목/리포트)가
+    #    있는 **2단 트리**입니다(오너가 그림으로 확정). 대분류 전환은 라디오 하나로 클릭 한 번에
+    #    되고, 중분류는 고른 대분류 밑에서만 나타납니다.
+    TOP_VALUATION = "💡 사실 이 가격이에요"
+    TOP_SCORECARD = "📊 내 성적표 (준비중 · 미리보기)"
+    # `admin_mode` 는 이 라디오보다 나중에(§3) 확정되지만, `is_scorecard_visible()` 이 실제로 보는
+    # 값은 st.session_state["admin_mode"] 하나뿐이라 여기서 미리 읽어도 안전합니다(매 실행마다
+    # 이전 실행 값이 세션에 남아있는 Streamlit 특성).
     admin_mode_hint = st.session_state.get("admin_mode", False)
-    market_options = [MARKET_KR, MARKET_US]
     scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)
+
+    top_options = [TOP_VALUATION]
     if scorecard_available:
-        market_options.append(SCORECARD_OPTION)
-    selected_market = st.sidebar.radio(
-        "시장 선택",
-        market_options,
-        index=0,  # 첫 진입 기본값은 예전과 동일하게 한국(코스피)
-        key="selected_market",
-        help="어느 화면을 볼지 고릅니다.\n\n"
-             f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
-             f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
-             + (f"\n* {SCORECARD_OPTION} : 내 보유 종목·리포트 (오너 승인 전 미리보기)"
-                if scorecard_available else "")
-    )
-    show_scorecard = selected_market == SCORECARD_OPTION
+        top_options.append(TOP_SCORECARD)
+    if len(top_options) > 1:
+        top_choice = st.sidebar.radio(
+            "메뉴",
+            top_options,
+            index=0,  # 첫 진입 기본값은 예전과 동일하게 "사실 이 가격이에요"
+            key="top_nav_choice",
+            help=f"* {TOP_VALUATION} : 시장별 밸류에이션 리포트(코스피/미국)\n"
+                 f"* {TOP_SCORECARD} : 내 보유 종목·리포트(오너 승인 전 미리보기)",
+        )
+    else:
+        top_choice = TOP_VALUATION  # 성적표 미노출 시(일반 방문자) 예전과 100% 동일 동작
+    show_scorecard = top_choice == TOP_SCORECARD
+
     if show_scorecard:
         st.sidebar.caption(
             "내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보고, "
             "쌓인 기록으로 리포트도 보는 신규 모듈입니다. 오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
         )
-    elif not scorecard_available and admin_mode_hint and SCORECARD_IMPORT_ERROR:
+        selected_market = None
+        MARKET_KR = MARKET_US = None  # 아래 §4 라우팅에서 존재 확인용
+    else:
+        st.sidebar.markdown(
+            """
+            <div style="border-left: 4px solid #14b8a6; padding: 2px 0 2px 10px; margin: 6px 0 10px 0;">
+                <div style="font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">💡 사실 이 가격이에요</div>
+                <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;">시장별 밸류에이션 리포트</div>
+            </div>
+            """,
+            unsafe_allow_html=True
+        )
+        MARKET_KR = "한국 주식은 이가격이에요"
+        MARKET_US = "미국 주식은 이가격이에요"
+        selected_market = st.sidebar.radio(
+            "시장 선택",
+            [MARKET_KR, MARKET_US],
+            index=0,  # 첫 진입 기본값은 예전과 동일하게 한국(코스피)
+            key="selected_market",
+            help="어느 시장의 밸류에이션 리포트를 볼지 고릅니다.\n\n"
+                 f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
+                 f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
+        )
+
+    if not scorecard_available and admin_mode_hint and SCORECARD_IMPORT_ERROR:
         st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
     st.sidebar.markdown("---")
 
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
 
-    # 3-1. 📈 리포트(2026-08-12 신설) — "내 성적표"를 고른 뒤 그 밑에 나오는 하위 탭입니다.
+    # 3-1. 📈 리포트(2026-08-12 신설) — "내 성적표"를 고른 뒤 그 밑에 나오는 중분류(하위 탭)입니다.
     #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영. 코드/데이터는
     #      성적표와 완전히 독립된 별도 모듈입니다 — 메뉴 배치만 하위 탭으로 묶인 것입니다.)
     show_report = False
