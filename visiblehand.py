@@ -183,10 +183,8 @@ def main():
     show_scorecard = top_choice == TOP_SCORECARD
 
     if show_scorecard:
-        st.sidebar.caption(
-            "내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보고, "
-            "쌓인 기록으로 리포트도 보는 신규 모듈입니다. 오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
-        )
+        # 2026-08-12(TASK_HISTORY #104): 사이드바 설명 캡션 없음 — 오너 판단으로 계속 안 씀
+        # ("공개 전환할 때도 필요 없을 것 같다").
         selected_market = None
         MARKET_KR = MARKET_US = None  # 아래 §4 라우팅에서 존재 확인용
     else:
