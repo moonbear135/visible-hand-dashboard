@@ -1103,8 +1103,11 @@ def test_view_and_routing():
           "달러 기호를 이스케이프해 두 개 이상 나타나도 LaTeX 수식으로 오인되지 않게 함")
     check('_md_amount(avg_price, currency)' in view_src and '_md_amount(price, currency)' in view_src,
           "평균매입가 VS 현재가 배너가 마크다운 안전 포맷을 씀(버그가 있던 바로 그 배너)")
-    check("f\"{_row_label(r, indexes)} {_md_amount(r['profit'], currency)}\"" in view_src,
+    check("f\"- {_row_chart_label(r, indexes)} {_md_amount(r['profit'], currency)}\"" in view_src,
           "손실 종목 안내 캡션도 마크다운 안전 포맷을 씀(2개 이상 손실 종목일 때도 안전)")
+    check('"\\n".join(' in view_src and 'loser_lines' in view_src,
+          "손실 종목 여러 개면 쉼표로 이어붙인 한 문장 대신 종목당 한 줄 목록으로 표시"
+          "(2026-08-13 오너 지적 — 한국처럼 손실 종목이 많으면 지저분해 보이던 문제)")
     # st.metric에 넘기는 값은 마크다운을 거치지 않아 이 버그가 없으므로 그대로 format_amount 사용
     check('c1.metric("현재가", format_amount(summary.get("price"), currency))' in view_src,
           "st.metric 경로는 마크다운이 아니라 이 버그가 없어 format_amount를 그대로 씀(과잉수정 방지)")

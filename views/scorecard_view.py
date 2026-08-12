@@ -719,13 +719,20 @@ def _render_currency_block(client, user_id, group, indexes):
                  for r in gainers],
                 use_container_width=True, hide_index=True,
             )
+        # 2026-08-13 오너 지적 — "미국 쪽은 예쁜데 한국 쪽은 이 텍스트 때문에..." 손실 종목이
+        # 여러 개(한국처럼)면 코드까지 붙은 긴 문장이 쉼표로 줄줄이 이어져 차트 바로 아래가
+        # 지저분해 보였습니다. ① 차트 범례(#86)와 똑같이 이 자리도 종목코드를 빼고
+        # (`_row_chart_label` 재사용 — 코드는 위 표에서 이미 확인 가능), ② 한 문장으로 몰아
+        # 쓰지 않고 종목당 한 줄씩 목록으로 나눠, 손실 종목이 몇 개든 스캔하기 쉽게 했습니다.
         losers = [r for r in priced if r.get("profit") is not None and r["profit"] <= 0]
         if losers:
+            loser_lines = "\n".join(
+                f"- {_row_chart_label(r, indexes)} {_md_amount(r['profit'], currency)}"
+                for r in losers
+            )
             st.caption(
-                "⚠️ 손실 종목은 원형차트에 음수 조각으로 넣을 수 없어 제외했습니다 — "
-                + ", ".join(
-                    f"{_row_label(r, indexes)} {_md_amount(r['profit'], currency)}" for r in losers
-                )
+                "⚠️ 손실 종목은 원형차트에 음수 조각으로 넣을 수 없어 제외했습니다:\n\n"
+                + loser_lines
             )
 
     # ---- "사실 이 가격이에요" 연동 -------------------------------------------
