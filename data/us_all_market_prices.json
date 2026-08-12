@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "collected_at_et": "2026-08-12T01:08:53.489849-04:00",
-    "collected_at_kst": "2026-08-12T14:08:53.489860+09:00",
+    "collected_at_et": "2026-08-12T03:58:53.871635-04:00",
+    "collected_at_kst": "2026-08-12T16:58:53.871655+09:00",
     "source": "https://stockanalysis.com/stocks/screener/__data.json",
     "count": 5607,
     "source_reported_count": 5607,
@@ -523,6 +523,11 @@
       "price": 194.48
     },
     {
+      "symbol": "SMFG",
+      "name": "Sumitomo Mitsui Financial Group, Inc.",
+      "price": 25.15
+    },
+    {
       "symbol": "WELL",
       "name": "Welltower Inc.",
       "price": 226.01
@@ -551,11 +556,6 @@
       "symbol": "BBVA",
       "name": "Banco Bilbao Vizcaya Argentaria, S.A.",
       "price": 28.5
-    },
-    {
-      "symbol": "SMFG",
-      "name": "Sumitomo Mitsui Financial Group, Inc.",
-      "price": 25.15
     },
     {
       "symbol": "PFE",
@@ -1068,6 +1068,11 @@
       "price": 219.53
     },
     {
+      "symbol": "APO",
+      "name": "Apollo Global Management, Inc.",
+      "price": 140.28
+    },
+    {
       "symbol": "NTES",
       "name": "NetEase, Inc.",
       "price": 127.89
@@ -1101,11 +1106,6 @@
       "symbol": "E",
       "name": "Eni S.p.A.",
       "price": 55.49
-    },
-    {
-      "symbol": "APO",
-      "name": "Apollo Global Management, Inc.",
-      "price": 140.28
     },
     {
       "symbol": "CP",
@@ -2718,11 +2718,6 @@
       "price": 41.69
     },
     {
-      "symbol": "CIB",
-      "name": "Grupo Cibest S.A.",
-      "price": 98.01
-    },
-    {
       "symbol": "NRG",
       "name": "NRG Energy, Inc.",
       "price": 119.79
@@ -2731,6 +2726,11 @@
       "symbol": "TPL",
       "name": "Texas Pacific Land Corporation",
       "price": 364.97
+    },
+    {
+      "symbol": "CIB",
+      "name": "Grupo Cibest S.A.",
+      "price": 98.01
     },
     {
       "symbol": "EQR",
@@ -3403,11 +3403,6 @@
       "price": 63.45
     },
     {
-      "symbol": "PKX",
-      "name": "POSCO Holdings Inc.",
-      "price": 57.12
-    },
-    {
       "symbol": "NLY",
       "name": "Annaly Capital Management, Inc.",
       "price": 23.14
@@ -3416,6 +3411,11 @@
       "symbol": "RBC",
       "name": "RBC Bearings Incorporated",
       "price": 552.48
+    },
+    {
+      "symbol": "PKX",
+      "name": "POSCO Holdings Inc.",
+      "price": 57.12
     },
     {
       "symbol": "NTNX",
@@ -5108,11 +5108,6 @@
       "price": 40.84
     },
     {
-      "symbol": "GGB",
-      "name": "Gerdau S.A.",
-      "price": 4.69
-    },
-    {
       "symbol": "IONS",
       "name": "Ionis Pharmaceuticals, Inc.",
       "price": 55.42
@@ -5261,6 +5256,11 @@
       "symbol": "OKLO",
       "name": "Oklo Inc.",
       "price": 47.01
+    },
+    {
+      "symbol": "GGB",
+      "name": "Gerdau S.A.",
+      "price": 4.69
     },
     {
       "symbol": "IDCC",
@@ -5568,11 +5568,6 @@
       "price": 186.7
     },
     {
-      "symbol": "GLXY",
-      "name": "Galaxy Digital Inc.",
-      "price": 20.13
-    },
-    {
       "symbol": "AVT",
       "name": "Avnet, Inc.",
       "price": 95.96
@@ -5581,6 +5576,11 @@
       "symbol": "SFM",
       "name": "Sprouts Farmers Market, Inc.",
       "price": 84.4
+    },
+    {
+      "symbol": "GLXY",
+      "name": "Galaxy Digital Inc.",
+      "price": 20.13
     },
     {
       "symbol": "FSS",
@@ -6418,14 +6418,14 @@
       "price": 15.39
     },
     {
-      "symbol": "AVAL",
-      "name": "Grupo Aval Acciones y Valores S.A.",
-      "price": 5.26
-    },
-    {
       "symbol": "HOMB",
       "name": "Home BancShares, Inc.",
       "price": 31.01
+    },
+    {
+      "symbol": "AVAL",
+      "name": "Grupo Aval Acciones y Valores S.A.",
+      "price": 5.26
     },
     {
       "symbol": "KGS",
@@ -9758,14 +9758,14 @@
       "price": 53.6
     },
     {
-      "symbol": "TRVI",
-      "name": "Trevi Therapeutics, Inc.",
-      "price": 17.8
-    },
-    {
       "symbol": "ALMR",
       "name": "Alamar Biosciences, Inc.",
       "price": 36.57
+    },
+    {
+      "symbol": "TRVI",
+      "name": "Trevi Therapeutics, Inc.",
+      "price": 17.8
     },
     {
       "symbol": "WLYB",
@@ -11353,14 +11353,14 @@
       "price": 6.89
     },
     {
-      "symbol": "BL",
-      "name": "BlackLine, Inc.",
-      "price": 28.12
-    },
-    {
       "symbol": "KMTS",
       "name": "Kestra Medical Technologies, Ltd.",
       "price": 27.87
+    },
+    {
+      "symbol": "BL",
+      "name": "BlackLine, Inc.",
+      "price": 28.12
     },
     {
       "symbol": "RLJ",
@@ -11488,6 +11488,11 @@
       "price": 39.75
     },
     {
+      "symbol": "AMBQ",
+      "name": "Ambiq Micro, Inc.",
+      "price": 65.29
+    },
+    {
       "symbol": "APPS",
       "name": "Digital Turbine, Inc.",
       "price": 13.04
@@ -11501,11 +11506,6 @@
       "symbol": "SBH",
       "name": "Sally Beauty Holdings, Inc.",
       "price": 16.84
-    },
-    {
-      "symbol": "AMBQ",
-      "name": "Ambiq Micro, Inc.",
-      "price": 65.29
     },
     {
       "symbol": "AVLN",
@@ -11528,14 +11528,14 @@
       "price": 23.76
     },
     {
-      "symbol": "XXI",
-      "name": "Twenty One Capital, Inc.",
-      "price": 4.5
-    },
-    {
       "symbol": "ESQ",
       "name": "Esquire Financial Holdings, Inc.",
       "price": 132.92
+    },
+    {
+      "symbol": "XXI",
+      "name": "Twenty One Capital, Inc.",
+      "price": 4.5
     },
     {
       "symbol": "QFIN",
@@ -13708,6 +13708,11 @@
       "price": 18.34
     },
     {
+      "symbol": "ABX",
+      "name": "Abacus Global Management, Inc.",
+      "price": 8.92
+    },
+    {
       "symbol": "ACRS",
       "name": "Aclaris Therapeutics, Inc.",
       "price": 5.92
@@ -13746,11 +13751,6 @@
       "symbol": "CEVA",
       "name": "CEVA, Inc.",
       "price": 30.83
-    },
-    {
-      "symbol": "ABX",
-      "name": "Abacus Global Management, Inc.",
-      "price": 8.92
     },
     {
       "symbol": "MAKO",
@@ -14528,14 +14528,14 @@
       "price": 6.77
     },
     {
-      "symbol": "TRON",
-      "name": "Tron Inc.",
-      "price": 1.46
-    },
-    {
       "symbol": "DGICA",
       "name": "Donegal Group Inc.",
       "price": 18.65
+    },
+    {
+      "symbol": "TRON",
+      "name": "Tron Inc.",
+      "price": 1.46
     },
     {
       "symbol": "MSBI",
@@ -14863,6 +14863,11 @@
       "price": 4.32
     },
     {
+      "symbol": "ALTI",
+      "name": "AlTi Global, Inc.",
+      "price": 4.07
+    },
+    {
       "symbol": "FWRD",
       "name": "Forward Air Corporation",
       "price": 18.6
@@ -14966,11 +14971,6 @@
       "symbol": "DDI",
       "name": "DoubleDown Interactive Co., Ltd.",
       "price": 12.37
-    },
-    {
-      "symbol": "ALTI",
-      "name": "AlTi Global, Inc.",
-      "price": 4.07
     },
     {
       "symbol": "GPRK",
@@ -15943,6 +15943,11 @@
       "price": 31.29
     },
     {
+      "symbol": "GCGR",
+      "name": "General Catalyst Global Resilience Merger Corp.",
+      "price": 10.1
+    },
+    {
       "symbol": "ZKH",
       "name": "ZKH Group Limited",
       "price": 2.93
@@ -15996,11 +16001,6 @@
       "symbol": "TWI",
       "name": "Titan International, Inc.",
       "price": 7.14
-    },
-    {
-      "symbol": "GCGR",
-      "name": "General Catalyst Global Resilience Merger Corp.",
-      "price": 10.1
     },
     {
       "symbol": "CZNC",
@@ -16708,11 +16708,6 @@
       "price": 6.59
     },
     {
-      "symbol": "CNCK",
-      "name": "Coincheck Group N.V.",
-      "price": 2.04
-    },
-    {
       "symbol": "GEVO",
       "name": "Gevo, Inc.",
       "price": 1.63
@@ -16776,6 +16771,11 @@
       "symbol": "VLOS",
       "name": "Velos Acquisition I Corp.",
       "price": 10.7101
+    },
+    {
+      "symbol": "CNCK",
+      "name": "Coincheck Group N.V.",
+      "price": 2.04
     },
     {
       "symbol": "RCKT",
@@ -18693,11 +18693,6 @@
       "price": 47.06
     },
     {
-      "symbol": "SCM",
-      "name": "Stellus Capital Investment Corporation",
-      "price": 8.8
-    },
-    {
       "symbol": "SLGL",
       "name": "Sol-Gel Technologies Ltd.",
       "price": 77.92
@@ -18778,6 +18773,11 @@
       "price": 10.075
     },
     {
+      "symbol": "SCM",
+      "name": "Stellus Capital Investment Corporation",
+      "price": 8.8
+    },
+    {
       "symbol": "BRBI",
       "name": "BRBI BR Partners S.A.",
       "price": 9.59
@@ -18833,11 +18833,6 @@
       "price": 12.46
     },
     {
-      "symbol": "WLCO",
-      "name": "Wilco 63 Corporation",
-      "price": 9.97
-    },
-    {
       "symbol": "ESOA",
       "name": "Energy Services of America Corporation",
       "price": 13.23
@@ -18871,6 +18866,11 @@
       "symbol": "CEPL",
       "name": "Capstone Energy+, Inc.",
       "price": 7.6
+    },
+    {
+      "symbol": "WLCO",
+      "name": "Wilco 63 Corporation",
+      "price": 9.97
     },
     {
       "symbol": "AUDC",
@@ -20408,6 +20408,11 @@
       "price": 3.82
     },
     {
+      "symbol": "OXSQ",
+      "name": "Oxford Square Capital Corp.",
+      "price": 1.44
+    },
+    {
       "symbol": "MRT",
       "name": "Marti Technologies, Inc.",
       "price": 1.8
@@ -20451,11 +20456,6 @@
       "symbol": "PED",
       "name": "PEDEVCO Corp.",
       "price": 11.39
-    },
-    {
-      "symbol": "OXSQ",
-      "name": "Oxford Square Capital Corp.",
-      "price": 1.44
     },
     {
       "symbol": "FJDI",
@@ -21753,6 +21753,11 @@
       "price": 5.86
     },
     {
+      "symbol": "AEC",
+      "name": "Anfield Energy Inc.",
+      "price": 4.54
+    },
+    {
       "symbol": "TP",
       "name": "Ticketplus Ltd.",
       "price": 7.59
@@ -21931,11 +21936,6 @@
       "symbol": "DTI",
       "name": "Drilling Tools International Corporation",
       "price": 2.45
-    },
-    {
-      "symbol": "AEC",
-      "name": "Anfield Energy Inc.",
-      "price": 4.54
     },
     {
       "symbol": "ALIS",
@@ -24738,11 +24738,6 @@
       "price": 1.43
     },
     {
-      "symbol": "FMST",
-      "name": "Foremost Clean Energy Ltd.",
-      "price": 1.32
-    },
-    {
       "symbol": "SPPL",
       "name": "Simpple Ltd.",
       "price": 2.32
@@ -24811,6 +24806,11 @@
       "symbol": "LICN",
       "name": "Lichen International Limited",
       "price": 1.33
+    },
+    {
+      "symbol": "FMST",
+      "name": "Foremost Clean Energy Ltd.",
+      "price": 1.32
     },
     {
       "symbol": "DARE",
@@ -27383,6 +27383,11 @@
       "price": 1.51
     },
     {
+      "symbol": "DFSC",
+      "name": "DEFSEC Technologies Inc.",
+      "price": 1.29
+    },
+    {
       "symbol": "CETX",
       "name": "Cemtrex, Inc.",
       "price": 3.05
@@ -27411,11 +27416,6 @@
       "symbol": "ITP",
       "name": "IT Tech Packaging, Inc.",
       "price": 0.1919
-    },
-    {
-      "symbol": "DFSC",
-      "name": "DEFSEC Technologies Inc.",
-      "price": 1.29
     },
     {
       "symbol": "VSME",
