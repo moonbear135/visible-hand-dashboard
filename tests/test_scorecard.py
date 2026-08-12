@@ -385,6 +385,29 @@ def test_universe_lookup():
         check(lookup(MARKET_KR, "999999") is None,
               "broad_kr_prices=None(기본값)인 기존 lookup은 이전 동작 그대로 — 하위호환 확인")
 
+        # 2026-08-12(TASK_HISTORY #92) — broad_us_prices 폴백(미국판). 위 한국판과 완전히 같은 규칙.
+        broad_us_prices = {"CAVA": {"symbol": "CAVA", "name": "Cava Group, Inc.", "price": 68.4},
+                            "FAKE": {"symbol": "FAKE", "name": "유니버스에도 있는 종목", "price": 999.0},
+                            "NOPRICE": {"symbol": "NOPRICE", "name": "가격 있는 쪽", "price": 33.0}}
+        us_lookup = make_price_lookup(indexes, broad_us_prices=broad_us_prices)
+        check(us_lookup(MARKET_US, "FAKE") == 200.0,
+              "상위 550 유니버스 안에 있으면 broad_us_prices보다 그쪽을 우선 사용")
+        check(us_lookup(MARKET_US, "cava") == 68.4,
+              "상위 550 밖이지만 broad_us_prices에 있으면 2차로 그 가격 사용(소문자 입력도 정규화)")
+        check(us_lookup(MARKET_US, "NOWHERE") is None,
+              "broad_us_prices에도 없으면 여전히 None(추정 금지)")
+        check(us_lookup(MARKET_KR, "999999") is None,
+              "한국 시장은 broad_us_prices 영향을 전혀 받지 않음(원/달러 혼용 차단)")
+        check(lookup(MARKET_US, "CAVA") is None,
+              "broad_us_prices=None(기본값)인 기존 lookup은 이전 동작 그대로 — 하위호환 확인")
+
+        both_lookup = make_price_lookup(indexes, broad_kr_prices=broad_kr_prices,
+                                        broad_us_prices=broad_us_prices)
+        check(both_lookup(MARKET_KR, "777777") == 5000.0 and both_lookup(MARKET_US, "CAVA") == 68.4,
+              "두 폴백을 동시에 넘겨도 시장별로 각자 자기 목록만 사용")
+        check(both_lookup(MARKET_KR, "CAVA") is None and both_lookup(MARKET_US, "777777") is None,
+              "상대 시장 목록을 교차 조회하는 경로는 없음")
+
         found = valuation_summary(MARKET_KR, "005930", indexes)
         check(found["found"] and found["verified"], "유니버스 안 종목은 요약 반환")
         check(found["t_pegy"] == 0.50 and found["badge"] == "🟢 강력 저평가",
@@ -502,6 +525,40 @@ def test_kr_all_market_prices():
         print(f"  ℹ️ 저장소에 이미 kr_all_market_prices.json 존재 — {len(real_prices)}건")
     else:
         print("  ℹ️ 저장소에 kr_all_market_prices.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
+
+
+# =============================================================================
+# 4-0-3. 미국 전 종목 현재가 (2026-08-12, TASK_HISTORY #92)
+# =============================================================================
+def test_us_all_market_prices():
+    print("\n[4-0-3] 미국 전 종목 현재가 목록 — load_us_all_market_prices (밸류에이션 없이 가격만)")
+    synthetic_prices = {
+        "metadata": {"collected_at_kst": "2026-08-12 06:10", "count": 2,
+                      "source": "stockanalysis.com 스크리너 데이터 엔드포인트", "currency": "USD"},
+        "stocks": [
+            {"symbol": "CAVA", "name": "Cava Group, Inc.", "price": 68.4},
+            {"symbol": "BRK.B", "name": "Berkshire Hathaway Inc.", "price": 516.38},
+        ],
+    }
+    with tempfile.TemporaryDirectory() as tmp:
+        with open(os.path.join(tmp, "us_all_market_prices.json"), "w", encoding="utf-8") as f:
+            json.dump(synthetic_prices, f, ensure_ascii=False)
+
+        price_index, price_meta = sdb.load_us_all_market_prices(data_dir=tmp)
+        check(set(price_index.keys()) == {"CAVA", "BRK.B"}, "티커 2개 전부 인덱싱됨(점 포함 티커도 그대로)")
+        check(price_index["CAVA"]["price"] == 68.4, "현재가가 그대로 보존됨")
+        check(price_meta.get("count") == 2, "metadata 도 함께 반환")
+
+        empty_index, empty_meta = sdb.load_us_all_market_prices(data_dir=os.path.join(tmp, "없음"))
+        check(empty_index == {} and empty_meta is None,
+              "파일이 아직 없으면(다음 자동 수집 전) 에러 대신 빈 dict")
+
+    # 저장소에 실제 파일이 아직 없을 수 있습니다(이번 세션에서 신설).
+    real_prices, real_meta = sdb.load_us_all_market_prices()
+    if real_prices:
+        print(f"  ℹ️ 저장소에 이미 us_all_market_prices.json 존재 — {len(real_prices)}건")
+    else:
+        print("  ℹ️ 저장소에 us_all_market_prices.json 아직 없음(다음 자동 수집 후 생성 예정) — 정상")
 
 
 # =============================================================================
@@ -1059,6 +1116,9 @@ def test_view_and_routing():
     check("load_kr_all_market_prices" in view_src and "broad_kr_prices=kr_all_prices" in view_src,
           "코스피 상위 200 밖 종목도 실제 종가를 보여주는 전 종목 종가 목록 연동"
           "(2026-08-11, TASK_HISTORY #84)")
+    check("load_us_all_market_prices" in view_src and "broad_us_prices=us_all_prices" in view_src,
+          "미국 상위 550 밖 종목도 실제 종가를 보여주는 전 종목 현재가 목록 연동"
+          "(2026-08-12, TASK_HISTORY #92)")
     check("NAME_LOOKUP_MARKETS" not in view_src,
           "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
     check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
@@ -1333,6 +1393,7 @@ def main():
     test_universe_lookup()
     test_kr_ticker_master()
     test_kr_all_market_prices()
+    test_us_all_market_prices()
     test_name_lookup()
     test_resolve_stock_query()
     test_portfolio()

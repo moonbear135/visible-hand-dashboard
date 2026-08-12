@@ -558,6 +558,32 @@ def load_kr_all_market_prices(data_dir=None):
     return build_universe_index(payload, MARKET_KR), (payload or {}).get("metadata")
 
 
+US_ALL_MARKET_PRICES_FILENAME = "us_all_market_prices.json"
+
+
+def load_us_all_market_prices(data_dir=None):
+    """
+    2026-08-12 오너 요청(TASK_HISTORY #92) — 위 `load_kr_all_market_prices()`의 미국판입니다.
+    미국 시가총액 상위 550 유니버스 밖 종목도 "현재가 없음" 대신 실제 종가를 보여주기 위한
+    보조 가격 목록(`data/us_all_market_prices.json`, 수집기는 `collector_us_stocks.py`)을 읽습니다.
+
+    ⚠️ 한국판과 완전히 같은 원칙입니다 — 밸류에이션(PER/PEGY/퀀트점수)은 없고 **현재가만**
+    있습니다. `make_price_lookup()`에 `broad_us_prices`로 넘겨 "1차: 상위 550 유니버스 →
+    2차(없으면): 이 전 종목 가격 목록" 순서의 폴백으로만 씁니다. `valuation_summary()`는
+    이 목록을 보지 않으므로 "밸류에이션 정보 없음" 문구는 그대로 정확합니다.
+
+    (index, metadata) 반환. 파일이 없으면(아직 수집 전, 또는 이번 수집 실패) 빈 dict —
+    이 보조 기능만 조용히 비활성화되고 나머지 화면은 그대로 정상 작동합니다.
+    """
+    directory = data_dir or default_data_dir()
+    path = os.path.join(directory, US_ALL_MARKET_PRICES_FILENAME)
+    if not os.path.exists(path):
+        return {}, None
+    with open(path, "r", encoding="utf-8") as f:
+        payload = json.load(f)
+    return build_universe_index(payload, MARKET_US), (payload or {}).get("metadata")
+
+
 def find_ticker_by_name(market, name, indexes):
     """
     2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
@@ -677,7 +703,7 @@ def resolve_stock_query(market, query, indexes, broad_index=None):
     )
 
 
-def make_price_lookup(indexes, broad_kr_prices=None):
+def make_price_lookup(indexes, broad_kr_prices=None, broad_us_prices=None):
     """
     build_portfolio 에 넘길 현재가 조회 함수를 만듭니다.
     indexes: {"KR": {...}, "US": {...}}
@@ -687,8 +713,16 @@ def make_price_lookup(indexes, broad_kr_prices=None):
     `load_kr_all_market_prices()`가 반환한 인덱스. 한국 종목이 상위 200 유니버스(`indexes["KR"]`)
     안에 없을 때만 2차로 확인하는 폴백입니다 — **가격만** 쓰고 밸류에이션은 여전히 없습니다
     (`valuation_summary()`는 이 폴백을 타지 않으므로 "밸류에이션 정보 없음" 문구는 그대로 정확합니다).
-    미국 종목(US)에는 적용하지 않습니다(이 목록 자체가 국내 전용).
+
+    broad_us_prices: (2026-08-12, TASK_HISTORY #92 신설, 기본값 None으로 하위호환 유지)
+    위와 완전히 같은 역할의 미국판(`load_us_all_market_prices()`). 미국 종목이 상위 550
+    유니버스 안에 없을 때만 2차로 확인합니다.
+
+    ⚠️ 두 폴백은 시장별로 엄격히 분리됩니다 — 한국 목록을 미국 티커 조회에, 또는 그 반대로
+    쓰는 경로는 없습니다(원/달러 혼용 차단, 이 모듈 상단 '환율 변환 없음' 원칙과 같은 맥락).
     """
+    broad_by_market = {MARKET_KR: broad_kr_prices, MARKET_US: broad_us_prices}
+
     def lookup(market, ticker):
         try:
             market_code = normalize_market(market)
@@ -696,8 +730,8 @@ def make_price_lookup(indexes, broad_kr_prices=None):
         except ValueError:
             return None
         stock = (indexes.get(market_code) or {}).get(key)
-        if not stock and broad_kr_prices and market_code == MARKET_KR:
-            stock = broad_kr_prices.get(key)
+        if not stock:
+            stock = (broad_by_market.get(market_code) or {}).get(key)
         if not stock:
             return None
         price = stock.get("price")

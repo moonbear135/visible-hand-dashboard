@@ -627,6 +627,212 @@ def test_kr_all_market_prices_collector():
           "__main__ 에서 이 보조 수집도 try/except 로 감쌈(실패해도 앞 단계 결과는 그대로)")
 
 
+def _fake_screener_data_json(rows, include_count=True, total=None):
+    """
+    페이지네이션/실패 시나리오 검증용 **합성** devalue 응답을 만듭니다.
+
+    ⚠️ 디코더 자체의 정확성은 아래 `test_us_screener_devalue_decoder()`에서 **실제로 받은
+    응답 원문**(tests/fixtures/us_screener_data_json_head.json)으로 검증합니다. 여기 합성
+    응답은 "여러 페이지·실패·차단" 같은 실데이터로 만들 수 없는 흐름만 재현하기 위한 것이라,
+    인덱스 계산 실수를 피하려고 값 공유(devalue 의 중복 제거)는 일부러 쓰지 않았습니다.
+
+    rows: [(symbol, name, price), ...] — price 가 None 이면 '가격 없는 행'을 재현합니다.
+    """
+    schema = {"data": 1} if not include_count else {"count": 1, "data": 2}
+    flat = [schema, len(rows) if total is None else total, []] if include_count else [schema, []]
+    index_list = flat[2] if include_count else flat[1]
+    for symbol, name, price in rows:
+        base = len(flat)
+        flat.append({"s": base + 1, "n": base + 2, "price": base + 3})
+        flat.extend([symbol, name, price])
+        index_list.append(base)
+    return json.dumps({"type": "data", "nodes": [{"type": "data", "data": flat}]})
+
+
+def test_us_screener_devalue_decoder():
+    print("\n[4-3] 미국 스크리너 devalue 디코더 (2026-08-12, TASK_HISTORY #92 — 실제 응답 원문으로 검증)")
+    import collector_us_stocks as U
+
+    # ⚠️ 이 픽스처는 2026-08-12 stockanalysis.com 스크리너 데이터 엔드포인트
+    # (`/stocks/screener/__data.json`)에서 실제로 받은 응답의 **앞부분을 그대로 잘라낸 것**입니다.
+    # 값(티커/회사명/가격/시총/업종)은 한 글자도 손대지 않았고, 뒤쪽 5,600여 행과 화면 메타데이터
+    # (업종 목록·컬럼 정의 등)만 잘라냈습니다. 그래서 `count` 는 실제 그대로 5607 인데 행은 7개뿐이고,
+    # `country`/`dataPoints` 처럼 잘려나간 뒤쪽을 가리키는 인덱스는 None 으로 디코딩됩니다
+    # — 이것도 "응답이 잘렸을 때 크래시하지 않고 결측 처리"를 확인하는 검증 항목입니다.
+    fixture = (REPO_ROOT / "tests" / "fixtures" / "us_screener_data_json_head.json").read_text(encoding="utf-8")
+    nodes = U.decode_sveltekit_data_json(fixture)
+    check(len(nodes) == 2, "노드 2개(레이아웃 + 스크리너 페이지)를 전부 펼침")
+
+    rows, total_count = U.extract_screener_rows(nodes)
+    check(total_count == 5607,
+          "소스가 알려준 전체 종목 수(count=5607)를 그대로 읽음 — 미국 상장 전 종목 규모")
+    check(len(rows) == 7, "잘라낸 픽스처에 담긴 7개 행을 모두 찾음")
+
+    by_symbol = {r["s"]: r for r in rows}
+    check(by_symbol["NVDA"]["price"] == 217.5 and by_symbol["NVDA"]["n"] == "NVIDIA Corporation",
+          "평평한 배열의 인덱스를 따라가 티커·회사명·현재가를 정확히 복원")
+    check(by_symbol["GOOG"]["n"] == "Alphabet Inc.",
+          "devalue 의 값 공유(GOOG 가 GOOGL 과 같은 회사명 인덱스를 가리킴)를 올바르게 되풀어냄 "
+          "— 이걸 못 풀면 회사명이 숫자 23 으로 남습니다")
+    check(by_symbol["AVGO"]["industry"] == "Semiconductors",
+          "행을 건너뛴 값 공유(AVGO 업종이 NVDA 업종 인덱스를 가리킴)도 정확히 복원")
+    check(nodes[1]["country"] is None and nodes[1]["dataPoints"] is None,
+          "잘려나간 뒤쪽을 가리키는 인덱스는 크래시 대신 None(결측) — 응답이 잘려도 죽지 않음")
+
+    stocks = U.normalize_screener_rows(rows)
+    check([s["symbol"] for s in stocks] == ["NVDA", "AAPL", "GOOGL", "GOOG", "MSFT", "AMZN", "AVGO"],
+          "시가총액 순서 그대로 티커 목록으로 정규화됨")
+    check(set(stocks[0]) == {"symbol", "name", "price"},
+          "가격 전용 파일 목적대로 티커·회사명·현재가 3개 필드만 남김(밸류에이션 없음)")
+
+    # §0-1: 가격을 숫자로 읽을 수 없는 행은 0 으로 채우지 않고 버립니다.
+    dirty = U.normalize_screener_rows([
+        {"s": "GOODCO", "n": "정상", "price": 12.5},
+        {"s": "NOPRICE", "n": "가격없음", "price": None},
+        {"s": "ZERO", "n": "가격0", "price": 0},
+        {"s": "", "n": "티커없음", "price": 5},
+        {"s": "TEXT", "n": "가격이문자", "price": "N/A"},
+    ])
+    check([s["symbol"] for s in dirty] == ["GOODCO"],
+          "가격이 없거나 0 이거나 숫자가 아닌 행은 버림(§0-1 — 0 으로 메우지 않음)")
+
+
+def test_us_all_market_prices_collector():
+    print("\n[4-4] 미국 전 종목 현재가 수집기 (2026-08-12, TASK_HISTORY #92 — 실제 함수 호출)")
+    import collector_us_stocks as U
+    import requests as real_requests
+    from urllib.parse import urlparse, parse_qs
+
+    class _FakeResponse:
+        def __init__(self, text, status_code=200):
+            self.text = text
+            self.status_code = status_code
+
+    def _page_of(url):
+        return int(parse_qs(urlparse(url).query).get("p", ["1"])[0])
+
+    def _install(get_func):
+        class _FakeRequestsModule:
+            get = staticmethod(get_func)
+            exceptions = real_requests.exceptions
+        U.requests = _FakeRequestsModule()
+
+    orig_requests = U.requests
+    orig_sleep = U.time.sleep
+    tmpdir = tempfile.mkdtemp()
+    try:
+        U.time.sleep = lambda s: None  # 재시도/페이지 간 딜레이는 로직 검증에 불필요
+
+        # ── 시나리오 A: 2페이지가 계속 실패해도 건너뛰고 3페이지까지 이어서 수집 ──────────
+        page_bodies = {
+            1: _fake_screener_data_json(
+                [("NVDA", "NVIDIA Corporation", 217.5), ("AAPL", "Apple Inc.", 304.91),
+                 ("NOPRICE", "가격 없는 회사", None)],
+                total=5),
+            3: _fake_screener_data_json([("BRK.B", "Berkshire Hathaway Inc.", 516.38),
+                                         ("EPD", "Enterprise Products Partners L.P.", 37.86)],
+                                        total=5),
+        }
+        call_log = []
+
+        def _get_a(url, headers=None, timeout=None):
+            call_log.append(url)
+            page = _page_of(url)
+            if page in page_bodies:
+                return _FakeResponse(page_bodies[page])
+            return _FakeResponse("서버 오류 페이지(JSON 아님)", status_code=500)
+
+        _install(_get_a)
+        result_path = U.run_us_all_market_prices_collector(data_dir=tmpdir, max_pages=10)
+        check(result_path is not None, "정상 응답이 하나라도 있으면 파일 경로를 반환")
+
+        with open(result_path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+        by_symbol = {s["symbol"]: s for s in payload["stocks"]}
+        check(set(by_symbol) == {"NVDA", "AAPL", "BRK.B", "EPD"},
+              "1페이지 + 3페이지 종목이 모두 반영되고, 실패한 2페이지만 건너뜀")
+        check(by_symbol["NVDA"]["price"] == 217.5 and by_symbol["BRK.B"]["name"].startswith("Berkshire"),
+              "티커·회사명·현재가가 그대로 보존됨")
+        check("price" in by_symbol["NVDA"] and "t_per" not in by_symbol["NVDA"],
+              "밸류에이션 필드(PER 등)는 없음 — 가격 전용 목적")
+        check(payload["metadata"]["count"] == 4 and payload["metadata"]["failed_page_count"] == 1,
+              "metadata 에 실제 반영 건수와 건너뛴 페이지 수가 정직하게 기록됨")
+        check(payload["metadata"]["source_reported_count"] == 5,
+              "소스가 알려준 전체 종목 수도 함께 기록")
+        check(payload["metadata"]["source_blocked"] is False, "차단 없이 끝난 회차로 기록")
+
+        pages_called = [_page_of(u) for u in call_log]
+        check(pages_called == [1, 2, 2, 2, 3],
+              "2페이지는 재시도 3번 뒤 건너뛰고 3페이지로 이어서 진행, 소스가 알려준 전체 종목 수"
+              "(5)에 도달해 4페이지는 아예 요청하지 않음")
+
+        # ── 시나리오 B: 소스가 페이지 파라미터를 무시하고 매번 같은 전 종목을 주는 경우 ────
+        # (2026-08-12 현재 stockanalysis.com 스크리너의 실제 동작 — 한 응답에 전 종목이 다 옵니다)
+        same_body = _fake_screener_data_json(
+            [("NVDA", "NVIDIA Corporation", 217.5), ("AAPL", "Apple Inc.", 304.91)],
+            include_count=False)
+        repeat_log = []
+
+        def _get_b(url, headers=None, timeout=None):
+            repeat_log.append(url)
+            return _FakeResponse(same_body)
+
+        _install(_get_b)
+        tmp_b = tempfile.mkdtemp()
+        path_b = U.run_us_all_market_prices_collector(data_dir=tmp_b, max_pages=50)
+        check(len(repeat_log) == 2,
+              "새로 추가되는 종목이 없으면 즉시 멈춤 — 같은 목록을 50페이지까지 반복 요청하지 않음")
+        with open(path_b, "r", encoding="utf-8") as f:
+            check(len(json.load(f)["stocks"]) == 2, "중복 티커는 한 번만 저장됨")
+        shutil.rmtree(tmp_b, ignore_errors=True)
+
+        # ── 시나리오 C: 차단(HTTP 429)은 재시도하지 않고 즉시 중단, 그때까지 받은 건 저장 ──
+        block_log = []
+
+        def _get_c(url, headers=None, timeout=None):
+            block_log.append(url)
+            if _page_of(url) == 1:
+                return _FakeResponse(_fake_screener_data_json(
+                    [("NVDA", "NVIDIA Corporation", 217.5)], include_count=False))
+            return _FakeResponse("차단", status_code=429)
+
+        _install(_get_c)
+        tmp_c = tempfile.mkdtemp()
+        path_c = U.run_us_all_market_prices_collector(data_dir=tmp_c, max_pages=50)
+        check([_page_of(u) for u in block_log] == [1, 2],
+              "차단당한 페이지는 재시도를 반복하지 않고 즉시 중단(§0-3-2)")
+        with open(path_c, "r", encoding="utf-8") as f:
+            blocked_payload = json.load(f)
+        check(len(blocked_payload["stocks"]) == 1 and blocked_payload["metadata"]["source_blocked"] is True,
+              "차단 전까지 받은 분량은 저장하되 '차단당했다'는 사실을 metadata 에 남김")
+        shutil.rmtree(tmp_c, ignore_errors=True)
+
+        # ── 시나리오 D: 처음부터 끝까지 실패하면 파일을 만들지 않음(기존 파일 보존) ───────
+        _install(lambda url, headers=None, timeout=None: _FakeResponse("깨진 응답", status_code=500))
+        tmp_d = tempfile.mkdtemp()
+        broken_result = U.run_us_all_market_prices_collector(data_dir=tmp_d, max_pages=2)
+        check(broken_result is None,
+              "한 종목도 못 받으면 파일을 만들지 않고 조용히 None 반환(크래시 안 함)")
+        check(not os.path.exists(os.path.join(tmp_d, "us_all_market_prices.json")),
+              "빈 파일조차 만들지 않음 — 기존 파일이 있었다면 그대로 유지됨")
+        shutil.rmtree(tmp_d, ignore_errors=True)
+    finally:
+        U.requests = orig_requests
+        U.time.sleep = orig_sleep
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+    # 배선 확인: 550종목 핵심 수집 '뒤에' 실행되고, try/except 로 감싸져 있는지.
+    u_src = (REPO_ROOT / "collector_us_stocks.py").read_text(encoding="utf-8")
+    collect_body = u_src.split("def cmd_collect(")[1].split("\ndef ")[0]
+    check(collect_body.index("run_us_collector(") < collect_body.index("run_us_all_market_prices_collector()"),
+          "전 종목 현재가 수집은 550종목 밸류에이션 수집 뒤에 실행됨")
+    check("except Exception as e:" in collect_body.split("run_us_all_market_prices_collector()")[-1][:200],
+          "try/except 로 감쌈(실패해도 550종목 수집 결과는 그대로)")
+    check(collect_body.index('if not readiness["should_collect"]') < collect_body.index("run_us_all_market_prices_collector()"),
+          "사전 점검(--skip-if-not-ready)에 걸린 실행에서는 아예 돌지 않음 — 장중 가격을 담지 "
+          "않기 위한 §0-3-1(후행지표 전용) 방어")
+
+
 def main():
     print("=" * 70)
     print("📈 종목별 시계열 이력 · 다운로드 오프라인 검증")
@@ -637,6 +843,8 @@ def main():
     test_collector_blocked_scenarios()
     test_kr_ticker_master_collector()
     test_kr_all_market_prices_collector()
+    test_us_screener_devalue_decoder()
+    test_us_all_market_prices_collector()
     test_append_and_dedup()
     test_export_end_to_end()
     test_wiring()

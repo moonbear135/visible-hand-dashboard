@@ -44,6 +44,7 @@ from utils.scorecard_db import (
     load_kr_ticker_master,
     load_kr_all_market_prices,
     load_universe_index,
+    load_us_all_market_prices,
     make_price_lookup,
     resolve_stock_query,
     sign_in,
@@ -880,6 +881,11 @@ def render_scorecard_page():
     # 표시됩니다.
     kr_all_prices, _kr_all_prices_meta = load_kr_all_market_prices()
 
+    # 2026-08-12 오너 요청(TASK_HISTORY #92) — 위 한국판과 완전히 같은 역할의 미국판.
+    # 미국 상위 550 밖 종목도 "현재가 없음" 대신 실제 종가를 보여줍니다. 마찬가지로 밸류에이션은
+    # 없고 가격만 — `indexes`와 섞지 않고 `make_price_lookup`의 2차 폴백으로만 넘깁니다.
+    us_all_prices, _us_all_prices_meta = load_us_all_market_prices()
+
     if _render_input_form(client, user_id, holdings, indexes, kr_ticker_master):
         st.rerun()
 
@@ -899,7 +905,10 @@ def render_scorecard_page():
             "🚫 밸류에이션 스냅샷(data/*.json)을 읽지 못했습니다. 현재가·수익률을 계산할 수 없습니다."
         )
 
-    portfolio = build_portfolio(holdings, make_price_lookup(indexes, broad_kr_prices=kr_all_prices))
+    portfolio = build_portfolio(
+        holdings,
+        make_price_lookup(indexes, broad_kr_prices=kr_all_prices, broad_us_prices=us_all_prices),
+    )
     for currency in ("KRW", "USD"):
         group = portfolio.get(currency)
         if group:

@@ -13,6 +13,14 @@ collector_us_stocks.py
     보강했지만 여전히 재발할 수 있어, **끊기면 진행상황을 저장하고 다음 실행이 이어서 진행**하는
     체크포인트(`data/us_collect_checkpoint.json`)를 추가(같은 세션 날짜에서만 재사용, §0-1).
 
+2026-08-12 추가(TASK_HISTORY #92): **미국 상장 전 종목 현재가**(가격 전용) 수집기 신설.
+  - `run_us_all_market_prices_collector()` → `data/us_all_market_prices.json`.
+  - 종목별 페이지를 550번 도는 기존 경로와 달리, stockanalysis.com 스크리너의 SvelteKit
+    데이터 엔드포인트(`__data.json`)를 **한 번** 불러 전 종목(실측 5,607개)을 받습니다.
+    그 응답이 평범한 JSON 이 아니라 devalue 직렬화 포맷이라 전용 디코더를 §3-2에 뒀습니다.
+  - 밸류에이션은 일부러 담지 않습니다 — "내 성적표"에서 상위 550 밖 종목의 **현재가만**
+    보여주기 위한 보조 목록입니다(코스피 `kr_all_market_prices.json` 과 같은 역할).
+
 ⚠️ 기존 코스피 파이프라인(`collector_kospi200.py`, `views/pegy_view.py`,
    `utils/scoring.py`, `utils/constants.py`)은 이 파일에서 import 하지도, 수정하지도
    않습니다 (ENGINEERING_SPEC §0-3-6 신규 기능 모듈 분리 원칙).
@@ -34,6 +42,7 @@ CLI
   python collector_us_stocks.py indices             # 상단 지수 3종 소스 점검 (⚠️ 실측 미검증 소스)
   python collector_us_stocks.py collect --limit 5   # 전수 수집 경로 동작 확인(5종목만)
   python collector_us_stocks.py collect             # 🇺🇸 550종목 전수 수집 (약 40~56분, 배치 휴지기 포함)
+  python collector_us_stocks.py prices               # 🇺🇸 전 종목 '현재가만' 수집(스크리너 1회 요청)
   python collector_us_stocks.py collect --skip-if-not-ready
                                                     # 무인 자동화(GitHub Actions) 전용 — 아직 수집
                                                     # 시점이 아니거나 이미 그 거래일을 수집했으면
@@ -87,6 +96,15 @@ from utils.constants_us import (
     US_VALID_RATIO_DEGRADED,
     US_INDEX_PROXY_URL_TEMPLATE,
     US_INDEX_DEFINITIONS,
+    # 2026-08-12 신설(TASK_HISTORY #92) — 미국 전 종목 현재가(가격 전용) 수집용 (constants_us §9)
+    US_ALL_MARKET_PRICES_FILENAME,
+    US_SCREENER_DATA_JSON_URL,
+    US_ALL_MARKET_MAX_PAGES,
+    US_DEVALUE_MAX_DEPTH,
+    US_SCREENER_SYMBOL_KEY,
+    US_SCREENER_NAME_KEY,
+    US_SCREENER_PRICE_KEY,
+    US_SCREENER_TOTAL_COUNT_KEYS,
 )
 from utils.scoring_us import derive_valuation, apply_us_guardrail, score_all
 # 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
@@ -1641,6 +1659,264 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
 
 
 # =============================================================================
+# 3-2. 미국 상장 전 종목 현재가 수집기 (2026-08-12 신설, TASK_HISTORY #92)
+#
+# 코스피 쪽 `collector_kospi200.run_kr_all_market_prices_collector()`(#84)의 미국판입니다.
+# 목적도 원칙도 똑같습니다 — "내 성적표"에서 상위 550 유니버스 밖 종목이 "현재가 없음"으로만
+# 뜨던 것을 줄이기 위한 **가격 전용** 보조 목록(`data/us_all_market_prices.json`)을 만듭니다.
+#
+# ⚠️ 위쪽 `run_us_collector()`(550종목 밸류에이션 수집)와는 완전히 독립입니다. 여기서 만드는
+#    파일에는 PER/PEGY/퀀트점수가 **일부러** 없습니다(§0-1 — 밸류에이션이 전부 None인 종목을
+#    "찾음"으로 표시해 오해를 주지 않기 위해 파일 자체를 분리).
+#
+# 소스: stockanalysis.com 스크리너의 SvelteKit 데이터 엔드포인트(constants_us §9 참고).
+#       종목별 페이지를 550번 도는 대신 **한 번의 요청**으로 전 종목을 받습니다.
+# =============================================================================
+def _devalue_deref(index, flat, depth=0):
+    """
+    SvelteKit "devalue" 포맷의 인덱스 하나를 실제 값으로 되돌립니다(재귀).
+
+    devalue 는 응답 크기를 줄이려고 모든 값을 **평평한 배열 하나**에 담고, 컨테이너
+    (dict/list) 안에는 값 대신 그 배열의 **인덱스**를 넣습니다. 같은 값(예: 여러 종목이
+    공유하는 업종명 "Semiconductors")은 배열에 한 번만 저장되고 여러 곳에서 같은 인덱스를
+    가리킵니다. 그래서 `json.loads()` 만으로는 원래 구조가 나오지 않고, 이렇게 인덱스를
+    따라가며 펼쳐 줘야 합니다.
+
+    규칙(실응답 + devalue 공개 스펙 기준):
+      · 정수가 아니면 이미 값 그 자체 → 그대로 반환
+      · -1 은 null. 그 밖의 음수는 devalue 의 특수값(빈칸/NaN/Infinity)인데 이 수집기는
+        숫자/문자만 쓰므로 전부 None 으로 둡니다(§0-1 — 모르는 값을 0 으로 메우지 않음).
+      · 배열 길이를 벗어난 인덱스는 None (응답이 잘렸거나 형식이 바뀐 경우 크래시 대신 결측)
+      · `depth` 상한은 순환 참조(devalue 가 허용함)에서 무한 재귀를 막는 안전장치
+    """
+    if depth > US_DEVALUE_MAX_DEPTH:
+        return None
+    if isinstance(index, bool) or not isinstance(index, int):
+        return index
+    if index < 0 or index >= len(flat):
+        return None
+    value = flat[index]
+    if isinstance(value, dict):
+        return {k: _devalue_deref(v, flat, depth + 1) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_devalue_deref(v, flat, depth + 1) for v in value]
+    return value
+
+
+def decode_sveltekit_data_json(text):
+    """
+    `__data.json` 응답 원문 → 노드별로 펼친 dict 목록.
+
+    응답 형태: {"type":"data","nodes":[{...}, {"type":"data","data":[평평한 배열]}, ...]}
+    각 노드의 평평한 배열에서 0번이 그 노드의 최상위 값입니다(devalue 규약).
+    비어 있거나(`{"type":"skip"}`) 형식이 다른 노드는 조용히 건너뜁니다 — 노드 개수/순서는
+    사이트 라우팅 구조에 따라 달라지므로 "몇 번째 노드"에 의존하지 않습니다.
+    """
+    payload = json.loads(text)
+    nodes = payload.get("nodes") if isinstance(payload, dict) else None
+    if not isinstance(nodes, list):
+        return []
+    decoded_nodes = []
+    for node in nodes:
+        if not isinstance(node, dict):
+            continue
+        flat = node.get("data")
+        if not isinstance(flat, list) or not flat:
+            continue
+        decoded = _devalue_deref(0, flat)
+        if isinstance(decoded, dict):
+            decoded_nodes.append(decoded)
+    return decoded_nodes
+
+
+def _looks_like_screener_rows(value):
+    """스크리너 표의 '행 목록'인지 판정 — 첫 행이 티커·현재가 키를 가진 dict 인가."""
+    if not isinstance(value, list) or not value:
+        return False
+    head = value[0]
+    return (isinstance(head, dict)
+            and US_SCREENER_SYMBOL_KEY in head
+            and US_SCREENER_PRICE_KEY in head)
+
+
+def extract_screener_rows(decoded_nodes):
+    """
+    펼쳐진 노드들에서 스크리너 표의 행 목록과 소스가 알려준 전체 종목 수를 찾습니다.
+
+    ⚠️ 노드 순서나 키 이름("data"/"stockData" 등 페이지마다 다름)에 의존하지 않고, **행의
+    생김새**(티커+현재가 키를 가진 dict 목록)로 찾습니다. 사이트가 필드를 추가하거나 노드
+    구성을 바꿔도 잘 버티고, 못 찾으면 빈 목록을 돌려줘 호출 쪽이 "이번 페이지 실패"로
+    처리합니다(엉뚱한 배열을 억지로 행으로 해석하지 않음).
+
+    반환: (rows, total_count) — total_count 는 못 찾으면 None.
+    """
+    for node_data in decoded_nodes:
+        rows = next((v for v in node_data.values() if _looks_like_screener_rows(v)), None)
+        if rows is None:
+            continue
+        total_count = None
+        for key in US_SCREENER_TOTAL_COUNT_KEYS:
+            candidate = node_data.get(key)
+            if isinstance(candidate, int) and not isinstance(candidate, bool) and candidate > 0:
+                total_count = candidate
+                break
+        return rows, total_count
+    return [], None
+
+
+def normalize_screener_rows(rows):
+    """
+    스크리너 원문 행 → `{"symbol", "name", "price"}` 목록.
+
+    §0-1: 현재가를 숫자로 읽을 수 없거나 0 이하인 행은 **버립니다**(0 이나 추정값으로 채우지
+    않음). 이 파일의 존재 이유가 '현재가'라서, 가격 없는 행은 담아 봐야 화면에서 어차피
+    "현재가 없음"이고 오히려 "찾았는데 값이 없다"는 오해만 만듭니다.
+    """
+    normalized = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        symbol = str(row.get(US_SCREENER_SYMBOL_KEY) or "").strip().upper()
+        if not symbol:
+            continue
+        try:
+            price = float(row.get(US_SCREENER_PRICE_KEY))
+        except (TypeError, ValueError):
+            continue
+        if price <= 0:
+            continue
+        raw_name = row.get(US_SCREENER_NAME_KEY)
+        name = str(raw_name).strip() if raw_name else None
+        normalized.append({"symbol": symbol, "name": name, "price": price})
+    return normalized
+
+
+def fetch_us_screener_page(page):
+    """
+    스크리너 데이터 엔드포인트 한 페이지를 받아 파싱합니다.
+
+    반환: (stocks, raw_row_count, total_count)
+      · stocks         : normalize_screener_rows() 결과
+      · raw_row_count  : 가격 필터 전 원문 행 수 (마지막 페이지 판정에 씀)
+      · total_count    : 소스가 알려준 전체 종목 수(모르면 None)
+
+    실패(재시도 소진)는 예외로 올립니다 — 호출 쪽이 "이 페이지만 건너뛸지" 판단합니다.
+    차단(403/429 등)은 `_http_get()`이 USSourceBlockedError 로 즉시 중단시킵니다(§0-3-2).
+
+    "응답을 못 읽음(실패)"과 "정상인데 행이 0개(마지막 페이지)"는 코스피 수집기와 같은 기준으로
+    가릅니다 — 응답 자체를 못 받거나 JSON/노드 구조를 못 알아보면 **실패**(건너뛰고 계속),
+    구조는 멀쩡한데 표에 행이 없으면 **마지막 페이지**로 봅니다.
+    """
+    url = US_SCREENER_DATA_JSON_URL if page <= 1 else f"{US_SCREENER_DATA_JSON_URL}?p={page}"
+    res = _http_get(url)
+    decoded_nodes = decode_sveltekit_data_json(res.text)
+    if not decoded_nodes:
+        raise ValueError("응답에서 SvelteKit 데이터 노드를 찾지 못했습니다(소스 구조 변경 가능성)")
+    rows, total_count = extract_screener_rows(decoded_nodes)
+    return normalize_screener_rows(rows), len(rows), total_count
+
+
+def run_us_all_market_prices_collector(data_dir=None, max_pages=None):
+    """
+    미국 상장 전 종목의 현재가만 모아 `data/us_all_market_prices.json`으로 저장합니다.
+
+    ⚠️ `run_us_collector()`(상위 550종목 밸류에이션)와 완전히 독립입니다 — 이 함수가 실패해도
+    이미 저장된 550종목 스냅샷은 손대지 않습니다.
+
+    페이지 루프 규칙(코스피 `run_kr_all_market_prices_collector()`와 같은 원칙):
+      · 한 페이지가 재시도 끝에 실패해도 그 페이지만 건너뛰고 계속 진행합니다.
+      · 정상 응답인데 행이 0개면 마지막 페이지로 보고 멈춥니다.
+      · 새로 추가된 티커가 하나도 없으면 멈춥니다 — 지금 이 소스는 `?p=` 를 무시하고 전
+        종목을 한 응답에 주기 때문에, 이 판정이 사실상 "1페이지에서 끝"을 만들어 냅니다.
+        (사이트가 나중에 진짜 페이지네이션으로 바뀌면 루프가 자연스럽게 이어집니다.)
+      · 소스가 알려준 전체 종목 수만큼 받았으면 더 요청하지 않습니다.
+      · 차단(403/429)을 만나면 재시도하지 않고 즉시 루프를 멈춥니다(§0-3-2). 그때까지 받은
+        분량이 있으면 그것만이라도 저장합니다(있는 것은 정직하게, 없는 것은 없는 대로).
+    """
+    limit_pages = max_pages or US_ALL_MARKET_MAX_PAGES
+    entries = {}
+    page = 1
+    pages_fetched = 0
+    failed_page_count = 0
+    raw_rows_seen = 0
+    reported_total = None
+    blocked = False
+
+    print("=" * 70)
+    print("[미국 전 종목 현재가] 스크리너 데이터 엔드포인트에서 가격만 수집합니다(밸류에이션 없음)")
+
+    while page <= limit_pages:
+        try:
+            stocks, raw_row_count, total_count = fetch_us_screener_page(page)
+        except USSourceBlockedError as e:
+            blocked = True
+            print(f"⚠️ [미국 전 종목 현재가] 소스가 요청을 차단해 여기서 중단합니다: {e}")
+            break
+        except Exception as e:
+            failed_page_count += 1
+            print(f"⚠️ [미국 전 종목 현재가] {page}페이지 수집 실패({e}) — 이 페이지만 건너뜁니다")
+            page += 1
+            _polite_sleep()
+            continue
+
+        pages_fetched += 1
+        if raw_row_count == 0:
+            # 정상 응답인데 0건 = 마지막 페이지를 지났다고 판단하고 종료
+            break
+
+        raw_rows_seen += raw_row_count
+        if total_count:
+            reported_total = total_count
+        new_symbols = sum(1 for s in stocks if s["symbol"] not in entries)
+        for stock in stocks:
+            entries[stock["symbol"]] = stock
+        print(f"  {page}페이지: 원문 {raw_row_count}행 / 가격 있는 종목 {len(stocks)}개"
+              f"(신규 {new_symbols}) — 누적 {len(entries)}건")
+
+        if new_symbols == 0:
+            print("  ↳ 새로 추가된 종목이 없어 여기서 멈춥니다"
+                  "(소스가 페이지 파라미터를 무시하고 같은 목록을 다시 준 경우).")
+            break
+        if reported_total and raw_rows_seen >= reported_total:
+            print(f"  ↳ 소스가 알려준 전체 종목 수({reported_total})만큼 받아 여기서 멈춥니다.")
+            break
+        page += 1
+        _polite_sleep()
+
+    if not entries:
+        print("⚠️ [미국 전 종목 현재가] 한 종목도 수집하지 못해 파일을 만들지 않습니다"
+              "(기존 파일이 있으면 그대로 유지).")
+        print("=" * 70)
+        return None
+
+    resolved_data_dir = data_dir or os.path.join(os.path.dirname(os.path.abspath(__file__)), "data")
+    os.makedirs(resolved_data_dir, exist_ok=True)
+    json_path = os.path.join(resolved_data_dir, US_ALL_MARKET_PRICES_FILENAME)
+    payload = {
+        "metadata": {
+            "collected_at_et": _now_et().isoformat(),
+            "collected_at_kst": _now_kst().isoformat(),
+            "source": US_SCREENER_DATA_JSON_URL,
+            "count": len(entries),
+            "source_reported_count": reported_total,
+            "pages_fetched": pages_fetched,
+            "failed_page_count": failed_page_count,
+            "source_blocked": blocked,
+            "currency": "USD",
+            "description": "미국 상장 전 종목 현재가(장마감 종가) — 밸류에이션 없음, "
+                           "상위 550 유니버스 밖 종목의 현재가 표시 보조용",
+        },
+        "stocks": list(entries.values()),
+    }
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    print(f"[미국 전 종목 현재가] {len(entries)}건 저장 완료 "
+          f"(요청 {pages_fetched}페이지 / 실패 {failed_page_count}페이지) -> {json_path}")
+    print("=" * 70)
+    return json_path
+
+
+# =============================================================================
 # 4. CLI
 # =============================================================================
 def _data_path(filename):
@@ -1724,6 +2000,25 @@ def cmd_collect(args):
         delay=not args.no_delay,
         skip_indices=args.skip_indices,
     )
+    # 2026-08-12(TASK_HISTORY #92): 핵심 수집(위)이 끝난 **뒤에** 별도로 실행합니다.
+    #   · try/except 로 감싸 이 보조 수집이 실패해도 이미 저장된 550종목 스냅샷은 그대로입니다.
+    #   · 사전 점검(--skip-if-not-ready)에 걸려 위에서 return 한 실행에서는 아예 돌지 않습니다.
+    #     서머타임 때문에 하루 두 번 트리거되는데, 그중 한 번은 아직 **장중**(EST 기간의
+    #     20:35 UTC = 15:35 ET)이라 그때 가격을 담으면 §0-3-1(후행지표 전용, 장마감 종가만)을
+    #     어기게 됩니다. 사전 점검을 통과한 실행만 = 항상 장마감 이후입니다.
+    try:
+        run_us_all_market_prices_collector()
+    except Exception as e:
+        print(f"⚠️ [미국 전 종목 현재가] 수집 중 예외 발생(550종목 수집 결과에는 영향 없음): {e}")
+
+
+def cmd_prices(args):
+    """
+    미국 전 종목 현재가만 따로 수집합니다(2026-08-12, TASK_HISTORY #92).
+    평소에는 `collect` 뒤에 자동으로 붙어 돌지만, 오너가 로컬에서 이 부분만 확인하고 싶을 때
+    쓰는 진입점입니다. 밸류에이션 550종목 수집(40~56분)은 전혀 건드리지 않습니다.
+    """
+    run_us_all_market_prices_collector(max_pages=args.max_pages)
 
 
 def cmd_indices(_args):
@@ -1780,6 +2075,14 @@ def main():
     p_collect.add_argument("--no-delay", action="store_true",
                            help="⚠️ 크롤링 매너 위반 — 오프라인 테스트 외에는 쓰지 마세요")
     p_collect.set_defaults(func=cmd_collect)
+
+    p_prices = sub.add_parser(
+        "prices", help="미국 상장 전 종목 '현재가만' 수집 → data/us_all_market_prices.json "
+                       "(밸류에이션 없음. 스크리너 1회 요청이라 몇 초면 끝납니다)")
+    p_prices.add_argument("--max-pages", type=int, default=None,
+                          help="페이지 루프 상한(기본값은 constants_us.US_ALL_MARKET_MAX_PAGES). "
+                               "지금 소스는 한 응답에 전 종목을 주므로 실제로는 1페이지에서 끝납니다.")
+    p_prices.set_defaults(func=cmd_prices)
 
     p_idx = sub.add_parser("indices", help="상단 지수 3종 소스 점검(실측 미검증 소스 확인용)")
     p_idx.set_defaults(func=cmd_indices)

@@ -241,6 +241,7 @@ US_RAW_SNAPSHOT_FILENAME = "us_stocks_raw_latest.json"  # 크롤링 직후 raw �
 US_UNIVERSE_FILENAME = "us_universe_latest.json"        # 필터링된 종목 유니버스
 US_SAMPLE_DIRNAME = "us_sample"                         # 프로토타입 샘플 결과 보관 폴더
 US_SUMMARY_HISTORY_FILENAME = "us_summary_history.json"  # 상단 요약 지표 누적 이력
+US_ALL_MARKET_PRICES_FILENAME = "us_all_market_prices.json"  # 미국 전 종목 현재가(§9, 가격 전용)
 
 # =============================================================================
 # 8. 상단 지수 3종 (오너 확정 2026-08-07: S&P500 / 나스닥종합 / 다우존스, 러셀2000 제외)
@@ -275,3 +276,46 @@ US_INDEX_DEFINITIONS = (
     ("nasdaq", "나스닥 종합", "Nasdaq Composite", "oneq", "nasdaq composite"),
     ("dow",    "다우존스",   "Dow Jones",        "dia",  "dow jones"),
 )
+
+# =============================================================================
+# 9. 미국 상장 전 종목 현재가 (2026-08-12 신설, TASK_HISTORY #92)
+#
+# 무엇을 위한 것인가 — "내 성적표"에서 상위 550 유니버스 **밖** 미국 종목이 계속
+# "현재가 없음"으로만 뜨던 문제를 줄이기 위한 **가격 전용** 보조 목록입니다.
+# 코스피 쪽 `kr_all_market_prices.json`(TASK_HISTORY #84)과 정확히 같은 역할이며,
+# 밸류에이션(PER/PEGY/퀀트점수)은 여전히 상위 550 안에서만 제공됩니다(§0-1 —
+# "가격은 있는데 밸류에이션은 전부 None"인 오탐을 만들지 않으려고 파일을 분리).
+#
+# 왜 종목별 페이지가 아니라 스크리너인가 — 기존 `US_STATISTICS_URL_TEMPLATE` 경로는
+# 종목 하나당 요청 하나라서 550종목에 40~56분이 걸립니다(그래서 550이 한계였음).
+# stockanalysis.com 자체 스크리너는 **한 번의 요청**으로 미국 상장 전 종목의
+# 티커/회사명/현재가를 한꺼번에 돌려줍니다.
+#
+# ⚠️ 기술적 함정(2026-08-12 실응답으로 확인) — 스크리너 화면(/stocks/screener/)의
+#    페이지 넘김은 자바스크립트(SvelteKit)가 처리해서 `?p=2` 같은 쿼리로는 HTML이
+#    바뀌지 않습니다. 대신 SvelteKit 데이터 엔드포인트(`__data.json`)를 직접 부르면
+#    **필터·페이지와 무관하게 전 종목이 한 응답에 통째로** 들어옵니다(실응답에서
+#    `count=5607` + 5,607개 행 인덱스를 직접 확인). 다만 이 응답은 평범한 JSON이
+#    아니라 SvelteKit 의 "devalue" 직렬화 포맷(값들을 평평한 배열에 담고 서로
+#    인덱스로 참조 — 같은 값은 한 번만 저장)이라 전용 디코더가 필요합니다
+#    (`collector_us_stocks.py` §3-2 참고).
+#
+# 라이선스/매너: 이미 이 프로젝트가 쓰고 있는 같은 사이트이고(robots.txt 는 일반
+# 크롤러 전부 허용), 요청 수는 550회 → 사실상 1회로 **줄어듭니다**.
+# =============================================================================
+US_SCREENER_DATA_JSON_URL = "https://stockanalysis.com/stocks/screener/__data.json"
+# 위 엔드포인트가 지금은 전 종목을 한 번에 주지만, 사이트가 나중에 진짜 페이지네이션으로
+# 바뀔 수도 있어 수집기는 페이지 루프 구조를 유지합니다. 이 값은 그 루프가 폭주하지
+# 않게 막는 안전장치일 뿐, "실제로 이만큼 요청한다"는 뜻이 아닙니다(현재 실측 1회).
+US_ALL_MARKET_MAX_PAGES = 300
+# devalue 디코더가 순환 참조/기형 응답을 만났을 때 무한 재귀에 빠지지 않게 하는 상한.
+US_DEVALUE_MAX_DEPTH = 30
+# 스크리너 한 행(row)의 키 이름 — 실응답에서 확인한 그대로입니다.
+#   {"s":"NVDA","n":"NVIDIA Corporation","marketCap":...,"price":217.5,"change":...}
+# ⚠️ §2-1(위치 인덱스 파싱 금지)과 같은 정신으로, "몇 번째 열"이 아니라 키 이름으로 집습니다.
+US_SCREENER_SYMBOL_KEY = "s"
+US_SCREENER_NAME_KEY = "n"
+US_SCREENER_PRICE_KEY = "price"
+# 소스가 알려주는 "전체 종목 수" 키 후보(스크리너는 count, 목록 페이지는 resultsCount).
+# 이 값에 도달하면 다음 페이지를 더 요청하지 않고 멈춥니다(불필요한 요청 방지).
+US_SCREENER_TOTAL_COUNT_KEYS = ("count", "resultsCount")
