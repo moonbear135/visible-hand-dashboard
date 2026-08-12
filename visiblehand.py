@@ -156,71 +156,61 @@ def main():
     )
     MARKET_KR = "한국 주식은 이가격이에요"
     MARKET_US = "미국 주식은 이가격이에요"
-    # ⚠️ 2026-08-12: "내 성적표" 체크박스가 켜져 있으면 라우팅(§4)에서 이 라디오 선택이 무시되고
-    #    항상 성적표/리포트 화면이 우선 표시됩니다(이전부터 있던 동작). 라디오는 그대로 뒀는데
-    #    클릭해도 반응이 없어 보인다는 오너 피드백이 있어, **비활성화 + 안내 문구**로 명확히
-    #    보여주기로 했습니다. `view_scorecard` 위젯은 이 라디오보다 나중에 렌더링되지만,
-    #    st.session_state 는 이전 실행의 값을 이미 들고 있으므로 여기서 먼저 읽어도 안전합니다.
-    scorecard_checked = st.session_state.get("view_scorecard", False)
+    SCORECARD_OPTION = "📊 내 성적표 (준비중 · 미리보기)"
+    # ⚠️ 2026-08-12: 예전엔 "시장 선택 라디오"와 "내 성적표 체크박스"가 서로 다른 위젯이라,
+    #    성적표를 보려면 체크하고, 시장 리포트로 돌아가려면 그 체크를 다시 풀어야 했습니다
+    #    (오너 피드백: "좀 더 빠르게 전환될 수 있게 할 수는 없을까?"). 그래서 **하나의 라디오**로
+    #    합쳤습니다 — 셋 중 하나를 고르는 단일 선택이라 전환이 클릭 한 번으로 끝납니다.
+    #    `admin_mode` 는 이 라디오보다 나중에(§3) 확정되지만, `is_scorecard_visible()` 이 실제로
+    #    보는 값은 st.session_state["admin_mode"] 하나뿐이라 여기서 미리 읽어도 안전합니다
+    #    (매 실행마다 이전 실행 값이 세션에 남아있는 Streamlit 특성).
+    admin_mode_hint = st.session_state.get("admin_mode", False)
+    market_options = [MARKET_KR, MARKET_US]
+    scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)
+    if scorecard_available:
+        market_options.append(SCORECARD_OPTION)
     selected_market = st.sidebar.radio(
         "시장 선택",
-        [MARKET_KR, MARKET_US],
+        market_options,
         index=0,  # 첫 진입 기본값은 예전과 동일하게 한국(코스피)
         key="selected_market",
-        disabled=scorecard_checked,
-        help=(
-            "지금 '📊 내 성적표'가 켜져 있어 비활성화됐습니다. 이 리포트를 보려면 "
-            "아래 '📊 내 성적표' 체크를 먼저 해제하세요."
-            if scorecard_checked else
-            "어느 시장의 밸류에이션 리포트를 볼지 고릅니다.\n\n"
-            f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
-            f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
-        )
+        help="어느 화면을 볼지 고릅니다.\n\n"
+             f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
+             f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
+             + (f"\n* {SCORECARD_OPTION} : 내 보유 종목·리포트 (오너 승인 전 미리보기)"
+                if scorecard_available else "")
     )
-    if scorecard_checked:
-        st.sidebar.caption("⚠️ 내 성적표가 켜져 있어 위 시장 선택은 잠시 비활성화됩니다.")
+    show_scorecard = selected_market == SCORECARD_OPTION
+    if show_scorecard:
+        st.sidebar.caption(
+            "내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보고, "
+            "쌓인 기록으로 리포트도 보는 신규 모듈입니다. 오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
+        )
+    elif not scorecard_available and admin_mode_hint and SCORECARD_IMPORT_ERROR:
+        st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
     st.sidebar.markdown("---")
 
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
     admin_mode = render_admin_sidebar()
 
-    # 3-1. 📊 내 성적표 (스테이징, 2026-08-11 신설) + 📈 리포트(2026-08-12 신설, 그 하위 탭)
-    #      ⚠️ 기본값은 **숨김**입니다. 아래 두 경우에만 사이드바에 진입 체크박스가 생깁니다.
-    #         ① 관리자 인증 상태(미리보기)  ② SCORECARD_ENABLED 플래그를 명시적으로 켠 경우
-    #      일반 방문자에게는 메뉴 자체가 보이지 않으므로 공개 화면 동작은 예전과 100% 동일합니다.
-    #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영)
-    #      리포트는 "내 성적표" 체크박스를 켰을 때만 그 밑에 라디오(하위 탭)로 고를 수 있습니다
-    #      (2026-08-12 오너 요청 — 원래는 형제 체크박스 2개였는데, 둘 다 켜고 안 보는 쪽을 매번
-    #      꺼야 해서 쓰기 불편하다는 피드백으로 중첩 구조로 변경). 코드/데이터는 여전히 완전히
-    #      독립된 별도 모듈입니다 — 메뉴 배치만 바뀐 것입니다.
-    show_scorecard = False
+    # 3-1. 📈 리포트(2026-08-12 신설) — "내 성적표"를 고른 뒤 그 밑에 나오는 하위 탭입니다.
+    #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영. 코드/데이터는
+    #      성적표와 완전히 독립된 별도 모듈입니다 — 메뉴 배치만 하위 탭으로 묶인 것입니다.)
     show_report = False
-    if render_scorecard_page is not None and is_scorecard_visible(admin_mode):
-        st.sidebar.markdown("---")
-        show_scorecard = st.sidebar.checkbox(
-            "📊 내 성적표 (준비중 · 미리보기)",
-            key="view_scorecard",
-            help="내 보유 종목을 직접 입력해 비중·수익 비중과 PEGY 밸류에이션을 대조해보고, "
-                 "쌓인 기록으로 리포트도 보는 신규 모듈입니다. "
-                 "오너 승인 전까지 공개 메뉴에 노출되지 않습니다."
-        )
-        if show_scorecard:
-            report_available = render_report_page is not None and is_report_visible(admin_mode)
-            if report_available:
-                SCORECARD_TAB = "📊 내 보유종목"
-                REPORT_TAB = "📈 리포트"
-                scorecard_subpage = st.sidebar.radio(
-                    "내 성적표 하위 메뉴",
-                    [SCORECARD_TAB, REPORT_TAB],
-                    key="scorecard_subpage",
-                    help="같은 로그인 세션을 공유합니다 — 한 번만 로그인하면 됩니다.",
-                )
-                show_report = scorecard_subpage == REPORT_TAB
-            elif admin_mode and REPORT_IMPORT_ERROR:
-                st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
-    elif admin_mode and SCORECARD_IMPORT_ERROR:
-        # 실패를 조용히 삼키지 않되(§0-1), 일반 방문자 화면은 건드리지 않습니다.
-        st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
+    if show_scorecard:
+        report_available = render_report_page is not None and is_report_visible(admin_mode)
+        if report_available:
+            SCORECARD_TAB = "📊 내 보유종목"
+            REPORT_TAB = "📈 리포트"
+            scorecard_subpage = st.sidebar.radio(
+                "내 성적표 하위 메뉴",
+                [SCORECARD_TAB, REPORT_TAB],
+                key="scorecard_subpage",
+                help="같은 로그인 세션을 공유합니다 — 한 번만 로그인하면 됩니다.",
+            )
+            show_report = scorecard_subpage == REPORT_TAB
+        elif admin_mode and REPORT_IMPORT_ERROR:
+            st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
 
     # 4. 메인 뷰 라우팅
     #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.
