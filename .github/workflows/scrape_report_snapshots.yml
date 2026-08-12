@@ -1,0 +1,134 @@
+name: Daily Report Snapshots
+
+# =============================================================================
+# 📈 리포트 모듈 — ① 미국 벤치마크(S&P500·나스닥) 일별 종가 수집
+#                  ② 가입한 모든 사용자의 그날 평가금액 스냅샷 적재
+#                  (2026-08-12 신설, REPORT_WORK_ORDER.md §6-2 / §7)
+#
+# ⚠️ 기존 `scrape.yml`(코스피) · `scrape_us.yml`(미국주식)과 **완전히 분리된 별도
+#    워크플로우**입니다(ENGINEERING_SPEC §0-3-6). 잘 돌고 있는 두 자동화를 건드리지
+#    않기 위해 파일 자체를 나눴습니다.
+#
+# ── 왜 이 시각인가 ─────────────────────────────────────────────────────────
+# 스냅샷은 **그날 가격이 이미 갱신된 뒤**에 찍어야 정확합니다. 앞선 두 워크플로우가
+# 언제 끝나는지를 기준으로 잡았습니다.
+#
+#   · scrape.yml     : 07:05 UTC 시작(= KST 16:05), 실측 20~30분  → 늦어도 07:40 UTC 종료
+#   · scrape_us.yml  : 20:35 UTC(EDT) / 21:35 UTC(EST) 시작, 실측 40~56분
+#                      → EST 기간 기준으로 가장 늦게 끝나는 경우가 약 22:35 UTC
+#
+# 그래서 **23:20 UTC(월~금)** 에 실행합니다. 가장 늦는 경우에도 약 45분 여유가 있고,
+# 이 시각이면 그날의 한국 종가와 미국 종가가 둘 다 저장소에 들어와 있습니다.
+#   (23:20 UTC = 다음날 08:20 KST — 예: 월요일 23:20 UTC 실행분은 "월요일" 거래일의
+#    한국·미국 종가를 담습니다. 미국 정규장 마감 16:00 ET = 20:00 UTC 월요일.)
+#
+# ── 날짜는 시각이 아니라 데이터가 정합니다 ────────────────────────────────
+# 스냅샷 행의 `snapshot_date` 는 이 워크플로우가 도는 시각이 아니라, **가격 스냅샷
+# 파일이 스스로 말하는 거래일**입니다(`utils/report_db.resolve_session_dates()`).
+# 앞선 수집이 실패해 어제 파일이 그대로 남아 있으면, 그 값을 '오늘 값'으로 둔갑시키지
+# 않고 어제 날짜 행을 그대로 갱신합니다(§0-1 · §0-3-1 후행지표 전용).
+#
+# ── 🔴 이 워크플로우만 service_role 키를 씁니다 ───────────────────────────
+# "내 성적표" 앱(Streamlit)은 anon key + RLS 만 씁니다. 이 배치는 **가입한 모든
+# 사용자**의 스냅샷을 만들어야 해서 RLS 를 우회하는 service_role 이 필요합니다.
+#   · 키는 **GitHub Actions Secrets** 에만 등록합니다(`KRX_OPENAPI_KEY` 가 있는 그 자리).
+#     Streamlit Cloud Secrets(앱)에는 절대 넣지 마세요 — 넣는 순간 RLS 가 무력화됩니다.
+#   · 이 패턴을 다른 곳(특히 앱 코드)에 복사하지 마세요. 자세한 이유는
+#     `utils/report_db.py` 상단 주석과 `sql/report_schema.sql` §1 에 적어 뒀습니다.
+#
+# 필요한 Secrets (오너가 등록):
+#   SUPABASE_URL                : Supabase 프로젝트 URL (앱에 쓰는 것과 같은 값)
+#   SUPABASE_SERVICE_ROLE_KEY   : Supabase → Settings → API → service_role key
+# =============================================================================
+
+on:
+  schedule:
+    # 월~금 23:20 UTC (= 다음날 08:20 KST). 위 "왜 이 시각인가" 참고.
+    - cron: '20 23 * * 1-5'
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'true 로 두면 Supabase 에 저장하지 않고 계산 결과만 로그로 확인합니다(안전 점검용)'
+        type: boolean
+        required: false
+        default: false
+
+permissions:
+  contents: write # data/us_index_history.json 커밋용
+
+# 앞선 실행이 아직 돌고 있으면 취소하지 않고 대기시킵니다(같은 날짜를 두 번 upsert 해도
+# 행이 늘지는 않지만, 불필요한 중복 요청 자체를 피합니다 — §0-3-2).
+concurrency:
+  group: report-snapshots
+  cancel-in-progress: false
+
+jobs:
+  report-snapshots:
+    runs-on: ubuntu-latest
+    # 지수 요청 2회 + Supabase 왕복 정도라 몇 분이면 끝납니다. 사고 시 과금/점유를 막기 위해
+    # 넉넉하되 짧게 잡습니다.
+    timeout-minutes: 20
+
+    steps:
+    - name: 저장소 코드 체크아웃
+      uses: actions/checkout@v3
+
+    - name: 파이썬 환경 설정
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.10'
+
+    - name: 필수 의존 라이브러리 설치
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+
+    - name: 📈 미국 벤치마크(S&P500·나스닥) 일별 종가 수집
+      # 실패해도 뒤 단계(스냅샷 적재)는 계속 진행합니다 — 벤치마크가 없으면 그 날 값만
+      # NULL 로 저장되고(§0-1, 전날 값 복사 금지) 포트폴리오 기록 자체는 남아야 하기 때문입니다.
+      continue-on-error: true
+      run: |
+        python collector_us_indices.py collect
+
+    - name: 📸 사용자별 평가금액 스냅샷 적재 (Supabase)
+      env:
+        # ⚠️ 값 자체는 저장소 Secrets 에만 있고 코드·로그·문서 어디에도 남기지 않습니다.
+        #    (`utils/report_db.py` 는 이 두 값을 환경변수에서만 읽고, st.secrets 는 보지 않습니다)
+        SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+        SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+      run: |
+        if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+          echo "⚠️ dry_run=true — Supabase 에 저장하지 않고 계산 결과만 출력합니다"
+          python -m utils.report_db snapshot --dry-run
+        else
+          python -m utils.report_db snapshot
+        fi
+
+    - name: 벤치마크 이력 파일을 깃허브에 커밋
+      # 커밋 대상은 이 워크플로우가 만드는 공개 데이터 한 파일뿐입니다.
+      #   data/us_index_history.json : 미국 벤치마크 일별 종가(개인정보 아님)
+      # 사용자 스냅샷은 git 이 아니라 Supabase 에만 저장됩니다(개인 금융정보).
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+
+        git add data/us_index_history.json
+        git commit -m "Report Benchmark Update: $(date +'%Y-%m-%d') [무인 자동화 로봇]" || exit 0
+
+        # 다른 워크플로우(코스피/미국주식)나 사람이 그 사이 푸시했으면 원격이 앞서 있어
+        # push 가 거부됩니다. 기존 두 워크플로우와 동일하게 최대 3회 재시도합니다.
+        for i in 1 2 3; do
+          if git push origin main; then
+            echo "✅ 푸시 성공"
+            exit 0
+          fi
+          echo "⚠️ 푸시 거부됨 (원격이 앞서있음) — 최신 내용 받아와서 재시도 ($i/3)"
+          git fetch origin main
+          if ! git rebase origin/main; then
+            echo "❌ 리베이스 충돌 발생 — 자동 병합 불가, 수동 확인 필요"
+            git rebase --abort
+            exit 1
+          fi
+        done
+        echo "❌ 3회 재시도 후에도 푸시 실패"
+        exit 1
