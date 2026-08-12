@@ -156,15 +156,29 @@ def main():
     )
     MARKET_KR = "한국 주식은 이가격이에요"
     MARKET_US = "미국 주식은 이가격이에요"
+    # ⚠️ 2026-08-12: "내 성적표" 체크박스가 켜져 있으면 라우팅(§4)에서 이 라디오 선택이 무시되고
+    #    항상 성적표/리포트 화면이 우선 표시됩니다(이전부터 있던 동작). 라디오는 그대로 뒀는데
+    #    클릭해도 반응이 없어 보인다는 오너 피드백이 있어, **비활성화 + 안내 문구**로 명확히
+    #    보여주기로 했습니다. `view_scorecard` 위젯은 이 라디오보다 나중에 렌더링되지만,
+    #    st.session_state 는 이전 실행의 값을 이미 들고 있으므로 여기서 먼저 읽어도 안전합니다.
+    scorecard_checked = st.session_state.get("view_scorecard", False)
     selected_market = st.sidebar.radio(
         "시장 선택",
         [MARKET_KR, MARKET_US],
         index=0,  # 첫 진입 기본값은 예전과 동일하게 한국(코스피)
         key="selected_market",
-        help="어느 시장의 밸류에이션 리포트를 볼지 고릅니다.\n\n"
-             f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
-             f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
+        disabled=scorecard_checked,
+        help=(
+            "지금 '📊 내 성적표'가 켜져 있어 비활성화됐습니다. 이 리포트를 보려면 "
+            "아래 '📊 내 성적표' 체크를 먼저 해제하세요."
+            if scorecard_checked else
+            "어느 시장의 밸류에이션 리포트를 볼지 고릅니다.\n\n"
+            f"* {MARKET_KR} : 코스피200 종목 PEGY 리포트 (기본 화면)\n"
+            f"* {MARKET_US} : 미국(나스닥+뉴욕) 시가총액 상위 550종목 PEGY 리포트"
+        )
     )
+    if scorecard_checked:
+        st.sidebar.caption("⚠️ 내 성적표가 켜져 있어 위 시장 선택은 잠시 비활성화됩니다.")
     st.sidebar.markdown("---")
 
     # 3. 사이드바 하단 관리자 로그인 시스템 배치 (인증 성공 시 매크로 화면 진입 옵션도 여기서 노출)
