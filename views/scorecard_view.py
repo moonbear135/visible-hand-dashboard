@@ -26,6 +26,7 @@ import os
 
 import streamlit as st
 
+from utils.company_names_kr import resolve_korean_name
 from utils.scorecard_db import (
     MARKET_KR,
     MARKET_LABELS,
@@ -405,36 +406,73 @@ def _render_input_form(client, user_id, holdings, indexes, broad_kr_index=None):
 # =============================================================================
 # 3. 표 / 차트 / 밸류에이션 연동
 # =============================================================================
-def _row_label(row):
-    name = row.get("stock_name")
+def _us_korean_name(row, indexes):
+    """
+    2026-08-13 오너 요청 — "미국주식쪽은 티커로만 표시하고 종목명을 한국어로 표기할 수
+    없을까? 영어 단어보다 짧아지고 깔끔해질 것 같은데." 미국 종목은 풀네임 영문
+    (예: "ExxonMobil Holdings Corporation Common Stock") 대신 한글명을 씁니다.
+
+    공개 미국주식 화면(`views/us_stocks_view.py`)이 이미 쓰고 있는 것과 **완전히 같은 값**을
+    재사용합니다 — 로직을 새로 만들지 않고 앱 전체에서 한 곳(`utils/company_names_kr.py`,
+    정식 한글명 사전 우선 + 규칙 기반 자동 음역 폴백)만 단일 출처로 유지합니다. 상위 550
+    유니버스 **안** 종목은 수집 시점에 미리 계산해 스냅샷에 넣어둔 `name_kr`을 그대로 읽고
+    (공개 화면과 정확히 같은 표기가 보장됨), 그 유니버스 **밖**이라 스냅샷에 없는 종목만
+    같은 모듈을 이 자리에서 즉석으로 호출해 보조로 만듭니다. 한글명을 전혀 못 만드는
+    극히 드문 경우엔 지어내지 않고 영문명/티커로 정직하게 되돌아갑니다(§0-1).
+    """
+    ticker = row["ticker"]
+    stock = (indexes.get(MARKET_US) or {}).get(ticker)
+    if stock and stock.get("name_kr"):
+        return stock["name_kr"]
+    english_name = row.get("stock_name") or ticker
+    result = resolve_korean_name(ticker, english_name)
+    return result.get("korean_name") or result.get("english_clean") or english_name
+
+
+def _display_name(row, indexes):
+    """미국 종목은 한글명, 한국 종목은 기존처럼 스냅샷 종목명을 그대로 씁니다."""
+    if row.get("market") == MARKET_US:
+        return _us_korean_name(row, indexes)
+    return row.get("stock_name")
+
+
+def _row_label(row, indexes):
+    name = _display_name(row, indexes)
     return f"{name} ({row['ticker']})" if name else row["ticker"]
 
 
-def _row_chart_label(row):
+def _row_chart_label(row, indexes):
     """
     2026-08-13 오너 요청 — 아래 원형차트(보유 비중/수익 비중) 범례에는 종목코드까지 붙어
     있으면 글자가 작고 복잡해 보여, 차트 라벨에서만 종목명만 쓰도록 분리했습니다. 표
     (`_row_label_html`)·그 외 텍스트(`_row_label`)는 코드 병기를 그대로 유지합니다 —
     이 함수는 차트 전용입니다. 종목명이 없는 종목(유니버스 밖이라 이름을 못 찾은 경우)은
-    지어내지 않고 코드 그대로 보여줍니다(§0-1).
+    지어내지 않고 코드 그대로 보여줍니다(§0-1). 미국 종목은 `_display_name()`을 거쳐
+    한글명이 나오므로(위 함수 참고) 영문 풀네임보다 훨씬 짧아 범례 가독성이 좋아집니다.
     """
-    name = row.get("stock_name")
+    name = _display_name(row, indexes)
     return name if name else row["ticker"]
 
 
-def _row_label_html(row):
+def _row_label_html(row, indexes):
     """
     2026-08-11 오너 요청 — 표의 "종목" 칸에서 이름+코드를 억지로 한 줄에 구겨넣다가 옆
     "수량" 칸과 겹쳐 보이는 문제. `<br>`로 항상 "종목명 / (코드)" 두 줄로 강제 줄바꿈합니다.
     표 전체에 걸어둔 `white-space: nowrap`(2026-08-11, ✏️/🗑️ 버튼 처짐 방지용)은 **자동**
     줄바꿈만 막을 뿐이라, 이렇게 명시적으로 넣은 `<br>` 은 그대로 줄바꿈됩니다 — 두 CSS가
     서로 충돌하지 않습니다.
+
+    2026-08-13 오너 지적 — 미국 종목은 `_display_name()`으로 한글명을 써서 훨씬 짧아졌지만
+    (위 참고), 한국 ETF는 이름이 원래 길 수 있어("TIGER 미국나스닥100커버드콜(합성)" 등)
+    두 줄로 나눠도 한 줄 안에서 넘칠 수 있습니다. 이 칸에만 인라인 스타일로 줄바꿈을 다시
+    허용해(부모 표의 nowrap보다 우선순위가 높은 인라인 스타일이라 확실히 적용됨) 옆 칸을
+    밀어내거나 잘리지 않고 필요하면 세 줄, 네 줄도 자연스럽게 접히도록 했습니다 — 다른
+    칸(숫자 칸들, 버튼 처짐 방지용 nowrap)에는 전혀 영향 없습니다.
     """
-    name = row.get("stock_name")
+    name = _display_name(row, indexes)
     ticker = row["ticker"]
-    if name:
-        return f"{name}<br>({ticker})"
-    return ticker
+    label = f"{name}<br>({ticker})" if name else ticker
+    return f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">{label}</div>'
 
 
 def _colored_pct(value):
@@ -451,6 +489,27 @@ def _colored_pct(value):
     if value < 0:
         return f":blue[{text}]"
     return text
+
+
+def _md_amount(value, currency, decimals=None):
+    """
+    마크다운 텍스트(`st.error`/`st.info`/`st.caption`/`st.markdown` 등)에 금액을 넣을 때
+    전용으로 씁니다. `format_amount()`가 만드는 "$147.80" 같은 표기를 그대로 마크다운
+    문자열에 두 번 이상 넣으면, Streamlit 마크다운(KaTeX)이 그 "$"와 "$" 사이를 LaTeX
+    수식으로 오인해서 렌더링이 깨집니다.
+
+    2026-08-13 오너 신고 — 미국 주식의 "내 평균매입가 VS 현재가" 배너에서 "VS" 글자가
+    이상한 수식 글꼴로 겹쳐 보이던 게 바로 이 문제였습니다: "$147.80 VS $159.80" 문자열 안에
+    "$"가 두 번 있어 그 사이("147.80 VS $")가 통째로 수식으로 렌더링됐던 것. 원화는 "원"
+    접미사를 쓰고 "$"가 아예 없어 이 문제가 생기지 않았고, 이게 "한국 쪽보다 미국 쪽
+    가독성이 떨어진다"는 신고의 실제 원인이었습니다(글꼴·간격 문제가 아니라 렌더링 버그).
+    `\\$`로 이스케이프하면 화면엔 그대로 "$147.80"으로 보이면서 수식으로는 해석되지 않습니다.
+
+    ⚠️ `st.metric`처럼 애초에 마크다운을 거치지 않는 곳(예: `c1.metric("현재가",
+    format_amount(...))`)은 이 문제가 없어 그대로 `format_amount()`를 쓰면 됩니다 — 이
+    함수는 마크다운 텍스트 안에 넣을 때만 씁니다.
+    """
+    return format_amount(value, currency, decimals).replace("$", "\\$")
 
 
 def _render_currency_block(client, user_id, group, indexes):
@@ -558,7 +617,7 @@ def _render_currency_block(client, user_id, group, indexes):
             row_id = row.get("id")
             edit_key = f"scorecard_editing_{row_id}"
             cols = st.columns(_COL_RATIOS)
-            cols[0].markdown(_row_label_html(row), unsafe_allow_html=True)
+            cols[0].markdown(_row_label_html(row, indexes), unsafe_allow_html=True)
             cols[1].write(f"{row['quantity']:,.6g}")
             cols[2].write(format_amount(row["avg_purchase_price"], currency))
             cols[3].write(
@@ -583,13 +642,13 @@ def _render_currency_block(client, user_id, group, indexes):
                     except ScorecardError as exc:
                         st.error(f"🚫 {exc}")
                     else:
-                        st.success(f"✅ {_row_label(row)} 삭제했습니다.")
+                        st.success(f"✅ {_row_label(row, indexes)} 삭제했습니다.")
                         st.rerun()
 
             if st.session_state.get(edit_key):
                 with st.container(border=True):
                     st.caption(
-                        f"✏️ **{_row_label(row)} 수정** — 다른 계좌분과 합쳐 평균을 내는 게 아니라, "
+                        f"✏️ **{_row_label(row, indexes)} 수정** — 다른 계좌분과 합쳐 평균을 내는 게 아니라, "
                         "값을 그대로 덮어씁니다(잘못 입력한 걸 바로잡을 때 사용)."
                     )
                     ecol1, ecol2, ecol3, ecol4 = st.columns([1.2, 1.2, 0.7, 0.7])
@@ -629,7 +688,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.caption("현재가를 아는 종목이 없어 비중 차트를 그릴 수 없습니다.")
         elif PLOTLY_AVAILABLE:
             fig = px.pie(
-                names=[_row_chart_label(r) for r in priced],
+                names=[_row_chart_label(r, indexes) for r in priced],
                 values=[r["market_value"] for r in priced],
                 hole=0.35,
             )
@@ -637,7 +696,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.plotly_chart(fig, use_container_width=True)
         else:  # pragma: no cover
             st.dataframe(
-                [{"종목": _row_chart_label(r), "비중(%)": round(r["weight_pct"], 2)} for r in priced],
+                [{"종목": _row_chart_label(r, indexes), "비중(%)": round(r["weight_pct"], 2)} for r in priced],
                 use_container_width=True, hide_index=True,
             )
 
@@ -648,7 +707,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.caption("이익이 난 종목이 없어 수익 비중 차트를 그릴 수 없습니다.")
         elif PLOTLY_AVAILABLE:
             fig = px.pie(
-                names=[_row_chart_label(r) for r in gainers],
+                names=[_row_chart_label(r, indexes) for r in gainers],
                 values=[r["profit"] for r in gainers],
                 hole=0.35,
             )
@@ -656,7 +715,7 @@ def _render_currency_block(client, user_id, group, indexes):
             st.plotly_chart(fig, use_container_width=True)
         else:  # pragma: no cover
             st.dataframe(
-                [{"종목": _row_chart_label(r), "수익비중(%)": round(r["profit_share_pct"], 2)}
+                [{"종목": _row_chart_label(r, indexes), "수익비중(%)": round(r["profit_share_pct"], 2)}
                  for r in gainers],
                 use_container_width=True, hide_index=True,
             )
@@ -664,7 +723,9 @@ def _render_currency_block(client, user_id, group, indexes):
         if losers:
             st.caption(
                 "⚠️ 손실 종목은 원형차트에 음수 조각으로 넣을 수 없어 제외했습니다 — "
-                + ", ".join(f"{_row_label(r)} {format_amount(r['profit'], currency)}" for r in losers)
+                + ", ".join(
+                    f"{_row_label(r, indexes)} {_md_amount(r['profit'], currency)}" for r in losers
+                )
             )
 
     # ---- "사실 이 가격이에요" 연동 -------------------------------------------
@@ -672,7 +733,7 @@ def _render_currency_block(client, user_id, group, indexes):
     st.caption(
         "Streamlit 은 표 안에 마우스오버 툴팁을 붙일 수 없어, 종목을 고르면 카드로 보여주는 방식으로 만들었습니다."
     )
-    labels = {_row_label(r): r for r in rows}
+    labels = {_row_label(r, indexes): r for r in rows}
     picked = st.selectbox(
         "종목 선택", list(labels.keys()), key=f"scorecard_pick_{currency}",
     )
@@ -711,6 +772,9 @@ def _render_currency_block(client, user_id, group, indexes):
         # 지시해서 **빨강(오름)/파랑(내림)** 으로 바꿨습니다. Streamlit에는 파랑 계열 강조
         # 박스가 `st.info` 하나뿐이라, `st.error`(빨강)=이득 / `st.info`(파랑)=손실로
         # "에러/정보"라는 원래 이름과 무관하게 **색상만 빌려 씁니다**(실제 에러가 아님에 주의).
+        # 2026-08-13 오너 신고 — 미국 주식에서 이 배너의 "VS" 글자가 이상한 수식 글꼴로
+        # 겹쳐 보임("$147.80 VS $159.80" 안에 "$"가 두 번 있어 그 사이가 LaTeX 수식으로
+        # 오인됨). `_md_amount()`로 "$"를 이스케이프해 해결 — 자세한 원인은 그 함수 주석 참고.
         price = summary.get("price")
         avg_price = row.get("avg_purchase_price")
         if price is not None and avg_price:
@@ -719,13 +783,13 @@ def _render_currency_block(client, user_id, group, indexes):
             arrow = "📈" if diff >= 0 else "📉"
             banner = st.error if diff >= 0 else st.info
             banner(
-                f"{arrow} **내 평균매입가 {format_amount(avg_price, currency)} VS "
-                f"현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)**"
+                f"{arrow} **내 평균매입가 {_md_amount(avg_price, currency)} VS "
+                f"현재가 {_md_amount(price, currency)} ({diff_pct:+.2f}%)**"
             )
         else:
             st.info(
-                f"내 평균매입가 {format_amount(avg_price, currency)} vs "
-                f"현재가 {format_amount(price, currency)}"
+                f"내 평균매입가 {_md_amount(avg_price, currency)} vs "
+                f"현재가 {_md_amount(price, currency)}"
             )
         st.caption("판단은 각자의 몫입니다(매수/매도 권유가 아닙니다).")
         if summary.get("data_issues"):

@@ -1079,8 +1079,40 @@ def test_view_and_routing():
     check("_row_chart_label" in view_src and "def _row_chart_label" in view_src,
           "원형차트(보유 비중/수익 비중) 범례는 종목코드 없이 이름만 표시"
           "(2026-08-13, 표·기타 텍스트는 코드 병기 유지)")
-    check(view_src.count("names=[_row_chart_label(r)") == 2,
+    check(view_src.count("names=[_row_chart_label(r, indexes)") == 2,
           "두 원형차트(보유 비중, 수익 비중) 모두 차트 전용 라벨 함수를 씀")
+
+    # 2026-08-13 오너 요청 3건 — 미국 종목 한글 표기, $ 마크다운 렌더링 버그, ETF 긴 이름 줄바꿈.
+    check("from utils.company_names_kr import resolve_korean_name" in view_src,
+          "공개 미국주식 화면과 같은 한글 표기 모듈을 재사용(새 로직 중복 없음)")
+    check("def _us_korean_name(row, indexes)" in view_src,
+          "미국 종목 한글명 조회 함수 신설")
+    check('stock.get("name_kr")' in view_src,
+          "상위 550 유니버스 안 종목은 공개 화면과 동일한 사전 계산 name_kr을 그대로 재사용")
+    check("resolve_korean_name(ticker, english_name)" in view_src,
+          "유니버스 밖 미국 종목은 즉석에서 같은 모듈을 호출해 보조로 한글명 생성(§0-1, 지어내지 않음)")
+    check("def _display_name(row, indexes)" in view_src
+          and "if row.get(\"market\") == MARKET_US" in view_src,
+          "미국 종목은 한글명, 한국 종목은 기존 종목명을 쓰도록 표시 로직 분기")
+    check("def _row_label(row, indexes)" in view_src and "def _row_label_html(row, indexes)" in view_src,
+          "_row_label/_row_label_html이 indexes를 받아 _display_name()을 거치도록 시그니처 확장")
+
+    check("def _md_amount(value, currency, decimals=None)" in view_src,
+          "마크다운용 금액 이스케이프 함수 신설(2026-08-13, $ 페어링 KaTeX 오작동 버그 수정)")
+    check('.replace("$", "\\\\$")' in view_src,
+          "달러 기호를 이스케이프해 두 개 이상 나타나도 LaTeX 수식으로 오인되지 않게 함")
+    check('_md_amount(avg_price, currency)' in view_src and '_md_amount(price, currency)' in view_src,
+          "평균매입가 VS 현재가 배너가 마크다운 안전 포맷을 씀(버그가 있던 바로 그 배너)")
+    check("f\"{_row_label(r, indexes)} {_md_amount(r['profit'], currency)}\"" in view_src,
+          "손실 종목 안내 캡션도 마크다운 안전 포맷을 씀(2개 이상 손실 종목일 때도 안전)")
+    # st.metric에 넘기는 값은 마크다운을 거치지 않아 이 버그가 없으므로 그대로 format_amount 사용
+    check('c1.metric("현재가", format_amount(summary.get("price"), currency))' in view_src,
+          "st.metric 경로는 마크다운이 아니라 이 버그가 없어 format_amount를 그대로 씀(과잉수정 방지)")
+
+    check('white-space: normal; overflow-wrap: anywhere;' in view_src,
+          "표의 종목 칸은 인라인 스타일로 줄바꿈을 허용해 긴 ETF 이름이 옆 칸을 밀어내지 않음"
+          "(2026-08-13 오너 지적 — 부모 표 전체의 nowrap보다 우선순위가 높은 인라인 스타일)")
+
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,
@@ -1150,6 +1182,53 @@ def test_view_and_routing():
 
             check(not hasattr(module, "NAME_LOOKUP_MARKETS"),
                   "종목명 자동조회를 특정 시장으로 제한하던 상수는 제거됨(2026-08-11 오너 지시)")
+
+            # 2026-08-13 오너 요청 3건 — 미국 종목 한글 표기, VS 배너 $ 마크다운 렌더링 버그,
+            # ETF처럼 긴 종목명의 표 줄바꿈. 문자열만 보는 소스 검사 말고 실제 함수를 직접
+            # 호출해 동작을 검증합니다.
+            us_row_in_universe = {
+                "market": module.MARKET_US, "ticker": "XOM",
+                "stock_name": "ExxonMobil Holdings Corporation Common Stock",
+            }
+            us_indexes = {
+                module.MARKET_US: {
+                    "XOM": {"name": "ExxonMobil Holdings Corporation Common Stock",
+                            "name_kr": "엑슨모빌"},
+                },
+                module.MARKET_KR: {},
+            }
+            check(module._us_korean_name(us_row_in_universe, us_indexes) == "엑슨모빌",
+                  "유니버스 안 미국 종목은 스냅샷에 미리 계산된 name_kr을 그대로 씀"
+                  "(공개 미국주식 화면과 정확히 같은 표기가 보장됨)")
+            check(module._row_chart_label(us_row_in_universe, us_indexes) == "엑슨모빌",
+                  "미국 종목 차트 라벨도 한글명만 나옴(영문 풀네임 아님)")
+            check(module._row_label(us_row_in_universe, us_indexes) == "엑슨모빌 (XOM)",
+                  "미국 종목 표시 라벨은 '한글명 (티커)' 형식(영문 풀네임보다 훨씬 짧음)")
+
+            us_row_out_of_universe = {
+                "market": module.MARKET_US, "ticker": "ZZZQQ",
+                "stock_name": "Zzz Testing Corporation Common Stock",
+            }
+            empty_us_indexes = {module.MARKET_US: {}, module.MARKET_KR: {}}
+            on_the_fly = module._us_korean_name(us_row_out_of_universe, empty_us_indexes)
+            check(bool(on_the_fly) and "Corporation" not in on_the_fly and "Common" not in on_the_fly,
+                  "유니버스 밖 미국 종목(스냅샷에 name_kr 없음)은 즉석에서 같은 음역 모듈을 "
+                  "호출해 한글명을 보조로 만듦 — 영문 풀네임이 그대로 노출되지 않음")
+
+            kr_row = {"market": module.MARKET_KR, "ticker": "005930", "stock_name": "삼성전자"}
+            check(module._row_label(kr_row, us_indexes) == "삼성전자 (005930)",
+                  "한국 종목은 기존과 동일하게 종목명을 그대로 씀(한글 변환 로직에 영향받지 않음)")
+
+            html_label = module._row_label_html(us_row_in_universe, us_indexes)
+            check("엑슨모빌<br>(XOM)" in html_label and "white-space: normal" in html_label,
+                  "표 셀도 한글명을 쓰고, 긴 이름이 옆 칸을 밀어내지 않도록 줄바꿈 인라인 "
+                  "스타일이 포함됨(2026-08-13 오너 지적 — ETF 등 긴 종목명 대비)")
+
+            check(module._md_amount(1234.5, "USD") == "\\$1,234.50",
+                  "_md_amount()는 $ 를 이스케이프해서 돌려줌(마크다운에서 두 개 이상 나타나도 "
+                  "LaTeX 수식으로 오인되지 않게 함 — 2026-08-13 'VS' 배너 렌더링 버그 수정)")
+            check(module._md_amount(93076, "KRW") == "93,076원",
+                  "원화는 애초에 $ 가 없어 이스케이프해도 원래 표기와 동일(이 버그 자체가 없었음)")
 
             # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 발견) — module.st.session_state를
             # 직접 덮어쓰면 streamlit이 진짜로 설치된 환경에서는 그 프로세스의 진짜
