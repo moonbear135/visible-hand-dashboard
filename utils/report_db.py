@@ -36,6 +36,18 @@ REPORT_WORK_ORDER.md 에 따라 만든 모듈입니다. 화면(`views/report_vie
     클라이언트를 그대로 받아서 씁니다(이 파일이 화면용 클라이언트를 새로 만들지 않습니다).
 
 -------------------------------------------------------------------------------
+🧾 저장하는 표는 두 개이고, 둘은 같은 계산에서 나옵니다 (2026-08-13 오너 결정)
+-------------------------------------------------------------------------------
+  · `portfolio_daily_snapshots`   : 사용자 × 시장 × 거래일 = 1행 (그날 **합계**)
+  · `portfolio_holding_snapshots` : 사용자 × 시장 × **종목** × 거래일 = 1행 (그날 **상세**)
+
+오너 요청은 "종목별 일일 스냅샷까지 저장" + "데이터 품질관리 · 들쑥날쑥하면 안 됨" 이었습니다.
+그래서 합계 표를 갈아엎지 않고 **덧붙였고**, 두 표가 어긋날 수 없게 계산 소스를 하나로
+못 박았습니다 — `build_snapshot_rows_with_holdings()` 가 종목별 행을 먼저 만들고 **그 행들을
+그대로 더해서** 합계 행을 만듭니다(합계를 따로 계산하는 코드가 이 파일에 없습니다).
+기간 집계(`compute_period_report()`)는 예전 그대로 합계 표만 봅니다 — 기존 기능 무손상.
+
+-------------------------------------------------------------------------------
 ⚠️ 지어내지 않기 (ENGINEERING_SPEC §0-1)
 -------------------------------------------------------------------------------
   · 과거분을 소급 계산하지 않습니다. 기능을 켠 날부터 스냅샷이 쌓이고, 그 이전 구간은
@@ -54,6 +66,7 @@ import os
 import re
 import sys
 from datetime import date, datetime, timedelta
+from decimal import Decimal
 
 # ⚠️ "내 성적표" 데이터 계층의 **읽기 전용 재사용**입니다(작업지시서 §7 — 기존 파일을 고치지
 #    않되 import 는 권장). 시장/통화 상수, 종목 평가, 가격 조회 함수를 그대로 씁니다:
@@ -83,6 +96,39 @@ class ReportError(RuntimeError):
 
 SNAPSHOTS_TABLE = "portfolio_daily_snapshots"
 HOLDINGS_TABLE = "holdings"
+
+# 🆕 종목별 일일 스냅샷 테이블 (2026-08-13 오너 결정 — sql/report_schema.sql §8).
+#    합계 표(SNAPSHOTS_TABLE)를 대체하는 게 아니라 **나란히 덧붙인** 표입니다. 두 표는
+#    `build_snapshot_rows_with_holdings()` 안에서 **같은 평가 결과 하나**로부터 함께
+#    만들어지므로 서로 어긋날 수 없습니다(아래 그 함수의 주석 참고).
+HOLDING_SNAPSHOTS_TABLE = "portfolio_holding_snapshots"
+
+# 테이블이 아직 없는 DB(= 오너가 sql/report_schema.sql §8 을 실행하기 전)에서 배치가 통째로
+# 죽지 않게 하려고 쓰는 표식. PostgREST 는 없는 테이블을 PGRST205 로 알려 주고, 메시지에
+# 테이블 이름과 "schema cache" 를 그대로 실어 보냅니다.
+#  ⚠️ 여기에 실행할 SQL 전문을 적어 두지 않았습니다 — 40줄짜리 CREATE TABLE 을 파이썬
+#     문자열로 복사해 두면 sql/report_schema.sql 과 언젠가 어긋나고, 그 순간 오너는 서로
+#     다른 두 개의 "정답"을 갖게 됩니다. 단일 출처는 .sql 파일 하나입니다.
+HOLDING_TABLE_MISSING_MARKERS = (
+    "pgrst205",
+    "could not find the table",
+    "schema cache",
+    "does not exist",
+    "relation",
+)
+# 🔬 "합계 = 종목별 합" 을 대조할 때 쓰는 허용오차 (원 / 달러 단위).
+#    왜 0 이 아닌가 — 아래 `_sum_money()` 주석에 실측과 함께 적어 뒀습니다. 요약하면:
+#    저장값은 소수점 6자리 십진수인데 파이썬은 그걸 2진 부동소수점(배정밀도)으로 다루고,
+#    유효자릿수(15~17자리)를 넘는 큰 합계에서는 마지막 자리가 표현되지 않습니다(실측 최대
+#    0.00005원 수준). 0.01(1원·1센트의 100분의 1)은 화면 표기 단위(원=정수, 달러=소수 2자리)
+#    보다 훨씬 작아 **의미 있는 불일치는 전부 잡고**, 존재하지 않는 문제를 쫓지는 않습니다.
+TOTAL_MATCH_TOLERANCE = 0.01
+
+HOLDING_TABLE_SETUP_HINT = (
+    "Supabase SQL Editor 에서 `sql/report_schema.sql` 전체를 다시 실행하세요 "
+    "(§8 블록이 이 테이블을 만듭니다 — 여러 번 실행해도 안전하고, 기존 표·데이터는 "
+    "건드리지 않습니다)."
+)
 
 # 🕐 "이 행의 가격은 몇 시 몇 분에 수집된 값인가"를 담는 컬럼 이름 (2026-08-13 오너 요청).
 #    한국장(오후)과 미국장(한국시간 새벽)의 수집 시각이 달라서, 거래일(날짜)만으로는 리포트가
@@ -271,30 +317,106 @@ def shift_period(period, ref_date, steps):
 # =============================================================================
 # B. 스냅샷 1행 만들기 / 기간 집계·판정 (순수 함수)
 # =============================================================================
-def build_snapshot_rows(user_id, holdings, price_lookup,
-                        session_date_by_market, benchmark_by_market=None,
-                        price_stamp_by_market=None):
+def _round6(value):
     """
-    사용자 1명의 보유 종목 → 그날 저장할 스냅샷 행 목록(시장별 최대 1행).
+    소수점 6자리 반올림 — DB 컬럼이 전부 numeric(20,6) 이라 **여기서 반올림한 값이 곧
+    저장되는 값**입니다. 이 함수를 거친 숫자만 행에 담아, 파이썬이 보는 값과 DB 에 들어가는
+    값이 다를 여지를 없앱니다(합계와 종목별이 어긋나는 흔한 원인 중 하나가 '저장할 때 한 번
+    더 반올림되는 것'입니다).
+    """
+    return round(float(value), 6)
 
-    price_lookup           : (market, ticker) -> 현재가 또는 None  (scorecard_db.make_price_lookup)
-    session_date_by_market : {"KR": "2026-08-11", "US": "2026-08-11"} — 그 시장 가격이 실제로
-                             속한 **거래일**. 배치가 도는 시각이 아니라 데이터가 말하는 날짜를
-                             씁니다(§0-3-1 후행지표 전용, 아래 resolve_session_dates 참고).
-    benchmark_by_market    : {"KR": ("KOSPI", 3210.5), "US": ("SP500_PROXY_SPY", 754.6)}
-                             값이 없으면 (심볼, None) 로 넘기세요 — NULL 로 저장됩니다.
-    price_stamp_by_market  : {"KR": "2026-08-12 17:50", "US": "2026-08-13 07:14"} — 그 시장
-                             가격이 **한국시간 기준 몇 시 몇 분에 수집됐는지**(수집기 메타데이터
-                             원문). 모르면 넣지 마세요 — NULL 로 저장되고 화면이 "시각 정보
-                             없음"이라고 정직하게 표시합니다(추정 금지).
 
-    반환: (rows, skipped)
-      rows    : Supabase 에 그대로 넣을 dict 목록
-      skipped : [{"market":..., "reason":...}] — 왜 안 만들었는지(§0-1, 조용히 넘기지 않음)
+def _sum_money(values):
+    """
+    돈을 더할 때 쓰는 합산 — **Decimal 로 정확히** 더한 뒤 float 로 돌려줍니다.
 
-    ⚠️ 총평가금액·총매입원가는 **그날 현재가를 아는 종목만** 합산합니다. 값을 모르는 종목을
-       0원으로 넣으면 그 자체가 지어낸 숫자이고, 다음 날 그 종목 가격이 들어오는 순간
-       "하루 만에 수천만원 상승"처럼 보이는 가짜 수익률이 생깁니다.
+    왜 그냥 sum() 이 아닌가 (2026-08-13, 이번 작업에서 실측으로 확인)
+      저장되는 종목별 값은 소수점 6자리로 딱 떨어지는 십진수인데, 그것들을 float 로 더하면
+      2진 부동소수점 오차가 쌓입니다. DB(numeric)는 **십진수로 정확히** 더하므로, 금액이
+      커지면 "종목별을 다 더한 값"과 "저장된 합계"가 마지막 자리에서 어긋날 수 있습니다.
+      오너가 나중에 SQL 로 대조했을 때 딱 그게 "들쑥날쑥"으로 보입니다. 그래서 여기서도
+      DB 와 **같은 방식(십진수)** 으로 더합니다.
+
+    ⚠️ 남아 있는 한계는 정직하게 적어 둡니다(지어내지 않기 — 여기서 "완벽하다"고 쓰면
+       그게 거짓말입니다): 십진수 정확 합을 float 로 되돌리는 마지막 단계는 IEEE-754
+       배정밀도의 유효자릿수(약 15~17자리)에 갇힙니다. 그래서 **합계가 대략 10^10 을 넘으면서
+       동시에 소수점 이하 금액까지 있는** 경우(예: 수백억원 규모 + 가중평균 매입단가처럼 무한
+       소수인 단가)에는 마지막 자리가 어긋날 수 있습니다 — 무작위 2,000 포트폴리오로 실측한
+       최대 오차가 **0.00005원**이었습니다. 정수 수량·정수 단가인 한국 주식이나 금액 규모가
+       작은 미국 주식에서는 오차가 아예 0 입니다.
+       그래서 대조는 0 이 아니라 `TOTAL_MATCH_TOLERANCE`(0.01) 로 봅니다. 화면 표기 단위보다
+       훨씬 작은 값이라 **사람이 볼 수 있는 불일치는 전부 잡히고**, 있지도 않은 문제를 쫓지도
+       않습니다.
+    """
+    total = Decimal("0")
+    for value in values:
+        total += Decimal(str(float(value)))
+    return _round6(float(total))
+
+
+def _holding_snapshot_row(user_id, market, snapshot_date, evaluated, price_stamp):
+    """
+    `evaluate_holding()` 결과 1건 → 종목별 스냅샷 테이블에 넣을 행 1개.
+
+    ⚠️ 이익(profit)·수익률은 **저장하지 않습니다.** `market_value - cost` 로 언제든 정확히
+       나오는 값이고, 저장하면 계산 경로가 하나 더 생겨서 나중에 서로 어긋날 여지가 됩니다
+       (sql/report_schema.sql §8 의 같은 설명 참고).
+    ⚠️ 통화는 보유 행의 값이 아니라 **시장에서 파생**시킵니다(합계 행과 완전히 동일한 규칙).
+       보유 행에 잘못된 통화가 들어 있어도 이 표에 원·달러가 섞이지 않습니다.
+    """
+    priced = bool(evaluated.get("price_available"))
+    raw_name = evaluated.get("stock_name")
+    stock_name = str(raw_name).strip() if raw_name is not None else ""
+    return {
+        "user_id": user_id,
+        "market": market,
+        "ticker": evaluated["ticker"],
+        "snapshot_date": snapshot_date,
+        "stock_name": stock_name or None,
+        "quantity": _round6(evaluated["quantity"]),
+        "avg_purchase_price": _round6(evaluated["avg_purchase_price"]),
+        "cost": _round6(evaluated["cost"]),
+        # 가격을 몰랐으면 NULL. 0 으로 채우지 않습니다(§0-1) — DB CHECK 로도 강제됩니다.
+        "current_price": _round6(evaluated["current_price"]) if priced else None,
+        "market_value": _round6(evaluated["market_value"]) if priced else None,
+        "currency": currency_for_market(market),
+        "priced": priced,
+        # 합계 행에 들어가는 것과 **완전히 같은 문자열**(같은 변수)을 넣습니다.
+        PRICE_STAMP_FIELD: price_stamp,
+    }
+
+
+def build_snapshot_rows_with_holdings(user_id, holdings, price_lookup,
+                                      session_date_by_market, benchmark_by_market=None,
+                                      price_stamp_by_market=None):
+    """
+    사용자 1명의 보유 종목 → **합계 행(시장별 1행) + 종목별 행(종목당 1행)** 을 한 번에.
+
+    반환: (rows, holding_rows, skipped)
+      rows         : portfolio_daily_snapshots 에 넣을 dict 목록 (기존과 완전히 동일한 형태)
+      holding_rows : portfolio_holding_snapshots 에 넣을 dict 목록 (2026-08-13 신설)
+      skipped      : [{"market":..., "reason":...}] — 왜 안 만들었는지(§0-1, 조용히 넘기지 않음)
+
+    =========================================================================
+    🔴 이 함수가 "들쑥날쑥"(합계 ≠ 종목별 합)을 원천 차단하는 방식 — 가장 중요한 부분
+    =========================================================================
+    합계를 따로 계산하는 코드 경로가 **없습니다.**
+      ① 보유 종목을 `evaluate_holding()` 으로 평가 (화면 '내 성적표'와 같은 함수)
+      ② 그 결과를 곧바로 **종목별 행**으로 만들고(= 실제로 DB 에 저장될 그 숫자)
+      ③ **그 종목별 행들을 그대로 더해서** 합계 행을 만듭니다.
+    즉 합계는 종목별의 파생물입니다. 두 값이 서로 다른 입력·다른 반올림·다른 시점을 타지
+    않으므로 어긋날 수가 없습니다.
+
+    반올림도 한 번뿐입니다 — 종목별 행을 만들 때 소수점 6자리(=DB 컬럼 정밀도)로 맞추고,
+    **그 맞춰진 값들을 더합니다.** (먼저 원본 정밀도로 더한 뒤 나중에 반올림하면, 저장된
+    종목별 값들의 합과 저장된 합계가 마지막 자리에서 어긋날 수 있습니다.)
+
+    이전 버전(2026-08-12)은 종목별 평가 결과를 합산한 뒤 **버렸습니다.** 이번 변경은 그것을
+    버리지 않고 함께 저장하는 것뿐이고, 합계 쪽 숫자의 의미는 그대로입니다.
+    =========================================================================
+
+    나머지 인자 설명은 `build_snapshot_rows()` 와 같습니다(그 함수는 이 함수의 얇은 래퍼).
     """
     benchmark_by_market = benchmark_by_market or {}
     price_stamp_by_market = price_stamp_by_market or {}
@@ -306,7 +428,7 @@ def build_snapshot_rows(user_id, holdings, price_lookup,
             continue
         grouped.setdefault(market, []).append(holding)
 
-    rows, skipped = [], []
+    rows, holding_rows, skipped = [], [], []
     for market in MARKETS:
         items = grouped.get(market)
         if not items:
@@ -325,37 +447,91 @@ def build_snapshot_rows(user_id, holdings, price_lookup,
                 evaluated.append(evaluate_holding(holding, price))
             except (ValueError, KeyError, TypeError) as exc:
                 # 한 종목이 깨져도 나머지는 살립니다. 대신 그 종목은 '가격 모름'으로도 세지
-                # 않고 사유를 남깁니다(§0-1 — 조용히 사라지면 안 됨).
+                # 않고 사유를 남깁니다(§0-1 — 조용히 사라지면 안 됨). 합계에서도 종목별
+                # 표에서도 똑같이 빠지므로 두 표는 계속 일치합니다.
                 skipped.append({
                     "market": market,
                     "reason": f"보유 행을 평가할 수 없어 제외: {holding.get('ticker')!r} ({exc})",
                 })
 
-        priced = [row for row in evaluated if row["price_available"]]
+        snapshot_date = to_date(session_date).isoformat()
+        # 시:분을 모르면 None(=NULL). 오늘 시각이나 장 마감 시각으로 메우지 않습니다(§0-1).
+        # 이 **하나의 값**을 합계 행과 종목별 행 양쪽에 그대로 넣습니다.
+        price_stamp = normalize_price_stamp(price_stamp_by_market.get(market))
+
+        # ② 종목별 행을 먼저 만듭니다 — 가격을 모르는 종목도 **행은 만듭니다**(값만 NULL +
+        #    priced=false). 합계에서는 빠지지만 "그날 이 종목을 들고 있었고 가격을 몰랐다"는
+        #    사실 자체가 기록으로 남아야 하기 때문입니다(빈칸으로 사라지면 안 됨).
+        details = [_holding_snapshot_row(user_id, market, snapshot_date, row, price_stamp)
+                   for row in evaluated]
+        priced = [row for row in details if row["priced"]]
         if not priced:
             skipped.append({
                 "market": market,
-                "reason": (f"{len(evaluated)}개 종목 모두 그날 현재가를 알 수 없어 스냅샷을 "
+                "reason": (f"{len(details)}개 종목 모두 그날 현재가를 알 수 없어 스냅샷을 "
                            "만들지 않았습니다(0원으로 기록하지 않습니다)."),
             })
+            # ⚠️ 이 경우 종목별 행도 만들지 않습니다. 합계 행이 없는 날짜에 종목별 행만
+            #    남으면 두 표가 서로 다른 날짜 집합을 갖게 됩니다("종목별 표에는 있는데
+            #    리포트에는 없는 날"). 두 표는 항상 같은 (사용자·시장·거래일)을 가집니다.
             continue
 
+        # ③ 합계는 **위에서 만든 종목별 행들을 그대로 더한 값**입니다.
         symbol, value = benchmark_by_market.get(market, (None, None))
         rows.append({
             "user_id": user_id,
             "market": market,
-            "snapshot_date": to_date(session_date).isoformat(),
-            "total_value": round(sum(r["market_value"] for r in priced), 6),
-            "total_cost": round(sum(r["cost"] for r in priced), 6),
+            "snapshot_date": snapshot_date,
+            # 🔴 종목별 행에 저장되는 바로 그 값들을, DB 와 같은 십진수 방식으로 더합니다.
+            "total_value": _sum_money(row["market_value"] for row in priced),
+            "total_cost": _sum_money(row["cost"] for row in priced),
             "currency": currency_for_market(market),
-            "holdings_count": len(evaluated),
+            "holdings_count": len(details),
             "priced_count": len(priced),
-            "unpriced_count": len(evaluated) - len(priced),
+            "unpriced_count": len(details) - len(priced),
             "benchmark_symbol": symbol,
-            "benchmark_value": (round(float(value), 6) if value is not None else None),
-            # 시:분을 모르면 None(=NULL). 오늘 시각이나 장 마감 시각으로 메우지 않습니다(§0-1).
-            PRICE_STAMP_FIELD: normalize_price_stamp(price_stamp_by_market.get(market)),
+            "benchmark_value": (_round6(value) if value is not None else None),
+            PRICE_STAMP_FIELD: price_stamp,
         })
+        holding_rows.extend(details)
+    return rows, holding_rows, skipped
+
+
+def build_snapshot_rows(user_id, holdings, price_lookup,
+                        session_date_by_market, benchmark_by_market=None,
+                        price_stamp_by_market=None):
+    """
+    사용자 1명의 보유 종목 → 그날 저장할 **합계** 스냅샷 행 목록(시장별 최대 1행).
+
+    price_lookup           : (market, ticker) -> 현재가 또는 None  (scorecard_db.make_price_lookup)
+    session_date_by_market : {"KR": "2026-08-11", "US": "2026-08-11"} — 그 시장 가격이 실제로
+                             속한 **거래일**. 배치가 도는 시각이 아니라 데이터가 말하는 날짜를
+                             씁니다(§0-3-1 후행지표 전용, 아래 resolve_session_dates 참고).
+    benchmark_by_market    : {"KR": ("KOSPI", 3210.5), "US": ("SP500_PROXY_SPY", 754.6)}
+                             값이 없으면 (심볼, None) 로 넘기세요 — NULL 로 저장됩니다.
+    price_stamp_by_market  : {"KR": "2026-08-12 17:50", "US": "2026-08-13 07:14"} — 그 시장
+                             가격이 **한국시간 기준 몇 시 몇 분에 수집됐는지**(수집기 메타데이터
+                             원문). 모르면 넣지 마세요 — NULL 로 저장되고 화면이 "시각 정보
+                             없음"이라고 정직하게 표시합니다(추정 금지).
+
+    반환: (rows, skipped)   ← 2026-08-12 부터의 시그니처를 그대로 유지합니다.
+
+    ⚠️ 2026-08-13 — 실제 계산은 `build_snapshot_rows_with_holdings()` 로 옮겼습니다. 이 함수는
+       그 결과에서 **합계 행만** 꺼내 주는 얇은 래퍼입니다. 이렇게 둔 이유:
+         · 기존 호출부·테스트가 한 줄도 바뀌지 않습니다(회귀 위험 0).
+         · 그럼에도 합계는 여전히 종목별 결과에서 파생됩니다 — 두 경로가 갈라지지 않습니다.
+       (#112 에서 `resolve_session_dates()` 를 `resolve_session_info()` 의 래퍼로 남긴 것과
+        같은 패턴입니다.)
+
+    ⚠️ 총평가금액·총매입원가는 **그날 현재가를 아는 종목만** 합산합니다. 값을 모르는 종목을
+       0원으로 넣으면 그 자체가 지어낸 숫자이고, 다음 날 그 종목 가격이 들어오는 순간
+       "하루 만에 수천만원 상승"처럼 보이는 가짜 수익률이 생깁니다.
+    """
+    rows, _holding_rows, skipped = build_snapshot_rows_with_holdings(
+        user_id, holdings, price_lookup, session_date_by_market,
+        benchmark_by_market=benchmark_by_market,
+        price_stamp_by_market=price_stamp_by_market,
+    )
     return rows, skipped
 
 
@@ -386,6 +562,58 @@ def sort_snapshots(snapshots):
     """날짜 오름차순 정렬(원본 리스트는 건드리지 않습니다)."""
     return sorted((_normalize_snapshot(s) for s in snapshots),
                   key=lambda s: s["snapshot_date"])
+
+
+def _normalize_holding_snapshot(row):
+    """
+    종목별 스냅샷 한 행을 계산·표시하기 좋은 형태로 정규화(숫자는 float, 날짜는 date).
+
+    ⚠️ 가격을 몰랐던 행의 `current_price` / `market_value` 는 **None 그대로** 둡니다.
+       0 으로 바꾸면 그 순간 화면과 집계가 거짓말을 시작합니다(§0-1). `priced` 플래그와
+       값의 유무가 어긋나는 행(DB CHECK 를 우회한 손상 데이터)은 조용히 고치지 않고
+       `priced` 를 **값이 실제로 있는지**로 다시 판정합니다 — 없는 값을 있는 척하지 않기.
+    """
+    item = dict(row)
+    item["snapshot_date"] = to_date(item.get("snapshot_date"))
+    for field in ("quantity", "avg_purchase_price", "cost", "current_price", "market_value"):
+        raw = item.get(field)
+        if raw is None or raw == "":
+            item[field] = None
+            continue
+        try:
+            item[field] = float(raw)
+        except (TypeError, ValueError):
+            raise ReportError(f"종목별 스냅샷 데이터가 손상됐습니다({field}={raw!r}).")
+    item["priced"] = bool(item.get("priced")) and item.get("current_price") is not None \
+        and item.get("market_value") is not None
+    ticker = item.get("ticker")
+    item["ticker"] = str(ticker).strip() if ticker is not None else ""
+    name = item.get("stock_name")
+    item["stock_name"] = (str(name).strip() or None) if name is not None else None
+    stamp = item.get(PRICE_STAMP_FIELD)
+    item[PRICE_STAMP_FIELD] = (str(stamp).strip() or None) if stamp is not None else None
+    return item
+
+
+def sort_holding_snapshots(rows):
+    """거래일 오름차순 → 같은 날은 종목코드 순(원본 리스트는 건드리지 않습니다)."""
+    return sorted((_normalize_holding_snapshot(r) for r in rows),
+                  key=lambda r: (r["snapshot_date"], r["ticker"]))
+
+
+def _with_derived_profit(row):
+    """
+    종목별 행에 이익·수익률을 **계산해서** 붙입니다(저장하지 않고 그때그때 계산하는 값).
+    가격을 몰랐던 행은 둘 다 None — 0 이나 '변동 없음'으로 만들지 않습니다.
+    """
+    item = dict(row)
+    if row.get("priced") and row.get("market_value") is not None and row.get("cost") is not None:
+        item["profit"] = row["market_value"] - row["cost"]
+        item["profit_pct"] = (item["profit"] / row["cost"] * 100.0) if row["cost"] else None
+    else:
+        item["profit"] = None
+        item["profit_pct"] = None
+    return item
 
 
 # 판정 상태 — 화면은 이 값만 보고 "정상 리포트"와 "데이터 부족"을 가릅니다.
@@ -599,6 +827,177 @@ def benchmark_period_return(closes, baseline_date, end_date):
         "end_value": end_value,
         "change_pct": (end_value - start_value) / start_value * 100.0,
     })
+    return result
+
+
+# -----------------------------------------------------------------------------
+# B-2. 종목별 스냅샷 → 화면용 요약 (2026-08-13 신설, 순수 함수)
+# -----------------------------------------------------------------------------
+#  오너 요청: "가독성을 최대한 살린 한장으로 볼 수 있는 테이블을 잘 짜줘".
+#  그래서 화면에 넘기기 전에 **여기서** 다음 형태로 정리합니다(계산은 화면이 아니라 이 모듈에
+#  두는 기존 계층 분리 원칙 유지 — 화면은 그리기만 합니다):
+#     · 기간 안의 **마지막 기록일 하루**를 기준으로 종목별 최신 상태 1행씩 (한눈에 보는 표)
+#     · 그 종목의 기간 내 일별 추이는 따로 담아 두었다가 펼쳐 볼 때만 그림
+#  ⚠️ 날짜를 섞지 않습니다 — "최신 상태" 표의 모든 행은 **같은 거래일**의 값입니다. 종목마다
+#     각자의 마지막 날을 긁어 모으면 표의 합계가 그 어떤 날의 합계와도 같지 않게 됩니다
+#     (오너가 말한 "들쑥날쑥"이 화면에서 생기는 전형적인 경로).
+# -----------------------------------------------------------------------------
+def build_holding_history(holding_rows, window_start=None, window_end=None):
+    """
+    **한 시장의** 종목별 스냅샷 행들 → 화면이 그대로 그릴 수 있는 구조.
+    **DB·네트워크 불필요**(순수 함수). 시장·통화가 섞여 들어오면 합산하지 않고 예외입니다.
+
+    반환 dict
+        base_date        : 이 기간에 종목별 기록이 있는 **마지막 거래일**(없으면 None)
+        first_date       : 기간 안 첫 기록일
+        dates            : 기간 안에 기록이 있는 거래일 오름차순 목록
+        rows             : base_date 하루의 종목별 행 목록(평가금액 큰 순, 가격 모름은 맨 뒤)
+                           각 행에 profit / profit_pct / price_change_pct(기간 주가 등락) /
+                           days_recorded / unpriced_days 가 계산되어 붙습니다.
+        totals           : base_date 하루의 합계(가격을 아는 종목만) + 개수
+        gone             : 기간 안에는 기록이 있었지만 base_date 에는 없는 종목(매도 등)
+        daily_by_ticker  : {티커: [그 종목의 기간 내 일별 행(오름차순)]}
+
+    ⚠️ price_change_pct 는 **주가(현재가) 등락률**입니다 — 평가금액 등락이 아닙니다.
+       중간에 추가 매수하면 평가금액은 오르지만 그건 수익이 아니기 때문입니다. 기간 안에서
+       가격을 처음 안 날의 현재가와 base_date 현재가를 비교하고, 비교할 두 값이 없으면
+       None(화면은 "—")입니다. 가까운 날로 밀어서 맞추지 않습니다.
+    """
+    rows = sort_holding_snapshots(holding_rows or [])
+
+    # 🔴 원화와 달러를 절대 한 숫자로 합치지 않는다 — 이 모듈 전체를 관통하는 원칙이라
+    #    여기서도 방어합니다. 이 함수는 **한 시장의 행들만** 받습니다(화면이 시장별 블록으로
+    #    나눠서 부릅니다). 섞여 들어오면 합계가 원+달러가 되므로 조용히 계산하지 않고 멈춥니다.
+    currencies = {r.get("currency") for r in rows if r.get("currency")}
+    markets = {r.get("market") for r in rows if r.get("market")}
+    if len(currencies) > 1 or len(markets) > 1:
+        raise ReportError(
+            "종목별 기록에 서로 다른 시장·통화가 섞여 있습니다"
+            f"(시장: {sorted(markets)}, 통화: {sorted(currencies)}) — "
+            "환율 변환을 하지 않으므로 합산하지 않고 중단합니다."
+        )
+
+    if window_start is not None:
+        start = to_date(window_start)
+        rows = [r for r in rows if r["snapshot_date"] >= start]
+    if window_end is not None:
+        end = to_date(window_end)
+        rows = [r for r in rows if r["snapshot_date"] <= end]
+
+    result = {
+        "base_date": None, "first_date": None, "dates": [],
+        "rows": [], "gone": [], "daily_by_ticker": {},
+        "totals": {"market_value": None, "cost": None, "cost_all": None,
+                   "profit": None, "profit_pct": None,
+                   "holdings_count": 0, "priced_count": 0, "unpriced_count": 0},
+    }
+    if not rows:
+        return result
+
+    dates = sorted({r["snapshot_date"] for r in rows})
+    base_date = dates[-1]
+
+    by_ticker = {}
+    for row in rows:
+        by_ticker.setdefault(row["ticker"], []).append(row)
+
+    daily_by_ticker = {ticker: [_with_derived_profit(r) for r in history]
+                       for ticker, history in by_ticker.items()}
+
+    summary_rows = []
+    for row in (r for r in rows if r["snapshot_date"] == base_date):
+        history = by_ticker[row["ticker"]]
+        item = _with_derived_profit(row)
+
+        priced_history = [h for h in history if h["priced"]]
+        first_priced = priced_history[0] if priced_history else None
+        item["price_change_pct"] = None
+        item["price_change_from"] = None
+        item["price_change_from_price"] = None
+        if row["priced"] and first_priced is not None \
+                and first_priced["snapshot_date"] < base_date and first_priced["current_price"]:
+            item["price_change_from"] = first_priced["snapshot_date"]
+            item["price_change_from_price"] = first_priced["current_price"]
+            item["price_change_pct"] = (
+                (row["current_price"] - first_priced["current_price"])
+                / first_priced["current_price"] * 100.0
+            )
+
+        item["days_recorded"] = len(history)
+        item["unpriced_days"] = sum(1 for h in history if not h["priced"])
+        summary_rows.append(item)
+
+    # 평가금액이 큰 종목부터(= 내 자산에서 차지하는 비중이 큰 순서). 가격을 모르는 종목은
+    # 금액으로 줄 세울 수 없으므로 0 으로 치지 않고 **맨 뒤로** 보냅니다.
+    summary_rows.sort(key=lambda i: (0 if i["priced"] else 1,
+                                     -(i["market_value"] or 0.0),
+                                     i["ticker"]))
+
+    priced_rows = [i for i in summary_rows if i["priced"]]
+    total_value = _sum_money(i["market_value"] for i in priced_rows) if priced_rows else None
+    total_cost = _sum_money(i["cost"] for i in priced_rows) if priced_rows else None
+    totals = {
+        "market_value": total_value,
+        "cost": total_cost,
+        # 가격을 모르는 종목까지 포함한 매입원가 — 위 total_cost 와 **다른 숫자**이고,
+        # 합계 스냅샷과 비교할 때 쓰는 건 total_cost(가격을 아는 종목만) 쪽입니다.
+        "cost_all": _sum_money(i["cost"] for i in summary_rows),
+        "profit": (total_value - total_cost) if (total_value is not None and total_cost is not None) else None,
+        "profit_pct": None,
+        "holdings_count": len(summary_rows),
+        "priced_count": len(priced_rows),
+        "unpriced_count": len(summary_rows) - len(priced_rows),
+    }
+    if totals["profit"] is not None and total_cost:
+        totals["profit_pct"] = totals["profit"] / total_cost * 100.0
+
+    base_tickers = {i["ticker"] for i in summary_rows}
+    gone = []
+    for ticker, history in by_ticker.items():
+        if ticker in base_tickers:
+            continue
+        last = history[-1]
+        gone.append({"ticker": ticker, "stock_name": last.get("stock_name"),
+                     "last_date": last["snapshot_date"], "days_recorded": len(history)})
+    gone.sort(key=lambda g: (g["last_date"], g["ticker"]))
+
+    result.update({
+        "base_date": base_date,
+        "first_date": dates[0],
+        "dates": dates,
+        "rows": summary_rows,
+        "totals": totals,
+        "gone": gone,
+        "daily_by_ticker": daily_by_ticker,
+    })
+    return result
+
+
+def compare_holding_total(detail_total, summary_total, tolerance=TOTAL_MATCH_TOLERANCE):
+    """
+    "종목별 합"과 "합계 스냅샷"이 실제로 같은지 **화면에서도 매번 대조**하기 위한 함수.
+
+    두 값은 같은 배치·같은 계산에서 나오므로 정상이라면 항상 일치합니다. 그럼에도 화면에서
+    다시 확인하는 이유: 종목별 저장만 실패한 날(§D 의 부분 실패)이나 사람이 DB 를 손댄 경우를
+    **숨기지 않고 드러내기 위해서**입니다. 어긋나면 화면이 그 사실을 그대로 말합니다(§0-1).
+
+    반환: {"comparable", "matches", "diff", "message"}
+    """
+    result = {"comparable": False, "matches": None, "diff": None, "message": ""}
+    if detail_total is None or summary_total is None:
+        result["message"] = "대조할 값이 없어 확인하지 못했습니다."
+        return result
+    try:
+        diff = float(detail_total) - float(summary_total)
+    except (TypeError, ValueError):
+        result["message"] = "대조할 값을 숫자로 읽지 못했습니다."
+        return result
+    result["comparable"] = True
+    result["diff"] = diff
+    result["matches"] = abs(diff) <= tolerance
+    result["message"] = ("종목별 합계가 같은 날 합계 스냅샷과 일치합니다."
+                         if result["matches"] else
+                         f"종목별 합계와 합계 스냅샷이 {diff:+,.6f} 만큼 어긋납니다.")
     return result
 
 
@@ -881,6 +1280,127 @@ def upsert_snapshots(service_client, rows, chunk_size=200):
     return saved
 
 
+def _holding_row_key(row):
+    return (row.get("user_id"), row.get("market"), row.get("ticker"), row.get("snapshot_date"))
+
+
+def _assert_unique_holding_keys(rows):
+    """
+    같은 (사용자·시장·종목·거래일) 이 한 번의 저장 요청에 두 번 들어오면 미리 막습니다.
+
+    왜 필요한가: PostgREST 의 upsert 는 한 요청 안에 같은 충돌 키가 두 번 있으면
+    "ON CONFLICT DO UPDATE command cannot affect row a second time" 로 **요청 전체를**
+    거절합니다. 그러면 그날 종목별 저장이 통째로 날아가는데, 원인이 로그에 잘 드러나지
+    않습니다. 여기서 먼저 잡아 **어느 종목이 겹쳤는지**를 그대로 알립니다.
+
+    ⚠️ 겹친 행을 임의로 합치거나 하나를 버리지 않습니다. 합치면 합계 표와 종목 수가
+       어긋나고(holdings_count 는 겹친 두 행을 다 세었으므로), 버리면 그만큼 합계가 종목별
+       합보다 커집니다 — 어느 쪽이든 오너가 말한 "들쑥날쑥"을 우리 손으로 만드는 셈입니다.
+       `holdings` 테이블에 (user_id, market, ticker) 유니크 제약이 있어 정상 경로에서는
+       일어날 수 없는 상황이고, 일어났다면 원본 데이터를 봐야 합니다.
+    """
+    seen = set()
+    for row in rows:
+        key = _holding_row_key(row)
+        if key in seen:
+            raise ReportError(
+                "종목별 스냅샷에 같은 (사용자·시장·종목·거래일) 행이 두 번 들어 있습니다: "
+                f"{key[1]} {key[2]} {key[3]} — 보유 종목 원본에 중복 행이 있는지 확인하세요"
+                "(임의로 합치거나 버리지 않고 중단합니다)."
+            )
+        seen.add(key)
+
+
+def upsert_holding_snapshots(service_client, rows, chunk_size=200):
+    """
+    (배치 전용) **종목별** 스냅샷 행들을 저장합니다. 같은
+    (user_id, market, ticker, snapshot_date) 가 이미 있으면 갱신합니다(배치를 두 번 돌려도
+    행이 늘지 않음). 반환: 저장 시도한 행 수.
+
+    ⚠️ 실패를 삼키지 않습니다 — 어떤 오류든 그대로 ReportError 로 올립니다. "테이블이 아직
+       없는 경우"만 배치가 따로 알아보고 건너뛰는데, 그 판단은 여기가 아니라
+       `save_holding_snapshots()` 가 합니다(이 함수는 순수하게 저장만).
+    """
+    if service_client is None:
+        raise ReportError("Supabase 클라이언트가 없습니다.")
+    if not rows:
+        return 0
+    _assert_unique_holding_keys(rows)
+
+    saved = 0
+    for start in range(0, len(rows), chunk_size):
+        chunk = rows[start:start + chunk_size]
+        _execute(
+            service_client.table(HOLDING_SNAPSHOTS_TABLE).upsert(
+                chunk, on_conflict="user_id,market,ticker,snapshot_date"
+            ),
+            "종목별 스냅샷 저장",
+        )
+        saved += len(chunk)
+    return saved
+
+
+def is_missing_holding_table_error(error):
+    """
+    "종목별 스냅샷 테이블이 아직 없다"(= 오너가 sql/report_schema.sql §8 을 아직 실행하지
+    않았다)로 보이는 오류인지. 테이블 이름이 메시지에 있고, 동시에 '없다'는 취지의 표식이
+    있을 때만 True 입니다 — 아무 오류나 이 경로로 새어 들어가면 진짜 사고가 조용히
+    묻힙니다(§0-1).
+    """
+    text = str(error or "").lower()
+    if HOLDING_SNAPSHOTS_TABLE not in text:
+        return False
+    return any(marker in text for marker in HOLDING_TABLE_MISSING_MARKERS)
+
+
+def save_holding_snapshots(service_client, rows, summary_saved=None):
+    """
+    배치에서 **합계 저장이 끝난 뒤** 종목별 행을 저장하는 단계. 반환:
+        {"saved": int, "skipped_reason": str 또는 None}
+
+    =========================================================================
+    두 표 중 한쪽만 성공하는 경우를 어떻게 다루는가 (Supabase REST 에는 여러 테이블에 걸친
+    원자적 트랜잭션이 없습니다 — 그래서 '완벽한 원자성' 대신 아래 규칙을 씁니다)
+    =========================================================================
+    ① **순서: 합계 먼저, 종목별 나중.** 합계 표는 리포트 화면 전체가 의존하는 기존 기능이라
+       어떤 경우에도 퇴화시키지 않습니다. 합계 저장이 실패하면 예외가 나서 이 단계까지
+       오지도 않습니다 ⇒ **"종목별 행이 있는데 합계 행이 없는 날"은 생기지 않습니다.**
+       (그 반대 — 합계는 있는데 종목별이 없는 날 — 은 생길 수 있고, 그건 안전한 쪽입니다:
+        기존 리포트는 그대로 나오고 종목별 표만 "기록 없음"이 됩니다.)
+    ② **테이블 자체가 없으면**(오너가 아직 SQL 을 안 돌린 상태) 배치를 죽이지 않고 이 단계만
+       건너뜁니다. 그날 합계 스냅샷은 이미 저장돼 있고, 무엇을 해야 하는지 로그에 크게
+       남깁니다(#112 의 '컬럼 없는 DB' 폴백과 같은 방침).
+    ③ **그 밖의 실패는 삼키지 않고 그대로 올립니다** — 배치가 빨간 실패로 끝나 오너가 알아챕니다.
+       이때도 합계는 이미 저장돼 있어 **잃는 데이터는 없고**, 저장은 upsert 라서 다음 실행이
+       같은 날짜를 그대로 다시 채웁니다(재시도를 이 안에서 반복하지 않는 이유 — 같은 요청을
+       즉시 되풀이해도 원인이 바뀌지 않고, 하루 한 번 도는 배치라 다음 실행이 곧 재시도입니다).
+    ④ 청크(200행) 단위로 나눠 보내므로 중간에 실패하면 앞 청크만 들어간 상태가 될 수 있습니다.
+       이것도 upsert 라 다음 실행에서 그대로 메워집니다. 그 사이에 화면이 어긋난 합계를 보여
+       주지 않도록, 화면은 **매번 종목별 합과 합계 스냅샷을 대조해서**(compare_holding_total)
+       어긋나면 그 사실을 표시합니다.
+    =========================================================================
+    """
+    if not rows:
+        return {"saved": 0, "skipped_reason": None}
+    try:
+        saved = upsert_holding_snapshots(service_client, rows)
+    except ReportError as exc:
+        if not is_missing_holding_table_error(exc):
+            print(f"  ❌ 종목별 스냅샷 저장 실패 — {exc}")
+            print(f"     (합계 스냅샷 {summary_saved if summary_saved is not None else '?'}행은 "
+                  "이미 저장됐습니다. 잃은 수치는 없고, 다음 실행이 같은 날짜를 다시 채웁니다.)")
+            raise
+        reason = (f"DB 에 `{HOLDING_SNAPSHOTS_TABLE}` 테이블이 없어 종목별 스냅샷 "
+                  f"{len(rows)}행을 저장하지 못했습니다.")
+        print(f"  ⚠️ {reason}")
+        print(f"     합계 스냅샷은 정상 저장됐습니다 — 기존 리포트 기능은 그대로 동작합니다.")
+        print(f"     오너 할 일 — {HOLDING_TABLE_SETUP_HINT}")
+        print("     (실행 전까지의 날짜는 종목별 표에서 '기록 없음'으로 남고, 소급해서 "
+              "채우지 않습니다 — 그날 종목별 값은 어디에도 보관돼 있지 않습니다.)")
+        return {"saved": 0, "skipped_reason": reason}
+    return {"saved": saved, "skipped_reason": None}
+
+
 def fetch_user_snapshots(client, user_id, market=None, start_date=None, end_date=None):
     """
     (화면용) 로그인한 사용자 **본인** 스냅샷 조회. 넘겨받는 client 는 "내 성적표"가 이미
@@ -900,6 +1420,34 @@ def fetch_user_snapshots(client, user_id, market=None, start_date=None, end_date
         query = query.lte("snapshot_date", to_date(end_date).isoformat())
     rows = _execute(query, "리포트 스냅샷 조회")
     return sort_snapshots(rows)
+
+
+def fetch_user_holding_snapshots(client, user_id, market=None, start_date=None, end_date=None):
+    """
+    (화면용) 로그인한 사용자 **본인**의 종목별 스냅샷 조회. `fetch_user_snapshots()` 와 완전히
+    같은 규약입니다(anon key + 로그인 세션 클라이언트를 받아 쓰고, RLS 위에 user_id 필터를
+    한 번 더 겁니다 — 이중 방어).
+
+    ⚠️ 이 표는 합계 표보다 행이 훨씬 많으므로(종목 수만큼), 화면은 **보고 있는 기간만**
+       잘라서 부릅니다(start_date/end_date). 합계 쪽은 기간 시작 이전의 기준점 행이 필요해서
+       전부 받지만, 종목별 표는 그 기간 안의 움직임만 보여주므로 기준점이 필요 없습니다.
+    ⚠️ 테이블이 아직 없으면(오너가 sql/report_schema.sql §8 미실행) 여기서 ReportError 가
+       납니다. 화면은 그 오류를 **삼키지 않고**, 다만 리포트의 나머지는 정상 표시되도록
+       이 섹션만 안내 문구로 대체합니다(`is_missing_holding_table_error()` 로 구분).
+    """
+    if client is None:
+        raise ReportError("Supabase 연결이 준비되지 않았습니다.")
+    if not user_id:
+        raise ReportError("로그인 정보가 없어 종목별 기록을 조회할 수 없습니다.")
+    query = client.table(HOLDING_SNAPSHOTS_TABLE).select("*").eq("user_id", user_id)
+    if market:
+        query = query.eq("market", normalize_market(market))
+    if start_date:
+        query = query.gte("snapshot_date", to_date(start_date).isoformat())
+    if end_date:
+        query = query.lte("snapshot_date", to_date(end_date).isoformat())
+    rows = _execute(query, "종목별 스냅샷 조회")
+    return sort_holding_snapshots(rows)
 
 
 # =============================================================================
@@ -1007,8 +1555,13 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
       1) 가격 스냅샷 파일에서 시장별 거래일 + 가격 수집 시각(KST)을 확인 (resolve_session_info)
       2) 벤치마크 종가 확인 (코스피 CSV / 미국 지수 JSON) — 없으면 NULL 로 둡니다
       3) service_role 로 **모든 사용자** holdings 조회
-      4) 사용자별·시장별 스냅샷 행 생성 (순수 함수)
-      5) upsert (같은 날 두 번 돌려도 행이 늘지 않음)
+      4) 사용자별·시장별 **합계 행 + 종목별 행**을 한 번에 생성 (순수 함수, 같은 계산 결과)
+      5) upsert — **합계 먼저, 종목별 나중** (같은 날 두 번 돌려도 행이 늘지 않음)
+
+    ⚠️ 저장 순서와 부분 실패 처리 (2026-08-13)
+       두 표는 한 번의 트랜잭션으로 묶을 수 없습니다(Supabase REST 의 한계). 그래서 기존
+       기능인 **합계를 먼저** 저장하고, 그 다음 종목별을 저장합니다. 근거와 각 실패 경우의
+       동작은 `save_holding_snapshots()` 의 주석에 한곳으로 모아 적어 뒀습니다.
 
     dry_run=True 면 Supabase 에 쓰지 않고 계산 결과만 돌려줍니다(로컬 점검용).
     반환: 요약 dict (행 수, 사용자 수, 건너뛴 사유 등)
@@ -1045,24 +1598,38 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
     grouped = group_holdings_by_user(holdings)
     print(f"  · 보유 종목 {len(holdings)}행 / 사용자 {len(grouped)}명")
 
-    all_rows, all_skips = [], []
+    all_rows, all_holding_rows, all_skips = [], [], []
     for user_id, user_holdings in grouped.items():
-        rows, skips = build_snapshot_rows(
+        # 합계와 종목별을 **한 번의 계산**으로 함께 만듭니다(합계는 종목별의 합).
+        rows, holding_rows, skips = build_snapshot_rows_with_holdings(
             user_id, user_holdings, price_lookup, session_dates, benchmarks,
             price_stamp_by_market=price_stamps,
         )
         all_rows.extend(rows)
+        all_holding_rows.extend(holding_rows)
         all_skips.extend(skips)
 
     for skip in all_skips:
         print(f"  ⚠️ [{skip['market']}] 기록하지 않음 — {skip['reason']}")
 
     saved = 0
+    holding_saved = 0
+    holding_skipped_reason = None
     if dry_run:
-        print(f"  · (dry-run) 저장하지 않고 계산만 했습니다 — 대상 {len(all_rows)}행")
+        print(f"  · (dry-run) 저장하지 않고 계산만 했습니다 — 합계 {len(all_rows)}행 / "
+              f"종목별 {len(all_holding_rows)}행")
     else:
+        # ① 기존 기능(합계)이 먼저. 여기서 실패하면 예외가 나서 종목별은 시도조차 하지
+        #    않습니다 — "종목별은 있는데 합계가 없는 날"을 만들지 않기 위해서입니다.
         saved = upsert_snapshots(service_client, all_rows)
         print(f"  ✅ 스냅샷 {saved}행 저장(갱신 포함)")
+
+        # ② 종목별. 테이블이 아직 없으면 여기만 건너뛰고 배치는 정상 종료합니다.
+        outcome = save_holding_snapshots(service_client, all_holding_rows, summary_saved=saved)
+        holding_saved = outcome["saved"]
+        holding_skipped_reason = outcome["skipped_reason"]
+        if holding_saved:
+            print(f"  ✅ 종목별 스냅샷 {holding_saved}행 저장(갱신 포함)")
 
     print("=" * 70)
     return {
@@ -1072,7 +1639,10 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
         "user_count": len(grouped),
         "holdings_count": len(holdings),
         "rows": all_rows,
+        "holding_rows": all_holding_rows,
         "saved": saved,
+        "holding_saved": holding_saved,
+        "holding_skipped_reason": holding_skipped_reason,
         "skipped": all_skips,
         "dry_run": bool(dry_run),
         "notes": notes,

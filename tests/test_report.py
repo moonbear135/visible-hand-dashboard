@@ -13,6 +13,8 @@ REPORT_WORK_ORDER.md §9-4 / §9-7 에 따라, 이 세션에서는 **실제 Supa
     ⑤ 벤치마크 파일 읽기 (market_history.csv 는 **읽기 전용**, 미국 지수 JSON)
     ⑥ 미국 지수 수집기의 순수 파싱 로직 (devalue 응답 구조 · 병합 시 기존 기록 보존)
     ⑦ 가짜 Supabase 클라이언트로 적재/조회 배선 검증 (upsert 충돌 키, user_id 필터)
+    ⑦-1 🧾 종목별 일일 스냅샷(2026-08-13) — **합계 = 종목별 합** 불변식, 저장 순서와 부분 실패,
+         테이블이 아직 없는 DB, 화면 표 문구
     ⑧ SQL 스키마 · 워크플로우 · 화면 배선 (기본 숨김, service_role 격리, 기존 파일 무손상)
 
 ⚠️ 저장소의 실제 데이터 파일(data/*.json, market_history.csv)은 **읽기만** 합니다.
@@ -26,11 +28,13 @@ import io
 import importlib
 import json
 import os
+import random
 import re
 import sys
 import tempfile
 import types
 from datetime import date
+from decimal import Decimal
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -1005,6 +1009,43 @@ class _StreamlitRecorder:
         return _noop
 
 
+class _HoldingViewRecorder(_StreamlitRecorder):
+    """종목별 상세 섹션 검증용 — info/warning/error/selectbox/expander 까지 받아 적습니다."""
+
+    def __init__(self):
+        super().__init__()
+        self.warning_calls = []
+        self.info_calls = []
+        self.error_calls = []
+        self.selectbox_calls = []
+
+    def reset(self):
+        for calls in (self.markdown_calls, self.caption_calls, self.warning_calls,
+                      self.info_calls, self.error_calls, self.selectbox_calls):
+            calls.clear()
+
+    def warning(self, text, *_args, **_kwargs):
+        self.warning_calls.append(str(text))
+
+    def info(self, text, *_args, **_kwargs):
+        self.info_calls.append(str(text))
+
+    def error(self, text, *_args, **_kwargs):
+        self.error_calls.append(str(text))
+
+    def selectbox(self, _label, options, *_args, **_kwargs):
+        options = list(options)
+        self.selectbox_calls.append(options)
+        return options[0] if options else None
+
+    def expander(self, *_args, **_kwargs):
+        return contextlib.nullcontext()
+
+    def columns(self, spec, **_kwargs):
+        count = spec if isinstance(spec, int) else len(spec)
+        return [self for _ in range(count)]
+
+
 def test_price_stamp_wiring():
     print("\n[9-1] 가격 수집 시각(KST) 저장·표시 배선")
 
@@ -1176,6 +1217,589 @@ def test_price_stamp_wiring():
             sys.modules.pop("views.report_view", None)
             sys.modules.pop("views.scorecard_view", None)
 
+
+# =============================================================================
+# 9-2. 🧾 종목별 일일 스냅샷 (2026-08-13, TASK_HISTORY #113)
+# =============================================================================
+#  오너 결정: "3번으로 해보자(=종목별 일일 스냅샷까지 저장) … 내가 제일 중시하는 데이터의
+#  품질관리를 하려면 아무튼 최대한 깨끗하게 잘 정리된 상태의 많은 데이터가 필요해 … 들쑥날쑥
+#  하면 세상의 모두가 힘들어져".
+#
+#  ⇒ 이 블록의 **가장 중요한 검사는 "합계 = 종목별 합"** 입니다(⑵·⑶). 나머지는 그 불변식이
+#     저장·조회·화면까지 살아서 도착하는지를 봅니다.
+# =============================================================================
+class _NoHoldingTableClient(_FakeClient):
+    """`portfolio_holding_snapshots` 테이블이 아직 없는 DB(= 오너가 §8 SQL 실행 전) 흉내."""
+
+    def table(self, name):
+        query = _FakeQuery(name, self.store, self.log)
+        original_execute = query.execute
+
+        def execute():
+            if name == rdb.HOLDING_SNAPSHOTS_TABLE:
+                self.log.append({"table": name, "op": "rejected", "filters": [],
+                                 "payload": query.payload, "on_conflict": query.on_conflict})
+                raise RuntimeError(
+                    "PGRST205: Could not find the table "
+                    "'public.portfolio_holding_snapshots' in the schema cache"
+                )
+            return original_execute()
+
+        query.execute = execute
+        return query
+
+
+def _assert_totals_match_details(rows, holding_rows, label):
+    """
+    🔴 이 헬퍼가 이번 작업의 핵심 요구사항입니다 — 합계 행의 모든 수치가 **그날 종목별 행들의
+    합과 정확히 같은지**. float 비교로 얼버무리지 않고, DB(numeric)가 계산할 값과 같은
+    **Decimal 정확 합**으로도 확인합니다.
+    """
+    ok = True
+    detail = ""
+    by_key = {}
+    for row in holding_rows:
+        by_key.setdefault((row["user_id"], row["market"], row["snapshot_date"]), []).append(row)
+
+    seen_keys = set()
+    for row in rows:
+        key = (row["user_id"], row["market"], row["snapshot_date"])
+        seen_keys.add(key)
+        details = by_key.get(key, [])
+        priced = [d for d in details if d["priced"]]
+        exact_value = sum((Decimal(str(d["market_value"])) for d in priced), Decimal(0))
+        exact_cost = sum((Decimal(str(d["cost"])) for d in priced), Decimal(0))
+        checks = (
+            (Decimal(str(row["total_value"])) == exact_value, "total_value"),
+            (Decimal(str(row["total_cost"])) == exact_cost, "total_cost"),
+            (row["holdings_count"] == len(details), "holdings_count"),
+            (row["priced_count"] == len(priced), "priced_count"),
+            (row["unpriced_count"] == len(details) - len(priced), "unpriced_count"),
+            (all(d["currency"] == row["currency"] for d in details), "currency"),
+            (all(d[rdb.PRICE_STAMP_FIELD] == row[rdb.PRICE_STAMP_FIELD] for d in details),
+             "price_as_of_kst"),
+        )
+        for passed, field in checks:
+            if not passed:
+                ok = False
+                detail += f" [{key} {field}]"
+    # 합계 행이 없는데 종목별 행만 있는 날짜가 있으면 두 표의 날짜 집합이 어긋난 것
+    for key in by_key:
+        if key not in seen_keys:
+            ok = False
+            detail += f" [합계 없는 종목별 행 {key}]"
+    check(ok, label, detail)
+
+
+def test_holding_snapshots():
+    print("\n[9-2] 🧾 종목별 일일 스냅샷 — 합계와 절대 어긋나지 않기")
+
+    holdings = [
+        holding(MARKET_KR, "005930", 10, 70000, "삼성전자"),
+        holding(MARKET_KR, "000660", 2, 1000000, "SK하이닉스"),
+        holding(MARKET_KR, "999999", 3, 1234.56, "가격모르는종목"),
+        holding(MARKET_US, "AAPL", 3, 200.0, "Apple"),
+    ]
+    prices = {(MARKET_KR, "005930"): 80000.0,
+              (MARKET_KR, "000660"): 1200000.0,
+              (MARKET_US, "AAPL"): 250.0}
+    session_dates = {MARKET_KR: "2026-08-12", MARKET_US: "2026-08-12"}
+    benchmarks = {MARKET_KR: ("KOSPI", 6345.53), MARKET_US: ("SP500_PROXY_SPY", 754.6)}
+    stamps = {MARKET_KR: "2026-08-12 17:50", MARKET_US: "2026-08-13 07:14"}
+
+    rows, holding_rows, skipped = rdb.build_snapshot_rows_with_holdings(
+        "u1", holdings, price_lookup_factory(prices), session_dates, benchmarks,
+        price_stamp_by_market=stamps)
+
+    # ---- ⑴ 행 자체가 제대로 만들어지는지 -------------------------------------
+    check(len(rows) == 2 and len(holding_rows) == 4 and not skipped,
+          "합계 2행(KR/US) + 종목별 4행(가격 모르는 종목 포함)이 한 번에 생성됨")
+    kr_details = [r for r in holding_rows if r["market"] == MARKET_KR]
+    samsung = next(r for r in kr_details if r["ticker"] == "005930")
+    unknown = next(r for r in kr_details if r["ticker"] == "999999")
+    check(approx(samsung["market_value"], 800000.0) and approx(samsung["cost"], 700000.0)
+          and approx(samsung["current_price"], 80000.0) and samsung["priced"] is True,
+          "가격을 아는 종목: 수량×현재가 / 수량×매입가 저장")
+    check(samsung["stock_name"] == "삼성전자",
+          "그날 기준 종목명도 함께 저장(holdings 에서 종목이 사라져도 과거 표가 안 비게)")
+    check(unknown["priced"] is False and unknown["current_price"] is None
+          and unknown["market_value"] is None,
+          "가격을 몰랐던 종목: 값을 지어내지 않고 NULL + priced=False (0원으로 세지 않음)")
+    check(approx(unknown["cost"], 3 * 1234.56),
+          "가격을 몰라도 **매입원가는 아는 값**이라 그대로 기록(수량·매입가도 함께)")
+    check(all(r["currency"] == "KRW" for r in kr_details)
+          and all(r["currency"] == "USD" for r in holding_rows if r["market"] == MARKET_US),
+          "통화는 시장에서 파생 — 원/달러가 한 표에서 섞이지 않음")
+    check(all(r["snapshot_date"] == "2026-08-12" for r in holding_rows),
+          "종목별 행의 거래일 = 합계 행의 거래일(배치 실행 시각이 아님)")
+    check(next(r for r in holding_rows if r["market"] == MARKET_KR)[rdb.PRICE_STAMP_FIELD]
+          == "2026-08-12 17:50"
+          and next(r for r in holding_rows if r["market"] == MARKET_US)[rdb.PRICE_STAMP_FIELD]
+          == "2026-08-13 07:14",
+          "가격 수집 시각(KST)이 종목별 행에도 시장별로 그대로 실림")
+    check("profit" not in samsung and "profit_pct" not in samsung,
+          "이익·수익률은 저장하지 않음(market_value-cost 로 언제든 정확히 나오는 파생값 — "
+          "저장하면 계산 경로가 하나 더 생겨 어긋날 여지가 됨)")
+
+    # ---- ⑵ 🔴 합계 = 종목별 합 (이번 작업의 핵심 요구사항) --------------------
+    _assert_totals_match_details(rows, holding_rows,
+                                 "🔴 합계 행의 모든 수치가 종목별 행의 합과 정확히 일치")
+
+    # 값이 지저분해도 어긋나지 않는지 — 반올림이 종목별 저장값 기준으로 **한 번만** 일어나고,
+    # 합산이 DB(numeric)와 같은 십진수 방식으로 되는지를 보는 검사입니다.
+    #   · 현실적인 포트폴리오(한국=정수 수량·정수 단가, 미국=소수점 수량·소액) → **정확히 일치**
+    #   · 비현실적으로 큰 금액 + 무한소수 단가 → 배정밀도 표현 한계까지만(허용오차 이내).
+    #     이 한계는 utils/report_db._sum_money() 주석에 실측과 함께 적어 뒀습니다.
+    rng = random.Random(20260813)
+    exact_ok, tolerant_ok, worst = True, True, 0.0
+    for round_index in range(600):
+        extreme = round_index % 3 == 0
+        many, prices_rand = [], {}
+        market = MARKET_KR if round_index % 2 else MARKET_US
+        for i in range(rng.randint(1, 20)):
+            ticker = f"{i:06d}" if market == MARKET_KR else f"TST{i}"
+            if extreme:
+                quantity = rng.choice([1234.567891, 0.333333, 98765.4321])
+                avg = rng.choice([1000 / 3, 93076.923076923, 12345678.9])
+                price = rng.choice([1e7 / 3, 987654321.123456, 80000.000001])
+            elif market == MARKET_KR:
+                quantity = rng.randint(1, 5000)
+                # 가중평균 매입단가는 무한소수가 됩니다(내 성적표의 실제 계산 결과)
+                avg = rng.choice([rng.randint(100, 500000), 93076.923076, 1210000 / 13])
+                price = rng.randint(100, 500000)
+            else:
+                quantity = rng.choice([rng.randint(1, 500), round(rng.random() * 100, 6)])
+                avg = round(rng.uniform(0.01, 900), 4)
+                price = round(rng.uniform(0.01, 900), 4)
+            many.append(holding(market, ticker, quantity, avg))
+            if rng.random() < 0.85:
+                prices_rand[(market, ticker)] = price
+        r2, h2, _ = rdb.build_snapshot_rows_with_holdings(
+            "u1", many, price_lookup_factory(prices_rand), {market: "2026-08-12"})
+        for row in r2:
+            priced = [d for d in h2 if d["priced"]]
+            for field, key in (("total_value", "market_value"), ("total_cost", "cost")):
+                exact = sum((Decimal(str(d[key])) for d in priced), Decimal(0))
+                gap = float(abs(Decimal(str(row[field])) - exact))
+                if extreme:
+                    # 금액 자체가 비현실적(수십조 원)인 구간 — 여기서 남는 오차는 우리 계산이
+                    # 아니라 **배정밀도 실수의 표현 한계**입니다. 그래서 절대값이 아니라
+                    # 상대오차로 봅니다(1e-13 = 배정밀도 한계보다 한참 느슨한 상한).
+                    if gap > abs(float(row[field])) * 1e-13 + rdb.TOTAL_MATCH_TOLERANCE:
+                        tolerant_ok = False
+                else:
+                    worst = max(worst, gap)
+                    if gap != 0:
+                        exact_ok = False
+                    if gap > rdb.TOTAL_MATCH_TOLERANCE:
+                        tolerant_ok = False
+    check(exact_ok,
+          f"🔴 현실적인 400가지 무작위 포트폴리오에서 합계 = 종목별 합이 **정확히** 일치 "
+          f"(Decimal 비교 — DB numeric 이 계산할 값과 동일. 실측 최대 오차 {worst:g})")
+    check(tolerant_ok,
+          "🔴 수십조 원처럼 비현실적으로 큰 금액에서도 오차가 배정밀도 표현 한계 안에 머묾"
+          f"(허용오차 {rdb.TOTAL_MATCH_TOLERANCE} + 상대오차 1e-13 — "
+          "_sum_money() 주석에 이 한계를 그대로 적어 뒀습니다)")
+
+    # ---- ⑶ 두 표의 날짜·시장 집합이 항상 같은지 -------------------------------
+    only_unpriced, only_unpriced_details, skips2 = rdb.build_snapshot_rows_with_holdings(
+        "u1", [holding(MARKET_KR, "999999", 1, 100)], price_lookup_factory({}),
+        {MARKET_KR: "2026-08-12"})
+    check(only_unpriced == [] and only_unpriced_details == [],
+          "가격을 하나도 모르는 시장: 합계도 종목별도 만들지 않음"
+          "(종목별만 남아 '리포트엔 없는 날'이 생기지 않게)")
+    check(any("현재가를 알 수 없어" in s["reason"] for s in skips2), "그 사유가 기록됨")
+
+    no_date_rows, no_date_details, skips3 = rdb.build_snapshot_rows_with_holdings(
+        "u1", holdings, price_lookup_factory(prices), {MARKET_KR: "2026-08-12"}, benchmarks)
+    check(all(r["market"] == MARKET_KR for r in no_date_rows + no_date_details),
+          "거래일을 모르는 시장(US)은 합계도 종목별도 안 만듦")
+    _assert_totals_match_details(no_date_rows, no_date_details,
+                                 "거래일이 일부만 확인된 경우에도 두 표가 일치")
+
+    broken = list(holdings) + [{"market": "KR", "ticker": "005380", "quantity": "??",
+                                "avg_purchase_price": 1000, "currency": "KRW"}]
+    b_rows, b_details, b_skips = rdb.build_snapshot_rows_with_holdings(
+        "u1", broken, price_lookup_factory(prices), session_dates, benchmarks)
+    check(any("평가할 수 없어" in s["reason"] for s in b_skips),
+          "평가 자체가 불가능한 보유 행은 사유를 남기고 제외")
+    _assert_totals_match_details(b_rows, b_details,
+                                 "깨진 보유 행이 섞여도 두 표가 똑같이 제외해서 계속 일치")
+
+    # ---- ⑷ 기존 시그니처 무손상 ----------------------------------------------
+    legacy = build_snapshot_rows("u1", holdings, price_lookup_factory(prices),
+                                 session_dates, benchmarks, price_stamp_by_market=stamps)
+    check(isinstance(legacy, tuple) and len(legacy) == 2 and legacy[0] == rows,
+          "기존 build_snapshot_rows() 는 2-튜플 그대로이고 합계 행도 완전히 동일"
+          "(호출부·기존 테스트 무손상)")
+
+    # ---- ⑸ 저장 배선 ----------------------------------------------------------
+    client = _FakeClient()
+    saved = rdb.upsert_holding_snapshots(client, [dict(r) for r in holding_rows])
+    call = client.log[-1]
+    check(saved == 4 and call["op"] == "upsert"
+          and call["table"] == "portfolio_holding_snapshots",
+          "종목별도 upsert 로 저장(같은 날 두 번 돌려도 행이 늘지 않음)")
+    check(call["on_conflict"] == "user_id,market,ticker,snapshot_date",
+          "충돌 키가 스키마의 유니크 제약(사용자×시장×종목×거래일)과 일치")
+    check(rdb.upsert_holding_snapshots(client, []) == 0, "저장할 행이 없으면 호출도 하지 않음")
+    chunky = _FakeClient()
+    rdb.upsert_holding_snapshots(chunky, [dict(r, ticker=f"T{i}") for i, r in
+                                          enumerate(holding_rows * 2)], chunk_size=3)
+    check(len([c for c in chunky.log if c["op"] == "upsert"]) == 3, "많은 행은 나눠서 저장")
+    expect_raises(lambda: rdb.upsert_holding_snapshots(
+        _FakeClient(), [dict(holding_rows[0]), dict(holding_rows[0])]), ReportError,
+        "같은 (사용자·시장·종목·거래일) 이 두 번 들어오면 임의로 합치지 않고 중단")
+    expect_raises(lambda: rdb.upsert_holding_snapshots(None, [dict(holding_rows[0])]),
+                  ReportError, "클라이언트가 없으면 오류")
+
+    check(rdb.is_missing_holding_table_error(
+        "PGRST205: Could not find the table 'public.portfolio_holding_snapshots' "
+        "in the schema cache") is True,
+        "테이블 없음(PGRST205) 을 알아봄")
+    check(rdb.is_missing_holding_table_error("네트워크가 끊겼습니다") is False,
+          "무관한 오류를 테이블 없음으로 오인하지 않음(진짜 사고가 조용히 묻히지 않게)")
+    check(rdb.is_missing_holding_table_error(
+        "Could not find the table 'public.portfolio_daily_snapshots' in the schema cache")
+        is False,
+        "합계 테이블이 없다는 오류는 이 폴백 경로로 새지 않음")
+
+    # ---- ⑹ 두 표 중 한쪽만 실패하는 경우 --------------------------------------
+    legacy_db = _NoHoldingTableClient()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        outcome = rdb.save_holding_snapshots(legacy_db, [dict(r) for r in holding_rows],
+                                             summary_saved=2)
+    log_text = buffer.getvalue()
+    check(outcome["saved"] == 0 and outcome["skipped_reason"],
+          "테이블이 없으면 예외로 배치를 죽이지 않고 이 단계만 건너뜀")
+    check("report_schema.sql" in log_text and "오너 할 일" in log_text,
+          "무엇을 실행하면 되는지 로그에 그대로 안내(조용히 넘어가지 않음)")
+    check("합계 스냅샷은 정상 저장" in log_text,
+          "기존 기능은 멀쩡하다는 사실도 함께 알림")
+    boom_log = io.StringIO()
+
+    def _boom():
+        with contextlib.redirect_stdout(boom_log):
+            rdb.save_holding_snapshots(_BoomClient(), [dict(holding_rows[0])], summary_saved=2)
+
+    expect_raises(_boom, ReportError,
+                  "테이블 없음이 아닌 오류는 삼키지 않고 그대로 올림(배치가 빨갛게 실패)")
+    check("합계 스냅샷 2행은 이미 저장" in boom_log.getvalue(),
+          "그때도 '합계는 이미 저장됐고 잃은 수치는 없다'는 사실을 로그에 남김")
+
+    # ---- ⑺ 배치 end-to-end ----------------------------------------------------
+    batch_client = _FakeClient({"holdings": [
+        {"id": "1", "user_id": "u1", "market": "KR", "ticker": "005930",
+         "quantity": 10, "avg_purchase_price": 70000, "currency": "KRW"},
+        {"id": "2", "user_id": "u1", "market": "KR", "ticker": "999999",
+         "quantity": 1, "avg_purchase_price": 1000, "currency": "KRW"},
+    ]})
+    summary = rdb.run_daily_snapshot_batch(service_client=batch_client, dry_run=True)
+    check(len(summary["holding_rows"]) == 2 and summary["holding_saved"] == 0,
+          "dry-run: 종목별 행도 계산되지만 저장은 하지 않음")
+    _assert_totals_match_details(summary["rows"], summary["holding_rows"],
+                                 "🔴 실제 저장소 데이터로 돈 배치에서도 합계 = 종목별 합")
+
+    live = _FakeClient({"holdings": [
+        {"id": "1", "user_id": "u1", "market": "KR", "ticker": "005930",
+         "quantity": 10, "avg_purchase_price": 70000, "currency": "KRW"},
+    ]})
+    with contextlib.redirect_stdout(io.StringIO()):
+        summary2 = rdb.run_daily_snapshot_batch(service_client=live, dry_run=False)
+    upserts = [c for c in live.log if c["op"] == "upsert"]
+    check(summary2["saved"] == 1 and summary2["holding_saved"] == 1,
+          "실제 저장 경로: 합계 1행 + 종목별 1행")
+    check([c["table"] for c in upserts] == ["portfolio_daily_snapshots",
+                                            "portfolio_holding_snapshots"],
+          "저장 순서 = 합계 먼저, 종목별 나중(기존 기능을 새 기능이 막지 않게)")
+    check(all(c["table"] != "holdings" or c["op"] == "select" for c in live.log),
+          "배치는 여전히 holdings 를 읽기만 함")
+
+    missing_table_db = _NoHoldingTableClient({"holdings": [
+        {"id": "1", "user_id": "u1", "market": "KR", "ticker": "005930",
+         "quantity": 10, "avg_purchase_price": 70000, "currency": "KRW"},
+    ]})
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        summary3 = rdb.run_daily_snapshot_batch(service_client=missing_table_db, dry_run=False)
+    check(summary3["saved"] == 1 and summary3["holding_saved"] == 0
+          and summary3["holding_skipped_reason"],
+          "🔴 종목별 테이블이 아직 없어도 배치가 죽지 않고 **합계 저장은 정상 진행**"
+          "(기존 기능 무손상 — 이번 확장은 순수 추가)")
+    check("portfolio_daily_snapshots" in [c["table"] for c in missing_table_db.log
+                                          if c["op"] == "upsert"],
+          "그 상황에서도 합계 스냅샷은 실제로 저장됨")
+
+    # ---- ⑻ 조회·정규화 --------------------------------------------------------
+    stored = [dict(r) for r in holding_rows]
+    reader = _FakeClient({"portfolio_holding_snapshots":
+                          stored + [dict(stored[0], user_id="other", market="KR",
+                                         ticker="000020", market_value=999.0)]})
+    fetched = rdb.fetch_user_holding_snapshots(reader, "u1", market="KR",
+                                               start_date="2026-08-01",
+                                               end_date="2026-08-31")
+    filters = reader.log[-1]["filters"]
+    check(("eq", "user_id", "u1") in filters and ("eq", "market", "KR") in filters,
+          "RLS 위에 user_id·market 필터를 한 번 더 검(이중 방어)")
+    check(any(f[0] == "gte" for f in filters) and any(f[0] == "lte" for f in filters),
+          "기간만 잘라서 조회(행이 많은 표라 전체를 끌어오지 않음)")
+    check(len(fetched) == 3 and all(r["market"] == MARKET_KR for r in fetched),
+          "본인·해당 시장 행만 조회됨")
+    check([r["ticker"] for r in fetched] == sorted(r["ticker"] for r in fetched),
+          "같은 날은 종목코드 순으로 정렬")
+    check(all(isinstance(r["snapshot_date"], date) for r in fetched), "날짜는 date 로 정규화")
+    weird = {r["ticker"]: r for r in rdb.sort_holding_snapshots([
+        dict(stored[0], priced=True, current_price=None, market_value=None),
+        dict(stored[0], ticker="000001", stock_name="  ", **{rdb.PRICE_STAMP_FIELD: "  "}),
+    ])}
+    check(weird["005930"]["priced"] is False,
+          "priced=True 인데 값이 비어 있는 손상 행은 '가격 있음'으로 둔갑시키지 않음")
+    check(weird["000001"]["stock_name"] is None
+          and weird["000001"][rdb.PRICE_STAMP_FIELD] is None,
+          "공백만 있는 종목명·시각은 None 으로 정규화(빈 문자열과 없음을 섞지 않음)")
+    expect_raises(lambda: rdb.sort_holding_snapshots([dict(stored[0], quantity="??")]),
+                  ReportError, "손상된 숫자는 조용히 0으로 만들지 않고 오류")
+    expect_raises(lambda: rdb.fetch_user_holding_snapshots(reader, None), ReportError,
+                  "로그인 정보가 없으면 오류(빈 표로 위장하지 않음)")
+
+    # ---- ⑼ 화면용 요약(build_holding_history) --------------------------------
+    multi = []
+    for day, p1, p2 in (("2026-08-10", 75000.0, 1100000.0),
+                        ("2026-08-11", 78000.0, None),
+                        ("2026-08-12", 80000.0, 1200000.0)):
+        day_prices = {(MARKET_KR, "005930"): p1}
+        if p2 is not None:
+            day_prices[(MARKET_KR, "000660")] = p2
+        _r, _h, _s = rdb.build_snapshot_rows_with_holdings(
+            "u1", holdings[:2], price_lookup_factory(day_prices), {MARKET_KR: day},
+            price_stamp_by_market={MARKET_KR: f"{day} 17:50"})
+        multi.extend(_h)
+    # 기간 중간에 팔린 종목(마지막 날에는 기록 없음)
+    _r, sold_rows, _s = rdb.build_snapshot_rows_with_holdings(
+        "u1", [holding(MARKET_KR, "005380", 5, 200000, "현대차")],
+        price_lookup_factory({(MARKET_KR, "005380"): 210000.0}), {MARKET_KR: "2026-08-10"})
+    multi.extend(sold_rows)
+    # DB 에서 읽어 온 것과 같은 상태로 맞춥니다(날짜는 date, 숫자는 float).
+    multi = rdb.sort_holding_snapshots(multi)
+
+    history = rdb.build_holding_history(multi, "2026-08-01", "2026-08-31")
+    check(history["base_date"] == date(2026, 8, 12) and history["first_date"] == date(2026, 8, 10),
+          "기준일 = 기간 안 마지막 기록일")
+    check([r["ticker"] for r in history["rows"]] == ["000660", "005930"],
+          "기준일 하루의 종목만, 평가금액 큰 순으로 정렬(날짜를 섞지 않음)")
+    check(all(r["snapshot_date"] == history["base_date"] for r in history["rows"]),
+          "🔴 표의 모든 행이 **같은 거래일** — 종목마다 각자의 마지막 날을 긁어 모으지 않음")
+    check(approx(history["totals"]["market_value"], 800000.0 + 2400000.0)
+          and approx(history["totals"]["cost"], 700000.0 + 2000000.0),
+          "표 합계 = 그날 종목별 합")
+    check(history["totals"]["holdings_count"] == 2 and history["totals"]["priced_count"] == 2,
+          "표 합계에 종목 수·담긴 종목 수가 함께")
+    samsung_row = next(r for r in history["rows"] if r["ticker"] == "005930")
+    check(approx(samsung_row["price_change_pct"], (80000 - 75000) / 75000 * 100),
+          "기간 주가등락 = 기간 안 첫 가격 → 기준일 가격(수량 변화의 영향을 받지 않음)")
+    check(samsung_row["price_change_from"] == date(2026, 8, 10), "비교한 날짜를 함께 돌려줌")
+    hynix_row = next(r for r in history["rows"] if r["ticker"] == "000660")
+    check(hynix_row["days_recorded"] == 3 and hynix_row["unpriced_days"] == 1,
+          "며칠치가 기록됐고 그중 며칠이 '가격 모름'이었는지 표시")
+    check([g["ticker"] for g in history["gone"]] == ["005380"]
+          and history["gone"][0]["last_date"] == date(2026, 8, 10),
+          "기간 중 기록이 끊긴 종목은 표에 섞지 않고 따로 알려 줌")
+    check(len(history["daily_by_ticker"]["005930"]) == 3
+          and approx(history["daily_by_ticker"]["005930"][0]["profit"], 50000.0),
+          "종목별 일별 추이 + 이익은 계산해서 붙임(저장값이 아님)")
+    check(history["daily_by_ticker"]["000660"][1]["profit"] is None,
+          "가격을 몰랐던 날의 이익은 0 이 아니라 없음(None)")
+
+    one_day = rdb.build_holding_history(
+        [r for r in multi if r["snapshot_date"] == date(2026, 8, 12)])
+    check(one_day["rows"][0]["price_change_pct"] is None,
+          "비교할 날이 하루뿐이면 등락률을 만들어내지 않음(—)")
+    check(rdb.build_holding_history([])["rows"] == [], "기록이 없으면 빈 결과(빈 표)")
+    check(rdb.build_holding_history(multi, "2027-01-01", "2027-12-31")["rows"] == [],
+          "기간 밖은 걸러짐")
+    mixed = [dict(multi[0]), dict(multi[0], market="US", currency="USD", ticker="AAPL")]
+    expect_raises(lambda: rdb.build_holding_history(mixed), ReportError,
+                  "원화·달러가 섞여 들어오면 합산하지 않고 중단(환율 변환 없음)")
+
+    match = rdb.compare_holding_total(3200000.0, 3200000.0)
+    check(match["comparable"] and match["matches"] is True, "대조: 일치")
+    gap = rdb.compare_holding_total(3200000.0, 3100000.0)
+    check(gap["matches"] is False and approx(gap["diff"], 100000.0)
+          and "어긋납니다" in gap["message"], "대조: 불일치 시 차이를 그대로 알림")
+    check(rdb.compare_holding_total(None, 100.0)["comparable"] is False,
+          "대조할 값이 없으면 '일치'라고 말하지 않음")
+
+    # ---- ⑽ 화면 문구 ---------------------------------------------------------
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        recorder = _HoldingViewRecorder()
+        module.st = recorder
+        try:
+            summary_rows = rdb.sort_snapshots([
+                snap(date(2026, 8, 12), 3200000.0, 2700000.0, holdings_count=2, priced_count=2),
+            ])
+            module._render_holding_history(MARKET_KR, multi, summary_rows,
+                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
+            check("삼성전자 (005930)" in table and "SK하이닉스 (000660)" in table,
+                  "한눈에 보는 표: 종목명(코드) 표기가 '내 성적표'와 같은 관례")
+            check(":red[" in table or ":blue[" in table,
+                  "수익률 색상이 국내 증시 관례(오르면 빨강/내리면 파랑)로 통일")
+            check("원" in table and "$" not in table, "금액은 format_amount() 통화 표기 그대로")
+            check("**합계 2종목**" in table, "표 맨 아래 합계 한 줄 — 한 장에서 총액이 바로 보임")
+            check(len(table.splitlines()) <= 6,
+                  "종목 수 + 헤더 + 합계 만큼만 — 기간 전체를 한 표에 늘어놓지 않음")
+            check(any("데이터 대조 통과" in t for t in recorder.caption_calls),
+                  "🔴 종목별 합과 합계 스냅샷을 화면에서도 매번 대조해 결과를 표시")
+            check(any("005380" in t for t in recorder.caption_calls),
+                  "기간 중 기록이 끊긴 종목을 표에 섞지 않고 따로 안내")
+            daily = next(t for t in recorder.markdown_calls if t.startswith("| 거래일 |"))
+            check("종가 수집 시각(KST)" in daily and "2026-08-10 17:50" in daily,
+                  "펼친 일별 표에는 그날 가격 수집 시각(한국시간)까지 함께")
+
+            # 가격을 몰랐던 날 — 빈칸·이전 가격 대체 금지
+            recorder.reset()
+            unpriced_only = [r for r in multi if r["ticker"] == "000660"
+                             and r["snapshot_date"] <= date(2026, 8, 11)]
+            module._render_holding_history(MARKET_KR, unpriced_only, [],
+                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            table2 = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
+            check("가격 모름" in table2,
+                  "가격을 몰랐던 날은 '가격 모름'으로 정직하게 표시(빈칸·이전 가격 대체 금지)")
+            check("1,100,000" not in table2,
+                  "전날 가격을 끌어와서 채우지 않음")
+            check(any("대조하지 못했습니다" in t for t in recorder.caption_calls),
+                  "대조할 합계 스냅샷이 없으면 '일치'라고 말하지 않고 그 사실을 밝힘")
+
+            # 불일치 — 숨기지 않고 경고
+            recorder.reset()
+            wrong = rdb.sort_snapshots([snap(date(2026, 8, 12), 999.0, 111.0)])
+            module._render_holding_history(MARKET_KR, multi, wrong,
+                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            check(any("대조 불일치" in t for t in recorder.warning_calls),
+                  "🔴 합계와 종목별 합이 어긋나면 숨기지 않고 경고로 드러냄")
+
+            # 표가 아직 없는 상태 — 안내로 대체(리포트 나머지는 정상)
+            recorder.reset()
+            module._render_holding_history(
+                MARKET_KR, [], [], date(2026, 8, 1), date(2026, 8, 31), "KRW",
+                error="PGRST205: Could not find the table "
+                      "'public.portfolio_holding_snapshots' in the schema cache")
+            check(any("report_schema.sql" in t for t in recorder.info_calls),
+                  "테이블이 아직 없으면 실행할 SQL 파일을 화면에서 안내")
+            check(not recorder.error_calls,
+                  "그 경우는 빨간 오류가 아니라 안내(기존 리포트는 정상 동작하므로)")
+
+            recorder.reset()
+            module._render_holding_history(MARKET_KR, [], [], date(2026, 8, 1),
+                                           date(2026, 8, 31), "KRW",
+                                           error="네트워크가 끊겼습니다")
+            check(any("네트워크" in t for t in recorder.error_calls),
+                  "그 밖의 조회 실패는 조용히 넘기지 않고 화면까지 도달시킴(§0-1)")
+
+            # 기간 리포트가 "데이터 부족"인 구간에서도 **저장된 종목별 기록은 보여야** 합니다.
+            # (기능을 켠 첫 달은 기간 시작 이전 기준점이 없어 거의 항상 INSUFFICIENT 입니다 —
+            #  여기서 숨기면 오너가 SQL 을 실행하고도 새 표를 한참 못 봅니다.)
+            recorder.reset()
+            window_only = rdb.sort_snapshots([
+                snap(date(2026, 8, 10), 3100000.0, 2700000.0),
+                snap(date(2026, 8, 12), 3200000.0, 2700000.0),
+            ])
+            module._render_market_block(MARKET_KR, window_only, PERIOD_MONTHLY,
+                                        date(2026, 8, 15), holding_rows=multi)
+            check(any("데이터 부족" in t for t in recorder.error_calls),
+                  "기간 시작 이전 기준점이 없으면 '데이터 부족'이 여전히 주 컨텐츠(§3 무손상)")
+            check(any(t.startswith("| 종목 |") for t in recorder.markdown_calls),
+                  "그 구간에서도 저장된 종목별 기록은 그대로 보여 줌(계산이 아니라 기록이므로)")
+        finally:
+            module.st = real_st
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 종목별 상세 렌더링 검증",
+              f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
+def test_holding_schema_and_wiring():
+    print("\n[10-1] 종목별 스냅샷 — SQL 스키마 · 화면 배선")
+    sql = (REPO_ROOT / "sql" / "report_schema.sql").read_text(encoding="utf-8")
+    sql_code = squeeze(sql_code_only(sql))
+
+    check("create table if not exists public.portfolio_holding_snapshots" in sql,
+          "종목별 테이블 생성문(여러 번 실행해도 안전)")
+    check("drop table" not in sql_code.lower(),
+          "실행되는 SQL 에 여전히 DROP TABLE 없음(기존 데이터 무손상)")
+    check("unique (user_id, market, ticker, snapshot_date)" in squeeze(sql),
+          "사용자×시장×종목×거래일 유니크 제약(하루 종목당 1행)")
+    check("alter table public.portfolio_holding_snapshots enable row level security" in sql,
+          "종목별 테이블도 RLS 켜기")
+    check("create policy holding_snapshots_select_own" in sql
+          and "for select to authenticated" in sql,
+          "본인 행 select 정책")
+    for forbidden in ("for insert to authenticated", "for update to authenticated",
+                      "for delete to authenticated"):
+        check(forbidden not in sql,
+              f"사용자에게 {forbidden.split()[1]} 정책을 주지 않음(합계 표와 같은 원칙)")
+    check("revoke all on public.portfolio_holding_snapshots from anon" in sql,
+          "anon 권한 회수")
+    check("grant select on public.portfolio_holding_snapshots to authenticated" in sql,
+          "로그인 사용자에게는 select 만")
+    check("grant select, insert, update on public.portfolio_holding_snapshots to service_role"
+          in sql, "배치(service_role)에도 delete 는 주지 않음")
+    # CREATE TABLE 블록만 잘라서 확인합니다(파일 다른 곳의 같은 문자열에 속지 않게).
+    create_block = sql_code[
+        sql_code.index("create table if not exists public.portfolio_holding_snapshots"):
+        sql_code.index("create index if not exists holding_snapshots_user_market_date_idx")]
+    check("priced boolean not null" in create_block, "가격을 알았는지 여부 컬럼")
+    check("current_price is null or current_price > 0" in create_block,
+          "가격을 모르면 NULL — 0 으로 메우지 못하게 DB 에서도 강제(§0-1)")
+    check("(priced and current_price is not null and market_value is not null)" in create_block
+          and "(not priced and current_price is null and market_value is null)" in create_block,
+          "'가격 모름'의 표현이 한 가지로 못 박힘(priced 와 값의 유무가 어긋난 행은 못 들어옴)")
+    check("(market = 'KR' and currency = 'KRW')" in create_block,
+          "종목별 표에도 원/달러 혼용 차단 제약")
+    check("create index if not exists holding_snapshots_user_market_date_idx" in sql,
+          "주 조회 패턴(user_id, market, snapshot_date) 인덱스")
+    check("stock_name text" in create_block, "그날 기준 종목명 컬럼")
+    check("price_as_of_kst text" in create_block,
+          "종목별 표에도 가격 수집 시각 컬럼(이 표만 봐도 자기완결적으로 읽히게)")
+    check("created_at timestamptz not null default now()" in create_block,
+          "created_at 컬럼")
+    check("quantity numeric(20, 6) not null" in create_block
+          and "avg_purchase_price numeric(20, 6) not null" in create_block
+          and "cost numeric(20, 6) not null" in create_block,
+          "숫자 컬럼 타입·정밀도가 holdings / 합계 표와 동일(numeric(20,6))")
+    check(sql.count("sum(market_value) filter (where priced)") == 1,
+          "설치 후 '합계 = 종목별 합' 대조 쿼리를 파일에 남김(오너가 눈으로 확인 가능)")
+    check(not re.search(r"https://[a-z0-9]+\.supabase\.co", sql), "실제 Supabase URL 없음")
+
+    # 기존 합계 테이블 정의가 그대로인지(이번 확장은 순수 추가)
+    check("create table if not exists public.portfolio_daily_snapshots" in sql
+          and "constraint snapshots_user_market_date_unique unique (user_id, market, snapshot_date)"
+          in sql,
+          "🔴 기존 합계 테이블 정의·제약은 한 글자도 바뀌지 않음")
+
+    db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
+    view_code = python_code_only(view_src)
+    check("HOLDING_SNAPSHOTS_TABLE" in db_src and "portfolio_holding_snapshots" in db_src,
+          "데이터 계층에 종목별 테이블 상수")
+    check("create_service_client" not in view_code and "SERVICE_ROLE" not in view_code,
+          "🔴 화면 코드에는 여전히 service_role 경로가 없음(가장 중요한 격리)")
+    check("_render_holding_history" in view_src and "_render_snapshot_table" in view_src,
+          "종목별 상세는 기존 '스냅샷 원본 보기'와 **별도 섹션**")
+    check("compare_holding_total" in view_code,
+          "화면이 매번 합계와 대조(어긋나면 드러남)")
+    check(not re.search(r"open\([^)]*['\"]w", db_src + view_src),
+          "새 코드도 어떤 파일에도 쓰지 않음(읽기 전용)")
+    check("delete(" not in python_code_only(db_src),
+          "데이터 계층에 delete 경로가 없음(과거 기록을 지우는 코드 없음)")
 
 # =============================================================================
 # 10. SQL 스키마 · 워크플로우 · 화면 · 범위 확인
@@ -1445,6 +2069,8 @@ def main():
     test_supabase_wiring()
     test_batch_end_to_end()
     test_price_stamp_wiring()
+    test_holding_snapshots()
+    test_holding_schema_and_wiring()
     test_sql_schema()
     test_workflow()
     test_view_and_scope()

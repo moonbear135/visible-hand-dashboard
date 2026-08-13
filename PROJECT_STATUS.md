@@ -105,17 +105,28 @@
 
 ## 4. 지금 열려있는 일 (다음에 반드시 확인/처리할 것)
 
-- **🔴 오너 액션 1건 — Supabase 에서 SQL 1줄 실행 (2026-08-13, TASK_HISTORY #112).**
-  "📈 사장님 보고서"에 **"이 숫자는 언제 종가로 만들어졌나"(한국시간 시:분)** 를 표시하려고
-  스냅샷 테이블에 컬럼을 하나 추가했습니다. 기존 테이블에는 `sql/report_schema.sql` 의
-  `create table **if not exists**` 가 아무 일도 하지 않으므로 **아래 한 줄이 필요합니다**
-  (Supabase → SQL Editor → New query → Run):
-  ```sql
-  alter table public.portfolio_daily_snapshots add column if not exists price_as_of_kst text;
-  ```
-  실행 전에 배치가 돌아도 스냅샷은 정상 저장됩니다(시각만 빠지고, CI 로그에 이 문장을 남깁니다).
-  다만 그 사이 행은 화면에서 "시각 정보 없음"으로 남고 **나중에 소급해 채우지 않습니다**. 자세한
-  내용·확인 쿼리는 **§10-7**.
+> **📌 2026-08-13 세션 종료 시점 요약 — 다음 세션(다음 주)은 여기서부터 시작하세요.**
+> 오너가 주간 토큰 소진 직전이라 이번 세션은 여기서 멈추고, 코드 개발은 다음 주에 재개합니다.
+> **바로 아래 항목(#113 — 종목별 일일 스냅샷)이 다음 세션의 첫 번째 확인 대상입니다.**
+
+- **🔴 오너 액션 대기 — 종목별 일일 스냅샷 신설 (2026-08-13, TASK_HISTORY #113, 아직 git 미실행).**
+  "합계만 보여주니 의미가 없다"는 오너 피드백으로, 새 테이블 `portfolio_holding_snapshots`를
+  추가해 종목별(수량·평균매입가·현재가·평가금액·손익·수익률) 히스토리를 "한 장으로 보는" 표로
+  리포트 화면에 붙였습니다(합계 테이블은 무변경 — 순수 추가). **오너가 이번 대화 마지막에 git
+  명령어를 실행했는지 미확인** — 다음 세션 시작 시 `git log -3`으로 커밋 `#113` 반영 여부부터
+  확인하세요. 안 됐다면 아래를 오너에게 다시 안내:
+  1. Supabase SQL Editor 에서 `sql/report_schema.sql` **파일 전체**를 다시 붙여넣고 Run
+     (여러 번 실행해도 안전 — `#112` 컬럼과 `#113` 새 테이블이 함께 반영됨)
+  2. git add(파일별) → commit → push (정확한 명령어는 TASK_HISTORY #113 항목 참고)
+  - 스키마가 아직 없어도 배치는 안 죽고, 종목별 저장만 건너뛰며 기존 합계 리포트는 정상
+    작동합니다(§10-7 이하 참고).
+- **✅ 완료 — 종가 수집 시각(시:분) 표시 (2026-08-13, TASK_HISTORY #112).** 오너가 SQL
+  실행(`alter table ... add column price_as_of_kst`) 및 git push 완료 확인함. 다음 배치부터
+  "종가 기준 : HH:MM (한국시간)"이 시장별로 표시됩니다.
+- **🟡 미확인 — SCORECARD_ENABLED / REPORT_ENABLED 가 실제로 켜져 있는지.** #106에서 공개
+  전환 승인은 받았지만, 오너가 Streamlit Cloud Secrets 에 이 2줄을 실제로 등록했는지 이 세션
+  안에서 명확한 답을 못 받았습니다(관리자 로그인 상태로 테스트했을 가능성 있음). 다음 세션에서
+  다시 확인 필요 — §9-6 참고.
 - **✅ 완료 — 비밀번호 찾기, 실사용 검증까지 끝남 (2026-08-13, TASK_HISTORY #109/#110).**
   로그인 화면에 **"비밀번호 찾기" 탭**을 추가했고, 오너가 Resend Custom SMTP 연결 +
   `mail.visiblehand.co.kr` 도메인 인증 + Reset Password 템플릿에 `{{ .Token }}` 추가까지
@@ -767,21 +778,32 @@ REPORT_ENABLED = "1"
 
 ### 10-1. 지금 상태 = 🔓 **공개 승인 완료 + 공개 전환 전 최종 점검 완료** (2026-08-13, #106)
 
-> 🔴 **오너가 Supabase 에서 실행해야 할 SQL 이 1줄 있습니다 (2026-08-13, TASK_HISTORY #112)**
+> 🔴 **오너가 Supabase 에서 실행해야 할 SQL 이 있습니다 (2026-08-13, TASK_HISTORY #112 · #113)**
+>
+> **`sql/report_schema.sql` 파일 전체를 SQL Editor 에 붙여넣고 한 번 Run 하면 아래 두 가지가
+> 한꺼번에 끝납니다.** 여러 번 실행해도 안전하고(idempotent), 기존 표와 지금까지 쌓인 데이터는
+> 건드리지 않습니다.
+>
+> | # | 무엇 | 왜 |
+> |---|---|---|
+> | ① (#112) | `portfolio_daily_snapshots` 에 `price_as_of_kst` 컬럼 추가 | "이 숫자는 **언제 종가**로 만들어졌나"(한국시간 시:분) 표시 — §10-7 |
+> | ② (#113) | **`portfolio_holding_snapshots` 테이블 신설** + RLS·인덱스 | **종목별** 일일 스냅샷 저장(오너의 품질관리 요구) — §10-8 |
+>
+> 한 줄짜리 ①만 따로 실행하고 싶다면:
 >
 > ```sql
 > alter table public.portfolio_daily_snapshots add column if not exists price_as_of_kst text;
 > ```
 >
-> 리포트에 "이 숫자는 **언제 종가**로 만들어졌나"(한국시간 시:분)를 표시하기 위해 스냅샷 테이블에
-> 컬럼 하나를 추가했습니다. `sql/report_schema.sql` 은 `create table **if not exists**` 라서
-> **이미 만들어져 있는 테이블에는 컬럼이 생기지 않습니다** — 위 한 줄을 SQL Editor 에서 실행하거나,
-> `sql/report_schema.sql` 파일 전체를 다시 실행하세요(파일 §1-1 에 같은 문장이 들어 있고, 여러 번
-> 실행해도 안전합니다). 확인은 파일 §7 의 ③-1 쿼리로 합니다.
+> ②의 SQL 전문은 **§10-8** 에 그대로 실어 뒀습니다(파일 §8~§9 와 같은 내용).
+> 확인은 파일 §7(①·기존 표)과 §9(②·종목별 표)의 자가 점검 쿼리로 합니다 — 특히 §9 의 ⑨
+> **"합계 = 종목별 합" 대조 쿼리는 항상 0행**이어야 정상입니다.
 >
-> 실행 전까지도 **배치는 죽지 않습니다** — 시각만 빼고 저장한 뒤 로그에 이 ALTER 문을 남깁니다.
-> 다만 그 사이에 쌓인 행은 화면에서 계속 "시각 정보 없음"으로 보이고, **나중에 소급해서 채우지
-> 않습니다**(그날 몇 시 가격이었는지는 어디에도 기록돼 있지 않으므로 — §0-1). 자세한 내용은 §10-7.
+> 실행 전까지도 **배치는 죽지 않습니다** — ①은 시각만 빼고 저장하고, ②는 종목별 저장만 건너뛴 뒤
+> 각각 무엇을 실행하면 되는지 로그에 크게 남깁니다. **그 사이에도 합계 스냅샷은 정상 저장되고
+> 기존 리포트는 그대로 동작합니다.** 다만 그 사이 날짜는 화면에서 "시각 정보 없음" / "종목별
+> 기록 없음"으로 남고 **소급해서 채우지 않습니다**(그날 몇 시 가격이었는지·어느 종목이 얼마였는지는
+> 어디에도 기록돼 있지 않으므로 — §0-1). 자세한 내용은 §10-7 · §10-8.
 
 > **⚡ 현재 상태 한 줄 요약 (2026-08-13 갱신)** — 오너가 2026-08-12 "둘 다 공개로 전환해줘"로
 > 이 모듈의 공개를 최종 승인했고, 공개 전 보안/견고성 최종 점검이 끝났습니다(#106). 이 모듈에서
@@ -837,12 +859,12 @@ REPORT_ENABLED = "1"
 
 | 파일 | 역할 |
 |---|---|
-| `sql/report_schema.sql` | `portfolio_daily_snapshots`(사용자 × 시장 × 거래일 = 1행) + RLS. **정책이 select 하나뿐**인 게 `holdings` 와 다른 점 — 쓰기는 배치(service_role)만 하고 사용자는 자기 과거 기록을 못 고칩니다. `priced_count > 0` CHECK 로 "그날 가격을 하나도 모르면 행 자체가 안 생기게" DB 레벨에서도 강제 |
+| `sql/report_schema.sql` | **표 2개** — `portfolio_daily_snapshots`(사용자 × 시장 × 거래일 = 1행, 합계) + `portfolio_holding_snapshots`(§8, 2026-08-13 추가 — 사용자 × 시장 × **종목** × 거래일 = 1행, 상세) + 각각의 RLS. **정책이 select 하나뿐**인 게 `holdings` 와 다른 점 — 쓰기는 배치(service_role)만 하고 사용자는 자기 과거 기록을 못 고칩니다. `priced_count > 0` CHECK 로 "그날 가격을 하나도 모르면 행 자체가 안 생기게" DB 레벨에서도 강제 |
 | `collector_us_indices.py` | 미국 벤치마크(S&P500·나스닥) 일별 종가 수집기 — 아래 §10-3 소스 조사 결과 참고 |
 | `utils/report_db.py` | 기간 경계 계산 · 스냅샷 행 생성 · 기간 집계/데이터 부족 판정 · 벤치마크 수익률 · Supabase 접근. **저장소에서 유일하게 service_role 을 쓰는 파일** |
 | `views/report_view.py` | 리포트 화면(기간 선택·이전/다음 기간·시장별 블록·벤치마크 비교·데이터 부족 안내). 기본 숨김 |
 | `.github/workflows/scrape_report_snapshots.yml` | 평일 23:20 UTC 실행(코스피·미국 수집이 끝난 뒤) |
-| `tests/test_report.py` | 오프라인 **270체크** (네트워크·Supabase 불필요). #96 부터 파싱 검증은 **실제 응답 원문 픽스처**(`tests/fixtures/us_index_history_{spy,oneq}_data_json_head.json`, 2026-08-12 캡처)로 합니다 |
+| `tests/test_report.py` | 오프라인 **429체크** (네트워크·Supabase 불필요. 2026-08-13 기준 — #112 +41, #113 +113). #96 부터 파싱 검증은 **실제 응답 원문 픽스처**(`tests/fixtures/us_index_history_{spy,oneq}_data_json_head.json`, 2026-08-12 캡처)로 합니다 |
 
 ### 10-3. 🔍 벤치마크 소스 — 실응답으로 확인한 결과와 채택 근거 (§0-1)
 
@@ -934,6 +956,9 @@ REPORT_ENABLED = "1"
   영향이 섞여 있다"는 안내를 반드시 붙입니다. TWR 같은 정교한 계산은 v1 범위 밖(지어내지 않기).
 - **화면 숫자와 스냅샷이 같은 계산** — 평가금액은 "내 성적표"의 `make_price_lookup()`/
   `evaluate_holding()` 을 그대로 재사용합니다(두 번 구현하면 언젠가 반드시 어긋납니다).
+- **합계와 종목별이 같은 계산** (2026-08-13 추가, §10-8) — 종목별 스냅샷 표를 덧붙이면서도
+  합계를 따로 계산하는 경로를 만들지 않았습니다. **종목별 행을 먼저 만들고 그것을 그대로 더해
+  합계 행을 만듭니다.** 화면에서도 매번 두 값을 대조해 어긋나면 숨기지 않고 표시합니다.
 
 ### 10-6. v1 에서 제외한 것(다음 순서)
 
@@ -990,4 +1015,183 @@ alter table public.portfolio_daily_snapshots add column if not exists price_as_o
 - **이 기능 이전에 저장된 행**은 `종가 기준 : 시각 정보 없음`(표에서는 `기록 없음`)으로 정직하게
   표시하고 **소급해서 채우지 않습니다.** 화면 코드에 `date.today()`/`datetime.now()` 가 없다는
   것을 테스트가 강제합니다(오늘 시각으로 대신 채우는 사고 방지).
+
+### 10-8. 🧾 종목별 일일 스냅샷 저장 (2026-08-13, TASK_HISTORY #113)
+
+오너 결정 원문: *"3번으로 해보자 내가 제일 중시하는 데이터의 품질관리를 하려면 아무튼 최대한
+깨끗하게 잘 정리된 상태의 많은 데이터가 필요해 대신 가독성을 최대한 살린 한장으로 볼 수 있는
+테이블을 잘 짜줘 나중에 유료로 할 정도로 자료가 많아지는데 들쑥날쑥하면 세상의 모두가 힘들어져"*
+
+#### 왜 늘렸나 — 그리고 저장량에 대한 오너의 명시적 결정
+
+`portfolio_daily_snapshots` 는 지금까지 **사용자 × 시장 × 거래일 = 1행**(그날 **합계**)만
+저장했습니다. 처음에 오너가 *"일간·주간·월간·분기·반기·연간을 다 저장하면 계정당 데이터가 너무
+쌓인다"* 고 우려해 **일부러 좁힌** 설계였습니다(§10-2, `sql/report_schema.sql` §1).
+
+이번에 늘린 것은 **기간 축이 아니라 종목 축**입니다.
+
+- 기간별 테이블은 **여전히 만들지 않습니다** — 주간·월간·분기·반기·연간은 예전 그대로 합계 표에
+  대한 **날짜 범위 쿼리**로 계산합니다(미리 계산해 저장하면 보유 종목이 바뀔 때마다 과거 집계가
+  어긋나기 시작합니다).
+- 대신 **그날 어느 종목을 얼마에 얼마나 들고 있었나**를 종목별로 남깁니다. 합계 1줄만으로는
+  "이 달 수익이 어느 종목에서 났는지"를 **영원히** 알 수 없고, 과거 종목별 값은 **소급 계산이
+  불가능**합니다(그날 가격을 아무 데도 보관하지 않으므로 — §0-1). 지금부터 저장하지 않으면 그
+  데이터는 영구히 존재하지 않습니다.
+
+**저장량 증가는 오너가 설명을 듣고 인지·감수하기로 한 사항입니다.**
+
+| | 행 수 (사용자 1명 기준) | 비고 |
+|---|---|---|
+| 기존 합계 표 | 연 약 500행 (2시장 × 250거래일) | 그대로 유지 |
+| 신설 종목별 표 | 연 약 2,500행 (10종목 기준) | 종목 수에 비례 |
+| 대략 용량 | 사용자당 연 0.5MB 안팎 | 무료 티어 500MB 기준 **수백 사용자 · 수년** 여유 |
+
+용량이 한계에 가까워지면 **종목별 행만** 오래된 것부터 지우는 보존 정책을 그때 도입하면 됩니다.
+그때도 합계 표는 그대로라 **기간 리포트는 전혀 영향받지 않습니다** — 두 표를 하나로 합치지 않고
+나란히 둔 덕에 나중에 이런 선택지가 남습니다.
+
+#### 🔴 "들쑥날쑥"을 원천 차단한 방법 (이번 작업의 최우선 가치)
+
+기존 표를 갈아엎지 않고 **새 표를 덧붙였고**, 두 표를 **같은 배치 실행의 같은 계산 결과 하나**
+에서 함께 만듭니다. `utils/report_db.build_snapshot_rows_with_holdings()` 가
+
+1. `evaluate_holding()` 으로 종목을 평가하고 (← '내 성적표' 화면과 **같은 함수**),
+2. 그 결과를 곧바로 **종목별 행**(= 실제로 DB 에 저장될 바로 그 숫자)으로 만든 뒤,
+3. **그 종목별 행들을 그대로 더해서** 합계 행을 만듭니다.
+
+⇒ **합계를 따로 계산하는 코드 경로가 저장소에 없습니다.** 합계는 종목별의 파생물이라 두 값이
+서로 다른 입력·다른 반올림·다른 시점을 탈 수가 없습니다. 합산도 DB(numeric)와 같은
+**십진수(Decimal)** 로 합니다.
+
+⚠️ 다만 **완전한 비트 단위 일치를 약속하지는 않습니다**(지어내지 않기). 합계가 10^10 을 넘으면서
+동시에 소수점 이하 금액까지 있는 경우(수백억원 + 가중평균 매입단가처럼 무한소수인 단가) 파이썬
+배정밀도 실수의 표현 한계로 **최대 0.00005원** 어긋날 수 있습니다(무작위 2,000 포트폴리오로 실측).
+그래서 대조는 0 이 아니라 **0.01(1원의 100분의 1)** 허용오차로 봅니다 — 화면 표기 단위(원=정수,
+달러=소수 2자리)보다 훨씬 작아 **사람이 볼 수 있는 불일치는 전부 잡힙니다.**
+
+#### ▶️ 오너가 실행할 SQL
+
+**가장 쉬운 방법: `sql/report_schema.sql` 파일 전체를 SQL Editor 에 붙여넣고 Run.**
+(여러 번 실행해도 안전하고, 기존 표·데이터는 건드리지 않습니다. #112 의 ALTER 도 같이 처리됩니다.)
+
+그 파일에서 이 표에 해당하는 부분만 따로 실행하고 싶다면 아래가 전문입니다(설명 주석만 뺀 것).
+⚠️ 아래 조각만 실행하려면 `public.report_set_updated_at()` 함수가 이미 있어야 합니다(파일 §2 가
+만드는 함수 — 2026-08-12 에 파일 전체를 실행했다면 이미 있습니다). 없다면 그냥 **파일 전체**를
+실행하세요.
+
+```sql
+create table if not exists public.portfolio_holding_snapshots (
+    id                 uuid primary key default gen_random_uuid(),
+    user_id            uuid not null references auth.users (id) on delete cascade,
+    market             text not null check (market in ('KR', 'US')),
+    ticker             text not null check (length(ticker) between 1 and 20),
+    snapshot_date      date not null,
+
+    stock_name         text,
+
+    quantity           numeric(20, 6) not null check (quantity > 0),
+    avg_purchase_price numeric(20, 6) not null check (avg_purchase_price >= 0),
+    cost               numeric(20, 6) not null check (cost >= 0),
+
+    current_price      numeric(20, 6) check (current_price is null or current_price > 0),
+    market_value       numeric(20, 6) check (market_value is null or market_value >= 0),
+
+    currency           text not null check (currency in ('KRW', 'USD')),
+
+    priced             boolean not null,
+
+    price_as_of_kst    text,
+
+    created_at         timestamptz not null default now(),
+    updated_at         timestamptz not null default now(),
+
+    constraint holding_snapshots_user_market_ticker_date_unique
+        unique (user_id, market, ticker, snapshot_date),
+
+    constraint holding_snapshots_market_currency_match check (
+        (market = 'KR' and currency = 'KRW')
+        or (market = 'US' and currency = 'USD')
+    ),
+
+    constraint holding_snapshots_priced_match check (
+        (priced and current_price is not null and market_value is not null)
+        or (not priced and current_price is null and market_value is null)
+    )
+);
+
+create index if not exists holding_snapshots_user_market_date_idx
+    on public.portfolio_holding_snapshots (user_id, market, snapshot_date);
+
+drop trigger if exists holding_snapshots_set_updated_at on public.portfolio_holding_snapshots;
+create trigger holding_snapshots_set_updated_at
+    before update on public.portfolio_holding_snapshots
+    for each row execute function public.report_set_updated_at();
+
+comment on table public.portfolio_holding_snapshots is
+    '리포트 모듈: 사용자별·시장별·종목별 하루 1행 스냅샷(2026-08-13 추가). portfolio_daily_snapshots 의 합계는 이 표의 같은 날 행들을 그대로 더한 값이며, 두 표는 같은 배치 실행의 같은 계산 결과로 함께 저장됩니다. 쓰기는 GitHub Actions 배치(service_role)만, 사용자는 읽기 전용.';
+comment on column public.portfolio_holding_snapshots.stock_name is
+    '그날 기준 표시용 종목명. holdings 에서 그대로 복사합니다(나중에 종목을 팔거나 회사명이 바뀌어도 과거 표가 빈칸이 되지 않게).';
+comment on column public.portfolio_holding_snapshots.cost is
+    '수량 × 평균매입가. 같은 날 같은 시장의 priced=true 행들의 합이 portfolio_daily_snapshots.total_cost 와 정확히 같아야 합니다.';
+comment on column public.portfolio_holding_snapshots.market_value is
+    '수량 × 그날 현재가. 현재가를 몰랐으면 NULL(0 으로 채우지 않음). 같은 날 같은 시장의 priced=true 행들의 합이 portfolio_daily_snapshots.total_value 와 정확히 같아야 합니다.';
+comment on column public.portfolio_holding_snapshots.priced is
+    '그날 이 종목의 현재가를 알았는지. false 면 current_price/market_value 가 NULL 이고, 화면은 빈칸이 아니라 ''가격 모름''으로 표시합니다. 같은 날 같은 시장의 true 개수 = portfolio_daily_snapshots.priced_count.';
+comment on column public.portfolio_holding_snapshots.price_as_of_kst is
+    '이 행의 가격이 수집된 시각(한국시간 ''YYYY-MM-DD HH:MM'' 문자열). 같은 시장·같은 날이면 모든 종목이 같은 값이지만, 이 표만 조회해도 자기완결적으로 읽히도록 행마다 넣습니다. 모르면 NULL(추정하지 않음).';
+
+alter table public.portfolio_holding_snapshots enable row level security;
+
+drop policy if exists holding_snapshots_select_own on public.portfolio_holding_snapshots;
+create policy holding_snapshots_select_own on public.portfolio_holding_snapshots
+    for select to authenticated
+    using (auth.uid() = user_id);
+
+revoke all on public.portfolio_holding_snapshots from anon;
+grant select on public.portfolio_holding_snapshots to authenticated;
+grant select, insert, update on public.portfolio_holding_snapshots to service_role;
+```
+
+**실행 후 확인** — `sql/report_schema.sql` §9 의 자가 점검 쿼리를 그대로 실행하세요.
+
+- ⑥ `relrowsecurity = true` (RLS 켜짐)
+- ⑦ 정책이 **select 1개뿐**
+- ⑧ 배치 1회 실행 후 종목별 행이 들어왔는지
+- ⑨ 🔴 **"합계 = 종목별 합" 대조 쿼리 — 항상 0행이어야 정상**
+  (이 표를 만들기 **전** 날짜는 종목별 행이 없어서 나옵니다. 정상입니다 — 소급해서 만들지
+  않습니다. 실제 점검은 `and d.snapshot_date >= '이 SQL 을 실행한 날짜'` 를 붙여서 하세요.)
+
+#### 실행 전에 배치가 돌아도 괜찮습니다
+
+- **합계 스냅샷은 예전과 똑같이 정상 저장**되고 기존 리포트는 그대로 동작합니다(이번 확장은
+  순수 추가라 기존 기능을 하나도 퇴화시키지 않습니다).
+- 종목별 저장 단계만 건너뛰고, 무엇을 실행하면 되는지 CI 로그에 크게 남깁니다.
+- 화면에서는 종목별 섹션만 "아직 준비되지 않았습니다 + 실행할 파일" 안내로 대체됩니다.
+- 그 사이 날짜의 종목별 값은 **소급해서 채우지 않습니다**(어디에도 기록돼 있지 않으므로).
+
+#### 저장 순서와 부분 실패 (Supabase REST 에는 여러 표에 걸친 트랜잭션이 없습니다)
+
+- **합계 먼저 → 종목별 나중.** 합계 저장이 실패하면 예외가 나서 종목별은 시도조차 하지 않습니다
+  ⇒ **"종목별은 있는데 합계가 없는 날"은 생기지 않습니다**(그 반대는 생길 수 있고, 그건 기존
+  리포트가 멀쩡한 안전한 쪽입니다).
+- 테이블 없음 외의 실패는 **삼키지 않고 배치를 빨갛게 실패**시킵니다. 그때도 합계는 이미 저장돼
+  있어 **잃는 수치가 없고**, upsert 라 다음 실행이 같은 날짜를 그대로 다시 채웁니다.
+- 화면은 **매번 종목별 합과 합계 스냅샷을 대조**해서, 어긋나면 숨기지 않고 그 사실을 보여 줍니다.
+
+#### 화면 — "가독성을 최대한 살린 한 장으로 볼 수 있는 테이블"
+
+시장 블록 안, 벤치마크 비교 아래에 `🧾 종목별 상세` 섹션이 생겼습니다(기존 "스냅샷 원본 보기"와는
+**별도 섹션**이고 그 표는 지금까지처럼 맨 아래 접혀 있습니다).
+
+- 기간 안 **마지막 기록일 하루**의 종목별 상태를 **평가금액 큰 순**으로 한 표에 담고 맨 아래
+  **합계 한 줄**. 종목 10개면 11줄이라 스크롤 없이 한눈에 들어옵니다.
+  컬럼: 종목 / 수량 / 평균매입가 / 현재가 / 평가금액 / 평가손익 / 수익률 / **기간 주가등락** / 기록일수.
+- **날짜를 섞지 않습니다** — 표의 모든 행이 같은 거래일 값입니다. 기간 중 기록이 끊긴 종목(매도 등)은
+  표에 섞지 않고 아래에 따로 적습니다.
+- **일별 추이는 펼쳐서** — 종목 하나를 고르면 그 종목의 기간 내 일별 표(거래일 / 종가 수집 시각(KST) /
+  수량 / 현재가 / 평가금액 / 평가손익 / 수익률).
+- 색·금액 표기는 '내 성적표' 표와 **같은 관례**(오르면 빨강 / 내리면 파랑, `format_amount()`).
+- **가격을 몰랐던 날은 "가격 모름"** — 빈칸으로 얼버무리거나 전날 가격을 끌어오지 않습니다.
+- 표 바로 아래에 **대조 결과**를 함께 보여 줍니다: `⚖️ 데이터 대조 통과 — 위 종목별 합계(…)가
+  같은 날 합계 스냅샷과 정확히 일치합니다.`
 

@@ -11,9 +11,12 @@
 --       (새 프로젝트를 만들지 마세요 — 이 테이블은 기존 `holdings` / `auth.users` 를 참조합니다)
 --    2. 좌측 메뉴 → SQL Editor → New query
 --    3. 이 파일 전체를 붙여넣고 Run
---    4. 좌측 메뉴 → Table Editor 에서 public.portfolio_daily_snapshots 테이블과
---       "RLS enabled" 표시를 눈으로 확인
---    5. 맨 아래 §7 자가 점검 쿼리를 실행해 결과를 눈으로 확인
+--    4. 좌측 메뉴 → Table Editor 에서 아래 **두 테이블**과 각각의 "RLS enabled" 표시를
+--       눈으로 확인
+--         · public.portfolio_daily_snapshots   (시장별 합계 1행 — §1)
+--         · public.portfolio_holding_snapshots (종목별 상세 — §8, 2026-08-13 추가)
+--    5. 맨 아래 §7 · §9 자가 점검 쿼리를 실행해 결과를 눈으로 확인
+--       (특히 §9 의 ⑨ '합계 = 종목별 합' 대조 쿼리는 **항상 0행**이어야 정상입니다)
 --
 --  ⚠️ 이 스크립트는 **여러 번 실행해도 안전하도록**(idempotent) 작성했습니다.
 --     기존 데이터를 지우는 DROP TABLE 은 일부러 넣지 않았습니다.
@@ -280,3 +283,222 @@ grant select, insert, update on public.portfolio_daily_snapshots to service_role
 --  ⑤ 로그인 상태의 **앱에서** 다른 사람 행이 안 보이는지(대시보드 SQL Editor 는 postgres
 --     권한이라 RLS 를 우회하므로, 이 확인만은 반드시 앱에서 해야 합니다).
 -- =============================================================================
+
+
+-- =============================================================================
+-- 8. 🆕 portfolio_holding_snapshots — **종목별** 일일 스냅샷 (2026-08-13 오너 결정)
+-- =============================================================================
+--  ▶ 이 블록은 **추가**입니다. 위 §1~§7 의 portfolio_daily_snapshots(시장별 합계 1행)은
+--    한 글자도 바뀌지 않았고, 지금 쌓여 있는 데이터도 그대로 씁니다. 파일 전체를 다시
+--    실행하면 기존 테이블은 건드리지 않고(`create table if not exists`) 이 테이블만 새로
+--    생깁니다.
+--
+--  ── 왜 만드나 (오너 결정, 2026-08-13) ────────────────────────────────────────
+--  처음에는 "일간·주간·월간·분기·반기·연간을 다 저장하면 계정당 데이터가 너무 쌓인다"는
+--  우려로 **시장별 합계 1줄만** 저장했습니다(§1 의 설명). 그 판단은 기간 리포트에 대해서는
+--  지금도 유효합니다(기간별 테이블은 여전히 만들지 않습니다 — 날짜 범위 쿼리로 계산).
+--
+--  이번에 늘리는 건 **기간 축이 아니라 종목 축**입니다. 오너 원문:
+--    "내가 제일 중시하는 데이터의 품질관리를 하려면 아무튼 최대한 깨끗하게 잘 정리된
+--     상태의 많은 데이터가 필요해 … 나중에 유료로 할 정도로 자료가 많아지는데 들쑥날쑥하면
+--     세상의 모두가 힘들어져"
+--  합계 1줄만으로는 "이 달 수익이 어느 종목에서 났는지"를 **영원히** 알 수 없습니다.
+--  과거 종목별 값은 소급 계산이 불가능하므로(그날 가격을 아무 데도 보관하지 않음), 지금부터
+--  저장하지 않으면 그 데이터는 영구히 존재하지 않습니다.
+--
+--  ── 저장량 (오너가 인지하고 감수하기로 한 부분) ─────────────────────────────
+--    사용자 1명 × 보유 10종목 × 거래일 250일 ≈ 연 2,500행 (합계 테이블의 500행 + α).
+--    한 행이 대략 150~200바이트 → 사용자당 연 0.5MB 안팎. 무료 티어 500MB 기준으로
+--    수백 사용자 · 수년 단위까지 여유가 있습니다. 그래도 무한하지는 않으므로, 용량이
+--    한계에 가까워지면 **오래된 종목별 행만** 지우는 보존 정책을 그때 도입하면 됩니다
+--    (합계 테이블은 그대로 두면 되므로 기간 리포트는 영향받지 않습니다 — 이렇게 두 표를
+--     나눠 둔 덕에 나중에 선택지가 생깁니다).
+--
+--  ── 🔴 이 표의 존재 이유이자 가장 중요한 원칙 : "들쑥날쑥" 금지 ──────────────
+--  합계 표와 이 표는 **같은 배치 실행에서, 같은 메모리 위의 평가 결과 하나**로부터
+--  함께 만들어집니다(`utils/report_db.build_snapshot_rows_with_holdings()`).
+--    · 종목별 행을 먼저 만들고 → **그 행들을 그대로 더해서** 합계 행을 만듭니다.
+--    · 합계를 따로 계산하는 경로가 코드에 없습니다. 두 값이 서로 다른 계산을 타지 않으므로
+--      원천적으로 어긋날 수 없습니다.
+--    · 반올림도 같은 자리(소수점 6자리)에서 **한 번만** 합니다 — 종목별 행에 저장되는
+--      바로 그 숫자를, DB 와 같은 십진수 방식으로 더해서 합계를 만듭니다(먼저 더하고 나중에
+--      반올림하지 않고, 파이썬 float 로 대충 더하지도 않습니다).
+--  ⇒ 아래 §9 의 ⑨ 대조 쿼리는 항상 0행이어야 정상입니다. 화면에서도 같은 대조를 하고,
+--    어긋나면 숨기지 않고 표시합니다.
+--  ⚠️ 다만 **완전한 비트 단위 일치를 약속하지는 않습니다**(지어내지 않기). 배치가 쓰는
+--     파이썬의 배정밀도 실수는 유효자릿수가 15~17자리라, 합계가 대략 10^10 을 넘으면서
+--     동시에 소수점 이하 금액까지 있는 경우(수백억원 + 가중평균 매입단가처럼 무한소수인
+--     단가) 마지막 자리가 어긋날 수 있습니다 — 실측 최대 오차 0.00005원. 그래서 대조는
+--     **0.01(1원의 100분의 1)** 허용오차로 봅니다. 화면 표기 단위(원=정수, 달러=소수 2자리)
+--     보다 훨씬 작아 사람이 볼 수 있는 불일치는 전부 잡힙니다.
+--
+--  ── 왜 종목명(stock_name)을 여기에 또 저장하나 ──────────────────────────────
+--  `holdings` 에도 있지만 그건 **지금** 이름입니다. 사용자가 종목을 팔면 그 행은 사라지고,
+--  회사명이 바뀌기도 합니다. 리포트는 "그날 무엇을 들고 있었나"를 보여주는 기록이라
+--  **그날 기준 이름**을 함께 남깁니다(과거 표에서 종목명이 빈칸이 되지 않게).
+--
+--  ── 왜 price_as_of_kst 를 종목마다 반복해서 넣나 ─────────────────────────────
+--  같은 시장·같은 날이면 모든 종목이 같은 값입니다(시장별로 하루 1값). 그럼에도 넣는 이유는
+--  이 표만 조회해도 "이 가격은 몇 시 몇 분 것인가"가 **자기완결적으로** 읽히게 하기
+--  위해서입니다. 조인 없이 CSV 로 뽑아 봐도 시각이 함께 나오는 것이 오너가 말한 "깨끗하게
+--  잘 정리된 데이터"에 맞다고 판단했습니다. 비용은 행당 16바이트 남짓입니다.
+--
+--  ── 이익(profit)·수익률을 컬럼으로 두지 않은 이유 ───────────────────────────
+--  `market_value - cost` 로 언제든 정확히 나옵니다. 저장하면 계산 경로가 하나 더 생기고,
+--  그게 바로 "들쑥날쑥"의 씨앗입니다. 저장하는 것은 **관측값**(수량·매입가·현재가)과 그
+--  곱셈 결과까지이고, 뺄셈·나눗셈은 화면에서 그때그때 합니다.
+-- -----------------------------------------------------------------------------
+create table if not exists public.portfolio_holding_snapshots (
+    id                 uuid primary key default gen_random_uuid(),
+    user_id            uuid not null references auth.users (id) on delete cascade,
+    market             text not null check (market in ('KR', 'US')),
+    ticker             text not null check (length(ticker) between 1 and 20),
+    snapshot_date      date not null,
+
+    -- 그날 기준 표시용 이름(holdings.stock_name 과 같은 성격). 없을 수 있어 NULL 허용.
+    stock_name         text,
+
+    -- 관측값 — holdings 와 완전히 같은 타입·제약(numeric(20,6))으로 맞춥니다.
+    quantity           numeric(20, 6) not null check (quantity > 0),
+    avg_purchase_price numeric(20, 6) not null check (avg_purchase_price >= 0),
+    cost               numeric(20, 6) not null check (cost >= 0),
+
+    -- ⚠️ 그날 현재가를 몰랐던 종목은 여기 두 컬럼이 **NULL** 입니다.
+    --    0 으로 채우지 않습니다(0원이라는 거짓말이 되고, 다음 날 가격이 들어오는 순간
+    --    "하루 만에 폭등"처럼 보이는 가짜 수익률이 생깁니다 — ENGINEERING_SPEC §0-1).
+    current_price      numeric(20, 6) check (current_price is null or current_price > 0),
+    market_value       numeric(20, 6) check (market_value is null or market_value >= 0),
+
+    currency           text not null check (currency in ('KRW', 'USD')),
+
+    -- 합계 표의 priced_count / unpriced_count 와 같은 개념을 **행 단위**로 남긴 것.
+    -- 화면은 이 값이 false 인 행을 빈칸이 아니라 "가격 모름"으로 표시합니다.
+    priced             boolean not null,
+
+    -- 이 행의 가격이 수집된 시각(한국시간 'YYYY-MM-DD HH:MM'). 합계 표의 같은 이름 컬럼과
+    -- 같은 값이며, 같은 배치가 같은 문자열을 양쪽에 넣습니다. 모르면 NULL(추정 금지).
+    price_as_of_kst    text,
+
+    created_at         timestamptz not null default now(),
+    updated_at         timestamptz not null default now(),
+
+    -- 사용자 × 시장 × 종목 × 거래일 = 딱 한 행. 배치를 두 번 돌려도 늘지 않고 갱신됩니다.
+    constraint holding_snapshots_user_market_ticker_date_unique
+        unique (user_id, market, ticker, snapshot_date),
+
+    -- holdings / portfolio_daily_snapshots 와 동일한 이중 방어 — 원·달러 혼용 차단.
+    constraint holding_snapshots_market_currency_match check (
+        (market = 'KR' and currency = 'KRW')
+        or (market = 'US' and currency = 'USD')
+    ),
+
+    -- 🔴 "가격 모름"의 표현을 한 가지로 못 박습니다. priced=true 인데 값이 비어 있거나,
+    --    priced=false 인데 값이 들어 있는 행은 DB 레벨에서 아예 들어오지 못합니다.
+    --    (이 제약이 없으면 "값이 0인지 NULL인지 false인지"가 행마다 달라지면서, 나중에
+    --     집계할 때 사람마다 다른 숫자가 나옵니다 — 오너가 말한 "들쑥날쑥"의 전형입니다.)
+    constraint holding_snapshots_priced_match check (
+        (priced and current_price is not null and market_value is not null)
+        or (not priced and current_price is null and market_value is null)
+    )
+);
+
+-- 주 조회 패턴은 화면과 완전히 같습니다: "이 사용자 / 이 시장 / 이 날짜 구간".
+create index if not exists holding_snapshots_user_market_date_idx
+    on public.portfolio_holding_snapshots (user_id, market, snapshot_date);
+-- ⚠️ 인덱스를 더 만들지 않았습니다. 위 unique 제약이 (user_id, market, ticker, snapshot_date)
+--    인덱스를 이미 만들어 주고, 이 표는 **매일 쓰기가 일어나는 표**라 인덱스 하나하나가
+--    행 수만큼의 쓰기 비용·저장 공간으로 돌아옵니다(합계 표보다 행이 10배 이상 많습니다).
+--    실제로 던지는 질의가 늘면 그때 근거를 남기고 추가하세요.
+
+drop trigger if exists holding_snapshots_set_updated_at on public.portfolio_holding_snapshots;
+create trigger holding_snapshots_set_updated_at
+    before update on public.portfolio_holding_snapshots
+    for each row execute function public.report_set_updated_at();
+
+comment on table public.portfolio_holding_snapshots is
+    '리포트 모듈: 사용자별·시장별·종목별 하루 1행 스냅샷(2026-08-13 추가). portfolio_daily_snapshots 의 합계는 이 표의 같은 날 행들을 그대로 더한 값이며, 두 표는 같은 배치 실행의 같은 계산 결과로 함께 저장됩니다. 쓰기는 GitHub Actions 배치(service_role)만, 사용자는 읽기 전용.';
+comment on column public.portfolio_holding_snapshots.stock_name is
+    '그날 기준 표시용 종목명. holdings 에서 그대로 복사합니다(나중에 종목을 팔거나 회사명이 바뀌어도 과거 표가 빈칸이 되지 않게).';
+comment on column public.portfolio_holding_snapshots.cost is
+    '수량 × 평균매입가. 같은 날 같은 시장의 priced=true 행들의 합이 portfolio_daily_snapshots.total_cost 와 정확히 같아야 합니다.';
+comment on column public.portfolio_holding_snapshots.market_value is
+    '수량 × 그날 현재가. 현재가를 몰랐으면 NULL(0 으로 채우지 않음). 같은 날 같은 시장의 priced=true 행들의 합이 portfolio_daily_snapshots.total_value 와 정확히 같아야 합니다.';
+comment on column public.portfolio_holding_snapshots.priced is
+    '그날 이 종목의 현재가를 알았는지. false 면 current_price/market_value 가 NULL 이고, 화면은 빈칸이 아니라 ''가격 모름''으로 표시합니다. 같은 날 같은 시장의 true 개수 = portfolio_daily_snapshots.priced_count.';
+comment on column public.portfolio_holding_snapshots.price_as_of_kst is
+    '이 행의 가격이 수집된 시각(한국시간 ''YYYY-MM-DD HH:MM'' 문자열). 같은 시장·같은 날이면 모든 종목이 같은 값이지만, 이 표만 조회해도 자기완결적으로 읽히도록 행마다 넣습니다. 모르면 NULL(추정하지 않음).';
+
+
+-- -----------------------------------------------------------------------------
+-- 8-1. 🔐 RLS — 합계 표(§3)와 **정확히 같은 원칙**
+-- -----------------------------------------------------------------------------
+--  select 정책 **하나뿐**입니다. insert/update/delete 정책은 일부러 만들지 않습니다 —
+--  RLS 가 켜진 테이블에서 정책 없는 동작은 전부 거부되므로, 로그인한 사용자도 자기 과거
+--  기록을 고치거나 지울 수 없습니다. 배치는 service_role 키를 쓰고 그 키는 RLS 를 우회합니다.
+-- -----------------------------------------------------------------------------
+alter table public.portfolio_holding_snapshots enable row level security;
+
+drop policy if exists holding_snapshots_select_own on public.portfolio_holding_snapshots;
+create policy holding_snapshots_select_own on public.portfolio_holding_snapshots
+    for select to authenticated
+    using (auth.uid() = user_id);
+
+revoke all on public.portfolio_holding_snapshots from anon;
+grant select on public.portfolio_holding_snapshots to authenticated;
+-- delete 는 주지 않습니다(§4 와 같은 이유 — 과거 기록을 지우는 코드가 저장소에 없습니다).
+grant select, insert, update on public.portfolio_holding_snapshots to service_role;
+
+
+-- =============================================================================
+-- 9. 설치 후 자가 점검 — 종목별 표 (위 §7 에 이어서)
+-- =============================================================================
+--  ⑥ 테이블·RLS 가 만들어졌는지 (rls_enabled = true 여야 정상)
+--      select relname, relrowsecurity as rls_enabled
+--        from pg_class
+--       where relname = 'portfolio_holding_snapshots';
+--
+--  ⑦ 정책이 **select 1개뿐**인지
+--      select tablename, policyname, cmd
+--        from pg_policies
+--       where schemaname = 'public' and tablename = 'portfolio_holding_snapshots';
+--
+--  ⑧ 배치를 한 번 돌린 뒤, 종목별 행이 들어왔는지
+--      select snapshot_date, market, ticker, stock_name, quantity,
+--             avg_purchase_price, cost, current_price, market_value, priced,
+--             price_as_of_kst
+--        from public.portfolio_holding_snapshots
+--       order by snapshot_date desc, market, market_value desc nulls last
+--       limit 30;
+--
+--  ⑨ 🔴 **가장 중요한 점검 — 합계와 종목별 합이 어긋나지 않는지.**
+--     아래 쿼리는 **항상 0행**이어야 정상입니다. 한 행이라도 나오면 그날 두 표가 서로 다른
+--     값을 말하고 있다는 뜻이므로, 그대로 두지 말고 배치 로그부터 확인하세요.
+--     (그날 종목별 저장만 실패했다면 종목별 행이 아예 없어서 여기서도 잡힙니다.)
+--
+--      select d.user_id, d.market, d.snapshot_date,
+--             d.total_value, h.sum_value,
+--             d.total_cost,  h.sum_cost,
+--             d.priced_count, h.priced_rows,
+--             d.holdings_count, h.all_rows
+--        from public.portfolio_daily_snapshots d
+--        left join (
+--              select user_id, market, snapshot_date,
+--                     sum(market_value) filter (where priced) as sum_value,
+--                     sum(cost)         filter (where priced) as sum_cost,
+--                     count(*)          filter (where priced) as priced_rows,
+--                     count(*)                                as all_rows
+--                from public.portfolio_holding_snapshots
+--               group by user_id, market, snapshot_date
+--             ) h
+--          on h.user_id = d.user_id and h.market = d.market
+--         and h.snapshot_date = d.snapshot_date
+--       where h.user_id is null                          -- 종목별 행이 통째로 없는 날
+--          or abs(d.total_value - h.sum_value) > 0.01   -- 허용오차 이유는 위 §8 마지막 ⚠️ 참고
+--          or abs(d.total_cost  - h.sum_cost)  > 0.01
+--          or d.priced_count   is distinct from h.priced_rows
+--          or d.holdings_count is distinct from h.all_rows;
+--
+--     ⚠️ 이 표를 만들기 **전에** 쌓인 날짜는 종목별 행이 없어서 위 쿼리에 나옵니다.
+--        정상입니다 — 그날 종목별 값은 아무 데도 기록돼 있지 않아 **소급해서 만들지
+--        않습니다**(§0-1). 위 쿼리로 실제 점검을 할 때는 이 표를 만든 날 이후만 보세요:
+--          ... and d.snapshot_date >= '이 SQL 을 실행한 날짜'

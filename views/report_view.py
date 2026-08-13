@@ -25,6 +25,10 @@ v1 범위 (REPORT_WORK_ORDER.md §6)
    - 시장별로 "이 숫자는 **언제 종가**로 만들어졌나"(한국시간 시:분)를 표시 — 2026-08-13 추가.
      한국장/미국장은 수집 시각이 다르고(미국은 한국시간 새벽), 그 시각은 **그 스냅샷 행이
      저장될 때 배치가 기록해 둔 값**(`price_as_of_kst`)입니다(오늘 값으로 대신 채우지 않음).
+   - 🧾 **종목별 상세** 섹션 — 2026-08-13 추가(오너 결정, `portfolio_holding_snapshots` 신설).
+     기간 안 **마지막 기록일 하루**의 종목별 상태를 평가금액 큰 순으로 한 표(+ 합계 한 줄)에
+     담고, 종목 하나를 고르면 그 종목의 기간 내 일별 추이를 펼쳐 봅니다. 이 표의 합계는 같은 날
+     합계 스냅샷과 **매번 대조**해서 결과를 그대로 보여 줍니다(어긋나면 숨기지 않고 경고).
 
 지켜야 할 것
    - **환율 변환 없음** — 원화/달러를 절대 합치지 않고 시장별로 따로 계산·표시합니다.
@@ -69,8 +73,12 @@ from utils.report_db import (
     ReportError,
     benchmark_closes_for_market,
     benchmark_period_return,
+    build_holding_history,
+    compare_holding_total,
     compute_period_report,
+    fetch_user_holding_snapshots,
     fetch_user_snapshots,
+    is_missing_holding_table_error,
     period_bounds,
     period_title,
     shift_period,
@@ -392,7 +400,218 @@ def _render_snapshot_table(rows_in_window, currency):
         )
 
 
-def _render_market_block(market, snapshots, period, ref_date):
+def _md_cell(text):
+    """
+    마크다운 표의 한 칸에 넣을 문자열을 안전하게 만듭니다.
+    종목명에 '|' 가 들어 있으면 표가 통째로 깨지므로 이스케이프합니다(있을 법하지 않지만,
+    사용자가 직접 입력하는 값이라 화면이 깨질 여지를 남기지 않습니다).
+    """
+    return str(text if text is not None else "").replace("|", "\\|").strip() or "—"
+
+
+def _holding_label(row):
+    """'삼성전자 (005930)' / 이름이 없으면 '005930'. '내 성적표' 표의 표기 관례와 같습니다."""
+    name = (row.get("stock_name") or "").strip()
+    ticker = (row.get("ticker") or "").strip() or "—"
+    return _md_cell(f"{name} ({ticker})" if name else ticker)
+
+
+def _md_qty(value):
+    """수량 표기 — '내 성적표' 표와 같은 형식(정수는 정수로, 소수점은 필요한 만큼만)."""
+    if value is None:
+        return "—"
+    return f"{value:,.6g}"
+
+
+def _render_holding_history(market, holding_rows, snapshots_in_window,
+                            window_start, window_end, currency, error=None):
+    """
+    🧾 종목별 상세 — 2026-08-13 오너 결정으로 신설한 섹션.
+
+    오너 원문: "대신 가독성을 최대한 살린 한장으로 볼 수 있는 테이블을 잘 짜줘 … 나중에 유료로
+    할 정도로 자료가 많아지는데 들쑥날쑥하면 세상의 모두가 힘들어져".
+
+    그래서 이렇게 짰습니다.
+      · **한 장** — 기간 안의 모든 날짜 × 모든 종목을 늘어놓지 않습니다. 기간 안 **마지막
+        기록일 하루**의 종목별 상태를 평가금액 큰 순으로 한 표에 담고, 맨 아래 합계 한 줄을
+        둡니다. 종목이 10개면 11줄이라 스크롤 없이 들어옵니다.
+      · **일별 추이는 펼쳐서** — 종목 하나를 고르면 그 종목의 기간 내 일별 표가 나옵니다.
+        (종목 수만큼 expander 를 늘어놓으면 그 자체가 '한 장'을 깨뜨려서 선택 방식으로 했습니다.)
+      · **날짜를 섞지 않습니다** — 표의 모든 행은 같은 거래일 값입니다. 종목마다 각자의 마지막
+        기록일을 긁어 모으면 합계가 그 어떤 날의 합계와도 같지 않게 됩니다.
+      · **들쑥날쑥 감시** — 이 표의 합계와 같은 날 합계 스냅샷을 매번 대조해서 결과를 그대로
+        보여줍니다(일치하면 조용한 캡션, 어긋나면 경고).
+      · 색·금액 표기는 '내 성적표' 표와 같은 관례(오르면 빨강/내리면 파랑, format_amount).
+      · 가격을 몰랐던 날은 빈칸이 아니라 **"가격 모름"** — 이전 가격을 대신 넣지 않습니다(§0-1).
+    """
+    st.markdown("##### 🧾 종목별 상세 — 이 기간 숫자가 **어느 종목**에서 나왔나")
+
+    if error is not None:
+        if is_missing_holding_table_error(error):
+            # 아직 표가 없는 상태(오너가 SQL 실행 전). 리포트의 나머지는 정상이므로 이 섹션만
+            # 안내로 대체합니다 — 실패를 숨기는 게 아니라 "무엇을 하면 되는지"까지 말합니다.
+            st.info(
+                "ℹ️ **종목별 상세는 아직 준비되지 않았습니다.** 이 기능을 위한 표"
+                "(`portfolio_holding_snapshots`)가 데이터베이스에 아직 없습니다.\n\n"
+                "오너 할 일 — Supabase → SQL Editor 에서 `sql/report_schema.sql` 전체를 다시 "
+                "실행하세요(§8 블록이 이 표를 만듭니다. 여러 번 실행해도 안전하고 기존 기록은 "
+                "그대로입니다). 실행한 **다음 날 배치부터** 종목별 기록이 쌓이기 시작하며, "
+                "그 이전 날짜는 소급해서 만들지 않습니다."
+            )
+        else:
+            st.error(f"🚫 종목별 기록을 불러오지 못했습니다: {error}")
+        return
+
+    try:
+        history = build_holding_history(holding_rows or [], window_start, window_end)
+    except (ReportError, ScorecardError) as exc:
+        st.error(f"🚫 {exc}")
+        return
+
+    if not history["rows"]:
+        st.info(
+            "ℹ️ 이 기간에는 저장된 **종목별** 기록이 없습니다. 종목별 저장은 2026-08-13 부터 "
+            "시작됐고, 그 이전 날짜는 합계만 남아 있습니다(과거 종목별 값은 어디에도 기록돼 "
+            "있지 않아 만들어내지 않습니다)."
+        )
+        return
+
+    base_date = history["base_date"]
+    totals = history["totals"]
+    dates = history["dates"]
+
+    st.caption(
+        f"기준일 **{base_date.isoformat()}** — 이 기간에 종목별 기록이 있는 마지막 거래일입니다. "
+        f"아래 표의 모든 숫자는 **이 하루의 값**이고 종목마다 다른 날짜를 섞지 않았습니다. "
+        f"(이 기간 기록 {len(dates)}일: {dates[0].isoformat()} ~ {dates[-1].isoformat()})"
+    )
+
+    lines = ["| 종목 | 수량 | 평균매입가 | 현재가 | 평가금액 | 평가손익 | 수익률 | 기간 주가등락 | 기록 |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    for row in history["rows"]:
+        if row["priced"]:
+            price_cell = _md_amount(row["current_price"], currency)
+            value_cell = _md_amount(row["market_value"], currency)
+            profit_cell = _md_amount(row["profit"], currency)
+            pct_cell = _colored_pct(row["profit_pct"])
+        else:
+            # 빈칸으로 얼버무리거나 이전 가격을 대신 넣지 않습니다(§0-1).
+            price_cell = "**가격 모름**"
+            value_cell = profit_cell = pct_cell = "—"
+        record = f"{row['days_recorded']}일"
+        if row["unpriced_days"]:
+            record += f" (가격 모름 {row['unpriced_days']}일)"
+        lines.append(
+            f"| {_holding_label(row)} | {_md_qty(row['quantity'])} "
+            f"| {_md_amount(row['avg_purchase_price'], currency)} | {price_cell} "
+            f"| {value_cell} | {profit_cell} | {pct_cell} "
+            f"| {_colored_pct(row['price_change_pct'])} | {record} |"
+        )
+    # 합계 줄 — 칸 순서: 종목 / 수량 / 평균매입가(=매입원가 합) / 현재가 / 평가금액 /
+    #            평가손익 / 수익률 / 기간 주가등락 / 기록   (헤더와 9칸으로 정확히 맞춤)
+    lines.append(
+        f"| **합계 {totals['holdings_count']}종목** "
+        f"| "
+        f"| **{_md_amount(totals['cost'], currency)}** "
+        f"| "
+        f"| **{_md_amount(totals['market_value'], currency)}** "
+        f"| **{_md_amount(totals['profit'], currency)}** "
+        f"| {_colored_pct(totals['profit_pct'])} "
+        f"| "
+        f"| 가격 담긴 종목 {totals['priced_count']}/{totals['holdings_count']} |"
+    )
+    st.markdown("\n".join(lines))
+    st.caption(
+        "· **합계 줄의 '평균매입가' 칸은 매입원가 합계**입니다(단가를 평균 낸 값이 아닙니다). "
+        "가격을 알 수 없는 종목은 평가금액을 모르므로 합계에서 빠집니다 — "
+        f"그 종목까지 포함한 매입원가 총액은 {_md_amount(totals['cost_all'], currency)} 입니다.\n"
+        "· **기간 주가등락**은 수량 변화의 영향을 받지 않는 **주가만의 등락률**입니다"
+        "(이 기간 안에서 가격을 처음 안 날의 종가 → 기준일 종가). 비교할 날이 하루뿐이거나 "
+        "그날 가격을 몰랐으면 '—' 입니다(가까운 날로 대체하지 않습니다)."
+    )
+
+    # ---- 🔴 들쑥날쑥 감시 — 같은 날 합계 스냅샷과 대조 --------------------------
+    summary_row = next((r for r in (snapshots_in_window or [])
+                        if r.get("snapshot_date") == base_date), None)
+    outcome = compare_holding_total(
+        totals["market_value"], summary_row.get("total_value") if summary_row else None)
+    if not outcome["comparable"]:
+        # 대조를 못 한 이유를 뭉뚱그리지 않습니다 — "확인했다"와 "확인 못 했다"는 다른 말입니다.
+        why = ("이 기간 목록에 그날 합계 스냅샷이 없습니다"
+               if summary_row is None
+               else "기준일에 가격을 아는 종목이 없어 비교할 합계가 없습니다")
+        st.caption(
+            f"⚖️ {base_date.isoformat()} 은(는) 합계와 대조하지 못했습니다 — {why}. "
+            "(대조 없이 '일치한다'고 말하지 않습니다.)"
+        )
+    elif outcome["matches"]:
+        st.caption(
+            f"⚖️ **데이터 대조 통과** — 위 종목별 합계"
+            f"({_md_amount(totals['market_value'], currency)})가 같은 날 합계 스냅샷과 "
+            "정확히 일치합니다(두 표는 같은 계산에서 함께 저장됩니다)."
+        )
+    else:
+        st.warning(
+            f"⚠️ **대조 불일치** — 종목별 합계({_md_amount(totals['market_value'], currency)})와 "
+            f"같은 날 합계 스냅샷({_md_amount(summary_row.get('total_value'), currency)})이 "
+            f"서로 다릅니다(차이 {outcome['diff']:+,.6f}). 그날 종목별 저장이 중간에 실패했을 수 "
+            "있습니다 — 숨기지 않고 그대로 알려 드립니다. 다음 배치가 같은 날짜를 다시 저장하면 "
+            "맞춰집니다."
+        )
+
+    if history["gone"]:
+        gone_text = ", ".join(
+            f"{(g['stock_name'] or '').strip() or g['ticker']}({g['ticker']}, "
+            f"마지막 기록 {g['last_date'].isoformat()})"
+            for g in history["gone"]
+        )
+        st.caption(
+            f"⏹ 이 기간에는 기록이 있었지만 기준일({base_date.isoformat()})에는 없는 종목: "
+            f"{gone_text}. (매도했거나 그날 평가에서 빠진 종목입니다 — 위 표에 넣으면 날짜가 "
+            "섞이므로 따로 적습니다.)"
+        )
+
+    # ---- 종목 하나를 골라 일별 추이 보기 ---------------------------------------
+    with st.expander("📅 종목 하나를 골라 이 기간 일별 추이 보기", expanded=False):
+        options = [row["ticker"] for row in history["rows"]] + \
+                  [g["ticker"] for g in history["gone"]]
+        label_by_ticker = {row["ticker"]: _holding_label(row) for row in history["rows"]}
+        for g in history["gone"]:
+            label_by_ticker[g["ticker"]] = _holding_label(g)
+        picked = st.selectbox(
+            "종목", options,
+            format_func=lambda t: label_by_ticker.get(t, t),
+            key=f"report_holding_pick_{market}",
+        )
+        daily = history["daily_by_ticker"].get(picked) or []
+        if not daily:
+            st.caption("이 종목의 일별 기록이 없습니다.")
+            return
+        rows_md = ["| 거래일 | 종가 수집 시각(KST) | 수량 | 현재가 | 평가금액 | 평가손익 | 수익률 |",
+                   "|---|---|---:|---:|---:|---:|---:|"]
+        for row in daily:
+            if row["priced"]:
+                cells = (_md_amount(row["current_price"], currency),
+                         _md_amount(row["market_value"], currency),
+                         _md_amount(row["profit"], currency),
+                         _colored_pct(row["profit_pct"]))
+            else:
+                cells = ("**가격 모름**", "—", "—", "—")
+            rows_md.append(
+                f"| {row['snapshot_date'].isoformat()} "
+                f"| {row.get(PRICE_STAMP_FIELD) or '기록 없음'} "
+                f"| {_md_qty(row['quantity'])} | {cells[0]} | {cells[1]} | {cells[2]} | {cells[3]} |"
+            )
+        st.markdown("\n".join(rows_md))
+        st.caption(
+            "이 표는 **저장된 날만** 나옵니다 — 휴장일이나 배치가 돌지 않은 날은 행 자체가 "
+            "없습니다(없는 날을 이전 값으로 채우지 않습니다). 수량이 바뀐 날은 그날 추가 매수·"
+            "매도가 있었다는 뜻입니다."
+        )
+
+
+def _render_market_block(market, snapshots, period, ref_date,
+                         holding_rows=None, holding_error=None):
     st.markdown(f"### {MARKET_TITLES.get(market, market)}")
     report = compute_period_report(snapshots, period, ref_date)
     window_start, window_end = report["window_start"], report["window_end"]
@@ -403,8 +622,23 @@ def _render_market_block(market, snapshots, period, ref_date):
     if report.get("latest"):
         _render_price_stamp(market, report["latest"])
 
-    if report["status"] in (STATUS_NO_DATA, STATUS_INSUFFICIENT):
+    currency = report.get("currency") or ("KRW" if market == MARKET_KR else "USD")
+    in_window = [row for row in snapshots
+                 if window_start <= row["snapshot_date"] <= window_end]
+
+    if report["status"] == STATUS_NO_DATA:
         _render_shortage(report)
+        return
+
+    if report["status"] == STATUS_INSUFFICIENT:
+        _render_shortage(report)
+        # ⚠️ 기간 리포트는 "데이터 부족"이지만, **그 기간에 실제로 저장된 종목별 기록**은
+        #    계산이 아니라 사실 그대로의 기록이라 숨길 이유가 없습니다(§3 이 금지하는 것은
+        #    "부족한 데이터를 정상 리포트처럼 꾸미는 것"이지 기록을 보여주는 게 아닙니다).
+        #    숨기면 기능을 켠 첫 달 내내 이 표가 안 보입니다 — 기간 시작 이전 기준점이 없어
+        #    그 기간은 거의 항상 INSUFFICIENT 이기 때문입니다.
+        _render_holding_history(market, holding_rows, in_window,
+                                window_start, window_end, currency, error=holding_error)
         return
 
     if report["status"] == STATUS_IN_PROGRESS:
@@ -415,9 +649,10 @@ def _render_market_block(market, snapshots, period, ref_date):
     _render_numbers(report)
     _render_benchmarks(report, market)
 
-    currency = report.get("currency") or ("KRW" if market == MARKET_KR else "USD")
-    in_window = [row for row in snapshots
-                 if window_start <= row["snapshot_date"] <= window_end]
+    # 🧾 종목별 상세(2026-08-13 신설). 합계 스냅샷 원본 표(_render_snapshot_table)와는 성격이
+    #    달라 **별도 섹션**으로 두고, 원본 표는 지금까지처럼 맨 아래 접힌 채로 둡니다.
+    _render_holding_history(market, holding_rows, in_window,
+                            window_start, window_end, currency, error=holding_error)
     _render_snapshot_table(in_window, currency)
 
 
@@ -468,7 +703,7 @@ def render_report_page():
     st.caption(f"로그인: {email or user_id}")
 
     period, ref_date = _render_period_controls()
-    _, window_end = period_bounds(period, ref_date)
+    window_start, window_end = period_bounds(period, ref_date)
 
     # 기간 시작 **이전**의 스냅샷도 기준점으로 필요하므로 시작일로 자르지 않고, 종료일까지
     # 전부 받아 메모리에서 계산합니다(사용자 1명 × 시장 1개 = 연 250행 수준이라 가볍습니다).
@@ -487,6 +722,21 @@ def render_report_page():
         )
         return
 
+    # 🧾 종목별 스냅샷(2026-08-13 신설) — **보고 있는 기간만** 잘라서 부릅니다(합계와 달리
+    #    기간 시작 이전의 기준점 행이 필요 없고, 행이 종목 수만큼 많기 때문입니다).
+    #    ⚠️ 여기서 실패해도 **기존 리포트는 그대로 나와야 합니다** — 오류를 삼키지 않고
+    #       그 시장 블록의 종목별 섹션에 그대로 보여 주되, 나머지 화면은 정상 진행합니다.
+    holding_error = None
+    holding_by_market = {}
+    try:
+        holding_rows = fetch_user_holding_snapshots(
+            client, user_id, start_date=window_start, end_date=window_end)
+    except (ReportError, ScorecardError) as exc:
+        holding_error = str(exc)
+    else:
+        for row in holding_rows:
+            holding_by_market.setdefault(row.get("market"), []).append(row)
+
     by_market = {}
     for row in snapshots:
         by_market.setdefault(row.get("market"), []).append(row)
@@ -495,5 +745,7 @@ def render_report_page():
         rows = by_market.get(market)
         if not rows:
             continue
-        _render_market_block(market, rows, period, ref_date)
+        _render_market_block(market, rows, period, ref_date,
+                             holding_rows=holding_by_market.get(market, []),
+                             holding_error=holding_error)
         st.markdown("---")
