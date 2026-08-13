@@ -1097,18 +1097,47 @@ def test_view_and_scope():
           "소스 조사 결과와 FRED 를 쓰지 않은 이유(재배포 제한)를 파일에 기록")
     check("market_history" not in collector_src, "미국 수집기가 매크로 파일을 건드리지 않음")
 
-    # 기존 파일 무손상 — 이번 작업에서 한 줄도 고치지 않았습니다.
+    # 기존 파일 무손상 — 리포트 모듈을 만들면서 다른 모듈 파일은 한 줄도 고치지 않았습니다.
     #  ⚠️ 단순히 "report" 라는 낱말을 찾으면 안 됩니다(collector_kospi200.py 에는 예전부터
     #     네이버 "WiseReport" 스크래핑 주석이 있습니다). 이번 모듈 고유의 이름으로 확인합니다.
+    #
+    #  ⚠️ 2026-08-13 수정 — 이 목록에서 `visiblehand.py` 를 뺐습니다. 리포트 모듈을 처음 만든
+    #     날(2026-08-12 오전)에는 작업지시서 §7 지시대로 `visiblehand.py` 를 건드리지 않아서
+    #     이 검사가 맞았지만, 같은 날 오후 오너 요청(TASK_HISTORY #102·#105)으로 사이드바가
+    #     2단 트리로 개편되면서 리포트 화면이 "내 성적표"의 하위 메뉴로 **정식 배선**됐습니다.
+    #     그때 이 검사를 같이 고치지 않아 그 뒤로 계속 실패하고 있던 항목입니다(2026-08-13 공개 전환
+    #     점검에서 발견). 배선 자체는 바로 아래에서 따로 검증하므로, 이 목록에는 "리포트가
+    #     침범하면 안 되는 다른 모듈들"만 남깁니다.
     report_markers = ("report_db", "report_view", "portfolio_daily_snapshots",
                       "collector_us_indices", "us_index_history")
     for untouched in ("views/scorecard_view.py", "utils/scorecard_db.py",
-                      "collector_us_stocks.py", "collector_kospi200.py", "visiblehand.py",
+                      "collector_us_stocks.py", "collector_kospi200.py",
                       "utils/scoring.py", "views/pegy_view.py", "views/us_stocks_view.py",
                       "utils/constants_us.py", "scrape_daily.py", "views/macro_view.py"):
         src = (REPO_ROOT / untouched).read_text(encoding="utf-8").lower()
         check(not any(marker in src for marker in report_markers),
               f"{untouched} 에 리포트 모듈 관련 수정 없음")
+
+    # 사이드바 배선 (TASK_HISTORY #102·#105 + 2026-08-13 레이아웃 정리) --------------
+    app_src = (REPO_ROOT / "visiblehand.py").read_text(encoding="utf-8")
+    check("from views.report_view import is_report_visible, render_report_page" in app_src,
+          "리포트 화면이 사이드바에 배선됨(import 가드 안)")
+    check("except Exception as _report_import_exc" in app_src,
+          "리포트 모듈 로드 실패해도 기존 화면이 죽지 않도록 import 가드")
+    check("report_available = render_report_page is not None and is_report_visible(admin_mode_hint)"
+          in app_src,
+          "리포트 하위 메뉴도 대분류 라디오와 같은 admin_mode_hint 를 사용(#105 패턴 통일)")
+    # 레이아웃 고정: 하위 메뉴 라디오는 반드시 관리자 메뉴(render_admin_sidebar) **위**에서
+    # 그려져야 합니다. 아래로 내려가면 대분류를 바꿀 때 관리자 메뉴 위치가 흔들립니다.
+    check(app_src.index('key="scorecard_subpage"') < app_src.index("admin_mode = render_admin_sidebar()"),
+          "내 성적표 하위 메뉴 라디오가 관리자 메뉴보다 위에서 그려짐(관리자 메뉴 세로 위치 고정)")
+    check(app_src.count("render_category_header(") == 3,
+          "두 대분류가 같은 헤더 함수를 써서 같은 높이로 그려짐(정의 1 + 호출 2)")
+    # ⚠️ 반드시 주석을 걷어낸 '실제 코드'로 확인합니다 — 왜 sticky/fixed 를 쓰지 않았는지
+    #    설명하는 주석 자체에 그 낱말이 들어 있어서, 원문으로 검사하면 항상 실패합니다.
+    app_code = python_code_only(app_src)
+    check("position: sticky" not in app_code and "position: fixed" not in app_code,
+          "레이아웃 고정에 Streamlit 내부 DOM 의존 CSS(sticky/fixed)를 쓰지 않음")
 
     check((REPO_ROOT / "REPORT_WORK_ORDER.md").exists(), "작업지시서 원본 보존")
 

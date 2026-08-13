@@ -1294,6 +1294,39 @@ def test_view_and_routing():
             expect_raises(lambda: module._parse_positive_number("-5", "수량"), ValueError,
                           "음수는 거부")
 
+            # 🔐 2026-08-13 공개 전환 전 점검에서 보강한 방어 ------------------------
+            # 파이썬 float() 는 "nan"/"inf"/"1e400" 을 성공적으로 파싱하고, NaN·Infinity 는
+            # `<= 0` 검사를 통과해버립니다. 수정(✏️) 경로는 make_lot() 을 거치지 않아 이 값이
+            # 그대로 Supabase 로 나가던 상태였습니다.
+            for bad in ("nan", "NaN", "inf", "Infinity", "1e400"):
+                expect_raises(lambda b=bad: module._parse_positive_number(b, "수량"), ValueError,
+                              f"NaN/무한대 입력 거부: {bad!r}")
+            expect_raises(lambda: module._parse_positive_number("1e300", "매입가"), ValueError,
+                          "DB numeric(20,6) 에 안 들어가는 초대형 값은 화면 단계에서 거부"
+                          "(Postgres 원문 오류를 사용자에게 노출하지 않음)")
+            check(module._parse_positive_number(str(module.MAX_INPUT_VALUE - 1), "수량")
+                  == float(module.MAX_INPUT_VALUE - 1),
+                  "상한 바로 아래 값은 정상 통과(정상 입력을 과하게 막지 않음)")
+
+            # 🔐 XSS — 사용자가 소유한 DB 컬럼(stock_name)이 unsafe_allow_html 로 그려지는
+            # 유일한 자리. Supabase REST 를 직접 호출하면 본인 행에 임의 HTML 을 넣을 수 있어
+            # (RLS 는 남의 행만 막습니다) 반드시 이스케이프해야 합니다.
+            evil = '<img src=x onerror="alert(1)">'
+            rendered = module._row_label_html(
+                {"ticker": "005930", "stock_name": evil, "market": sdb.MARKET_KR}, {},
+            )
+            check("<img" not in rendered and "&lt;img" in rendered,
+                  "종목명에 들어있는 HTML 태그가 실행되지 않고 글자 그대로 이스케이프됨")
+            check("onerror=\"alert(1)\"" not in rendered,
+                  "이벤트 핸들러 속성이 살아남지 않음")
+            check("<br>" in rendered and rendered.startswith("<div"),
+                  "우리가 직접 넣는 <br>·<div> 는 그대로 유지(기존 두 줄 표기 동작 무손상)")
+            rendered_ticker_only = module._row_label_html(
+                {"ticker": "<b>X</b>", "stock_name": None, "market": sdb.MARKET_KR}, {},
+            )
+            check("&lt;b&gt;" in rendered_ticker_only,
+                  "종목명이 없어 티커만 그릴 때도 이스케이프됨")
+
             # 코드 형식 판정 정규식은 utils/scorecard_db.py 로 옮겨졌습니다(2026-08-11 통합 입력창
             # 리디자인 — resolve_stock_query 가 코드/이름을 함께 판단하기 위해 필요).
             check(bool(sdb.KR_TICKER_LIKE.fullmatch("005930")), "6자리 숫자 코드는 코드로 인정")

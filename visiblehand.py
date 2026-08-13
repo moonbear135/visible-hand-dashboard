@@ -114,6 +114,31 @@ def init_background_jobs():
 
 init_background_jobs()
 
+
+def render_category_header(title, subtitle):
+    """
+    사이드바 대분류 헤더 1블록. **두 대분류가 똑같은 모양·똑같은 높이로 그려지도록** 마크업을
+    한 곳에 모아둔 함수입니다(2026-08-13 사이드바 레이아웃 정리 — 아래 main() §2-1 주석 참고).
+
+    ⚠️ `title`/`subtitle` 은 이 파일 안에 상수로 적힌 문자열만 들어옵니다(사용자 입력이 닿는
+       경로가 없습니다). 그래서 별도 이스케이프 없이 그대로 넣습니다 — 만약 나중에 이 자리에
+       DB 값이나 사용자 입력을 넣게 되면 반드시 `html.escape()` 를 거치세요
+       (같은 이유로 `views/scorecard_view.py._row_label_html()` 은 이스케이프합니다).
+    ⚠️ 두 줄(제목 1줄 + 부제 1줄)로 **고정**하기 위해 각 줄에 nowrap + 말줄임을 걸었습니다.
+       사이드바 폭이 아무리 좁아져도 이 블록이 3줄로 늘어나 아래 메뉴를 밀어내지 않습니다.
+    """
+    st.sidebar.markdown(
+        f"""
+        <div style="border-left: 4px solid #14b8a6; padding: 2px 0 2px 10px; margin: 6px 0 10px 0;">
+            <div style="font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{title}</div>
+            <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;
+                        white-space: nowrap; overflow: hidden; text-overflow: ellipsis;">{subtitle}</div>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
 def main():
     # URL Query Parameter 체크
     query_params = st.query_params
@@ -176,21 +201,66 @@ def main():
         top_choice = TOP_VALUATION  # 성적표 미노출 시(일반 방문자) 예전과 100% 동일 동작
     show_scorecard = top_choice == TOP_SCORECARD
 
+    # 2-1. 고른 대분류의 **중분류(하위 메뉴)** 블록
+    # =========================================================================
+    # ⚠️ 2026-08-13 사이드바 레이아웃 정리 — 오너 신고: "대분류를 바꿀 때마다 그 아래
+    #    '⚙️ 관리자 전용 메뉴'와 '🏢 매크로 방공망 보기' 체크박스가 위아래로 움직인다."
+    #
+    #    원인은 두 가지였습니다.
+    #      ① 두 대분류가 만들어내는 콘텐츠의 **구성 자체가 달랐습니다.**
+    #         - "💡 사실 이 가격이에요" → [대분류 헤더] + [시장 선택 라디오 2개]
+    #         - "📊 내 성적표"          → (아무것도 없음)
+    #         Streamlit 사이드바는 위에서 아래로 순서대로 쌓이므로, 위쪽 콘텐츠 높이가
+    #         다르면 그 아래 요소가 그만큼 밀리는 게 정상 동작입니다(버그가 아니라 설계 문제).
+    #      ② 게다가 "내 성적표"의 하위 메뉴(내 보유종목/리포트) 라디오는 §3-1, 즉
+    #         `render_admin_sidebar()` **뒤**에서 그려지고 있었습니다. 그래서 성적표를 고르면
+    #         하위 메뉴가 관리자 메뉴 **아래**로 내려가, 오너가 그림으로 확정한 2단 트리
+    #         (대분류 밑에 중분류)도 무너지고 "관리자 메뉴는 맨 아래"라는 #105 방침과도
+    #         어긋났습니다.
+    #
+    #    ▶ 고친 방법(Streamlit 네이티브 — CSS 주입·position 조작 일절 없음)
+    #      두 대분류가 **완전히 같은 요소 순서**를 그리도록 구조를 맞췄습니다.
+    #          [대분류 헤더 마크다운 1개] + [선택지 2개짜리 라디오 1개]
+    #      "내 성적표"에도 같은 모양의 헤더를 주고, 하위 메뉴 라디오를 여기(관리자 메뉴 위)로
+    #      끌어올렸습니다. 요소의 개수·종류·줄수가 같으니 블록 높이가 같아지고, 그 아래
+    #      "⚙️ 관리자 전용 메뉴"는 **어느 대분류를 고르든 항상 같은 세로 위치**에서 시작합니다.
+    #
+    #    ▶ 왜 CSS `position: sticky/fixed` 나 고정 높이 컨테이너를 쓰지 않았는가
+    #      · CSS 주입은 Streamlit 내부 DOM(클래스명 등)에 의존해 버전이 바뀌면 조용히 깨집니다.
+    #        여기서 쓰는 건 `st.sidebar.markdown` 과 `st.sidebar.radio` 뿐 — 공개 API만 씁니다.
+    #      · `st.container(height=...)` 로 높이를 고정하는 방법도 검토했지만, 픽셀 상수를
+    #        테마·글꼴·화면폭마다 다시 맞춰야 하고 어긋나면 **내부 스크롤바 뒤로 메뉴가 잘려**
+    #        더 나쁜 실패가 납니다. 지금 방식은 매직넘버가 하나도 없고, 최악의 경우에도
+    #        (미래 버전에서 글자 줄바꿈이 달라지는 정도) 살짝 어긋날 뿐 잘리지 않습니다.
+    #
+    #    ⚠️ 하위 메뉴 라디오가 `admin_mode` 대신 `admin_mode_hint` 를 보게 된 점 — 위 대분류
+    #      라디오와 완전히 같은 이유·같은 패턴입니다(#105). 값이 실제와 다르면 아래 §3 에서
+    #      `st.rerun()` 이 한 번 더 그려주므로 스테일 문제(#103)는 재발하지 않습니다.
+    #    ⚠️ 남은 예외 하나: `SCORECARD_ENABLED` 만 켜고 `REPORT_ENABLED` 를 안 켠(또는 리포트
+    #      모듈 import 가 실패한) 상태에서는 하위 메뉴 라디오를 만들 수 없어 그만큼 짧아집니다.
+    #      없는 메뉴를 만들어 보여줄 수는 없으니(§0-1) 그대로 두었습니다 — 오너가 두 플래그를
+    #      함께 켜는 정상 공개 상태에서는 발생하지 않습니다.
+    show_report = False
     if show_scorecard:
         # 2026-08-12(TASK_HISTORY #104): 사이드바 설명 캡션 없음 — 오너 판단으로 계속 안 씀
-        # ("공개 전환할 때도 필요 없을 것 같다").
+        # ("공개 전환할 때도 필요 없을 것 같다"). 아래 부제는 캡션이 아니라 위 "사실 이
+        # 가격이에요"와 짝을 이루는 대분류 헤더의 일부입니다.
+        render_category_header("📊 내 성적표", "내 보유종목 · 기간별 리포트")
+        report_available = render_report_page is not None and is_report_visible(admin_mode_hint)
+        if report_available:
+            SCORECARD_TAB = "📊 내 보유종목"
+            REPORT_TAB = "📈 리포트"
+            scorecard_subpage = st.sidebar.radio(
+                "내 성적표 하위 메뉴",
+                [SCORECARD_TAB, REPORT_TAB],
+                key="scorecard_subpage",
+                help="같은 로그인 세션을 공유합니다 — 한 번만 로그인하면 됩니다.",
+            )
+            show_report = scorecard_subpage == REPORT_TAB
         selected_market = None
         MARKET_KR = MARKET_US = None  # 아래 §4 라우팅에서 존재 확인용
     else:
-        st.sidebar.markdown(
-            """
-            <div style="border-left: 4px solid #14b8a6; padding: 2px 0 2px 10px; margin: 6px 0 10px 0;">
-                <div style="font-size: 17px; font-weight: 800; color: #0f172a; letter-spacing: -0.3px;">💡 사실 이 가격이에요</div>
-                <div style="font-size: 12px; color: #64748b; font-weight: 600; margin-top: 2px;">시장별 밸류에이션 리포트</div>
-            </div>
-            """,
-            unsafe_allow_html=True
-        )
+        render_category_header("💡 사실 이 가격이에요", "시장별 밸류에이션 리포트")
         MARKET_KR = "한국 주식은 이가격이에요"
         MARKET_US = "미국 주식은 이가격이에요"
         selected_market = st.sidebar.radio(
@@ -216,27 +286,16 @@ def main():
     if admin_mode != admin_mode_hint:
         st.rerun()
 
+    # 3-1. 모듈 로드 실패 안내 — **관리자에게만** 보이는 진단 메시지입니다.
+    #      2026-08-13: 예전에는 리포트 하위 메뉴 라디오와 함께 §3-1 에 있었는데, 그 라디오가
+    #      위 §2-1(관리자 메뉴 위)로 올라가면서 여기엔 진단 문구만 남았습니다. 진단 문구를
+    #      §2-1 로 같이 올리지 않은 이유: 에러 박스는 높이가 문구 길이에 따라 들쭉날쭉해서
+    #      §2-1 의 "두 대분류 높이 맞추기"를 그 자리에서 다시 깨뜨립니다. 일반 방문자에게는
+    #      애초에 보이지 않는 문구이므로 사이드바 맨 아래에 두는 편이 안전합니다.
     if not scorecard_available and admin_mode and SCORECARD_IMPORT_ERROR:
         st.sidebar.error(f"📊 내 성적표 모듈 로드 실패: {SCORECARD_IMPORT_ERROR}")
-
-    # 3-1. 📈 리포트(2026-08-12 신설) — "내 성적표"를 고른 뒤 그 밑에 나오는 중분류(하위 탭)입니다.
-    #      (ENGINEERING_SPEC.md §0-3-6: 신규 기능은 오너 승인 후에 공개 반영. 코드/데이터는
-    #      성적표와 완전히 독립된 별도 모듈입니다 — 메뉴 배치만 하위 탭으로 묶인 것입니다.)
-    show_report = False
-    if show_scorecard:
-        report_available = render_report_page is not None and is_report_visible(admin_mode)
-        if report_available:
-            SCORECARD_TAB = "📊 내 보유종목"
-            REPORT_TAB = "📈 리포트"
-            scorecard_subpage = st.sidebar.radio(
-                "내 성적표 하위 메뉴",
-                [SCORECARD_TAB, REPORT_TAB],
-                key="scorecard_subpage",
-                help="같은 로그인 세션을 공유합니다 — 한 번만 로그인하면 됩니다.",
-            )
-            show_report = scorecard_subpage == REPORT_TAB
-        elif admin_mode and REPORT_IMPORT_ERROR:
-            st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
+    if show_scorecard and render_report_page is None and admin_mode and REPORT_IMPORT_ERROR:
+        st.sidebar.error(f"📈 리포트 모듈 로드 실패: {REPORT_IMPORT_ERROR}")
 
     # 4. 메인 뷰 라우팅
     #    ⚠️ 기본(아무것도 고르지 않은 첫 진입) 경로는 예전과 100% 동일하게 render_pegy_page() 입니다.

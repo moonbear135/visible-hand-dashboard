@@ -22,6 +22,7 @@ v1 범위 (SCORECARD_WORK_ORDER.md §2)
    - 이 화면은 기존 두 모듈(코스피/미국주식)의 코드와 데이터를 **읽기 전용**으로만 씁니다.
 """
 
+import html
 import os
 
 import streamlit as st
@@ -196,10 +197,34 @@ def _render_auth(client):
                     )
 
 
+# DB 컬럼이 `numeric(20, 6)` 이라 정수부는 14자리까지만 들어갑니다
+# (sql/scorecard_schema.sql — 전체 20자리 중 소수점 아래 6자리). 즉 저장 가능한 최대값은
+# 99,999,999,999,999.999999 이고, 그보다 큰 값을 넣으면 Postgres 가 `numeric field overflow`
+# 로 거절합니다. 그 거절 문구를 사용자에게 그대로 보여주는 대신, 화면 단계에서 먼저 막고
+# 한국어로 설명합니다. 이 상수는 DB 정의에서 그대로 유도한 값이지 임의로 정한 값이 아닙니다.
+MAX_INPUT_VALUE = 10 ** 14  # 이 값 **이상**은 저장 불가
+
+
 def _parse_positive_number(raw, label):
     """
     텍스트 입력 → 양수 float. 콤마(1,664,333)와 앞뒤 공백을 허용합니다.
     ⚠️ 값을 지어내지 않습니다 — 비어있거나 숫자가 아니면 그대로 예외를 던집니다.
+
+    🔐 2026-08-13 공개 전환 전 점검에서 보강 — 공개되면 불특정 다수가 아무 문자열이나 넣습니다.
+    기존에는 `float()` 성공 + `> 0` 만 봤는데, 파이썬 `float()` 는 `"nan"` · `"inf"` ·
+    `"Infinity"` · `"1e400"`(→ inf) 을 **모두 성공적으로 파싱**합니다. 그리고 `nan <= 0` 과
+    `inf <= 0` 은 둘 다 거짓이라 이 함수의 양수 검사를 그냥 통과해버렸습니다. 그 뒤는:
+      · 추가(➕) 경로 — `utils/scorecard_db.make_lot()` 안의 `_positive_number()` 가
+        `math.isfinite()` 로 걸러줘서 저장은 막혔지만, 사용자에게는 "저장하지 못했습니다:
+        수량이(가) 유효한 숫자가 아닙니다: 'nan'" 처럼 한 겹 늦은 메시지가 떴습니다.
+      · 수정(✏️) 경로 — `update_holding()` 은 `make_lot()` 을 거치지 않아 **검증이 아예
+        없었습니다.** NaN/Infinity 가 그대로 JSON 본문에 실려 Supabase 로 나가고
+        (JSON 규격에 없는 리터럴이라 서버가 거절), 사용자는 DB 원문 오류를 보게 됐습니다.
+      · 매우 큰 값(예: 1e300) — 유한수라 `isfinite()` 도 통과해 DB까지 갔다가
+        `numeric field overflow` 로 거절 → 역시 DB 원문 오류가 화면에 노출됐습니다.
+    그래서 **사용자가 숫자를 타이핑하는 두 곳(추가 폼·수정 폼)이 공유하는 이 함수**에서
+    유한성과 상한을 함께 확인합니다. 여기서 막으면 두 경로 모두 친절한 한국어 문구가 나가고,
+    잘못된 값이 네트워크 밖으로 나가지도 않습니다(DB의 CHECK 제약은 그대로 최후 방어선).
     """
     text = str(raw or "").strip().replace(",", "")
     if not text:
@@ -208,8 +233,16 @@ def _parse_positive_number(raw, label):
         number = float(text)
     except ValueError:
         raise ValueError(f"{label}은(는) 숫자로 입력해 주세요: {raw!r}")
+    if number != number or number in (float("inf"), float("-inf")):
+        # NaN 은 자기 자신과도 다르다는 성질로 판별합니다(math.isnan 과 동일, import 불필요).
+        raise ValueError(f"{label}은(는) 실제 숫자로 입력해 주세요: {raw!r}")
     if number <= 0:
         raise ValueError(f"{label}은(는) 0보다 커야 합니다.")
+    if number >= MAX_INPUT_VALUE:
+        raise ValueError(
+            f"{label}이(가) 너무 큽니다 — 저장할 수 있는 최대값은 "
+            f"{MAX_INPUT_VALUE - 1:,}(약 100조 미만)입니다: {raw!r}"
+        )
     return number
 
 
@@ -470,10 +503,26 @@ def _row_label_html(row, indexes):
     허용해(부모 표의 nowrap보다 우선순위가 높은 인라인 스타일이라 확실히 적용됨) 옆 칸을
     밀어내거나 잘리지 않고 필요하면 세 줄, 네 줄도 자연스럽게 접히도록 했습니다 — 다른
     칸(숫자 칸들, 버튼 처짐 방지용 nowrap)에는 전혀 영향 없습니다.
+
+    🔐 2026-08-13 공개 전환 전 보안 점검에서 추가 — **종목명·티커를 반드시 HTML 이스케이프**
+    합니다. 이 화면에서 `unsafe_allow_html=True` 로 DB 값을 그리는 곳은 여기 한 군데뿐입니다
+    (나머지 한 곳은 통화코드만 들어가는 표 전용 <style> 블록이라 사용자 입력이 닿지 않습니다).
+    정상 경로에서는 종목명이 우리 수집 스냅샷(`data/*.json`)에서만 오므로 HTML이 섞일 일이
+    없지만, `holdings.stock_name` 은 **DB에 저장되는 사용자 소유 컬럼**이고 Supabase 는
+    설계상 anon key + 로그인 JWT 로 REST 를 직접 호출할 수 있습니다 — 즉 로그인한 사용자가
+    이 화면을 거치지 않고 자기 행의 stock_name 에 `<img src=x onerror=...>` 같은 값을 직접
+    써넣는 것이 가능합니다. RLS 덕분에 그 값은 **본인 화면에만** 그려지고 남의 세션으로는
+    절대 넘어가지 않지만(→ 남을 공격하는 XSS는 아님), 본인 세션에서 실행되는 스크립트는 그
+    사람의 Supabase 로그인 토큰을 훔칠 수 있어("이 문자열을 종목명에 붙여넣어 보세요" 식의
+    사회공학) 그대로 두면 안 됩니다. `html.escape()` 를 거치면 그런 값은 실행되지 않고
+    **글자 그대로** 보입니다. 우리가 직접 넣는 `<br>` 와 바깥 `<div>` 는 이스케이프 대상이
+    아니므로 기존 두 줄 표기·줄바꿈 동작은 100% 그대로입니다.
     """
     name = _display_name(row, indexes)
     ticker = row["ticker"]
-    label = f"{name}<br>({ticker})" if name else ticker
+    safe_name = html.escape(str(name)) if name else None
+    safe_ticker = html.escape(str(ticker))
+    label = f"{safe_name}<br>({safe_ticker})" if safe_name else safe_ticker
     return f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">{label}</div>'
 
 
