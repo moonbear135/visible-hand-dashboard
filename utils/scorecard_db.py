@@ -995,6 +995,10 @@ def user_id_of(user):
 #        (이메일의 경우 type 은 email / **recovery** / invite / email_change)
 #      · https://supabase.com/docs/reference/python/auth-resetpasswordforemail
 #      · https://supabase.com/docs/reference/python/auth-updateuser
+#    ⚠️ 2026-08-13 실측 정정: 문서는 "6-digit"라 했지만 오너가 실제로 받은 코드는
+#      8자리(`59974821`)였습니다. 방식(OTP)에 대한 판단은 그대로 유효하지만, 정확한
+#      자리수는 문서보다 실측을 따라야 해서 아래 상수를 정확히 6이 아니라 범위로
+#      완화했습니다(§0-1).
 #
 #  ⚠️ 오너가 Supabase 대시보드에서 **딱 한 가지**를 해야 이 기능이 동작합니다:
 #     Authentication → Emails(Email Templates) → **Reset Password** 템플릿 본문에
@@ -1010,9 +1014,14 @@ def user_id_of(user):
 #     구분해 말하지 않고 항상 같은 문구(PASSWORD_RESET_SENT_MESSAGE)를 돌려줍니다.
 # -----------------------------------------------------------------------------
 
-# 이메일 템플릿의 `{{ .Token }}` 이 6자리 숫자라는 공식 문서 기술에서 그대로 온 값입니다
-# (임의로 정한 숫자가 아닙니다).
-PASSWORD_RESET_CODE_LENGTH = 6
+# ⚠️ 2026-08-13 실측 정정 — 공식 문서("{{ .Token }} Contains a 6-digit OTP")를 근거로
+# 처음엔 정확히 6자리만 받도록 막아뒀는데, 오너가 실제로 받은 재설정 메일의 코드가
+# **8자리**(`59974821`)였습니다. 문서와 실측이 다르면 실측을 따른다는 원칙(§0-1)에 따라
+# 특정 자리수를 강제하지 않고 범위로 완화합니다. 최종 정오답 판단은 Supabase
+# verify_otp() 서버 응답이 내리고, 여기서는 명백히 잘못된 입력(빈 값 · 문자 섞임 ·
+# 너무 짧은 값)만 사전에 걸러 1회용 코드를 허투루 소모하지 않게 합니다.
+PASSWORD_RESET_CODE_MIN_LENGTH = 6
+PASSWORD_RESET_CODE_MAX_LENGTH = 10
 
 # Supabase Auth 의 기본 최소 비밀번호 길이(대시보드에서 더 길게 올릴 수 있습니다).
 # 여기서 먼저 막으면 사용자가 영어 원문 대신 한국어 안내를 보게 됩니다. 더 강한 정책은
@@ -1021,7 +1030,7 @@ MIN_PASSWORD_LENGTH = 6
 
 # 계정 존재 여부를 흘리지 않는 안전한 안내 문구(성공·미가입 어느 쪽이든 이 문구 하나).
 PASSWORD_RESET_SENT_MESSAGE = (
-    "입력하신 이메일로 가입된 계정이 있다면 6자리 재설정 코드를 보냈습니다. "
+    "입력하신 이메일로 가입된 계정이 있다면 재설정 코드를 보냈습니다. "
     "메일함(스팸함 포함)을 확인해 주세요."
 )
 
@@ -1052,7 +1061,7 @@ def _reset_request_callable(client):
 
 def send_password_reset_code(client, email):
     """
-    비밀번호 재설정 코드(6자리)를 이메일로 보내달라고 Supabase 에 요청합니다.
+    비밀번호 재설정 코드를 이메일로 보내달라고 Supabase 에 요청합니다.
 
     반환: 화면에 그대로 띄울 안내 문구(PASSWORD_RESET_SENT_MESSAGE).
     ⚠️ 이 함수는 **가입된 이메일인지 아닌지를 절대 알려주지 않습니다**(위 주석 참고).
@@ -1072,7 +1081,7 @@ def send_password_reset_code(client, email):
         )
     try:
         # options(redirect_to)는 일부러 넘기지 않습니다 — 우리는 링크가 아니라 메일 본문의
-        # 6자리 코드를 쓰기 때문에 Redirect URL 등록이 필요 없습니다.
+        # 코드를 쓰기 때문에 Redirect URL 등록이 필요 없습니다.
         request(address)
     except Exception as exc:  # noqa: BLE001
         # 발송 단계 실패는 대부분 '요청 과다(rate limit)' 라서 사용자에게 보여줄 가치가 있습니다.
@@ -1083,16 +1092,22 @@ def send_password_reset_code(client, email):
 
 def _normalize_reset_code(code):
     """
-    사용자가 입력한 재설정 코드 정리 — 공백/하이픈을 걷어내고 6자리 숫자인지 확인합니다.
+    사용자가 입력한 재설정 코드 정리 — 공백/하이픈을 걷어내고 숫자로만 된 값인지 확인합니다.
     (메일에서 복사·붙여넣기 하면 앞뒤 공백이나 '123-456' 형태가 섞여 들어올 수 있습니다.)
+
+    ⚠️ 정확한 자리수를 강제하지 않습니다 — 위 PASSWORD_RESET_CODE_MIN/MAX_LENGTH 주석 참고
+    (문서는 6자리라 했지만 실측은 8자리였음). 범위 밖이거나 숫자가 아니면 1회용 코드를
+    Supabase 로 보내기 전에 여기서 막습니다.
     """
     text = re.sub(r"[\s-]", "", str(code or ""))
     if not text:
         raise ScorecardError("이메일로 받은 재설정 코드를 입력해 주세요.")
-    if not (text.isdigit() and len(text) == PASSWORD_RESET_CODE_LENGTH):
+    if not (
+        text.isdigit()
+        and PASSWORD_RESET_CODE_MIN_LENGTH <= len(text) <= PASSWORD_RESET_CODE_MAX_LENGTH
+    ):
         raise ScorecardError(
-            f"재설정 코드는 이메일로 받은 {PASSWORD_RESET_CODE_LENGTH}자리 숫자입니다. "
-            "메일 본문의 숫자를 다시 확인해 주세요."
+            "재설정 코드가 올바르지 않습니다. 메일 본문의 숫자 코드를 다시 확인해 주세요."
         )
     return text
 
@@ -1123,7 +1138,7 @@ def _session_of(response):
 
 def reset_password_with_code(client, email, code, new_password, confirm_password=None):
     """
-    이메일로 받은 6자리 코드를 검증하고(=본인 확인), 곧바로 새 비밀번호로 바꿉니다.
+    이메일로 받은 코드를 검증하고(=본인 확인), 곧바로 새 비밀번호로 바꿉니다.
 
     ⚠️ **`client` 는 반드시 이 재설정 전용으로 새로 만든 클라이언트여야 합니다.**
        `verify_otp()` 가 성공하면 그 클라이언트에 **재설정 대상 계정의 로그인 세션이 붙습니다.**

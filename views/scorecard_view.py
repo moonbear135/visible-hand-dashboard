@@ -168,8 +168,9 @@ def _render_not_ready(status):
    → `service_role` 키는 **절대 넣지 마세요** (RLS를 통째로 우회합니다)
 5. `requirements.txt` 의 `supabase` 가 반영되도록 재배포
 6. Supabase → Authentication → **Emails(Email Templates) → Reset Password** 본문에
-   `{{ .Token }}` 추가 (비밀번호 찾기용 **6자리 코드**. 기본 템플릿에는 링크만 있어서
-   이 한 줄이 없으면 사용자가 입력할 코드가 메일에 안 옵니다)
+   `{{ .Token }}` 추가 (비밀번호 찾기용 **재설정 코드**. 기본 템플릿에는 링크만 있어서
+   이 한 줄이 없으면 사용자가 입력할 코드가 메일에 안 옵니다. 문서엔 "6자리"라고
+   적혀 있지만 실측 결과 8자리로 오기도 합니다 — 화면 쪽 검증은 자리수를 고정하지 않습니다)
             """
         )
 
@@ -191,7 +192,7 @@ def _render_auth(client):
         # 안에서 바로 재설정 탭으로 안내합니다(로그인 ID는 이메일 자체라 '아이디 찾기'는 없습니다).
         st.caption(
             "🔑 비밀번호를 잊으셨나요? 새 계정을 만들지 마시고 위 **비밀번호 찾기** 탭에서 "
-            "이메일로 6자리 코드를 받아 새 비밀번호를 정하세요 — 기존에 입력한 보유 종목이 "
+            "이메일로 코드를 받아 새 비밀번호를 정하세요 — 기존에 입력한 보유 종목이 "
             "그대로 남습니다."
         )
         if submitted:
@@ -238,16 +239,18 @@ def _render_auth(client):
     # 비밀번호 찾기(재설정) — 2026-08-13 오너 요청, TASK_HISTORY #109
     #
     #  로그인 ID가 이메일 자체라 '아이디 찾기'는 없고 **비밀번호 재설정**만 있습니다.
-    #  링크를 누르는 방식이 아니라 **메일로 받은 6자리 코드를 직접 입력**하는 방식입니다
+    #  링크를 누르는 방식이 아니라 **메일로 받은 코드를 직접 입력**하는 방식입니다
     #  (Streamlit 은 URL 해시 프래그먼트를 읽을 수 없어 링크 방식이 안 맞습니다 —
-    #   자세한 근거는 utils/scorecard_db.py 의 'D-2' 주석 블록).
+    #   자세한 근거는 utils/scorecard_db.py 의 'D-2' 주석 블록). ⚠️ 2026-08-13: 문서상
+    #  "6자리"였지만 실측 코드가 8자리로 와서, 자리수를 고정하지 않고 범위로 검증합니다
+    #  (utils/scorecard_db.py 의 PASSWORD_RESET_CODE_MIN/MAX_LENGTH 참고).
     #
     #  ⚠️ 이 탭 어디에서도 SESSION_USER_KEY(로그인 세션)를 건드리지 않습니다. 코드 검증은
     #     `_new_auth_client()` 로 만든 1회용 클라이언트에서만 일어나고 끝나면 로그아웃됩니다.
     # -------------------------------------------------------------------------
     with tab_reset:
         st.caption(
-            "가입한 이메일로 **6자리 재설정 코드**를 보내드립니다. 메일에 적힌 숫자를 아래 "
+            "가입한 이메일로 **재설정 코드**를 보내드립니다. 메일에 적힌 숫자를 아래 "
             "2단계에 그대로 입력하면 새 비밀번호를 정할 수 있습니다."
         )
 
@@ -279,8 +282,8 @@ def _render_auth(client):
                     "가입한 이메일", key="scorecard_reset_email_confirm",
                 )
             reset_code = st.text_input(
-                "이메일로 받은 6자리 코드", key="scorecard_reset_code",
-                help="메일 본문의 숫자 6자리입니다. 링크를 누를 필요는 없습니다.",
+                "이메일로 받은 코드", key="scorecard_reset_code",
+                help="메일 본문에 적힌 숫자 코드를 그대로 입력하세요. 링크를 누를 필요는 없습니다.",
             )
             new_pw = st.text_input("새 비밀번호", type="password", key="scorecard_reset_pw")
             st.caption("8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.")

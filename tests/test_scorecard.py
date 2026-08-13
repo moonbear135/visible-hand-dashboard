@@ -1147,7 +1147,10 @@ def test_password_reset():
         ScorecardError, "코드가 비면 거부")
     expect_raises(
         lambda: sdb.reset_password_with_code(client, "a@b.c", "12345", "newpw123", "newpw123"),
-        ScorecardError, "6자리가 아닌 코드 거부")
+        ScorecardError, "너무 짧은(5자리) 코드 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "123456789012", "newpw123", "newpw123"),
+        ScorecardError, "너무 긴(12자리) 코드 거부")
     expect_raises(
         lambda: sdb.reset_password_with_code(client, "a@b.c", "12a456", "newpw123", "newpw123"),
         ScorecardError, "숫자가 아닌 코드 거부")
@@ -1163,8 +1166,16 @@ def test_password_reset():
     check(params["type"] == "recovery",
           "비밀번호 재설정용 OTP 타입은 'recovery'(공식 문서 확인)")
     check(params["token"] == "123456",
-          "코드에 섞인 공백·하이픈은 걷어내고 6자리 숫자로 정규화")
+          "코드에 섞인 공백·하이픈은 걷어내고 숫자만 남도록 정규화")
     check(params["email"] == "a@b.c", "이메일 앞뒤 공백 제거")
+
+    # 2026-08-13 실사용 버그 재현 — Supabase 문서는 "6자리"라 했지만 오너가 실제로 받은
+    # 코드는 8자리(59974821)였고, 예전 코드(정확히 6자리만 허용)는 이걸 전부 거부했습니다.
+    client8 = FakeClient()
+    ok8 = sdb.reset_password_with_code(client8, "a@b.c", "59974821", "newpw123", "newpw123")
+    check(ok8 is True, "실측된 8자리 코드도 정상 통과(재발 방지 회귀 테스트)")
+    check(client8.auth.verify_otp_calls[0]["token"] == "59974821",
+          "8자리 코드가 잘리거나 변형되지 않고 그대로 전달됨")
     check(client.auth.update_user_keys == [["password"]],
           "update_user 에 password 키만 전달(다른 필드 건드리지 않음)")
     check(client.auth.update_user_password_len == len("newpw123"),
@@ -1213,9 +1224,10 @@ def test_password_reset():
           "실패했더라도 1회용 세션은 로그아웃(세션이 남지 않음)")
     check(callable(original_update), "테스트 보조 확인")
 
-    # 문서화된 상수
-    check(sdb.PASSWORD_RESET_CODE_LENGTH == 6,
-          "코드 길이 6자리 — Supabase 이메일 템플릿 {{ .Token }} 의 공식 사양")
+    # 문서화된 상수 — 2026-08-13 실측 정정(문서 "6자리" vs 실제 수신 8자리)으로 범위화됨
+    check(sdb.PASSWORD_RESET_CODE_MIN_LENGTH == 6, "최소 자리수는 문서 사양(6자리) 유지")
+    check(sdb.PASSWORD_RESET_CODE_MAX_LENGTH >= 8,
+          "최대 자리수는 실측된 8자리 코드를 받아들일 수 있어야 함")
 
 
 # =============================================================================
