@@ -51,6 +51,7 @@ from __future__ import annotations
 import csv
 import json
 import os
+import re
 import sys
 from datetime import date, datetime, timedelta
 
@@ -82,6 +83,21 @@ class ReportError(RuntimeError):
 
 SNAPSHOTS_TABLE = "portfolio_daily_snapshots"
 HOLDINGS_TABLE = "holdings"
+
+# 🕐 "이 행의 가격은 몇 시 몇 분에 수집된 값인가"를 담는 컬럼 이름 (2026-08-13 오너 요청).
+#    한국장(오후)과 미국장(한국시간 새벽)의 수집 시각이 달라서, 거래일(날짜)만으로는 리포트가
+#    언제 시점의 종가로 만들어졌는지 알 수 없다는 피드백에서 나왔습니다.
+#    값은 **수집기가 이미 적어 둔 한국시간 문자열을 그대로** 씁니다(앱이 시차를 직접 계산하지
+#    않습니다). 문자열 하나로 충분한 이유: 스냅샷 행은 이미 `market` 으로 KR/US 가 나뉘어
+#    있어서, 시장별 컬럼을 따로 둘 필요가 없습니다.
+PRICE_STAMP_FIELD = "price_as_of_kst"
+
+# 컬럼이 아직 없는 DB(= 오너가 ALTER 문을 실행하기 전)에서 배치가 통째로 죽지 않게 하려고
+# 쓰는 표식. PostgREST 는 없는 컬럼을 보내면 PGRST204 와 함께 컬럼 이름을 그대로 알려 줍니다.
+PRICE_STAMP_ALTER_SQL = (
+    "alter table public.portfolio_daily_snapshots "
+    f"add column if not exists {PRICE_STAMP_FIELD} text;"
+)
 
 # 화면에 상시 노출할 고지. "내 성적표"의 NO_FX_CONVERSION_NOTICE / NO_FEES_TAXES_NOTICE 와
 # 같은 목적이며, 리포트 고유의 한계를 추가로 알립니다.
@@ -138,6 +154,31 @@ def to_date(value):
         return date.fromisoformat(text[:10])
     except ValueError as exc:
         raise ValueError(f"날짜 형식을 알 수 없습니다: {value!r}") from exc
+
+
+# 'YYYY-MM-DD HH:MM' 또는 'YYYY-MM-DDTHH:MM(:SS…)' 앞부분만 인정합니다.
+_PRICE_STAMP_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})[ T](\d{2}):(\d{2})")
+
+
+def normalize_price_stamp(value):
+    """
+    수집기 메타데이터의 타임스탬프 문자열 → 'YYYY-MM-DD HH:MM' (없거나 시:분이 없으면 None).
+
+    ⚠️ 여기서 하는 일은 **자르기뿐**입니다(§0-1).
+      · 날짜만 있고 시각이 없는 값('2026-08-12')은 00:00 을 붙이지 않고 **None** 입니다 —
+        자정에 수집했다는 뜻이 되어 버립니다.
+      · 타임존 변환을 하지 않습니다. 이 함수에 들어오는 값은 호출부에서 이미 **한국시간**
+        이라고 확인된 필드뿐입니다(KR=last_updated_at, US=last_updated_at_kst).
+      · 초는 원본에 있어도 버립니다. 화면 표기가 분 단위로 통일돼야 하고, 두 수집기 모두
+        분 단위까지만 기록합니다(TASK_HISTORY #111 과 같은 판단).
+    """
+    text = str(value or "").strip()
+    if not text:
+        return None
+    match = _PRICE_STAMP_RE.match(text)
+    if not match:
+        return None
+    return f"{match.group(1)} {match.group(2)}:{match.group(3)}"
 
 
 def normalize_period(period):
@@ -231,7 +272,8 @@ def shift_period(period, ref_date, steps):
 # B. 스냅샷 1행 만들기 / 기간 집계·판정 (순수 함수)
 # =============================================================================
 def build_snapshot_rows(user_id, holdings, price_lookup,
-                        session_date_by_market, benchmark_by_market=None):
+                        session_date_by_market, benchmark_by_market=None,
+                        price_stamp_by_market=None):
     """
     사용자 1명의 보유 종목 → 그날 저장할 스냅샷 행 목록(시장별 최대 1행).
 
@@ -241,6 +283,10 @@ def build_snapshot_rows(user_id, holdings, price_lookup,
                              씁니다(§0-3-1 후행지표 전용, 아래 resolve_session_dates 참고).
     benchmark_by_market    : {"KR": ("KOSPI", 3210.5), "US": ("SP500_PROXY_SPY", 754.6)}
                              값이 없으면 (심볼, None) 로 넘기세요 — NULL 로 저장됩니다.
+    price_stamp_by_market  : {"KR": "2026-08-12 17:50", "US": "2026-08-13 07:14"} — 그 시장
+                             가격이 **한국시간 기준 몇 시 몇 분에 수집됐는지**(수집기 메타데이터
+                             원문). 모르면 넣지 마세요 — NULL 로 저장되고 화면이 "시각 정보
+                             없음"이라고 정직하게 표시합니다(추정 금지).
 
     반환: (rows, skipped)
       rows    : Supabase 에 그대로 넣을 dict 목록
@@ -251,6 +297,7 @@ def build_snapshot_rows(user_id, holdings, price_lookup,
        "하루 만에 수천만원 상승"처럼 보이는 가짜 수익률이 생깁니다.
     """
     benchmark_by_market = benchmark_by_market or {}
+    price_stamp_by_market = price_stamp_by_market or {}
     grouped = {}
     for holding in holdings or []:
         try:
@@ -306,6 +353,8 @@ def build_snapshot_rows(user_id, holdings, price_lookup,
             "unpriced_count": len(evaluated) - len(priced),
             "benchmark_symbol": symbol,
             "benchmark_value": (round(float(value), 6) if value is not None else None),
+            # 시:분을 모르면 None(=NULL). 오늘 시각이나 장 마감 시각으로 메우지 않습니다(§0-1).
+            PRICE_STAMP_FIELD: normalize_price_stamp(price_stamp_by_market.get(market)),
         })
     return rows, skipped
 
@@ -326,6 +375,10 @@ def _normalize_snapshot(row):
     for field in ("holdings_count", "priced_count", "unpriced_count"):
         raw = item.get(field)
         item[field] = int(raw) if raw is not None and raw != "" else None
+    # 🕐 가격 수집 시각(KST). 컬럼이 없던 시절의 행이나 시각을 못 읽은 날은 None 그대로 둡니다
+    #    — 화면이 "시각 정보 없음"으로 표시할 수 있게, 빈 문자열과 None 을 하나로 맞춰만 둡니다.
+    stamp = item.get(PRICE_STAMP_FIELD)
+    item[PRICE_STAMP_FIELD] = (str(stamp).strip() or None) if stamp is not None else None
     return item
 
 
@@ -772,25 +825,58 @@ def group_holdings_by_user(holdings):
     return grouped
 
 
+def _without_price_stamp(rows):
+    """가격 수집 시각 필드만 뺀 사본(컬럼이 아직 없는 DB 로 보낼 때)."""
+    return [{key: value for key, value in row.items() if key != PRICE_STAMP_FIELD}
+            for row in rows]
+
+
 def upsert_snapshots(service_client, rows, chunk_size=200):
     """
     (배치 전용) 스냅샷 행들을 저장합니다. 같은 (user_id, market, snapshot_date) 가 이미 있으면
     새로 만들지 않고 **갱신**합니다(배치를 두 번 돌려도 행이 늘지 않음).
     반환: 저장 시도한 행 수
+
+    ⚠️ `price_as_of_kst` 컬럼이 아직 없는 DB 대비 (2026-08-13)
+       이 컬럼은 나중에 추가된 것이라, 오너가 `sql/report_schema.sql` 의 alter 문을 실행하기
+       전에는 DB 에 없습니다. 그 상태로 컬럼을 보내면 PostgREST 가 요청 전체를 거절해서
+       **그날 스냅샷이 통째로 저장되지 않습니다.** 그래서 그 오류만 알아보고 **시각 필드를 빼고
+       한 번 더** 저장한 뒤 크게 경고합니다(수치는 지키고, 무엇이 빠졌는지는 로그로 알림).
+       — 다른 오류는 그대로 올립니다(조용히 삼키지 않음, §0-1).
     """
     if service_client is None:
         raise ReportError("Supabase 클라이언트가 없습니다.")
     if not rows:
         return 0
+
     saved = 0
+    stamp_column_missing = False
     for start in range(0, len(rows), chunk_size):
         chunk = rows[start:start + chunk_size]
-        _execute(
-            service_client.table(SNAPSHOTS_TABLE).upsert(
-                chunk, on_conflict="user_id,market,snapshot_date"
-            ),
-            "스냅샷 저장",
-        )
+        payload = _without_price_stamp(chunk) if stamp_column_missing else chunk
+        try:
+            _execute(
+                service_client.table(SNAPSHOTS_TABLE).upsert(
+                    payload, on_conflict="user_id,market,snapshot_date"
+                ),
+                "스냅샷 저장",
+            )
+        except ReportError as exc:
+            if stamp_column_missing or PRICE_STAMP_FIELD not in str(exc):
+                raise
+            stamp_column_missing = True
+            print(
+                f"  ⚠️ DB 에 `{PRICE_STAMP_FIELD}` 컬럼이 없어 **가격 수집 시각을 빼고** 저장합니다.\n"
+                f"     오너 할 일 — Supabase SQL Editor 에서 아래 한 줄 실행:\n"
+                f"       {PRICE_STAMP_ALTER_SQL}\n"
+                "     (실행 전까지 저장되는 행은 리포트 화면에서 '시각 정보 없음'으로 보입니다.)"
+            )
+            _execute(
+                service_client.table(SNAPSHOTS_TABLE).upsert(
+                    _without_price_stamp(chunk), on_conflict="user_id,market,snapshot_date"
+                ),
+                "스냅샷 저장(가격 수집 시각 제외)",
+            )
         saved += len(chunk)
     return saved
 
@@ -819,17 +905,31 @@ def fetch_user_snapshots(client, user_id, market=None, start_date=None, end_date
 # =============================================================================
 # E. 배치 진입점
 # =============================================================================
-def resolve_session_dates(data_dir=None):
+def resolve_session_info(data_dir=None):
     """
-    "지금 저장하는 가격은 **어느 거래일** 것인가"를 데이터 스스로 말하게 합니다.
-    배치가 도는 시각(UTC)이 아니라 가격 스냅샷의 기준일을 쓰는 이유는, 수집이 실패해
-    어제 파일이 그대로 남아 있을 때 그것을 '오늘 값'으로 둔갑시키지 않기 위해서입니다
-    (§0-1 · §0-3-1). 확인할 수 없으면 그 시장은 **기록하지 않습니다**(추측 금지).
+    "지금 저장하는 가격은 **어느 거래일** 것이고, **몇 시 몇 분에** 수집된 것인가"를 데이터
+    스스로 말하게 합니다. 배치가 도는 시각(UTC)이 아니라 가격 스냅샷의 기준일을 쓰는 이유는,
+    수집이 실패해 어제 파일이 그대로 남아 있을 때 그것을 '오늘 값'으로 둔갑시키지 않기
+    위해서입니다(§0-1 · §0-3-1). 확인할 수 없으면 그 시장은 **기록하지 않습니다**(추측 금지).
 
-    반환: ({"KR": "2026-08-11", "US": "2026-08-11"}, [진단 문구, ...])
+    🕐 시:분(가격 수집 시각)에 대해 (2026-08-13 추가)
+      · 원래 이 함수는 같은 메타데이터에서 **날짜만** 뽑고 시:분을 버렸습니다. 그런데 한국장은
+        오후, 미국장은 한국시간 새벽에 수집돼서 "이 리포트가 언제 종가로 만들어졌나"가 리포트
+        화면에 전혀 드러나지 않는다는 오너 피드백이 있었습니다(TASK_HISTORY #112).
+      · KR : `last_updated_at` — 수집기가 이미 **한국시간**으로 적습니다.
+      · US : `last_updated_at_kst` — 수집기가 이미 한국시간으로 **변환해 둔 값**을 그대로
+             씁니다. ⚠️ `last_updated_at_et`(미국 동부시간)로 대체하지 않습니다 — 그건 KST 가
+             아니어서, KST 라고 저장하는 순간 13~14시간 틀린 값을 사실처럼 보여주게 됩니다.
+             ET 밖에 없으면 시각은 **없음(None)** 으로 둡니다(직접 시차 계산 금지 — 서머타임
+             처리를 여기서 다시 구현하면 언젠가 반드시 틀립니다).
+      · 시각을 못 읽어도 거래일만 확인되면 스냅샷은 **정상 저장**됩니다(시각만 NULL).
+
+    반환: ({"KR": "2026-08-11", ...}, {"KR": "2026-08-11 17:50", ...}, [진단 문구, ...])
+          — 두 번째 dict 는 값이 확인된 시장만 담습니다(빈 값을 넣지 않습니다).
     """
     notes = []
     dates = {}
+    stamps = {}
 
     kr_meta = (load_snapshot_payload(MARKET_KR, data_dir=data_dir) or {}).get("metadata") or {}
     kr_stamp = kr_meta.get("last_updated_at")
@@ -841,6 +941,14 @@ def resolve_session_dates(data_dir=None):
             notes.append(f"KR 거래일 확인 실패: last_updated_at={kr_stamp!r}")
     else:
         notes.append("KR 거래일 확인 실패: 코스피 스냅샷(metadata.last_updated_at)이 없습니다.")
+
+    kr_price_stamp = normalize_price_stamp(kr_stamp)
+    if kr_price_stamp:
+        stamps[MARKET_KR] = kr_price_stamp
+        notes.append(f"KR 가격 수집 시각 = {kr_price_stamp} (KST, last_updated_at)")
+    elif MARKET_KR in dates:
+        notes.append(f"KR 가격 수집 시각 없음: last_updated_at={kr_stamp!r} 에 시:분이 없어 "
+                     "시각은 비운 채(NULL) 저장합니다(추정하지 않음).")
 
     us_meta = (load_snapshot_payload(MARKET_US, data_dir=data_dir) or {}).get("metadata") or {}
     us_session = (us_meta.get("session_hint") or {}).get("session_date") \
@@ -854,6 +962,24 @@ def resolve_session_dates(data_dir=None):
     else:
         notes.append("US 거래일 확인 실패: 미국 스냅샷(metadata.session_hint)이 없습니다.")
 
+    us_price_stamp = normalize_price_stamp(us_meta.get("last_updated_at_kst"))
+    if us_price_stamp:
+        stamps[MARKET_US] = us_price_stamp
+        notes.append(f"US 가격 수집 시각 = {us_price_stamp} (KST, last_updated_at_kst — "
+                     "수집기가 변환해 둔 값 재사용)")
+    elif MARKET_US in dates:
+        notes.append("US 가격 수집 시각 없음: last_updated_at_kst 가 없어 시각은 비운 채(NULL) "
+                     "저장합니다(ET 값을 KST 로 둔갑시키지 않습니다).")
+
+    return dates, stamps, notes
+
+
+def resolve_session_dates(data_dir=None):
+    """
+    `resolve_session_info()` 중 거래일만 필요한 호출부를 위한 얇은 래퍼(기존 시그니처 유지).
+    반환: ({"KR": "2026-08-11", "US": "2026-08-11"}, [진단 문구, ...])
+    """
+    dates, _stamps, notes = resolve_session_info(data_dir=data_dir)
     return dates, notes
 
 
@@ -878,7 +1004,7 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
     """
     매일 1회 도는 스냅샷 적재 배치의 본체.
 
-      1) 가격 스냅샷 파일에서 시장별 거래일을 확인 (resolve_session_dates)
+      1) 가격 스냅샷 파일에서 시장별 거래일 + 가격 수집 시각(KST)을 확인 (resolve_session_info)
       2) 벤치마크 종가 확인 (코스피 CSV / 미국 지수 JSON) — 없으면 NULL 로 둡니다
       3) service_role 로 **모든 사용자** holdings 조회
       4) 사용자별·시장별 스냅샷 행 생성 (순수 함수)
@@ -890,7 +1016,7 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
     print("=" * 70)
     print("[리포트 스냅샷 배치] 시작")
 
-    session_dates, notes = resolve_session_dates(data_dir=data_dir)
+    session_dates, price_stamps, notes = resolve_session_info(data_dir=data_dir)
     for note in notes:
         print(f"  · {note}")
     if not session_dates:
@@ -923,6 +1049,7 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
     for user_id, user_holdings in grouped.items():
         rows, skips = build_snapshot_rows(
             user_id, user_holdings, price_lookup, session_dates, benchmarks,
+            price_stamp_by_market=price_stamps,
         )
         all_rows.extend(rows)
         all_skips.extend(skips)
@@ -940,6 +1067,7 @@ def run_daily_snapshot_batch(service_client=None, data_dir=None, csv_path=None, 
     print("=" * 70)
     return {
         "session_dates": session_dates,
+        "price_stamps": price_stamps,
         "benchmarks": {m: {"symbol": s, "value": v} for m, (s, v) in benchmarks.items()},
         "user_count": len(grouped),
         "holdings_count": len(holdings),

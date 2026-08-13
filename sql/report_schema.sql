@@ -84,6 +84,24 @@ create table if not exists public.portfolio_daily_snapshots (
     unpriced_count   integer not null check (unpriced_count >= 0),
     benchmark_symbol text,
     benchmark_value  numeric(20, 6),
+
+    -- 🕐 이 행의 가격이 **몇 시 몇 분에 수집된 값인가** (2026-08-13 추가, 오너 요청)
+    --    snapshot_date 는 "어느 거래일"만 말해 줄 뿐, 한국장(오후)과 미국장(한국시간 새벽)의
+    --    수집 시각이 다르다는 사실이 리포트에 전혀 드러나지 않았습니다. 그래서 배치가 그날
+    --    실제로 읽은 가격 파일의 타임스탬프를 **한국 시간(KST) 기준 'YYYY-MM-DD HH:MM'** 로
+    --    그대로 남깁니다.
+    --      · KR = data/kospi200_pegy_latest.json 의 metadata.last_updated_at (이미 KST)
+    --      · US = data/us_stocks_latest.json  의 metadata.last_updated_at_kst
+    --             (수집기가 이미 KST 로 변환해 둔 값을 재사용 — 앱이 직접 시차 계산을 하지 않습니다)
+    --    ⚠️ timestamptz 가 아니라 text 인 이유: 원본 메타데이터가 **분 단위까지만** 기록합니다.
+    --       timestamptz 로 넣으면 없는 초(:00)와 없는 정밀도가 생기고, 표시할 때 서버 타임존에
+    --       따라 다른 시각으로 렌더링될 여지도 생깁니다. 수집기가 적어 둔 문자열을 그대로 보관해
+    --       화면에도 그대로 보여 줍니다(§0-1 — 없는 정밀도를 지어내지 않기, TASK_HISTORY #111 과 같은 판단).
+    --    ⚠️ NULL 허용: 이 컬럼을 만들기 전에 저장된 과거 행과, 수집기 메타데이터에 시각이
+    --       없었던 날은 NULL 입니다. 화면은 그 행을 "시각 정보 없음"으로 정직하게 표시하고
+    --       오늘 시각이나 추정값으로 메우지 않습니다.
+    price_as_of_kst  text,
+
     created_at       timestamptz not null default now(),
     updated_at       timestamptz not null default now(),
 
@@ -107,6 +125,21 @@ create table if not exists public.portfolio_daily_snapshots (
     )
 );
 
+-- -----------------------------------------------------------------------------
+-- 1-1. 🔧 이미 만들어 둔 테이블에 컬럼 추가 (마이그레이션 — 2026-08-13)
+-- -----------------------------------------------------------------------------
+--  ⚠️ 위 `create table if not exists` 는 **테이블이 이미 있으면 아무 일도 하지 않습니다.**
+--     그래서 2026-08-12 에 이미 이 스크립트를 실행해 둔 프로젝트에는 `price_as_of_kst`
+--     컬럼이 생기지 않습니다. 아래 한 줄이 그 경우를 위한 것입니다(새 프로젝트에서 실행하면
+--     이미 있는 컬럼이라 조용히 넘어갑니다 — 여러 번 실행해도 안전).
+--
+--  기존 행은 NULL 로 남습니다. 그 시각을 지금 와서 계산해 채우지 않습니다 — 그날 배치가
+--  몇 시 몇 분 가격을 봤는지는 아무 데도 기록돼 있지 않고, 추정해 넣으면 그게 지어낸
+--  값입니다(§0-1). 화면은 그 행을 "시각 정보 없음"으로 표시합니다.
+-- -----------------------------------------------------------------------------
+alter table public.portfolio_daily_snapshots
+    add column if not exists price_as_of_kst text;
+
 create index if not exists snapshots_user_id_idx
     on public.portfolio_daily_snapshots (user_id);
 create index if not exists snapshots_date_idx
@@ -129,6 +162,8 @@ comment on column public.portfolio_daily_snapshots.benchmark_symbol is
     '한국=KOSPI(코스피 지수 종가). 미국=SP500_PROXY_SPY / NASDAQ_PROXY_ONEQ (지수 자체가 아니라 추종 ETF 종가라는 사실을 이름에 그대로 남깁니다 — §0-1).';
 comment on column public.portfolio_daily_snapshots.benchmark_value is
     '그날 벤치마크 종가. 수집 실패한 날은 NULL 이며, 전날 값을 복사해 채우지 않습니다(보간 금지).';
+comment on column public.portfolio_daily_snapshots.price_as_of_kst is
+    '이 행의 가격이 수집된 시각(한국시간 KST, ''YYYY-MM-DD HH:MM'' 문자열). KR=kospi200_pegy_latest.json last_updated_at / US=us_stocks_latest.json last_updated_at_kst 를 그대로 저장합니다. 원본이 분 단위까지만 기록하므로 초는 없습니다(지어내지 않음). 이 컬럼 신설 이전 행과 메타데이터에 시각이 없던 날은 NULL.';
 
 
 -- -----------------------------------------------------------------------------
@@ -224,12 +259,23 @@ grant select, insert, update on public.portfolio_daily_snapshots to service_role
 --       where table_schema = 'public' and table_name = 'portfolio_daily_snapshots'
 --       order by ordinal_position;
 --
+--  ③-1 (2026-08-13) 가격 수집 시각 컬럼이 실제로 붙었는지 — 이 한 줄이 안 나오면 위
+--      §1-1 의 alter 문을 실행하지 않은 것입니다(그 상태에서도 배치는 죽지 않고, 시각만
+--      비운 채 저장한 뒤 로그에 경고를 남깁니다).
+--      select column_name, data_type, is_nullable
+--        from information_schema.columns
+--       where table_schema = 'public' and table_name = 'portfolio_daily_snapshots'
+--         and column_name = 'price_as_of_kst';
+--
 --  ④ 배치를 한 번 돌린 뒤(GitHub Actions 수동 실행), 행이 들어왔는지
---      select market, snapshot_date, total_value, total_cost, holdings_count,
---             priced_count, unpriced_count, benchmark_symbol, benchmark_value
+--      select market, snapshot_date, price_as_of_kst, total_value, total_cost,
+--             holdings_count, priced_count, unpriced_count,
+--             benchmark_symbol, benchmark_value
 --        from public.portfolio_daily_snapshots
 --       order by snapshot_date desc, market
 --       limit 20;
+--     (price_as_of_kst 는 KR 이 그날 오후, US 가 거래일 **다음 날 새벽~오전** 으로 찍히는 게
+--      정상입니다 — 미국장 마감이 한국시간 새벽이기 때문입니다.)
 --
 --  ⑤ 로그인 상태의 **앱에서** 다른 사람 행이 안 보이는지(대시보드 SQL Editor 는 postgres
 --     권한이라 RLS 를 우회하므로, 이 확인만은 반드시 앱에서 해야 합니다).

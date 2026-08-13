@@ -22,6 +22,9 @@ v1 범위 (REPORT_WORK_ORDER.md §6)
    - 저장된 스냅샷을 기간 범위로 집계해 수익률 표시(계산은 전부 `utils/report_db.py`)
    - 시장별 벤치마크 비교(한국=코스피 지수, 미국=S&P500·나스닥 **추종 ETF 프록시**)
    - 데이터가 부족한 구간은 §3 원칙대로 "데이터 부족"을 **주 컨텐츠로** 표시
+   - 시장별로 "이 숫자는 **언제 종가**로 만들어졌나"(한국시간 시:분)를 표시 — 2026-08-13 추가.
+     한국장/미국장은 수집 시각이 다르고(미국은 한국시간 새벽), 그 시각은 **그 스냅샷 행이
+     저장될 때 배치가 기록해 둔 값**(`price_as_of_kst`)입니다(오늘 값으로 대신 채우지 않음).
 
 지켜야 할 것
    - **환율 변환 없음** — 원화/달러를 절대 합치지 않고 시장별로 따로 계산·표시합니다.
@@ -56,6 +59,7 @@ from utils.scorecard_db import (
 )
 from utils.report_db import (
     PERIOD_OPTIONS,
+    PRICE_STAMP_FIELD,
     REPORT_NO_BACKFILL_NOTICE,
     REPORT_SIMPLE_RETURN_NOTICE,
     STATUS_COMPLETE,
@@ -131,6 +135,48 @@ def _md_amount(value, currency, decimals=None):
     `st.metric` 처럼 마크다운을 거치지 않는 곳에는 `format_amount()` 를 그대로 씁니다.
     """
     return format_amount(value, currency, decimals).replace("$", "\\$")
+
+
+def _render_price_stamp(market, row):
+    """
+    🕐 "이 블록의 숫자는 **언제 종가**로 만들어졌나" (2026-08-13 오너 요청).
+
+    오너 원문: "미국 주식은 장 마감시간이 다르니깐 국장하고 크롤링 시간이 다른데 이 리포트
+    상으로는 언제쯤 종가로 만들어진건지 눈에 확 들어오질 않아".
+
+    ⚠️ '내 성적표'의 같은 표시와 성격이 다릅니다. 거기는 **지금 화면이 쓰는 최신 스냅샷 파일**의
+       시각이라 오늘 메타데이터를 그대로 읽으면 되지만, 리포트는 **DB 에 저장된 과거 어느 날의
+       값**을 보여주는 화면입니다. 그래서 오늘 파일이 아니라 **그 행이 저장될 때 배치가 기록해
+       둔 시각**(`price_as_of_kst`)만 씁니다. 오늘 시각으로 대신 채우면 그 자체가 거짓말입니다.
+
+    ⚠️ 회색 캡션 한 줄로는 묻힌다는 지적이라 **굵은 본문 한 줄**로 올렸습니다(다만 st.info 같은
+       색 상자는 이 화면에 이미 많아 쓰지 않았습니다).
+    """
+    stamp = (row or {}).get(PRICE_STAMP_FIELD)
+    session_day = row["snapshot_date"].isoformat() if row and row.get("snapshot_date") else "—"
+
+    if stamp:
+        st.markdown(
+            f"🕐 **종가 기준 : {stamp} (한국시간)** "
+            f"　·　이 블록의 숫자는 **{session_day} 거래일** 스냅샷이고, 그 값은 위 시각에 "
+            "수집된 가격으로 계산됐습니다."
+        )
+    else:
+        # 값이 없는 과거 행 — 빈칸으로 얼버무리지 않고, 왜 없는지까지 밝힙니다(§0-1).
+        #  ⚠️ 여기에 '오늘 몇 시'를 대신 넣지 마세요. 그 행이 저장될 때의 시각은 아무 데도
+        #     기록돼 있지 않고, 지금 시각을 넣으면 그 자체가 지어낸 값입니다.
+        st.markdown(
+            f"🕐 **종가 기준 : 시각 정보 없음** "
+            f"　·　{session_day} 거래일 스냅샷입니다. **가격 수집 시각을 함께 저장하기 전에 "
+            "만들어진 행**이라 몇 시 몇 분 가격인지 기록이 없습니다(추정해서 채우지 않습니다). "
+            "이후 쌓이는 스냅샷부터 시각이 표시됩니다."
+        )
+
+    if market == MARKET_US:
+        st.caption(
+            "🇺🇸 미국장은 한국시간으로 **새벽에** 마감돼서, 수집 시각이 거래일 **다음 날 새벽~오전**"
+            "으로 찍힙니다 — 한국 주식 블록과 시각이 다른 것은 정상입니다."
+        )
 
 
 def _render_not_ready(status):
@@ -323,13 +369,16 @@ def _render_snapshot_table(rows_in_window, currency):
         if not rows_in_window:
             st.caption("이 기간에 저장된 스냅샷이 없습니다.")
             return
-        lines = ["| 날짜 | 평가금액 | 매입원가 | 담긴 종목 | 벤치마크 |", "|---|---|---|---|---|"]
+        lines = ["| 거래일 | 종가 수집 시각(KST) | 평가금액 | 매입원가 | 담긴 종목 | 벤치마크 |",
+                 "|---|---|---|---|---|---|"]
         for row in rows_in_window:
             benchmark = (f"{row.get('benchmark_symbol')} {row.get('benchmark_value'):,.2f}"
                          if row.get("benchmark_value") is not None
                          else f"{row.get('benchmark_symbol') or '—'} 없음")
+            # 날짜마다 수집 시각이 다를 수 있어(수집 지연·재수집) 행별로 그날 값을 그대로 씁니다.
             lines.append(
                 f"| {row['snapshot_date'].isoformat()} "
+                f"| {row.get(PRICE_STAMP_FIELD) or '기록 없음'} "
                 f"| {_md_amount(row.get('total_value'), currency)} "
                 f"| {_md_amount(row.get('total_cost'), currency)} "
                 f"| {row.get('priced_count')}/{row.get('holdings_count')} "
@@ -337,7 +386,9 @@ def _render_snapshot_table(rows_in_window, currency):
             )
         st.markdown("\n".join(lines))
         st.caption(
-            "'담긴 종목'은 그날 현재가를 알 수 있어 합계에 들어간 종목 수 / 전체 보유 종목 수입니다."
+            "'담긴 종목'은 그날 현재가를 알 수 있어 합계에 들어간 종목 수 / 전체 보유 종목 수입니다. "
+            "'종가 수집 시각'은 그날 배치가 그 시장 가격 파일을 읽은 시각(한국시간)이며, "
+            "이 값을 저장하기 전에 만들어진 행은 '기록 없음'입니다(나중에 채워 넣지 않습니다)."
         )
 
 
@@ -346,6 +397,11 @@ def _render_market_block(market, snapshots, period, ref_date):
     report = compute_period_report(snapshots, period, ref_date)
     window_start, window_end = report["window_start"], report["window_end"]
     st.caption(f"{period_title(period, ref_date)} · 달력 기준 {window_start} ~ {window_end}")
+
+    # 🕐 이 블록이 실제로 보여주는 **마지막 스냅샷 행**의 가격 수집 시각(한국시간).
+    #    스냅샷이 하나도 없는 구간(NO_DATA)에는 보여줄 행 자체가 없으므로 생략합니다.
+    if report.get("latest"):
+        _render_price_stamp(market, report["latest"])
 
     if report["status"] in (STATUS_NO_DATA, STATUS_INSUFFICIENT):
         _render_shortage(report)

@@ -21,6 +21,7 @@ REPORT_WORK_ORDER.md §9-4 / §9-7 에 따라, 이 세션에서는 **실제 Supa
 실행: python tests/test_report.py
 """
 
+import contextlib
 import io
 import importlib
 import json
@@ -941,6 +942,242 @@ def test_batch_end_to_end():
 
 
 # =============================================================================
+# 9-1. 🕐 가격 수집 시각(KST) 저장·표시 배선 (2026-08-13, TASK_HISTORY #112)
+# =============================================================================
+#  오너 요청: "이 리포트가 만들어지는 날짜와 시간까지는 표시해야 될 것 같아 … 한국 시간
+#  기준으로 시간과 분 정도는 표기를 해야 할 것 같아".
+#  여기서 지켜야 할 것 — **없는 시각을 만들어내지 않기**(§0-1):
+#    · 메타데이터에 시:분이 없으면 NULL 이고, 00:00 이나 오늘 시각으로 메우지 않습니다.
+#    · 미국은 수집기가 이미 변환해 둔 KST 값만 씁니다(ET 를 KST 로 둔갑시키지 않음).
+# =============================================================================
+class _NoStampColumnClient(_FakeClient):
+    """`price_as_of_kst` 컬럼이 아직 없는 DB(= 오너가 ALTER 실행 전) 흉내."""
+
+    def table(self, name):
+        query = _FakeQuery(name, self.store, self.log)
+        original_execute = query.execute
+
+        def execute():
+            if query.op == "upsert" and any(rdb.PRICE_STAMP_FIELD in row
+                                            for row in (query.payload or [])):
+                self.log.append({"table": name, "op": "rejected",
+                                 "filters": [], "payload": query.payload,
+                                 "on_conflict": query.on_conflict})
+                raise RuntimeError(
+                    "PGRST204: Could not find the 'price_as_of_kst' column of "
+                    "'portfolio_daily_snapshots' in the schema cache"
+                )
+            return original_execute()
+
+        query.execute = execute
+        return query
+
+
+class _BoomClient(_FakeClient):
+    """시각 컬럼과 무관한 다른 오류 — 조용히 삼키면 안 되는 경우."""
+
+    def table(self, name):
+        query = _FakeQuery(name, self.store, self.log)
+
+        def execute():
+            raise RuntimeError("네트워크가 끊겼습니다")
+
+        query.execute = execute
+        return query
+
+
+class _StreamlitRecorder:
+    """화면 함수가 실제로 무슨 문구를 그리는지 받아 적는 가짜 st."""
+
+    def __init__(self):
+        self.markdown_calls = []
+        self.caption_calls = []
+
+    def markdown(self, text, *_args, **_kwargs):
+        self.markdown_calls.append(str(text))
+
+    def caption(self, text, *_args, **_kwargs):
+        self.caption_calls.append(str(text))
+
+    def __getattr__(self, _name):
+        def _noop(*_args, **_kwargs):
+            return None
+        return _noop
+
+
+def test_price_stamp_wiring():
+    print("\n[9-1] 가격 수집 시각(KST) 저장·표시 배선")
+
+    # ---- ① 문자열 정규화: 자르기만 하고 없는 값을 만들지 않음 ----------------
+    check(rdb.normalize_price_stamp("2026-08-12 17:50") == "2026-08-12 17:50",
+          "수집기 형식('YYYY-MM-DD HH:MM')을 그대로 보존")
+    check(rdb.normalize_price_stamp("2026-08-13T07:14:33+09:00") == "2026-08-13 07:14",
+          "ISO 타임스탬프도 분까지만(초는 표기 통일 위해 버림)")
+    check(rdb.normalize_price_stamp("2026-08-12") is None,
+          "날짜만 있으면 None — 00:00 을 붙이지 않음(자정 수집이라는 거짓말 방지)")
+    check(rdb.normalize_price_stamp("") is None and rdb.normalize_price_stamp(None) is None,
+          "빈 값은 None")
+    check(rdb.normalize_price_stamp("어제 오후") is None, "형식을 모르는 값은 None(추정 없음)")
+
+    # ---- ② 실제 저장소 메타데이터에서 시각을 뽑아오는지 ----------------------
+    dates, stamps, notes = rdb.resolve_session_info()
+    kr_meta = json.loads((REPO_ROOT / "data" / "kospi200_pegy_latest.json")
+                         .read_text(encoding="utf-8"))["metadata"]
+    us_meta = json.loads((REPO_ROOT / "data" / "us_stocks_latest.json")
+                         .read_text(encoding="utf-8"))["metadata"]
+    check(stamps.get(MARKET_KR) == rdb.normalize_price_stamp(kr_meta.get("last_updated_at")),
+          f"KR 수집 시각 = 코스피 스냅샷 last_updated_at ({stamps.get(MARKET_KR)})")
+    check(stamps.get(MARKET_US) == rdb.normalize_price_stamp(us_meta.get("last_updated_at_kst")),
+          f"US 수집 시각 = 미국 스냅샷 last_updated_at_kst ({stamps.get(MARKET_US)})")
+    check(stamps.get(MARKET_US) != rdb.normalize_price_stamp(us_meta.get("last_updated_at_et")),
+          "US 는 ET 값이 아니라 수집기가 변환해 둔 KST 값을 씀")
+    check(any("가격 수집 시각" in note for note in notes), "시각 판정 근거도 로그 문구로 남김")
+    check(rdb.resolve_session_dates() == (dates, notes),
+          "기존 2-튜플 시그니처(resolve_session_dates)가 그대로 동작(호출부 무손상)")
+
+    # ---- ③ 시각이 없을 때 — 거래일은 살리고 시각만 비움 ----------------------
+    with tempfile.TemporaryDirectory() as tmp:
+        (Path(tmp) / "kospi200_pegy_latest.json").write_text(
+            json.dumps({"metadata": {"last_updated_at": "2026-08-12"}, "stocks": []}),
+            encoding="utf-8")
+        (Path(tmp) / "us_stocks_latest.json").write_text(
+            json.dumps({"metadata": {"last_updated_at_et": "2026-08-12 18:14",
+                                     "session_hint": {"session_date": "2026-08-12"}},
+                        "stocks": []}),
+            encoding="utf-8")
+        d, s, n = rdb.resolve_session_info(data_dir=tmp)
+        check(d.get(MARKET_KR) == "2026-08-12" and MARKET_KR not in s,
+              "KR: 날짜만 있는 메타데이터 → 거래일은 저장하고 시각은 비움")
+        check(d.get(MARKET_US) == "2026-08-12" and MARKET_US not in s,
+              "US: KST 값이 없으면 ET(18:14)를 KST 로 둔갑시키지 않고 비움")
+        check(any("ET 값을 KST 로 둔갑" in note for note in n),
+              "그 이유를 로그 문구로 남김")
+
+    # ---- ④ 스냅샷 행에 실리는지 ---------------------------------------------
+    holdings = [holding(MARKET_KR, "005930", 10, 70000), holding(MARKET_US, "AAPL", 3, 200.0)]
+    prices = {(MARKET_KR, "005930"): 80000.0, (MARKET_US, "AAPL"): 250.0}
+    session_dates = {MARKET_KR: "2026-08-12", MARKET_US: "2026-08-12"}
+    rows, _ = build_snapshot_rows(
+        "user-1", holdings, price_lookup_factory(prices), session_dates, None,
+        price_stamp_by_market={MARKET_KR: "2026-08-12 17:50",
+                               MARKET_US: "2026-08-13T07:14:33+09:00"},
+    )
+    kr = next(r for r in rows if r["market"] == MARKET_KR)
+    us = next(r for r in rows if r["market"] == MARKET_US)
+    check(kr[rdb.PRICE_STAMP_FIELD] == "2026-08-12 17:50", "KR 행에 수집 시각 저장")
+    check(us[rdb.PRICE_STAMP_FIELD] == "2026-08-13 07:14",
+          "US 행에는 한국시간 값이 저장(거래일 다음 날 새벽이 정상)")
+    check(us[rdb.PRICE_STAMP_FIELD][:10] != us["snapshot_date"],
+          "미국은 수집 시각의 날짜가 거래일과 다를 수 있음(둘을 같은 값으로 맞추지 않음)")
+
+    rows_no_stamp, _ = build_snapshot_rows("user-1", holdings, price_lookup_factory(prices),
+                                           session_dates)
+    check(all(r[rdb.PRICE_STAMP_FIELD] is None for r in rows_no_stamp),
+          "시각을 안 넘기면 NULL(오늘 시각·장 마감 시각으로 메우지 않음)")
+    rows_bad, _ = build_snapshot_rows("user-1", holdings, price_lookup_factory(prices),
+                                      session_dates, None,
+                                      price_stamp_by_market={MARKET_KR: "2026-08-12"})
+    check(next(r for r in rows_bad if r["market"] == MARKET_KR)[rdb.PRICE_STAMP_FIELD] is None,
+          "시:분이 없는 값은 저장하지 않고 NULL")
+
+    # 배치 전체(dry-run)에서도 실제 데이터로 실려 나가는지
+    client = _FakeClient({"holdings": [
+        {"id": "1", "user_id": "u1", "market": "KR", "ticker": "005930",
+         "quantity": 10, "avg_purchase_price": 70000, "currency": "KRW"},
+    ]})
+    summary = rdb.run_daily_snapshot_batch(service_client=client, dry_run=True)
+    check(summary["price_stamps"].get(MARKET_KR) == stamps.get(MARKET_KR),
+          "배치 요약에 시장별 수집 시각이 담김")
+    check(summary["rows"][0][rdb.PRICE_STAMP_FIELD] == stamps.get(MARKET_KR),
+          "배치가 만든 실제 행에 수집 시각이 실림")
+
+    # ---- ⑤ 저장 배선 + 컬럼이 아직 없는 DB 대비 -----------------------------
+    row = {"user_id": "u1", "market": "KR", "snapshot_date": "2026-08-12",
+           "total_value": 100.0, "total_cost": 90.0, "currency": "KRW",
+           "holdings_count": 1, "priced_count": 1, "unpriced_count": 0,
+           "benchmark_symbol": "KOSPI", "benchmark_value": 6345.53,
+           rdb.PRICE_STAMP_FIELD: "2026-08-12 17:50"}
+
+    normal = _FakeClient()
+    upsert_snapshots(normal, [dict(row)])
+    check(normal.log[-1]["payload"][0][rdb.PRICE_STAMP_FIELD] == "2026-08-12 17:50",
+          "정상 DB 로는 수집 시각이 그대로 전송됨")
+
+    legacy = _NoStampColumnClient()
+    buffer = io.StringIO()
+    with contextlib.redirect_stdout(buffer):
+        saved = upsert_snapshots(legacy, [dict(row)])
+    log_text = buffer.getvalue()
+    upserts = [c for c in legacy.log if c["op"] == "upsert"]
+    check(saved == 1 and len(upserts) == 1,
+          "컬럼이 없는 DB 에서도 그날 스냅샷은 저장됨(수치를 통째로 잃지 않음)")
+    check(rdb.PRICE_STAMP_FIELD not in upserts[0]["payload"][0],
+          "재시도 요청에서는 시각 필드만 빠짐")
+    check(upserts[0]["payload"][0]["total_value"] == 100.0
+          and upserts[0]["on_conflict"] == "user_id,market,snapshot_date",
+          "나머지 값과 충돌 키는 그대로")
+    check(rdb.PRICE_STAMP_ALTER_SQL in log_text and "오너 할 일" in log_text,
+          "오너가 실행할 ALTER 문을 로그에 그대로 안내(조용히 넘어가지 않음)")
+
+    expect_raises(lambda: upsert_snapshots(_BoomClient(), [dict(row)]), ReportError,
+                  "시각 컬럼과 무관한 오류는 그대로 올림(폴백으로 삼키지 않음)")
+
+    # ---- ⑥ 화면 조회 시 값이 살아 오는지 / 옛 행은 None ----------------------
+    reader = _FakeClient({"portfolio_daily_snapshots": [
+        dict(row, snapshot_date="2026-08-11", **{rdb.PRICE_STAMP_FIELD: None}),   # 옛 행
+        dict(row, snapshot_date="2026-08-12"),
+        dict(row, snapshot_date="2026-08-13", **{rdb.PRICE_STAMP_FIELD: "  "}),   # 공백만
+    ]})
+    fetched = fetch_user_snapshots(reader, "u1")
+    check(fetched[0][rdb.PRICE_STAMP_FIELD] is None,
+          "이 기능 이전에 저장된 행은 None(빈칸이 아니라 '없음'으로 다뤄짐)")
+    check(fetched[1][rdb.PRICE_STAMP_FIELD] == "2026-08-12 17:50", "저장된 시각이 그대로 조회됨")
+    check(fetched[2][rdb.PRICE_STAMP_FIELD] is None, "공백 문자열도 None 으로 정규화")
+
+    # ---- ⑦ 화면 문구 ---------------------------------------------------------
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        recorder = _StreamlitRecorder()
+        module.st = recorder
+        try:
+            module._render_price_stamp(MARKET_KR, {"snapshot_date": date(2026, 8, 12),
+                                                   rdb.PRICE_STAMP_FIELD: "2026-08-12 17:50"})
+            kr_line = recorder.markdown_calls[-1]
+            check("2026-08-12 17:50" in kr_line and "한국시간" in kr_line,
+                  "한국 블록: 저장된 시각을 한국시간으로 표기")
+            check("**" in kr_line, "회색 캡션이 아니라 굵은 본문 한 줄로 노출(오너: '확 들어오질 않아')")
+
+            recorder.markdown_calls.clear()
+            recorder.caption_calls.clear()
+            module._render_price_stamp(MARKET_US, {"snapshot_date": date(2026, 8, 12),
+                                                   rdb.PRICE_STAMP_FIELD: "2026-08-13 07:14"})
+            check("2026-08-13 07:14" in recorder.markdown_calls[-1],
+                  "미국 블록: 한국 블록과 **따로** 그 시장의 시각을 표기")
+            check(any("미국장" in text for text in recorder.caption_calls),
+                  "미국은 거래일 다음 날 새벽에 찍히는 이유를 함께 안내(오너 혼동 방지)")
+
+            recorder.markdown_calls.clear()
+            module._render_price_stamp(MARKET_KR, {"snapshot_date": date(2026, 8, 1),
+                                                   rdb.PRICE_STAMP_FIELD: None})
+            missing_line = recorder.markdown_calls[-1]
+            check("시각 정보 없음" in missing_line and "2026-08-01" in missing_line,
+                  "값이 없는 과거 행은 '시각 정보 없음'으로 정직하게 표시")
+            check(re.search(r"\d{1,2}:\d{2}", missing_line) is None,
+                  "없는 값을 오늘 시각·자정(00:00) 같은 값으로 대신 채우지 않음(문구에 시:분이 아예 없음)")
+        finally:
+            module.st = real_st
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 시각 표시 문구 검증", f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
+# =============================================================================
 # 10. SQL 스키마 · 워크플로우 · 화면 · 범위 확인
 # =============================================================================
 def test_sql_schema():
@@ -976,6 +1213,17 @@ def test_sql_schema():
           "개수 정합성 제약")
     check("benchmark_value is null or benchmark_value > 0" in sql,
           "벤치마크는 NULL 허용 + 0/음수 금지(실패를 0으로 메우지 않음)")
+    # 🕐 2026-08-13 — 가격 수집 시각 컬럼
+    check("price_as_of_kst text" in squeeze(sql_code),
+          "가격 수집 시각 컬럼(text, nullable — not null 이 아님)")
+    check("add column if not exists price_as_of_kst text" in squeeze(sql_code),
+          "이미 만들어 둔 테이블용 alter 문이 스크립트에 포함(create table if not exists 만으로는 "
+          "기존 테이블에 컬럼이 생기지 않음)")
+    check(re.search(r"comment on column public\.portfolio_daily_snapshots\.price_as_of_kst",
+                    sql) is not None,
+          "컬럼의 의미(어느 메타데이터에서 왔는지·KST·분 단위)를 DB 코멘트로 남김")
+    check("price_as_of_kst timestamptz" not in squeeze(sql_code),
+          "timestamptz 가 아님(원본이 분 단위라 없는 초·타임존을 만들지 않기 위해)")
     check("(market = 'KR' and currency = 'KRW')" in sql,
           "원/달러 혼용 차단 제약(holdings 와 동일 패턴)")
     check("service_role" in sql and "Streamlit" in sql,
@@ -1072,6 +1320,13 @@ def test_view_and_scope():
     check(":red[" in view_src and ":blue[" in view_src,
           "수익률 색상이 국내 증시 관례(오르면 빨강/내리면 파랑)로 '내 성적표'와 통일")
     check("_md_amount" in view_src, "마크다운 금액 표기는 $ 이스케이프 사용(#88 렌더링 버그 방지)")
+    check("_render_price_stamp" in view_src and "PRICE_STAMP_FIELD" in view_src,
+          "가격 수집 시각을 시장 블록마다 그리는 전용 렌더러가 있음(2026-08-13 오너 요청)")
+    view_stamp_fn = view_src[view_src.index("def _render_price_stamp"):
+                             view_src.index("def _render_not_ready")]
+    check("date.today()" not in python_code_only(view_stamp_fn)
+          and "datetime.now" not in python_code_only(view_stamp_fn),
+          "시각 표시가 '지금'을 쓰지 않음 — 저장된 행의 값만 보여줌(오늘 시각으로 대체 금지)")
 
     db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src),
@@ -1189,6 +1444,7 @@ def main():
     test_us_index_collector_run()
     test_supabase_wiring()
     test_batch_end_to_end()
+    test_price_stamp_wiring()
     test_sql_schema()
     test_workflow()
     test_view_and_scope()
