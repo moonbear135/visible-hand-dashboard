@@ -181,7 +181,7 @@ def main():
     #    session_state 를 미리 읽고(`admin_mode_hint`) 아래 §5 에서 실제 값과 다르면 즉시
     #    `st.rerun()`으로 한 번 더 그려서 화면 위치는 그대로 유지하면서 정확성도 지킵니다.
     TOP_VALUATION = "💡 사실 이 가격이에요"
-    TOP_SCORECARD = "📊 내 성적표 (준비중 · 미리보기)"
+    TOP_SCORECARD = "📊 내 성적표"
     admin_mode_hint = st.session_state.get("admin_mode", False)
     scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)
 
@@ -195,7 +195,7 @@ def main():
             index=0,  # 첫 진입 기본값은 예전과 동일하게 "사실 이 가격이에요"
             key="top_nav_choice",
             help=f"* {TOP_VALUATION} : 시장별 밸류에이션 리포트(코스피/미국)\n"
-                 f"* {TOP_SCORECARD} : 내 보유 종목·리포트(오너 승인 전 미리보기)",
+                 f"* {TOP_SCORECARD} : 내 보유 종목·사장님 보고서",
         )
     else:
         top_choice = TOP_VALUATION  # 성적표 미노출 시(일반 방문자) 예전과 100% 동일 동작
@@ -249,7 +249,7 @@ def main():
         report_available = render_report_page is not None and is_report_visible(admin_mode_hint)
         if report_available:
             SCORECARD_TAB = "📊 내 보유종목"
-            REPORT_TAB = "📈 사장님 보고서"
+            REPORT_TAB = "📈 사장님 보고서입니다"
             scorecard_subpage = st.sidebar.radio(
                 "내 성적표 하위 메뉴",
                 [SCORECARD_TAB, REPORT_TAB],

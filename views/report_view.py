@@ -13,7 +13,7 @@ views/report_view.py
       같은 패턴):
 
           from views.report_view import is_report_visible, render_report_page
-          show_report = st.sidebar.checkbox("📈 사장님 보고서 (준비중 · 미리보기)", key="view_report") \
+          show_report = st.sidebar.checkbox("📈 사장님 보고서입니다", key="view_report") \
               if is_report_visible(admin_mode) else False
           ...  if show_report: render_report_page()
 
@@ -369,7 +369,7 @@ def _render_market_block(market, snapshots, period, ref_date):
 # 4. 메인 렌더러
 # =============================================================================
 def render_report_page():
-    st.markdown("## 📈 사장님 보고서")
+    st.markdown("## 📈 사장님 보고서입니다")
     st.info(
         "🧾 **사장님, 보고서입니다.** 매일 자동으로 저장되는 내 평가금액 스냅샷을 기간별로 "
         "집계해서 보여드립니다. 이 보고서는 **시간이 지나면 채워집니다** — 이제 막 시작하셨다면 "
