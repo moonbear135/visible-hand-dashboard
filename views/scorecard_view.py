@@ -671,9 +671,12 @@ def _md_amount(value, currency, decimals=None):
     return format_amount(value, currency, decimals).replace("$", "\\$")
 
 
-def _render_currency_block(client, user_id, group, indexes):
+def _render_currency_block(client, user_id, group, indexes, sync_label=None):
     currency = group["currency"]
-    st.markdown(f"### {CURRENCY_TITLES.get(currency, currency)}")
+    header_col, sync_col = st.columns([3, 2])
+    header_col.markdown(f"### {CURRENCY_TITLES.get(currency, currency)}")
+    if sync_label:
+        sync_col.caption(sync_label + " — 실시간 시세가 아닙니다.")
 
     rows = group["rows"]
     if not rows:
@@ -1061,17 +1064,23 @@ def render_scorecard_page():
         st.info("아직 등록한 보유 종목이 없습니다. 위 입력창에서 추가해 주세요.")
         return
 
-    stamps = []
-    if kr_meta and kr_meta.get("last_updated_at"):
-        stamps.append(f"한국 {kr_meta['last_updated_at']}")
-    if us_meta and us_meta.get("last_updated_at_kst"):
-        stamps.append(f"미국 {us_meta['last_updated_at_kst']} (KST)")
-    if stamps:
-        st.caption("현재가 기준 스냅샷: " + " · ".join(stamps) + " — 실시간 시세가 아닙니다.")
     if not kr_index and not us_index:
         st.error(
             "🚫 밸류에이션 스냅샷(data/*.json)을 읽지 못했습니다. 현재가·수익률을 계산할 수 없습니다."
         )
+
+    # 2026-08-13 오너 요청 — "한국 주식"/"미국 주식" 소제목 옆에 그 시장 현재가가 언제
+    # 수집됐는지 바로 보이면 좋겠다는 피드백. 통합 캡션 하나로 맨 위에 몰아 보여주던 걸
+    # 시장별로 나눠 각 소제목 바로 아래에 붙입니다.
+    # ⚠️ 초(seconds) 단위는 표시하지 않습니다 — 수집기(collector_kospi200.py /
+    # collector_us_stocks.py)의 `last_updated_at`/`last_updated_at_kst` 메타데이터 자체가
+    # 분 단위까지만 기록합니다(초 단위 타임스탬프를 저장하지 않음). 없는 정밀도를 있는
+    # 것처럼 ':00'을 붙여 지어내지 않습니다(§0-1) — 초 단위가 꼭 필요하면 수집기 쪽
+    # 타임스탬프 포맷 자체를 바꿔야 합니다.
+    SYNC_LABELS = {
+        "KRW": (f"현재가 : {kr_meta['last_updated_at']} 기준" if kr_meta and kr_meta.get("last_updated_at") else None),
+        "USD": (f"현재가 : {us_meta['last_updated_at_kst']} 기준 (KST)" if us_meta and us_meta.get("last_updated_at_kst") else None),
+    }
 
     portfolio = build_portfolio(
         holdings,
@@ -1080,5 +1089,5 @@ def render_scorecard_page():
     for currency in ("KRW", "USD"):
         group = portfolio.get(currency)
         if group:
-            _render_currency_block(client, user_id, group, indexes)
+            _render_currency_block(client, user_id, group, indexes, SYNC_LABELS.get(currency))
             st.markdown("---")
