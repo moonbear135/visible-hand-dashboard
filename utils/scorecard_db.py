@@ -970,6 +970,217 @@ def user_id_of(user):
     return getattr(user, "id", None)
 
 
+# -----------------------------------------------------------------------------
+# D-2. 비밀번호 재설정 ("아이디/비밀번호 찾기") — 2026-08-13 오너 요청
+# -----------------------------------------------------------------------------
+#  오너 원문: "아이디 비밀번호를 잊어먹어서 로그인을 못할 때 간단하게 찾는 과정이 필요할 것
+#  같애. 그래야 계정 무한생성을 막을 수 있어."
+#
+#  ▶ 왜 '아이디 찾기'가 없는가 — 이 앱의 로그인 ID는 **이메일 그 자체**입니다
+#    (`sql/scorecard_schema.sql` — profiles 에 별도 아이디 컬럼이 없습니다). 그래서 실제로
+#    필요한 건 비밀번호 재설정 하나뿐입니다.
+#
+#  ▶ 왜 '이메일 링크'가 아니라 '6자리 코드' 방식인가 (Streamlit 제약)
+#    Supabase 의 기본 재설정 메일은 링크를 눌러 앱으로 돌아오게 하는데, 그 토큰은 URL 해시
+#    프래그먼트(`#access_token=...`)나 쿼리스트링 `code` 로 전달됩니다. Streamlit 은 서버에서
+#    렌더링하는 파이썬 앱이라 **해시 프래그먼트를 읽을 수 없고**, 링크 방식은 Redirect URL 을
+#    Supabase 대시보드에 따로 등록해야 합니다. 반면 Supabase 이메일 템플릿의 `{{ .Token }}`
+#    변수는 "링크 대신 쓸 수 있는 6자리 OTP"로 공식 문서에 명시돼 있고, 그 코드는
+#    `verify_otp({"email":..., "token":..., "type":"recovery"})` 로 검증할 수 있습니다.
+#    → 브라우저 리다이렉트가 아예 필요 없어 Streamlit 에 가장 잘 맞습니다.
+#      · 공식 근거: https://supabase.com/docs/guides/auth/auth-email-templates
+#        ("{{ .Token }} Contains a 6-digit One-Time-Password (OTP) that can be used
+#          instead of the {{ .ConfirmationURL }}")
+#      · https://supabase.com/docs/reference/python/auth-verifyotp
+#        (이메일의 경우 type 은 email / **recovery** / invite / email_change)
+#      · https://supabase.com/docs/reference/python/auth-resetpasswordforemail
+#      · https://supabase.com/docs/reference/python/auth-updateuser
+#
+#  ⚠️ 오너가 Supabase 대시보드에서 **딱 한 가지**를 해야 이 기능이 동작합니다:
+#     Authentication → Emails(Email Templates) → **Reset Password** 템플릿 본문에
+#     `{{ .Token }}` 을 넣기(기본 템플릿에는 링크만 있고 코드가 없습니다).
+#     자세한 절차는 PROJECT_STATUS.md §9 에 적어뒀습니다.
+#
+#  ⚠️ 계정 존재 여부를 절대 흘리지 않습니다(user enumeration 방지)
+#     Supabase 도 같은 정책입니다 — "To prevent user enumeration,
+#     resetPasswordForEmail() doesn't reveal whether an account exists for the given
+#     email address. When no user is associated with the address, Supabase Auth won't
+#     send an email, though the method still returns without an error."
+#     (https://supabase.com/docs/guides/auth/passwords) 그래서 이 모듈도 성공/실패를
+#     구분해 말하지 않고 항상 같은 문구(PASSWORD_RESET_SENT_MESSAGE)를 돌려줍니다.
+# -----------------------------------------------------------------------------
+
+# 이메일 템플릿의 `{{ .Token }}` 이 6자리 숫자라는 공식 문서 기술에서 그대로 온 값입니다
+# (임의로 정한 숫자가 아닙니다).
+PASSWORD_RESET_CODE_LENGTH = 6
+
+# Supabase Auth 의 기본 최소 비밀번호 길이(대시보드에서 더 길게 올릴 수 있습니다).
+# 여기서 먼저 막으면 사용자가 영어 원문 대신 한국어 안내를 보게 됩니다. 더 강한 정책은
+# 서버가 최종적으로 거절하므로, 이 값은 "최소한의 사전 방어"입니다.
+MIN_PASSWORD_LENGTH = 6
+
+# 계정 존재 여부를 흘리지 않는 안전한 안내 문구(성공·미가입 어느 쪽이든 이 문구 하나).
+PASSWORD_RESET_SENT_MESSAGE = (
+    "입력하신 이메일로 가입된 계정이 있다면 6자리 재설정 코드를 보냈습니다. "
+    "메일함(스팸함 포함)을 확인해 주세요."
+)
+
+
+def _normalize_email(email):
+    """이메일 입력 정규화(앞뒤 공백 제거). 값이 없으면 빈 문자열."""
+    return str(email or "").strip()
+
+
+def _reset_request_callable(client):
+    """
+    설치된 supabase(auth) 패키지에서 '재설정 메일 발송' 함수를 찾아 돌려줍니다.
+
+    ⚠️ 왜 getattr 로 찾는가 — 공식 파이썬 레퍼런스는 `reset_password_for_email(email, options)`
+    이라고 적고 있지만, 같은 계열 패키지(gotrue-py)의 옛 이름은 `reset_password_email` 이었고
+    두 이름이 버전에 따라 공존/교체돼 왔습니다. 이 저장소는 `requirements.txt` 에 버전을 고정하지
+    않은 채 `supabase` 만 적어두므로(재배포 시점의 최신이 깔림), **하드코딩한 이름 하나에 걸면
+    패키지 업데이트 한 번에 조용히 깨질 수 있습니다.** 그래서 문서에 적힌 새 이름을 먼저 찾고,
+    없으면 옛 이름으로 폴백하며, 둘 다 없으면 '지어내지 않고' 그대로 실패를 알립니다(§0-1).
+    """
+    auth = getattr(client, "auth", None)
+    for name in ("reset_password_for_email", "reset_password_email"):
+        func = getattr(auth, name, None)
+        if callable(func):
+            return func, name
+    return None, None
+
+
+def send_password_reset_code(client, email):
+    """
+    비밀번호 재설정 코드(6자리)를 이메일로 보내달라고 Supabase 에 요청합니다.
+
+    반환: 화면에 그대로 띄울 안내 문구(PASSWORD_RESET_SENT_MESSAGE).
+    ⚠️ 이 함수는 **가입된 이메일인지 아닌지를 절대 알려주지 않습니다**(위 주석 참고).
+       그래서 성공 경로의 반환 문구가 항상 동일합니다.
+    ⚠️ 이 호출은 로그인 세션을 만들지 않습니다 — 현재 로그인 상태에 아무 영향이 없습니다.
+    """
+    _require_client(client)
+    address = _normalize_email(email)
+    if not address:
+        raise ScorecardError("가입할 때 사용한 이메일을 입력해 주세요.")
+
+    request, _name = _reset_request_callable(client)
+    if request is None:
+        raise ScorecardError(
+            "설치된 supabase 패키지에서 비밀번호 재설정 기능을 찾지 못했습니다. "
+            "(패키지 버전 확인 후 재배포가 필요합니다)"
+        )
+    try:
+        # options(redirect_to)는 일부러 넘기지 않습니다 — 우리는 링크가 아니라 메일 본문의
+        # 6자리 코드를 쓰기 때문에 Redirect URL 등록이 필요 없습니다.
+        request(address)
+    except Exception as exc:  # noqa: BLE001
+        # 발송 단계 실패는 대부분 '요청 과다(rate limit)' 라서 사용자에게 보여줄 가치가 있습니다.
+        # (§0-1 — 조용히 성공한 척하지 않습니다.)
+        raise _auth_error("재설정 코드 발송", exc) from exc
+    return PASSWORD_RESET_SENT_MESSAGE
+
+
+def _normalize_reset_code(code):
+    """
+    사용자가 입력한 재설정 코드 정리 — 공백/하이픈을 걷어내고 6자리 숫자인지 확인합니다.
+    (메일에서 복사·붙여넣기 하면 앞뒤 공백이나 '123-456' 형태가 섞여 들어올 수 있습니다.)
+    """
+    text = re.sub(r"[\s-]", "", str(code or ""))
+    if not text:
+        raise ScorecardError("이메일로 받은 재설정 코드를 입력해 주세요.")
+    if not (text.isdigit() and len(text) == PASSWORD_RESET_CODE_LENGTH):
+        raise ScorecardError(
+            f"재설정 코드는 이메일로 받은 {PASSWORD_RESET_CODE_LENGTH}자리 숫자입니다. "
+            "메일 본문의 숫자를 다시 확인해 주세요."
+        )
+    return text
+
+
+def _validated_new_password(new_password, confirm_password=None):
+    """
+    새 비밀번호 사전 검증. ⚠️ 비밀번호 '값'은 어떤 예외 메시지에도 넣지 않습니다.
+    `confirm_password` 가 None 이면 확인란 비교를 생략합니다(화면이 이미 비교한 경우).
+    """
+    password = new_password if new_password is not None else ""
+    if not password:
+        raise ScorecardError("새 비밀번호를 입력해 주세요.")
+    if confirm_password is not None and password != confirm_password:
+        raise ScorecardError("새 비밀번호와 확인란이 서로 다릅니다.")
+    if len(password) < MIN_PASSWORD_LENGTH:
+        raise ScorecardError(f"새 비밀번호는 {MIN_PASSWORD_LENGTH}자 이상이어야 합니다.")
+    return password
+
+
+def _session_of(response):
+    """verify_otp 응답에서 세션만 안전하게 꺼냅니다(객체/딕셔너리 양쪽 지원)."""
+    if response is None:
+        return None
+    if isinstance(response, dict):
+        return response.get("session")
+    return getattr(response, "session", None)
+
+
+def reset_password_with_code(client, email, code, new_password, confirm_password=None):
+    """
+    이메일로 받은 6자리 코드를 검증하고(=본인 확인), 곧바로 새 비밀번호로 바꿉니다.
+
+    ⚠️ **`client` 는 반드시 이 재설정 전용으로 새로 만든 클라이언트여야 합니다.**
+       `verify_otp()` 가 성공하면 그 클라이언트에 **재설정 대상 계정의 로그인 세션이 붙습니다.**
+       화면이 쓰는 공용 클라이언트를 그대로 넘기면, 같은 브라우저에서 다른 사람이 로그인해
+       있는 상태를 덮어써 남의 데이터를 보게 될 수 있습니다. 그래서 화면 쪽
+       (`views/scorecard_view.py._new_auth_client()`)은 이 호출에만 1회용 클라이언트를 만들어
+       넘기고, 이 함수는 끝날 때 그 세션을 반드시 로그아웃시킵니다(아래 finally).
+
+    검증 순서도 의미가 있습니다 — **코드를 서버로 보내기 전에** 비밀번호 입력값부터 확인합니다.
+    OTP 는 1회용이라, 확인란 오타 때문에 코드가 먼저 소모되면 사용자가 메일을 다시 받아야
+    합니다(그리고 발송에는 요청 제한이 걸려 있습니다).
+
+    반환: True (성공). 실패는 전부 ScorecardError.
+    """
+    _require_client(client)
+    address = _normalize_email(email)
+    if not address:
+        raise ScorecardError("가입할 때 사용한 이메일을 입력해 주세요.")
+    token = _normalize_reset_code(code)
+    password = _validated_new_password(new_password, confirm_password)
+
+    try:
+        response = client.auth.verify_otp(
+            {"email": address, "token": token, "type": "recovery"}
+        )
+    except Exception as exc:  # noqa: BLE001
+        # ⚠️ 여기서는 Supabase 원문을 붙이지 않습니다. 원문에는 "user not found" 처럼
+        #    **그 이메일이 가입돼 있는지 여부가 드러나는** 문구가 섞일 수 있어서, 위쪽
+        #    '계정 존재 여부를 흘리지 않는다' 원칙이 이 한 줄에서 깨질 수 있기 때문입니다.
+        raise ScorecardError(
+            "재설정 코드 확인에 실패했습니다 — 코드가 다르거나 유효시간이 지났을 수 있습니다. "
+            "1단계에서 코드를 다시 받아 주세요."
+        ) from exc
+
+    if _session_of(response) is None:
+        raise ScorecardError(
+            "재설정 코드는 보냈지만 인증 세션을 받지 못했습니다. 잠시 후 다시 시도해 주세요."
+        )
+
+    try:
+        client.auth.update_user({"password": password})
+    except Exception as exc:  # noqa: BLE001
+        # 비밀번호 정책 위반(길이/유출된 비밀번호 등)은 서버가 최종 판단합니다. 원인을 감추면
+        # 사용자가 왜 안 되는지 알 수 없으므로 기존 `_auth_error` 관례대로 감싸서 올립니다.
+        # (예외 메시지에 비밀번호 값이 실릴 경로는 없습니다 — 값을 넘기지 않습니다.)
+        raise _auth_error("새 비밀번호 설정", exc) from exc
+    finally:
+        # 성공하든 실패하든 이 1회용 클라이언트의 세션은 남기지 않습니다.
+        # (로그아웃 실패는 여기서 더 할 수 있는 일이 없고, 실제 결과를 가리면 안 되므로 삼킵니다.
+        #  클라이언트 자체를 화면이 버리기 때문에 세션이 재사용될 경로도 없습니다.)
+        try:
+            client.auth.sign_out()
+        except Exception:  # noqa: BLE001
+            pass
+    return True
+
+
 def _execute(query, action):
     try:
         response = query.execute()

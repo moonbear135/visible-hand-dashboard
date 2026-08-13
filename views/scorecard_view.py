@@ -48,7 +48,9 @@ from utils.scorecard_db import (
     load_us_all_market_prices,
     load_us_all_etf_prices,
     make_price_lookup,
+    reset_password_with_code,
     resolve_stock_query,
+    send_password_reset_code,
     sign_in,
     sign_out,
     sign_up,
@@ -71,6 +73,12 @@ except ImportError:  # pragma: no cover
 
 SESSION_CLIENT_KEY = "scorecard_supabase_client"
 SESSION_USER_KEY = "scorecard_user"
+
+# 2026-08-13 오너 요청(비밀번호 찾기) — 1단계에서 코드를 보낸 이메일을 2단계 화면이 그대로
+# 이어받기 위한 임시 보관 키입니다. **위젯 키가 아니라 평범한 값**이라 여기에 대입해도
+# Streamlit 위젯 규칙과 충돌하지 않습니다. 로그인 세션(SESSION_USER_KEY)과는 완전히 별개라
+# 재설정 폼을 쓰든 말든 로그인 상태에 아무 영향이 없습니다.
+SESSION_RESET_EMAIL_KEY = "scorecard_reset_target_email"
 
 CURRENCY_TITLES = {
     "KRW": "🇰🇷 한국 주식 (원화)",
@@ -117,6 +125,26 @@ def _get_client():
     return st.session_state[SESSION_CLIENT_KEY]
 
 
+def _new_auth_client():
+    """
+    비밀번호 재설정 2단계(코드 검증 → 비밀번호 변경) 전용 **1회용** Supabase 클라이언트.
+
+    ⚠️ 왜 `_get_client()`(세션에 보관된 공용 클라이언트)를 쓰지 않는가 —
+       `verify_otp()` 가 성공하면 그 클라이언트에 **재설정 대상 계정의 로그인 세션이 붙습니다.**
+       공용 클라이언트에 그 일이 벌어지면, 같은 브라우저를 다른 사람과 함께 쓰는 상황에서
+       기존 로그인 상태가 조용히 바뀌어 남의 보유종목을 보게 될 수 있습니다.
+       그래서 이 호출에만 새 클라이언트를 만들어 넘기고(세션 상태에 저장하지 않음),
+       `reset_password_with_code()` 가 끝날 때 그 세션을 로그아웃시킨 뒤 그대로 버립니다.
+    """
+    client = create_supabase_client()
+    if client is None:
+        raise ScorecardError(
+            "Supabase 연결이 준비되지 않아 비밀번호를 재설정할 수 없습니다. "
+            + (supabase_status().reason or "")
+        )
+    return client
+
+
 def _render_not_ready(status):
     """Supabase 가 준비되지 않은 상태 안내 (에러가 아니라 '준비중'입니다)."""
     st.warning(
@@ -139,23 +167,33 @@ def _render_not_ready(status):
    ```
    → `service_role` 키는 **절대 넣지 마세요** (RLS를 통째로 우회합니다)
 5. `requirements.txt` 의 `supabase` 가 반영되도록 재배포
+6. Supabase → Authentication → **Emails(Email Templates) → Reset Password** 본문에
+   `{{ .Token }}` 추가 (비밀번호 찾기용 **6자리 코드**. 기본 템플릿에는 링크만 있어서
+   이 한 줄이 없으면 사용자가 입력할 코드가 메일에 안 옵니다)
             """
         )
 
 
 def _render_auth(client):
-    """로그인 / 회원가입 폼."""
+    """로그인 / 회원가입 / 비밀번호 찾기 폼."""
     st.markdown("#### 🔐 로그인")
     st.caption(
         "비밀번호는 Supabase Auth 가 관리합니다 — 이 앱은 비밀번호를 저장하지도, 볼 수도 없습니다."
     )
-    tab_login, tab_signup = st.tabs(["로그인", "회원가입"])
+    tab_login, tab_signup, tab_reset = st.tabs(["로그인", "회원가입", "비밀번호 찾기"])
 
     with tab_login:
         with st.form("scorecard_login_form"):
             email = st.text_input("이메일", key="scorecard_login_email")
             password = st.text_input("비밀번호", type="password", key="scorecard_login_pw")
             submitted = st.form_submit_button("로그인")
+        # 2026-08-13 오너 요청 — 비밀번호를 잊었을 때 새 계정을 또 만들지 않도록, 로그인 탭
+        # 안에서 바로 재설정 탭으로 안내합니다(로그인 ID는 이메일 자체라 '아이디 찾기'는 없습니다).
+        st.caption(
+            "🔑 비밀번호를 잊으셨나요? 새 계정을 만들지 마시고 위 **비밀번호 찾기** 탭에서 "
+            "이메일로 6자리 코드를 받아 새 비밀번호를 정하세요 — 기존에 입력한 보유 종목이 "
+            "그대로 남습니다."
+        )
         if submitted:
             try:
                 response = sign_in(client, email.strip(), password)
@@ -195,6 +233,73 @@ def _render_auth(client):
                         "✅ 가입 요청이 접수되었습니다. 이메일 인증이 켜져 있으면 받은 메일함을 "
                         "확인한 뒤 로그인 탭에서 로그인해 주세요."
                     )
+
+    # -------------------------------------------------------------------------
+    # 비밀번호 찾기(재설정) — 2026-08-13 오너 요청, TASK_HISTORY #109
+    #
+    #  로그인 ID가 이메일 자체라 '아이디 찾기'는 없고 **비밀번호 재설정**만 있습니다.
+    #  링크를 누르는 방식이 아니라 **메일로 받은 6자리 코드를 직접 입력**하는 방식입니다
+    #  (Streamlit 은 URL 해시 프래그먼트를 읽을 수 없어 링크 방식이 안 맞습니다 —
+    #   자세한 근거는 utils/scorecard_db.py 의 'D-2' 주석 블록).
+    #
+    #  ⚠️ 이 탭 어디에서도 SESSION_USER_KEY(로그인 세션)를 건드리지 않습니다. 코드 검증은
+    #     `_new_auth_client()` 로 만든 1회용 클라이언트에서만 일어나고 끝나면 로그아웃됩니다.
+    # -------------------------------------------------------------------------
+    with tab_reset:
+        st.caption(
+            "가입한 이메일로 **6자리 재설정 코드**를 보내드립니다. 메일에 적힌 숫자를 아래 "
+            "2단계에 그대로 입력하면 새 비밀번호를 정할 수 있습니다."
+        )
+
+        st.markdown("**1단계 · 재설정 코드 받기**")
+        with st.form("scorecard_reset_request_form"):
+            reset_email = st.text_input("가입한 이메일", key="scorecard_reset_email")
+            reset_requested = st.form_submit_button("재설정 코드 보내기")
+        if reset_requested:
+            address = (reset_email or "").strip()
+            try:
+                # 발송 요청은 로그인 세션을 만들지 않으므로 공용 클라이언트로 보내도 안전합니다.
+                notice = send_password_reset_code(client, address)
+            except ScorecardError as exc:
+                st.error(f"🚫 {exc}")
+            else:
+                # ⚠️ 가입된 이메일인지 여부는 알려주지 않습니다(계정 존재 여부 유출 방지) —
+                #    Supabase 도 같은 정책이라 미가입 이메일이어도 오류 없이 통과합니다.
+                st.session_state[SESSION_RESET_EMAIL_KEY] = address
+                st.success(f"✅ {notice}")
+
+        st.markdown("**2단계 · 받은 코드로 새 비밀번호 정하기**")
+        pending_email = st.session_state.get(SESSION_RESET_EMAIL_KEY) or ""
+        with st.form("scorecard_reset_confirm_form"):
+            if pending_email:
+                st.caption(f"코드를 보낸 이메일: {pending_email}")
+                confirm_email = pending_email
+            else:
+                confirm_email = st.text_input(
+                    "가입한 이메일", key="scorecard_reset_email_confirm",
+                )
+            reset_code = st.text_input(
+                "이메일로 받은 6자리 코드", key="scorecard_reset_code",
+                help="메일 본문의 숫자 6자리입니다. 링크를 누를 필요는 없습니다.",
+            )
+            new_pw = st.text_input("새 비밀번호", type="password", key="scorecard_reset_pw")
+            st.caption("8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.")
+            new_pw2 = st.text_input(
+                "새 비밀번호 확인", type="password", key="scorecard_reset_pw2",
+            )
+            reset_submitted = st.form_submit_button("비밀번호 변경")
+        if reset_submitted:
+            try:
+                reset_password_with_code(
+                    _new_auth_client(), confirm_email, reset_code, new_pw, new_pw2,
+                )
+            except ScorecardError as exc:
+                st.error(f"🚫 {exc}")
+            else:
+                st.session_state.pop(SESSION_RESET_EMAIL_KEY, None)
+                st.success(
+                    "✅ 비밀번호를 변경했습니다. 위 **로그인** 탭에서 새 비밀번호로 로그인해 주세요."
+                )
 
 
 # DB 컬럼이 `numeric(20, 6)` 이라 정수부는 14자리까지만 들어갑니다

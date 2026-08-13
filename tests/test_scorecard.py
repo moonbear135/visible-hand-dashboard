@@ -212,6 +212,15 @@ class FakeAuth:
         self.fail = fail
         self.signed_out = False
         self.last_credentials_keys = None
+        # 2026-08-13 비밀번호 재설정(#109) 검증용 기록. ⚠️ 아래 어디에도 비밀번호 '값'은
+        # 보관하지 않습니다(기존 sign_in 기록 관례와 동일 — 키/길이만).
+        self.reset_requests = []          # reset_password_for_email 로 넘어온 이메일 목록
+        self.verify_otp_calls = []        # verify_otp 로 넘어온 파라미터(코드는 값 그대로,
+                                          #   합성 코드라 비밀정보가 아님)
+        self.update_user_keys = []        # update_user 로 넘어온 키 목록만
+        self.update_user_password_len = None
+        self.verify_fail = False          # 코드가 틀린 상황을 따로 흉내내기 위한 스위치
+        self.verify_returns_session = True
 
     def sign_in_with_password(self, credentials):
         # 비밀번호 '값'은 어디에도 보관하지 않고 키 목록만 기록합니다.
@@ -237,12 +246,64 @@ class FakeAuth:
             user=types.SimpleNamespace(id="user-uuid-1", email="owner@example.com")
         )
 
+    # --- 비밀번호 재설정 (2026-08-13, #109) --------------------------------
+    # 실제 supabase 패키지의 공식 이름(문서 확인)과 같은 시그니처로 흉내냅니다.
+    #   https://supabase.com/docs/reference/python/auth-resetpasswordforemail
+    #   https://supabase.com/docs/reference/python/auth-verifyotp
+    #   https://supabase.com/docs/reference/python/auth-updateuser
+    def reset_password_for_email(self, email, options=None):
+        self.reset_requests.append(email)
+        if self.fail:
+            raise RuntimeError("For security purposes, you can only request this after 60 seconds(합성)")
+        return types.SimpleNamespace(data={})
+
+    def verify_otp(self, params):
+        self.verify_otp_calls.append(dict(params))
+        if self.fail or self.verify_fail:
+            raise RuntimeError("Token has expired or is invalid(합성)")
+        session = (types.SimpleNamespace(access_token="synthetic-token")
+                   if self.verify_returns_session else None)
+        return types.SimpleNamespace(
+            session=session,
+            user=types.SimpleNamespace(id="user-uuid-1", email=params.get("email")),
+        )
+
+    def update_user(self, attributes):
+        self.update_user_keys.append(sorted(attributes.keys()))
+        password = attributes.get("password")
+        self.update_user_password_len = len(password) if password else 0
+        if self.fail:
+            raise RuntimeError("Password should be at least 6 characters(합성)")
+        return types.SimpleNamespace(
+            user=types.SimpleNamespace(id="user-uuid-1", email="owner@example.com")
+        )
+
+
+class FakeLegacyAuth(FakeAuth):
+    """
+    옛 이름(`reset_password_email`)만 가진 패키지 버전을 흉내냅니다.
+    utils/scorecard_db.py 가 새 이름 → 옛 이름 순으로 찾아가는지 확인하기 위한 것입니다.
+    """
+    reset_password_for_email = None  # getattr 로는 잡히지만 callable 이 아님
+
+    def reset_password_email(self, email, options=None):
+        self.reset_requests.append(email)
+        if self.fail:
+            raise RuntimeError("rate limit(합성)")
+        return types.SimpleNamespace(data={})
+
+
+class FakeNoResetAuth(FakeAuth):
+    """재설정 함수가 아예 없는(=아주 오래된/이상한) 패키지 버전."""
+    reset_password_for_email = None
+    reset_password_email = None
+
 
 class FakeClient:
-    def __init__(self, rows=None, fail=False):
+    def __init__(self, rows=None, fail=False, auth_class=FakeAuth):
         self.store = {"rows": list(rows or []), "calls": []}
         self.fail = fail
-        self.auth = FakeAuth(fail=fail)
+        self.auth = auth_class(fail=fail)
 
     def table(self, name):
         self.store["last_table"] = name
@@ -1024,6 +1085,140 @@ def test_crud_with_fake_client():
 
 
 # =============================================================================
+# 7-2. 비밀번호 재설정(비밀번호 찾기) — 2026-08-13 오너 요청, TASK_HISTORY #109
+#
+#  ⚠️ 여기서 검증하는 것: 함수 시그니처 배선 · 방어적 입력 검증 · 에러 문구 · 세션 뒷정리.
+#     **실제 이메일이 오는지, 그 코드로 진짜 Supabase 가 비밀번호를 바꿔주는지는 이 테스트로
+#     알 수 없습니다**(네트워크·실계정 필요). 그건 오너가 배포 후 직접 확인해야 합니다.
+# =============================================================================
+def test_password_reset():
+    print("\n[7-2] 비밀번호 재설정(6자리 코드 방식)")
+
+    # --- 1단계: 코드 발송 요청 -------------------------------------------------
+    expect_raises(lambda: sdb.send_password_reset_code(None, "a@b.c"), ScorecardError,
+                  "클라이언트 없으면 조용히 넘어가지 않고 ScorecardError")
+
+    client = FakeClient()
+    expect_raises(lambda: sdb.send_password_reset_code(client, "   "), ScorecardError,
+                  "이메일이 비면 거부(네트워크 호출 전에 차단)")
+    check(client.auth.reset_requests == [], "빈 이메일은 Supabase 로 나가지도 않음")
+
+    notice = sdb.send_password_reset_code(client, "  Owner@Example.com  ")
+    check(client.auth.reset_requests == ["Owner@Example.com"],
+          "앞뒤 공백만 제거해 그대로 전달(대소문자 임의 변형 없음)")
+    check(notice == sdb.PASSWORD_RESET_SENT_MESSAGE, "성공 시 표준 안내 문구 반환")
+    check("있다면" in notice,
+          "가입 여부를 단정하지 않는 문구 — 계정 존재 여부 유출(enumeration) 방지")
+    check("가입되어 있지 않" not in notice and "없는 이메일" not in notice,
+          "'그런 계정 없음'류 문구가 들어있지 않음")
+
+    legacy = FakeClient(auth_class=FakeLegacyAuth)
+    check(sdb.send_password_reset_code(legacy, "a@b.c") == sdb.PASSWORD_RESET_SENT_MESSAGE
+          and legacy.auth.reset_requests == ["a@b.c"],
+          "패키지가 옛 이름(reset_password_email)만 가진 경우도 폴백으로 동작")
+
+    missing = FakeClient(auth_class=FakeNoResetAuth)
+    expect_raises(lambda: sdb.send_password_reset_code(missing, "a@b.c"), ScorecardError,
+                  "재설정 함수가 아예 없으면 AttributeError 가 아니라 한국어 ScorecardError")
+
+    failing = FakeClient(fail=True)
+    expect_raises(lambda: sdb.send_password_reset_code(failing, "a@b.c"), ScorecardError,
+                  "발송 실패(요청 과다 등)를 조용히 성공으로 위장하지 않음")
+
+    # --- 2단계: 코드 검증 + 새 비밀번호 --------------------------------------
+    client = FakeClient()
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "123456", "newpw1", "newpw2"),
+        ScorecardError, "새 비밀번호와 확인란이 다르면 거부")
+    check(client.auth.verify_otp_calls == [],
+          "확인란 오타 때문에 1회용 코드가 먼저 소모되지 않음(검증 순서 보장)")
+
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "123456", "abc", "abc"),
+        ScorecardError, "너무 짧은 비밀번호 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "123456", "", ""),
+        ScorecardError, "빈 비밀번호 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "", "123456", "newpw123", "newpw123"),
+        ScorecardError, "이메일이 비면 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "", "newpw123", "newpw123"),
+        ScorecardError, "코드가 비면 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "12345", "newpw123", "newpw123"),
+        ScorecardError, "6자리가 아닌 코드 거부")
+    expect_raises(
+        lambda: sdb.reset_password_with_code(client, "a@b.c", "12a456", "newpw123", "newpw123"),
+        ScorecardError, "숫자가 아닌 코드 거부")
+    check(client.auth.verify_otp_calls == [] and client.auth.update_user_keys == [],
+          "형식이 틀린 입력은 Supabase 로 나가지 않음")
+
+    ok = sdb.reset_password_with_code(client, " a@b.c ", " 123 456 ", "newpw123", "newpw123")
+    check(ok is True, "정상 입력이면 True 반환")
+    check(len(client.auth.verify_otp_calls) == 1, "verify_otp 를 정확히 한 번 호출")
+    params = client.auth.verify_otp_calls[0]
+    check(sorted(params.keys()) == ["email", "token", "type"],
+          "verify_otp 파라미터는 email/token/type 3개")
+    check(params["type"] == "recovery",
+          "비밀번호 재설정용 OTP 타입은 'recovery'(공식 문서 확인)")
+    check(params["token"] == "123456",
+          "코드에 섞인 공백·하이픈은 걷어내고 6자리 숫자로 정규화")
+    check(params["email"] == "a@b.c", "이메일 앞뒤 공백 제거")
+    check(client.auth.update_user_keys == [["password"]],
+          "update_user 에 password 키만 전달(다른 필드 건드리지 않음)")
+    check(client.auth.update_user_password_len == len("newpw123"),
+          "입력한 새 비밀번호가 그대로 전달됨(값은 테스트에도 저장하지 않고 길이만 확인)")
+    check(client.auth.signed_out is True,
+          "재설정용 1회용 세션은 끝나고 반드시 로그아웃 — 남의 브라우저에 세션이 남지 않음")
+
+    # 코드가 틀린 경우: Supabase 원문을 사용자에게 그대로 노출하지 않아야 함
+    wrong = FakeClient()
+    wrong.auth.verify_fail = True
+    try:
+        sdb.reset_password_with_code(wrong, "a@b.c", "123456", "newpw123", "newpw123")
+    except ScorecardError as exc:
+        message = str(exc)
+        check("재설정 코드 확인에 실패" in message and "다시 받아" in message,
+              "코드 오류는 한국어 안내로 감쌈")
+        check("합성" not in message and "Token" not in message,
+              "Supabase 원문(계정 존재 여부가 드러날 수 있음)을 그대로 노출하지 않음")
+    else:
+        check(False, "코드 오류 시 ScorecardError")
+    check(wrong.auth.update_user_keys == [],
+          "코드 검증에 실패하면 비밀번호 변경을 시도하지 않음")
+
+    # 세션을 못 받은 경우(이론상): 비밀번호 변경을 시도하지 않고 정직하게 실패
+    no_session = FakeClient()
+    no_session.auth.verify_returns_session = False
+    expect_raises(
+        lambda: sdb.reset_password_with_code(no_session, "a@b.c", "123456", "newpw123", "newpw123"),
+        ScorecardError, "세션을 못 받으면 성공으로 위장하지 않고 실패")
+    check(no_session.auth.update_user_keys == [], "세션 없이 update_user 를 호출하지 않음")
+
+    # 비밀번호 변경 단계 실패
+    update_failing = FakeClient(fail=True)
+    update_failing.auth.fail = False          # verify_otp 는 통과시키고
+    original_update = update_failing.auth.update_user
+
+    def _failing_update(attributes):
+        update_failing.auth.update_user_keys.append(sorted(attributes.keys()))
+        raise RuntimeError("Password should be at least 6 characters(합성)")
+
+    update_failing.auth.update_user = _failing_update
+    expect_raises(
+        lambda: sdb.reset_password_with_code(update_failing, "a@b.c", "123456", "newpw123", "newpw123"),
+        ScorecardError, "비밀번호 변경 단계 실패도 조용히 넘어가지 않음")
+    check(update_failing.auth.signed_out is True,
+          "실패했더라도 1회용 세션은 로그아웃(세션이 남지 않음)")
+    check(callable(original_update), "테스트 보조 확인")
+
+    # 문서화된 상수
+    check(sdb.PASSWORD_RESET_CODE_LENGTH == 6,
+          "코드 길이 6자리 — Supabase 이메일 템플릿 {{ .Token }} 의 공식 사양")
+
+
+# =============================================================================
 # 8. SQL 스키마 — RLS 가 반드시 포함돼야 함
 # =============================================================================
 def test_sql_schema():
@@ -1225,6 +1420,31 @@ def test_view_and_routing():
     check('white-space: normal; overflow-wrap: anywhere;' in view_src,
           "표의 종목 칸은 인라인 스타일로 줄바꿈을 허용해 긴 ETF 이름이 옆 칸을 밀어내지 않음"
           "(2026-08-13 오너 지적 — 부모 표 전체의 nowrap보다 우선순위가 높은 인라인 스타일)")
+
+    # 2026-08-13 오너 요청(#109) — 비밀번호 찾기(재설정) 배선.
+    check('st.tabs(["로그인", "회원가입", "비밀번호 찾기"])' in view_src,
+          "로그인 화면에 '비밀번호 찾기' 탭이 생김(기존 로그인·회원가입 탭은 그대로)")
+    check("비밀번호를 잊으셨나요?" in view_src,
+          "로그인 탭 안에 재설정 진입 안내가 있음(계정 무한생성 방지가 목적)")
+    check("send_password_reset_code" in view_src and "reset_password_with_code" in view_src,
+          "재설정 2단계가 모두 데이터 계층 함수로 연결됨(화면이 Supabase 를 직접 호출하지 않음)")
+    check('st.form("scorecard_reset_request_form")' in view_src
+          and 'st.form("scorecard_reset_confirm_form")' in view_src,
+          "1단계(코드 발송)·2단계(코드+새 비밀번호) 폼이 분리돼 있음")
+    check("reset_password_with_code(\n                    _new_auth_client()" in view_src
+          or "reset_password_with_code(_new_auth_client()" in view_src,
+          "코드 검증은 세션에 저장하지 않는 **1회용 클라이언트**로 실행 — 같은 브라우저의 "
+          "기존 로그인 세션을 덮어쓰지 않음")
+    check("def _new_auth_client()" in view_src and "SESSION_CLIENT_KEY" not in
+          view_src.split("def _new_auth_client()")[1].split("def _render_not_ready")[0],
+          "_new_auth_client() 는 공용 클라이언트(SESSION_CLIENT_KEY)를 재사용하지 않음")
+    reset_tab_src = view_src.split("with tab_reset:")[1].split("# DB 컬럼이")[0]
+    check("SESSION_USER_KEY" not in reset_tab_src,
+          "재설정 탭이 로그인 세션(SESSION_USER_KEY)을 건드리지 않음")
+    check('type="password"' in reset_tab_src and "scorecard_reset_pw2" in reset_tab_src,
+          "새 비밀번호와 확인란 둘 다 마스킹된 입력으로 받음")
+    check("{{ .Token }}" in view_src,
+          "오너 설정 체크리스트에 Reset Password 템플릿의 6자리 코드 변수 안내가 들어감")
 
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
@@ -1496,6 +1716,7 @@ def main():
     test_sort_holding_rows()
     test_supabase_fallback()
     test_crud_with_fake_client()
+    test_password_reset()
     test_sql_schema()
     test_view_and_routing()
     test_requirements_and_docs()
