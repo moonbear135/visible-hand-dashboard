@@ -13,7 +13,7 @@ views/report_view.py
       같은 패턴):
 
           from views.report_view import is_report_visible, render_report_page
-          show_report = st.sidebar.checkbox("📈 리포트 (준비중 · 미리보기)", key="view_report") \
+          show_report = st.sidebar.checkbox("📈 사장님 보고서 (준비중 · 미리보기)", key="view_report") \
               if is_report_visible(admin_mode) else False
           ...  if show_report: render_report_page()
 
@@ -135,7 +135,7 @@ def _md_amount(value, currency, decimals=None):
 
 def _render_not_ready(status):
     st.warning(
-        "🚧 **리포트는 아직 준비중입니다.**\n\n"
+        "🚧 **사장님 보고서는 아직 준비중입니다.**\n\n"
         f"사유: {status.reason}\n\n"
         "이 화면이 준비되지 않아도 기존 밸류에이션 리포트(한국/미국)는 정상 동작합니다."
     )
@@ -369,10 +369,11 @@ def _render_market_block(market, snapshots, period, ref_date):
 # 4. 메인 렌더러
 # =============================================================================
 def render_report_page():
-    st.markdown("## 📈 리포트")
-    st.warning(
-        "🚧 **개발 중인 화면입니다(스테이징).** 오너 승인 전까지 공개 메뉴에 노출되지 않습니다. "
-        "매일 자동으로 저장되는 내 평가금액 스냅샷을 기간별로 집계해서 보여줍니다."
+    st.markdown("## 📈 사장님 보고서")
+    st.info(
+        "🧾 **사장님, 보고서입니다.** 매일 자동으로 저장되는 내 평가금액 스냅샷을 기간별로 "
+        "집계해서 보여드립니다. 이 보고서는 **시간이 지나면 채워집니다** — 이제 막 시작하셨다면 "
+        "일간부터 채워지고, 주간·월간·분기·반기·연간은 그 기간이 지나가면서 차례로 완성됩니다."
     )
     st.info(NO_FX_CONVERSION_NOTICE)
     st.info(NO_FEES_TAXES_NOTICE)

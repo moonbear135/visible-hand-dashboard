@@ -245,11 +245,11 @@ def main():
         # 2026-08-12(TASK_HISTORY #104): 사이드바 설명 캡션 없음 — 오너 판단으로 계속 안 씀
         # ("공개 전환할 때도 필요 없을 것 같다"). 아래 부제는 캡션이 아니라 위 "사실 이
         # 가격이에요"와 짝을 이루는 대분류 헤더의 일부입니다.
-        render_category_header("📊 내 성적표", "내 보유종목 · 기간별 리포트")
+        render_category_header("📊 내 성적표", "내 보유종목 · 기간별 보고서")
         report_available = render_report_page is not None and is_report_visible(admin_mode_hint)
         if report_available:
             SCORECARD_TAB = "📊 내 보유종목"
-            REPORT_TAB = "📈 리포트"
+            REPORT_TAB = "📈 사장님 보고서"
             scorecard_subpage = st.sidebar.radio(
                 "내 성적표 하위 메뉴",
                 [SCORECARD_TAB, REPORT_TAB],

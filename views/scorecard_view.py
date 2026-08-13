@@ -861,9 +861,8 @@ def _render_currency_block(client, user_id, group, indexes):
 # =============================================================================
 def render_scorecard_page():
     st.markdown("## 📊 내 성적표")
-    st.warning(
-        "🚧 **개발 중인 화면입니다(스테이징).** 오너 승인 전까지 공개 메뉴에 노출되지 않습니다. "
-        "입력한 데이터는 Supabase 에 저장되며, 본인만 조회할 수 있도록 DB 정책(RLS)이 걸려 있습니다."
+    st.info(
+        "🔒 입력한 데이터는 Supabase 에 저장되며, 본인만 조회할 수 있도록 DB 정책(RLS)이 걸려 있습니다."
     )
     st.info(NO_FX_CONVERSION_NOTICE)
     st.info(NO_FEES_TAXES_NOTICE)
