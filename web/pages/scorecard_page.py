@@ -96,15 +96,37 @@ MAX_INPUT_VALUE = 10 ** 14  # 이 값 **이상**은 저장 불가
 # 정렬 드롭다운의 "정렬하지 않음" 항목 (추가한 순서 그대로)
 _SORT_NONE = "기본순서"
 
+# 원형차트 조각 색 — plotly 기본 팔레트(`plotly.colors.qualitative.Plotly`)와 **같은 값**을
+# 우리가 직접 들고 있습니다. 튜플(불변)이라 화면마다 값이 섞일 수 없습니다(§0-3-8).
+#
+# 🔴 2026-08-17 (실기기 확인) 왜 굳이 색을 적어두는가 —
+#    Streamlit 의 `st.plotly_chart()` 는 넘겨받은 figure 에 **Streamlit 자체 테마를 다시
+#    입혀서** 그립니다(기본값 theme="streamlit"). 그래서 원본 화면에서는 figure 에 조각 색을
+#    한 번도 지정한 적이 없는데도 항상 알록달록하게 보였습니다.
+#    NiceGUI 의 `ui.plotly()` 에는 그런 재테마링이 없어서, 조각 색이 오로지
+#    `layout.template.layout.colorway` 가 파이썬 → JSON → 브라우저 plotly.js 까지
+#    살아서 도착하는지에 달리게 됩니다. 그게 비면 조각에 색이 안 깔리고, 우리는 배경을
+#    투명(`paper_bgcolor`/`plot_bgcolor` = rgba(0,0,0,0))으로 뚫어놨기 때문에 그 자리에
+#    페이지의 검은 배경(#0e1117)이 그대로 비쳐 **"검은 도넛"** 으로 보입니다
+#    (라벨은 흰색이라 정상적으로 보이고요 — 오너가 본 화면이 정확히 이 모습입니다).
+#    → 템플릿 전달에 기대지 않고 **조각 색을 파이썬에서 못 박습니다.**
+_SLICE_COLORS = (
+    "#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A",
+    "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52",
+)
+
 # 차트 배경/글자색 — 이 화면은 다크 모드 고정(web/layout.py)이라 plotly 기본 흰 배경을 쓰면
 # 차트만 하얗게 뜹니다. **figure 의 데이터(names/values)는 원본과 한 글자도 다르지 않고**,
-# 배경 투명화와 글자색만 지정합니다 (계획서 §7).
+# 배경 투명화와 글자색·조각 색만 지정합니다 (계획서 §7).
 _CHART_LAYOUT = dict(
     paper_bgcolor="rgba(0,0,0,0)",
     plot_bgcolor="rgba(0,0,0,0)",
     font=dict(color="#e2e8f0"),
     margin=dict(t=10, b=10, l=10, r=10),
     showlegend=False,
+    # 조각 색 안전망 ①. 아래 `_pie()` 에서 trace 에 직접 색을 넣는 게 본 수정이고,
+    # 이건 혹시 그쪽이 무시되는 plotly 버전에서도 검은 도넛이 되지 않게 하는 이중 보험입니다.
+    piecolorway=list(_SLICE_COLORS),
 )
 
 
@@ -702,15 +724,34 @@ def _render_currency_block(client, user_id: str, group: dict, market: dict, on_c
     rows_all = group["rows"]
     sync_label = market["sync_labels"].get(currency)
 
-    with ui.row().classes('no-wrap items-center gap-2 w-full'):
-        ui.markdown(f'### {CURRENCY_TITLES.get(currency, currency)}').classes('flex-1 min-w-0')
+    # 🔴 2026-08-17 (실기기 확인) — 모바일에서 이 제목이 "미/국/주/식" 처럼 한 글자씩 세로로
+    #    쌓이던 버그를 고친 자리입니다. #122·#123·#127~#130 과 **같은 계열**이고 원인도 같습니다.
+    #
+    #    [고치기 전] 줄 전체 `no-wrap` + 제목 `flex-1 min-w-0` + 캡션 `shrink-0`
+    #      · `no-wrap`  → 캡션이 다음 줄로 못 내려감
+    #      · 캡션 `shrink-0` → "🕒 현재가 : 2026-08-16 15:30 기준 (KST) — 실시간 시세가
+    #        아닙니다." 라는 40자짜리 문장이 **한 치도 안 줄어들고** 줄 폭을 통째로 차지
+    #      · 제목 `flex-1 min-w-0` → "얼마든지 줄어들어도 된다"는 뜻이라 남은 폭(≈0)까지 수축
+    #      · 한글은 띄어쓰기가 없어도 글자 사이에서 줄바꿈되므로 → 한 글자씩 세로로 쌓임
+    #      (반대로 그 위 "한국/미국" 토글이 멀쩡했던 건 Quasar 버튼이라 수축하지 않아서입니다.)
+    #
+    #    [고친 뒤] 역할을 정반대로 뒤집고, 좁으면 **줄 단위로** 갈라지게 합니다.
+    #      ① `no-wrap` 제거 → 폭이 모자라면 캡션이 통째로 다음 줄로 내려감(허용 패턴 C)
+    #      ② 제목 `shrink-0` → 절대 수축하지 않음(글자 단위 쌓임이 구조적으로 불가능)
+    #      ③ 캡션 `flex: 1 1 260px` → 남는 폭이 260px 미만이면 줄바꿈. `flex-1`(basis 0)은
+    #         절대 다음 줄로 안 내려가서 오히려 같은 사고가 나므로 **쓰면 안 됩니다.**
+    #      ④ 양쪽 다 `vh-keep-all`(word-break: keep-all) → 어떤 폭에서도 CJK 는 띄어쓰기
+    #         자리에서만 줄바꿈 (web/theme.py)
+    with ui.row().classes('items-center gap-2 w-full'):
+        ui.markdown(f'### {CURRENCY_TITLES.get(currency, currency)}') \
+            .classes('shrink-0 vh-keep-all')
         if sync_label:
             # sync_label 은 사용자 입력이 아니라 우리 수집기가 쓴 메타데이터에서만 옵니다.
             # 그래도 esc() 는 습관적으로 걸어 둡니다 (§0-3-9).
             ui.html(
                 f'<div style="font-size:0.9rem; font-weight:600; color:#cbd5e1;">'
                 f'🕒 {esc(sync_label)} — 실시간 시세가 아닙니다.</div>'
-            ).classes('shrink-0')
+            ).classes('vh-keep-all').style('flex: 1 1 260px; min-width: 0;')
 
     with ui.row().classes('w-full gap-4 items-stretch'):
         metric_card('매입원가 합계', format_amount(group["total_cost"], currency))
@@ -806,12 +847,17 @@ def _render_row_manager(client, user_id: str, rows, indexes, view: dict, redraw,
        JS 로 인라인 style 을 박아넣어 CSS 로 이길 수 없었지만(공식 이슈 #6592), NiceGUI 의
        `ui.row()` 는 평범한 flex 컨테이너라 `no-wrap` 한 줄이면 끝입니다.
        **이 세 클래스를 지우지 마세요**: 줄 전체 `no-wrap`, 라벨 `flex-1 min-w-0`, 버튼 `shrink-0`.
+
+    ⚠️ 2026-08-17 — 여기 라벨은 (버튼 두 개가 작아서) 통화 블록 제목만큼 극단적으로 좁아지진
+       않지만, 구조는 **똑같이 "줄어들어도 되는 CJK 라벨"** 입니다. 좁은 기기에서 종목명이
+       글자 단위로 쪼개지지 않도록 같은 `vh-keep-all` 을 함께 걸어 둡니다
+       (`word-break` 는 상속 속성이라 안쪽 `_row_label_html()` 의 div 까지 적용됩니다).
     """
     ui.markdown('**종목 관리**')
     for row in rows:
         row_id = row.get("id")
         with ui.row().classes('no-wrap items-center gap-2 w-full vh-card'):
-            ui.html(_row_label_html(row, indexes)).classes('flex-1 min-w-0')
+            ui.html(_row_label_html(row, indexes)).classes('flex-1 min-w-0 vh-keep-all')
             ui.button(icon='edit', on_click=lambda _=None, rid=row_id: _toggle_edit(view, rid, redraw)) \
                 .props('flat dense').classes('shrink-0').tooltip('수정')
             ui.button(icon='delete',
@@ -947,6 +993,11 @@ def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
 
     fig = px.pie(names=names, values=values, hole=0.35)
     fig.update_traces(textposition="inside", textinfo="percent+label")
+    # 조각 색 안전망 ② (본 수정). 종목 수가 팔레트보다 많으면 처음부터 다시 돌려 씁니다
+    # (plotly 가 colorway 를 재사용하는 방식과 동일). 라벨 순서 = 색 순서라 항상 1:1 로 맞습니다.
+    fig.update_traces(marker=dict(
+        colors=[_SLICE_COLORS[i % len(_SLICE_COLORS)] for i in range(len(names))],
+    ))
     fig.update_layout(**_CHART_LAYOUT)
     ui.plotly(fig).classes('w-full h-80')
 
