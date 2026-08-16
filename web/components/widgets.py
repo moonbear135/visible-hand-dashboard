@@ -55,14 +55,21 @@ def info_banner(text: str) -> None:
     _plain('info', text)
 
 
-def metric_card(label: str, value: str, delta: str = '') -> None:
+def metric_card(label: str, value: str, delta: str = '', *, delta_html: str = '') -> None:
     """`st.metric` 대체 (NiceGUI 에 동등 위젯 없음).
 
     값이 없을 때 `—`/'데이터 없음' 을 그대로 크게 보여주는 용도까지 포함합니다(§0-1).
+
+    :param delta: 카드 아래 작은 회색 한 줄. **평문**이며 여기서 이스케이프합니다.
+    :param delta_html: 색을 입힌 등락률처럼 **이미 HTML 인 한 줄**(예: `pct_html()` 결과).
+        이 값은 그대로 출력하므로 **호출하는 쪽이 이스케이프까지 끝내서** 넘겨야 합니다
+        (§0-3-9). 사장님 보고서의 '평가금액 변화' 카드가 국내 관례 색(오르면 빨강/내리면
+        파랑)을 유지하려고 씁니다 — 색 있는 카드를 화면마다 따로 만들지 않기 위한 것입니다.
     """
-    delta_html = (
-        f'<div style="font-size: 13px; color: #94a3b8; font-weight: 600; margin-top: 4px;">{esc(delta)}</div>'
-        if delta else ''
+    delta_body = delta_html or (esc(delta) if delta else '')
+    delta_block = (
+        f'<div style="font-size: 13px; color: #94a3b8; font-weight: 600; margin-top: 4px;">{delta_body}</div>'
+        if delta_body else ''
     )
     ui.html(compact(f"""
         <div style="background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155;
@@ -70,7 +77,7 @@ def metric_card(label: str, value: str, delta: str = '') -> None:
             <div style="font-size: 13px; color: #94a3b8; font-weight: 700; line-height: 1.4;">{esc(label)}</div>
             <div style="font-size: 30px; color: #f8fafc; font-weight: 800; letter-spacing: -1px;
                         margin-top: 6px; overflow-wrap: break-word;">{esc(value)}</div>
-            {delta_html}
+            {delta_block}
         </div>
     """)).style('flex: 1 1 240px;')
     # ⚠️ 폭 지정은 Tailwind 임의값 클래스(`min-w-[240px]`)가 아니라 인라인 style 로 둡니다.

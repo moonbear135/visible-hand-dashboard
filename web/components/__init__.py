@@ -24,6 +24,7 @@ from web.components.html import (  # noqa: F401
     graham_unavailable_box,
     info_badge,
     loss_banner_html,
+    pct_html,
     quality_badge,
     quant_score_badge,
     rank_prefix_html,

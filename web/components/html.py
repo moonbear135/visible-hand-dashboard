@@ -109,6 +109,29 @@ def fmt_num(value, suffix: str = '', digits=None, na_text: str = NA_TEXT) -> str
         return na_text
 
 
+def pct_html(value, digits: int = 2, suffix: str = '%') -> str:
+    """등락률 한 조각 — **국내 증시 관례대로 오르면 빨강 / 내리면 파랑**.
+
+    2026-08-11 오너 확정(TASK_HISTORY #79·#80)이며 '내 성적표'와 '사장님 보고서'가
+    **같은 색·같은 서식**을 써야 합니다(두 화면의 색이 어긋나면 안 됨). 그래서 두 화면이
+    각자 들고 있던 같은 함수를 여기 한 곳으로 모았습니다 (§0-3-10 중복 금지).
+
+    :param suffix: 기본은 '%'. 비중 **변화량**처럼 단위가 퍼센트포인트인 자리는 '%p' 를
+        넘깁니다 — 50%→75% 는 "+25%p"(비중이 25포인트 늘어남)이지 "+25%"(1.5배)가
+        아니어서, 색 규칙은 같고 단위만 달라야 하는 자리입니다(사장님 보고서 비중 변화 표).
+
+    값이 없으면 0% 같은 숫자를 지어내지 않고 '—' 입니다(§0-1).
+    """
+    if value is None:
+        return '—'
+    text = f'{value:+.{digits}f}{suffix}'
+    if value > 0:
+        return f"<span style='color:#f87171; font-weight:700;'>{esc(text)}</span>"
+    if value < 0:
+        return f"<span style='color:#60a5fa; font-weight:700;'>{esc(text)}</span>"
+    return esc(text)
+
+
 # =============================================================================
 # 카드 공통 조각 (pegy · us_stocks 가 같은 마크업을 씁니다 — §0-3-10)
 # =============================================================================

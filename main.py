@@ -19,12 +19,14 @@ import web.theme
 #   pegy_page      → '/'          (공개 기본 화면, 2단계에서 이전 완료)
 #   us_stocks_page → '/us'        (공개 화면, 3단계에서 이전 완료)
 #   scorecard_page → '/scorecard' (로그인 필요 · 스테이징, 4단계)
+#   report_page    → '/report'    (로그인 필요 · 스테이징, 5단계 — scorecard 와 같은 로그인 공유)
 #   admin_page     → '/admin'     (1단계)
 #   demo_page      → '/demo'      (0단계 모바일 반응형 검증용. 실화면 검증이 끝나면 삭제 예정 — §0-3-10)
 from web.pages import (  # noqa: F401
     admin_page,
     demo_page,
     pegy_page,
+    report_page,
     scorecard_page,
     us_stocks_page,
 )

@@ -36,6 +36,11 @@
   [3] 화면 배선 검사 — `web/pages/scorecard_page.py` 가 client/user_id 를 **인자로** 받는지,
       전역에서 사용자를 추측하는 코드가 없는지, XSS 이스케이프·차트 높이 등.
 
+  [5]~[7] 2026-08-17(5단계) 추가 — 로그인이 필요한 **두 번째 화면**
+      `web/pages/report_page.py`(사장님 보고서)에 [3]과 같은 기준을 그대로 적용하고,
+      표·기간이동을 실제로 실행해 보며(스모크), 두 화면이 **같은 로그인 세션**을 쓰는지를
+      함께 검증합니다. 로그인이 필요한 화면이 늘어날 때마다 이 목록도 같이 늘립니다.
+
   ⚠️ 이 샌드박스에서 **검증하지 못한 것**(배포 후 오너 실기기 확인 필요):
       · 진짜 NiceGUI 서버 프로세스에서 `app.storage.client` 가 접속마다 실제로 다른 dict 를
         돌려주는지(= NiceGUI 내부 contextvar 동작 자체). 이 테스트는 "우리 코드가 그 두 저장소를
@@ -83,6 +88,18 @@ def target_files():
 
 def rel(path):
     return path.relative_to(REPO_ROOT).as_posix()
+
+
+def python_code_only(src):
+    """주석·독스트링을 걷어낸 파이썬 '실행되는 코드'만 남깁니다.
+
+    (설명 주석에 `st.session_state` 같은 문구가 적혀 있다고 실제로 그 경로가 있는 건
+     아니므로, "코드에 없는지"를 볼 때는 반드시 이걸 통과시킨 문자열로 확인합니다.
+     `tests/test_report.py` 의 같은 이름 함수와 동일한 규칙입니다.)
+    """
+    without_docstrings = re.sub(r'("""|\'\'\')(?:.|\n)*?\1', "", src)
+    return "\n".join(line for line in without_docstrings.splitlines()
+                     if not line.strip().startswith("#"))
 
 
 def module_level_statements(tree):
@@ -138,6 +155,8 @@ ALLOWED_MUTABLE_GLOBALS = {
         "통화 코드 → 소제목 문구(고정 문자열).",
     ("web/pages/scorecard_page.py", "_CHART_LAYOUT"):
         "plotly 차트 배경/글자색 설정(고정 문자열·숫자). 차트 데이터는 여기 담기지 않음.",
+    ("web/pages/report_page.py", "MARKET_TITLES"):
+        "시장 코드 → 소제목 문구(고정 문자열). 사용자 데이터가 들어갈 자리가 없음.",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
@@ -754,10 +773,328 @@ def test_render_smoke():
           "유니버스 밖 종목(999999)은 값을 지어내지 않고 '현재가 없음' 으로 표시 (§0-1)")
 
 
+# =============================================================================
+# [5] 화면 배선 — web/pages/report_page.py (5단계 · 사장님 보고서)
+# =============================================================================
+#  '내 성적표'와 **같은 로그인 세션**을 쓰는 두 번째 화면이라, [3] 과 같은 기준을 그대로
+#  적용합니다. 로그인이 필요한 화면이 늘어날 때마다 이 검사를 함께 늘립니다(§0-3-8).
+# =============================================================================
+def test_report_page_wiring():
+    print("\n[5] web/pages/report_page.py 배선 (사장님 보고서)")
+    path = REPO_ROOT / "web" / "pages" / "report_page.py"
+    check(path.exists(), "web/pages/report_page.py 존재")
+    if not path.exists():
+        return
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    # ⚠️ "이 낱말이 코드에 없는지"를 볼 때는 **주석·독스트링을 걷어낸** 문자열로 확인합니다.
+    #    이 파일은 "Streamlit 의 _consume_pending_ref_date 우회가 왜 필요 없어졌는지"를
+    #    주석으로 길게 설명하고 있어서, 원문으로 검사하면 그 설명 자체에 걸려 항상 실패합니다.
+    code = python_code_only(src)
+
+    # (a) DB를 만지는 함수는 client·user_id 를 **인자로** 받아야 합니다 (§0-3-8 함수 설계 원칙)
+    funcs = {n.name: n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    for name in ("_render_signed_in", "_render_report_body"):
+        node = funcs.get(name)
+        args = [a.arg for a in node.args.args] if node else []
+        check(node is not None and "client" in args and "user_id" in args,
+              f"`{name}()` 이 client·user_id 를 인자로 받음", f"실제 인자: {args}")
+
+    # (b) DB 호출에 client 가 첫 인자로 들어가는지 (전역에서 추측하지 않는지)
+    for call_name in ("fetch_user_snapshots", "fetch_user_holding_snapshots"):
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == call_name]
+        check(calls and all(c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "client"
+                            for c in calls),
+              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김",
+              f"호출 {len(calls)}건")
+
+    # (c) 저장소 직접 접근 금지 (web/auth.py 를 통해서만)
+    check(bool(re.search(r'from nicegui import[^\n]*\bui\b', src)) and "app.storage" not in code,
+          "화면 파일은 app.storage 를 직접 만지지 않음 (web/auth.py 경유)")
+
+    # (d) 🔑 로그인 공유 — '내 성적표'와 **같은 세션 함수·같은 로그인 폼**을 쓰는지
+    check("has_supabase_session" in code and "from web.auth import" in code,
+          "로그인 여부를 web/auth.py 의 접속자 저장소로 판단 (scorecard 와 동일 경로 = 세션 공유)")
+    check("from web.auth_ui import" in code and "render_auth()" in code,
+          "로그인 폼을 web/auth_ui.py 공용 함수로 그림 (화면마다 폼을 복붙하지 않음, §0-3-10)")
+    for forbidden in ("sign_in(", "sign_up(", "SESSION_USER_KEY", "set_session("):
+        check(forbidden not in code,
+              f"자체 로그인 처리(`{forbidden}`)를 따로 만들지 않음 — 인증 경로는 web/auth.py 하나")
+
+    # (e) XSS — 사용자/DB 문자열이 HTML 로 나가는 곳은 esc() 통과 (§0-3-9)
+    check("esc(" in src, "HTML 출력에 esc() 사용")
+    check("stock_name" not in src or "_holding_label_html" in src,
+          "종목명은 이스케이프하는 전용 함수(_holding_label_html)를 거침")
+
+    # (f) 🔴 Streamlit 위젯 키 우회 코드가 통째로 사라졌는지 (계획서 §4-2)
+    for leftover in ("_consume_pending_ref_date", "pending_ref_date", "REF_DATE_WIDGET_KEY",
+                     "st.session_state", "st.rerun", "import streamlit"):
+        check(leftover not in code,
+              f"Streamlit 잔재 `{leftover}` 가 없음 (위젯 키 우회는 지역변수+refresh 로 대체)")
+    check("@ui.refreshable" in code and ".refresh()" in code,
+          "기간 이동/기간 변경이 부분 갱신(@ui.refreshable + .refresh())으로 동작")
+
+    # (g) 계산은 utils/report_db.py 가 하고 화면은 그리기만 하는지 (계층 분리)
+    check("from utils.report_db import" in code and "PERIOD_OPTIONS" in code,
+          "6기간 목록·계산 함수를 utils/report_db.py 에서 그대로 가져다 씀(문자열 이중 관리 금지)")
+    check("resolve_display_date" in code and "period_title" in code,
+          "주말·공휴일 대체(#117) 판정을 기존 함수로 하고 두 날짜를 화면에 밝힘")
+
+    # (h) 예외 원문·트레이스백 노출 방지 (§0-3-4)
+    check("_fail(" in src and "traceback" not in src,
+          "예상 못 한 예외는 화면에 원문을 흘리지 않고 로그로만 보냄 (§0-3-4)")
+
+
+# =============================================================================
+# [6] 사장님 보고서 렌더 스모크 — 표·기간이동을 **실제로 실행**해봅니다
+# =============================================================================
+#  ⚠️ 스냅샷은 **합성 데이터**이고 DB 호출은 대체합니다(§0-1 — 실 Supabase 에 접속하지 않음).
+#     벤치마크만 저장소의 실제 `market_history.csv` 를 읽으므로, 아래 기대값(+5.80%)은
+#     그 파일의 실측 코스피 종가(2026-07-31 6595.45 → 2026-08-14 6977.94)에서 나옵니다.
+# =============================================================================
+SYNTHETIC_SNAPSHOTS = [
+    {"snapshot_date": "2026-07-31", "market": "KR", "currency": "KRW",
+     "total_value": 700000, "total_cost": 703000, "holdings_count": 2, "priced_count": 2,
+     "unpriced_count": 0, "benchmark_symbol": "KOSPI", "benchmark_value": 6595.45,
+     "price_as_of_kst": "2026-07-31 16:05"},
+    {"snapshot_date": "2026-08-03", "market": "KR", "currency": "KRW",
+     "total_value": 723300, "total_cost": 703000, "holdings_count": 2, "priced_count": 2,
+     "unpriced_count": 0, "benchmark_symbol": "KOSPI", "benchmark_value": 6358.95,
+     "price_as_of_kst": "2026-08-03 16:05"},
+    {"snapshot_date": "2026-08-14", "market": "KR", "currency": "KRW",
+     "total_value": 750000, "total_cost": 700000, "holdings_count": 2, "priced_count": 1,
+     "unpriced_count": 1, "benchmark_symbol": "KOSPI", "benchmark_value": 6977.94,
+     "price_as_of_kst": "2026-08-14 16:05"},
+]
+
+SYNTHETIC_HOLDING_SNAPSHOTS = [
+    {"snapshot_date": "2026-08-03", "market": "KR", "currency": "KRW", "ticker": "005930",
+     "stock_name": "삼성전자", "quantity": 10, "avg_purchase_price": 70000, "cost": 700000,
+     "current_price": 72000, "market_value": 720000, "priced": True,
+     "price_as_of_kst": "2026-08-03 16:05"},
+    # 종목명에 XSS 시도 문자열이 들어간 경우 (§0-3-9 — 그대로 실행되면 안 됨)
+    {"snapshot_date": "2026-08-03", "market": "KR", "currency": "KRW", "ticker": "999999",
+     "stock_name": "<img src=x onerror=alert(1)>", "quantity": 3, "avg_purchase_price": 1000,
+     "cost": 3000, "current_price": 1100, "market_value": 3300, "priced": True,
+     "price_as_of_kst": "2026-08-03 16:05"},
+    {"snapshot_date": "2026-08-14", "market": "KR", "currency": "KRW", "ticker": "005930",
+     "stock_name": "삼성전자", "quantity": 10, "avg_purchase_price": 70000, "cost": 700000,
+     "current_price": 75000, "market_value": 750000, "priced": True,
+     "price_as_of_kst": "2026-08-14 16:05"},
+    # 그날 가격을 몰랐던 종목 — 0 이 아니라 '가격 모름'/'모름' 으로 나와야 합니다(§0-1)
+    {"snapshot_date": "2026-08-14", "market": "KR", "currency": "KRW", "ticker": "999999",
+     "stock_name": "<img src=x onerror=alert(1)>", "quantity": 3, "avg_purchase_price": 1000,
+     "cost": 3000, "current_price": None, "market_value": None, "priced": False,
+     "price_as_of_kst": "2026-08-14 16:05"},
+]
+
+
+# 🇺🇸 미국 블록 — 벤치마크 두 줄 + **평균 한 줄**(#116)과 한글 종목명(#115) 확인용.
+#    날짜는 저장소의 실제 `data/us_index_history.json` 에 들어 있는 거래일을 씁니다
+#    (SPY 773.26 → 776.34 = +0.40% / ONEQ 105.184 → 105.32 = +0.13% / 평균 +0.26%).
+SYNTHETIC_US_SNAPSHOTS = [
+    {"snapshot_date": "2026-08-07", "market": "US", "currency": "USD",
+     "total_value": 10000, "total_cost": 9000, "holdings_count": 1, "priced_count": 1,
+     "unpriced_count": 0, "benchmark_symbol": "SP500_PROXY_SPY", "benchmark_value": 773.26,
+     "price_as_of_kst": "2026-08-08 06:10"},
+    {"snapshot_date": "2026-08-14", "market": "US", "currency": "USD",
+     "total_value": 10500, "total_cost": 9000, "holdings_count": 1, "priced_count": 1,
+     "unpriced_count": 0, "benchmark_symbol": "SP500_PROXY_SPY", "benchmark_value": 776.34,
+     "price_as_of_kst": "2026-08-15 06:10"},
+]
+
+SYNTHETIC_US_HOLDINGS = [
+    # 스냅샷에는 **영문 원문**이 저장돼 있고, 화면은 '내 성적표'와 같은 한글명으로 보여야 합니다(#115).
+    {"snapshot_date": "2026-08-07", "market": "US", "currency": "USD", "ticker": "NVDA",
+     "stock_name": "NVIDIA Corp", "quantity": 2, "avg_purchase_price": 4500, "cost": 9000,
+     "current_price": 5000, "market_value": 10000, "priced": True,
+     "price_as_of_kst": "2026-08-08 06:10"},
+    {"snapshot_date": "2026-08-14", "market": "US", "currency": "USD", "ticker": "NVDA",
+     "stock_name": "NVIDIA Corp", "quantity": 2, "avg_purchase_price": 4500, "cost": 9000,
+     "current_price": 5250, "market_value": 10500, "priced": True,
+     "price_as_of_kst": "2026-08-15 06:10"},
+]
+
+
+def _capture_report_render(period, ref_date,
+                           snapshots=SYNTHETIC_SNAPSHOTS, holdings=SYNTHETIC_HOLDING_SNAPSHOTS):
+    """리포트 본문을 스텁 위에서 실제로 그려 보고, 만들어진 HTML 조각을 모아 돌려줍니다."""
+    _install_nicegui_stub()
+    import web.pages.report_page as page
+    import web.components.widgets as widgets
+    from nicegui import ui
+
+    captured = []
+    original_html = ui.html
+    original_snapshots = page.fetch_user_snapshots
+    original_holdings = page.fetch_user_holding_snapshots
+
+    def _capture(content='', *a, **k):
+        captured.append(str(content))
+        return original_html(content, *a, **k)
+
+    # ⚠️ 실제 `fetch_user_*` 는 DB 행을 `sort_snapshots()` / `sort_holding_snapshots()` 로
+    #    정규화해서 돌려줍니다(날짜는 date, 숫자는 float). 화면이 그 규약 위에서 돌기 때문에
+    #    가짜 조회도 **같은 정규화를 거쳐** 돌려줘야 진짜와 같은 조건이 됩니다.
+    from utils.report_db import sort_holding_snapshots, sort_snapshots
+    page.fetch_user_snapshots = lambda client, user_id, **kw: sort_snapshots(snapshots)
+    page.fetch_user_holding_snapshots = \
+        lambda client, user_id, **kw: sort_holding_snapshots(holdings)
+    ui.html = _capture
+    widgets.ui.html = _capture
+    try:
+        page._render_report_body(object(), "uid-test", period, ref_date)
+        error = None
+    except Exception as exc:                       # noqa: BLE001
+        error = exc
+    finally:
+        page.fetch_user_snapshots = original_snapshots
+        page.fetch_user_holding_snapshots = original_holdings
+        ui.html = original_html
+        widgets.ui.html = original_html
+    return "\n".join(captured), error
+
+
+def test_report_render_smoke():
+    print("\n[6] 사장님 보고서 렌더 스모크 (합성 스냅샷)")
+    import datetime
+
+    # ── 월간 (2026-08-14 기준) ────────────────────────────────────────────
+    blob, error = _capture_report_render("MONTHLY", datetime.date(2026, 8, 14))
+    check(error is None, "_render_report_body() 가 예외 없이 끝까지 실행됨",
+          f"({type(error).__name__}: {error})" if error else "")
+    check(bool(blob), "렌더 중 HTML 이 실제로 만들어짐")
+    check("<img src=x onerror=" not in blob,
+          "🔐 종목명에 심어둔 <img onerror=...> 가 HTML 로 살아나오지 않음 (§0-3-9 XSS)")
+    check("&lt;img src=x onerror=alert(1)&gt;" in blob,
+          "🔐 그 문자열이 이스케이프되어 '글자 그대로' 출력됨")
+    check("750,000원" in blob, "기간 종료 평가금액이 스냅샷 값 그대로 표시됨")
+    check("+7.14%" in blob,
+          "평가금액 변화율이 계산 함수 결과와 일치 (700,000 → 750,000)")
+    check("+5.80%" in blob,
+          "벤치마크(코스피 6595.45 → 6977.94) 수익률이 실측 CSV 값으로 계산됨")
+    check("가격 모름" in blob and "모름" in blob,
+          "그날 가격을 몰랐던 종목을 0 이 아니라 '가격 모름'/'모름' 으로 표시 (§0-1)")
+    check("대조 불일치" not in blob,
+          "종목별 합계(750,000)와 같은 날 합계 스냅샷이 일치해 경고가 뜨지 않음")
+    check("비중 변화" in blob or "%p" in blob, "비중 변화 표가 그려짐(기록이 이틀 이상)")
+
+    # ── 일간 · 주말(기록 없는 날) → 가장 최근 기록일로 대체 (#117) ────────
+    blob_sun, error_sun = _capture_report_render("DAILY", datetime.date(2026, 8, 16))
+    check(error_sun is None, "일간(주말) 렌더도 예외 없이 실행됨",
+          f"({type(error_sun).__name__}: {error_sun})" if error_sun else "")
+    check("2026-08-16" in blob_sun and "2026-08-14" in blob_sun,
+          "주말 대체 안내가 **고른 날과 실제로 보여주는 날 둘 다** 밝힘 (#117 · §0-1)")
+    check("저장된 기록이 없는 날" in blob_sun, "대체 안내 문구가 그대로 이식됨")
+
+    # ── 🇺🇸 미국 주간 — 벤치마크 2종 + 평균 한 줄(#116) + 한글 종목명(#115) ─
+    import datetime as _dt
+    blob_us, error_us = _capture_report_render(
+        "WEEKLY", _dt.date(2026, 8, 14),
+        snapshots=SYNTHETIC_US_SNAPSHOTS, holdings=SYNTHETIC_US_HOLDINGS)
+    check(error_us is None, "미국 블록도 예외 없이 렌더됨",
+          f"({type(error_us).__name__}: {error_us})" if error_us else "")
+    check("+0.40%" in blob_us and "+0.13%" in blob_us,
+          "벤치마크 두 줄이 실측 ETF 종가(SPY 773.26→776.34 / ONEQ 105.184→105.32)로 계산됨")
+    check("+0.26%" in blob_us and "평균" in blob_us,
+          "미국 두 벤치마크 **평균 한 줄**(#116)이 두 값의 산술평균으로 나옴")
+    check("엔비디아" in blob_us and "NVIDIA Corp" not in blob_us,
+          "미국 종목명이 '내 성적표'와 같은 한글 표기로 나옴 (#115 — 저장된 영문 원문 아님)")
+    check("$10,500.00" in blob_us,
+          "달러 금액이 통화 기호 그대로 표시됨 (환율 변환·원화 합산 없음)")
+
+
+def test_report_period_navigation():
+    """'◀ 이전 / 최신 / 다음 ▶' — Streamlit 의 pending 우회 없이 지역 상태만으로 동작하는가."""
+    print("\n[6-b] 기간 이동 버튼 (위젯 키 우회 코드 없이)")
+    _install_nicegui_stub()
+    import datetime
+    import web.pages.report_page as page
+
+    class _FakeInput:
+        def __init__(self, value):
+            self.value = value
+
+    class _FakeBody:
+        def __init__(self):
+            self.refreshed = 0
+
+        def refresh(self):
+            self.refreshed += 1
+
+    view = {"period": "MONTHLY", "ref_date": datetime.date(2026, 8, 17)}
+    date_input, body = _FakeInput("2026-08-17"), _FakeBody()
+
+    page._shift_ref_date(view, -1, date_input, body)
+    check(view["ref_date"] == datetime.date(2026, 7, 1) and date_input.value == "2026-07-01",
+          "◀ 이전 기간: 기준일과 **달력 칸 값이 함께** 바뀜(= 화면에 즉시 반영)",
+          f"실제: {view['ref_date']} / {date_input.value}")
+    check(body.refreshed == 1, "본문이 한 번 다시 그려짐")
+
+    page._shift_ref_date(view, 1, date_input, body)
+    check(view["ref_date"] == datetime.date(2026, 8, 1) and date_input.value == "2026-08-01",
+          "다음 기간 ▶ 로 되돌아옴(기간 시작일 기준 — shift_period 규약 그대로)")
+
+    page._apply_ref_date(view, datetime.date(2026, 8, 1), date_input, body)
+    check(body.refreshed == 2, "같은 날짜를 다시 넣으면 다시 그리지 않음(무한 루프 방지)")
+
+    page._on_date_typed(view, "이건날짜가아님", date_input, body)
+    check(date_input.value == "2026-08-01" and view["ref_date"] == datetime.date(2026, 8, 1),
+          "달력 칸에 이상한 값이 들어오면 날짜를 지어내지 않고 직전 기준일로 되돌림 (§0-1)")
+
+    page._apply_period(view, "DAILY", body)
+    check(view["period"] == "DAILY" and body.refreshed == 3, "기간 종류 변경이 본문을 다시 그림")
+
+
+def test_login_is_shared_between_scorecard_and_report():
+    """🔑 '내 성적표'와 '사장님 보고서'가 **같은 로그인 세션**을 쓰는가 (오너 확정 사항).
+
+    Streamlit 에서는 두 화면이 같은 `session_state` 키를 공유해서 맞췄지만, NiceGUI 에서는
+    두 화면이 **같은 함수(web/auth.py)** 를 부르기만 하면 저장소가 접속자 단위라 자동으로
+    공유됩니다. 그래서 여기서 확인하는 것은 두 가지입니다.
+      ① 두 화면이 참조하는 세션 함수·로그인 폼이 **같은 객체**인가 (다른 사본이면 언젠가
+         한쪽만 고쳐져 두 화면의 로그인 상태가 어긋납니다)
+      ② 한 접속에서 로그인하면 그 접속의 저장소 하나로 **양쪽 게이트가 함께 열리는가**,
+         그리고 다른 접속(B)은 그대로 닫혀 있는가 (§0-3-8 — 공유는 같은 사람 안에서만)
+    """
+    print("\n[7] 🔑 내 성적표 ↔ 사장님 보고서 로그인 공유")
+    _install_nicegui_stub()
+    import web.auth as auth
+    import web.auth_ui as auth_ui
+    import web.pages.report_page as report
+    import web.pages.scorecard_page as scorecard
+
+    check(report.has_supabase_session is scorecard.has_supabase_session is auth.has_supabase_session,
+          "두 화면이 **같은** has_supabase_session() 을 봄 (로그인 판정 단일 출처)")
+    check(report.get_client is scorecard.get_client is auth.get_client,
+          "두 화면이 **같은** get_client() 를 씀 (접속 전용 Supabase 클라이언트 1개)")
+    check(report.render_auth is scorecard.render_auth is auth_ui.render_auth,
+          "두 화면이 **같은** 로그인 폼을 그림 (web/auth_ui.py 하나 — §0-3-10)")
+
+    conn_a, conn_b = FakeConnection("A"), FakeConnection("B")
+    active = {"conn": conn_a}
+    original = (auth.user_storage, auth.client_storage)
+    auth.user_storage = lambda: active["conn"].user
+    auth.client_storage = lambda: active["conn"].client
+    try:
+        # '내 성적표'에서 로그인한 상태를 흉내 냅니다(토큰이 접속자 저장소에 들어간 상태).
+        conn_a.user[auth.SB_TOKENS_KEY] = {"access_token": "A", "refresh_token": "A-r"}
+        check(report.has_supabase_session() is True,
+              "🔑 /scorecard 에서 로그인해 두면 /report 도 로그인 상태 (폼 없이 본문)")
+        active["conn"] = conn_b
+        check(report.has_supabase_session() is False and scorecard.has_supabase_session() is False,
+              "🔴 다른 접속(B)에는 그 로그인이 전혀 보이지 않음 (§0-3-8)")
+    finally:
+        (auth.user_storage, auth.client_storage) = original
+
+
 def test_pages_import_cleanly():
     print("\n[3-b] 모듈 import 검증 (문법·배선 오류 조기 발견)")
     _install_nicegui_stub()
-    for module_name in ("web.auth", "web.layout", "web.pages.scorecard_page"):
+    for module_name in ("web.auth", "web.auth_ui", "web.layout",
+                        "web.pages.scorecard_page", "web.pages.report_page"):
         try:
             __import__(module_name)
         except Exception as exc:                   # noqa: BLE001
@@ -779,6 +1116,10 @@ def main():
     test_two_sessions_do_not_mix()
     test_scorecard_page_wiring()
     test_render_smoke()
+    test_report_page_wiring()
+    test_report_render_smoke()
+    test_report_period_navigation()
+    test_login_is_shared_between_scorecard_and_report()
     test_pages_import_cleanly()
 
     print("\n" + "=" * 74)
