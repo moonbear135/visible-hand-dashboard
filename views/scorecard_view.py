@@ -832,6 +832,18 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
            쌓기 로직 자체가 `st.columns()` 전용) 순수 CSS로 확실히 이길 수 있습니다.
            라벨(첫 번째 칸)은 남는 폭을 다 먹고(flex: 1), 버튼 2개는 내용물 크기만큼만
            차지해(flex: 0 0 auto) 오른쪽에 붙습니다 — 화면 폭과 무관하게 항상 한 줄. */
+        /* 2026-08-16 (#130 핫픽스) — #128 배포 후 오너가 **데스크탑까지** 세로로 쌓인
+           스크린샷을 보내옴("웹 화면이 모바일 화면처럼 바뀌었는데?") — 이건 폭이 넓은
+           데스크탑에서도 똑같이 깨졌다는 뜻이라, "모바일에서만 좁아서 쌓이는" #127/#128의
+           그 원인(폭 임계값)이 아니라 **CSS 선택자 자체가 아예 안 걸리고 있었다**는 뜻입니다.
+           원인: `st.container(key=...)`는 `.st-key-<key>` 클래스를 **내부의 별도 자식
+           div가 아니라, 세로 블록(`stVerticalBlock`)을 담당하는 그 div 자신에** 붙입니다
+           — 즉 클래스가 붙는 div와 `[data-testid="stVerticalBlock"]`가 서로 다른 요소가
+           아니라 **같은 요소**라, "그 클래스를 가진 요소의 후손 중 stVerticalBlock을
+           찾는" 아래쪽(descendant) 선택자로는 애초에 아무것도 못 찾습니다(자기 자신은
+           후손이 아니므로). 두 가지 DOM 구조(클래스가 자기 자신에 붙는 경우 / 후손에
+           붙는 경우) 모두 확실히 잡히도록 선택자를 둘 다 걸어둡니다. */
+        [class*="st-key-{table_key}_mgmt_row_"],
         [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] {{
             display: flex !important;
             flex-direction: row !important;
@@ -839,10 +851,12 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
             flex-wrap: nowrap !important;
             gap: 8px;
         }}
+        [class*="st-key-{table_key}_mgmt_row_"] > div:first-child,
         [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] > div:first-child {{
             flex: 1 1 auto;
             min-width: 0;
         }}
+        [class*="st-key-{table_key}_mgmt_row_"] > div:not(:first-child),
         [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] > div:not(:first-child) {{
             flex: 0 0 auto;
         }}
