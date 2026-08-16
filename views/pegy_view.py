@@ -1319,13 +1319,25 @@ def render_pegy_page():
             <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
                 <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
                     {rank_prefix_html}
-                    <span style="font-size: 24px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{s['name']}</span>
+                    <!-- 2026-08-16 오너 신고(#119 후속) — 종목명·밸류에이션 배지는 둘 다
+                         길이가 고정돼 있지 않은 실제 데이터입니다(실측: 종목명 최대
+                         "LIG디펜스앤에어로스페이스" 13자, 배지는 "🔵 Trailing만 검증됨
+                         (Forward 데이터 없음)" 최대 32자). 이 둘에 white-space: nowrap이
+                         걸려 있으면, 200종목 중 긴 이름/배지를 가진 카드 **단 하나**만 있어도
+                         지금 화면에 보이는 카드가 아니라 스크롤 아래쪽 다른 카드라 해도 페이지
+                         전체의 가로 스크롤 폭을 그만큼 넓혀버립니다 — 그래서 "눈에 보이는 곳엔
+                         튀어나온 글자가 없는데 손가락으로 스와이프하면 옆으로 밀린다"는 증상이
+                         생겼습니다. 부모 flex(줄 1319/1320)는 이미 flex-wrap: wrap 이라 형제
+                         요소끼리는 줄바꿈되지만, 각 span **자체**는 nowrap 때문에 내부에서
+                         못 끊겼던 게 원인 — nowrap을 없애 span 안에서도 자연스럽게 줄바꿈되게
+                         합니다. -->
+                    <span style="font-size: 24px; font-weight: 800; color: #f8fafc; white-space: normal; overflow-wrap: break-word; max-width: 260px;">{s['name']}</span>
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
                         <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!<br>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외합니다.<br>{score_tooltip_extra}</span></span> {score_badge_html}
                     </span>
-                    <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: nowrap;">
+                    <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: normal; overflow-wrap: break-word; max-width: 260px; display: inline-block;">
                         {s['badge']}
                     </span>
                     <span style="font-size: 12px; color: {vol_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6); padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">{vol_text}</span>

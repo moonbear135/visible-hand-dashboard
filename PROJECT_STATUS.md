@@ -606,13 +606,17 @@ ETF **KORU(코러)**가 성적표에서 계속 "현재가 없음"으로 뜬 것.
    항목입니다. 1차 신고 3건 중 진행 상황:
    - ✅ **PEGY "Forward" 카드 설명 문구가 페이지 전체를 가로로 밀어내던 버그 — 수정 완료.**
      `white-space: nowrap` → 줄바꿈 허용으로 교체(자세한 내용은 #119).
-   - ✅→🔄 **"Built with Streamlit ❤️" 하단 바 — 절충안 실행 완료, 실기기 확인만 남음
-     (TASK_HISTORY #120).** `index.html`의 iframe이 쓰는 `?embed=true` 모드에 항상 붙는
-     Streamlit 고정 요소라 CSS·파라미터로 못 없앤다는 걸 확인(공식 문서). 오너 승인 후
-     `embed=true`를 빼고 `visiblehand.py` 전역 CSS에 `stToolbar`/`stDecoration`/
-     `stStatusWidget`/`#MainMenu`/`footer` 개별 숨김을 추가(사이드바 접기 버튼이 있는
-     `header` 태그 전체는 일부러 안 건드림). **오너가 배포 후 실기기로 바가 실제로
-     사라지는지, 사이드바 토글이 정상인지 확인 필요.**
+   - ❌ **"Built with Streamlit ❤️" 하단 바 — 제거 불가로 최종 결론 (TASK_HISTORY #120→#121).**
+     `embed=true`를 빼는 절충안을 시도했으나 배포 직후 커스텀 도메인(iframe 경로)이 통째로
+     다운됨(`share.streamlit.io/-/auth/app` 503 — Community Cloud가 iframe 임베드 시
+     `embed=true`를 사실상 요구하는 것으로 보임). 즉시 `embed=true` 원복해 정상화. 이 바는
+     self-hosting 없이는 없앨 방법이 없는 것으로 최종 정리 — 더 이상 시도하지 않음.
+   - ✅ **모바일 가로 스크롤(핀치줌 무력화의 실질 원인) — 2건 수정 완료 (TASK_HISTORY
+     #119, #122).** PEGY "Forward" 카드 문구(#119) + PEGY·미국주식 두 화면 카드 헤더의
+     종목명·밸류에이션 배지(#122)에 걸려 있던 `white-space: nowrap`이 실제 데이터(종목명
+     최대 13자, 배지 최대 32자)와 만나 페이지 전체를 가로로 밀어내던 게 원인. 전부 자연
+     줄바꿈으로 교체. **배포 후 오너 실기기 재확인 필요** — 여전히 밀리면 다른 요소가
+     남아있을 수 있음.
    - 🔍 **보유종목 표 칸 간격 문제 — 원인 미확정, 조사 중.** #106 모바일 표 CSS가 실기기에서
      왜 의도대로 안 보이는지 코드 리뷰만으로는 확실한 원인을 못 찾음(샌드박스 네트워크 제약으로
      헤드리스 브라우저 설치 불가 → 실제 기기 폭 라이브 렌더링 검증 못함). 위 iframe 이슈와

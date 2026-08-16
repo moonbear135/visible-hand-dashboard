@@ -219,8 +219,13 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
         name_main = name_en or symbol
         translit_badge = ""
 
+    # 2026-08-16 오너 신고(#119 후속, pegy_view.py와 같은 원인) — 종목명은 길이가 정해져
+    # 있지 않은 실제 데이터라 white-space: nowrap이면 이름이 긴 종목 카드 하나만 있어도
+    # (지금 화면에 안 보이는 카드라도) 페이지 전체가 가로로 넓어져 모바일에서 스와이프 시
+    # 옆으로 밀립니다. nowrap을 없애 span 안에서 자연스럽게 줄바꿈되게 합니다.
     name_html = (
-        f'<span style="font-size: 24px; font-weight: 800; color: #f8fafc; white-space: nowrap;">{name_main}</span>'
+        f'<span style="font-size: 24px; font-weight: 800; color: #f8fafc; white-space: normal; '
+        f'overflow-wrap: break-word; max-width: 260px;">{name_main}</span>'
         f'{translit_badge}'
         f'<span style="font-size: 13px; color: #94a3b8; font-weight: 600;">{name_en}</span>'
         f'<span style="font-size: 14px; color: #38bdf8; font-weight: 800; background-color: rgba(15,23,42,0.6); '
@@ -728,9 +733,12 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                     수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외하므로 만점은 종목마다 다릅니다.<br>
                     {score_tooltip_extra}</span></span> {score_badge_html}
                 </span>
+                <!-- 2026-08-16 (#119 후속) — 배지 문구도 길이가 정해져 있지 않아 같은
+                     이유로 nowrap을 없앴습니다(pegy_view.py와 동일한 조치). -->
                 <span style="background-color: {s.get('badge_bg', '#1e293b')}; color: {s.get('badge_fg', '#cbd5e1')};
                              font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px;
-                             border: 1px solid {s.get('badge_fg', '#64748b')}; white-space: nowrap;">{s.get('badge', '—')}</span>
+                             border: 1px solid {s.get('badge_fg', '#64748b')}; white-space: normal;
+                             overflow-wrap: break-word; max-width: 260px; display: inline-block;">{s.get('badge', '—')}</span>
                 <span style="font-size: 12px; color: {beta_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6);
                              padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">
                     <span class="q-tooltip" style="color: {beta_color};">{beta_text} ℹ️<span class="q-tooltiptext">
