@@ -29,5 +29,11 @@ _CSS = """
 
 
 def register() -> None:
-    """main.py 에서 ui.run() 호출 전에 한 번만 부릅니다."""
-    ui.add_css(_CSS)
+    """main.py 에서 ui.run() 호출 전에 한 번만 부릅니다.
+
+    2026-08-16 (Render 첫 배포 실패 대응) — `shared=True`가 없으면 NiceGUI가
+    "@ui.page 를 쓰는 중에는 전역 스코프에서 ui.add_css를 호출할 수 없다"며
+    RuntimeError로 즉시 죽습니다(런타임 로그로 확인). shared=True 는 "이 CSS를
+    모든 페이지에 공통 적용해라"는 뜻으로, 지금 우리가 원하는 동작 그대로입니다.
+    """
+    ui.add_css(_CSS, shared=True)
