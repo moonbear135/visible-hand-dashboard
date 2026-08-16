@@ -32,15 +32,14 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
     """
     print("🤖 AI 매크로 코멘트 생성을 시작합니다...")
     
+    # ⚠️ 2026-08-17 (NiceGUI 이전 6단계) — streamlit 의존 제거.
+    #    예전에는 여기서 `import streamlit as st; api_key = st.secrets.get("GEMINI_API_KEY")`
+    #    로 Streamlit Cloud secrets 를 한 번 더 뒤졌습니다. 이 함수의 **유일한 호출자는
+    #    `scrape_daily.py`(GitHub Actions 배치)** 이고 거기서는 항상 환경변수로 들어오므로
+    #    실제 동작은 달라지지 않습니다. 이전 후 앱이 도는 Render 도 전부 환경변수입니다
+    #    (NICEGUI_MIGRATION_PLAN.md §8-3). 키 이름·읽는 방식·이후 로직은 그대로입니다.
     api_key = os.environ.get("GEMINI_API_KEY")
-    # Streamlit Cloud 환경에서 secrets.toml을 로컬 변수처럼 사용하는 경우를 대비한 꼼수
-    if not api_key:
-        try:
-            import streamlit as st
-            api_key = st.secrets.get("GEMINI_API_KEY")
-        except Exception:
-            pass
-            
+
     if not api_key:
         print("⚠️ GEMINI_API_KEY가 없습니다. AI 코멘트 생성을 건너뜁니다.")
         return

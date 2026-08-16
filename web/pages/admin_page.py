@@ -25,12 +25,18 @@ from web.layout import layout
 def admin_page() -> None:
     with layout('⚙️ 관리자 콘솔'):
         if not is_admin():
-            _render_login()
+            render_admin_login()
             return
         _render_console()
 
 
-def _render_login() -> None:
+def render_admin_login() -> None:
+    """관리자 비밀번호 게이트 (관리자 전용 화면들이 **같은 함수 하나**를 씁니다).
+
+    2026-08-17(6단계) — `/admin/macro`(매크로 방공망)도 같은 게이트를 써야 해서
+    `_render_login` 에서 공개 이름으로 바꿨습니다. 게이트 로직을 화면마다 복붙하면
+    한쪽만 고쳐지는 사고가 납니다 (ENGINEERING_SPEC.md §0-3-10).
+    """
     ui.markdown('일반 방문자에게 노출되지 않는 디버그용 화면입니다. 관리자 비밀번호를 입력하세요.')
 
     if not get_admin_password_hash():
@@ -71,6 +77,10 @@ def _render_console() -> None:
         ui.label(f'DB 파일 경로: {HISTORY_FILE}')
         ui.label(f'DB 파일 존재 여부: {os.path.exists(HISTORY_FILE)}')
 
+    # 2026-08-17(6단계) — 수동 데이터 입력 콘솔은 원본(`views/macro_view.py` 가
+    # `render_admin_console()` 을 화면 안에서 호출)과 **같은 자리**인 매크로 화면에
+    # 그대로 붙였습니다. 여기서는 그리로 가는 링크만 둡니다.
     ui.markdown(
-        '📌 매크로 방공망 수동 데이터 입력 콘솔은 6단계(macro 이전)에서 이 화면에 이어붙일 예정입니다.'
+        '📌 매크로 방공망 수동 데이터 입력 콘솔은 [🏢 매크로 방공망 화면](/admin/macro) 안에 있습니다 '
+        '(원본 Streamlit 화면과 같은 위치).'
     ).classes('vh-muted')

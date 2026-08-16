@@ -23,6 +23,9 @@ _BANNER_PALETTE = {
     'error': ('rgba(127, 29, 29, 0.35)', '#ef4444', '#fecaca'),
     'warning': ('rgba(120, 53, 15, 0.35)', '#f59e0b', '#fde68a'),
     'info': ('rgba(14, 116, 144, 0.30)', '#38bdf8', '#bae6fd'),
+    # 2026-08-17 (6단계) — `st.success` 대체. 매크로 화면이 "지금 보는 데이터가 최신 마감분인가"
+    # (초록) / "아닌가"(파랑)를 색으로 구분해서 알려주는데, 그 신호를 잃지 않으려면 필요합니다.
+    'success': ('rgba(6, 78, 59, 0.35)', '#22c55e', '#bbf7d0'),
 }
 
 
@@ -53,6 +56,10 @@ def warning_banner(text: str) -> None:
 
 def info_banner(text: str) -> None:
     _plain('info', text)
+
+
+def success_banner(text: str) -> None:
+    _plain('success', text)
 
 
 def metric_card(label: str, value: str, delta: str = '', *, delta_html: str = '') -> None:

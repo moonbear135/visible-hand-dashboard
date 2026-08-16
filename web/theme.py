@@ -238,6 +238,62 @@ body.body--dark,
     overflow-wrap: break-word;
 }
 
+/* ── 6단계(macro) 이식분 ──────────────────────────────────────────────── */
+/* `views/macro_view.py` 가 매 렌더마다 `st.markdown("<style>...")` 로 주입하던 CSS를
+   **규칙·수치를 한 글자도 바꾸지 않고** 여기로 옮겼습니다(2단계 pegy 와 동일한 방식).
+   클래스 이름도 그대로입니다 — Quasar 내장 클래스와 겹치는 이름이 없습니다.
+   ⚠️ 원본 `.premium-table` 블록 맨 앞에 있던
+        body { background-color: transparent; margin: 0; padding: 0; }
+      한 줄은 **일부러 옮기지 않았습니다.** 그건 이 표를 `st.components.v1.html()` 의
+      iframe 안에 그리던 시절의 잔재(iframe 문서용 리셋)이고, 지금은 iframe 자체가
+      없습니다(계획서 §1-3). 전역 스타일시트에 `body` 규칙을 새로 들이면 다른 화면의
+      배경까지 건드릴 수 있어 제외했습니다. 표 자체의 모양에는 영향이 없습니다. */
+.apartment-building {
+    display: flex;
+    flex-direction: column;
+    background-color: #0f172a;
+    border: 6px solid #334155;
+    border-radius: 20px;
+    padding: 16px;
+    box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.4);
+    margin-bottom: 30px;
+}
+.floor-card {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 20px;
+    margin: 4px 0;
+    border-radius: 12px;
+    transition: all 0.3s ease;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+}
+.floor-card.active {
+    background: linear-gradient(90deg, #991b1b 0%, #7f1d1d 100%);
+    border: 2px solid #f87171;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+    transform: scale(1.02);
+    z-index: 10;
+}
+.floor-card.inactive {
+    background-color: #1e293b;
+    border: 1px solid #334155;
+    opacity: 0.6;
+}
+.floor-name { font-size: 18px; font-weight: 800; color: #f8fafc; display: flex; align-items: center; gap: 8px; }
+.floor-status { font-size: 15px; font-weight: 700; color: #fca5a5; }
+.floor-card.inactive .floor-status { color: #94a3b8; }
+.floor-guide { font-size: 14px; font-weight: 600; color: #cbd5e1; }
+
+/* 지표별 기여도 상세 분석표 (원본 `.premium-table` 규칙 그대로) */
+.premium-table { width: 100%; border-collapse: collapse; margin-top: 5px; font-family: -apple-system, BlinkMacSystemFont, sans-serif; font-size: 13.5px; background-color: #0f172a; border-radius: 10px; overflow: hidden; }
+.premium-table th { background-color: #1e293b; color: #38bdf8; font-weight: 700; text-align: center; padding: 12px 10px; border-bottom: 2px solid #334155; }
+.premium-table td { padding: 11px 10px; border-bottom: 1px solid #334155; color: #f8fafc; text-align: center; }
+.premium-table tr:nth-child(even) { background-color: #0f172a; }
+.premium-table tr:nth-child(odd) { background-color: #1e293b; }
+.premium-table tr:hover { background-color: #334155; }
+.premium-table td:first-child { text-align: left; font-weight: 600; color: #f1f5f9; }
+
 /* 2026-08-17 — NiceGUI 자체 "Connection lost. Trying to reconnect..." 팝업을 화면
    왼쪽 아래 대신 정중앙에 뜨게 합니다. 이 팝업은 프레임워크가 `id="popup"` 으로
    그리는 고정 요소라(우리 코드가 만드는 게 아님), 여기서 CSS로만 위치를 덮어씁니다.

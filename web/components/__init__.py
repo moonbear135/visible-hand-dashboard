@@ -42,5 +42,6 @@ from web.components.widgets import (  # noqa: F401
     pager,
     render_summary_metrics,
     scroll_to_top,
+    success_banner,
     warning_banner,
 )

@@ -157,6 +157,22 @@ ALLOWED_MUTABLE_GLOBALS = {
         "plotly 차트 배경/글자색 설정(고정 문자열·숫자). 차트 데이터는 여기 담기지 않음.",
     ("web/pages/report_page.py", "MARKET_TITLES"):
         "시장 코드 → 소제목 문구(고정 문자열). 사용자 데이터가 들어갈 자리가 없음.",
+    # ── 6단계(macro) 이식분 — 전부 `views/macro_view.py` 에서 글자 그대로 옮긴 **설명 상수**
+    #    입니다. 이 화면은 로그인이 없고(관리자 비밀번호 게이트만 있음) 사용자별 데이터를
+    #    아예 다루지 않습니다 — 읽는 건 모든 관리자에게 동일한 `market_history.csv` 와
+    #    `data/macro_commentary.json` 뿐이라 §0-3-8 의 "읽기 전용 시장데이터" 쪽입니다.
+    #    아래 4개가 원본과 글자 단위로 같은지는 [8] 이 매번 대조합니다.
+    ("web/pages/macro_page.py", "layers"):
+        "위험 점수 구간(0~10층) → 라벨·권장 비중 문구(고정 문자열 튜플). 값이 대입되는 코드가 없음.",
+    ("web/pages/macro_page.py", "FRIENDLY_NAMES"):
+        "지표 내부키 → 화면 표기명(고정 문자열). 사용자 데이터가 들어갈 자리가 없음.",
+    ("web/pages/macro_page.py", "STUDY_ONLY_INDICATORS"):
+        "점수에서 뺀 지표들의 '공부용' 설명 텍스트(고정 문자열). 어떤 값도 계산·저장하지 않음.",
+    ("web/pages/macro_page.py", "DROPPED_AS_DUPLICATE"):
+        "개념 중복으로 완전 제외한 지표 2개의 사유 문구(고정 문자열 튜플).",
+    ("web/pages/macro_page.py", "_CHART_LAYOUT"):
+        "plotly 차트 배경/글자색 설정(고정 문자열). 차트 데이터는 여기 담기지 않음 "
+        "(scorecard_page.py 의 같은 이름 상수와 동일한 사유).",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
@@ -1090,10 +1106,238 @@ def test_login_is_shared_between_scorecard_and_report():
         (auth.user_storage, auth.client_storage) = original
 
 
+# =============================================================================
+# [8] 🏢 매크로 방공망 (`web/pages/macro_page.py`) — 2026-08-17 (이전 6단계) 추가
+#
+#     이 화면은 로그인(사용자 자산)이 없는 **관리자 전용** 화면이라 [3]/[5]와 검사 항목이
+#     다릅니다. 여기서 지켜야 할 것은 두 가지입니다.
+#       ① 관리자가 아닌 접속에는 **본문이 한 글자도 그려지지 않는다** (§0-3-6 / §0-3-9)
+#       ② 이식하면서 **숫자가 달라지지 않았다** — 오너가 "개발 중단"을 지시한 화면이라
+#          기능 추가·개선이 아니라 "있는 그대로 옮기기"가 목표였기 때문입니다.
+#          그래서 원본 `views/macro_view.py` 와 리터럴·계산·차트 데이터를 **직접 대조**합니다.
+# =============================================================================
+def _module_literal(path, name):
+    """파일을 import 하지 않고(=streamlit 의존 회피) 모듈 최상위 리터럴 값만 꺼냅니다.
+
+    (`tests/test_macro_scoring.py::_literal_from_source` 와 같은 기법 — `views/macro_view.py`
+     는 streamlit 을 import 하므로 오프라인 환경에서 import 자체가 불가능합니다.)
+    """
+    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
+    for node in tree.body:
+        if isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name) and target.id == name:
+                    return ast.literal_eval(node.value)
+    return None
+
+
+def _chart_block(path):
+    """트렌드 차트의 집계 코드 블록(`df_temp = ...` ~ `chart_data.columns = ...`)만 잘라냅니다."""
+    src = Path(path).read_text(encoding="utf-8")
+    start = src.index('df_temp = history_df.copy()')
+    tail = 'chart_data.columns = ["위험 지수"]'
+    end = src.index(tail) + len(tail)
+    lines = src[start:end].split("\n")
+    body = [line for line in lines[1:] if line.strip()]
+    indent = min(len(line) - len(line.lstrip()) for line in body)
+    return "\n".join([lines[0]] + [line[indent:] if len(line) >= indent else line for line in lines[1:]])
+
+
+def test_macro_page_wiring():
+    print("\n[8] web/pages/macro_page.py 배선 (🏢 매크로 방공망 · 관리자 전용)")
+    _install_nicegui_stub()
+
+    page_path = REPO_ROOT / "web" / "pages" / "macro_page.py"
+    view_path = REPO_ROOT / "views" / "macro_view.py"
+    src = page_path.read_text(encoding="utf-8")
+    code = python_code_only(src)
+
+    # ── (a) 관리자 게이트 ────────────────────────────────────────────────
+    check("@ui.page('/admin/macro')" in code, "경로가 /admin/macro (관리자 전용 네임스페이스)")
+    check("if not is_admin():" in code and "render_admin_login()" in code,
+          "페이지 첫 부분에서 is_admin() 확인 후 게이트 폼만 그림")
+    check("def render_admin_login" not in code,
+          "게이트 폼을 이 파일에 복붙하지 않고 admin_page 의 함수를 재사용 (§0-3-10)")
+    check(("/admin/macro", "🏢 매크로 방공망 (관리자 전용)", True)
+          in __import__("web.layout", fromlist=["_MENU"])._MENU,
+          "드로어 메뉴에 등록되어 있고 admin_only=True (비관리자에게는 안 보임)")
+    check("macro_page" in (REPO_ROOT / "main.py").read_text(encoding="utf-8"),
+          "main.py 가 macro_page 를 import (@ui.page 등록)")
+
+    # ── (b) 상수가 원본과 글자 단위로 같은가 ──────────────────────────────
+    for name in ("layers", "FRIENDLY_NAMES", "STUDY_ONLY_INDICATORS", "DROPPED_AS_DUPLICATE"):
+        check(_module_literal(page_path, name) == _module_literal(view_path, name),
+              f"`{name}` 이 views/macro_view.py 와 완전히 동일 (문구를 손대지 않음)")
+
+    # ── (c) 옛 프록시 계산식이 되살아나지 않았는가 (test_macro_scoring [15] 과 같은 기준) ──
+    for var in ("skew_base", "synth_base"):
+        pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b", re.MULTILINE)
+        check(not pattern.search(code), f"macro_page.py 에 '{var}' 계산/사용이 없음")
+    check('"VKOSPI_Skew": None,' in code and '"Synthetic_Futures": None,' in code,
+          "미리보기 분기는 두 지표를 산출 불가(None)로 두고 프록시로 채우지 않음 (§0-1)")
+    check("0.5 + 0.3 * (usd_close - 1200) / 300" in code and "0.5 - 0.4 * kospi_change" in code,
+          "살아있는 프록시 2개의 산식은 원본과 글자 그대로 같음")
+    check("2500" not in code and "1350" not in code.replace("#", ""),
+          "가짜 기본 시세(2500 / 1350)를 다시 넣지 않음 (§0-1)")
+
+    # ── (d) utils/db.py 가 streamlit 에서 풀려났는가 (계획서 §4-2 6번 행) ──
+    #
+    #  ⚠️ 2026-08-17 예외 1건: `_notify()` 안에 **지연 import + try/except** 로 감싼
+    #     streamlit 폴백이 있습니다. 콜백 없이 불렸을 때(NiceGUI 는 콜백을 항상 넘기므로
+    #     해당 없음) 아직 살아있는 `views/macro_view.py`(듀얼런, 콜백을 안 넘김)가 실패
+    #     배너를 잃어버리는 §0-1 회귀를 막기 위한 하위호환 장치입니다. 그래서 여기서는
+    #     "streamlit 이 아예 없다"가 아니라 "① 모듈 최상위(하드 의존)에는 없고,
+    #     ② `_notify()` 함수 밖 어디에도 없다"를 확인합니다 — 폴백 범위가 그 함수
+    #     하나로 봉인돼 있는지가 핵심입니다.
+    db_src = (REPO_ROOT / "utils" / "db.py").read_text(encoding="utf-8")
+    db_tree = ast.parse(db_src)
+    check(not any(
+              isinstance(n, ast.Import) and any(a.name == "streamlit" for a in n.names)
+              for n in module_level_statements(db_tree)
+          ),
+          "utils/db.py 최상위(모듈 스코프)에 streamlit import 가 없음 (하드 의존 아님)")
+
+    notify_node = next(n for n in ast.walk(db_tree)
+                        if isinstance(n, ast.FunctionDef) and n.name == "_notify")
+    notify_src = ast.get_source_segment(db_src, notify_node) or ""
+    outside_notify = db_src.replace(notify_src, "")
+    outside_notify = python_code_only(outside_notify)
+    check("import streamlit" not in outside_notify,
+          "streamlit import 가 _notify() 함수 밖 어디에도 없음 (폴백 범위 봉인)")
+    check("st.session_state" not in outside_notify and "st.warning(" not in outside_notify
+          and "st.write(" not in outside_notify and "st.error(" not in outside_notify,
+          "utils/db.py 의 _notify() 밖에는 st.* 호출이 하나도 없음 (7곳 전부 콜백/로거로 전환)")
+    notify_code_only = python_code_only(notify_src)
+    check("get_script_run_ctx() is not None" in notify_code_only,
+          "_notify() 의 streamlit 폴백은 실제 Streamlit 스크립트 실행 중일 때만 동작 "
+          "(NiceGUI 요청에는 해당 없음)")
+    check(notify_code_only.count("except") >= 1 and "try:" in notify_code_only,
+          "_notify() 의 streamlit 폴백은 try/except 로 감싸져 미설치·비실행 환경에서도 안전")
+    ai_code = python_code_only((REPO_ROOT / "utils" / "macro_ai.py").read_text(encoding="utf-8"))
+    check("streamlit" not in ai_code, "utils/macro_ai.py 에 streamlit 의존이 없음")
+    check("on_error=on_error" in code and "is_admin=is_admin_call" in code,
+          "macro_page 가 저장 실패를 화면까지 전달할 콜백을 넘김 (§0-1 — 로그만 남기지 않음)")
+
+    # ── (e) XSS / 예외 노출 (§0-3-9 · §0-3-4) ────────────────────────────
+    check("esc(ai_comments_data.get(" in code,
+          "AI 코멘트(외부 생성 텍스트)를 HTML 로 넣기 전에 esc() 를 거침 (§0-3-9)")
+    # 예외 원문(`{e}` / `{exc}`)이 f-string 에 들어가는 줄은 **전부 print() 여야** 합니다.
+    # (= 서버 로그로만 나감. 배너·notify 문구에 섞이면 §0-3-4 위반)
+    leaky = [line.strip() for line in code.splitlines()
+             if ("{e}" in line or "{exc}" in line) and "print(" not in line]
+    check(not leaky, "예외 원문이 서버 로그(print)에만 쓰이고 화면 문구에는 없음 (§0-3-4)",
+          f"발견: {leaky}")
+
+    # ── (f) 차트 — 같은 계열·같은 값인가 (계획서 §9 "6. macro" 완료기준 ③) ──
+    check('px.line(chart_data.reset_index(), x="Date", y="위험 지수")' in code,
+          "차트가 원본과 같은 호출 (계열 1개 = '위험 지수', x = Date)")
+    check("h-80" not in code and "height: 300px" in code,
+          "차트 높이를 명시 (안 주면 0px 로 그려져 통째로 사라짐 — 계획서 §7)")
+
+    import pandas as pd
+    import web.pages.macro_page as macro
+
+    view_block, page_block = _chart_block(view_path), _chart_block(page_path)
+    history_df = macro._load_history_df()
+    if history_df.empty:
+        check(False, "차트 대조용 market_history.csv 로드", "← 파일이 없거나 비어 있습니다")
+    else:
+        for option in ("일별 (Daily)", "주별 (Weekly)", "월별 (Monthly)"):
+            env_view = {"history_df": history_df, "pd": pd, "period_option": option}
+            env_page = {"history_df": history_df, "pd": pd, "period_option": option}
+            exec(view_block, env_view)          # noqa: S102 — 원본 소스를 그대로 돌려 대조하는 것이 목적
+            exec(page_block, env_page)          # noqa: S102
+            check(env_view["chart_data"].equals(env_page["chart_data"]),
+                  f"트렌드 차트 데이터가 원본과 완전히 동일 ({option})")
+
+
+def test_macro_render_smoke():
+    print("\n[8-b] 매크로 화면 렌더 스모크 (실제 market_history.csv)")
+    _install_nicegui_stub()
+    from nicegui import app
+    import web.pages.macro_page as macro
+
+    # (1) 비관리자는 본문이 **한 글자도** 그려지지 않아야 합니다.
+    seen = []
+    original = (macro._render_dashboard, macro.render_admin_login)
+    macro._render_dashboard = lambda: seen.append("body")
+    macro.render_admin_login = lambda: seen.append("login")
+    try:
+        app.storage.user.clear()
+        macro.macro_page()
+        check(seen == ["login"], "🔒 비관리자 접속 → 게이트 폼만, 본문 렌더 0회")
+        seen.clear()
+        app.storage.user["admin"] = True
+        macro.macro_page()
+        check(seen == ["body"], "🔓 관리자 접속 → 본문 렌더")
+    finally:
+        (macro._render_dashboard, macro.render_admin_login) = original
+        app.storage.user.clear()
+
+    # (2) 본문 전체를 실제로 실행 — f-string·이스케이프·분기가 전부 진짜로 돕니다.
+    app.storage.user["admin"] = True
+    try:
+        macro._render_dashboard()
+        check(True, "본문 전체 렌더 (탭 7개·표·차트·다운로드 버튼 포함) 예외 0건")
+    except Exception as exc:                       # noqa: BLE001
+        check(False, "본문 전체 렌더", f"({type(exc).__name__}: {exc})")
+
+    # (3) §0-1 회귀 — 이력 파일이 없으면 숫자를 한 개도 그리지 않아야 합니다.
+    drawn = []
+    saved = (macro._html, macro.error_banner, macro.warning_banner,
+             macro.info_banner, macro.success_banner, macro.banner, macro.HISTORY_FILE)
+    macro._html = lambda markup: drawn.append(markup)
+    macro.error_banner = lambda text: drawn.append(("error", text))
+    macro.warning_banner = lambda text: drawn.append(text)
+    macro.info_banner = lambda text: drawn.append(text)
+    macro.success_banner = lambda text: drawn.append(text)
+    macro.banner = lambda kind, body: drawn.append(body)
+    macro.HISTORY_FILE = str(REPO_ROOT / "__no_such_market_history__.csv")
+    try:
+        macro._render_dashboard()
+        blob = "\n".join(str(d) for d in drawn)
+        check(any(isinstance(d, tuple) and d[0] == "error" for d in drawn),
+              "🚨 이력 파일이 없으면 빨간 실패 배너가 뜸 (§0-1)")
+        check("RISK INDEX" not in blob and "apartment-building" not in blob,
+              "그 상태에서 위험 지수·층 카드를 그리지 않음 (가짜 수치 렌더 금지)")
+        check("Traceback" not in blob, "화면에 트레이스백이 없음 (§0-3-4)")
+    finally:
+        (macro._html, macro.error_banner, macro.warning_banner,
+         macro.info_banner, macro.success_banner, macro.banner, macro.HISTORY_FILE) = saved
+        app.storage.user.clear()
+
+    # (4) 🔐 §0-3-9 — AI 코멘트(외부 생성 텍스트)가 HTML 로 새지 않는지 실제 값으로 확인
+    import json
+    import tempfile
+    app.storage.user["admin"] = True
+    tmp_path = Path(tempfile.mkdtemp()) / "macro_commentary.json"
+    tmp_path.write_text(json.dumps({
+        "comments": {"FX_Swap_Point": "<img src=x onerror=alert(1)>달러 유동성 주의"},
+        "comment_dates": {"FX_Swap_Point": "2026-01-01"},
+    }, ensure_ascii=False), encoding="utf-8")
+    captured = []
+    saved = (macro._html, macro.data_path, macro.warning_banner)
+    macro._html = lambda markup: captured.append(markup)
+    macro.data_path = lambda name: str(tmp_path)
+    macro.warning_banner = lambda text: captured.append(text)
+    try:
+        result = macro.fetch_verified_market_data()
+        macro._render_ai_commentary(result[4], result[3])
+        blob = "\n".join(captured)
+        check("<img src=x onerror" not in blob, "🔐 AI 코멘트의 <img onerror=...> 가 그대로 나가지 않음")
+        check("&lt;img src=x onerror" in blob, "   → 이스케이프된 문자열로 표시됨 (글자 그대로 보임)")
+        check("달러 유동성 주의" in blob, "   → 정상 문장은 그대로 보존됨")
+        check("2026-01-01 생성 코멘트" in blob, "오늘 것이 아닌 코멘트는 생성일자를 함께 표기 (§0-1)")
+    finally:
+        (macro._html, macro.data_path, macro.warning_banner) = saved
+        app.storage.user.clear()
+
+
 def test_pages_import_cleanly():
     print("\n[3-b] 모듈 import 검증 (문법·배선 오류 조기 발견)")
     _install_nicegui_stub()
     for module_name in ("web.auth", "web.auth_ui", "web.layout",
+                        "web.pages.admin_page", "web.pages.macro_page",
                         "web.pages.scorecard_page", "web.pages.report_page"):
         try:
             __import__(module_name)
@@ -1120,6 +1364,8 @@ def main():
     test_report_render_smoke()
     test_report_period_navigation()
     test_login_is_shared_between_scorecard_and_report()
+    test_macro_page_wiring()
+    test_macro_render_smoke()
     test_pages_import_cleanly()
 
     print("\n" + "=" * 74)
