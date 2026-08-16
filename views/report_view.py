@@ -28,7 +28,14 @@ v1 범위 (REPORT_WORK_ORDER.md §6)
    - 🧾 **종목별 상세** 섹션 — 2026-08-13 추가(오너 결정, `portfolio_holding_snapshots` 신설).
      기간 안 **마지막 기록일 하루**의 종목별 상태를 평가금액 큰 순으로 한 표(+ 합계 한 줄)에
      담고, 종목 하나를 고르면 그 종목의 기간 내 일별 추이를 펼쳐 봅니다. 이 표의 합계는 같은 날
-     합계 스냅샷과 **매번 대조**해서 결과를 그대로 보여 줍니다(어긋나면 숨기지 않고 경고).
+     합계 스냅샷과 **매번 대조**합니다(어긋나면 숨기지 않고 경고 — 정상일 땐 조용히).
+   - 📊 **종목별 비중(%) + 기간 시작 대비 비중 변화** — 2026-08-13 추가(#114, 오너가 수기로
+     관리하던 표를 옮긴 것). **새 테이블 없이** 이미 저장된 종목별 `market_value` 를 같은 날
+     합계로 나눠 조회 시점에 계산합니다(`utils/report_db.build_weight_comparison()`).
+   - 🔤 화면 문구는 2026-08-13(#114)에 대폭 줄였습니다 — 기준은 "이 프로젝트를 처음 보는
+     방문자". 다만 **§0-1 고지(환율·수수료·단순비교·ETF 프록시·가격 모름·대조 불일치)는
+     표현만 압축했고 하나도 지우지 않았습니다.** 이 파일에 문구를 더할 때도 같은 기준으로:
+     "이 줄이 없으면 방문자가 숫자를 오해하는가?" 가 아니면 넣지 마세요.
 
 지켜야 할 것
    - **환율 변환 없음** — 원화/달러를 절대 합치지 않고 시장별로 따로 계산·표시합니다.
@@ -74,6 +81,7 @@ from utils.report_db import (
     benchmark_closes_for_market,
     benchmark_period_return,
     build_holding_history,
+    build_weight_comparison,
     compare_holding_total,
     compute_period_report,
     fetch_user_holding_snapshots,
@@ -91,6 +99,12 @@ MARKET_TITLES = {
 
 SESSION_PERIOD_KEY = "report_period"
 SESSION_REF_DATE_KEY = "report_ref_date"
+
+# 🔴 기준일 달력 **위젯 자체의 키**와, 버튼이 "다음 렌더에서 이 날짜로 바꿔달라"고 남기는 표시.
+#    이 둘을 나눠 놓는 이유는 아래 `_consume_pending_ref_date()` 주석에 적어 뒀습니다
+#    (2026-08-13 #114 — 이전/최신/다음 기간 버튼이 눌러도 반응이 없던 버그의 핵심).
+REF_DATE_WIDGET_KEY = "report_ref_date_input"
+SESSION_PENDING_REF_DATE_KEY = "report_pending_ref_date"
 
 
 # =============================================================================
@@ -159,40 +173,29 @@ def _render_price_stamp(market, row):
 
     ⚠️ 회색 캡션 한 줄로는 묻힌다는 지적이라 **굵은 본문 한 줄**로 올렸습니다(다만 st.info 같은
        색 상자는 이 화면에 이미 많아 쓰지 않았습니다).
+
+    ⚠️ 2026-08-13 (#114) — 문구를 **세 줄에서 한 줄로** 줄였습니다. 남긴 정보는 그대로입니다
+       (어느 거래일 / 몇 시 수집 / 한국시간). 지운 것은 "그 값은 위 시각에 수집된 가격으로
+       계산됐습니다" 같은 같은 말 반복과, "이후 쌓이는 스냅샷부터 시각이 표시됩니다" 같은
+       내부 진행상황 설명뿐입니다.
     """
     stamp = (row or {}).get(PRICE_STAMP_FIELD)
     session_day = row["snapshot_date"].isoformat() if row and row.get("snapshot_date") else "—"
 
     if stamp:
-        st.markdown(
-            f"🕐 **종가 기준 : {stamp} (한국시간)** "
-            f"　·　이 블록의 숫자는 **{session_day} 거래일** 스냅샷이고, 그 값은 위 시각에 "
-            "수집된 가격으로 계산됐습니다."
-        )
+        st.markdown(f"🕐 **{session_day} 종가 기준** 　·　 수집 {stamp} (한국시간)")
     else:
-        # 값이 없는 과거 행 — 빈칸으로 얼버무리지 않고, 왜 없는지까지 밝힙니다(§0-1).
+        # 값이 없는 과거 행 — 빈칸으로 얼버무리지 않고 "없다"고 밝힙니다(§0-1).
         #  ⚠️ 여기에 '오늘 몇 시'를 대신 넣지 마세요. 그 행이 저장될 때의 시각은 아무 데도
         #     기록돼 있지 않고, 지금 시각을 넣으면 그 자체가 지어낸 값입니다.
-        st.markdown(
-            f"🕐 **종가 기준 : 시각 정보 없음** "
-            f"　·　{session_day} 거래일 스냅샷입니다. **가격 수집 시각을 함께 저장하기 전에 "
-            "만들어진 행**이라 몇 시 몇 분 가격인지 기록이 없습니다(추정해서 채우지 않습니다). "
-            "이후 쌓이는 스냅샷부터 시각이 표시됩니다."
-        )
+        st.markdown(f"🕐 **{session_day} 종가 기준** 　·　 수집 시각 정보 없음")
 
     if market == MARKET_US:
-        st.caption(
-            "🇺🇸 미국장은 한국시간으로 **새벽에** 마감돼서, 수집 시각이 거래일 **다음 날 새벽~오전**"
-            "으로 찍힙니다 — 한국 주식 블록과 시각이 다른 것은 정상입니다."
-        )
+        st.caption("미국장은 한국시간 새벽에 마감돼 수집 시각이 거래일 다음 날로 찍힙니다.")
 
 
 def _render_not_ready(status):
-    st.warning(
-        "🚧 **사장님 보고서는 아직 준비중입니다.**\n\n"
-        f"사유: {status.reason}\n\n"
-        "이 화면이 준비되지 않아도 기존 밸류에이션 리포트(한국/미국)는 정상 동작합니다."
-    )
+    st.warning(f"🚧 **사장님 보고서는 아직 준비중입니다.** ({status.reason})")
     with st.expander("🔧 오너 설정 체크리스트 (관리자용)", expanded=False):
         st.markdown(
             """
@@ -216,10 +219,7 @@ def _render_login(client):
     화면이라, 여기서 가입 절차를 중복해서 두지 않았습니다.
     """
     st.markdown("#### 🔐 로그인")
-    st.caption(
-        "리포트는 '📊 내 성적표'와 같은 계정을 씁니다. 아직 계정이 없다면 내 성적표 화면에서 "
-        "먼저 가입해 주세요. 비밀번호는 Supabase Auth 가 관리합니다."
-    )
+    st.caption("'📊 내 성적표'와 같은 계정입니다. 계정이 없다면 그 화면에서 먼저 가입해 주세요.")
     with st.form("report_login_form"):
         email = st.text_input("이메일", key="report_login_email")
         password = st.text_input("비밀번호", type="password", key="report_login_pw")
@@ -242,11 +242,44 @@ def _render_login(client):
 # =============================================================================
 # 2. 기간 선택
 # =============================================================================
+def _consume_pending_ref_date():
+    """
+    '◀ 이전 기간 / 최신 기간 / 다음 기간 ▶' 버튼이 남겨 둔 새 기준일을, 달력 위젯이 만들어지기
+    **전에** 그 위젯의 진짜 키에 대입합니다. 반드시 `_render_period_controls()` 가 위젯을
+    하나도 만들기 전에 불러야 합니다.
+
+    ⚠️ 2026-08-13 (#114) — 오너 신고: "일간으로 했을 때 맨위에 있는 이전기간 / 최신기간 /
+       다음기간 저거 작동 안하고 있어". 코드를 따라가 보니 원인이 두 겹이었습니다.
+
+       ① `st.date_input(..., key="report_ref_date_input")` 처럼 **키를 준 위젯**은 한 번
+          만들어지고 나면 다음 재실행부터 `value=` 인자를 무시하고
+          `st.session_state["report_ref_date_input"]` 을 우선합니다. 그래서 버튼이 다른 키
+          (`report_ref_date`)를 아무리 바꿔도 화면의 달력은 옛 날짜 그대로였습니다.
+       ② 게다가 함수 **맨 끝**에 `st.session_state[SESSION_REF_DATE_KEY] = ref_date` 가 있어서,
+          버튼이 방금 넣어 둔 새 날짜를 그 옛 위젯 값으로 도로 덮어썼습니다. 두 겹이 겹쳐
+          "눌러도 아무 일도 안 일어나는" 증상이 됐습니다(예외도 안 나므로 조용히 씹힘).
+
+       고치는 방법은 "위젯 키에 **대입**하기"뿐인데, 위젯이 이미 만들어진 뒤(=버튼 처리 시점)
+       에는 대입이 금지돼 있습니다. 그래서 '내 성적표'가 같은 함정을 넘을 때 쓴 검증된 관례
+       (`views/scorecard_view.py` 의 `_reset_input_fields()` / `_consume_pending_reset()`,
+       TASK_HISTORY #85)를 그대로 따릅니다 — 버튼은 **pending 표시만** 남기고 `st.rerun()`,
+       실제 대입은 다음 렌더 맨 앞(여기)에서 합니다.
+    """
+    pending = st.session_state.pop(SESSION_PENDING_REF_DATE_KEY, None)
+    if pending is None:
+        return
+    # 대입이라야 브라우저(프런트엔드)까지 새 값이 전달됩니다 — pop 만으로는 전달되지 않습니다.
+    st.session_state[REF_DATE_WIDGET_KEY] = pending
+    st.session_state[SESSION_REF_DATE_KEY] = pending
+
+
 def _render_period_controls():
     """
     기간 종류 + 기준일 선택. 최신(오늘 기준)이 기본이고, 과거 기간도 자유롭게 볼 수 있습니다.
     반환: (period, ref_date)
     """
+    _consume_pending_ref_date()   # ⚠️ 반드시 위젯을 만들기 전(맨 앞)에
+
     labels = {code: label for code, label in PERIOD_OPTIONS}
     codes = [code for code, _ in PERIOD_OPTIONS]
 
@@ -261,23 +294,26 @@ def _render_period_controls():
         )
     st.session_state[SESSION_PERIOD_KEY] = period
 
-    stored_ref = st.session_state.get(SESSION_REF_DATE_KEY) or date.today()
+    # 첫 렌더에서만 초기값을 심고, 그 뒤로는 위젯 키가 유일한 출처입니다.
+    #  ⚠️ `value=` 를 함께 주면 안 됩니다 — 세션 상태로 값을 정한 위젯에 기본값까지 주면
+    #     Streamlit 이 화면에 노란 경고 상자를 띄웁니다(그리고 둘 중 뭐가 이기는지도 헷갈립니다).
+    if REF_DATE_WIDGET_KEY not in st.session_state:
+        st.session_state[REF_DATE_WIDGET_KEY] = \
+            st.session_state.get(SESSION_REF_DATE_KEY) or date.today()
     with col_date:
-        ref_date = st.date_input(
-            "기준일 (이 날짜가 속한 기간을 봅니다)", value=stored_ref, key="report_ref_date_input",
-        )
+        ref_date = st.date_input("기준일", key=REF_DATE_WIDGET_KEY)
     if isinstance(ref_date, (list, tuple)):  # 범위 선택 위젯으로 잘못 동작할 때의 방어
         ref_date = ref_date[0]
 
     col_prev, col_now, col_next = st.columns(3)
     if col_prev.button("◀ 이전 기간", key="report_prev_period", use_container_width=True):
-        st.session_state[SESSION_REF_DATE_KEY] = shift_period(period, ref_date, -1)
+        st.session_state[SESSION_PENDING_REF_DATE_KEY] = shift_period(period, ref_date, -1)
         st.rerun()
     if col_now.button("최신 기간", key="report_latest_period", use_container_width=True):
-        st.session_state[SESSION_REF_DATE_KEY] = date.today()
+        st.session_state[SESSION_PENDING_REF_DATE_KEY] = date.today()
         st.rerun()
     if col_next.button("다음 기간 ▶", key="report_next_period", use_container_width=True):
-        st.session_state[SESSION_REF_DATE_KEY] = shift_period(period, ref_date, 1)
+        st.session_state[SESSION_PENDING_REF_DATE_KEY] = shift_period(period, ref_date, 1)
         st.rerun()
 
     st.session_state[SESSION_REF_DATE_KEY] = ref_date
@@ -307,12 +343,13 @@ def _render_numbers(report, incomplete=False):
     baseline, latest = report["baseline"], report["latest"]
     currency = report.get("currency") or ("KRW" if report.get("market") == MARKET_KR else "USD")
 
+    # 무엇과 무엇을 비교했는지는 §0-1 상 절대 뺄 수 없습니다 — 대신 괄호 설명을 줄였습니다.
     st.caption(
         f"비교 구간: **{baseline['snapshot_date'].isoformat()}** → "
         f"**{latest['snapshot_date'].isoformat()}** "
-        + ("(기간 시작 직전 스냅샷을 기준점으로 사용)"
+        + ("(기간 시작 직전 기록이 기준점)"
            if report["baseline_kind"] == "prior_close"
-           else "(기간 시작 이전 스냅샷이 없어 기간 안 첫 스냅샷을 기준점으로 사용)")
+           else "(기간 시작 전 기록이 없어 기간 안 첫 기록이 기준점)")
     )
 
     col1, col2, col3 = st.columns(3)
@@ -327,18 +364,20 @@ def _render_numbers(report, incomplete=False):
                 else f"{report['profit_pct_start']:+.2f}%")
     col5.metric("기간 종료 누적수익률", "—" if report.get("profit_pct_end") is None
                 else f"{report['profit_pct_end']:+.2f}%")
-    st.caption(
-        "누적수익률 = (평가금액 − 매입원가) ÷ 매입원가. 위 '평가금액 변화'는 이 기간 동안의 "
-        "변화량이고, 누적수익률은 매수 시점부터의 누적입니다 — 둘은 서로 다른 숫자입니다."
-    )
+    # 공식(= (평가금액−매입원가)÷매입원가)은 뺐지만, **누적과 기간 변화가 다른 숫자**라는
+    # 사실은 남깁니다 — 바로 위에 두 값이 나란히 있어서 헷갈리면 숫자를 오해하게 됩니다.
+    st.caption("누적수익률은 매수 시점부터의 누적입니다(이 기간의 변화가 아닙니다).")
 
     if incomplete:
         st.warning("⚠️ 위 숫자는 기간 전체가 아니라 **실제로 쌓인 구간만**의 값입니다.")
 
-    if report.get("composition_changed"):
-        st.warning("🔁 " + " ".join(report.get("composition_notes") or []))
+    # 구성 변경·가격 결측 안내를 색 상자 두 개로 나눠 띄우면 화면이 그만큼 길어져서,
+    # 내용은 그대로 두고 **경고 상자 하나로 합쳤습니다**(둘 다 §0-1 고지라 삭제 불가).
+    alerts = list(report.get("composition_notes") or []) if report.get("composition_changed") else []
     if report.get("coverage_note"):
-        st.info("ℹ️ " + report["coverage_note"])
+        alerts.append(report["coverage_note"])
+    if alerts:
+        st.warning("⚠️ " + " ".join(alerts))
 
 
 def _render_benchmarks(report, market):
@@ -346,30 +385,33 @@ def _render_benchmarks(report, market):
     st.markdown("##### 📊 벤치마크 비교")
     benchmarks = benchmark_closes_for_market(market)
     if not benchmarks:
-        st.info(
-            "ℹ️ 이 시장의 벤치마크 데이터가 아직 없습니다 — 값을 지어내지 않고 비교를 생략합니다."
-            + (" (미국 벤치마크는 `Daily Report Snapshots` 워크플로우가 처음 돌면 쌓입니다.)"
-               if market == MARKET_US else "")
-        )
+        # 색 상자(st.info) → 캡션으로. "데이터가 없다"는 사실만 남기고 배치·워크플로우 이름 같은
+        # 개발 쪽 이야기는 뺐습니다(방문자가 할 수 있는 일이 아무것도 없는 정보).
+        st.caption("이 시장의 벤치마크 데이터가 아직 없어 비교를 생략합니다.")
         return
 
     baseline_date = report["baseline"]["snapshot_date"]
     end_date = report["latest"]["snapshot_date"]
     mine = report.get("value_change_pct")
 
+    has_proxy = False
     for benchmark in benchmarks:
         outcome = benchmark_period_return(benchmark["closes"], baseline_date, end_date)
         if not outcome["available"]:
             st.markdown(f"- **{benchmark['label']}**: 비교 불가 — {outcome['reason']}")
             continue
+        has_proxy = has_proxy or bool(benchmark.get("is_proxy"))
         line = (f"- **{benchmark['label']}** {_colored_pct(outcome['change_pct'])} "
                 f"( {outcome['start_value']:,.2f} → {outcome['end_value']:,.2f} )")
         if mine is not None:
             gap = mine - outcome["change_pct"]
             line += f" · 내 포트폴리오 {_colored_pct(mine)} → 차이 {gap:+.2f}%p"
         st.markdown(line)
-        if benchmark.get("is_proxy"):
-            st.caption(f"　↳ {benchmark['note']}")
+    if has_proxy:
+        # ⚠️ 이 고지는 §0-1 상 삭제 불가입니다(지수 자체가 아니라 ETF 종가라는 사실). 다만
+        #    벤치마크마다 한 줄씩 반복하지 않고 **맨 아래 한 줄**로 모았습니다 — 종목 라벨에
+        #    이미 "(SPY ETF 종가 기준)"이 들어 있어 두 번 말하던 상태였습니다.
+        st.caption("지수 포인트가 아니라 추종 ETF 종가 기준입니다(기간 비교용 근사치).")
 
 
 def _render_snapshot_table(rows_in_window, currency):
@@ -393,11 +435,8 @@ def _render_snapshot_table(rows_in_window, currency):
                 f"| {benchmark} |"
             )
         st.markdown("\n".join(lines))
-        st.caption(
-            "'담긴 종목'은 그날 현재가를 알 수 있어 합계에 들어간 종목 수 / 전체 보유 종목 수입니다. "
-            "'종가 수집 시각'은 그날 배치가 그 시장 가격 파일을 읽은 시각(한국시간)이며, "
-            "이 값을 저장하기 전에 만들어진 행은 '기록 없음'입니다(나중에 채워 넣지 않습니다)."
-        )
+        # 이 표 자체가 접힌 원본 보기라 설명은 컬럼 뜻 한 줄이면 충분합니다.
+        st.caption("'담긴 종목' = 그날 현재가를 알아 합계에 들어간 종목 수 / 전체 보유 종목 수.")
 
 
 def _md_cell(text):
@@ -423,6 +462,63 @@ def _md_qty(value):
     return f"{value:,.6g}"
 
 
+def _md_weight(value):
+    """
+    비중(%) 표기. **값이 없으면 0% 가 아니라 "모름"** 입니다 — 그날 가격을 몰라 평가금액
+    자체를 모르는 종목이고, 0% 로 적으면 "가진 게 없다"는 다른 뜻이 됩니다(§0-1).
+    """
+    if value is None:
+        return "모름"
+    return f"{value:.2f}%"
+
+
+def _colored_pp(value):
+    """
+    비중 **변화량**(퍼센트포인트) 표기. 색 관례는 수익률과 같습니다(늘면 빨강/줄면 파랑).
+    ⚠️ 단위는 % 가 아니라 %p 입니다 — 50%→75% 는 "+25%p"(비중이 25포인트 늘어남)이지
+       "+25%"(1.5배)가 아닙니다. 오너 원본 표는 '%'로 적혀 있었지만 여기서는 정확히 씁니다.
+    """
+    if value is None:
+        return "—"
+    text = f"{value:+.2f}%p"
+    if value > 0:
+        return f":red[{text}]"
+    if value < 0:
+        return f":blue[{text}]"
+    return text
+
+
+def _render_weight_changes(history, base_date):
+    """
+    📊 **비중 변화** — 2026-08-13(#114) 신설. 오너가 수기로 관리하던 표
+    ("종목 | 지난달 비중 | 이번달 비중 | 차이")를 그대로 옮긴 것입니다.
+
+    ⚠️ 비교 시작점은 "지난 기간"이 아니라 **이 기간 안의 첫 기록일**입니다. 종목별 스냅샷은
+       보고 있는 기간만 조회하므로 기간 이전의 종목별 기록은 애초에 손에 없습니다 —
+       그래서 두 날짜를 표 머리글에 그대로 박아 둡니다(무엇과 무엇을 비교했는지 숨기지 않기).
+    ⚠️ 기록이 하루뿐이면 표 자체를 그리지 않습니다(비교할 게 없는데 0%p 를 늘어놓지 않기).
+    """
+    weights = build_weight_comparison(history)
+    if not weights["comparable"] or not weights["rows"]:
+        return
+
+    first_label = weights["first_date"].isoformat()
+    base_label = base_date.isoformat()
+    st.caption(f"📊 **비중 변화** — {first_label} → {base_label}")
+
+    lines = [f"| 종목 | {first_label} | {base_label} | 변화 |", "|---|---:|---:|---:|"]
+    for row in weights["rows"]:
+        lines.append(
+            f"| {_holding_label(row)} | {_md_weight(row['first_pct'])} "
+            f"| {_md_weight(row['base_pct'])} | {_colored_pp(row['change_pp'])} |"
+        )
+    st.markdown("\n".join(lines))
+
+    if weights["unpriced_first"] or weights["unpriced_base"]:
+        # 정상일 땐 조용히, 실제로 '모름'이 있을 때만.
+        st.caption("가격을 몰랐던 종목은 비중을 '모름'으로 두고 분모에서 뺐습니다(0%로 치지 않습니다).")
+
+
 def _render_holding_history(market, holding_rows, snapshots_in_window,
                             window_start, window_end, currency, error=None):
     """
@@ -439,25 +535,28 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
         (종목 수만큼 expander 를 늘어놓으면 그 자체가 '한 장'을 깨뜨려서 선택 방식으로 했습니다.)
       · **날짜를 섞지 않습니다** — 표의 모든 행은 같은 거래일 값입니다. 종목마다 각자의 마지막
         기록일을 긁어 모으면 합계가 그 어떤 날의 합계와도 같지 않게 됩니다.
-      · **들쑥날쑥 감시** — 이 표의 합계와 같은 날 합계 스냅샷을 매번 대조해서 결과를 그대로
-        보여줍니다(일치하면 조용한 캡션, 어긋나면 경고).
+      · **들쑥날쑥 감시** — 이 표의 합계와 같은 날 합계 스냅샷을 매번 대조합니다. 2026-08-13
+        (#114)부터 **어긋났을 때만** 경고를 띄우고, 정상일 때는 아무 말도 하지 않습니다
+        (오너 지적: "데이터 대조 통과" 같은 줄은 개발자용 자체 검증 문구라 방문자에게는 소음).
       · 색·금액 표기는 '내 성적표' 표와 같은 관례(오르면 빨강/내리면 파랑, format_amount).
       · 가격을 몰랐던 날은 빈칸이 아니라 **"가격 모름"** — 이전 가격을 대신 넣지 않습니다(§0-1).
+      · **비중(%)** 칸은 2026-08-13(#114)에 추가했습니다 — 오너가 수기로 관리하던 표
+        ("종목 | 현재금액 | 현재 금액 합 | 비율")를 그대로 옮긴 것입니다.
     """
-    st.markdown("##### 🧾 종목별 상세 — 이 기간 숫자가 **어느 종목**에서 나왔나")
+    st.markdown("##### 🧾 종목별 상세")
 
     if error is not None:
         if is_missing_holding_table_error(error):
             # 아직 표가 없는 상태(오너가 SQL 실행 전). 리포트의 나머지는 정상이므로 이 섹션만
-            # 안내로 대체합니다 — 실패를 숨기는 게 아니라 "무엇을 하면 되는지"까지 말합니다.
-            st.info(
-                "ℹ️ **종목별 상세는 아직 준비되지 않았습니다.** 이 기능을 위한 표"
-                "(`portfolio_holding_snapshots`)가 데이터베이스에 아직 없습니다.\n\n"
-                "오너 할 일 — Supabase → SQL Editor 에서 `sql/report_schema.sql` 전체를 다시 "
-                "실행하세요(§8 블록이 이 표를 만듭니다. 여러 번 실행해도 안전하고 기존 기록은 "
-                "그대로입니다). 실행한 **다음 날 배치부터** 종목별 기록이 쌓이기 시작하며, "
-                "그 이전 날짜는 소급해서 만들지 않습니다."
-            )
+            # 안내로 대체합니다. 설치 절차 전문은 관리자용이라 접어 두고, 방문자에게는 "아직
+            # 준비되지 않았다"는 사실 한 줄만 보입니다.
+            st.info("ℹ️ 종목별 상세는 아직 준비되지 않았습니다.")
+            with st.expander("🔧 관리자: 이 표를 켜는 방법", expanded=False):
+                st.markdown(
+                    "Supabase → SQL Editor 에서 `sql/report_schema.sql` 전체를 다시 실행하세요"
+                    "(여러 번 실행해도 안전하고 기존 기록은 그대로입니다). 실행한 **다음 날 "
+                    "배치부터** 종목별 기록이 쌓이며, 그 이전 날짜는 소급해서 만들지 않습니다."
+                )
         else:
             st.error(f"🚫 종목별 기록을 불러오지 못했습니다: {error}")
         return
@@ -469,10 +568,9 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
         return
 
     if not history["rows"]:
-        st.info(
-            "ℹ️ 이 기간에는 저장된 **종목별** 기록이 없습니다. 종목별 저장은 2026-08-13 부터 "
-            "시작됐고, 그 이전 날짜는 합계만 남아 있습니다(과거 종목별 값은 어디에도 기록돼 "
-            "있지 않아 만들어내지 않습니다)."
+        st.caption(
+            "이 기간에는 종목별 기록이 없습니다(종목별 저장은 2026-08-13부터 — 그 이전 날짜는 "
+            "합계만 남아 있고 소급해서 만들지 않습니다)."
         )
         return
 
@@ -481,13 +579,12 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
     dates = history["dates"]
 
     st.caption(
-        f"기준일 **{base_date.isoformat()}** — 이 기간에 종목별 기록이 있는 마지막 거래일입니다. "
-        f"아래 표의 모든 숫자는 **이 하루의 값**이고 종목마다 다른 날짜를 섞지 않았습니다. "
+        f"**{base_date.isoformat()}** 하루 기준 "
         f"(이 기간 기록 {len(dates)}일: {dates[0].isoformat()} ~ {dates[-1].isoformat()})"
     )
 
-    lines = ["| 종목 | 수량 | 평균매입가 | 현재가 | 평가금액 | 평가손익 | 수익률 | 기간 주가등락 | 기록 |",
-             "|---|---:|---:|---:|---:|---:|---:|---:|---|"]
+    lines = ["| 종목 | 비중 | 수량 | 평균매입가 | 현재가 | 평가금액 | 평가손익 | 수익률 | 주가등락 |",
+             "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for row in history["rows"]:
         if row["priced"]:
             price_cell = _md_amount(row["current_price"], currency)
@@ -498,65 +595,60 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
             # 빈칸으로 얼버무리거나 이전 가격을 대신 넣지 않습니다(§0-1).
             price_cell = "**가격 모름**"
             value_cell = profit_cell = pct_cell = "—"
-        record = f"{row['days_recorded']}일"
-        if row["unpriced_days"]:
-            record += f" (가격 모름 {row['unpriced_days']}일)"
         lines.append(
-            f"| {_holding_label(row)} | {_md_qty(row['quantity'])} "
+            f"| {_holding_label(row)} | {_md_weight(row.get('weight_pct'))} "
+            f"| {_md_qty(row['quantity'])} "
             f"| {_md_amount(row['avg_purchase_price'], currency)} | {price_cell} "
             f"| {value_cell} | {profit_cell} | {pct_cell} "
-            f"| {_colored_pct(row['price_change_pct'])} | {record} |"
+            f"| {_colored_pct(row['price_change_pct'])} |"
         )
-    # 합계 줄 — 칸 순서: 종목 / 수량 / 평균매입가(=매입원가 합) / 현재가 / 평가금액 /
-    #            평가손익 / 수익률 / 기간 주가등락 / 기록   (헤더와 9칸으로 정확히 맞춤)
+    # 합계 줄 — 칸 순서: 종목 / 비중 / 수량 / 평균매입가(=매입원가 합) / 현재가 / 평가금액 /
+    #            평가손익 / 수익률 / 주가등락   (헤더와 9칸으로 정확히 맞춤)
+    #  '평균매입가' 칸에는 단가가 아니라 **원가 합계**가 들어가므로, 예전에 캡션으로 길게
+    #  설명하던 것을 칸 안에 '원가합'이라고 써 넣어 설명 자체가 필요 없게 만들었습니다.
     lines.append(
         f"| **합계 {totals['holdings_count']}종목** "
+        # 그날 가격을 아는 종목이 하나도 없으면 분모 자체가 없습니다 — 그때 '100%'라고 쓰면
+        # 아무것도 계산하지 않고 다 계산한 척하는 게 됩니다(§0-1).
+        f"| **{'100.00%' if totals['market_value'] is not None else '—'}** "
         f"| "
-        f"| **{_md_amount(totals['cost'], currency)}** "
+        f"| **원가합 {_md_amount(totals['cost'], currency)}** "
         f"| "
         f"| **{_md_amount(totals['market_value'], currency)}** "
         f"| **{_md_amount(totals['profit'], currency)}** "
         f"| {_colored_pct(totals['profit_pct'])} "
-        f"| "
-        f"| 가격 담긴 종목 {totals['priced_count']}/{totals['holdings_count']} |"
+        f"| |"
     )
     st.markdown("\n".join(lines))
-    st.caption(
-        "· **합계 줄의 '평균매입가' 칸은 매입원가 합계**입니다(단가를 평균 낸 값이 아닙니다). "
-        "가격을 알 수 없는 종목은 평가금액을 모르므로 합계에서 빠집니다 — "
-        f"그 종목까지 포함한 매입원가 총액은 {_md_amount(totals['cost_all'], currency)} 입니다.\n"
-        "· **기간 주가등락**은 수량 변화의 영향을 받지 않는 **주가만의 등락률**입니다"
-        "(이 기간 안에서 가격을 처음 안 날의 종가 → 기준일 종가). 비교할 날이 하루뿐이거나 "
-        "그날 가격을 몰랐으면 '—' 입니다(가까운 날로 대체하지 않습니다)."
-    )
+    # 바로 옆 칸의 '수익률'과 뜻이 달라서 이 한 줄은 남깁니다(오해하면 숫자를 잘못 읽습니다).
+    st.caption("주가등락 = 이 기간 첫 기록가 → 기준일 종가 (수량 변화와 무관한 주가만의 등락)")
+    if totals["unpriced_count"]:
+        # 정상일 땐 조용히, 실제로 빠진 종목이 있을 때만 — 합계·비중의 분모가 달라지므로
+        # 이건 §0-1 상 반드시 알려야 하는 정보입니다.
+        st.caption(
+            f"⚠️ 그날 가격을 몰라 합계·비중에서 빠진 종목 {totals['unpriced_count']}개 — "
+            f"그 종목까지 포함한 매입원가는 {_md_amount(totals['cost_all'], currency)} 입니다."
+        )
+
+    _render_weight_changes(history, base_date)
 
     # ---- 🔴 들쑥날쑥 감시 — 같은 날 합계 스냅샷과 대조 --------------------------
     summary_row = next((r for r in (snapshots_in_window or [])
                         if r.get("snapshot_date") == base_date), None)
     outcome = compare_holding_total(
         totals["market_value"], summary_row.get("total_value") if summary_row else None)
-    if not outcome["comparable"]:
-        # 대조를 못 한 이유를 뭉뚱그리지 않습니다 — "확인했다"와 "확인 못 했다"는 다른 말입니다.
-        why = ("이 기간 목록에 그날 합계 스냅샷이 없습니다"
-               if summary_row is None
-               else "기준일에 가격을 아는 종목이 없어 비교할 합계가 없습니다")
-        st.caption(
-            f"⚖️ {base_date.isoformat()} 은(는) 합계와 대조하지 못했습니다 — {why}. "
-            "(대조 없이 '일치한다'고 말하지 않습니다.)"
-        )
-    elif outcome["matches"]:
-        st.caption(
-            f"⚖️ **데이터 대조 통과** — 위 종목별 합계"
-            f"({_md_amount(totals['market_value'], currency)})가 같은 날 합계 스냅샷과 "
-            "정확히 일치합니다(두 표는 같은 계산에서 함께 저장됩니다)."
-        )
-    else:
+    # ⚠️ 2026-08-13 (#114) — **어긋났을 때만** 말합니다.
+    #    · 일치: 아무것도 그리지 않습니다. "데이터 대조 통과"는 우리끼리 쓰는 자체 검증 문구라
+    #      방문자에게는 뜻이 닿지 않고, 정상일 때 매번 뜨면 진짜 경고가 묻힙니다.
+    #    · 대조 불가: 역시 조용히 넘어갑니다. 말하지 않는 것과 "일치한다"고 말하는 것은 전혀
+    #      다릅니다 — 이 화면은 어디에서도 대조 결과를 주장하지 않으므로 §0-1 위반이 아닙니다.
+    #    · 불일치: 그대로 경고합니다(숨기지 않기 — 이게 이 대조의 존재 이유).
+    if outcome["comparable"] and not outcome["matches"]:
         st.warning(
             f"⚠️ **대조 불일치** — 종목별 합계({_md_amount(totals['market_value'], currency)})와 "
             f"같은 날 합계 스냅샷({_md_amount(summary_row.get('total_value'), currency)})이 "
             f"서로 다릅니다(차이 {outcome['diff']:+,.6f}). 그날 종목별 저장이 중간에 실패했을 수 "
-            "있습니다 — 숨기지 않고 그대로 알려 드립니다. 다음 배치가 같은 날짜를 다시 저장하면 "
-            "맞춰집니다."
+            "있습니다 — 다음 배치가 같은 날짜를 다시 저장하면 맞춰집니다."
         )
 
     if history["gone"]:
@@ -565,11 +657,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
             f"마지막 기록 {g['last_date'].isoformat()})"
             for g in history["gone"]
         )
-        st.caption(
-            f"⏹ 이 기간에는 기록이 있었지만 기준일({base_date.isoformat()})에는 없는 종목: "
-            f"{gone_text}. (매도했거나 그날 평가에서 빠진 종목입니다 — 위 표에 넣으면 날짜가 "
-            "섞이므로 따로 적습니다.)"
-        )
+        st.caption(f"⏹ 기간 중 기록이 끊긴 종목(매도 등): {gone_text}")
 
     # ---- 종목 하나를 골라 일별 추이 보기 ---------------------------------------
     with st.expander("📅 종목 하나를 골라 이 기간 일별 추이 보기", expanded=False):
@@ -603,11 +691,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
                 f"| {_md_qty(row['quantity'])} | {cells[0]} | {cells[1]} | {cells[2]} | {cells[3]} |"
             )
         st.markdown("\n".join(rows_md))
-        st.caption(
-            "이 표는 **저장된 날만** 나옵니다 — 휴장일이나 배치가 돌지 않은 날은 행 자체가 "
-            "없습니다(없는 날을 이전 값으로 채우지 않습니다). 수량이 바뀐 날은 그날 추가 매수·"
-            "매도가 있었다는 뜻입니다."
-        )
+        st.caption("저장된 날만 나옵니다(휴장일 등 빠진 날을 이전 값으로 채우지 않습니다).")
 
 
 def _render_market_block(market, snapshots, period, ref_date,
@@ -641,10 +725,12 @@ def _render_market_block(market, snapshots, period, ref_date,
                                 window_start, window_end, currency, error=holding_error)
         return
 
+    # ⚠️ 2026-08-13 (#114) — COMPLETE 일 때의 초록 상자(st.success)를 없앴습니다. 그 문구는
+    #    "X(직전 기준) → Y 비교"였는데, 바로 아래 _render_numbers() 의 "비교 구간" 캡션이
+    #    같은 두 날짜를 이미 말합니다(같은 말 두 번). 진행 중일 때는 "아직 확정 아님"이라는
+    #    **다른 정보**라서 그대로 둡니다.
     if report["status"] == STATUS_IN_PROGRESS:
         st.info("⏳ " + report["status_message"])
-    elif report["status"] == STATUS_COMPLETE:
-        st.success("✅ " + report["status_message"])
 
     _render_numbers(report)
     _render_benchmarks(report, market)
@@ -661,14 +747,20 @@ def _render_market_block(market, snapshots, period, ref_date,
 # =============================================================================
 def render_report_page():
     st.markdown("## 📈 사장님 보고서입니다")
-    st.info(
-        "🧾 **사장님, 보고서입니다.** 매일 자동으로 저장되는 내 평가금액 스냅샷을 기간별로 "
-        "집계해서 보여드립니다. 이 보고서는 **시간이 지나면 채워집니다** — 이제 막 시작하셨다면 "
-        "일간부터 채워지고, 주간·월간·분기·반기·연간은 그 기간이 지나가면서 차례로 완성됩니다."
+    # ⚠️ 2026-08-13 (#114) — 머리말을 **색 상자 3개 + 캡션 1개 → 캡션 1덩이**로 줄였습니다.
+    #    · 지운 것: "이 보고서는 시간이 지나면 채워집니다 …" 소개문. 기간마다 실제로 데이터가
+    #      부족하면 그 블록이 "📭 데이터 부족"을 주 컨텐츠로 띄우므로(§3), 화면 맨 위에서
+    #      미리 변명할 필요가 없었습니다.
+    #    · 남긴 것: 세 가지 고지(환율 미변환 / 수수료·세금 미반영 / 단순 비교라 매매가 섞임).
+    #      **한 글자도 지우지 않고** 색 상자만 걷어냈습니다 — 숫자를 오해하게 둘 정보라
+    #      삭제·요약이 금지된 항목입니다(§0-1). 두 상수는 '내 성적표'와 공유하므로 그 문구
+    #      자체는 손대지 않았습니다.
+    st.caption(
+        "매일 자동으로 저장되는 평가금액 기록을 기간별로 모아 보여드립니다.  \n"
+        + NO_FX_CONVERSION_NOTICE + "  \n"
+        + NO_FEES_TAXES_NOTICE + "  \n"
+        + REPORT_SIMPLE_RETURN_NOTICE
     )
-    st.info(NO_FX_CONVERSION_NOTICE)
-    st.info(NO_FEES_TAXES_NOTICE)
-    st.caption(REPORT_SIMPLE_RETURN_NOTICE)
 
     status = supabase_status()
     if not status.available:
@@ -715,10 +807,8 @@ def render_report_page():
 
     if not snapshots:
         st.error(
-            "📭 **아직 저장된 스냅샷이 없습니다.**\n\n"
-            "리포트는 매일 자동으로 도는 배치가 평가금액을 저장하기 시작한 날부터 만들어집니다. "
-            "'내 성적표'에 보유 종목을 등록해 두면 다음 배치부터 쌓이기 시작합니다. "
-            "과거분을 지금 시세로 역산해서 만들어내지는 않습니다."
+            "📭 **아직 저장된 기록이 없습니다.** '내 성적표'에 보유 종목을 등록해 두면 "
+            "다음 날부터 하루치씩 쌓입니다(과거분을 지금 시세로 역산하지는 않습니다)."
         )
         return
 

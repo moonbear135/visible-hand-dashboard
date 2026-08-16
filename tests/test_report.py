@@ -33,7 +33,7 @@ import re
 import sys
 import tempfile
 import types
-from datetime import date
+from datetime import date, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -1652,8 +1652,13 @@ def test_holding_snapshots():
             check("**합계 2종목**" in table, "표 맨 아래 합계 한 줄 — 한 장에서 총액이 바로 보임")
             check(len(table.splitlines()) <= 6,
                   "종목 수 + 헤더 + 합계 만큼만 — 기간 전체를 한 표에 늘어놓지 않음")
-            check(any("데이터 대조 통과" in t for t in recorder.caption_calls),
-                  "🔴 종목별 합과 합계 스냅샷을 화면에서도 매번 대조해 결과를 표시")
+            # 2026-08-13 (#114) 오너 지시로 **정상일 때는 아무 말도 하지 않습니다.**
+            # ("⚖️ 데이터 대조 통과 …"는 개발자용 자체 검증 문구 — 방문자에게는 소음이고,
+            #  정상일 때 매번 뜨면 진짜 경고가 묻힙니다.) 대조 자체는 계속 돌고, 어긋난
+            # 경우의 경고는 아래 '대조 불일치' 검사가 그대로 지킵니다.
+            check(not any("대조" in t for t in
+                          recorder.caption_calls + recorder.info_calls + recorder.warning_calls),
+                  "🔴 합계와 일치하면 대조 문구를 아예 띄우지 않음(정상일 땐 조용히)")
             check(any("005380" in t for t in recorder.caption_calls),
                   "기간 중 기록이 끊긴 종목을 표에 섞지 않고 따로 안내")
             daily = next(t for t in recorder.markdown_calls if t.startswith("| 거래일 |"))
@@ -1671,8 +1676,14 @@ def test_holding_snapshots():
                   "가격을 몰랐던 날은 '가격 모름'으로 정직하게 표시(빈칸·이전 가격 대체 금지)")
             check("1,100,000" not in table2,
                   "전날 가격을 끌어와서 채우지 않음")
-            check(any("대조하지 못했습니다" in t for t in recorder.caption_calls),
-                  "대조할 합계 스냅샷이 없으면 '일치'라고 말하지 않고 그 사실을 밝힘")
+            check("100.00%" not in table2,
+                  "그날 가격을 아는 종목이 하나도 없으면 합계 비중을 '100%'라고 쓰지 않음(§0-1)")
+            check("모름" in table2, "그 경우 종목의 비중 칸은 '모름'")
+            # 대조할 합계 스냅샷이 없는 경우 — 화면은 **아무 주장도 하지 않습니다**.
+            # 말하지 않는 것과 "일치한다"고 말하는 것은 전혀 다릅니다(§0-1 위반 아님).
+            check(not any("일치" in t for t in
+                          recorder.caption_calls + recorder.info_calls + recorder.warning_calls),
+                  "대조할 합계 스냅샷이 없으면 '일치'라고 말하지 않음")
 
             # 불일치 — 숨기지 않고 경고
             recorder.reset()
@@ -1688,8 +1699,13 @@ def test_holding_snapshots():
                 MARKET_KR, [], [], date(2026, 8, 1), date(2026, 8, 31), "KRW",
                 error="PGRST205: Could not find the table "
                       "'public.portfolio_holding_snapshots' in the schema cache")
-            check(any("report_schema.sql" in t for t in recorder.info_calls),
-                  "테이블이 아직 없으면 실행할 SQL 파일을 화면에서 안내")
+            # 2026-08-13 (#114) — 방문자에게는 "아직 준비되지 않았습니다" 한 줄만 보이고,
+            # 설치 절차 전문은 '🔧 관리자' expander 안으로 접었습니다(문구 간소화). 안내
+            # 자체가 사라지면 안 되므로 실행할 SQL 파일 이름은 그대로 있어야 합니다.
+            check(any("준비되지 않았습니다" in t for t in recorder.info_calls),
+                  "테이블이 아직 없으면 그 사실을 화면에 알림")
+            check(any("report_schema.sql" in t for t in recorder.markdown_calls),
+                  "실행할 SQL 파일 안내는 관리자용으로 접어서 보존(삭제하지 않음)")
             check(not recorder.error_calls,
                   "그 경우는 빨간 오류가 아니라 안내(기존 리포트는 정상 동작하므로)")
 
@@ -1719,6 +1735,325 @@ def test_holding_snapshots():
     except Exception as exc:  # noqa: BLE001
         check(False, "views.report_view 종목별 상세 렌더링 검증",
               f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
+# =============================================================================
+# 9-3. ◀ 이전 기간 / 최신 기간 / 다음 기간 ▶ 버튼 (2026-08-13 #114 회귀 방지)
+# =============================================================================
+#  오너 신고: "일간으로 했을 때 맨위에 있는 이전기간 / 최신기간 / 다음기간 저거 작동 안하고
+#  있어 … 저 단추는 뭐하러 있는건지 모르겠어".
+#
+#  🔴 이 블록에서 가장 중요한 검사는 **"다음 렌더에서 달력 위젯 자체(session_state의
+#     report_ref_date_input 키)가 새 날짜를 갖는가"** 입니다. `report_ref_date`(별도 키)만
+#     확인하면 옛 코드도 통과해 버립니다 — 옛 버그는 바로 "다른 키만 바뀌고 위젯은 그대로"
+#     였기 때문입니다.
+# =============================================================================
+class _Rerun(Exception):
+    """st.rerun() 흉내 — Streamlit 처럼 그 자리에서 스크립트 실행을 끊습니다."""
+
+
+class _PeriodControlsFake:
+    """
+    기준일 달력의 **Streamlit 실제 규칙**을 그대로 흉내 내는 가짜 st.
+
+    재현하는 핵심 규칙: *키를 준 위젯은 한 번 만들어지고 나면 `session_state[그 키]` 가
+    유일한 출처이고, `value=` 인자는 무시된다.* 이 규칙을 흉내 내지 않으면 이번 버그를
+    재현할 수도, 회귀를 막을 수도 없습니다.
+    """
+
+    def __init__(self, pressed=None):
+        self.session_state = {}
+        self.pressed = pressed
+        self.rerun_count = 0
+
+    def selectbox(self, _label, options, index=0, key=None, **_kwargs):
+        options = list(options)
+        value = options[index]
+        if key is not None:
+            self.session_state[key] = value
+        return value
+
+    def date_input(self, _label, value=None, key=None, **_kwargs):
+        if key is None:
+            return value
+        if key in self.session_state:      # ← 위젯 키가 언제나 이깁니다(= 실제 Streamlit)
+            return self.session_state[key]
+        self.session_state[key] = value
+        return value
+
+    def button(self, _label, key=None, **_kwargs):
+        return key == self.pressed
+
+    def rerun(self):
+        self.rerun_count += 1
+        raise _Rerun()
+
+    def columns(self, spec, **_kwargs):
+        count = spec if isinstance(spec, int) else len(spec)
+        return [self for _ in range(count)]
+
+    # `with col_period:` 를 쓸 수 있게 — 던더 메서드는 __getattr__ 로 가로챌 수 없어 직접 정의.
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_exc):
+        return False
+
+    def __getattr__(self, _name):
+        def _noop(*_args, **_kwargs):
+            return None
+        return _noop
+
+
+def test_period_buttons():
+    print("\n[9-3] 기간 이동 버튼 — 눌러도 반응 없던 버그(#114) 회귀 방지")
+
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        fake = _PeriodControlsFake()
+        module.st = fake
+        try:
+            widget_key = module.REF_DATE_WIDGET_KEY
+            ref_key = module.SESSION_REF_DATE_KEY
+            pending_key = module.SESSION_PENDING_REF_DATE_KEY
+            today = date.today()
+
+            def render(pressed=None):
+                """한 번의 화면 렌더. 버튼을 눌렀으면 rerun 으로 끊깁니다(실제와 동일)."""
+                fake.pressed = pressed
+                try:
+                    return module._render_period_controls()
+                except _Rerun:
+                    return None
+
+            check(widget_key == "report_ref_date_input" and widget_key != ref_key,
+                  "달력 위젯의 진짜 키와 '기준일 저장용' 키가 서로 다른 키임(버그의 무대)")
+
+            # ---- 일간 ----------------------------------------------------
+            fake.session_state[module.SESSION_PERIOD_KEY] = PERIOD_DAILY
+            period, ref = render()
+            check(period == PERIOD_DAILY and ref == today, "첫 렌더 = 일간 · 오늘")
+            check(fake.session_state[widget_key] == today, "달력 위젯 키에 오늘이 들어감")
+
+            check(render(pressed="report_prev_period") is None and fake.rerun_count == 1,
+                  "'◀ 이전 기간'을 누르면 st.rerun() 으로 화면을 다시 그림")
+            check(fake.session_state.get(pending_key) == today - timedelta(days=1),
+                  "버튼은 위젯 키를 직접 못 고치므로 pending 표시만 남김(위젯 생성 뒤라 대입 금지)")
+            check(fake.session_state[widget_key] == today,
+                  "그 렌더에서는 달력이 아직 옛 날짜 — 대입은 다음 렌더 맨 앞에서 일어남")
+
+            period, ref = render()
+            yesterday = today - timedelta(days=1)
+            check(ref == yesterday, "🔴 다음 렌더에서 기준일이 실제로 하루 전으로 이동")
+            check(fake.session_state[widget_key] == yesterday,
+                  "🔴 **달력 위젯 자체**(report_ref_date_input)가 새 날짜를 가짐 "
+                  "— 옛 코드는 여기서 실패했습니다(다른 키만 바뀌고 위젯은 그대로)")
+            check(fake.session_state[ref_key] == yesterday, "기준일 저장용 키도 새 날짜")
+            check(pending_key not in fake.session_state, "pending 표시는 쓰고 나서 지워짐")
+
+            render(pressed="report_next_period")
+            period, ref = render()
+            check(ref == today and fake.session_state[widget_key] == today,
+                  "'다음 기간 ▶' 은 정확히 되돌아옴(하루 앞으로)")
+
+            render(pressed="report_prev_period")
+            render()
+            render(pressed="report_prev_period")
+            period, ref = render()
+            check(ref == today - timedelta(days=2), "여러 번 눌러도 누적해서 이동")
+            render(pressed="report_latest_period")
+            period, ref = render()
+            check(ref == today and fake.session_state[widget_key] == today,
+                  "'최신 기간' 은 어디서 눌러도 오늘로 돌아옴")
+
+            # ---- 월간 (기간 단위가 달라도 같은 경로) ----------------------
+            fake.session_state[module.SESSION_PERIOD_KEY] = PERIOD_MONTHLY
+            fake.session_state[widget_key] = date(2026, 8, 13)
+            fake.session_state[ref_key] = date(2026, 8, 13)
+            render()
+            render(pressed="report_prev_period")
+            period, ref = render()
+            check(period == PERIOD_MONTHLY and ref == date(2026, 7, 1),
+                  "월간에서 '이전 기간' = 지난달 1일(shift_period 규칙 그대로)")
+            check(fake.session_state[widget_key] == date(2026, 7, 1),
+                  "월간에서도 달력 위젯 자체가 새 날짜를 가짐")
+
+            # 버튼을 누르지 않은 평범한 렌더가 값을 되돌리지 않는지(옛 버그의 두 번째 겹)
+            period, ref = render()
+            check(ref == date(2026, 7, 1) and fake.session_state[widget_key] == date(2026, 7, 1),
+                  "그냥 다시 그리기만 하면 기준일이 옛 값으로 되돌아가지 않음")
+        finally:
+            module.st = real_st
+    except Exception as exc:  # noqa: BLE001
+        check(False, "기간 이동 버튼 검증", f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
+# =============================================================================
+# 9-4. 📊 종목별 비중(%) · 비중 변화 (2026-08-13 #114 신설)
+# =============================================================================
+#  오너가 수기로 관리해 온 표를 그대로 옮긴 기능입니다(오너 제공 자료 참고).
+#     · "종목 | 현재금액 | 현재 금액 합 | 비율"
+#     · "종목 | 지난달 비중 | 이번달 비중 | 차이"
+#  🔴 핵심 검사: **이미 저장된 값만으로 계산**되고(새 테이블 없음), 가격을 몰랐던 종목을
+#     0% 로 둔갑시키지 않으며, 매매로 생기거나 사라진 종목을 숨기지 않는지.
+# =============================================================================
+def test_holding_weights():
+    print("\n[9-4] 📊 종목별 비중(%) · 기간 시작 대비 비중 변화")
+
+    holdings_kr = [holding(MARKET_KR, "005930", 10, 70000, "삼성전자"),
+                   holding(MARKET_KR, "000660", 2, 1000000, "SK하이닉스")]
+
+    def _rows(day, prices, items=None):
+        _r, detail, _s = rdb.build_snapshot_rows_with_holdings(
+            "u1", items or holdings_kr, price_lookup_factory(prices), {MARKET_KR: day},
+            price_stamp_by_market={MARKET_KR: f"{day} 17:50"})
+        return detail
+
+    rows = []
+    # 8/10 — 세 종목(현대차 포함). 합계 4,000,000
+    rows += _rows("2026-08-10", {(MARKET_KR, "005930"): 75000.0,
+                                 (MARKET_KR, "000660"): 1100000.0})
+    rows += _rows("2026-08-10", {(MARKET_KR, "005380"): 210000.0},
+                  items=[holding(MARKET_KR, "005380", 5, 200000, "현대차")])
+    # 8/12 — 현대차는 매도돼 기록 없음. 합계 3,200,000
+    rows += _rows("2026-08-12", {(MARKET_KR, "005930"): 80000.0,
+                                 (MARKET_KR, "000660"): 1200000.0})
+    rows = rdb.sort_holding_snapshots(rows)
+
+    history = rdb.build_holding_history(rows, "2026-08-01", "2026-08-31")
+
+    # ---- ① 비중(%) 은 '그날 평가금액 ÷ 그날 합계' -----------------------------
+    by_ticker = {r["ticker"]: r for r in history["rows"]}
+    check(approx(by_ticker["000660"]["weight_pct"], 2400000 / 3200000 * 100),
+          "비중 = 그날 평가금액 ÷ 그날 평가금액 합계 (2,400,000 / 3,200,000 = 75%)")
+    check(approx(by_ticker["005930"]["weight_pct"], 800000 / 3200000 * 100),
+          "나머지 종목도 같은 분모로 계산 (800,000 / 3,200,000 = 25%)")
+    check(approx(sum(r["weight_pct"] for r in history["rows"]), 100.0),
+          "🔴 비중 합 = 100% (분모가 그날 합계 스냅샷과 같은 값이라 어긋날 수 없음)")
+    check(approx(history["totals"]["market_value"], 3200000.0),
+          "비중을 붙여도 기존 합계 숫자는 그대로(파생값만 추가)")
+
+    # ---- ② 기간 첫 기록일 대비 비중 변화 --------------------------------------
+    weights = rdb.build_weight_comparison(history)
+    check(weights["first_date"] == date(2026, 8, 10)
+          and weights["base_date"] == date(2026, 8, 12) and weights["comparable"],
+          "비교한 두 날짜 = 이 기간의 첫 기록일 → 마지막 기록일")
+    check(approx(weights["first_total"], 4000000.0) and approx(weights["base_total"], 3200000.0),
+          "각 날의 분모는 그날 '가격을 아는 종목'의 평가금액 합")
+    wby = {r["ticker"]: r for r in weights["rows"]}
+    check(approx(wby["000660"]["first_pct"], 55.0) and approx(wby["000660"]["base_pct"], 75.0)
+          and approx(wby["000660"]["change_pp"], 20.0),
+          "비중 변화 = 이번 비중 − 지난 비중 (55.00% → 75.00% = +20.00%p)")
+    check(approx(wby["005930"]["first_pct"], 18.75) and approx(wby["005930"]["change_pp"], 6.25),
+          "다른 종목도 같은 방식(18.75% → 25.00% = +6.25%p)")
+    check(approx(wby["005380"]["first_pct"], 26.25)
+          and wby["005380"]["base_pct"] == 0.0
+          and wby["005380"]["base_state"] == rdb.WEIGHT_ABSENT
+          and approx(wby["005380"]["change_pp"], -26.25),
+          "🔴 기간 중 매도된 종목을 숨기지 않고 26.25% → 0.00%(-26.25%p)로 정직하게 표시")
+    check([r["ticker"] for r in weights["rows"]] == ["000660", "005930", "005380"],
+          "기준일 비중이 큰 종목부터 정렬(없어진 종목은 0% 라 맨 뒤)")
+
+    # 새로 산 종목은 반대 방향으로 — 0.00% → X%
+    fresh = rdb.build_holding_history(rdb.sort_holding_snapshots(
+        _rows("2026-08-10", {(MARKET_KR, "005930"): 75000.0},
+              items=[holdings_kr[0]])
+        + _rows("2026-08-12", {(MARKET_KR, "005930"): 80000.0,
+                               (MARKET_KR, "000660"): 1200000.0})))
+    fresh_w = {r["ticker"]: r for r in rdb.build_weight_comparison(fresh)["rows"]}
+    check(fresh_w["000660"]["first_pct"] == 0.0
+          and approx(fresh_w["000660"]["base_pct"], 75.0)
+          and approx(fresh_w["000660"]["change_pp"], 75.0),
+          "기간 중 새로 산 종목은 0.00% → 75.00%(+75.00%p)로 드러남")
+
+    # ---- ③ 가격을 몰랐던 종목 — 0% 가 아니라 '모름' ---------------------------
+    unpriced = rdb.build_holding_history(rdb.sort_holding_snapshots(
+        _rows("2026-08-10", {(MARKET_KR, "005930"): 75000.0,
+                             (MARKET_KR, "000660"): 1100000.0})
+        + _rows("2026-08-12", {(MARKET_KR, "005930"): 80000.0})))
+    u_rows = {r["ticker"]: r for r in unpriced["rows"]}
+    check(u_rows["000660"]["weight_pct"] is None,
+          "🔴 그날 가격을 몰랐던 종목의 비중은 0% 가 아니라 None(화면 '모름')")
+    check(approx(u_rows["005930"]["weight_pct"], 100.0),
+          "분모에서 뺀 결과 — 가격을 아는 종목만으로 100%(없는 값을 0으로 메우지 않음)")
+    u_weights = rdb.build_weight_comparison(unpriced)
+    u_by = {r["ticker"]: r for r in u_weights["rows"]}
+    check(u_by["000660"]["base_pct"] is None
+          and u_by["000660"]["base_state"] == rdb.WEIGHT_UNPRICED
+          and u_by["000660"]["change_pp"] is None,
+          "한쪽이 '모름'이면 변화량도 만들어내지 않음(0%p 로 적으면 거짓말)")
+    check(u_weights["unpriced_base"] == ["000660"] and u_weights["unpriced_first"] == [],
+          "어느 날 어느 종목이 비중 계산에서 빠졌는지 그대로 돌려줌(화면이 밝힐 수 있게)")
+
+    # ---- ④ 비교할 날이 하루뿐이면 표를 만들지 않음 ----------------------------
+    one_day = rdb.build_holding_history(rdb.sort_holding_snapshots(
+        _rows("2026-08-12", {(MARKET_KR, "005930"): 80000.0,
+                             (MARKET_KR, "000660"): 1200000.0})))
+    check(rdb.build_weight_comparison(one_day)["comparable"] is False,
+          "기록이 하루뿐이면 비교 불가(0%p 를 늘어놓지 않음)")
+    check(rdb.build_weight_comparison(rdb.build_holding_history([]))["rows"] == [],
+          "기록이 없으면 빈 결과")
+    check(rdb.build_weight_comparison(None)["rows"] == [], "history 가 없어도 죽지 않음")
+
+    # ---- ⑤ 화면 문구 ---------------------------------------------------------
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        recorder = _HoldingViewRecorder()
+        module.st = recorder
+        try:
+            check(module._md_weight(75.0) == "75.00%", "비중 표기(소수 2자리)")
+            check(module._md_weight(None) == "모름",
+                  "🔴 비중을 모르면 '0%' 가 아니라 '모름'")
+            check(module._colored_pp(20.0) == ":red[+20.00%p]"
+                  and module._colored_pp(-26.25) == ":blue[-26.25%p]",
+                  "비중 변화는 %p 단위 + 국내 증시 색 관례(늘면 빨강/줄면 파랑)")
+            check(module._colored_pp(None) == "—", "변화량이 없으면 —(0으로 속이지 않음)")
+
+            summary = rdb.sort_snapshots([
+                snap(date(2026, 8, 12), 3200000.0, 2700000.0, holdings_count=2, priced_count=2)])
+            module._render_holding_history(MARKET_KR, rows, summary,
+                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
+            check("| 종목 | 비중 |" in table, "종목별 상세 표 두 번째 칸이 비중(%)")
+            check("75.00%" in table and "25.00%" in table, "표에 실제 비중이 찍힘")
+            check("**100.00%**" in table, "합계 줄의 비중은 100%")
+            check("원가합" in table,
+                  "합계 줄 '평균매입가' 칸이 원가 합계임을 칸 안에서 밝힘(설명 캡션 대신)")
+
+            change_table = [t for t in recorder.markdown_calls if t.startswith("| 종목 |")][1]
+            check("2026-08-10" in change_table and "2026-08-12" in change_table,
+                  "비중 변화 표 머리글에 비교한 두 날짜를 그대로 표기")
+            check(":red[+20.00%p]" in change_table, "늘어난 종목은 +%p (빨강)")
+            check(":blue[-26.25%p]" in change_table and "현대차 (005380)" in change_table,
+                  "🔴 매도돼 사라진 종목도 숨기지 않고 -26.25%p 로 표시")
+            check(any("비중 변화" in t for t in recorder.caption_calls),
+                  "비중 변화 표에 제목 한 줄")
+
+            # 하루치뿐이면 비중 변화 표 자체가 없음
+            recorder.reset()
+            module._render_holding_history(
+                MARKET_KR, [r for r in rows if r["snapshot_date"] == date(2026, 8, 12)],
+                summary, date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            check(len([t for t in recorder.markdown_calls if t.startswith("| 종목 |")]) == 1,
+                  "비교할 날이 하루뿐이면 비중 변화 표를 그리지 않음(화면을 늘리지 않음)")
+        finally:
+            module.st = real_st
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 비중 표시 검증", f"({type(exc).__name__}: {exc})")
     finally:
         if stubbed:
             sys.modules.pop("streamlit", None)
@@ -2070,6 +2405,8 @@ def main():
     test_batch_end_to_end()
     test_price_stamp_wiring()
     test_holding_snapshots()
+    test_period_buttons()
+    test_holding_weights()
     test_holding_schema_and_wiring()
     test_sql_schema()
     test_workflow()

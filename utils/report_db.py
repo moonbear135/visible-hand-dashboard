@@ -147,14 +147,19 @@ PRICE_STAMP_ALTER_SQL = (
 
 # 화면에 상시 노출할 고지. "내 성적표"의 NO_FX_CONVERSION_NOTICE / NO_FEES_TAXES_NOTICE 와
 # 같은 목적이며, 리포트 고유의 한계를 추가로 알립니다.
+#
+# ⚠️ 2026-08-13 (#114) — 두 문구를 **한 줄로 줄였습니다.** 오너 지적: "글자가 너무 많고
+#    나하고 너하고 말하는 용어로 설명이 되어있고 다른 사람들이 이것을 볼 때 필요없는 내용이
+#    너무 많은거 같아". 줄이면서 **뜻은 하나도 버리지 않았습니다** — 지운 것은 "v1 범위 밖"
+#    같은 개발 로드맵 이야기와 "안내 문구가 함께 표시됩니다" 같은 화면 사용법 설명뿐이고,
+#    숫자를 오해하게 둘 정보(단순 비교라는 점 / 매매가 섞인다는 점 / 역산하지 않는다는 점)는
+#    그대로 남겼습니다(§0-1).
 REPORT_SIMPLE_RETURN_NOTICE = (
-    "⚠️ 이 리포트의 수익률은 **구간 시작 스냅샷과 종료 스냅샷의 단순 비교**입니다. "
-    "중간에 종목을 사고팔면 그 영향이 수익률에 섞입니다(시간가중수익률(TWR) 같은 정교한 "
-    "계산은 v1 범위 밖입니다). 구성이 바뀐 구간에는 안내 문구가 함께 표시됩니다."
+    "⚠️ 수익률은 기간 시작·종료 두 시점의 **단순 비교**입니다 — 기간 중 매매가 있었다면 "
+    "그 영향이 함께 섞여 있습니다."
 )
 REPORT_NO_BACKFILL_NOTICE = (
-    "⚠️ 스냅샷은 이 기능을 켠 날부터 쌓입니다 — 그 전 기간은 과거 시세로 역산하지 않고 "
-    "'데이터 부족'으로 표시합니다(없는 기록을 만들어내지 않습니다)."
+    "기록은 이 기능을 켠 날부터 쌓입니다 — 그 이전 기간은 과거 시세로 역산하지 않습니다."
 )
 
 
@@ -716,10 +721,11 @@ def compute_period_report(snapshots, period, ref_date, today=None):
     elif not result["is_window_ended"]:
         result["status"] = STATUS_IN_PROGRESS
         result["missing_days_before_start"] = 0
+        # 2026-08-13 (#114) 문구 축약 — "정식 리포트는 기간이 끝난 뒤에 확정됩니다"는
+        # "아직 진행 중 / 중간 집계"와 같은 말이라 뺐습니다(뜻은 그대로).
         result["status_message"] = (
-            f"{result['period_title']}은(는) 아직 진행 중입니다 — "
-            f"{result['covered_to'].isoformat()} 까지의 중간 집계이며, "
-            "정식 리포트는 기간이 끝난 뒤에 확정됩니다."
+            f"{result['period_title']}은(는) 아직 진행 중 — "
+            f"{result['covered_to'].isoformat()} 까지의 중간 집계입니다."
         )
     else:
         result["status"] = STATUS_COMPLETE
@@ -951,6 +957,17 @@ def build_holding_history(holding_rows, window_start=None, window_end=None):
     if totals["profit"] is not None and total_cost:
         totals["profit_pct"] = totals["profit"] / total_cost * 100.0
 
+    # 📊 비중(%) — 2026-08-13(#114) 추가. **기존 숫자는 하나도 바뀌지 않는 파생값**입니다
+    #    (기준일 평가금액 ÷ 그날 평가금액 합계 × 100). 분모는 위 total_value, 즉 **그날 가격을
+    #    아는 종목의 합계**이고 이것은 같은 날 합계 스냅샷의 total_value 와 같은 값입니다.
+    #    가격을 몰랐던 종목은 비중을 0% 로 적지 않고 None(화면 "모름")입니다 — 자세한 근거는
+    #    아래 `build_weight_comparison()` 주석에 적어 뒀습니다.
+    for item in summary_rows:
+        item["weight_pct"] = (
+            item["market_value"] / total_value * 100.0
+            if item["priced"] and total_value else None
+        )
+
     base_tickers = {i["ticker"] for i in summary_rows}
     gone = []
     for ticker, history in by_ticker.items():
@@ -998,6 +1015,138 @@ def compare_holding_total(detail_total, summary_total, tolerance=TOTAL_MATCH_TOL
     result["message"] = ("종목별 합계가 같은 날 합계 스냅샷과 일치합니다."
                          if result["matches"] else
                          f"종목별 합계와 합계 스냅샷이 {diff:+,.6f} 만큼 어긋납니다.")
+    return result
+
+
+# -----------------------------------------------------------------------------
+# B-3. 📊 종목별 비중(%) · 기간 시작 대비 비중 변화 (2026-08-13 #114 신설, 순수 함수)
+# -----------------------------------------------------------------------------
+#  오너가 직접 수기로 관리해 온 표를 그대로 옮긴 기능입니다(오너 제공 자료
+#  "2026년 수익률비교 - 문대호 한장 정리.csv"). 그 표는 두 덩어리였습니다.
+#     · "26년 N월 종목 비율"        : 종목 | 현재금액 | 현재 금액 합 | 비율
+#     · "구성종목 비율 변경"        : 종목 | 지난달 비중 | 이번달 비중 | 차이
+#  둘 다 **이미 저장된 값만으로 계산됩니다** — `portfolio_holding_snapshots`(#113)에 그날
+#  종목별 `market_value` 가 있으므로, 같은 날 합계로 나누면 비중이 나옵니다. 새 테이블도,
+#  새 저장 로직도 필요 없어서 **조회 시점에 계산**합니다.
+#
+#  🔴 분모를 무엇으로 잡을 것인가 (판단 근거를 남깁니다 — §0-1)
+#     분모 = **그날 가격을 아는 종목들의 평가금액 합**입니다. 즉 같은 날 합계 스냅샷의
+#     `total_value` 와 같은 값이고, 그래서 이 화면의 비중 합은 항상 100% 가 됩니다.
+#     가격을 몰랐던 종목은 두 선택지가 있었습니다.
+#       ① 분자에 0 을 넣고 분모에는 포함  → 그 종목이 "0원짜리"라고 말하는 셈이라 거짓말.
+#       ② 분모에서 빼고 비중을 "모름"으로 → 채택.
+#     ②를 고른 이유: 그 종목의 평가금액은 **아무 데도 기록돼 있지 않습니다**(가격을 몰랐으니
+#     계산 자체가 불가능). 없는 값을 0 으로 메우면 나머지 종목의 비중까지 전부 부풀려집니다.
+#     대신 "몇 종목이 비중 계산에서 빠졌는지"를 함께 돌려줘 화면이 그 사실을 밝힙니다.
+# -----------------------------------------------------------------------------
+WEIGHT_OK = "ok"                # 그날 가격을 알아 비중을 계산함
+WEIGHT_UNPRICED = "unpriced"    # 그날 보유했지만 가격을 몰라 비중을 모름(0% 아님)
+WEIGHT_ABSENT = "absent"        # 그날은 이 종목 기록 자체가 없음(= 비중 0%)
+
+
+def _weight_denominator(day_rows):
+    """
+    비중 계산의 분모 — 그날 **가격을 아는** 종목들의 평가금액 합.
+    같은 날 합계 스냅샷의 `total_value` 와 같은 값입니다(합계도 가격을 아는 종목만 더하므로).
+    가격을 아는 종목이 하나도 없으면 None — 0 으로 나누지도, 분모를 지어내지도 않습니다.
+    """
+    priced = [r for r in day_rows if r.get("priced") and r.get("market_value") is not None]
+    if not priced:
+        return None
+    total = _sum_money(r["market_value"] for r in priced)
+    return total if total > 0 else None
+
+
+def _weight_of(row, denominator):
+    """한 종목의 그날 비중 → (비중% 또는 None, 상태 문자열)."""
+    if row is None:
+        # 그날은 이 종목을 안 들고 있었습니다 → 비중 0%. 숨기지 않고 0.00% 로 드러냅니다
+        # (매매로 종목이 새로 생기거나 없어진 것을 표에서 보이게 하는 게 이 표의 목적).
+        return 0.0, WEIGHT_ABSENT
+    if not row.get("priced") or row.get("market_value") is None or not denominator:
+        return None, WEIGHT_UNPRICED
+    return row["market_value"] / denominator * 100.0, WEIGHT_OK
+
+
+def build_weight_comparison(history):
+    """
+    `build_holding_history()` 결과 → **기간 첫 기록일 vs 마지막 기록일**의 종목별 비중 비교.
+
+    왜 history 를 받는가: 두 표가 같은 `base_date`(마지막 기록일)를 보게 못 박기 위해서입니다.
+    날짜를 각자 다시 고르면 언젠가 서로 다른 날을 보게 되고, 그 순간 화면의 두 표가
+    어긋납니다(오너가 말한 "들쑥날쑥"이 생기는 전형적인 경로).
+
+    ⚠️ 비교 시작점은 "지난 기간"이 아니라 **이 기간 안의 첫 기록일**입니다. 화면은 두 날짜를
+       그대로 표기해야 합니다 — 종목별 스냅샷은 보고 있는 기간만 조회하므로 기간 시작 이전의
+       종목별 기록은 애초에 이 함수에 들어오지 않습니다(없는 값을 끌어오지 않습니다).
+
+    반환 dict
+        first_date / base_date : 비교한 두 거래일(같으면 comparable=False)
+        comparable             : 비교할 날이 이틀 이상인가
+        first_total / base_total : 각 날의 분모(가격을 아는 종목 평가금액 합)
+        rows                   : [{ticker, stock_name,
+                                   first_pct, first_state, base_pct, base_state,
+                                   base_value, change_pp}]  — 기준일 비중 큰 순
+        unpriced_base          : 기준일에 가격을 몰라 비중에서 빠진 티커 목록
+        unpriced_first         : 첫 기록일에 같은 이유로 빠진 티커 목록
+    """
+    result = {
+        "first_date": None, "base_date": None, "comparable": False,
+        "first_total": None, "base_total": None,
+        "rows": [], "unpriced_base": [], "unpriced_first": [],
+    }
+    daily = (history or {}).get("daily_by_ticker") or {}
+    dates = (history or {}).get("dates") or []
+    base_date = (history or {}).get("base_date")
+    if not daily or not dates or base_date is None:
+        return result
+
+    first_date = dates[0]
+    result["first_date"] = first_date
+    result["base_date"] = base_date
+    result["comparable"] = base_date != first_date
+
+    on_first, on_base = {}, {}
+    names = {}
+    for ticker, rows_for_ticker in daily.items():
+        for row in rows_for_ticker:
+            if row.get("stock_name"):
+                names[ticker] = row["stock_name"]
+            if row["snapshot_date"] == first_date:
+                on_first[ticker] = row
+            if row["snapshot_date"] == base_date:
+                on_base[ticker] = row
+
+    result["first_total"] = _weight_denominator(on_first.values())
+    result["base_total"] = _weight_denominator(on_base.values())
+
+    rows = []
+    for ticker in daily:
+        first_pct, first_state = _weight_of(on_first.get(ticker), result["first_total"])
+        base_pct, base_state = _weight_of(on_base.get(ticker), result["base_total"])
+        if first_state == WEIGHT_UNPRICED:
+            result["unpriced_first"].append(ticker)
+        if base_state == WEIGHT_UNPRICED:
+            result["unpriced_base"].append(ticker)
+        rows.append({
+            "ticker": ticker,
+            "stock_name": names.get(ticker),
+            "first_pct": first_pct,
+            "first_state": first_state,
+            "base_pct": base_pct,
+            "base_state": base_state,
+            "base_value": (on_base.get(ticker) or {}).get("market_value"),
+            # 한쪽이라도 "모름"이면 변화량을 만들어내지 않습니다(0%p 로 적으면 거짓말).
+            "change_pp": (base_pct - first_pct)
+                         if (first_pct is not None and base_pct is not None) else None,
+        })
+
+    # 기준일 비중이 큰 종목부터. 비중을 모르는 종목은 금액으로 줄 세울 수 없어 맨 뒤로.
+    rows.sort(key=lambda i: (0 if i["base_pct"] is not None else 1,
+                             -(i["base_pct"] or 0.0), i["ticker"]))
+    result["rows"] = rows
+    result["unpriced_first"].sort()
+    result["unpriced_base"].sort()
     return result
 
 
