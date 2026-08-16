@@ -1381,6 +1381,23 @@ def test_view_and_routing():
           and "icon=\":material/delete:\"" in view_src,
           "✏️ 수정 / 🗑️ 삭제 버튼이 표를 HTML로 바꾼 뒤에도 그대로 남아있음(모바일이라고 "
           "기능을 줄이지 않음 — 2026-08-16 오너 명시적 지시)")
+    # 2026-08-16 (#127 후속) — 오너 실기기 재확인 결과, 표는 고쳐졌는데 그 아래 "종목 관리"
+    # 줄(종목명 + ✏️ + 🗑️)이 st.columns([4, 0.6, 0.6])를 쓰고 있어서 똑같이 세로로
+    # 쌓여 화면이 쓸데없이 길어지는 문제가 재현됨 — 칸이 3개뿐이라 덜 걸릴 거라 예상했던
+    # 게 틀렸고(칸 "개수"가 아니라 컨테이너 폭이 임계값보다 좁은지로 판정되는 것으로 보임),
+    # 이 줄도 st.columns()를 버리고 종목당 컨테이너 + CSS flex-row로 교체함.
+    check("mcol1, mcol2, mcol3 = st.columns" not in view_src,
+          "'종목 관리' 줄에서도 st.columns()를 걷어냄(모바일에서 라벨/✏️/🗑️가 각각 "
+          "세로로 쌓여 화면이 쓸데없이 길어지던 문제 재발 방지, 2026-08-16 오너 실기기 재확인)")
+    check('key=f"{table_key}_mgmt_row_{row_id}"' in view_src,
+          "'종목 관리' 각 줄이 종목별 컨테이너로 감싸짐 — 그 컨테이너 안 세로 블록을 "
+          "CSS로 flex-row 전환해 라벨+버튼이 화면 폭과 무관하게 항상 한 줄에 나옴")
+    check('[data-testid="stVerticalBlock"] {' in view_src
+          and "flex-direction: row !important" in view_src
+          and 'flex: 1 1 auto' in view_src,
+          "st.columns()가 쓰는 stHorizontalBlock(JS가 인라인 style을 박아넣어 CSS로 "
+          "못 이김, #6592)과 달리 일반 stVerticalBlock에는 그런 JS가 없어 순수 CSS "
+          "flex로 라벨(남는 폭 다 먹음)+버튼(내용물 크기만) 배치를 확실히 관철시킴")
     check("_row_label_html" in view_src and "<br>" in view_src,
           "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
     check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,

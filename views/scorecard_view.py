@@ -819,6 +819,34 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
         .st-key-{table_key}-mgmt button p {{
             margin: 0; line-height: 1; font-size: 1.05rem;
         }}
+        /* 2026-08-16 (#127 후속, 오너 실기기 재확인) — 표는 고쳤는데, 그 아래 "종목 관리"
+           줄(종목명 + ✏️ + 🗑️)이 `st.columns([4, 0.6, 0.6])`를 쓰고 있어서 똑같은
+           문제가 여기서도 재현됨(칸이 3개뿐이라 덜 걸릴 거라 예상했는데 실제로는 칸
+           **개수**가 아니라 **컨테이너 폭이 임계값보다 좁은지**로 판정되는 것으로 보여,
+           칸이 2~3개뿐이어도 폭이 좁으면 그대로 쌓임 — 오너 폰 스크린샷으로 확인).
+           그래서 이 줄도 `st.columns()`를 아예 버리고, 종목당 `st.container(key=...)`
+           하나(파이썬 쪽에서 `_{row_id}` 접미사로 구분) 안에 라벨+버튼 2개를 순서대로
+           넣은 뒤, 그 컨테이너의 세로 블록(`stVerticalBlock`)을 flex-row로 CSS만으로
+           돌립니다. `st.columns()`가 쓰는 `stHorizontalBlock`과 달리 일반
+           `stVerticalBlock`에는 Streamlit이 JS로 인라인 style을 박아넣지 않아서(반응형
+           쌓기 로직 자체가 `st.columns()` 전용) 순수 CSS로 확실히 이길 수 있습니다.
+           라벨(첫 번째 칸)은 남는 폭을 다 먹고(flex: 1), 버튼 2개는 내용물 크기만큼만
+           차지해(flex: 0 0 auto) 오른쪽에 붙습니다 — 화면 폭과 무관하게 항상 한 줄. */
+        [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] {{
+            display: flex !important;
+            flex-direction: row !important;
+            align-items: center !important;
+            flex-wrap: nowrap !important;
+            gap: 8px;
+        }}
+        [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] > div:first-child {{
+            flex: 1 1 auto;
+            min-width: 0;
+        }}
+        [class*="st-key-{table_key}_mgmt_row_"] [data-testid="stVerticalBlock"] > div:not(:first-child) {{
+            flex: 0 0 auto;
+        }}
+        [class*="st-key-{table_key}_mgmt_row_"] {{ margin-bottom: 6px; }}
         </style>
         """,
         unsafe_allow_html=True,
@@ -855,26 +883,28 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
         for row in rows:
             row_id = row.get("id")
             edit_key = f"scorecard_editing_{row_id}"
-            mcol1, mcol2, mcol3 = st.columns([4, 0.6, 0.6])
-            mcol1.markdown(_row_label_html(row, indexes), unsafe_allow_html=True)
-            # 2026-08-11: 이모지(✏️/🗑️)를 버튼 라벨 텍스트로 쓰면 글꼴마다 글리프 자체의
-            # 여백이 삐뚤어서 CSS로 중앙 정렬해도 박스 안에서 치우쳐 보이는 문제(오너 스크린샷
-            # 3연속 확인)가 있었습니다. 근본 원인이 이모지 폰트 렌더링이라 CSS로는 못 고치고,
-            # Streamlit이 지원하는 `icon=` 파라미터(Material Symbols, 폰트가 아니라 일정한
-            # 벡터 아이콘)로 바꿔서 항상 정중앙에 오도록 했습니다.
-            if mcol2.button("", key=f"scorecard_edit_btn_{row_id}", help="수정", icon=":material/edit:"):
-                st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-            if mcol3.button("", key=f"scorecard_del_btn_{row_id}", help="삭제", icon=":material/delete:"):
-                if not row_id:
-                    st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
-                else:
-                    try:
-                        delete_holding(client, user_id, row_id)
-                    except ScorecardError as exc:
-                        st.error(f"🚫 {exc}")
+            # 2026-08-16 (#127 후속) — st.columns([4, 0.6, 0.6]) 대신 종목당 컨테이너
+            # 하나(위 <style> 블록의 flex CSS가 스코프됨)에 라벨+버튼 2개를 순서대로 넣습니다.
+            with st.container(key=f"{table_key}_mgmt_row_{row_id}"):
+                st.markdown(_row_label_html(row, indexes), unsafe_allow_html=True)
+                # 2026-08-11: 이모지(✏️/🗑️)를 버튼 라벨 텍스트로 쓰면 글꼴마다 글리프 자체의
+                # 여백이 삐뚤어서 CSS로 중앙 정렬해도 박스 안에서 치우쳐 보이는 문제(오너 스크린샷
+                # 3연속 확인)가 있었습니다. 근본 원인이 이모지 폰트 렌더링이라 CSS로는 못 고치고,
+                # Streamlit이 지원하는 `icon=` 파라미터(Material Symbols, 폰트가 아니라 일정한
+                # 벡터 아이콘)로 바꿔서 항상 정중앙에 오도록 했습니다.
+                if st.button("", key=f"scorecard_edit_btn_{row_id}", help="수정", icon=":material/edit:"):
+                    st.session_state[edit_key] = not st.session_state.get(edit_key, False)
+                if st.button("", key=f"scorecard_del_btn_{row_id}", help="삭제", icon=":material/delete:"):
+                    if not row_id:
+                        st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
                     else:
-                        st.success(f"✅ {_row_label(row, indexes)} 삭제했습니다.")
-                        st.rerun()
+                        try:
+                            delete_holding(client, user_id, row_id)
+                        except ScorecardError as exc:
+                            st.error(f"🚫 {exc}")
+                        else:
+                            st.success(f"✅ {_row_label(row, indexes)} 삭제했습니다.")
+                            st.rerun()
 
             if st.session_state.get(edit_key):
                 with st.container(border=True):
