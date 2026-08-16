@@ -1,0 +1,15 @@
+# NiceGUI(Render) 이미지에 안 들어가도 되는 것들 — 이미지 크기·빌드 시간 절약(ENGINEERING_SPEC.md §0-3-10)
+.git
+.github
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+.env
+.env.*
+tests/
+.devcontainer/
+*.md
+.nicegui/
+node_modules/

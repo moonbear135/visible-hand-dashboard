@@ -16,6 +16,12 @@ bcrypt
 # (한국/미국 밸류에이션)은 아무 영향 없이 그대로 돕니다.
 supabase
 
+# 2026-08-16 — Streamlit → NiceGUI 이전(NICEGUI_MIGRATION_PLAN.md) 0단계.
+# `streamlit`/`altair`는 컷오버 전까지 지우지 않습니다(듀얼런, ENGINEERING_SPEC.md §0-3-10 ·
+# §11-1) — main.py(NiceGUI)와 app.py(Streamlit)가 당분간 같은 저장소에서 나란히 삽니다.
+# 컷오버 완료 후에만 streamlit/altair를 제거합니다(부록 B).
+nicegui
+
 # 2026-08-10 (TASK_HISTORY #70) — KRX OPEN API 연동에 **새 의존성을 추가하지 않았습니다.**
 # 후보였던 `pykrx-openapi`(PyPI)의 소스를 직접 읽고 비교한 결과, ① 인증키를 공식 규격(HTTP
 # 헤더 AUTH_KEY)이 아니라 쿼리스트링에 실어 보내고(키가 URL·로그에 남음), ② 우리가 쓰는 건
