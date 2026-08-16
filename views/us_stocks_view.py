@@ -208,7 +208,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
         translit_badge = ""
         if s.get("name_kr_is_transliterated"):
             translit_badge = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #a5b4fc; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #a5b4fc; '
                 'background-color: #312e81; border: 1px solid #818cf8; border-radius: 6px; padding: 1px 6px; '
                 'vertical-align: middle;">음역<span class="q-tooltiptext">한국에서 널리 쓰이는 정식 한글명이 '
                 '없어, 영문 사명을 <b>발음대로 자동 음역</b>한 표기입니다(번역이 아닙니다).<br>'
@@ -308,7 +308,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
     sector_badge_html = ""
     if s.get("is_reit"):
         sector_badge_html = (
-            '<span class="q-tooltip" style="background-color: #1e3a5f; color: #93c5fd; font-size: 11.5px; '
+            '<span class="q-tooltip" tabindex="0" style="background-color: #1e3a5f; color: #93c5fd; font-size: 11.5px; '
             'font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #3b82f6;">'
             '🏢 리츠(REIT)<span class="q-tooltiptext">부동산 투자 신탁입니다. 감가상각 때문에 순이익 기반 PER이 '
             '의미가 약해서, 데이터 소스도 PER 대신 <b>Price/FFO</b>(운영자금 대비 주가)를 제공합니다.</span></span>'
@@ -316,14 +316,14 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
 
     # 계산값 배지들 (§0-1 예시2-보충: 실측값과 반드시 구분 표기)
     calc_price_tag = (
-        ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+        ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
         'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
         'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">장마감 종가 블록을 직접 읽지 못해 '
         '<b>시가총액 ÷ 발행주식수</b>로 역산한 값입니다 (실측 종가 아님).</span></span>'
         if s.get("price_calculated") else ""
     )
     calc_feps_tag = (
-        ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+        ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
         'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
         'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">데이터 소스가 Forward EPS를 직접 주지 않아 '
         '<b>장마감 종가 ÷ Forward PER(애널리스트 컨센서스)</b>로 역산한 값입니다.<br>'
@@ -334,7 +334,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
     growth_capped_badge_html = ""
     if s.get("growth_score_capped"):
         growth_capped_badge_html = (
-            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
             'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
             'vertical-align: middle;">⚠️ 고성장 추정 보수반영<span class="q-tooltiptext">예상 성장률이 100%를 '
             '넘어 기저효과(일시적 실적 급변) 왜곡 가능성을 의심해, 퀀트 스코어의 PEGY 항목 점수만 보수적으로 '
@@ -344,7 +344,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
     geff_capped_badge_html = ""
     if s.get("g_eff_capped"):
         geff_capped_badge_html = (
-            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
             'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
             'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">실효성장률이 상한(성장률 35%p / '
             f'주주환원 10%p / 합계 40%p)에 걸려 절단된 값입니다.<br>캡 미적용 원값: '
@@ -433,7 +433,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
         uncapped_txt = f"캡을 적용하지 않은 산출값은 {fmt_usd(uncapped)} 입니다.<br>" if uncapped else ""
         gap_str, gap_color, bar_color, bar_width = "상승여력 산출 안 함 (상한 캡 적용)", "#fbbf24", "#78716c", 100
         target_cap_badge_html = (
-            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
             'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
             'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">이 목표가는 계산 결과가 아니라 '
             f'<b>상한(캡) 값</b>입니다.<br>{cap_reason}.<br>{uncapped_txt}'
@@ -447,7 +447,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
         bar_width = min(abs(gap_pct), 100)
         if s.get("f_target_floored"):
             target_cap_badge_html = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #7dd3fc; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #7dd3fc; '
                 'background-color: #1e3a5f; border: 1px solid #38bdf8; border-radius: 6px; padding: 1px 6px; '
                 'vertical-align: middle;">🛡️ 장부가 바닥값<span class="q-tooltiptext">PEGY 역산값이 장부가(BPS)보다 '
                 '낮게 나와 BPS를 대신 사용했습니다. 자세한 내용은 위 안내 참고.</span></span>'
@@ -493,7 +493,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
     <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px;
                 padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 22px; flex-wrap: wrap;">
         <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">
-            <span class="q-tooltip">🎯 애널리스트 컨센서스 (실측) ℹ️<span class="q-tooltiptext"><b>데이터 소스가 제공하는
+            <span class="q-tooltip" tabindex="0">🎯 애널리스트 컨센서스 (실측) ℹ️<span class="q-tooltiptext"><b>데이터 소스가 제공하는
             애널리스트 목표주가·투자의견 원본값</b>입니다.<br>아래 Forward 카드의 '목표가'는 우리 PEGY 모델이 계산한
             값이라 서로 다를 수 있습니다 — 둘을 나란히 보여주는 이유입니다(어느 쪽도 정답이 아님).</span></span>:
         </span>
@@ -620,7 +620,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
             <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">실효성장률 (g_eff) ℹ️<span class="q-tooltiptext"><b>실효성장률 = 3년 EPS 성장 전망 +
+                        <span class="q-tooltip" tabindex="0">실효성장률 (g_eff) ℹ️<span class="q-tooltiptext"><b>실효성장률 = 3년 EPS 성장 전망 +
                         주주환원율(배당+자사주)</b><br>PEGY의 분모입니다. 폭주 방지를 위해 성장률 35%p / 주주환원 10%p /
                         합계 40%p 상한을 둡니다(상한에 걸리면 옆에 배지가 붙습니다).</span></span>
                     </div>
@@ -628,7 +628,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">가치 지표 ℹ️<span class="q-tooltiptext"><b>Forward 밸류에이션</b><br>
+                        <span class="q-tooltip" tabindex="0">가치 지표 ℹ️<span class="q-tooltiptext"><b>Forward 밸류에이션</b><br>
                         • Forward PER: 주가 ÷ 향후 예상 EPS<br>• Forward EPS: 주가 ÷ Forward PER 로 역산한 계산값<br>
                         • Forward PEGY: Forward PER ÷ 실효성장률 (낮을수록 저평가)</span></span>
                     </div>
@@ -642,7 +642,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">3년 EPS 성장 전망 ℹ️<span class="q-tooltiptext">데이터 소스가 제공하는
+                        <span class="q-tooltip" tabindex="0">3년 EPS 성장 전망 ℹ️<span class="q-tooltiptext">데이터 소스가 제공하는
                         애널리스트 컨센서스(EPS Growth Forecast, 3년) 실측값입니다.<br>우리가 추정하거나 가공한 값이 아닙니다.</span></span>
                     </div>
                     <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{fmt_num(s.get('growth'), '%', 2)}</div>
@@ -655,14 +655,14 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                         </div>
                         <div class="comparison-row divider">
                             <span class="label-text">
-                                <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 기준 바닥가 ℹ️<span class="q-tooltiptext"
+                                <span class="q-tooltip" tabindex="0" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 기준 바닥가 ℹ️<span class="q-tooltiptext"
                                 style="color: #f1f5f9; font-weight: 400;">회사의 순자산 가치 기준 심리적 바닥 가격입니다 (현재가 ÷ PBR).</span></span>
                             </span>
                             <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{fmt_usd(s.get('floor_price'))}</span>
                         </div>
                         <div class="comparison-row">
                             <span class="label-text">
-                                <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">모델 목표가 ℹ️<span class="q-tooltiptext"
+                                <span class="q-tooltip" tabindex="0" style="color: #14b8a6; font-weight: 700;">모델 목표가 ℹ️<span class="q-tooltiptext"
                                 style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br>
                                 <b>① 목표 PEGY</b> = 1.0 + ROE/ROIC 프리미엄<br>
                                 <b>② 목표 PER</b> = 목표 PEGY × 실효성장률(g_eff)<br>
@@ -727,7 +727,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 {rank_prefix_html}{name_html}
                 <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px;
                              font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                    <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext">
+                    <span class="q-tooltip" tabindex="0" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext">
                     <b>종합 퀀트 스코어 (미국 종목용)</b><br>
                     PEGY 35 + 자본효율성(ROE·ROIC) 30 + 주주환원 20 + 재무건전성(F-Score) 10 + 변동성(베타) 5<br>
                     수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외하므로 만점은 종목마다 다릅니다.<br>
@@ -741,7 +741,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                              overflow-wrap: break-word; max-width: 260px; display: inline-block;">{s.get('badge', '—')}</span>
                 <span style="font-size: 12px; color: {beta_color}; font-weight: 600; background-color: rgba(15, 23, 42, 0.6);
                              padding: 4px 10px; border-radius: 6px; border: 1px solid #334155; white-space: nowrap;">
-                    <span class="q-tooltip" style="color: {beta_color};">{beta_text} ℹ️<span class="q-tooltiptext">
+                    <span class="q-tooltip" tabindex="0" style="color: {beta_color};">{beta_text} ℹ️<span class="q-tooltiptext">
                     <b>베타(5년)</b> = 이 종목이 시장(S&amp;P 500) 대비 얼마나 크게 출렁이는지 나타내는 지표입니다.<br>
                     베타 1.0 = 시장과 동일하게 움직임 · 1.0보다 크면 시장보다 더 크게 오르내림 · 1.0보다 작으면 더 완만하게 움직임<br>
                     (예: 베타 1.47 = 시장이 10% 움직일 때 이 종목은 평균적으로 약 14.7% 움직여온 편)<br>
@@ -763,22 +763,22 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                     padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; gap: 28px; flex-wrap: wrap;">
             <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
             <span style="font-size: 13px; color: #e2e8f0;">
-                <span class="q-tooltip">ROE ℹ️<span class="q-tooltiptext"><b>자기자본이익률</b><br>
+                <span class="q-tooltip" tabindex="0">ROE ℹ️<span class="q-tooltiptext"><b>자기자본이익률</b><br>
                 순이익 ÷ 자기자본. 미국 시장 기준선은 15% 안팎이며, 9% 미만이면 자본비용도 못 버는 구간으로 봅니다.</span></span>:
                 <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(t_roe, '%', 2)}</b>
             </span>
             <span style="font-size: 13px; color: #e2e8f0;">
-                <span class="q-tooltip">ROIC ℹ️<span class="q-tooltiptext"><b>투하자본이익률</b><br>
+                <span class="q-tooltip" tabindex="0">ROIC ℹ️<span class="q-tooltiptext"><b>투하자본이익률</b><br>
                 세후영업이익 ÷ 투하자본. WACC(미국 대형주 8~10%)와 비교합니다.<br>
                 은행·보험은 투하자본 개념이 달라 데이터 소스가 n/a로 제공합니다(수집 실패가 아님).</span></span>:
                 <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(roic, '%', 2)}</b>
             </span>
             <span style="font-size: 13px; color: #e2e8f0;">
-                <span class="q-tooltip">ROA ℹ️<span class="q-tooltiptext"><b>총자산이익률</b> — 순이익 ÷ 총자산</span></span>:
+                <span class="q-tooltip" tabindex="0">ROA ℹ️<span class="q-tooltiptext"><b>총자산이익률</b> — 순이익 ÷ 총자산</span></span>:
                 <b style="color: #cbd5e1; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(roa, '%', 2)}</b>
             </span>
             <span style="font-size: 13px; color: #e2e8f0;">
-                <span class="q-tooltip">F-Score ℹ️<span class="q-tooltiptext"><b>피오트로스키 F-Score (0~9)</b><br>
+                <span class="q-tooltip" tabindex="0">F-Score ℹ️<span class="q-tooltiptext"><b>피오트로스키 F-Score (0~9)</b><br>
                 수익성·재무건전성·운영효율 9개 항목을 점검하는 회계학 표준 스코어입니다. 높을수록 재무가 튼튼합니다.</span></span>:
                 <b style="color: #cbd5e1; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(s.get('piotroski_f'), ' / 9')}</b>
             </span>
@@ -800,13 +800,13 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
             <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext">과거 12개월 자기자본 대비 순이익 비율</span></span>
+                        <span class="q-tooltip" tabindex="0">Trailing ROE ℹ️<span class="q-tooltiptext">과거 12개월 자기자본 대비 순이익 비율</span></span>
                     </div>
                     <div style="font-size: 18px; font-weight: 800; color: #cbd5e1;">{fmt_num(t_roe, '%', 2)}</div>
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>
+                        <span class="q-tooltip" tabindex="0">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>
                         • PER: 주가÷순이익 • EPS: 주당순이익 • PBR: 주가÷순자산 • EV/EBITDA: M&A 투자원금 회수기간</span></span>
                     </div>
                     <div style="font-size: 18px; color: #cbd5e1; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
@@ -824,7 +824,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">주주환원 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>
+                        <span class="q-tooltip" tabindex="0">주주환원 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역</b><br>
                         • 주당배당금(DPS): {dps_str}<br>• 배당수익률: {fmt_num(s.get('div_yield'), '%', 2)}<br>
                         • 자사주 매입 수익률: {fmt_num(s.get('buyback_yield'), '%', 2)}<br>
                         • 배당성향: {fmt_num(s.get('payout_ratio'), '%', 2)}<br>
@@ -839,7 +839,7 @@ def _render_stock_card(s, rank_fallback, is_admin=False):
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>
+                        <span class="q-tooltip" tabindex="0">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>
                         • PEGY: Trailing PER ÷ 실효성장률<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
                     </div>
                     <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">
@@ -1029,11 +1029,23 @@ def render_us_stocks_page():
             transition: opacity 0.2s ease-in-out, visibility 0.2s; border: 1px solid #38bdf8;
             font-size: 11.5px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); font-weight: 400; }
         .q-tooltip:hover .q-tooltiptext { visibility: visible; opacity: 1; }
-        /* 2026-08-16 (#124, pegy_view.py와 동일한 원인) — 숨겨진 300px 툴팁 박스가
-           visibility: hidden 이라 레이아웃 공간을 계속 차지해 페이지 가로 스크롤 폭을
-           늘리던 문제. 좁은 화면에서는 display: none 으로 완전히 빼서 원천 차단. */
+        /* 2026-08-16 (#124→#125, pegy_view.py와 동일한 원인·동일한 개선 — 자세한 설명은
+           그쪽 주석 참고) — 숨겨진 300px 툴팁 박스의 visibility:hidden이 레이아웃 공간을
+           계속 차지해 페이지 가로 스크롤 폭을 늘리던 문제. #124에서는 좁은 화면에 display:
+           none으로 아예 꺼버렸으나, 오너 지적("모바일이라고 기능을 줄이면 안 된다")에 따라
+           기능은 유지하고 위치만 화면 안으로 고정하는 방식으로 교체: 탭하면 포커스되도록
+           tabindex="0" 추가 + :focus에서도 표시 + 좁은 화면에서는 화면 하단 중앙에
+           position: fixed 로 고정(트리거 위치와 무관하게 항상 화면 안에만 그려짐). */
+        .q-tooltip:focus .q-tooltiptext,
+        .q-tooltip:focus-within .q-tooltiptext { visibility: visible; opacity: 1; }
+        .q-tooltip:focus { outline: none; }
         @media (max-width: 768px) {
-            .q-tooltip .q-tooltiptext { display: none; }
+            .q-tooltip .q-tooltiptext {
+                position: fixed; left: 50%; right: auto; top: auto; bottom: 64px;
+                transform: translateX(-50%); width: min(300px, calc(100vw - 32px));
+                max-height: 45vh; overflow-y: auto;
+            }
+            .q-tooltip .q-tooltiptext::after { display: none; }
         }
         .comparison-box { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 10px;
             padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }

@@ -309,18 +309,48 @@ def render_pegy_page():
             visibility: visible;
             opacity: 1;
         }
-        /* 2026-08-16 (#119→#122→#123 이어서 발견한 진짜 원인, #124) — 이 (i) 툴팁 박스는
-           카드마다 여러 개(Forward ROE·PER·EPS 등) 있고 `visibility: hidden`으로만 숨겨
-           둔 채 `width: 300px`에 `position: absolute; left: 50%; transform: translateX(-50%)`
-           로 항상 DOM에 그려져 있습니다. `visibility: hidden`은 `display: none`과 달리
-           레이아웃 공간을 계속 차지하므로, 트리거(ℹ️)가 화면 가장자리 근처에 있으면 이
-           숨겨진 300px 박스가 뷰포트 밖으로 삐져나가면서도 **눈에는 안 보이는 채** 페이지
-           전체의 가로 스크롤 폭을 계속 늘려놓고 있었습니다 — "보이는 곳엔 문제없는데
-           스와이프하면 밀린다"는 증상의 진짜 뿌리였습니다(호버 자체도 터치 화면에선 거의
-           의미가 없어 모바일에서 잃는 기능이 없습니다). 좁은 화면에서는 이 박스를 아예
-           `display: none`으로 완전히 레이아웃에서 빼서 원천 차단합니다(데스크탑은 그대로). */
+        /* 2026-08-16 (#119→#122→#123 이어서 발견한 진짜 원인, #124→#125로 개선) — 이 (i)
+           툴팁 박스는 카드마다 여러 개(Forward ROE·PER·EPS 등) 있고 `visibility: hidden`
+           으로만 숨겨 둔 채 `width: 300px`에 `position: absolute; left: 50%;
+           transform: translateX(-50%)`로 트리거(ℹ️) 바로 밑에 항상 그려져 있었습니다.
+           `visibility: hidden`은 `display: none`과 달리 레이아웃 공간을 계속 차지하므로,
+           트리거가 화면 가장자리 근처에 있으면 이 숨겨진 300px 박스가 뷰포트 밖으로
+           삐져나가면서도 **눈에는 안 보이는 채** 페이지 전체의 가로 스크롤 폭을 계속
+           늘려놓고 있었습니다.
+           ⚠️ 2026-08-16 오너 지적 — "모바일이라고 기능을 줄이면 안 된다"(모바일·태블릿
+           사용이 대세인데 연령대 폭넓게 쓰게 하려면 기능을 빼면 안 된다는 지적, 정당함).
+           그래서 #124에서 했던 "좁은 화면엔 아예 display:none으로 꺼버리기"를 되돌리고,
+           **기능은 그대로 살리되 위치만 화면 안으로 고정**하는 방식으로 바꿨습니다:
+           ① `tabindex="0"`을 모든 `.q-tooltip`에 추가해 **탭(터치)하면 포커스**가 가게
+              만들고(터치 화면은 :hover가 잘 안 통하지만 탭=포커스는 모든 브라우저에서
+              확실히 동작합니다), `:focus`에서도 툴팁이 보이도록 CSS만 추가(JS 불필요,
+              다른 곳 탭하면 포커스가 빠지며 자동으로 닫힘 — 흔한 모바일 바텀시트 UX와 동일).
+           ② 좁은 화면에서는 툴팁 박스를 트리거 아이콘에 붙이는 대신
+              `position: fixed`로 **화면 하단 중앙에 고정**하고 폭을 `min(300px,
+              화면폭-32px)`로 제한합니다 — 아이콘이 화면 어디에 있든 박스가 항상 화면
+              안에만 그려지므로 가로 스크롤을 만들 수가 없습니다. 설명 글자·내용은 전혀
+              안 바뀌고 "아이콘 바로 밑" 대신 "화면 하단"에 뜨는 것만 달라집니다. */
+        .q-tooltip:focus .q-tooltiptext,
+        .q-tooltip:focus-within .q-tooltiptext {
+            visibility: visible;
+            opacity: 1;
+        }
+        .q-tooltip:focus {
+            outline: none;
+        }
         @media (max-width: 768px) {
             .q-tooltip .q-tooltiptext {
+                position: fixed;
+                left: 50%;
+                right: auto;
+                top: auto;
+                bottom: 64px;
+                transform: translateX(-50%);
+                width: min(300px, calc(100vw - 32px));
+                max-height: 45vh;
+                overflow-y: auto;
+            }
+            .q-tooltip .q-tooltiptext::after {
                 display: none;
             }
         }
@@ -827,7 +857,7 @@ def render_pegy_page():
         )
         if roe_gap_flag:
             roe_gap_badge_html = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
                 'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
                 f'vertical-align: middle;">⚡ 추정치 변동 큼<span class="q-tooltiptext">Trailing({t_roe_val:.1f}%) 대비 '
                 f'Forward 추정치가 큰 폭으로 높습니다({f_roe_val:.1f}%).<br>반도체 등 경기순환 업종은 실적 사이클상 '
@@ -847,7 +877,7 @@ def render_pegy_page():
         growth_capped_badge_html = ""
         if s.get("growth_score_capped"):
             growth_capped_badge_html = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
                 'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
                 'vertical-align: middle;">⚠️ 고성장 추정 보수반영<span class="q-tooltiptext">예상 성장률이 100%를 '
                 '넘어 기저효과(일시적 실적 급변) 왜곡 가능성을 의심, 퀀트 스코어의 PEGY 항목 점수만 보수적으로 '
@@ -895,7 +925,7 @@ def render_pegy_page():
         # 2026-08-05 추가: Trailing EPS가 실측값이 아니라 계산값(가격÷PER 역산)이면
         # ENGINEERING_SPEC.md §0-1 예시2-보충 원칙에 따라 반드시 별도 마크를 붙입니다.
         calc_eps_tag = (
-            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
             'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
             'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">네이버에 실측 EPS가 없어 '
             '가격÷PER 로 역산한 값입니다 (실측 아님)</span></span>'
@@ -917,7 +947,7 @@ def render_pegy_page():
         # 2026-08-06 추가: DPS가 재무제표 실측이 아니라 배당수익률로 역산한 계산값이면
         # ENGINEERING_SPEC.md §0-1 예시2-보충 원칙에 따라 별도 마크를 붙입니다.
         calc_dps_tag = (
-            ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+            ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
             'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
             'vertical-align: middle;">🧮 계산값<span class="q-tooltiptext">재무제표에 확정 DPS가 없어 '
             '배당수익률로 역산한 값입니다 (실측 아님)</span></span>'
@@ -964,7 +994,7 @@ def render_pegy_page():
             bar_color = "#78716c"        # 계산된 상승여력이 아니므로 초록 바를 쓰지 않습니다
             bar_width = 100
             target_cap_badge_html = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
                 'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
                 'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">이 목표가는 계산 결과가 아니라 '
                 f'<b>상한(캡) 값</b>입니다.<br>{cap_reason}.<br>{uncapped_txt}'
@@ -989,7 +1019,7 @@ def render_pegy_page():
             t_fair_uncapped = s.get('t_fair_uncapped')
             t_fair_uncapped_txt = f"캡 미적용 산출값 {t_fair_uncapped:,}원.<br>" if t_fair_uncapped else ""
             t_fair_cap_badge_html = (
-                ' <span class="q-tooltip" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
+                ' <span class="q-tooltip" tabindex="0" style="font-size: 10px; font-weight: 800; color: #fbbf24; '
                 'background-color: #78350f; border: 1px solid #facc15; border-radius: 6px; padding: 1px 6px; '
                 'vertical-align: middle;">🧮 상한 적용값<span class="q-tooltiptext">과거 적정가가 현재가 2.5배 '
                 f'상한에 걸려 절단된 값입니다.<br>{t_fair_uncapped_txt}계산 결과가 아니라 상한값입니다.</span></span>'
@@ -1279,21 +1309,21 @@ def render_pegy_page():
                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
+                            <span class="q-tooltip" tabindex="0">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 만들어내지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('f_roe'), '%', 1)}{roe_gap_badge_html}</div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">가치 지표 ℹ️<span class="q-tooltiptext"><b>Forward 밸류에이션</b><br>• PER: 주가 / 12개월 추정 EPS<br>• EPS: 향후 12개월 예상 주당순이익</span></span>
+                            <span class="q-tooltip" tabindex="0">가치 지표 ℹ️<span class="q-tooltiptext"><b>Forward 밸류에이션</b><br>• PER: 주가 / 12개월 추정 EPS<br>• EPS: 향후 12개월 예상 주당순이익</span></span>
                         </div>
                         <div style="font-size: 18px; color: #f1f5f9; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
+                            <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward PER ℹ️<span class="q-tooltiptext">내년에 벌어들일 돈에 비해 현재 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('f_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">Forward EPS ℹ️<span class="q-tooltiptext">주식 1주가 내년 1년 동안 벌어들일 것으로 예상되는 순수익(원)</span></span> {fmt_num(s.get('f_eps'), '원', 0)}
                         </div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
+                            <span class="q-tooltip" tabindex="0">예상 성장률 ℹ️<span class="q-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}{growth_capped_badge_html}</div>
                     </div>
@@ -1305,13 +1335,13 @@ def render_pegy_page():
                             </div>
                             <div class="comparison-row divider">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 계산의 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
+                                    <span class="q-tooltip" tabindex="0" style="color: #94a3b8; font-weight: 700;">🛡️ PBR 계산의 바닥가 ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;">회사가 가진 순수한 재산 가치를 기준으로 산정한 심리적 바닥 가격입니다. (현재가 ÷ PBR로 계산됨)</span></span>
                                 </span>
                                 <span style="font-size: 15px; font-weight: 700; color: #94a3b8;">{floor_price_str}</span>
                             </div>
                             <div class="comparison-row">
                                 <span class="label-text">
-                                    <span class="q-tooltip" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br>PEGY(=PER÷실효성장률) 공식을 거꾸로 풀어서 계산해요.<br><b>① 목표 PEGY</b> = 기준 1.0배 + ROE/ROIC 프리미엄(이익 창출력이 좋을수록 더 비싼 배수를 인정)<br><b>② 목표 PER</b> = 목표 PEGY × Forward 실효성장률(g_eff = 예상 성장률+주주환원율(배당 등), 변동성 벌점 반영)<br><b>③ 목표주가</b> = Forward EPS × 목표 PER<br>Forward EPS·PER은 네이버 '추정 컨센서스' 기반입니다.<br>다만 고성장 종목은 공식상 값이 발산하기 때문에 <b>목표 PER 25배 / 현재가의 2.5배</b> 상한을 둡니다. 상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다.</span></span>
+                                    <span class="q-tooltip" tabindex="0" style="color: #14b8a6; font-weight: 700;">목표가 (Target) ℹ️<span class="q-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br>PEGY(=PER÷실효성장률) 공식을 거꾸로 풀어서 계산해요.<br><b>① 목표 PEGY</b> = 기준 1.0배 + ROE/ROIC 프리미엄(이익 창출력이 좋을수록 더 비싼 배수를 인정)<br><b>② 목표 PER</b> = 목표 PEGY × Forward 실효성장률(g_eff = 예상 성장률+주주환원율(배당 등), 변동성 벌점 반영)<br><b>③ 목표주가</b> = Forward EPS × 목표 PER<br>Forward EPS·PER은 네이버 '추정 컨센서스' 기반입니다.<br>다만 고성장 종목은 공식상 값이 발산하기 때문에 <b>목표 PER 25배 / 현재가의 2.5배</b> 상한을 둡니다. 상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다.</span></span>
                                 </span>
                                 <span class="price-text-target">{fmt_num(f_target, '원', 0)}{target_cap_badge_html}</span>
                             </div>
@@ -1350,7 +1380,7 @@ def render_pegy_page():
                     <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({s['code']})</span>
                     <!-- 100점 만점 퀀트 종합점수 뱃지 -->
                     <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
-                        <span class="q-tooltip" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!<br>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외합니다.<br>{score_tooltip_extra}</span></span> {score_badge_html}
+                        <span class="q-tooltip" tabindex="0" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="q-tooltiptext"><b>종합 퀀트 스코어</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!<br>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외합니다.<br>{score_tooltip_extra}</span></span> {score_badge_html}
                     </span>
                     <span style="background-color: {s['badge_bg']}; color: {s['badge_fg']}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {s['badge_fg']}; white-space: normal; overflow-wrap: break-word; max-width: 260px; display: inline-block;">
                         {s['badge']}
@@ -1393,15 +1423,15 @@ def render_pegy_page():
             <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px; padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: flex-start; gap: 28px; flex-wrap: wrap;">
                 <span style="color: #94a3b8; font-weight: 700; font-size: 13px;">💎 자본효율성 지표:</span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE (자기자본이익률)</b><br>지난 12개월(4분기 합산) 순이익을 자기자본으로 나눈 자본 효율성 지표입니다. 8% 미만 시 이익 창출력이 부족한 상태입니다.</span></span>: 
+                    <span class="q-tooltip" tabindex="0">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE (자기자본이익률)</b><br>지난 12개월(4분기 합산) 순이익을 자기자본으로 나눈 자본 효율성 지표입니다. 8% 미만 시 이익 창출력이 부족한 상태입니다.</span></span>: 
                     <b style="color: {roe_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(t_roe_val, '%', 1)}</b>
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 추정해 채우지 않고 '데이터 없음'으로 표시합니다.</span></span>:
+                    <span class="q-tooltip" tabindex="0">Forward ROE ℹ️<span class="q-tooltiptext"><b>Forward ROE (예상 자기자본이익률)</b><br>네이버 재무제표의 애널리스트 컨센서스 연간 추정치입니다.<br>커버리지가 없는 종목은 값을 추정해 채우지 않고 '데이터 없음'으로 표시합니다.</span></span>:
                     <b style="color: #38bdf8; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(s.get('f_roe'), '%', 1)}</b>{roe_gap_badge_html}
                 </span>
                 <span style="font-size: 13px; color: #e2e8f0;">
-                    <span class="q-tooltip">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>영업이익 ÷ 투하자본으로 별도 산출해야 하는 지표입니다.<br>현재 이 프로젝트는 해당 원천 데이터를 수집하지 않으므로 '데이터 없음'으로 표시합니다.</span></span>:
+                    <span class="q-tooltip" tabindex="0">ROIC (ROC) ℹ️<span class="q-tooltiptext"><b>ROIC (영업 투입자본이익률)</b><br>영업이익 ÷ 투하자본으로 별도 산출해야 하는 지표입니다.<br>현재 이 프로젝트는 해당 원천 데이터를 수집하지 않으므로 '데이터 없음'으로 표시합니다.</span></span>:
                     <b style="color: {roic_color}; font-weight: 700; font-size: 14px; margin-left: 4px;">{fmt_num(roic_val, '%', 1)}</b>
                 </span>
             </div>
@@ -1415,30 +1445,30 @@ def render_pegy_page():
                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>
+                            <span class="q-tooltip" tabindex="0">Trailing ROE ℹ️<span class="q-tooltiptext"><b>Trailing ROE</b><br>과거 12개월 평균 자기자본 대비 순이익 비율</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #cbd5e1;">{fmt_num(t_roe_val, '%', 1)}</div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
+                            <span class="q-tooltip" tabindex="0">가치 및 회수 지표 ℹ️<span class="q-tooltiptext"><b>Trailing 밸류에이션</b><br>• PER: 주가/순이익<br>• EPS: 주당순이익<br>• PBR: 주가/순자산<br>• EV/EBITDA: M&A 투자원금 회수기간</span></span>
                         </div>
                         <div style="font-size: 18px; color: #cbd5e1; font-weight: 800; margin-bottom: 8px; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('t_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"}{calc_eps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"}
+                            <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="q-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {fmt_num(s.get('t_per'), '배', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="q-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"}{calc_eps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="q-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"}
                         </div>
                         <div style="font-size: 18px; color: #38bdf8; font-weight: 800; letter-spacing: -0.4px;">
-                            <span class="q-tooltip" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda_str if ev_ebitda_str == "데이터 없음" else ev_ebitda_str + "배"}{ev_years_str.replace("11px", "13px")}
+                            <span class="q-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&A 원금회수) ℹ️<span class="q-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {ev_ebitda_str if ev_ebitda_str == "데이터 없음" else ev_ebitda_str + "배"}{ev_years_str.replace("11px", "13px")}
                         </div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">작년 배당률 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실제 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
+                            <span class="q-tooltip" tabindex="0">작년 배당률 (확정) ℹ️<span class="q-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실제 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {dps_str}<br>• 배당 총 규모: {s.get('return_total', '데이터 없음')}<br>• 배당수익률: {fmt_num(s.get('sh_return'), '%', 2)}<br>※ {s.get('sh_return_basis', '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {dps_str}{calc_dps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {fmt_num(s.get('sh_return'), '%', 2)} <span style="font-size: 13px; color: #94a3b8;">({s.get('return_total', '데이터 없음')})</span></div>
                     </div>
                     <div>
                         <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                            <span class="q-tooltip">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
+                            <span class="q-tooltip" tabindex="0">PEGY / 과거 적정가 ℹ️<span class="q-tooltiptext"><b>Trailing PEGY & 과거 적정주가</b><br>• PEGY: PER / (성장률 + 주주환원율)<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
                         </div>
                         <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{fmt_num(s.get('t_pegy'), '', 2)} <span style="color: #475569; font-size: 15px; margin: 0 4px;">/</span> {fmt_num(s.get('t_fair'), '원', 0)}</div>
                     </div>
