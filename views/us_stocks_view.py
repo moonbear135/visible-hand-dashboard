@@ -1029,6 +1029,12 @@ def render_us_stocks_page():
             transition: opacity 0.2s ease-in-out, visibility 0.2s; border: 1px solid #38bdf8;
             font-size: 11.5px; box-shadow: 0 6px 18px rgba(0,0,0,0.6); font-weight: 400; }
         .q-tooltip:hover .q-tooltiptext { visibility: visible; opacity: 1; }
+        /* 2026-08-16 (#124, pegy_view.py와 동일한 원인) — 숨겨진 300px 툴팁 박스가
+           visibility: hidden 이라 레이아웃 공간을 계속 차지해 페이지 가로 스크롤 폭을
+           늘리던 문제. 좁은 화면에서는 display: none 으로 완전히 빼서 원천 차단. */
+        @media (max-width: 768px) {
+            .q-tooltip .q-tooltiptext { display: none; }
+        }
         .comparison-box { background-color: #0f172a; border: 1px solid #1e293b; border-radius: 10px;
             padding: 12px 14px; margin-bottom: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.4); }
         .comparison-row { display: flex; justify-content: space-between; align-items: center; padding: 3px 0; }

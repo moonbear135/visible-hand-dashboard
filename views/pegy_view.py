@@ -309,6 +309,21 @@ def render_pegy_page():
             visibility: visible;
             opacity: 1;
         }
+        /* 2026-08-16 (#119→#122→#123 이어서 발견한 진짜 원인, #124) — 이 (i) 툴팁 박스는
+           카드마다 여러 개(Forward ROE·PER·EPS 등) 있고 `visibility: hidden`으로만 숨겨
+           둔 채 `width: 300px`에 `position: absolute; left: 50%; transform: translateX(-50%)`
+           로 항상 DOM에 그려져 있습니다. `visibility: hidden`은 `display: none`과 달리
+           레이아웃 공간을 계속 차지하므로, 트리거(ℹ️)가 화면 가장자리 근처에 있으면 이
+           숨겨진 300px 박스가 뷰포트 밖으로 삐져나가면서도 **눈에는 안 보이는 채** 페이지
+           전체의 가로 스크롤 폭을 계속 늘려놓고 있었습니다 — "보이는 곳엔 문제없는데
+           스와이프하면 밀린다"는 증상의 진짜 뿌리였습니다(호버 자체도 터치 화면에선 거의
+           의미가 없어 모바일에서 잃는 기능이 없습니다). 좁은 화면에서는 이 박스를 아예
+           `display: none`으로 완전히 레이아웃에서 빼서 원천 차단합니다(데스크탑은 그대로). */
+        @media (max-width: 768px) {
+            .q-tooltip .q-tooltiptext {
+                display: none;
+            }
+        }
         /* 0.1초 가격 비교 박스 (위아래 직관 배치) */
         .comparison-box {
             background-color: #0f172a;
