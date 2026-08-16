@@ -650,6 +650,27 @@ def _colored_pct(value):
     return text
 
 
+def _colored_pct_lg(value):
+    """
+    2026-08-16 오너 지적 — 통화 요약 카드(매입원가/평가금액/평가손익 세 칸) 아래에 붙는
+    수익률이 "글자가 작고 안 보인다"는 스크린샷 피드백(빨간 동그라미). 색 규칙(오르면
+    빨강/내리면 파랑)은 `_colored_pct()`와 완전히 동일하게 유지하고, 이 카드에서만 글자
+    크기·굵기를 키웁니다. 표 안 종목별 수익률(좁은 칸, `_colored_pct()` 그대로 사용)까지
+    키우면 칸이 좁아 줄바꿈되므로 거기는 손대지 않았습니다 — 값(숫자) 자체는 동일합니다.
+    """
+    if value is None:
+        return "—"
+    text = f"{value:+.2f}%"
+    if value > 0:
+        color = "#d32f2f"
+    elif value < 0:
+        color = "#1565c0"
+    else:
+        color = None
+    style = f"font-size:1.35rem; font-weight:700;" + (f" color:{color};" if color else "")
+    return f"<span style='{style}'>{text}</span>"
+
+
 def _md_amount(value, currency, decimals=None):
     """
     마크다운 텍스트(`st.error`/`st.info`/`st.caption`/`st.markdown` 등)에 금액을 넣을 때
@@ -676,7 +697,16 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
     header_col, sync_col = st.columns([3, 2])
     header_col.markdown(f"### {CURRENCY_TITLES.get(currency, currency)}")
     if sync_label:
-        sync_col.caption(sync_label + " — 실시간 시세가 아닙니다.")
+        # 2026-08-16 오너 지적 — st.caption()은 글자가 작고 연한 회색이라 스크린샷에서
+        # 빨간 동그라미로 표시할 만큼 눈에 안 들어온다는 피드백. 내용(값)은 그대로 두고
+        # 글자 크기·굵기·색만 키웠습니다. sync_label은 사용자 입력이 아니라 우리 수집기가
+        # 쓴 data/*.json 메타데이터에서만 옵니다(§0-1 — kr_meta['last_updated_at']/
+        # us_meta['last_updated_at_kst']) — html.escape()는 습관적으로 걸어 둡니다.
+        sync_col.markdown(
+            f"<div style='font-size:0.95rem; font-weight:600; color:#31333F;'>"
+            f"🕒 {html.escape(sync_label)} — 실시간 시세가 아닙니다.</div>",
+            unsafe_allow_html=True,
+        )
 
     rows = group["rows"]
     if not rows:
@@ -692,7 +722,10 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
         # 전체를 통일. st.metric 내장 delta 색은 초록/빨강만 지원해서(파랑 옵션 없음) 끄고
         # (`delta_color="off"`), 아래 행과 같은 `_colored_pct()`로 직접 빨강/파랑을 입힙니다.
         col3.metric("평가손익", format_amount(profit, currency), delta_color="off")
-        col3.markdown(_colored_pct(profit / base * 100 if base else None))
+        col3.markdown(
+            _colored_pct_lg(profit / base * 100 if base else None),
+            unsafe_allow_html=True,
+        )
     else:
         col2.metric("평가금액 합계", "—")
         col3.metric("평가손익", "—")

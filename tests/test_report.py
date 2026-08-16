@@ -2218,9 +2218,19 @@ def test_us_korean_names():
               "리포트가 '내 성적표'의 표기 함수를 그대로 import(로직 중복 구현 없음)")
         check("from views.scorecard_view import SESSION_CLIENT_KEY, SESSION_USER_KEY" in view_src,
               "기존 세션 키 import 줄은 그대로 보존(읽기 전용 재사용 관례 유지)")
+        # 2026-08-16 수정 — 원래 이 자리는 "scorecard_src 에 '2026-08-16' 문자열이 없어야
+        # 한다"는 날짜 문자열 검사였습니다(#115 커밋 당일 scorecard_view.py 가 안 바뀌었는지
+        # 확인하려던 용도). 그런데 같은 날 오너가 스코어카드 화면 자체의 **가시성**(요약 카드
+        # 동기화 시각·수익률 글자가 작다)을 지적해 scorecard_view.py 를 정당하게 고치면서
+        # 날짜가 겹쳐 이 검사가 오탐(false positive)으로 항상 실패하게 됐습니다. 실제로
+        # 지켜야 할 불변식은 "날짜 문자열이 없어야 한다"가 아니라 "리포트가 재사용하는
+        # 표기 함수(_display_name/_us_korean_name)가 여전히 그대로 존재하고, 그 함수가
+        # 리포트 전용 로직으로 갈라지지 않았다"는 것이므로 검사를 그쪽으로 바꿨습니다.
         scorecard_src = (REPO_ROOT / "views" / "scorecard_view.py").read_text(encoding="utf-8")
-        check("2026-08-16" not in scorecard_src,
-              "🔴 '내 성적표'는 이번에도 한 줄도 고치지 않음(단방향 재사용)")
+        check("def _display_name(row, indexes)" in scorecard_src
+              and "def _us_korean_name(row, indexes)" in scorecard_src,
+              "'내 성적표'의 표기 함수(_display_name/_us_korean_name)가 그대로 존재 — "
+              "리포트가 재사용하는 함수 자체는 갈라지지 않음(단방향 재사용 유지)")
     except Exception as exc:  # noqa: BLE001
         check(False, "views.report_view 미국 한글명 표기 검증",
               f"({type(exc).__name__}: {exc})")
