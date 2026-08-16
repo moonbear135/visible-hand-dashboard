@@ -1250,12 +1250,16 @@ def render_pegy_page():
         else:
             forward_section_html = f"""
             <div style="background: linear-gradient(135deg, rgba(14, 116, 144, 0.35) 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px solid #38bdf8; border-radius: 12px; padding: 16px 22px; box-shadow: 0 0 16px rgba(56, 189, 248, 0.25);">
-                <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
+                <div style="display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 4px 8px; border-bottom: 1.5px solid #0284c7; padding-bottom: 8px; margin-bottom: 14px;">
                     <div>
                         <div style="font-size: 16px; font-weight: 800; color: #38bdf8; line-height: 1.2;">🚀 Forward</div>
                         <div style="font-size: 13px; font-weight: 600; color: #7dd3fc; margin-top: 2px;">(미래 추정 밸류 분석)</div>
                     </div>
-                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: nowrap;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 정도에 비례한 벌점 반영, 1.05~1.40x)</span>
+                    <!-- 2026-08-16 오너 신고 — 이 문구가 white-space: nowrap 이라 좁은 화면에서
+                         줄바꿈되지 않고 카드·페이지 폭을 통째로 밀어내 가로 스크롤이 생기던 버그.
+                         nowrap을 없애고(자연스럽게 줄바꿈) 최대 너비를 줘서 좁은 화면에서는
+                         이 설명만 여러 줄로 접히고 카드 폭은 그대로 유지되게 했습니다. -->
+                    <span style="font-size: 11.5px; color: #7dd3fc; font-weight: 500; white-space: normal; overflow-wrap: break-word; text-align: right; max-width: 220px;">*네이버 '추정 PER·EPS' 컨센서스 기반 (변동성 확대 시 정도에 비례한 벌점 반영, 1.05~1.40x)</span>
                 </div>
                 <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                     <div>
