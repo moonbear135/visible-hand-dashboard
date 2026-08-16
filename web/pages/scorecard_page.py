@@ -31,6 +31,8 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
      표시하고 평가금액·수익률을 계산하지 않습니다 (§0-1).
 """
 
+from contextlib import contextmanager
+
 from nicegui import ui
 
 from utils.company_names_kr import resolve_korean_name
@@ -396,19 +398,42 @@ def _render_auth() -> None:
             _render_reset_form()
 
 
+@contextmanager
+def _busy(button: ui.button):
+    """버튼을 로딩 상태로 바꿔 중복 클릭을 막습니다.
+
+    🔴 2026-08-17 (오너 실기기 신고) — Supabase 네트워크 응답까지 2~3초 걸리는데, 그동안
+    화면에 아무 표시가 없으면 "로그인 안 된 줄 알고" 여러 번 눌러 요청이 중복 발사되고,
+    운 나쁘면 그중 하나가 레이트리밋/일시 오류로 실패해 "비밀번호가 틀렸다"처럼 보이는
+    혼란스러운 화면이 됩니다. 버튼에 Quasar 내장 `loading` 표시를 켜고 클릭을 막아서
+    "지금 처리 중"임을 명확히 보여주고, 끝나면(성공/실패 상관없이) 원상복구합니다.
+
+    로그인/회원가입/비밀번호 재설정 코드 발송/비밀번호 변경 4곳이 전부 같은 네트워크
+    지연을 겪으므로 여기 한 곳에 모아 재사용합니다(§0-3-10 중복 금지).
+    """
+    button.props('loading')
+    button.disable()
+    try:
+        yield
+    finally:
+        button.props(remove='loading')
+        button.enable()
+
+
 def _render_login_form() -> None:
     message = ui.label('').classes('text-red-400')
 
     def _submit() -> None:
         message.text = ''
-        try:
-            user = login(email_input.value or '', password_input.value or '')
-        except Exception as exc:                   # noqa: BLE001
-            message.text = f'🚫 {_fail(exc, "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
-            return
-        if user is None:
-            message.text = '🚫 로그인에 실패했습니다(사용자 정보를 받지 못했습니다).'
-            return
+        with _busy(login_btn):
+            try:
+                user = login(email_input.value or '', password_input.value or '')
+            except Exception as exc:                   # noqa: BLE001
+                message.text = f'🚫 {_fail(exc, "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
+                return
+            if user is None:
+                message.text = '🚫 로그인에 실패했습니다(사용자 정보를 받지 못했습니다).'
+                return
         # 비밀번호가 브라우저 메모리에 남지 않도록 비우고, 같은 주소를 다시 그립니다.
         # ⚠️ 이동 주소는 우리가 정한 고정 경로뿐입니다 — 사용자가 준 URL 로 보내지 않습니다
         #    (§0-3-9 오픈 리다이렉트 방지).
@@ -418,7 +443,7 @@ def _render_login_form() -> None:
     email_input = ui.input('이메일').classes('w-full max-w-sm').on('keydown.enter', _submit)
     password_input = ui.input('비밀번호', password=True, password_toggle_button=True) \
         .classes('w-full max-w-sm').on('keydown.enter', _submit)
-    ui.button('로그인', on_click=_submit)
+    login_btn = ui.button('로그인', on_click=_submit)
     ui.label(
         '🔑 비밀번호를 잊으셨나요? 새 계정을 만들지 마시고 위 "비밀번호 찾기" 탭에서 '
         '이메일로 코드를 받아 새 비밀번호를 정하세요 — 기존에 입력한 보유 종목이 그대로 남습니다.'
@@ -437,15 +462,16 @@ def _render_signup_form() -> None:
         if (password_input.value or '') != (confirm_input.value or ''):
             message.text = '🚫 비밀번호가 서로 다릅니다.'
             return
-        try:
-            client = get_client()
-            if client is None:
-                message.text = '🚫 Supabase 연결이 준비되지 않아 가입할 수 없습니다.'
+        with _busy(signup_btn):
+            try:
+                client = get_client()
+                if client is None:
+                    message.text = '🚫 Supabase 연결이 준비되지 않아 가입할 수 없습니다.'
+                    return
+                sign_up(client, (email_input.value or '').strip(), password_input.value or '')
+            except Exception as exc:                   # noqa: BLE001
+                message.text = f'🚫 {_fail(exc, "가입 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
-            sign_up(client, (email_input.value or '').strip(), password_input.value or '')
-        except Exception as exc:                   # noqa: BLE001
-            message.text = f'🚫 {_fail(exc, "가입 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
-            return
         message.text = ''
         password_input.value = ''
         confirm_input.value = ''
@@ -459,7 +485,7 @@ def _render_signup_form() -> None:
     password_input = ui.input('비밀번호', password=True, password_toggle_button=True).classes('w-full max-w-sm')
     ui.label('8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.').classes('vh-muted')
     confirm_input = ui.input('비밀번호 확인', password=True, password_toggle_button=True).classes('w-full max-w-sm')
-    ui.button('회원가입', on_click=_submit)
+    signup_btn = ui.button('회원가입', on_click=_submit)
 
 
 def _render_reset_form() -> None:
@@ -480,38 +506,40 @@ def _render_reset_form() -> None:
     def _send_code() -> None:
         message.text = ''
         address = (request_email.value or '').strip()
-        try:
-            client = get_client()
-            if client is None:
-                message.text = '🚫 Supabase 연결이 준비되지 않아 코드를 보낼 수 없습니다.'
+        with _busy(send_code_btn):
+            try:
+                client = get_client()
+                if client is None:
+                    message.text = '🚫 Supabase 연결이 준비되지 않아 코드를 보낼 수 없습니다.'
+                    return
+                # 발송 요청은 로그인 세션을 만들지 않으므로 이 접속의 클라이언트로 보내도 안전합니다.
+                notice = send_password_reset_code(client, address)
+            except Exception as exc:                   # noqa: BLE001
+                message.text = f'🚫 {_fail(exc, "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
-            # 발송 요청은 로그인 세션을 만들지 않으므로 이 접속의 클라이언트로 보내도 안전합니다.
-            notice = send_password_reset_code(client, address)
-        except Exception as exc:                   # noqa: BLE001
-            message.text = f'🚫 {_fail(exc, "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
-            return
         # ⚠️ 가입된 이메일인지 여부는 알려주지 않습니다(계정 존재 여부 유출 방지, §0-3-9).
         confirm_email.value = address
         ui.notify(f'✅ {notice}', type='positive', multi_line=True, close_button='닫기')
 
     request_email = ui.input('가입한 이메일').classes('w-full max-w-sm')
-    ui.button('재설정 코드 보내기', on_click=_send_code)
+    send_code_btn = ui.button('재설정 코드 보내기', on_click=_send_code)
 
     ui.markdown('**2단계 · 받은 코드로 새 비밀번호 정하기**')
 
     def _confirm() -> None:
         message.text = ''
-        try:
-            reset_password_with_code(
-                new_auth_client(),
-                (confirm_email.value or '').strip(),
-                code_input.value or '',
-                new_pw.value or '',
-                new_pw2.value or '',
-            )
-        except Exception as exc:                   # noqa: BLE001
-            message.text = f'🚫 {_fail(exc, "비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
-            return
+        with _busy(confirm_btn):
+            try:
+                reset_password_with_code(
+                    new_auth_client(),
+                    (confirm_email.value or '').strip(),
+                    code_input.value or '',
+                    new_pw.value or '',
+                    new_pw2.value or '',
+                )
+            except Exception as exc:                   # noqa: BLE001
+                message.text = f'🚫 {_fail(exc, "비밀번호를 변경하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
+                return
         code_input.value = ''
         new_pw.value = ''
         new_pw2.value = ''
@@ -527,7 +555,7 @@ def _render_reset_form() -> None:
     new_pw = ui.input('새 비밀번호', password=True, password_toggle_button=True).classes('w-full max-w-sm')
     ui.label('8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.').classes('vh-muted')
     new_pw2 = ui.input('새 비밀번호 확인', password=True, password_toggle_button=True).classes('w-full max-w-sm')
-    ui.button('비밀번호 변경', on_click=_confirm)
+    confirm_btn = ui.button('비밀번호 변경', on_click=_confirm)
 
 
 # =============================================================================
