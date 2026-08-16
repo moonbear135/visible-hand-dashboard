@@ -507,6 +507,13 @@ def _render_reset_form() -> None:
 
     ⚠️ 이 폼 어디에서도 로그인 세션을 건드리지 않습니다. 코드 검증은 `new_auth_client()` 로
        만든 1회용 클라이언트에서만 일어나고, 끝나면 그 세션은 로그아웃됩니다(§0-3-8).
+
+    2026-08-17 (오너 UX 지적) — 원래 이메일 입력칸이 1단계/2단계에 각각 하나씩(총 2개)
+    있었습니다. 2단계 칸은 1단계 발송 성공 후 자동으로 채워지긴 했지만, 애초에 "같은
+    비밀번호 재설정 요청" 안에서 이메일이 바뀔 이유가 없어 입력칸 자체가 불필요했습니다
+    (기존 Streamlit 원본을 그대로 이식한 부분이었는데, 실사용해보니 번거로워서 여기서
+    걷어냅니다 — §0-3-10 "쓰지 않는 걸 굳이 남겨두지 않는다"). 이제 1단계에서 입력한
+    이메일을 2단계에서도 그대로 재사용합니다.
     """
     ui.label(
         '가입한 이메일로 재설정 코드를 보내드립니다. 메일에 적힌 숫자를 아래 2단계에 그대로 '
@@ -532,7 +539,6 @@ def _render_reset_form() -> None:
                 message.text = f'🚫 {_fail(exc, "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
         # ⚠️ 가입된 이메일인지 여부는 알려주지 않습니다(계정 존재 여부 유출 방지, §0-3-9).
-        confirm_email.value = address
         ui.notify(f'✅ {notice}', type='positive', multi_line=True, close_button='닫기')
 
     request_email = ui.input('가입한 이메일').classes('w-full max-w-sm')
@@ -547,7 +553,7 @@ def _render_reset_form() -> None:
                 await run.io_bound(
                     reset_password_with_code,
                     new_auth_client(),
-                    (confirm_email.value or '').strip(),
+                    (request_email.value or '').strip(),  # 1단계에서 입력한 이메일을 그대로 재사용
                     code_input.value or '',
                     new_pw.value or '',
                     new_pw2.value or '',
@@ -563,7 +569,6 @@ def _render_reset_form() -> None:
             type='positive', multi_line=True, close_button='닫기',
         )
 
-    confirm_email = ui.input('가입한 이메일').classes('w-full max-w-sm')
     code_input = ui.input('이메일로 받은 코드') \
         .classes('w-full max-w-sm') \
         .tooltip('메일 본문에 적힌 숫자 코드를 그대로 입력하세요. 링크를 누를 필요는 없습니다.')
