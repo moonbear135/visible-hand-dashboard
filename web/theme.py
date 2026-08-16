@@ -190,6 +190,38 @@ body.body--dark,
     overflow: hidden;
     margin-top: 8px;
 }
+
+/* ── 4단계(scorecard) 이식분 ──────────────────────────────────────────── */
+/* 보유 종목 표 — #127 의 결론(순수 HTML table + 가로 스크롤)을 그대로 옮긴 것입니다.
+   Streamlit 에서는 화면마다 <style> 을 f-string 으로 주입했는데(그 중괄호 이스케이프
+   누락이 #129 크래시의 원인), 여기서는 클래스 하나로 고정해 그 사고 자체를 없앴습니다.
+   min-width 640px 덕분에 좁은 화면에서 칸이 세로로 쌓이지 않고 가로로 스크롤됩니다. */
+.vh-holdings-table {
+    border-collapse: collapse;
+    width: 100%;
+    min-width: 640px;
+    font-size: 0.92rem;
+}
+.vh-holdings-table th,
+.vh-holdings-table td {
+    padding: 6px 10px;
+    text-align: right;
+    white-space: nowrap;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.25);
+}
+.vh-holdings-table th {
+    font-weight: 700;
+    color: #cbd5e1;
+}
+/* 첫 칸(종목명)만 좌측 정렬 + 자동 줄바꿈 — 한국 ETF 처럼 이름이 긴 종목이
+   옆 칸을 밀어내지 않도록 (2026-08-13 오너 지적分 그대로 유지). */
+.vh-holdings-table th:first-child,
+.vh-holdings-table td:first-child {
+    text-align: left;
+    white-space: normal;
+    overflow-wrap: anywhere;
+    min-width: 140px;
+}
 """
 
 
