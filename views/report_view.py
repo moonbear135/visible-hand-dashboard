@@ -43,6 +43,14 @@ v1 범위 (REPORT_WORK_ORDER.md §6)
      날짜로 계산됩니다. 두 벤치마크가 **둘 다** 계산됐을 때만 나오고, 한국 시장(벤치마크 1개)
      에는 나오지 않습니다. 라벨은 실제 수집 대상(SPY·ONEQ 프록시) 이름을 씁니다 — 자세한
      이유는 아래 `_render_benchmark_average()` 주석 참고.
+   - 📅 **'일간'에서 주말·공휴일을 고르면 가장 최근 기록일로 대체 표시** — 2026-08-16 추가
+     (#117, 오너 요청: "주말 공휴일에는 자료가 안나오게 되있는데 … 굳이 이렇게 비워둘 필요는
+     없을거 같은데"). 날짜 판정은 `utils/report_db.resolve_display_date()` 한 곳에서만 하고,
+     **그리는 표는 평일과 완전히 동일한 경로**입니다(대체 전용 화면을 따로 만들지 않음).
+     대체가 일어나면 **반드시** 경고 상자 한 줄로 "고른 날 ≠ 보여주는 날"을 밝힙니다
+     (`_render_substitute_notice()`) — 이 고지가 없으면 §0-1 위반입니다. 그 이전에도 기록이
+     하나도 없으면 대체하지 않고 기존 "데이터 부족" 그대로입니다. 주간~연간은 손대지
+     않았습니다(창 안의 실제 스냅샷을 모으는 방식이라 같은 문제가 없습니다).
    - 🔤 화면 문구는 2026-08-13(#114)에 대폭 줄였습니다 — 기준은 "이 프로젝트를 처음 보는
      방문자". 다만 **§0-1 고지(환율·수수료·단순비교·ETF 프록시·가격 모름·대조 불일치)는
      표현만 압축했고 하나도 지우지 않았습니다.** 이 파일에 문구를 더할 때도 같은 기준으로:
@@ -109,6 +117,7 @@ from utils.report_db import (
     is_missing_holding_table_error,
     period_bounds,
     period_title,
+    resolve_display_date,
     shift_period,
 )
 
@@ -833,12 +842,44 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
         st.caption("저장된 날만 나옵니다(휴장일 등 빠진 날을 이전 값으로 채우지 않습니다).")
 
 
+def _render_substitute_notice(period, ref_date, display_date):
+    """
+    📅 "선택하신 날은 거래일이 아니라, 가장 최근 거래일 자료를 보여드립니다" 안내
+    (2026-08-16 #117, 오너 요청).
+
+    🔴 이 한 줄이 이 기능의 **전제 조건**입니다(§0-1). 화면에 "2026-08-16(일) 기준"이라고
+       써 놓고 실제로는 2026-08-14(금) 숫자를 보여주면 그건 지어낸 것과 같은 수준의 거짓말이
+       됩니다. 그래서 회색 캡션이 아니라 **눈에 띄는 경고 상자**로, 두 날짜를 **둘 다** 적어
+       띄웁니다(무엇을 골랐고, 실제로는 언제 자료를 보고 있는지).
+
+    ⚠️ "휴장일" 이라고 단정하지 않습니다 — 이 프로젝트는 거래일 캘린더를 갖고 있지 않고,
+       기록이 없는 이유는 휴장일 수도 있고 그날 배치가 실패했을 수도 있습니다. 그래서
+       확인된 사실("그날은 저장된 기록이 없다")만 말합니다.
+    """
+    st.warning(
+        f"📅 **{period_title(period, ref_date)}** 은(는) 저장된 기록이 없는 날입니다"
+        "(주말·공휴일 등 장이 열리지 않은 날). 대신 **그 이전 가장 최근 기록일인 "
+        f"{period_title(period, display_date)}** 자료를 보여드립니다 — "
+        f"아래 숫자는 전부 {display_date.isoformat()} 기준이며, "
+        f"{ref_date.isoformat()} 의 값이 아닙니다."
+    )
+
+
 def _render_market_block(market, snapshots, period, ref_date,
                          holding_rows=None, holding_error=None):
     st.markdown(f"### {MARKET_TITLES.get(market, market)}")
-    report = compute_period_report(snapshots, period, ref_date)
+
+    # 📅 '일간'에서 기준일이 거래일이 아니면 그 이전 가장 최근 기록일로 대체합니다(#117).
+    #    아래는 **그 날짜 하나만 바꿔서** 기존 렌더링 경로를 그대로 태웁니다 — 대체 전용
+    #    화면을 따로 만들면 평일과 주말의 표가 서로 달라질 여지가 생깁니다.
+    #    시장별로 따로 구하는 이유: 미국장은 한국장과 마지막 거래일이 다를 수 있습니다.
+    display_date, substituted = resolve_display_date(snapshots, period, ref_date)
+    if substituted:
+        _render_substitute_notice(period, ref_date, display_date)
+
+    report = compute_period_report(snapshots, period, display_date)
     window_start, window_end = report["window_start"], report["window_end"]
-    st.caption(f"{period_title(period, ref_date)} · 달력 기준 {window_start} ~ {window_end}")
+    st.caption(f"{period_title(period, display_date)} · 달력 기준 {window_start} ~ {window_end}")
 
     # 🕐 이 블록이 실제로 보여주는 **마지막 스냅샷 행**의 가격 수집 시각(한국시간).
     #    스냅샷이 하나도 없는 구간(NO_DATA)에는 보여줄 행 자체가 없으므로 생략합니다.
@@ -951,6 +992,19 @@ def render_report_page():
         )
         return
 
+    by_market = {}
+    for row in snapshots:
+        by_market.setdefault(row.get("market"), []).append(row)
+
+    # 📅 '일간'에서 기준일이 거래일이 아니면 시장 블록이 그 이전 가장 최근 기록일로 대체해
+    #    그립니다(#117). 종목별 스냅샷은 **기간만 잘라서** 부르므로, 대체가 일어난 시장의
+    #    조회 범위도 그만큼 앞으로 넓혀 두지 않으면 합계는 나오는데 종목별 표만 비어 버립니다.
+    #    (날짜 판정은 시장 블록과 **같은 함수**를 씁니다 — 두 곳이 다른 날을 고르면 안 됩니다.)
+    holding_start = window_start
+    for rows in by_market.values():
+        display_date, _substituted = resolve_display_date(rows, period, ref_date)
+        holding_start = min(holding_start, period_bounds(period, display_date)[0])
+
     # 🧾 종목별 스냅샷(2026-08-13 신설) — **보고 있는 기간만** 잘라서 부릅니다(합계와 달리
     #    기간 시작 이전의 기준점 행이 필요 없고, 행이 종목 수만큼 많기 때문입니다).
     #    ⚠️ 여기서 실패해도 **기존 리포트는 그대로 나와야 합니다** — 오류를 삼키지 않고
@@ -959,16 +1013,12 @@ def render_report_page():
     holding_by_market = {}
     try:
         holding_rows = fetch_user_holding_snapshots(
-            client, user_id, start_date=window_start, end_date=window_end)
+            client, user_id, start_date=holding_start, end_date=window_end)
     except (ReportError, ScorecardError) as exc:
         holding_error = str(exc)
     else:
         for row in holding_rows:
             holding_by_market.setdefault(row.get("market"), []).append(row)
-
-    by_market = {}
-    for row in snapshots:
-        by_market.setdefault(row.get("market"), []).append(row)
 
     for market in (MARKET_KR, MARKET_US):
         rows = by_market.get(market)

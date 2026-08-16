@@ -19,6 +19,9 @@ REPORT_WORK_ORDER.md §9-4 / §9-7 에 따라, 이 세션에서는 **실제 Supa
          같은 값인지, 한국 종목은 그대로인지, 한글명을 못 만들면 지어내지 않는지
     ⑦-3 ➗ 벤치마크 비교의 "미국 두 지수 평균" 줄(2026-08-16, #116) — 둘 다 계산됐을 때만,
          정확한 산술 평균으로, 한국 시장·한쪽 결측일 때는 조용히 생략하는지
+    ⑦-4 📅 '일간'에서 주말·공휴일을 고르면 가장 최근 기록일로 대체 표시(2026-08-16, #117) —
+         **고른 날과 실제로 보여주는 날을 둘 다 밝히는지**, 대체할 과거 기록이 없으면 기존
+         "데이터 부족" 그대로인지, 평일은 예전과 동일한지, 주간~연간은 손대지 않았는지
     ⑧ SQL 스키마 · 워크플로우 · 화면 배선 (기본 숨김, service_role 격리, 기존 파일 무손상)
 
 ⚠️ 저장소의 실제 데이터 파일(data/*.json, market_history.csv)은 **읽기만** 합니다.
@@ -2366,6 +2369,131 @@ def test_benchmark_average():
             sys.modules.pop("views.scorecard_view", None)
 
 
+# =============================================================================
+# 9-7. 📅 '일간'에서 주말·공휴일 — 가장 최근 기록일로 대체 표시 (2026-08-16 #117)
+# =============================================================================
+#  오너 원문: "여기 일간 보고서를 보면 주말 공휴일에는 자료가 안나오게 되있는데 이건 가장
+#  마지막 날을 기준으로 그냥 계속 보여줘도 되는거 아냐? 굳이 이렇게 비워둘 필요는 없을거 같은데".
+#
+#  🔴 이 블록에서 가장 중요한 검사는 **(a) 안내 문구**입니다. 대체해서 보여주는 것 자체는
+#     편의지만, "고른 날 ≠ 보여주는 날"을 밝히지 않으면 그건 §0-1 위반(지어내기와 같은 급의
+#     거짓말)입니다. 그래서 두 날짜가 **둘 다** 화면 문구에 들어 있는지를 확인합니다.
+#  🔴 (b) 그 이전에도 기록이 하나도 없으면 **기존 "데이터 부족" 그대로**여야 합니다(회귀 금지).
+#  🔴 (c) 기준일에 기록이 실제로 있는 평일은 **예전과 한 글자도 다르지 않아야** 합니다.
+# =============================================================================
+def test_daily_weekend_fallback():
+    print("\n[9-7] 📅 '일간' 주말·공휴일 → 가장 최근 기록일로 대체 표시 (#117)")
+
+    sunday = date(2026, 8, 16)      # 오너가 스크린샷에서 고른 날(일요일 — 기록 없음)
+    friday = date(2026, 8, 14)      # 그 이전 가장 최근 기록일
+    thursday = date(2026, 8, 13)
+
+    kr_snaps = rdb.sort_snapshots([
+        snap(thursday, 3100000.0, 2700000.0),
+        snap(friday, 3200000.0, 2700000.0),
+    ])
+
+    # ---- ① 순수 판정 함수 — 날짜만 고르고 값은 만들지 않음 --------------------
+    picked, substituted = rdb.resolve_display_date(kr_snaps, PERIOD_DAILY, sunday)
+    check(picked == friday and substituted is True,
+          "일간·주말: 기준일 이전 가장 최근 기록일(2026-08-14)로 대체하고 '대체함'을 함께 알림")
+    check(picked in {r["snapshot_date"] for r in kr_snaps},
+          "🔴 고른 날짜는 **실제로 저장돼 있는 스냅샷 날짜** — 없는 날을 만들어내지 않음(§0-1)")
+    check(rdb.resolve_display_date(kr_snaps, PERIOD_DAILY, friday) == (friday, False),
+          "기준일에 기록이 있으면 그대로(대체 안 함)")
+    check(rdb.resolve_display_date(kr_snaps, PERIOD_DAILY, date(2026, 8, 1))
+          == (date(2026, 8, 1), False),
+          "기준일 **이전**에 기록이 하나도 없으면 대체하지 않음(뒤 날짜를 끌어오지 않음)")
+    check(rdb.resolve_display_date([], PERIOD_DAILY, sunday) == (sunday, False),
+          "스냅샷이 아예 없으면 대체하지 않음(= 기존 '데이터 부족' 경로 유지)")
+    for other in (PERIOD_WEEKLY, PERIOD_MONTHLY, PERIOD_QUARTERLY, PERIOD_HALF, PERIOD_YEARLY):
+        check(rdb.resolve_display_date(kr_snaps, other, sunday) == (sunday, False),
+              f"{other}: 오너가 요청하지 않은 기간은 손대지 않음(기준일 그대로)")
+    # 시장마다 마지막 거래일이 다를 수 있습니다(미국장 시차·수집 실패) — 시장별로 따로 판정.
+    us_snaps = rdb.sort_snapshots([
+        snap(thursday, 12000.0, 10000.0, market=MARKET_US,
+             benchmark_symbol="SP500_PROXY_SPY", benchmark_value=600.0),
+    ])
+    check(rdb.resolve_display_date(us_snaps, PERIOD_DAILY, sunday) == (thursday, True),
+          "시장별로 각자의 마지막 기록일을 고름(한국 08-14 / 미국 08-13 처럼 달라도 됨)")
+
+    # ---- ② 화면 ---------------------------------------------------------------
+    detail_rows = []
+    for day, price in ((thursday.isoformat(), 78000.0), (friday.isoformat(), 80000.0)):
+        _r, _h, _s = rdb.build_snapshot_rows_with_holdings(
+            "u1", [holding(MARKET_KR, "005930", 10, 70000, "삼성전자")],
+            price_lookup_factory({(MARKET_KR, "005930"): price}), {MARKET_KR: day},
+            price_stamp_by_market={MARKET_KR: f"{day} 17:50"})
+        detail_rows.extend(_h)
+    detail_rows = rdb.sort_holding_snapshots(detail_rows)
+
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        recorder = _HoldingViewRecorder()
+        module.st = recorder
+        try:
+            # ---- (a) 주말 기준일 + 그 이전 기록 있음 → 대체 표시 + 안내 --------
+            recorder.reset()
+            module._render_market_block(MARKET_KR, kr_snaps, PERIOD_DAILY, sunday,
+                                        holding_rows=detail_rows)
+            notice = " ".join(recorder.warning_calls)
+            check("2026-08-16" in notice and "2026-08-14" in notice,
+                  "🔴 안내 문구에 **고른 날(2026-08-16)과 실제로 보여주는 날(2026-08-14)이 "
+                  "둘 다** 들어 있음 — 몰래 바꿔치기하지 않음(§0-1)")
+            check("(일)" in notice and "(금)" in notice,
+                  "요일까지 적어 '주말이라 기록이 없다'는 사실이 바로 읽힘")
+            check(not any("데이터 부족" in t for t in recorder.error_calls),
+                  "더 이상 화면이 '데이터 부족'만 남기고 비지 않음(오너 요청)")
+            check(any("비교 구간" in t and "2026-08-14" in t for t in recorder.caption_calls),
+                  "평일과 **완전히 같은 표**를 그림(비교 구간 캡션이 대체된 날짜로 나옴)")
+            check(any(t.startswith("| 종목 |") for t in recorder.markdown_calls),
+                  "종목별 상세 표도 대체된 날짜 기준으로 함께 나옴")
+            check(any("2026-08-14 종가 기준" in t for t in recorder.markdown_calls),
+                  "🕐 수집 시각 줄도 대체된 날짜의 저장값 — 오늘 시각으로 메우지 않음")
+            check(not any("2026-08-16 종가" in t for t in recorder.markdown_calls),
+                  "🔴 어디에도 '2026-08-16 종가'라고 쓰지 않음(그 날짜의 값이 아니므로)")
+
+            # ---- (b) 기준일 이전에 기록이 전혀 없음 → 기존 '데이터 부족' 그대로 --
+            recorder.reset()
+            later_only = rdb.sort_snapshots([snap(date(2026, 8, 17), 3300000.0, 2700000.0)])
+            module._render_market_block(MARKET_KR, later_only, PERIOD_DAILY, sunday)
+            check(any("데이터 부족" in t for t in recorder.error_calls),
+                  "🔴 대체할 과거 기록이 없으면 예전 그대로 '데이터 부족'(지어낼 값이 없으므로)")
+            check(not recorder.warning_calls
+                  or not any("대신" in t for t in recorder.warning_calls),
+                  "그때는 대체 안내를 띄우지 않음(대체한 게 없으므로)")
+
+            # ---- (c) 평일(기준일에 기록이 있음) → 예전과 동일 -------------------
+            recorder.reset()
+            module._render_market_block(MARKET_KR, kr_snaps, PERIOD_DAILY, friday,
+                                        holding_rows=detail_rows)
+            check(not any("대신" in t for t in recorder.warning_calls),
+                  "🔴 기준일에 기록이 있는 평일에는 안내 문구가 아예 나오지 않음(회귀 없음)")
+            check(any("비교 구간" in t and "2026-08-14" in t for t in recorder.caption_calls)
+                  and not any("데이터 부족" in t for t in recorder.error_calls),
+                  "평일 표시는 이번 변경 전과 동일")
+
+            # ---- (d) 배선 — 종목별 조회 범위도 함께 넓혔는지 --------------------
+            view_code = python_code_only(
+                (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8"))
+            check("resolve_display_date" in view_code,
+                  "날짜 판정은 report_db 의 함수 한 곳에서만(화면이 따로 구현하지 않음)")
+            check("start_date=holding_start" in view_code,
+                  "대체된 날짜가 종목별 스냅샷 조회 범위 밖으로 잘리지 않도록 시작일을 넓힘")
+        finally:
+            module.st = real_st
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 주말 대체 표시 검증",
+              f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
 def test_holding_schema_and_wiring():
     print("\n[10-1] 종목별 스냅샷 — SQL 스키마 · 화면 배선")
     sql = (REPO_ROOT / "sql" / "report_schema.sql").read_text(encoding="utf-8")
@@ -2714,6 +2842,7 @@ def main():
     test_holding_weights()
     test_us_korean_names()
     test_benchmark_average()
+    test_daily_weekend_fallback()
     test_holding_schema_and_wiring()
     test_sql_schema()
     test_workflow()
