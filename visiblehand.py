@@ -73,6 +73,22 @@ st.markdown(
         font-weight: 900;
         margin: 5px 0;
     }
+
+    /* 2026-08-16 오너 신고(#119) — index.html이 iframe src에 `?embed=true`를 붙여 Streamlit
+       자체 헤더/풋터를 숨기고 있었는데, 공식 문서로 확인한 결과 `embed=true` 모드에서는
+       "Built with Streamlit · Fullscreen" 바가 **항상** 함께 붙고 CSS·embed_options 어느
+       쪽으로도 끌 수 없습니다(Community Cloud 무료 호스팅의 고정 요소, self-hosting 해야만
+       사라짐 — 커뮤니티 포럼 다수 확인). 그래서 `index.html` 쪽 `embed=true`는 빼고, 대신
+       여기 앱 코드에서 같은 목적(헤더 툴바·상단 색줄·풋터 숨김)을 CSS로 직접 구현합니다.
+       ⚠️ `header` 태그 전체를 숨기지 않습니다 — 사이드바 접기/펼치기(">>" 버튼)가 헤더 쪽에
+       같이 있어서, 통째로 숨기면 그 버튼까지 사라집니다(실사용 시 사이드바를 못 여는 버그가
+       됨). 대신 헤더 **안의** 툴바/배포버튼/상단 장식줄/실행중 표시만 개별적으로 숨겨서
+       사이드바 토글은 그대로 남깁니다. */
+    div[data-testid="stToolbar"] { visibility: hidden; height: 0%; position: fixed; }
+    div[data-testid="stDecoration"] { visibility: hidden; height: 0%; position: fixed; }
+    div[data-testid="stStatusWidget"] { visibility: hidden; height: 0%; position: fixed; }
+    #MainMenu { visibility: hidden; height: 0%; }
+    footer { visibility: hidden; height: 0%; }
     </style>
     """,
     unsafe_allow_html=True

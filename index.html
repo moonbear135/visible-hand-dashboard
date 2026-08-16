@@ -26,7 +26,11 @@
     </style>
 </head>
 <body>
-    <!-- Streamlit 헤더/푸터를 숨겨 완벽한 독립 사이트처럼 보이게 만드는 ?embed=true 옵션 부여 -->
-    <iframe src="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/?embed=true"></iframe>
+    <!-- 2026-08-16 (#119) — 예전에는 여기에 ?embed=true를 붙여서 Streamlit 자체 헤더/풋터를
+         숨겼는데, 그 모드에서는 Streamlit이 "Built with Streamlit · Fullscreen" 바를 항상
+         강제로 붙인다는 걸 공식 문서로 확인했습니다(embed_options로도 끌 수 없음, Community
+         Cloud 무료 호스팅의 고정 요소). 그래서 embed=true를 빼고, 같은 목적(헤더/풋터 숨김)을
+         visiblehand.py 쪽 CSS(#MainMenu/footer/stToolbar 등 개별 숨김)로 옮겼습니다. -->
+    <iframe src="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/"></iframe>
 </body>
 </html>

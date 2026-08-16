@@ -606,10 +606,13 @@ ETF **KORU(코러)**가 성적표에서 계속 "현재가 없음"으로 뜬 것.
    항목입니다. 1차 신고 3건 중 진행 상황:
    - ✅ **PEGY "Forward" 카드 설명 문구가 페이지 전체를 가로로 밀어내던 버그 — 수정 완료.**
      `white-space: nowrap` → 줄바꿈 허용으로 교체(자세한 내용은 #119).
-   - 🔍 **"Built with Streamlit ❤️" 하단 바 — 제거 불가로 확인됨.** `index.html`의 iframe이
-     쓰는 `?embed=true` 모드에 항상 붙는 Streamlit 고정 요소(공식 문서로 확인, `embed_options`
-     목록에 없음). **오너 결정 필요** — `embed=true`를 빼고 앱 코드에서 직접
-     `header/footer/#MainMenu {visibility:hidden}` CSS로 숨기는 절충안으로 바꿀지.
+   - ✅→🔄 **"Built with Streamlit ❤️" 하단 바 — 절충안 실행 완료, 실기기 확인만 남음
+     (TASK_HISTORY #120).** `index.html`의 iframe이 쓰는 `?embed=true` 모드에 항상 붙는
+     Streamlit 고정 요소라 CSS·파라미터로 못 없앤다는 걸 확인(공식 문서). 오너 승인 후
+     `embed=true`를 빼고 `visiblehand.py` 전역 CSS에 `stToolbar`/`stDecoration`/
+     `stStatusWidget`/`#MainMenu`/`footer` 개별 숨김을 추가(사이드바 접기 버튼이 있는
+     `header` 태그 전체는 일부러 안 건드림). **오너가 배포 후 실기기로 바가 실제로
+     사라지는지, 사이드바 토글이 정상인지 확인 필요.**
    - 🔍 **보유종목 표 칸 간격 문제 — 원인 미확정, 조사 중.** #106 모바일 표 CSS가 실기기에서
      왜 의도대로 안 보이는지 코드 리뷰만으로는 확실한 원인을 못 찾음(샌드박스 네트워크 제약으로
      헤드리스 브라우저 설치 불가 → 실제 기기 폭 라이브 렌더링 검증 못함). 위 iframe 이슈와
