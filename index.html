@@ -26,11 +26,14 @@
     </style>
 </head>
 <body>
-    <!-- 2026-08-16 (#119) — 예전에는 여기에 ?embed=true를 붙여서 Streamlit 자체 헤더/풋터를
-         숨겼는데, 그 모드에서는 Streamlit이 "Built with Streamlit · Fullscreen" 바를 항상
-         강제로 붙인다는 걸 공식 문서로 확인했습니다(embed_options로도 끌 수 없음, Community
-         Cloud 무료 호스팅의 고정 요소). 그래서 embed=true를 빼고, 같은 목적(헤더/풋터 숨김)을
-         visiblehand.py 쪽 CSS(#MainMenu/footer/stToolbar 등 개별 숨김)로 옮겼습니다. -->
-    <iframe src="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/"></iframe>
+    <!-- 2026-08-16 긴급 롤백(#120 시도 직후) — embed=true를 뺐더니 이 커스텀 도메인(iframe)
+         경로에서 Streamlit 쪽 인증 게이트웨이(share.streamlit.io/-/auth/app)가 503을 반환하며
+         사이트 전체가 안 뜨는 문제가 실측으로 확인됐습니다(직접 *.streamlit.app URL은 정상
+         작동 — 오직 iframe+embed 없는 조합에서만 깨짐). Streamlit Community Cloud가
+         iframe으로 임베드할 때는 embed=true를 사실상 요구하는 것으로 보입니다. 그래서
+         embed=true를 되돌립니다 — "Built with Streamlit" 바 제거는 이 방법으로는 못 하고
+         원인 규명만 TASK_HISTORY #119에 남깁니다. visiblehand.py 쪽 CSS는 그대로 둬도
+         무해하므로(embed 모드와 중복 적용될 뿐 충돌 없음) 유지합니다. -->
+    <iframe src="https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/?embed=true"></iframe>
 </body>
 </html>
