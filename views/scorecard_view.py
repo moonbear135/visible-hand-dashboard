@@ -671,6 +671,24 @@ def _colored_pct_lg(value):
     return f"<span style='{style}'>{text}</span>"
 
 
+def _colored_pct_html(value):
+    """
+    2026-08-16 (#127) — 순수 HTML(`<table>`) 안에서 쓰는 색칠된 수익률입니다. `_colored_pct()`
+    는 Streamlit 전용 콜론 마크다운(`:red[..]`)을 쓰는데, 이건 `st.markdown()`이 자체 처리할
+    때만 색이 입혀지고 `unsafe_allow_html=True`로 그린 순수 HTML 문자열 안에 그대로 넣으면
+    글자 그대로("​:red[+1.23%]")가 보여버립니다. 색 규칙(오르면 빨강/내리면 파랑)은 완전히
+    동일하게 유지하되, 실제 CSS 색상으로 직접 입힙니다.
+    """
+    if value is None:
+        return "—"
+    text = f"{value:+.2f}%"
+    if value > 0:
+        return f"<span style='color:#d32f2f; font-weight:700;'>{text}</span>"
+    if value < 0:
+        return f"<span style='color:#1565c0; font-weight:700;'>{text}</span>"
+    return text
+
+
 def _md_amount(value, currency, decimals=None):
     """
     마크다운 텍스트(`st.error`/`st.info`/`st.caption`/`st.markdown` 등)에 금액을 넣을 때
@@ -754,91 +772,99 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
         sort_field = dict(SORT_FIELD_OPTIONS)[sort_label]
         rows = sort_holding_rows(rows, sort_field, ascending=sort_ascending)
 
-    # ---- 표 (종목별 ✏️ 수정 / 🗑️ 삭제 버튼 포함) -------------------------------
+    # ---- 표 (종목별 데이터) ----------------------------------------------------
     # 2026-08-11: 오너 요청 — 별도 "삭제할 종목 고르기" 드롭다운 대신, 각 종목 줄
     # 바로 옆에 수정·삭제 버튼을 둡니다. 예전엔 st.dataframe 표 하나 + 화면 맨 아래
     # 접힌 삭제 전용 expander였는데("잘못 입력한 걸 고칠 방법이 없다"는 실사용
     # 피드백), 표를 직접 그리는 방식으로 바꿔 종목당 바로 옆에서 처리하게 했습니다.
-    # 2026-08-11: ✏️/🗑️ 버튼이 옆 셀보다 아래로 처져 보이는 문제(오너 스크린샷으로 확인) —
-    # "비중" 칸이 좁아 "100.0%"가 두 줄로 줄바꿈되면서 그 옆 버튼이 밀려 내려간 것이 원인.
-    # ① 값 칸 줄바꿈을 CSS로 막고 ② 행 전체를 세로 중앙 정렬해서 어떤 경우에도 어긋나지
-    # 않게 합니다. st.container(key=...) 는 Streamlit이 `.st-key-<key>` 클래스를 붙여주므로
-    # 이 표에만 스코프된 CSS를 걸 수 있습니다(다른 화면·다른 표에는 영향 없음).
+    #
+    # 2026-08-16 (#127) — 근본 원인 재정리: #106/#126 두 번 모두 `st.columns()` 9칸
+    # (데이터 7칸 + 버튼 2칸)을 CSS로 "가로 유지"시키려 했지만 실기기(오너 폰)에서
+    # 계속 세로로 쌓여 깨졌습니다. Streamlit 공식 GitHub 이슈 #6592에서 관리자가
+    # 직접 확인해준 사실: "칸(column)의 반응형 쌓기는 CSS class가 아니라 각 칸
+    # div에 JS가 직접 박아넣는 인라인 style 속성으로 동작해서, 스타일시트 규칙으로는
+    # 애초에 덮어쓸 수 없다"고 합니다 — 즉 CSS만으로는 원천적으로 못 고치는 Streamlit
+    # 자체의 한계였습니다.
+    #
+    # 그래서 데이터 7칸(종목/수량/평균매입가/현재가/평가손익/수익률/비중)은
+    # `st.columns()`를 아예 쓰지 않고 순수 HTML `<table>`로 직접 그립니다 — 이건
+    # Streamlit의 반응형 쌓기 JS가 전혀 관여하지 않는 일반 HTML이라 화면이 좁아지면
+    # 그냥 `overflow-x: auto`로 가로 스크롤될 뿐, 세로로 쌓이는 문제 자체가 생길 수
+    # 없습니다. ✏️/🗑️ 수정·삭제 버튼은 (오너 지시: "모바일이라고 기능을 줄여버리면
+    # 안 돼") 100% 그대로 유지하되, 실제 눌러야 하는 진짜 Streamlit 위젯이어야 하므로
+    # 표 아래 "종목 관리" 섹션에 종목명 + 버튼 2개짜리(총 3칸) 훨씬 단순한 줄로
+    # 옮겼습니다 — 칸이 3개뿐이고 버튼은 폭이 고정이라, #6592가 지목한 "칸이 좁아져
+    # 쌓이는" 트리거 자체가 훨씬 걸리기 어렵습니다(그래도 혹시를 대비해 이 섹션에도
+    # 동일한 가로-스크롤 안전망 CSS를 걸어둡니다).
     table_key = f"scorecard_rows_{currency}"
     st.markdown(
         f"""
         <style>
-        .st-key-{table_key} [data-testid="stHorizontalBlock"] {{ align-items: center; }}
-        .st-key-{table_key} [data-testid="stMarkdownContainer"] p {{
-            white-space: nowrap; margin-bottom: 0;
+        .st-key-{table_key} {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
+        .st-key-{table_key} table {{
+            border-collapse: collapse; width: 100%; min-width: 640px; font-size: 0.92rem;
         }}
-        /* 2026-08-11: ✏️/🗑️ 이모지가 버튼 네모칸 한가운데 오지 않고 구석에 치우쳐 보이는
-           문제(오너 스크린샷으로 확인) — 버튼 내부를 flex로 완전히 중앙 정렬합니다. */
-        .st-key-{table_key} button {{
+        .st-key-{table_key} th, .st-key-{table_key} td {{
+            padding: 6px 10px; text-align: right; white-space: nowrap;
+            border-bottom: 1px solid rgba(49, 51, 63, 0.15);
+        }}
+        .st-key-{table_key} th:first-child, .st-key-{table_key} td:first-child {{
+            text-align: left; white-space: normal; overflow-wrap: anywhere; min-width: 140px;
+        }}
+        .st-key-{table_key} th {{ font-weight: 700; color: #31333F; }}
+        /* 종목 관리 섹션의 ✏️/🗑️ 버튼 — 이모지가 박스 정중앙에 오도록(2026-08-11 확인 문제) */
+        .st-key-{table_key}-mgmt button {{
             display: flex; align-items: center; justify-content: center;
         }}
-        .st-key-{table_key} button p {{
+        .st-key-{table_key}-mgmt button p {{
             margin: 0; line-height: 1; font-size: 1.05rem;
-        }}
-        /* 2026-08-11 오너 지적 — 모바일처럼 화면이 좁아지면 Streamlit이 이 표의 9개 칸을
-           세로로 쌓아버려서(내장 반응형 규칙) 글자가 겹쳐 보이고 표 모양이 완전히 깨집니다.
-           표를 세로로 쌓는 대신 **가로 스크롤이 되는 표**로 유지되도록, 칸이 안 쌓이게
-           강제하고(min-width로 표 전체 너비를 확보) 그 바깥을 가로로 스크롤되게 감쌉니다.
-           다른 화면(입력 폼 등)은 그대로 세로로 쌓이는 게 정상입니다 — 이 규칙은 표
-           영역에만 스코프되어 있습니다.
-
-           2026-08-16 오너 실기기 재확인(#119에서 "원인 미확정"으로 남겨둔 항목) — 처음엔
-           `@media (max-width: 640px)`로 좁은 화면에서만 이 규칙을 걸었는데, 실제 폰에서는
-           여전히 세로로 쌓여 나왔습니다. index.html이 이 앱을 iframe(`?embed=true`)으로
-           감싸는 구조라(#120/#121에서 실측 확인) iframe 내부 문서가 보고하는 CSS 뷰포트
-           폭이 실제 물리적 화면 폭과 어긋날 가능성이 있고, 그러면 `@media` 조건 자체가
-           기대와 다르게 평가돼 이 규칙이 아예 안 걸릴 수 있습니다(반면 Streamlit 자체의
-           세로 쌓기 판정은 컨테이너의 실측 렌더링 폭을 JS로 직접 재서 media query보다
-           더 안정적으로 작동한 것으로 보임). 그래서 `@media` 조건 자체를 없애고 **모든
-           화면 폭에서 항상** 가로 유지 + 가로 스크롤을 적용합니다 — 데스크탑은 원래도
-           표가 700px보다 넓은 경우가 대부분이라 시각적으로 달라지는 게 없고, 오히려
-           media query 신뢰성 문제 자체를 근본적으로 없앱니다.
-        */
-        .st-key-{table_key} {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-        .st-key-{table_key} [data-testid="stHorizontalBlock"] {{
-            flex-direction: row !important;
-            flex-wrap: nowrap !important;
-            min-width: 700px;
         }}
         </style>
         """,
         unsafe_allow_html=True,
     )
     with st.container(key=table_key):
-        _COL_RATIOS = [2, 1, 1.2, 1.2, 1.1, 1.0, 1.0, 0.6, 0.6]
-        header_cols = st.columns(_COL_RATIOS)
-        for col, label in zip(
-            header_cols, ["종목", "수량", "평균매입가", "현재가", "평가손익", "수익률", "비중", "", ""]
-        ):
-            if label:
-                col.caption(f"**{label}**")
+        header_html = "".join(
+            f"<th>{label}</th>"
+            for label in ["종목", "수량", "평균매입가", "현재가", "평가손익", "수익률", "비중"]
+        )
+        row_html_list = []
+        for row in rows:
+            cells = [
+                _row_label_html(row, indexes),
+                html.escape(f"{row['quantity']:,.6g}"),
+                html.escape(format_amount(row["avg_purchase_price"], currency)),
+                html.escape(
+                    format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
+                ),
+                html.escape(format_amount(row["profit"], currency) if row["price_available"] else "—"),
+                _colored_pct_html(row.get("profit_pct")),
+                html.escape(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—"),
+            ]
+            row_html_list.append("<tr>" + "".join(f"<td>{cell}</td>" for cell in cells) + "</tr>")
+        table_html = (
+            f"<table><thead><tr>{header_html}</tr></thead>"
+            f"<tbody>{''.join(row_html_list)}</tbody></table>"
+        )
+        st.markdown(table_html, unsafe_allow_html=True)
 
+    # ---- 종목 관리 (✏️ 수정 / 🗑️ 삭제 — 진짜 Streamlit 위젯) --------------------
+    # st.container(key=...) 가 자동으로 `.st-key-<key>` 클래스를 붙여주므로, 위
+    # <style> 블록의 `.st-key-{table_key}-mgmt` 선택자가 바로 이 컨테이너에 걸립니다.
+    with st.container(key=f"{table_key}-mgmt"):
         for row in rows:
             row_id = row.get("id")
             edit_key = f"scorecard_editing_{row_id}"
-            cols = st.columns(_COL_RATIOS)
-            cols[0].markdown(_row_label_html(row, indexes), unsafe_allow_html=True)
-            cols[1].write(f"{row['quantity']:,.6g}")
-            cols[2].write(format_amount(row["avg_purchase_price"], currency))
-            cols[3].write(
-                format_amount(row["current_price"], currency) if row["price_available"] else "현재가 없음"
-            )
-            cols[4].write(format_amount(row["profit"], currency) if row["price_available"] else "—")
-            cols[5].markdown(_colored_pct(row.get("profit_pct")))
-            cols[6].write(f"{row['weight_pct']:.1f}%" if row.get("weight_pct") is not None else "—")
+            mcol1, mcol2, mcol3 = st.columns([4, 0.6, 0.6])
+            mcol1.markdown(_row_label_html(row, indexes), unsafe_allow_html=True)
             # 2026-08-11: 이모지(✏️/🗑️)를 버튼 라벨 텍스트로 쓰면 글꼴마다 글리프 자체의
             # 여백이 삐뚤어서 CSS로 중앙 정렬해도 박스 안에서 치우쳐 보이는 문제(오너 스크린샷
             # 3연속 확인)가 있었습니다. 근본 원인이 이모지 폰트 렌더링이라 CSS로는 못 고치고,
             # Streamlit이 지원하는 `icon=` 파라미터(Material Symbols, 폰트가 아니라 일정한
             # 벡터 아이콘)로 바꿔서 항상 정중앙에 오도록 했습니다.
-            if cols[7].button("", key=f"scorecard_edit_btn_{row_id}", help="수정", icon=":material/edit:"):
+            if mcol2.button("", key=f"scorecard_edit_btn_{row_id}", help="수정", icon=":material/edit:"):
                 st.session_state[edit_key] = not st.session_state.get(edit_key, False)
-            if cols[8].button("", key=f"scorecard_del_btn_{row_id}", help="삭제", icon=":material/delete:"):
+            if mcol3.button("", key=f"scorecard_del_btn_{row_id}", help="삭제", icon=":material/delete:"):
                 if not row_id:
                     st.error("🚫 삭제할 행의 id 를 알 수 없습니다.")
                 else:

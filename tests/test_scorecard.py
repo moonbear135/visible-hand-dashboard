@@ -1358,20 +1358,29 @@ def test_view_and_routing():
           "안 보였음)")
     check("DEBUG" not in view_src,
           "원인 추적용으로 잠깐 배포했던 임시 디버그 코드가 남아있지 않음(2026-08-11)")
-    # 2026-08-16 수정 — 원래는 "@media (max-width: 640px)"가 코드에 있는지만 확인했는데,
-    # 실기기(#119에서 "원인 미확정"으로 남겨뒀던 항목)로 재확인한 결과 이 미디어쿼리 조건이
-    # iframe 임베드 환경에서 기대대로 안 걸리는 경우가 실측됐습니다. 그래서 조건 없이
-    # 항상 걸리는 방식으로 바꿨고(자세한 경위는 TASK_HISTORY #126), 이 테스트도 실제
-    # 지켜야 할 것(표가 세로로 안 쌓이고 가로 스크롤 유지) 쪽으로 다시 맞췄습니다 — media
-    # query로 조건부 적용되던 옛 코드 블록(스타일 규칙 자체) 대신, 규칙이 무조건 걸려
-    # 있는지를 직접 확인합니다. (참고: 이 설명 주석 자체에 그 옛 구문을 문자열로 언급하고
-    # 있어 단순 "문자열 부재" 검사는 이 주석과 충돌하므로 쓰지 않습니다.)
-    check("overflow-x: auto" in view_src
-          and 'flex-direction: row !important' in view_src
-          and 'flex-wrap: nowrap !important' in view_src
-          and 'min-width: 700px' in view_src,
-          "표가 화면 폭과 무관하게 항상 가로 유지 + 가로 스크롤(세로로 쌓여 깨지는 것 방지, "
-          "2026-08-11 오너 지적 → 2026-08-16 #126으로 무조건 적용 방식으로 강화)")
+    # 2026-08-16 (#106 → #126 → #127) — #106/#126은 st.columns() 9칸을 CSS로 "가로
+    # 유지"시키려 했지만 실기기에서 계속 세로로 쌓여 깨졌습니다. Streamlit 공식 GitHub
+    # 이슈 #6592로 원인을 확인: 칸 반응형 쌓기는 CSS class가 아니라 각 칸 div에 JS가
+    # 직접 박아넣는 인라인 style로 동작해 스타일시트로는 원천적으로 못 덮어씁니다. #127은
+    # 데이터 7칸을 st.columns() 없이 순수 HTML <table>로 바꿔(Streamlit 반응형 JS가
+    # 아예 관여하지 않음) overflow-x:auto로 가로 스크롤만 되게 했습니다. ✏️/🗑️ 버튼은
+    # (오너 지시: "모바일이라고 기능을 줄여버리면 안 돼") 없애지 않고 표 아래 별도
+    # "종목 관리" 섹션(칸 3개짜리, 훨씬 단순)의 진짜 Streamlit 위젯으로 그대로 유지합니다.
+    check("<table>" in view_src and "<thead>" in view_src and "<tbody>" in view_src,
+          "종목별 데이터 표가 st.columns() 대신 순수 HTML <table>로 그려짐(2026-08-16 #127 — "
+          "Streamlit 공식 이슈 #6592: 칸 반응형 쌓기는 인라인 style이라 CSS로 못 덮어씀)")
+    check("overflow-x: auto" in view_src and "-webkit-overflow-scrolling: touch" in view_src,
+          "표 바깥을 감싸는 컨테이너가 화면 폭과 무관하게 가로 스크롤 유지"
+          "(세로로 쌓여 깨지는 것 자체가 원천 차단됨, 2026-08-11 오너 지적 → 2026-08-16 #127로 근본 해결)")
+    check("_colored_pct_html" in view_src,
+          "표 안 수익률 색칠(오르면 빨강/내리면 파랑)이 순수 HTML table 셀 안에서도 "
+          "그대로 유지됨(:red[..] 콜론 마크다운은 raw HTML 안에서 안 먹혀 별도 HTML 버전 헬퍼 추가)")
+    check('key=f"scorecard_edit_btn_{row_id}"' in view_src
+          and 'key=f"scorecard_del_btn_{row_id}"' in view_src
+          and "icon=\":material/edit:\"" in view_src
+          and "icon=\":material/delete:\"" in view_src,
+          "✏️ 수정 / 🗑️ 삭제 버튼이 표를 HTML로 바꾼 뒤에도 그대로 남아있음(모바일이라고 "
+          "기능을 줄이지 않음 — 2026-08-16 오너 명시적 지시)")
     check("_row_label_html" in view_src and "<br>" in view_src,
           "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
     check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,
