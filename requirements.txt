@@ -4,6 +4,10 @@ typing_extensions>=4.12
 plotly
 pandas
 finance-datareader
+# ⚠️ `requests` 는 수집기(collector_*.py)뿐 아니라 **웹앱 실행 중에도** 쓰입니다 —
+#    utils/data_source.py 가 data/*.json 을 raw.githubusercontent.com 에서 읽어옵니다
+#    (NICEGUI_MIGRATION_PLAN.md §8-5 B안, 2026-08-17). 컷오버 때 의존성을 정리하더라도
+#    이 줄은 지우지 마세요.
 requests
 beautifulsoup4
 lxml

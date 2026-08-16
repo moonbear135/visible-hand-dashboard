@@ -14,6 +14,7 @@ import os
 
 from nicegui import app, ui
 
+from utils import data_source
 import web.theme
 # @ui.page 등록을 위해 import 자체가 필요합니다 (모듈을 읽는 순간 경로가 등록됨).
 #   pegy_page      → '/'          (공개 기본 화면, 2단계에서 이전 완료)
@@ -34,6 +35,20 @@ from web.pages import (  # noqa: F401
 )
 
 web.theme.register()
+
+# 🌐 데이터 원격 로드(NICEGUI_MIGRATION_PLAN.md §8-5 B안)가 켜졌는지 **기동 로그 한 줄로** 확인할
+#    수 있게 합니다. 오너가 Render 대시보드에서 DATA_SOURCE_BASE_URL 을 넣은 뒤, 값이 실제로
+#    반영됐는지 "Logs" 탭에서 바로 볼 수 있어야 하기 때문입니다(추측으로 확인하지 않기 — §0-1).
+#    ⚠️ 주소 자체는 공개 저장소의 raw URL 이라 비밀이 아니지만, 로그에는 켜짐/꺼짐만 남깁니다.
+_DS_BASE, _DS_CONFIG_ERROR = data_source.resolve_base_url()
+if _DS_CONFIG_ERROR:
+    print(f'⚠️ [데이터 소스] {data_source.ENV_BASE_URL} 설정이 올바르지 않습니다 — {_DS_CONFIG_ERROR}. '
+          '이미지에 함께 배포된 data/ 사본으로 동작합니다.')
+elif _DS_BASE:
+    print('🌐 [데이터 소스] 원격 로드 켜짐 — data/*.json 을 실행 중에 원격에서 읽습니다 '
+          f'(TTL {data_source.DEFAULT_TTL_SECONDS:.0f}초 기본, ETag 조건부 GET).')
+else:
+    print('📁 [데이터 소스] 원격 로드 꺼짐 — 이미지에 포함된 data/ 파일을 그대로 읽습니다 (기존 동작).')
 
 
 @app.get('/healthz')

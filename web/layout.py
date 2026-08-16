@@ -18,7 +18,9 @@ from contextlib import contextmanager
 
 from nicegui import ui
 
+from utils import data_source
 from web.auth import is_admin
+from web.components.widgets import error_banner
 
 # (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
 # 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.
@@ -70,4 +72,32 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
                 ui.link(label, path).classes('text-base no-underline')
 
     with ui.column().classes(f'w-full {width_class} mx-auto p-4 gap-4 vh-page'):
+        # 🚨 "지금 보이는 값이 최신이 아닐 수 있음" 전역 배너 자리 (NICEGUI_MIGRATION_PLAN §8-5).
+        #    · **자리만 먼저 잡고**, 실제 판정은 본문을 다 그린 뒤에 합니다. 본문이 데이터를
+        #      읽는 도중에 실패가 확정되기 때문에, 본문보다 먼저 판정하면 "한 박자 늦은 배너"가
+        #      됩니다. NiceGUI 는 나중에 만든 요소도 지정한 컨테이너 안에 들어가므로, 화면에는
+        #      정상적으로 **맨 위**에 보입니다.
+        #    · 화면 5개(pegy/us_stocks/scorecard/report/macro)에 같은 코드를 복붙하지 않으려고
+        #      모든 페이지가 공유하는 이 한 곳에 둡니다 (ENGINEERING_SPEC.md §0-3-10).
+        stale_slot = ui.element('div').classes('w-full')
         yield
+        _render_staleness_banner(stale_slot)
+
+
+def _render_staleness_banner(slot) -> None:
+    """원격 데이터가 최신이 아닐 때만 빨간 배너를 그립니다. 정상이면 아무것도 그리지 않습니다.
+
+    언제 뜨나 — `DATA_SOURCE_BASE_URL` 이 켜져 있고, 이번 프로세스에서 어떤 파일이든 최신화에
+    실패해 **마지막 성공분(또는 배포에 함께 실린 사본)** 을 보여주고 있을 때.
+    언제 사라지나 — 그 파일의 다음 fetch 가 성공하면 상태가 스스로 풀립니다. 즉 **다음에
+    페이지를 열면** 배너가 없습니다. 이미 열려 있는 화면을 자동으로 고치지는 않습니다
+    (§0-3-1 — 실시간처럼 보이게 만들지 않습니다).
+    """
+    try:
+        status = data_source.get_staleness_status()
+        if not status:
+            return
+        with slot:
+            error_banner(status['message'])
+    except Exception as exc:                          # noqa: BLE001 — 배너 때문에 화면이 죽으면 안 됩니다
+        print(f'⚠️ 데이터 최신성 배너 표시 실패: {exc}')

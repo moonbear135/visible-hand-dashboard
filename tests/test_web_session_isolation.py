@@ -55,6 +55,7 @@
 import ast
 import asyncio
 import io
+import os
 import re
 import sys
 import types
@@ -83,6 +84,10 @@ def check(condition, label, detail=""):
 def target_files():
     files = sorted(p for p in (REPO_ROOT / "web").rglob("*.py") if "__pycache__" not in p.parts)
     files.append(REPO_ROOT / "main.py")
+    # 🌐 2026-08-17 — `utils/data_source.py` 는 `utils/` 에 있지만 **접속자 전원이 공유하는
+    #    전역 캐시**를 들고 있으므로(원격 스냅샷 텍스트), web/ 과 똑같은 §0-3-8 검사를 받게
+    #    합니다. "읽기 전용 시장데이터만 담긴다"가 앞으로도 유지되는지 자동으로 감시합니다.
+    files.append(REPO_ROOT / "utils" / "data_source.py")
     return files
 
 
@@ -143,6 +148,11 @@ ALLOWED_MUTABLE_GLOBALS = {
     ("web/state.py", "_JSON_CACHE"):
         "읽기 전용 시장 데이터(data/*.json) 캐시. 모든 접속자에게 동일한 시세이며 "
         "개인정보가 아님 (§0-3-8 구분선 · 계획서 §3-3 규칙 4). 키는 파일 경로뿐.",
+    ("utils/data_source.py", "_CACHE"):
+        "원격에서 받아온 `data/*.json` **본문 텍스트**와 그 메타데이터(ETag·마지막 성공시각) "
+        "캐시. 키는 저장소 기준 상대경로 문자열뿐이고, 값에 들어가는 것은 모든 접속자에게 "
+        "동일한 시세 스냅샷 텍스트입니다. 사용자별 데이터는 이 모듈을 거치는 경로 자체가 "
+        "없습니다 — `read_text()` 는 `data/` 안의 파일 경로만 받습니다 (§0-3-8 구분선).",
     ("web/components/widgets.py", "_BANNER_PALETTE"):
         "배너 색상 상수표(문자열 튜플). 값이 CSS 색상 문자열이라 데이터가 들어갈 자리가 없음.",
     ("web/layout.py", "_MENU"):
@@ -1333,6 +1343,49 @@ def test_macro_render_smoke():
         app.storage.user.clear()
 
 
+# =============================================================================
+# [0] 🌐 데이터 원격 로드가 **꺼져 있는 상태**임을 못 박습니다 (2026-08-17 추가)
+# =============================================================================
+#  `utils/data_source.py`(계획서 §8-5 B안)가 들어오면서 `web/state.py` 의 내부 구현이
+#  바뀌었습니다. 아래 [4]/[6]/[8-b] 렌더 스모크가 **예전과 같은 조건(로컬 파일만)** 에서
+#  돌았다는 것을 이 검사가 보증합니다. 원격이 켜진 채로 돌면 스모크의 의미가 달라집니다.
+def test_data_source_defaults_to_local():
+    print("\n[0] 🌐 데이터 원격 로드 기본값 = 꺼짐 (아래 렌더 스모크의 전제 조건)")
+    import utils.data_source as ds
+    import web.state as state
+
+    check(not os.environ.get(ds.ENV_BASE_URL),
+          f"이 테스트 프로세스에 {ds.ENV_BASE_URL} 가 설정돼 있지 않음",
+          f"실제: {os.environ.get(ds.ENV_BASE_URL)!r}")
+    check(ds.is_remote_enabled() is False, "원격 로더가 꺼진 상태로 판정됨")
+    check(ds.get_staleness_status() is None, "전역 '최신 아님' 배너 상태가 없음")
+
+    # 화면 5개가 부르는 함수의 **이름·인자·반환 계약**이 그대로인지 (호출부 무변경의 근거)
+    import inspect
+    check([p.name for p in inspect.signature(state.data_path).parameters.values()] == ["filename"],
+          "web/state.data_path(filename) 시그니처 유지")
+    check([p.name for p in inspect.signature(state.load_json_file).parameters.values()] == ["path"],
+          "web/state.load_json_file(path) 시그니처 유지")
+    check([p.name for p in inspect.signature(state.read_download_bytes).parameters.values()] == ["path"],
+          "web/state.read_download_bytes(path) 시그니처 유지")
+
+    real = state.data_path("kospi200_pegy_latest.json")
+    payload, error = state.load_json_file(real)
+    if os.path.exists(real):
+        check(payload is not None and error is None,
+              "실제 스냅샷을 로컬 파일에서 그대로 읽음(네트워크 없이)",
+              f"({error})")
+    else:                                              # pragma: no cover - 저장소에는 항상 있음
+        check(payload is None and error is not None, "파일이 없으면 실패 사유를 그대로 돌려줌")
+
+    # 전역 배너는 화면 5개가 아니라 공용 껍데기 한 곳에만 있어야 합니다 (§0-3-10)
+    layout_src = (REPO_ROOT / "web" / "layout.py").read_text(encoding="utf-8")
+    check("get_staleness_status" in layout_src, "web/layout.py 한 곳에서만 최신성 배너를 그림")
+    duplicated = [rel(p) for p in (REPO_ROOT / "web" / "pages").glob("*.py")
+                  if "get_staleness_status" in p.read_text(encoding="utf-8")]
+    check(not duplicated, "화면 파일에는 같은 배너 코드가 복붙되지 않음", f"발견: {duplicated}")
+
+
 def test_pages_import_cleanly():
     print("\n[3-b] 모듈 import 검증 (문법·배선 오류 조기 발견)")
     _install_nicegui_stub()
@@ -1353,6 +1406,7 @@ def main():
     print("🔴 동시 접속 세션 격리 검증 (ENGINEERING_SPEC.md §0-3-8 / 계획서 §9 완료기준 ⑦)")
     print("=" * 74)
 
+    test_data_source_defaults_to_local()
     test_no_mutable_globals()
     test_user_named_globals_are_constants()
     test_no_global_rebinding()
