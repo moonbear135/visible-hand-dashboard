@@ -237,6 +237,21 @@ body.body--dark,
     word-break: keep-all;
     overflow-wrap: break-word;
 }
+
+/* 2026-08-17 — NiceGUI 자체 "Connection lost. Trying to reconnect..." 팝업을 화면
+   왼쪽 아래 대신 정중앙에 뜨게 합니다. 이 팝업은 프레임워크가 `id="popup"` 으로
+   그리는 고정 요소라(우리 코드가 만드는 게 아님), 여기서 CSS로만 위치를 덮어씁니다.
+   (출처: NiceGUI GitHub Discussion #3835 — 기본 z-index/위치 이슈에 대한 메인테이너 답변)
+   Render 무료 인스턴스는 15분 무접속 후 슬립되거나 재배포 중 WebSocket이 잠깐 끊기는데,
+   그때 자동으로 뜨는 정상 동작입니다 — 몇 초~1분 내 재연결되면 저절로 사라집니다. */
+#popup {
+    top: 50% !important;
+    left: 50% !important;
+    bottom: auto !important;
+    right: auto !important;
+    transform: translate(-50%, -50%) !important;
+    z-index: 10000 !important;
+}
 """
 
 
