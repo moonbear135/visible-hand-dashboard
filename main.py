@@ -15,7 +15,7 @@ import os
 from nicegui import app, ui
 
 import web.theme
-from web.pages import demo_page  # noqa: F401  (@ui.page 등록을 위해 import 자체가 필요)
+from web.pages import admin_page, demo_page  # noqa: F401  (@ui.page 등록을 위해 import 자체가 필요)
 
 web.theme.register()
 
