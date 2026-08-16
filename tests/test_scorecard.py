@@ -1358,8 +1358,20 @@ def test_view_and_routing():
           "안 보였음)")
     check("DEBUG" not in view_src,
           "원인 추적용으로 잠깐 배포했던 임시 디버그 코드가 남아있지 않음(2026-08-11)")
-    check("@media (max-width: 640px)" in view_src and "overflow-x: auto" in view_src,
-          "좁은 화면(모바일)에서 표가 세로로 쌓여 깨지는 대신 가로 스크롤로 유지됨(2026-08-11 오너 지적)")
+    # 2026-08-16 수정 — 원래는 "@media (max-width: 640px)"가 코드에 있는지만 확인했는데,
+    # 실기기(#119에서 "원인 미확정"으로 남겨뒀던 항목)로 재확인한 결과 이 미디어쿼리 조건이
+    # iframe 임베드 환경에서 기대대로 안 걸리는 경우가 실측됐습니다. 그래서 조건 없이
+    # 항상 걸리는 방식으로 바꿨고(자세한 경위는 TASK_HISTORY #126), 이 테스트도 실제
+    # 지켜야 할 것(표가 세로로 안 쌓이고 가로 스크롤 유지) 쪽으로 다시 맞췄습니다 — media
+    # query로 조건부 적용되던 옛 코드 블록(스타일 규칙 자체) 대신, 규칙이 무조건 걸려
+    # 있는지를 직접 확인합니다. (참고: 이 설명 주석 자체에 그 옛 구문을 문자열로 언급하고
+    # 있어 단순 "문자열 부재" 검사는 이 주석과 충돌하므로 쓰지 않습니다.)
+    check("overflow-x: auto" in view_src
+          and 'flex-direction: row !important' in view_src
+          and 'flex-wrap: nowrap !important' in view_src
+          and 'min-width: 700px' in view_src,
+          "표가 화면 폭과 무관하게 항상 가로 유지 + 가로 스크롤(세로로 쌓여 깨지는 것 방지, "
+          "2026-08-11 오너 지적 → 2026-08-16 #126으로 무조건 적용 방식으로 강화)")
     check("_row_label_html" in view_src and "<br>" in view_src,
           "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
     check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,

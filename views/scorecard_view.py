@@ -782,18 +782,28 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
         }}
         /* 2026-08-11 오너 지적 — 모바일처럼 화면이 좁아지면 Streamlit이 이 표의 9개 칸을
            세로로 쌓아버려서(내장 반응형 규칙) 글자가 겹쳐 보이고 표 모양이 완전히 깨집니다.
-           표를 세로로 쌓는 대신 **가로 스크롤이 되는 표**로 유지되도록, 좁은 화면에서만
-           칸이 안 쌓이게 강제하고(min-width로 표 전체 너비를 확보) 그 바깥을 가로로
-           스크롤되게 감쌉니다. 다른 화면(입력 폼 등)은 그대로 세로로 쌓이는 게 정상입니다 —
-           이 규칙은 표 영역에만 스코프되어 있습니다.
+           표를 세로로 쌓는 대신 **가로 스크롤이 되는 표**로 유지되도록, 칸이 안 쌓이게
+           강제하고(min-width로 표 전체 너비를 확보) 그 바깥을 가로로 스크롤되게 감쌉니다.
+           다른 화면(입력 폼 등)은 그대로 세로로 쌓이는 게 정상입니다 — 이 규칙은 표
+           영역에만 스코프되어 있습니다.
+
+           2026-08-16 오너 실기기 재확인(#119에서 "원인 미확정"으로 남겨둔 항목) — 처음엔
+           `@media (max-width: 640px)`로 좁은 화면에서만 이 규칙을 걸었는데, 실제 폰에서는
+           여전히 세로로 쌓여 나왔습니다. index.html이 이 앱을 iframe(`?embed=true`)으로
+           감싸는 구조라(#120/#121에서 실측 확인) iframe 내부 문서가 보고하는 CSS 뷰포트
+           폭이 실제 물리적 화면 폭과 어긋날 가능성이 있고, 그러면 `@media` 조건 자체가
+           기대와 다르게 평가돼 이 규칙이 아예 안 걸릴 수 있습니다(반면 Streamlit 자체의
+           세로 쌓기 판정은 컨테이너의 실측 렌더링 폭을 JS로 직접 재서 media query보다
+           더 안정적으로 작동한 것으로 보임). 그래서 `@media` 조건 자체를 없애고 **모든
+           화면 폭에서 항상** 가로 유지 + 가로 스크롤을 적용합니다 — 데스크탑은 원래도
+           표가 700px보다 넓은 경우가 대부분이라 시각적으로 달라지는 게 없고, 오히려
+           media query 신뢰성 문제 자체를 근본적으로 없앱니다.
         */
         .st-key-{table_key} {{ overflow-x: auto; -webkit-overflow-scrolling: touch; }}
-        @media (max-width: 640px) {{
-            .st-key-{table_key} [data-testid="stHorizontalBlock"] {{
-                flex-direction: row !important;
-                flex-wrap: nowrap !important;
-                min-width: 700px;
-            }}
+        .st-key-{table_key} [data-testid="stHorizontalBlock"] {{
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            min-width: 700px;
         }}
         </style>
         """,
