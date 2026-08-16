@@ -825,7 +825,7 @@ def _render_currency_block(client, user_id, group, indexes, sync_label=None):
            **개수**가 아니라 **컨테이너 폭이 임계값보다 좁은지**로 판정되는 것으로 보여,
            칸이 2~3개뿐이어도 폭이 좁으면 그대로 쌓임 — 오너 폰 스크린샷으로 확인).
            그래서 이 줄도 `st.columns()`를 아예 버리고, 종목당 `st.container(key=...)`
-           하나(파이썬 쪽에서 `_{row_id}` 접미사로 구분) 안에 라벨+버튼 2개를 순서대로
+           하나(파이썬 쪽에서 `_{{row_id}}` 접미사로 구분) 안에 라벨+버튼 2개를 순서대로
            넣은 뒤, 그 컨테이너의 세로 블록(`stVerticalBlock`)을 flex-row로 CSS만으로
            돌립니다. `st.columns()`가 쓰는 `stHorizontalBlock`과 달리 일반
            `stVerticalBlock`에는 Streamlit이 JS로 인라인 style을 박아넣지 않아서(반응형

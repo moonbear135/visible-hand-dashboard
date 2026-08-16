@@ -1398,6 +1398,37 @@ def test_view_and_routing():
           "st.columns()가 쓰는 stHorizontalBlock(JS가 인라인 style을 박아넣어 CSS로 "
           "못 이김, #6592)과 달리 일반 stVerticalBlock에는 그런 JS가 없어 순수 CSS "
           "flex로 라벨(남는 폭 다 먹음)+버튼(내용물 크기만) 배치를 확실히 관철시킴")
+    # 2026-08-16 (#129 핫픽스) — #128에서 이 CSS <style> f-string 안에 넣은 설명 주석에
+    # `_{row_id}` (홑겹 중괄호)를 실수로 그대로 써서, 이 f-string이 만들어지는 시점(표
+    # 렌더링 시작 시점, 종목 반복문보다 훨씬 앞)에 아직 정의되지 않은 `row_id`를 파이썬이
+    # 변수로 해석해버려 `UnboundLocalError`로 배포 직후 화면이 통째로 깨진 사고가 있었음
+    # (`_{{row_id}}` 로 중괄호를 두 겹 써야 글자 그대로 출력됨 — f-string 리터럴 규칙).
+    # "문자열에 특정 텍스트가 있는지"만 보는 체크로는 이런 종류의 실수를 못 잡으므로,
+    # 표 CSS f-string 블록을 실제로 소스에서 그대로 추출해 **진짜로 한 번 조립**해보고
+    # (이 시점엔 row_id 를 일부러 정의하지 않음 — 실제 실행 순서와 동일) 에러 없이
+    # 조립되는지 직접 검증합니다. 앞으로 이 블록에 비슷한 실수(홑겹 중괄호로 아직
+    # 없는 변수를 참조)가 생기면 이 테스트가 바로 잡아냅니다.
+    _css_match = re.search(
+        r'table_key = f"scorecard_rows_\{currency\}"\n\s*st\.markdown\(\n\s*f"""(.*?)"""',
+        view_src, re.S,
+    )
+    if _css_match is None:
+        check(False, "표 CSS f-string 블록을 소스에서 찾을 수 있음(위치가 바뀌었으면 이 "
+                      "정규식을 갱신해야 함)")
+    else:
+        try:
+            # 실제 함수 실행 시점과 똑같이 table_key 만 정의된 상태에서 f-string을 조립.
+            # row_id(및 그 밖의 종목별 반복 변수)는 일부러 정의하지 않음 — 만약 CSS
+            # 주석 안에 홑겹 중괄호로 그런 변수가 남아있다면 여기서 바로 터짐.
+            table_key = "scorecard_rows_KRW"  # noqa: F841 (f-string에서 참조됨)
+            eval('f"""' + _css_match.group(1) + '"""')
+            check(True, "표 CSS <style> f-string이 row_id 등 아직 정의 안 된 변수 없이 "
+                        "안전하게 조립됨(2026-08-16 #129 — 실배포에서 UnboundLocalError로 "
+                        "화면이 깨졌던 실수 재발 방지, 실제로 f-string을 조립해서 검증)")
+        except Exception as exc:  # noqa: BLE001
+            check(False, "표 CSS <style> f-string 조립",
+                  f"(에러 발생: {type(exc).__name__}: {exc} — 홑겹 중괄호로 아직 정의 안 된 "
+                  "변수를 참조하고 있을 가능성 높음, #129와 같은 사고 재발)")
     check("_row_label_html" in view_src and "<br>" in view_src,
           "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
     check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,
