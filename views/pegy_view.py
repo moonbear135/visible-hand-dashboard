@@ -1460,11 +1460,16 @@ def render_pegy_page():
 
     page_options = [f"페이지 {i} (종목 {(i-1)*20+1} ~ {min(i*20, total_items)})" for i in range(1, total_pages + 1)]
     
+    # 2026-08-16 (#119 후속, 실기기 재신고) — horizontal=True 라디오는 옵션 10개("페이지 1"~
+    # "페이지 10")를 한 flex 줄에 욱여넣으려다 좁은 화면에서 줄바꿈이 부분적으로만 되고
+    # 전체 컨테이너 폭이 뷰포트보다 넓어져, 스크린샷으로 실측한 "페이지 선택 화면에서만
+    # 좌우로 스크롤되던" 증상의 실제 원인이었습니다(#119/#122에서 고친 nowrap span과는 별개
+    # 원인). 세로 목록으로 바꿔 폭 초과 가능성 자체를 없앴습니다.
     selected_page_str = st.radio(
-        "페이지 이동", 
-        page_options, 
-        index=current_page - 1, 
-        horizontal=True,
+        "페이지 이동",
+        page_options,
+        index=current_page - 1,
+        horizontal=False,
         key="pegy_page_radio"
     )
     

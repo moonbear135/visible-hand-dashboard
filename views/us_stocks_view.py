@@ -1321,8 +1321,11 @@ def render_us_stocks_page():
         f"페이지 {i} (종목 {(i - 1) * items_per_page + 1} ~ {min(i * items_per_page, total_items)})"
         for i in range(1, total_pages + 1)
     ]
+    # 2026-08-16 (#119 후속) — pegy_view.py와 같은 이유(horizontal=True 라디오가 옵션이
+    # 많을 때 좁은 화면에서 컨테이너 폭을 뷰포트보다 넓혀 좌우 스크롤을 만듦, 여기는 최대
+    # 28페이지까지 있어 pegy_view.py보다 더 심함)로 세로 목록으로 바꿨습니다.
     selected_page = st.radio(
-        "페이지 이동", page_options, index=current_page - 1, horizontal=True, key="us_page_radio"
+        "페이지 이동", page_options, index=current_page - 1, horizontal=False, key="us_page_radio"
     )
     new_page = page_options.index(selected_page) + 1
     if new_page != st.session_state.us_current_page:
