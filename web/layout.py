@@ -1,5 +1,5 @@
 """
-헤더 + 좌측 드로어(사이드바) 뼈대 (NiceGUI 이전 0단계).
+헤더 + 좌측 드로어(사이드바) 뼈대 (NiceGUI 이전 0단계 → 2단계에서 메뉴 배선 시작).
 
 각 페이지 함수는 이렇게 씁니다:
 
@@ -10,26 +10,51 @@
         with layout('화면 제목'):
             ui.label('본문')
 
-지금은 골격만입니다. 실제 메뉴 라우팅(한국 주식/미국 주식/내 성적표/사장님 보고서)은
-2~6단계에서 각 화면을 옮기며 이 드로어에 실제 링크를 채워 넣습니다
-(NICEGUI_MIGRATION_PLAN.md §3-2 라우팅 표 참고).
+메뉴(한국 주식/미국 주식/내 성적표/사장님 보고서)는 각 화면을 옮길 때마다 여기 드로어에
+한 줄씩 채웁니다 (NICEGUI_MIGRATION_PLAN.md §3-2 라우팅 표).
 """
 
 from contextlib import contextmanager
 
 from nicegui import ui
 
+from web.auth import is_admin
+
+# (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
+# 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.
+# ⚠️ 관리자 콘솔 링크는 **관리자로 인증된 접속에만** 보여줍니다. 화면 자체는 어차피 비밀번호
+#    게이트로 막혀 있지만, 공개 화면에 관리자 입구를 광고해 무차별 대입 표적을 만들 이유가
+#    없습니다 (ENGINEERING_SPEC.md §0-3-9 — 알려진 기본 공격면은 줄여둡니다).
+_MENU = [
+    ('/', '🇰🇷 한국 주식 밸류에이션', False),
+    ('/admin', '⚙️ 관리자 콘솔', True),
+]
+
 
 @contextmanager
-def layout(title: str):
+def layout(title: str, width_class: str = 'max-w-4xl'):
+    """공통 껍데기.
+
+    :param title: 헤더 우측에 작게 표시할 화면 이름
+    :param width_class: 본문 최대 폭(Tailwind). 카드가 넓은 화면(pegy 등)은 'max-w-6xl'.
+    """
+    # 화면 카드가 전부 짙은 남색 계열이라(기존 Streamlit 다크 테마 기준으로 만들어진 HTML)
+    # 밝은 배경 위에 그리면 인상이 크게 달라집니다. 프로젝트 전체를 다크로 고정합니다.
+    ui.dark_mode(True)
+
     with ui.header().classes('items-center justify-between q-pa-sm'):
         with ui.row().classes('items-center gap-2'):
+            ui.button(icon='menu', on_click=lambda: drawer.toggle()).props('flat dense round')
             ui.label('💡 잘 보면 보이는 손').classes('text-lg font-bold')
-        ui.label(title).classes('vh-muted')
+        ui.label(title).classes('text-sm opacity-70')
 
-    with ui.left_drawer(value=False).classes('bg-gray-50') as drawer:
-        ui.label('메뉴 (0단계 — 아직 배선 전)').classes('vh-muted q-pa-sm')
-        # 2~6단계에서 여기에 ui.link('한국 주식', '/'), ui.link('미국 주식', '/us') 등을 채웁니다.
+    admin = is_admin()
+    with ui.left_drawer(value=False) as drawer:
+        with ui.column().classes('gap-2 p-2'):
+            for path, label, admin_only in _MENU:
+                if admin_only and not admin:
+                    continue
+                ui.link(label, path).classes('text-base no-underline')
 
-    with ui.column().classes('w-full max-w-4xl mx-auto p-4 gap-4'):
+    with ui.column().classes(f'w-full {width_class} mx-auto p-4 gap-4 vh-page'):
         yield

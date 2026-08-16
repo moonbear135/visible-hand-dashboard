@@ -12,7 +12,10 @@ NICEGUI_MIGRATION_PLAN.md §5-2 "프로젝트 반응형 규약"의 패턴 A~D를
   ④ 새로고침해도 아래 카운터 값이 유지된다 (app.storage.user 확인)
   ⑤ 서버 로그에 KST 시각이 정확히 찍힌다 (Dockerfile의 tzdata 설치 확인용)
 
-이 파일은 1단계 이후 실제 화면(admin/pegy/...)으로 교체될 때 지워도 됩니다.
+2026-08-17 (2단계) — 실화면 `pegy_page` 가 `/` 를 가져가면서 이 데모는 `/demo` 로 옮겼습니다.
+오너가 2단계 실기기 확인을 할 때 "패턴 A~D 자체는 여전히 정상인가"를 대조할 수 있게 잠깐
+남겨둔 것이며, 3단계(us_stocks) 확인이 끝나면 이 파일과 `web/auth.py` 의 데모 카운터 두 함수를
+**삭제**합니다 (ENGINEERING_SPEC.md §0-3-10 — 안 쓰는 코드를 무기한 남기지 않습니다).
 """
 
 from datetime import datetime
@@ -23,8 +26,8 @@ from web.auth import bump_demo_counter, get_demo_counter
 from web.layout import layout
 
 
-@ui.page('/')
-def index_page() -> None:
+@ui.page('/demo')
+def demo_index_page() -> None:
     with layout('0단계 — 모바일 반응형 데모'):
         ui.markdown(
             '이 화면은 **0단계 검증 전용**입니다. 폰으로 열어서 '
