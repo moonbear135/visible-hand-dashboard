@@ -15,6 +15,10 @@ REPORT_WORK_ORDER.md §9-4 / §9-7 에 따라, 이 세션에서는 **실제 Supa
     ⑦ 가짜 Supabase 클라이언트로 적재/조회 배선 검증 (upsert 충돌 키, user_id 필터)
     ⑦-1 🧾 종목별 일일 스냅샷(2026-08-13) — **합계 = 종목별 합** 불변식, 저장 순서와 부분 실패,
          테이블이 아직 없는 DB, 화면 표 문구
+    ⑦-2 🇺🇸 미국 종목명 한글 표기(2026-08-16, #115) — 리포트의 모든 종목명 자리가 '내 성적표'와
+         같은 값인지, 한국 종목은 그대로인지, 한글명을 못 만들면 지어내지 않는지
+    ⑦-3 ➗ 벤치마크 비교의 "미국 두 지수 평균" 줄(2026-08-16, #116) — 둘 다 계산됐을 때만,
+         정확한 산술 평균으로, 한국 시장·한쪽 결측일 때는 조용히 생략하는지
     ⑧ SQL 스키마 · 워크플로우 · 화면 배선 (기본 숨김, service_role 격리, 기존 파일 무손상)
 
 ⚠️ 저장소의 실제 데이터 파일(data/*.json, market_history.csv)은 **읽기만** 합니다.
@@ -2061,6 +2065,307 @@ def test_holding_weights():
             sys.modules.pop("views.scorecard_view", None)
 
 
+# =============================================================================
+# 9-5. 🇺🇸 리포트 화면의 미국 종목명 한글 표기 (2026-08-16 #115 회귀 방지)
+# =============================================================================
+#  오너 원문: "미국 주식 이쪽에 종목 설명 있는 부분에는 한국식 발음으로 넣으면 안되는거야?
+#  스페이스 X 애플, 엔비디아, 마이크로소프트 이런식으로".
+#
+#  근본 원인: '내 성적표'(views/scorecard_view.py)는 2026-08-13부터 미국 종목을 한글명으로
+#  표시하고 있었는데, 리포트 화면만 그 로직을 재사용하지 않고 스냅샷에 저장된 영문 원문
+#  (`portfolio_holding_snapshots.stock_name`)을 그대로 뿌리고 있었습니다.
+#
+#  이 테스트가 지키는 것
+#    ① 미국 종목은 한글명 — 종목별 상세 표 / 비중 변화 표 / 기록이 끊긴 종목 안내 **전부**
+#    ② 한국 종목은 저장된 종목명 그대로(영향 없음)
+#    ③ 유니버스(상위 550) 밖 종목도 죽지 않고 폴백 경로로 이름이 나옴
+#    ④ 한글명을 끝내 못 만들면 **지어내지 않고** 영문명으로 정직하게 되돌아감(§0-1)
+#    ⑤ 표기의 단일 출처 — 리포트가 직접 만든 값이 아니라 '내 성적표'의 `_display_name()`
+#       결과와 **글자 하나까지 같은지**(두 화면이 어긋나면 그게 "들쑥날쑥")
+#  ⚠️ DB 저장값은 영문 그대로 두고 **표시 시점에만** 바꾸는 방식이라, 이 테스트도 저장 쪽은
+#     전혀 건드리지 않습니다(스냅샷 행의 stock_name 은 계속 영문이어야 정상).
+# =============================================================================
+def test_us_korean_names():
+    print("\n[9-5] 🇺🇸 리포트 종목명 한글 표기 (#115)")
+
+    holdings_us = [
+        holding(MARKET_US, "NVDA", 10, 150.0, "NVIDIA Corporation Common Stock"),
+        holding(MARKET_US, "SPCX", 40, 20.0,
+                "Space Exploration Technologies Corp. Class A Common Stock"),
+        # 상위 550 유니버스 **밖** 종목(스냅샷에 name_kr 이 없어 폴백 경로를 타는 경우)
+        holding(MARKET_US, "ZZZQ", 100, 9.0, "Bright Harbor Robotics Inc. Common Stock"),
+    ]
+
+    def _us_rows(day, prices, items=None):
+        _r, detail, _s = rdb.build_snapshot_rows_with_holdings(
+            "u1", items if items is not None else holdings_us,
+            price_lookup_factory(prices), {MARKET_US: day},
+            price_stamp_by_market={MARKET_US: f"{day} 06:20"})
+        return detail
+
+    # 8/10 세 종목 → 8/12 에는 SPCX 가 매도돼 기록이 끊깁니다(=gone 안내 경로까지 검증).
+    us_rows = rdb.sort_holding_snapshots(
+        _us_rows("2026-08-10", {(MARKET_US, "NVDA"): 200.0,
+                                (MARKET_US, "SPCX"): 25.0,
+                                (MARKET_US, "ZZZQ"): 10.0})
+        + _us_rows("2026-08-12", {(MARKET_US, "NVDA"): 220.0,
+                                  (MARKET_US, "ZZZQ"): 12.0},
+                   items=[h for h in holdings_us if h["ticker"] != "SPCX"]))
+
+    check(all("Common Stock" in (r["stock_name"] or "") for r in us_rows),
+          "🔴 저장되는 스냅샷의 stock_name 은 여전히 **영문 원문** (DB 는 손대지 않음)")
+
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        scorecard = importlib.import_module("views.scorecard_view")
+        from utils.company_names_kr import resolve_korean_name  # noqa: PLC0415
+
+        # ---- ① 라벨 함수 단위 ------------------------------------------------
+        indexes = module._display_indexes(MARKET_US)
+        universe = indexes.get(MARKET_US) or {}
+        check(bool(universe.get("NVDA", {}).get("name_kr")),
+              "미국 유니버스 스냅샷에서 미리 계산된 name_kr 을 그대로 읽어옴(재계산 없음)")
+        check(module._display_indexes(MARKET_KR) == {},
+              "한국 블록에서는 유니버스 파일을 아예 읽지 않음(변환이 필요 없으므로)")
+
+        nvda = {"ticker": "NVDA", "stock_name": "NVIDIA Corporation Common Stock"}
+        check(module._holding_label(nvda, MARKET_US, indexes) == "엔비디아 (NVDA)",
+              "🔴 미국 종목은 영문 풀네임이 아니라 한글명 — '엔비디아 (NVDA)'")
+        spcx = {"ticker": "SPCX",
+                "stock_name": "Space Exploration Technologies Corp. Class A Common Stock"}
+        check(module._holding_label(spcx, MARKET_US, indexes) == "스페이스X (SPCX)",
+              "오너가 예로 든 스페이스X 도 그대로 — '스페이스X (SPCX)'")
+        check(module._holding_name(nvda, MARKET_US, indexes) == "엔비디아",
+              "코드 없이 이름만 쓰는 자리(기록이 끊긴 종목 안내)도 같은 한글명")
+
+        # ② 한국 종목은 영향 없음
+        samsung = {"ticker": "005930", "stock_name": "삼성전자", "market": MARKET_KR}
+        check(module._holding_label(samsung, MARKET_KR, {}) == "삼성전자 (005930)",
+              "🔴 한국 종목은 저장된 종목명 그대로(이번 변경의 영향 없음)")
+
+        # ③ 유니버스 밖 종목 — 죽지 않고 같은 모듈의 폴백으로 이름을 만듦
+        outside = {"ticker": "ZZZQ",
+                   "stock_name": "Bright Harbor Robotics Inc. Common Stock"}
+        expected_outside = resolve_korean_name("ZZZQ", outside["stock_name"])["korean_name"]
+        check("ZZZQ" not in universe, "전제 확인 — ZZZQ 는 상위 550 유니버스 밖")
+        check(module._holding_label(outside, MARKET_US, indexes)
+              == f"{expected_outside} (ZZZQ)",
+              "유니버스 밖 종목은 company_names_kr 의 자동 음역으로 폴백(같은 단일 출처)")
+
+        # ④ 한글명을 끝내 못 만드는 경우 — 지어내지 않고 영문명 그대로(§0-1)
+        nameless = {"ticker": "0000", "stock_name": "9 9 9"}
+        check(resolve_korean_name("0000", "9 9 9")["korean_name"] is None,
+              "전제 확인 — 이 이름은 음역조차 만들 수 없음")
+        check(module._holding_label(nameless, MARKET_US, indexes) == "9 9 9 (0000)",
+              "🔴 한글명을 못 만들면 지어내지 않고 영문명으로 정직하게 되돌아감(§0-1)")
+
+        # ⑤ 단일 출처 — '내 성적표'와 글자 하나까지 같은 값
+        for probe in (nvda, spcx, outside):
+            same = scorecard._display_name(dict(probe, market=MARKET_US), indexes)
+            check(module._holding_label(probe, MARKET_US, indexes)
+                  == f"{same} ({probe['ticker']})",
+                  f"'내 성적표'와 완전히 같은 표기({probe['ticker']}) — 두 화면이 어긋나지 않음")
+
+        # ---- ⑥ 실제 화면 렌더링 ----------------------------------------------
+        real_st = module.st
+        recorder = _HoldingViewRecorder()
+        module.st = recorder
+        try:
+            us_summary = rdb.sort_snapshots([
+                snap(date(2026, 8, 12), 3400.0, 2400.0, market=MARKET_US,
+                     holdings_count=2, priced_count=2,
+                     benchmark_symbol=rdb.US_PRIMARY_BENCHMARK, benchmark_value=600.0)])
+            module._render_holding_history(MARKET_US, us_rows, us_summary,
+                                           date(2026, 8, 1), date(2026, 8, 31), "USD")
+            tables = [t for t in recorder.markdown_calls if t.startswith("| 종목 |")]
+            detail_table = tables[0]
+            check("엔비디아 (NVDA)" in detail_table,
+                  "🔴 종목별 상세 표에 한글명이 실제로 찍힘")
+            check("NVIDIA Corporation" not in detail_table
+                  and "Common Stock" not in detail_table,
+                  "🔴 영문 풀네임·상품 설명이 표에서 사라짐(오너가 지적한 그 부분)")
+            check(f"{expected_outside} (ZZZQ)" in detail_table,
+                  "유니버스 밖 종목도 표에서 한글로 보임")
+
+            change_table = tables[1]
+            check("스페이스X (SPCX)" in change_table and "엔비디아 (NVDA)" in change_table,
+                  "🔴 비중 변화 표도 같은 한글명(같은 화면에서 이름이 두 개가 되지 않음)")
+            check(any("스페이스X(SPCX" in t for t in recorder.caption_calls),
+                  "기록이 끊긴 종목 안내 줄도 한글명")
+
+            # 한국 블록은 그대로 — 같은 렌더러를 한국 시장으로 부르면 저장된 이름 그대로
+            recorder.reset()
+            kr_holdings = [holding(MARKET_KR, "005930", 10, 70000, "삼성전자")]
+            _r, kr_detail, _s = rdb.build_snapshot_rows_with_holdings(
+                "u1", kr_holdings, price_lookup_factory({(MARKET_KR, "005930"): 80000.0}),
+                {MARKET_KR: "2026-08-12"},
+                price_stamp_by_market={MARKET_KR: "2026-08-12 17:50"})
+            module._render_holding_history(MARKET_KR, kr_detail, [],
+                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
+            kr_table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
+            check("삼성전자 (005930)" in kr_table,
+                  "🔴 한국 시장 블록은 예전 그대로(한글명 변환이 끼어들지 않음)")
+        finally:
+            module.st = real_st
+
+        # ---- ⑦ 배선 자체 — 로직을 베껴 쓰지 않고 import 해서 재사용했는지 ------
+        view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
+        check("from views.scorecard_view import _display_name" in view_src,
+              "리포트가 '내 성적표'의 표기 함수를 그대로 import(로직 중복 구현 없음)")
+        check("from views.scorecard_view import SESSION_CLIENT_KEY, SESSION_USER_KEY" in view_src,
+              "기존 세션 키 import 줄은 그대로 보존(읽기 전용 재사용 관례 유지)")
+        scorecard_src = (REPO_ROOT / "views" / "scorecard_view.py").read_text(encoding="utf-8")
+        check("2026-08-16" not in scorecard_src,
+              "🔴 '내 성적표'는 이번에도 한 줄도 고치지 않음(단방향 재사용)")
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 미국 한글명 표기 검증",
+              f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
+def test_benchmark_average():
+    print("\n[9-6] ➗ 벤치마크 비교 — 미국 두 지수 평균 한 줄 (#116)")
+
+    spy_key, oneq_key = rdb.US_BENCHMARK_KEYS
+    spy_label = "S&P 500 (SPY ETF 종가 기준)"
+    oneq_label = "나스닥 종합 (ONEQ ETF 종가 기준)"
+
+    def report_for(change_pct):
+        """포트폴리오 쪽은 이 테스트의 관심사가 아니라, 화면이 읽는 키만 채운 최소 dict."""
+        return {"baseline": {"snapshot_date": date(2026, 7, 31)},
+                "latest": {"snapshot_date": date(2026, 8, 31)},
+                "value_change_pct": change_pct}
+
+    def bench(symbol, label, closes, is_proxy=True):
+        return {"symbol": symbol, "label": label, "closes": closes,
+                "is_proxy": is_proxy, "note": ""}
+
+    # 기간 양 끝 날짜만 있으면 되는 합성 종가(포트폴리오와 **같은 두 날짜**로만 계산되므로).
+    spy_up10 = {"2026-07-31": 100.0, "2026-08-31": 110.0}     # +10.00%
+    oneq_up20 = {"2026-07-31": 200.0, "2026-08-31": 240.0}    # +20.00%  → 평균 +15.00%
+    oneq_down4 = {"2026-07-31": 200.0, "2026-08-31": 192.0}   # -4.00%   → 평균 +3.00%
+    oneq_half = {"2026-07-31": 200.0}                          # 종료일 종가 없음(=비교 불가)
+    kospi_up5 = {"2026-07-31": 3000.0, "2026-08-31": 3150.0}   # +5.00%
+
+    stubbed = _install_streamlit_stub()
+    try:
+        module = importlib.import_module("views.report_view")
+        real_st = module.st
+        real_loader = module.benchmark_closes_for_market
+        recorder = _HoldingViewRecorder()
+        module.st = recorder
+
+        def use(benchmarks):
+            module.benchmark_closes_for_market = lambda *_a, **_k: list(benchmarks)
+            recorder.reset()
+
+        def avg_lines():
+            return [t for t in recorder.markdown_calls if "평균" in t]
+
+        try:
+            # ---- (a) 미국 · 둘 다 있을 때 = 정확한 산술 평균 --------------------
+            use([bench(spy_key, spy_label, spy_up10),
+                 bench(oneq_key, oneq_label, oneq_up20)])
+            module._render_benchmarks(report_for(18.0), MARKET_US)
+            lines = avg_lines()
+            check(len(lines) == 1, "🔴 미국 블록에 평균 줄이 정확히 한 줄 생김",
+                  f"(실제 {len(lines)}줄)")
+            line = lines[0] if lines else ""
+            check("+15.00%" in line,
+                  "🔴 평균이 두 수익률(+10.00% · +20.00%)의 정확한 산술 평균 +15.00%")
+            check("차이 +3.00%p" in line,
+                  "내 포트폴리오(+18.00%)와의 차이도 기존 줄과 같은 방식(+3.00%p)")
+            check("내 포트폴리오" in line and ":red[+18.00%]" in line,
+                  "내 수익률 표기·색 관례가 기존 벤치마크 줄과 동일")
+            check(line.startswith("- **") and "S&P 500 / 나스닥 종합 평균**" in line,
+                  "글머리표·굵은 라벨 형식이 기존 줄과 통일 — 'S&P 500 / 나스닥 종합 평균'")
+            check("VOO" not in line and "QQQ" not in line,
+                  "🔴 실제로 수집하는 건 SPY·ONEQ 프록시라, 가지고 있지도 않은 VOO/QQQ 종가로 "
+                  "계산한 것처럼 적지 않음(§0-1)")
+            check("→ (" not in line and "( 1" not in line,
+                  "서로 다른 두 ETF 가격의 평균 같은 무의미한 숫자는 넣지 않음(수익률 평균만)")
+            check(recorder.markdown_calls.index(line) == len(recorder.markdown_calls) - 1,
+                  "평균 줄은 기존 벤치마크 줄들 **아래**에 붙음")
+
+            # 개별 줄과 평균 줄이 같은 계산에서 나온 값인지(화면 안에서 숫자가 어긋나지 않게)
+            check(any(":red[+10.00%]" in t for t in recorder.markdown_calls)
+                  and any(":red[+20.00%]" in t for t in recorder.markdown_calls),
+                  "위 두 벤치마크 줄은 예전 그대로(+10.00% · +20.00%)")
+
+            # 음수가 섞여도 그대로 — (+10.00 + -4.00) / 2 = +3.00
+            use([bench(spy_key, spy_label, spy_up10),
+                 bench(oneq_key, oneq_label, oneq_down4)])
+            module._render_benchmarks(report_for(-1.0), MARKET_US)
+            line = (avg_lines() or [""])[0]
+            check(":red[+3.00%]" in line and "차이 -4.00%p" in line,
+                  "한쪽이 마이너스여도 산술 평균 그대로(+3.00%), 색·차이 표기도 관례대로")
+
+            # 내 수익률을 모르는 경우 — 평균 줄은 나오되 '차이'는 지어내지 않음
+            use([bench(spy_key, spy_label, spy_up10),
+                 bench(oneq_key, oneq_label, oneq_up20)])
+            module._render_benchmarks(report_for(None), MARKET_US)
+            line = (avg_lines() or [""])[0]
+            check("+15.00%" in line and "차이" not in line,
+                  "내 수익률이 없으면 평균만 보여주고 '차이'는 만들어내지 않음(§0-1)")
+
+            # ---- (b) 한국 · 벤치마크가 코스피 하나뿐 = 평균 줄 없음 --------------
+            use([bench("KOSPI", "코스피 지수", kospi_up5, is_proxy=False)])
+            module._render_benchmarks(report_for(7.0), MARKET_KR)
+            check(any(":red[+5.00%]" in t for t in recorder.markdown_calls),
+                  "전제 확인 — 한국 블록의 코스피 비교 줄은 예전 그대로 나옴")
+            check(avg_lines() == [],
+                  "🔴 한국 시장(벤치마크 1개)에는 평균 줄이 아예 나오지 않음")
+
+            # ---- (c) 한쪽이 비교 불가 = 조용히 생략(지어내지 않기) ----------------
+            use([bench(spy_key, spy_label, spy_up10),
+                 bench(oneq_key, oneq_label, oneq_half)])
+            module._render_benchmarks(report_for(18.0), MARKET_US)
+            check(any("비교 불가" in t for t in recorder.markdown_calls),
+                  "전제 확인 — 종료일 종가가 없는 벤치마크는 '비교 불가'로 표시됨")
+            check(avg_lines() == [],
+                  "🔴 한쪽이 available=False 면 남은 하나로 평균을 만들지 않고 **조용히 생략**")
+            check(not any("데이터 없음" in t or "알 수 없" in t for t in avg_lines()),
+                  "'평균: 데이터 없음' 같은 애매한 줄도 넣지 않음(§0-1)")
+
+            # 미국인데 나스닥 벤치마크 파일이 아직 없는 상태(수집 전)도 같은 결과
+            use([bench(spy_key, spy_label, spy_up10)])
+            module._render_benchmarks(report_for(18.0), MARKET_US)
+            check(avg_lines() == [],
+                  "벤치마크 목록에 한쪽이 아예 없으면(수집 전) 평균 줄 없음")
+        finally:
+            module.st = real_st
+            module.benchmark_closes_for_market = real_loader
+
+        # ---- (d) 배선·범위 -----------------------------------------------------
+        view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
+        check("US_BENCHMARK_KEYS" in python_code_only(view_src),
+              "평균에 쓸 두 벤치마크를 화면이 새로 정의하지 않고 report_db 의 키 목록을 재사용")
+        check("MARKET_US" in view_src[view_src.index("def _render_benchmark_average"):
+                                      view_src.index("def _render_benchmarks")],
+              "평균 줄은 미국 시장에서만 그리도록 함수 안에서 명시적으로 걸러냄")
+        check("예금" not in view_src and "은행" not in view_src,
+              "🔴 이번 범위에서 뺀 '시중은행 예금금리' 비교는 코드에 들어가지 않음"
+              "(실데이터 출처가 없어 가짜 값을 넣지 않기로 오너가 결정 — §0-1)")
+        db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
+        check("def benchmark_period_return" in db_src
+              and not re.search(r"^def .*average", db_src, re.M),
+              "계산 모듈(report_db)에 새 함수를 만들지 않고 기존 기간 수익률 계산을 그대로 재사용"
+              "(평균은 화면이 그 결과 두 개로 한 줄 더 그리는 것뿐)")
+    except Exception as exc:  # noqa: BLE001
+        check(False, "views.report_view 벤치마크 평균 줄 검증",
+              f"({type(exc).__name__}: {exc})")
+    finally:
+        if stubbed:
+            sys.modules.pop("streamlit", None)
+            sys.modules.pop("views.report_view", None)
+            sys.modules.pop("views.scorecard_view", None)
+
+
 def test_holding_schema_and_wiring():
     print("\n[10-1] 종목별 스냅샷 — SQL 스키마 · 화면 배선")
     sql = (REPO_ROOT / "sql" / "report_schema.sql").read_text(encoding="utf-8")
@@ -2407,6 +2712,8 @@ def main():
     test_holding_snapshots()
     test_period_buttons()
     test_holding_weights()
+    test_us_korean_names()
+    test_benchmark_average()
     test_holding_schema_and_wiring()
     test_sql_schema()
     test_workflow()

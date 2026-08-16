@@ -32,6 +32,17 @@ v1 범위 (REPORT_WORK_ORDER.md §6)
    - 📊 **종목별 비중(%) + 기간 시작 대비 비중 변화** — 2026-08-13 추가(#114, 오너가 수기로
      관리하던 표를 옮긴 것). **새 테이블 없이** 이미 저장된 종목별 `market_value` 를 같은 날
      합계로 나눠 조회 시점에 계산합니다(`utils/report_db.build_weight_comparison()`).
+   - 🇺🇸 **미국 종목명은 한글로 표시** — 2026-08-16 추가(#115, 오너 요청). 스냅샷에 저장된
+     영문 원문 대신 '내 성적표'가 쓰는 것과 **완전히 같은** 한글명을 씁니다(그 화면의
+     `_display_name()` 을 그대로 import — 로직 중복 구현 없음). 종목명이 나오는 자리
+     (종목별 상세 표 · 비중 변화 표 · 기록이 끊긴 종목 안내 · 일별 추이 선택 라벨)에
+     한 번에 적용했고, 한국 종목과 **DB 저장값은 그대로**입니다(표시 시점 변환).
+   - ➗ **벤치마크 비교에 "미국 두 지수 평균" 한 줄 추가** — 2026-08-16 추가(#116, 오너가 수기로
+     관리하던 "2025년수익률 비교 - 연말 성적표.csv" 의 'VOO / QQQ 평균 수익률' 줄을 옮긴 것).
+     기간별 로직은 그대로라 **오너가 고른 기간이 무엇이든**(일/주/월/분기/반기/연) 같은 두
+     날짜로 계산됩니다. 두 벤치마크가 **둘 다** 계산됐을 때만 나오고, 한국 시장(벤치마크 1개)
+     에는 나오지 않습니다. 라벨은 실제 수집 대상(SPY·ONEQ 프록시) 이름을 씁니다 — 자세한
+     이유는 아래 `_render_benchmark_average()` 주석 참고.
    - 🔤 화면 문구는 2026-08-13(#114)에 대폭 줄였습니다 — 기준은 "이 프로젝트를 처음 보는
      방문자". 다만 **§0-1 고지(환율·수수료·단순비교·ETF 프록시·가격 모름·대조 불일치)는
      표현만 압축했고 하나도 지우지 않았습니다.** 이 파일에 문구를 더할 때도 같은 기준으로:
@@ -55,6 +66,13 @@ import streamlit as st
 # 세션 키를 여기서 새로 정의하면 두 화면이 서로 로그인 상태를 모르게 되므로, 그 모듈의
 # 상수를 그대로 가져옵니다(읽기 전용 재사용 — scorecard_view 는 한 줄도 고치지 않았습니다).
 from views.scorecard_view import SESSION_CLIENT_KEY, SESSION_USER_KEY
+# 🇺🇸 미국 종목명 한글 표기 — 2026-08-16(#115) 오너 요청. '내 성적표'가 2026-08-13부터 쓰고
+# 있는 **바로 그 함수**를 그대로 가져다 씁니다(읽기 전용 재사용 — scorecard_view 는 이번에도
+# 한 줄도 고치지 않았습니다). 같은 로직을 여기에 베껴 쓰면 언젠가 두 화면의 표기가 어긋나므로
+# (오너가 말한 "들쑥날쑥") 단일 출처를 유지합니다. 아래 `_display_name()` 은 미국 종목이면
+# `utils/company_names_kr.py`(정식 한글명 사전 → 자동 음역 폴백)를, 한국 종목이면 저장된
+# 종목명을 그대로 돌려줍니다.
+from views.scorecard_view import _display_name
 from utils.scorecard_db import (
     MARKET_KR,
     MARKET_US,
@@ -64,6 +82,7 @@ from utils.scorecard_db import (
     create_supabase_client,
     current_user,
     format_amount,
+    load_universe_index,
     sign_in,
     supabase_status,
     user_id_of,
@@ -77,6 +96,7 @@ from utils.report_db import (
     STATUS_IN_PROGRESS,
     STATUS_INSUFFICIENT,
     STATUS_NO_DATA,
+    US_BENCHMARK_KEYS,
     ReportError,
     benchmark_closes_for_market,
     benchmark_period_return,
@@ -380,6 +400,53 @@ def _render_numbers(report, incomplete=False):
         st.warning("⚠️ " + " ".join(alerts))
 
 
+def _benchmark_short_label(label):
+    """
+    'S&P 500 (SPY ETF 종가 기준)' → 'S&P 500'. 평균 줄 하나에 두 벤치마크 이름을 나란히
+    넣으려고 괄호 안 설명만 떼어냅니다. 프록시라는 사실은 바로 위 두 줄의 라벨과 맨 아래
+    한 줄 고지에 그대로 남아 있으므로 여기서 정보가 사라지지는 않습니다(§0-1).
+    """
+    text = (label or "").strip()
+    return text.split(" (")[0].strip() or text
+
+
+def _render_benchmark_average(outcomes, market, mine):
+    """
+    🇺🇸 **미국 두 벤치마크 수익률의 단순 평균** 한 줄 (2026-08-16 #116, 오너 요청).
+
+    오너 원문: 수기로 관리하던 "2025년수익률 비교 - 연말 성적표.csv" 에 코스피·S&P500·나스닥
+    각각과 비교하는 줄 말고 **"VOO / QQQ 평균 수익률"** 줄이 따로 있었고, "모든 기간의 벤치마크
+    비교에 추가를 하면 좋겠는데" 라고 요청했습니다. 미국 대표 두 지수를 반반 들고 있었다면
+    얼마였을지를 한 줄로 보는 용도입니다(기간 시작에 반반 사서 그대로 뒀다면 그 수익률은
+    두 수익률의 산술 평균과 정확히 같습니다).
+
+    ⚠️ **라벨을 'VOO / QQQ' 라고 쓰지 않습니다.** 오너의 수기 표는 VOO·QQQ 로 적혀 있었지만,
+       이 프로젝트가 실제로 수집·저장하는 값은 **SPY(S&P500 프록시)·ONEQ(나스닥 종합 프록시)
+       종가**입니다(`collector_us_indices.US_INDEX_BENCHMARKS`). 가지고 있지도 않은 VOO/QQQ
+       종가로 계산한 것처럼 적으면 그 자체가 지어낸 값입니다(§0-1). 그래서 라벨은 위 두 줄에
+       실제로 찍힌 벤치마크 이름을 그대로 이어 붙여 만듭니다.
+    ⚠️ **둘 다 계산됐을 때만** 그립니다. 한쪽 종가가 없어 '비교 불가'인 기간에 나머지 하나로
+       평균을 만들면 그건 평균이 아니고, "평균: 데이터 없음" 같은 줄도 넣지 않습니다 —
+       계산할 수 없으면 **조용히 생략**합니다. 벤치마크가 하나뿐인 한국 시장도 마찬가지로
+       이 줄이 아예 나오지 않습니다.
+    ⚠️ 시작·종가 괄호(`( 600.00 → 660.00 )`)는 붙이지 않습니다. 서로 다른 두 ETF 의 가격을
+       평균 낸 숫자는 아무 뜻도 없는 값이라, 수익률의 평균만 보여 줍니다.
+    """
+    if market != MARKET_US:
+        return
+    picked = [outcomes.get(key) for key in US_BENCHMARK_KEYS]
+    if any(item is None or not item[1]["available"] for item in picked):
+        return
+
+    average = sum(item[1]["change_pct"] for item in picked) / len(picked)
+    names = " / ".join(_benchmark_short_label(item[0]["label"]) for item in picked)
+    line = f"- **{names} 평균** {_colored_pct(average)}"
+    if mine is not None:
+        gap = mine - average
+        line += f" · 내 포트폴리오 {_colored_pct(mine)} → 차이 {gap:+.2f}%p"
+    st.markdown(line)
+
+
 def _render_benchmarks(report, market):
     """포트폴리오와 **정확히 같은 두 날짜**로 벤치마크 수익률을 계산해 나란히 보여줍니다."""
     st.markdown("##### 📊 벤치마크 비교")
@@ -395,8 +462,12 @@ def _render_benchmarks(report, market):
     mine = report.get("value_change_pct")
 
     has_proxy = False
+    # 평균 줄(아래 `_render_benchmark_average()`)이 쓰려고 계산 결과를 심볼별로 들고 있습니다.
+    # 같은 수익률을 두 번 계산하지 않기 위한 것이라, 위 줄들과 평균 줄의 숫자는 항상 같습니다.
+    outcomes = {}
     for benchmark in benchmarks:
         outcome = benchmark_period_return(benchmark["closes"], baseline_date, end_date)
+        outcomes[benchmark["symbol"]] = (benchmark, outcome)
         if not outcome["available"]:
             st.markdown(f"- **{benchmark['label']}**: 비교 불가 — {outcome['reason']}")
             continue
@@ -407,6 +478,10 @@ def _render_benchmarks(report, market):
             gap = mine - outcome["change_pct"]
             line += f" · 내 포트폴리오 {_colored_pct(mine)} → 차이 {gap:+.2f}%p"
         st.markdown(line)
+
+    # 🇺🇸 미국 두 벤치마크가 **둘 다** 계산됐을 때만 평균 한 줄이 더 붙습니다(#116).
+    _render_benchmark_average(outcomes, market, mine)
+
     if has_proxy:
         # ⚠️ 이 고지는 §0-1 상 삭제 불가입니다(지수 자체가 아니라 ETF 종가라는 사실). 다만
         #    벤치마크마다 한 줄씩 반복하지 않고 **맨 아래 한 줄**로 모았습니다 — 종목 라벨에
@@ -448,9 +523,60 @@ def _md_cell(text):
     return str(text if text is not None else "").replace("|", "\\|").strip() or "—"
 
 
-def _holding_label(row):
-    """'삼성전자 (005930)' / 이름이 없으면 '005930'. '내 성적표' 표의 표기 관례와 같습니다."""
-    name = (row.get("stock_name") or "").strip()
+def _display_indexes(market):
+    """
+    미국 종목 한글명을 '내 성적표'와 **완전히 같은 값**으로 만들기 위해, 그 화면이 쓰는 것과
+    같은 유니버스 스냅샷(`data/us_stocks_latest.json`)을 같은 로더로 읽어 옵니다.
+    반환 형태는 `_display_name(row, indexes)` 가 기대하는 `{시장: {티커: 종목dict}}` 입니다.
+
+    · 상위 550 유니버스 **안** 종목은 이 파일에 수집 시점 계산해 넣어 둔 `name_kr` 이 들어 있어
+      공개 미국주식 화면·내 성적표와 글자 하나까지 같은 표기가 됩니다.
+    · 유니버스 **밖** 종목은 여기에 없고, 그때는 `_display_name()` 안쪽이
+      `resolve_korean_name()` 을 즉석 호출해 보조로 만듭니다(그마저 못 만들면 영문명/티커).
+    · 한국 시장 블록에서는 한글명 변환이 필요 없으므로 파일을 **아예 읽지 않습니다**.
+    · 파일이 없거나(아직 수집 전) 읽기에 실패해도 화면을 죽이지 않고 빈 dict 로 넘어갑니다 —
+      그 경우에도 위 폴백 경로가 그대로 동작하므로 이름이 사라지지는 않습니다.
+    """
+    if market != MARKET_US:
+        return {}
+    try:
+        us_index, _meta = load_universe_index(MARKET_US)
+    except Exception:   # noqa: BLE001 — 이름 표기 하나 때문에 리포트 전체가 죽으면 안 됩니다
+        return {}
+    return {MARKET_US: us_index or {}}
+
+
+def _holding_name(row, market=None, indexes=None):
+    """
+    화면에 쓸 **종목명만**(코드 없이). 이름을 끝내 못 찾으면 지어내지 않고 티커 그대로입니다
+    (§0-1). 미국 종목은 한글명 — 규칙과 근거는 아래 `_holding_label()` 주석 참고.
+    """
+    probe = dict(row)
+    probe["market"] = market or row.get("market")
+    name = (_display_name(probe, indexes or {}) or "").strip()
+    return name or (row.get("ticker") or "").strip() or "—"
+
+
+def _holding_label(row, market=None, indexes=None):
+    """
+    '삼성전자 (005930)' / 이름이 없으면 '005930'. '내 성적표' 표의 표기 관례와 같습니다.
+
+    🇺🇸 2026-08-16 (#115) 오너 요청 — "미국 주식 이쪽에 종목 설명 있는 부분에는 한국식
+       발음으로 넣으면 안되는거야? 스페이스 X 애플, 엔비디아, 마이크로소프트 이런식으로".
+       종목별 스냅샷에는 저장 당시의 **영문 원문**(예: "Advanced Micro Devices Inc. Common
+       Stock")이 들어 있는데, 리포트 화면만 그걸 그대로 뿌리고 있어서 '내 성적표'와 표기가
+       달랐습니다. 여기서 `_display_name()` 을 거치면 미국 종목만 한글명이 되고 한국 종목은
+       그대로입니다. **DB 값은 고치지 않습니다** — 표시 시점에만 바꾸는 것이라 과거 기록을
+       손댈 일이 없고, '내 성적표'가 쓰는 방식과도 같습니다.
+
+    ⚠️ `market` 을 따로 받는 이유: `build_holding_history()` 의 `gone` 목록과
+       `build_weight_comparison()` 의 행에는 `market` 키가 없습니다(같은 시장 안에서만 쓰는
+       파생 구조라 넣지 않은 것). 그 행들도 미국 한글명을 받게 하려면 호출부가 이미 알고 있는
+       시장을 넘겨 줘야 합니다. 넘기지 않으면 예전처럼 행의 `market` 을 봅니다.
+    """
+    probe = dict(row)
+    probe["market"] = market or row.get("market")
+    name = (_display_name(probe, indexes or {}) or "").strip()
     ticker = (row.get("ticker") or "").strip() or "—"
     return _md_cell(f"{name} ({ticker})" if name else ticker)
 
@@ -488,7 +614,7 @@ def _colored_pp(value):
     return text
 
 
-def _render_weight_changes(history, base_date):
+def _render_weight_changes(history, base_date, market=None, indexes=None):
     """
     📊 **비중 변화** — 2026-08-13(#114) 신설. 오너가 수기로 관리하던 표
     ("종목 | 지난달 비중 | 이번달 비중 | 차이")를 그대로 옮긴 것입니다.
@@ -497,6 +623,9 @@ def _render_weight_changes(history, base_date):
        보고 있는 기간만 조회하므로 기간 이전의 종목별 기록은 애초에 손에 없습니다 —
        그래서 두 날짜를 표 머리글에 그대로 박아 둡니다(무엇과 무엇을 비교했는지 숨기지 않기).
     ⚠️ 기록이 하루뿐이면 표 자체를 그리지 않습니다(비교할 게 없는데 0%p 를 늘어놓지 않기).
+    ⚠️ 2026-08-16 (#115) — 종목 칸도 위 종목별 상세 표와 **같은 라벨 함수**를 씁니다(미국은
+       한글명). 여기만 영문으로 남으면 같은 화면 안에서 같은 종목이 두 이름으로 보입니다.
+       `build_weight_comparison()` 의 행에는 `market` 키가 없어 호출부의 시장을 넘겨 받습니다.
     """
     weights = build_weight_comparison(history)
     if not weights["comparable"] or not weights["rows"]:
@@ -509,7 +638,7 @@ def _render_weight_changes(history, base_date):
     lines = [f"| 종목 | {first_label} | {base_label} | 변화 |", "|---|---:|---:|---:|"]
     for row in weights["rows"]:
         lines.append(
-            f"| {_holding_label(row)} | {_md_weight(row['first_pct'])} "
+            f"| {_holding_label(row, market, indexes)} | {_md_weight(row['first_pct'])} "
             f"| {_md_weight(row['base_pct'])} | {_colored_pp(row['change_pp'])} |"
         )
     st.markdown("\n".join(lines))
@@ -578,6 +707,11 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
     totals = history["totals"]
     dates = history["dates"]
 
+    # 🇺🇸 미국 블록일 때만 유니버스 스냅샷을 한 번 읽어 아래 모든 라벨에 같은 값을 씁니다
+    #    (2026-08-16 #115). 한 섹션 안에서 표마다 파일을 다시 읽으면 느릴 뿐 아니라, 읽는
+    #    사이에 배치가 파일을 갈아끼우면 표마다 이름이 달라질 수 있어 한 번만 읽습니다.
+    indexes = _display_indexes(market)
+
     st.caption(
         f"**{base_date.isoformat()}** 하루 기준 "
         f"(이 기간 기록 {len(dates)}일: {dates[0].isoformat()} ~ {dates[-1].isoformat()})"
@@ -596,7 +730,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
             price_cell = "**가격 모름**"
             value_cell = profit_cell = pct_cell = "—"
         lines.append(
-            f"| {_holding_label(row)} | {_md_weight(row.get('weight_pct'))} "
+            f"| {_holding_label(row, market, indexes)} | {_md_weight(row.get('weight_pct'))} "
             f"| {_md_qty(row['quantity'])} "
             f"| {_md_amount(row['avg_purchase_price'], currency)} | {price_cell} "
             f"| {value_cell} | {profit_cell} | {pct_cell} "
@@ -630,7 +764,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
             f"그 종목까지 포함한 매입원가는 {_md_amount(totals['cost_all'], currency)} 입니다."
         )
 
-    _render_weight_changes(history, base_date)
+    _render_weight_changes(history, base_date, market, indexes)
 
     # ---- 🔴 들쑥날쑥 감시 — 같은 날 합계 스냅샷과 대조 --------------------------
     summary_row = next((r for r in (snapshots_in_window or [])
@@ -652,8 +786,10 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
         )
 
     if history["gone"]:
+        # 여기도 같은 라벨 규칙(미국은 한글명) — 이 줄만 영문으로 남으면 바로 위 표와
+        # 다른 이름이 보입니다. `gone` 행에는 market 키가 없어 시장을 넘겨 줍니다(#115).
         gone_text = ", ".join(
-            f"{(g['stock_name'] or '').strip() or g['ticker']}({g['ticker']}, "
+            f"{_holding_name(g, market, indexes)}({g['ticker']}, "
             f"마지막 기록 {g['last_date'].isoformat()})"
             for g in history["gone"]
         )
@@ -663,9 +799,12 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
     with st.expander("📅 종목 하나를 골라 이 기간 일별 추이 보기", expanded=False):
         options = [row["ticker"] for row in history["rows"]] + \
                   [g["ticker"] for g in history["gone"]]
-        label_by_ticker = {row["ticker"]: _holding_label(row) for row in history["rows"]}
+        # 고르는 목록의 라벨도 표와 같은 규칙(미국은 한글명) — 표에서 "엔비디아"로 본 종목을
+        # 여기서 영문 풀네임으로 찾게 하면 같은 화면 안에서 이름이 두 개가 됩니다(#115).
+        label_by_ticker = {row["ticker"]: _holding_label(row, market, indexes)
+                           for row in history["rows"]}
         for g in history["gone"]:
-            label_by_ticker[g["ticker"]] = _holding_label(g)
+            label_by_ticker[g["ticker"]] = _holding_label(g, market, indexes)
         picked = st.selectbox(
             "종목", options,
             format_func=lambda t: label_by_ticker.get(t, t),
