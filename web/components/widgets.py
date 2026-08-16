@@ -16,7 +16,7 @@ from typing import Callable, Optional, Union
 
 from nicegui import ui
 
-from web.components.html import compact, esc
+from web.components.html import FOOTER_NOTICE_HTML, compact, esc, fmt_num
 
 # 배너 종류별 색상 (프로젝트 카드 팔레트와 동일 계열)
 _BANNER_PALETTE = {
@@ -76,6 +76,71 @@ def metric_card(label: str, value: str, delta: str = '') -> None:
     # ⚠️ 폭 지정은 Tailwind 임의값 클래스(`min-w-[240px]`)가 아니라 인라인 style 로 둡니다.
     #    NiceGUI 버전에 따라 Tailwind/UnoCSS 빌드가 임의값 클래스를 만들어 주지 않을 수 있어,
     #    "적용된 줄 알았는데 아무 효과가 없는" 상태가 되기 쉽기 때문입니다(계획서 §11-2).
+
+
+def _median(values):
+    """중앙값. 표본이 없으면 **평균값 같은 그럴듯한 수를 만들지 않고** None 입니다(§0-1)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    mid = len(ordered) // 2
+    return ordered[mid] if len(ordered) % 2 else (ordered[mid - 1] + ordered[mid]) / 2.0
+
+
+def render_summary_metrics(stocks, summary_history, labels) -> None:
+    """상단 요약 지표 3종 (중앙 Forward PER / 중앙 성장률 / 중앙 PEGY).
+
+    pegy·us_stocks 두 화면이 **완전히 같은 계산식과 같은 문구**를 쓰고 라벨만 다릅니다
+    (원본 Streamlit 코드에서도 45줄이 통째로 복붙돼 있었습니다 — §0-3-10).
+
+    :param labels: (Forward PER 라벨, 성장률 라벨, PEGY 라벨)
+    ⚠️ 표본이 없으면 10.4 / 14.2 / 0.73 같은 그럴듯한 상수를 표시하지 않고 '데이터 없음'입니다(§0-1).
+    """
+    f_per_list = [s['f_per'] for s in stocks if s.get('f_per')]
+    growth_list = [s['growth'] for s in stocks if s.get('growth') is not None]
+    pegy_list = [s['f_pegy'] for s in stocks if s.get('f_pegy') and 0 < s['f_pegy'] < 50.0]
+
+    calc_f_per = round(_median(f_per_list), 1) if f_per_list else None
+    calc_growth = round(_median(growth_list), 1) if growth_list else None
+    calc_pegy = round(_median(pegy_list), 2) if pegy_list else None
+
+    f_per_delta_str = f'{len(f_per_list)}개 종목 실측 중앙값'
+    growth_delta_str = f'{len(growth_list)}개 종목 실측 중앙값'
+    pegy_delta_num = None
+
+    if len(summary_history) >= 2 and None not in (calc_f_per, calc_growth, calc_pegy):
+        prev = summary_history[-2]
+        p_per, p_growth, p_pegy = prev.get('f_per'), prev.get('growth'), prev.get('pegy')
+        if p_per is not None:
+            f_per_delta_str = f'{calc_f_per - p_per:+.1f}배 (이전 동기화 대비)'
+        if p_growth is not None:
+            growth_delta_str = f'{calc_growth - p_growth:+.1f}%p (이전 동기화 대비)'
+        if p_pegy is not None:
+            pegy_delta_num = f'{calc_pegy - p_pegy:+.2f}'
+
+    if calc_pegy is None:
+        pegy_status = '산출 불가 (표본 없음)'
+    elif calc_pegy < 0.85:
+        pegy_status = '🟢 저평가 수용 구간'
+    elif calc_pegy < 1.15:
+        pegy_status = '🟡 적정 밸류 구간'
+    else:
+        pegy_status = '🔴 고평가 관망 구간'
+
+    pegy_delta_str = f'{pegy_delta_num} | {pegy_status}' if pegy_delta_num else pegy_status
+
+    with ui.row().classes('w-full gap-4 items-stretch'):
+        metric_card(labels[0], fmt_num(calc_f_per, ' 배', 1), f_per_delta_str)
+        metric_card(labels[1], fmt_num(calc_growth, ' %', 1), growth_delta_str)
+        metric_card(labels[2], fmt_num(calc_pegy, '', 2), pegy_delta_str)
+
+    if None in (calc_f_per, calc_growth, calc_pegy):
+        warning_banner("⚠️ 위 요약 지표 중 일부는 실측 표본이 없어 산출하지 못했습니다 ('데이터 없음').")
+
+
+def disclaimer_footer() -> None:
+    """화면 맨 아래 "학습용 보조 도구" 고지 (두 공개 화면 공통)."""
+    ui.html(compact(FOOTER_NOTICE_HTML)).classes('w-full')
 
 
 def download_button(label: str,

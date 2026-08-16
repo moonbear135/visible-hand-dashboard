@@ -16,10 +16,11 @@ from nicegui import app, ui
 
 import web.theme
 # @ui.page 등록을 위해 import 자체가 필요합니다 (모듈을 읽는 순간 경로가 등록됨).
-#   pegy_page  → '/'      (공개 기본 화면, 2단계에서 이전 완료)
-#   admin_page → '/admin' (1단계)
-#   demo_page  → '/demo'  (0단계 모바일 반응형 검증용. 실화면 검증이 끝나면 삭제 예정 — §0-3-10)
-from web.pages import admin_page, demo_page, pegy_page  # noqa: F401
+#   pegy_page      → '/'      (공개 기본 화면, 2단계에서 이전 완료)
+#   us_stocks_page → '/us'    (공개 화면, 3단계에서 이전 완료)
+#   admin_page     → '/admin' (1단계)
+#   demo_page      → '/demo'  (0단계 모바일 반응형 검증용. 실화면 검증이 끝나면 삭제 예정 — §0-3-10)
+from web.pages import admin_page, demo_page, pegy_page, us_stocks_page  # noqa: F401
 
 web.theme.register()
 

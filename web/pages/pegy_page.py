@@ -39,14 +39,25 @@ from utils.stock_history import (
 
 from web.auth import is_admin
 from web.components import (
+    LEARNING_NOTICE_HTML,
     compact,
+    disclaimer_footer,
     download_button,
     error_banner,
     esc,
+    fmt_num,
+    forward_mask_html,
+    graham_financial_box,
+    graham_reference_box,
+    graham_unavailable_box,
     info_banner,
-    metric_card,
+    loss_banner_html,
     pager,
+    quality_badge,
+    quant_score_badge,
+    rank_prefix_html,
     render_stock_download_tool,
+    render_summary_metrics,
     warn_badge,
     warning_banner,
 )
@@ -69,23 +80,6 @@ FILTER_PRESETS = [
 # =============================================================================
 # 1. 데이터 로드 (읽기 전용 — 렌더링 중에 수집기를 절대 실행하지 않습니다)
 # =============================================================================
-def fmt_num(value, suffix="", digits=None, na_text="데이터 없음"):
-    """
-    None / 결측값을 절대 그럴듯한 숫자로 바꾸지 않고 '데이터 없음'으로 표기합니다.
-    (ENGINEERING_SPEC §0-1)
-    """
-    if value is None:
-        return na_text
-    try:
-        if isinstance(value, str):
-            return f"{value}{suffix}"
-        if digits is None:
-            return f"{value:,}{suffix}"
-        return f"{value:,.{digits}f}{suffix}"
-    except (TypeError, ValueError):
-        return na_text
-
-
 def load_latest_kospi_usd():
     """
     market_history.csv에서 가장 최근 코스피 지수·원/달러 환율만 가볍게 읽어옵니다.
@@ -145,13 +139,6 @@ def load_pegy_summary_history():
 # =============================================================================
 # 2. 카드 HTML 조립 (순수 문자열 — NiceGUI 위젯을 만들지 않습니다)
 # =============================================================================
-def _rank_prefix_html(rank_num) -> str:
-    return (
-        f'<span style="font-size: 32px; font-weight: 900; color: #38bdf8; letter-spacing: -1px; '
-        f'margin-right: 4px; line-height: 1;">{esc(rank_num)}.</span>'
-    )
-
-
 def build_blocked_card_html(s, rank_num) -> str:
     """⚪ 카드 자체를 그릴 수 없는 종목(price 없음 / 상장주식수 파싱 오류)."""
     reason = s.get("reject_reason") or s.get("unverified_reason") or "원인 미상"
@@ -174,7 +161,7 @@ def build_blocked_card_html(s, rank_num) -> str:
     <div style="background: {card_bg}; border: 2px dashed {card_border_color}; border-radius: 14px; padding: 22px 26px; margin-bottom: 24px; box-shadow: 0 6px 20px rgba(0,0,0,0.5); font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid {inner_border}; padding-bottom: 10px; margin-bottom: 12px; flex-wrap: wrap; gap: 10px;">
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                {_rank_prefix_html(rank_num)}
+                {rank_prefix_html(rank_num)}
                 <span style="font-size: 22px; font-weight: 800; color: {badge_fg};">{esc(s.get('name') or '종목명 없음')}</span>
                 <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({esc(s.get('code'))})</span>
                 <span style="background-color: {badge_bg}; color: {badge_fg}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {badge_border}; white-space: nowrap;">
@@ -197,33 +184,6 @@ def build_blocked_card_html(s, rank_num) -> str:
         </div>
     </div>
     """)
-
-
-def _forward_mask_html(*, border_color, inner_border, gradient_from, title_color, sub_color,
-                       corner_text, icon, headline, body_html) -> str:
-    """🚀 Forward 자리 마스크 패널 (사유별 색상만 다르고 구조는 동일 — 원본 6중 복붙 통합).
-
-    ENGINEERING_SPEC.md §0-1 예시2-보충2 — 결측은 "종목 전체 차단"이 아니라
-    "해당 섹션만 마스킹 + 반드시 이유 명시" 입니다.
-    """
-    return f"""
-    <div style="background: linear-gradient(135deg, {gradient_from} 0%, rgba(15, 23, 42, 0.95) 100%); border: 2px dashed {border_color}; border-radius: 12px; padding: 16px 22px;">
-        <div style="display: flex; justify-content: space-between; align-items: flex-end; border-bottom: 1.5px solid {inner_border}; padding-bottom: 8px; margin-bottom: 14px;">
-            <div>
-                <div style="font-size: 16px; font-weight: 800; color: {title_color}; line-height: 1.2;">🚀 Forward</div>
-                <div style="font-size: 13px; font-weight: 600; color: {sub_color}; margin-top: 2px;">(미래 추정 밸류 분석)</div>
-            </div>
-            <span style="font-size: 11.5px; color: {sub_color}; font-weight: 500; white-space: nowrap;">{corner_text}</span>
-        </div>
-        <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid {inner_border}; border-radius: 10px; padding: 26px 24px; text-align: center;">
-            <div style="font-size: 30px; margin-bottom: 8px;">{icon}</div>
-            <h4 style="color: {title_color}; font-size: 15.5px; font-weight: 800; margin: 0 0 6px 0;">{headline}</h4>
-            <p style="color: {sub_color}; font-size: 13px; font-weight: 600; margin: 0; line-height: 1.5;">
-                {body_html}
-            </p>
-        </div>
-    </div>
-    """
 
 
 def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 — 원본 화면 구조를 그대로 유지
@@ -262,24 +222,14 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         "있으니(점수만 영향, 값 자체는 건드리지 않음) 함께 참고하세요.",
     ) if s.get("growth_score_capped") else ""
 
+    # 착시 저평가 판정 기준은 화면마다 다릅니다(코스피는 Trailing ROE 단독 — ROIC 원천
+    # 데이터를 수집하지 않으므로). 배지 모양만 공용 컴포넌트에서 가져옵니다.
     if s.get("value_trap", False):
-        trap_badge_html = """
-        <span style="background-color: #7f1d1d; color: #fca5a5; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #f87171; white-space: nowrap;">
-            ⚠️ 이익창출력 저하 (착시 저평가 주의)
-        </span>
-        """
+        trap_badge_html = quality_badge('trap')
     elif t_roe_val is None:
-        trap_badge_html = """
-        <span style="background-color: #1e293b; color: #cbd5e1; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #64748b; white-space: nowrap;">
-            ❔ 자본효율성 판정 불가 (데이터 없음)
-        </span>
-        """
+        trap_badge_html = quality_badge('unknown')
     else:
-        trap_badge_html = """
-        <span style="background-color: #14532d; color: #86efac; font-size: 12px; font-weight: 700; padding: 4px 10px; border-radius: 8px; border: 1px solid #4ade80; white-space: nowrap;">
-            ✨ 우량 자본효율성 (Quality OK)
-        </span>
-        """
+        trap_badge_html = quality_badge('ok')
 
     # 야후 파이낸스 교차검증 뱃지 (관리자 전용) — 미수행(None)과 이상없음(False)을 구분
     discrepancy_badge_html = ""
@@ -381,31 +331,9 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         )
 
     # ── 퀀트 스코어 — 기본값 80점 금지. 만점(score_max)이 없으면 % 도 지어내지 않습니다 ──
-    q_score = s.get("quant_score")
-    q_max = s.get("score_max")
-    excluded_items = s.get("score_excluded_items") or []
-    if q_score is None:
-        score_badge_html = "<b>측정 불가</b> (데이터 없음)"
-        score_tooltip_extra = "필수 지표를 수집하지 못해 점수를 산출하지 않았습니다."
-    else:
-        if not q_max:
-            score_badge_html = f"<b>{esc(q_score)}점</b> / 만점 산출 불가 (채점 가능 항목 없음)"
-        else:
-            pct = round(q_score / q_max * 100)
-            if pct >= 60:
-                pct_color = "#4ade80"
-            elif pct >= 30:
-                pct_color = "#fde047"
-            else:
-                pct_color = "#fca5a5"
-            score_badge_html = (
-                f"<b>{esc(q_score)}점</b> / {esc(q_max)}점 "
-                f"<span style='color:{pct_color}; font-weight:900;'>({pct}%)</span>"
-            )
-        score_tooltip_extra = (
-            f"※ 배점 제외 항목: {esc(', '.join(str(x) for x in excluded_items))}" if excluded_items
-            else "모든 항목이 배점에 반영되었습니다."
-        )
+    score_badge_html, score_tooltip_extra = quant_score_badge(
+        s.get("quant_score"), s.get("score_max"), s.get("score_excluded_items"),
+    )
 
     # ── Forward 카드를 마스킹해야 하는 사유 판정 (한 곳에서만) ─────────────
     # 우선순위: 배당 미확정 > 역성장 > PER 극단치 > g_eff 산출불가 > 일반 검증 실패 > Forward 결측 > 정상
@@ -442,45 +370,24 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         graham_target = s.get("graham_target")
         if is_loss_making:
             loss_reason = ", ".join(s.get("loss_evidence") or []) or f"Trailing ROE {fmt_num(t_roe_val, '%')}"
-            graham_box_html = f"""
-            <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center; margin-bottom: 14px;">
-                <div style="color: #94a3b8; font-size: 12.5px; font-weight: 700;">🧮 그레이엄 넘버 산출 불가 — 적자 기업 (EPS가 0 이하라 제곱근 안이 음수가 됩니다)</div>
-                <div style="color: #64748b; font-size: 11.5px; font-weight: 600; margin-top: 4px;">판정 근거: {esc(loss_reason)}</div>
-            </div>
-            """
+            graham_box_html = graham_unavailable_box(
+                "🧮 그레이엄 넘버 산출 불가 — 적자 기업 (EPS가 0 이하라 제곱근 안이 음수가 됩니다)",
+                esc(loss_reason),
+            )
         elif graham_target is not None and s.get("graham_is_financial_sector", False):
             # 금융주는 공식의 전제(제조업 장부가)가 잘 안 맞으므로 값은 보여주되 강한 경고 배지를 붙입니다.
-            graham_box_html = f"""
-            <div style="background-color: rgba(127, 29, 29, 0.35); border: 2px solid #f87171; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;">
-                <div style="color: #fca5a5; font-size: 13px; font-weight: 800; margin-bottom: 6px;">⚠️⚠️ 강한 경고: 금융업종 — 그레이엄 넘버 적용 부적합 가능성 높음</div>
-                <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">🧮 {graham_target:,.0f}원 <span style="font-size: 12px; color: #fca5a5; font-weight: 700;">(Trailing 전용 참고 목표가)</span></div>
-                <p style="color: #fecaca; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
-                    은행/보험/증권 등은 장부가(BPS)의 의미가 제조업과 달라, 이 공식(√22.5×EPS×BPS)의 전제가 잘 맞지 않습니다.<br>
-                    참고 수준으로만 활용하고, 이 숫자를 실제 목표주가로 신뢰하지 마세요.
-                </p>
-            </div>
-            """
+            graham_box_html = graham_financial_box(f"{graham_target:,.0f}원", "은행/보험/증권")
         elif graham_target is not None:
-            graham_box_html = f"""
-            <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px solid #475569; border-radius: 10px; padding: 16px 20px; margin-bottom: 14px;">
-                <div style="color: #94a3b8; font-size: 13px; font-weight: 700; margin-bottom: 6px;">🧮 Trailing 전용 참고 목표가 (Graham Number)</div>
-                <div style="color: #f1f5f9; font-size: 20px; font-weight: 900;">{graham_target:,.0f}원</div>
-                <p style="color: #94a3b8; font-size: 12px; font-weight: 600; margin: 8px 0 0 0; line-height: 1.5;">
-                    성장률 예측 없이 √(22.5 × Trailing EPS × BPS) 공식(벤저민 그레이엄)으로만 산출한 참고값입니다.<br>
-                    고성장 기업에는 보수적으로(낮게) 나올 수 있으니 유일한 판단 근거로 쓰지 마세요.
-                </p>
-            </div>
-            """
+            graham_box_html = graham_reference_box(f"{graham_target:,.0f}원")
         else:
-            graham_box_html = """
-            <div style="background-color: rgba(15, 23, 42, 0.85); border: 1px dashed #475569; border-radius: 10px; padding: 14px 20px; text-align: center; margin-bottom: 14px;">
-                <div style="color: #64748b; font-size: 12.5px; font-weight: 700;">🧮 그레이엄 넘버 산출 불가 (적자 기업 — EPS가 0 이하라 수학적으로 계산할 수 없음)</div>
-            </div>
-            """
+            graham_box_html = graham_unavailable_box(
+                "🧮 그레이엄 넘버 산출 불가 (적자 기업 — EPS가 0 이하라 수학적으로 계산할 수 없음)",
+                headline_color="#64748b",
+            )
 
     # ── 🚀 Forward 섹션 ───────────────────────────────────────────────────
     if s.get("dividend_data_unverified"):
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#facc15", inner_border="#92400e", gradient_from="rgba(120, 53, 15, 0.35)",
             title_color="#fbbf24", sub_color="#fde047", corner_text="🛡️ 배당 데이터 확인 필요",
             icon="🛡️", headline="주주환원 데이터 검증 대기 중",
@@ -490,7 +397,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             ),
         )
     elif is_negative_growth_case:
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#a855f7", inner_border="#6d28d9", gradient_from="rgba(59, 7, 100, 0.35)",
             title_color="#d8b4fe", sub_color="#c4b5fd", corner_text="📉 역성장 · 무성장",
             icon="📉", headline="실효성장률(g_eff) 0% 이하 — 가치 훼손 구간",
@@ -501,7 +408,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             ),
         )
     elif is_per_extreme:
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#f87171", inner_border="#991b1b", gradient_from="rgba(69, 10, 10, 0.35)",
             title_color="#fca5a5", sub_color="#fecaca", corner_text="🚫 PER 극단치",
             icon="🚫", headline="Forward PER 산출 범위 초과",
@@ -511,7 +418,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             ),
         )
     elif is_geff_missing:
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#64748b", inner_border="#334155", gradient_from="rgba(51, 65, 85, 0.35)",
             title_color="#94a3b8", sub_color="#64748b", corner_text="🔒 실효성장률 산출 불가",
             icon="🔒", headline="실효성장률(g_eff) 산출 불가",
@@ -521,7 +428,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             ),
         )
     elif is_generic_harness_fail:
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#facc15", inner_border="#92400e", gradient_from="rgba(120, 53, 15, 0.35)",
             title_color="#fbbf24", sub_color="#fde047", corner_text="🛡️ 데이터 검증 실패",
             icon="🛡️", headline="데이터 검증 실패 (PER·EPS 교차검증)",
@@ -532,7 +439,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             ),
         )
     elif s.get("forward_data_missing"):
-        forward_section_html = _forward_mask_html(
+        forward_section_html = forward_mask_html(
             border_color="#64748b", inner_border="#334155", gradient_from="rgba(51, 65, 85, 0.35)",
             title_color="#94a3b8", sub_color="#64748b", corner_text="🔒 데이터 없음",
             icon="🔒", headline="예상 실적(Forward) 데이터 없음",
@@ -609,27 +516,13 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
     # 원본은 카드 f-string 안에 f-string 을 중첩(`{"" if ... else f'''...'''}`)하고 있었는데,
     # 그 형태가 #129(중괄호 이스케이프 사고)와 같은 계열의 위험이라 밖으로 빼서 평평하게 만들었습니다.
     # 출력 HTML 은 동일합니다.
-    loss_banner_html = ""
+    loss_banner = ""
     if t_roe_val is not None and t_roe_val < 0:
-        loss_banner_html = f"""
-        <div style="background: linear-gradient(135deg, #450a0a 0%, #7f1d1d 50%, #450a0a 100%); border: 1.5px solid #dc2626; border-radius: 10px; padding: 12px 20px; margin-bottom: 14px; display: flex; align-items: center; gap: 14px; box-shadow: 0 0 15px rgba(220, 38, 38, 0.25);">
-            <div style="font-size: 28px; flex-shrink: 0;">🚨</div>
-            <div style="flex: 1;">
-                <div style="color: #fca5a5; font-size: 14px; font-weight: 800; margin-bottom: 3px;">
-                    ⚠️ 적자 기업 — PEGY 밸류에이션 산출 불가 (ROE {esc(t_roe_val)}%)
-                </div>
-                <div style="color: #fecaca; font-size: 12px; font-weight: 500; line-height: 1.5;">
-                    본 종목은 최근 12개월 기준 <b>순이익 적자(ROE &lt; 0)</b> 상태로, 성장 기반 밸류에이션(PEGY)을 적용할 수 없습니다.
-                    아래 목표주가·적정가는 <b>참고 불가</b>하며, 이익 정상화 전까지 투자에 각별한 주의가 필요합니다.
-                </div>
-            </div>
-            <!-- 값이 없으면 값을 쓰지 않습니다 (§0-1). 예전에 여기 하드코딩 '99.99'가 박혀 있었습니다. -->
-            <div style="background: #991b1b; border: 1px solid #f87171; border-radius: 8px; padding: 6px 14px; text-align: center; flex-shrink: 0;">
-                <div style="color: #f87171; font-size: 18px; font-weight: 900;">—</div>
-                <div style="color: #fca5a5; font-size: 10px; font-weight: 600;">PEGY 산출 불가</div>
-            </div>
-        </div>
-        """
+        loss_banner = loss_banner_html(
+            f"⚠️ 적자 기업 — PEGY 밸류에이션 산출 불가 (ROE {esc(t_roe_val)}%)",
+            "본 종목은 최근 12개월 기준 <b>순이익 적자(ROE &lt; 0)</b> 상태로, 성장 기반 밸류에이션(PEGY)을 적용할 수 없습니다.\n"
+            "아래 목표주가·적정가는 <b>참고 불가</b>하며, 이익 정상화 전까지 투자에 각별한 주의가 필요합니다.",
+        )
 
     t_eps_display = t_eps_str if t_eps_str == "데이터 없음" else t_eps_str + "원"
     t_pbr_display = t_pbr_str if t_pbr_str == "데이터 없음" else t_pbr_str + "배"
@@ -640,7 +533,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         <!-- 1. 메인 헤더: 종목명 / 코드 / 퀀트종합점수 / 배지 / 현재가 -->
         <div style="display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #334155; padding-bottom: 12px; margin-bottom: 14px; flex-wrap: wrap; gap: 12px;">
             <div style="display: flex; align-items: center; gap: 8px; flex-wrap: wrap;">
-                {_rank_prefix_html(rank_num)}
+                {rank_prefix_html(rank_num)}
                 <!-- 2026-08-16 오너 신고(#119 후속) — 종목명·배지는 길이가 고정돼 있지 않은 실제
                      데이터라 white-space: nowrap 이 걸려 있으면 긴 이름 카드 단 하나 때문에 페이지
                      전체의 가로 스크롤 폭이 넓어집니다. span 안에서도 줄바꿈되게 normal 로 둡니다. -->
@@ -663,7 +556,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
             </div>
         </div>
 
-        {loss_banner_html}
+        {loss_banner}
 
         <!-- 2. 자본효율성 품질 바 (Quality Bar) -->
         <div style="background-color: rgba(15, 23, 42, 0.75); border: 1px solid #334155; border-radius: 8px; padding: 9px 18px; margin-bottom: 14px; display: flex; align-items: center; justify-content: flex-start; gap: 28px; flex-wrap: wrap;">
@@ -803,7 +696,11 @@ def _render_body() -> None:                        # noqa: C901 — 원본 화�
     """)).classes('w-full')
 
     _render_raw_downloads(admin)
-    _render_summary_metrics(all_stocks, summary_history)
+    render_summary_metrics(all_stocks, summary_history, (
+        "타겟 중앙 Forward PER",
+        "코스피 대표 EPS 성장률 (컨센서스 EPS 기준)",
+        "시장 적정 밸류에이션 (PEGY)",
+    ))
 
     ui.separator()
 
@@ -984,43 +881,40 @@ def _render_body() -> None:                        # noqa: C901 — 원본 화�
         pager(total_pages, current_page, _on_page)
 
     _results()
-    _render_footer_notice()
+    disclaimer_footer()
 
 
 # =============================================================================
 # 4. 정적 블록 (제목 · 경고문 · 가이드 · 푸터)
 # =============================================================================
-def _render_title() -> None:
-    ui.html(compact("""
-        <div style="text-align: center; margin-bottom: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
-            <h1 style="font-size: 36px; font-weight: 800; color: #d97706; margin: 0 0 6px 0; letter-spacing: -0.5px;">💡 사실 이 가격이에요</h1>
-            <div style="background: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%); border: 2px solid #ef4444; border-radius: 12px; padding: 12px 22px; margin: 10px auto 14px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(239, 68, 68, 0.35);">
-                <div style="font-size: 15px; font-weight: 800; color: #fca5a5; letter-spacing: -0.3px;">
-                    🚨 [투자 주의 경고 및 AI 분석 안내]
-                </div>
-                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
-                    본 리포트의 수치 및 분석 결과는 <b>공시된 재무제표와 시장 데이터를 기반으로 AI 퀀트 알고리즘이 자동 계산한 단순 참고용 정보</b>입니다.<br>
-                    특정 종목의 매수·매도를 권유하거나 투자 자문을 제공하지 않으며, 데이터의 정확성이나 완벽성을 보장하지 않습니다.
-                </div>
-                <div style="font-size: 13.5px; color: #fecdd3; font-weight: 600; margin-top: 3px;">
-                    ⚠️ 모든 투자 결정과 그에 따른 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있음을 명시합니다.
-                </div>
-            </div>
-            <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #475569; border-radius: 12px; padding: 12px 22px; margin: 0 auto 24px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);">
-                <div style="font-size: 15px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px;">
-                    📘 [학습용 보조 도구 안내]
-                </div>
-                <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
-                    '잘 보면 보이는 손'은 정식 금융기관의 서비스가 아니며, 주식 초보자의 직관적인 밸류에이션 이해를 돕는 <b>참고용 프로젝트</b>입니다.
-                </div>
-                <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 3px;">
-                    ⚠️ 본 서비스는 종목 추천이나 원금 보장을 하지 않습니다.<br>
-                    제공된 데이터는 참고용으로만 활용하시고, 모든 투자 판단과 책임은 본인에게 있습니다.
-                </div>
-            </div>
-            <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외하므로, 각 카드에 '획득점수 / 그 종목의 만점 (달성률%)'로 표기됩니다)</span></div>
+# ⚠️ 아래 두 조각은 **f-string 이 아닙니다.** 사이에 들어가는 "📘 학습용 보조 도구 안내" 문구는
+#    us_stocks 화면과 글자 하나까지 같아서 `web/components` 에 단일 출처로 두고 여기서는 이어
+#    붙이기만 합니다(§0-3-10). f-string 을 쓰지 않는 이유는 #129(중괄호 이스케이프 사고) 재발 방지.
+_TITLE_HEAD = """
+<div style="text-align: center; margin-bottom: 12px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
+    <h1 style="font-size: 36px; font-weight: 800; color: #d97706; margin: 0 0 6px 0; letter-spacing: -0.5px;">💡 사실 이 가격이에요</h1>
+    <div style="background: linear-gradient(135deg, #7f1d1d 0%, #450a0a 100%); border: 2px solid #ef4444; border-radius: 12px; padding: 12px 22px; margin: 10px auto 14px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(239, 68, 68, 0.35);">
+        <div style="font-size: 15px; font-weight: 800; color: #fca5a5; letter-spacing: -0.3px;">
+            🚨 [투자 주의 경고 및 AI 분석 안내]
         </div>
-    """)).classes('w-full')
+        <div style="font-size: 14px; color: #ffffff; font-weight: 700; margin-top: 5px; line-height: 1.5;">
+            본 리포트의 수치 및 분석 결과는 <b>공시된 재무제표와 시장 데이터를 기반으로 AI 퀀트 알고리즘이 자동 계산한 단순 참고용 정보</b>입니다.<br>
+            특정 종목의 매수·매도를 권유하거나 투자 자문을 제공하지 않으며, 데이터의 정확성이나 완벽성을 보장하지 않습니다.
+        </div>
+        <div style="font-size: 13.5px; color: #fecdd3; font-weight: 600; margin-top: 3px;">
+            ⚠️ 모든 투자 결정과 그에 따른 결과(법적·경제적 책임)는 전적으로 투자자 본인에게 있음을 명시합니다.
+        </div>
+    </div>
+"""
+
+_TITLE_TAIL = """
+    <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외하므로, 각 카드에 '획득점수 / 그 종목의 만점 (달성률%)'로 표기됩니다)</span></div>
+</div>
+"""
+
+
+def _render_title() -> None:
+    ui.html(compact(_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL)).classes('w-full')
 
 
 def _render_market_snapshot() -> None:
@@ -1089,53 +983,6 @@ def _snapshot_csv_bytes(latest_path: str):
     return pd.DataFrame(payload.get("stocks", [])).to_csv(index=False).encode('utf-8-sig')
 
 
-def _render_summary_metrics(all_stocks, summary_history) -> None:
-    """
-    최신 종목 데이터 기반 요약 지표.
-    ⚠️ 표본이 없으면 10.4 / 14.2 / 0.73 같은 그럴듯한 상수를 표시하지 않고 '데이터 없음'입니다(§0-1).
-    """
-    f_per_list = [s['f_per'] for s in all_stocks if s.get('f_per')]
-    growth_list = [s['growth'] for s in all_stocks if s.get('growth') is not None]
-    pegy_list = [s['f_pegy'] for s in all_stocks if s.get('f_pegy') and 0 < s['f_pegy'] < 50.0]
-
-    calc_f_per = round(float(pd.Series(f_per_list).median()), 1) if f_per_list else None
-    calc_growth = round(float(pd.Series(growth_list).median()), 1) if growth_list else None
-    calc_pegy = round(float(pd.Series(pegy_list).median()), 2) if pegy_list else None
-
-    f_per_delta_str = f"{len(f_per_list)}개 종목 실측 중앙값"
-    growth_delta_str = f"{len(growth_list)}개 종목 실측 중앙값"
-    pegy_delta_num = None
-
-    if len(summary_history) >= 2 and None not in (calc_f_per, calc_growth, calc_pegy):
-        prev = summary_history[-2]
-        p_per, p_growth, p_pegy = prev.get("f_per"), prev.get("growth"), prev.get("pegy")
-        if p_per is not None:
-            f_per_delta_str = f"{calc_f_per - p_per:+.1f}배 (이전 동기화 대비)"
-        if p_growth is not None:
-            growth_delta_str = f"{calc_growth - p_growth:+.1f}%p (이전 동기화 대비)"
-        if p_pegy is not None:
-            pegy_delta_num = f"{calc_pegy - p_pegy:+.2f}"
-
-    if calc_pegy is None:
-        pegy_status = "산출 불가 (표본 없음)"
-    elif calc_pegy < 0.85:
-        pegy_status = "🟢 저평가 수용 구간"
-    elif calc_pegy < 1.15:
-        pegy_status = "🟡 적정 밸류 구간"
-    else:
-        pegy_status = "🔴 고평가 관망 구간"
-
-    pegy_delta_str = f"{pegy_delta_num} | {pegy_status}" if pegy_delta_num else pegy_status
-
-    with ui.row().classes('w-full gap-4 items-stretch'):
-        metric_card("타겟 중앙 Forward PER", fmt_num(calc_f_per, " 배", 1), f_per_delta_str)
-        metric_card("코스피 대표 EPS 성장률 (컨센서스 EPS 기준)", fmt_num(calc_growth, " %", 1), growth_delta_str)
-        metric_card("시장 적정 밸류에이션 (PEGY)", fmt_num(calc_pegy, "", 2), pegy_delta_str)
-
-    if None in (calc_f_per, calc_growth, calc_pegy):
-        warning_banner("⚠️ 위 요약 지표 중 일부는 실측 표본이 없어 산출하지 못했습니다 ('데이터 없음').")
-
-
 def _render_guide_box() -> None:
     ui.html(compact("""
         <div style="background-color: #0f172a; border: 1px solid #0284c7; border-radius: 12px; padding: 16px 22px; margin-bottom: 20px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;">
@@ -1152,20 +999,6 @@ def _render_guide_box() -> None:
                 • <b style="color: #fca5a5;">⚠️ 착시 저평가</b>: 주가가 단순히 PER 5배~7배로 싸 보이지만<br>
                 실제 이익창출력(<b>Trailing ROE &lt; 8%</b>)이 턱없이 낮아 주가가 바닥에 갇히는 위험 종목에 ⚠️ 태그를 부여합니다.<br>
                 <span style="color: #94a3b8; font-size: 12.5px;">※ ROIC(&lt;6%) 기준은 원천 데이터(영업이익÷투하자본)를 아직 수집하지 않아 판정에 사용되지 않습니다 — 현재는 ROE 기준 단독 판정입니다.</span>
-            </div>
-        </div>
-    """)).classes('w-full')
-
-
-def _render_footer_notice() -> None:
-    ui.html(compact("""
-        <div style="background: linear-gradient(135deg, #1e293b 0%, #0f172a 100%); border: 2px solid #475569; border-radius: 12px; padding: 12px 22px; margin: 20px auto 10px auto; max-width: 860px; text-align: center; box-shadow: 0 8px 20px rgba(0, 0, 0, 0.35);">
-            <div style="font-size: 14px; font-weight: 800; color: #38bdf8; letter-spacing: -0.3px;">
-                ⚠️ [알림: 학습용 보조 도구]
-            </div>
-            <div style="font-size: 13.5px; color: #cbd5e1; font-weight: 600; margin-top: 5px; line-height: 1.5;">
-                본 서비스는 정식 금융기관이 아닌 주식 공부를 돕는 개인 프로젝트(보조 도구)입니다.<br>
-                종목 추천이나 원금 보장을 하지 않으며, 모든 데이터는 참고용이므로 최종 투자 판단과 책임은 본인에게 있습니다.
             </div>
         </div>
     """)).classes('w-full')

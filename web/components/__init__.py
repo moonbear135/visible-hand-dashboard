@@ -13,19 +13,33 @@ ENGINEERING_SPEC.md §0-3-10 (코드 단순성 · 중복 금지) 에 따라,
 """
 
 from web.components.html import (  # noqa: F401
+    LEARNING_NOTICE_HTML,
+    NA_TEXT,
     compact,
     esc,
+    fmt_num,
+    forward_mask_html,
+    graham_financial_box,
+    graham_reference_box,
+    graham_unavailable_box,
+    info_badge,
+    loss_banner_html,
+    quality_badge,
+    quant_score_badge,
+    rank_prefix_html,
     tooltip,
     warn_badge,
 )
 from web.components.stock_download import render_stock_download_tool  # noqa: F401
 from web.components.widgets import (  # noqa: F401
     banner,
+    disclaimer_footer,
     download_button,
     error_banner,
     info_banner,
     metric_card,
     pager,
+    render_summary_metrics,
     scroll_to_top,
     warning_banner,
 )
