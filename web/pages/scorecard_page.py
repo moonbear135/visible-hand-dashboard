@@ -33,7 +33,7 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
 
 from contextlib import contextmanager
 
-from nicegui import ui
+from nicegui import run, ui
 
 from utils.company_names_kr import resolve_korean_name
 from utils.scorecard_db import (
@@ -410,6 +410,12 @@ def _busy(button: ui.button):
 
     로그인/회원가입/비밀번호 재설정 코드 발송/비밀번호 변경 4곳이 전부 같은 네트워크
     지연을 겪으므로 여기 한 곳에 모아 재사용합니다(§0-3-10 중복 금지).
+
+    ⚠️ 이것만으로는 부족합니다 — 호출하는 쪽(`_submit`/`_send_code`/`_confirm`)이
+    `async def` 이고, 안의 네트워크 호출을 `await run.io_bound(...)` 로 감싸야만
+    실제로 화면에 로딩 표시가 그려집니다. 동기 함수를 그냥 부르면 응답이 올 때까지
+    이 접속의 이벤트 루프 전체가 멈춰서, 이 함수가 막 켠 `loading` 상태조차 브라우저로
+    전송되지 못합니다(2026-08-17 오너 실기기 신고 — "스피너가 전혀 안 뜬다"의 원인).
     """
     button.props('loading')
     button.disable()
@@ -423,11 +429,16 @@ def _busy(button: ui.button):
 def _render_login_form() -> None:
     message = ui.label('').classes('text-red-400')
 
-    def _submit() -> None:
+    async def _submit() -> None:
         message.text = ''
         with _busy(login_btn):
             try:
-                user = login(email_input.value or '', password_input.value or '')
+                # ⚠️ run.io_bound 로 감쌉니다 — login()이 동기 함수라 그냥 부르면 응답이
+                # 올 때까지 이 접속의 이벤트 루프 전체가 멈춰서, 방금 켠 버튼 로딩 표시조차
+                # 브라우저로 안 나가고 화면이 그대로 굳어 보입니다(2026-08-17 오너 신고 원인).
+                # io_bound 는 별도 스레드에서 돌려 이 지점에서 제어권을 돌려주므로, 로딩
+                # 표시가 실제로 화면에 그려진 뒤에 네트워크 응답을 기다립니다.
+                user = await run.io_bound(login, email_input.value or '', password_input.value or '')
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {_fail(exc, "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
@@ -457,7 +468,7 @@ def _render_signup_form() -> None:
     )
     message = ui.label('').classes('text-red-400')
 
-    def _submit() -> None:
+    async def _submit() -> None:
         message.text = ''
         if (password_input.value or '') != (confirm_input.value or ''):
             message.text = '🚫 비밀번호가 서로 다릅니다.'
@@ -468,7 +479,9 @@ def _render_signup_form() -> None:
                 if client is None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 가입할 수 없습니다.'
                     return
-                sign_up(client, (email_input.value or '').strip(), password_input.value or '')
+                # run.io_bound 이유는 로그인 폼과 동일 — 동기 네트워크 호출이 이벤트 루프를
+                # 막아 로딩 표시가 화면에 안 그려지는 문제 방지.
+                await run.io_bound(sign_up, client, (email_input.value or '').strip(), password_input.value or '')
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {_fail(exc, "가입 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
@@ -503,7 +516,7 @@ def _render_reset_form() -> None:
 
     ui.markdown('**1단계 · 재설정 코드 받기**')
 
-    def _send_code() -> None:
+    async def _send_code() -> None:
         message.text = ''
         address = (request_email.value or '').strip()
         with _busy(send_code_btn):
@@ -513,7 +526,7 @@ def _render_reset_form() -> None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 코드를 보낼 수 없습니다.'
                     return
                 # 발송 요청은 로그인 세션을 만들지 않으므로 이 접속의 클라이언트로 보내도 안전합니다.
-                notice = send_password_reset_code(client, address)
+                notice = await run.io_bound(send_password_reset_code, client, address)
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {_fail(exc, "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return
@@ -526,11 +539,12 @@ def _render_reset_form() -> None:
 
     ui.markdown('**2단계 · 받은 코드로 새 비밀번호 정하기**')
 
-    def _confirm() -> None:
+    async def _confirm() -> None:
         message.text = ''
         with _busy(confirm_btn):
             try:
-                reset_password_with_code(
+                await run.io_bound(
+                    reset_password_with_code,
                     new_auth_client(),
                     (confirm_email.value or '').strip(),
                     code_input.value or '',

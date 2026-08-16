@@ -49,6 +49,7 @@
 
 import ast
 import io
+import re
 import sys
 import types
 from pathlib import Path
@@ -372,11 +373,24 @@ def _install_nicegui_stub():
         def __getattr__(self, _name):
             return element
 
+    class _Run(types.ModuleType):
+        """`nicegui.run` 흉내 — `await run.io_bound(fn, *a, **kw)` 를 그냥 동기 호출로
+        대체합니다. 오프라인 테스트에는 진짜 스레드풀/이벤트루프가 없으니 이걸로 충분하고,
+        중요한 건 `web/pages/scorecard_page.py` 의 `from nicegui import run, ui` 임포트가
+        깨지지 않는 것입니다(2026-08-17, 로그인 버튼 로딩 표시 수정분).
+        """
+
+        @staticmethod
+        async def io_bound(fn, *args, **kwargs):
+            return fn(*args, **kwargs)
+
     nicegui = types.ModuleType("nicegui")
     nicegui.app = _App()
     nicegui.ui = _UI("nicegui.ui")
+    nicegui.run = _Run("nicegui.run")
     sys.modules["nicegui"] = nicegui
     sys.modules["nicegui.ui"] = nicegui.ui
+    sys.modules["nicegui.run"] = nicegui.run
     return True
 
 
@@ -639,7 +653,12 @@ def test_scorecard_page_wiring():
               f"호출 {len(calls)}건")
 
     # (c) 저장소 직접 접근 금지 (web/auth.py 를 통해서만)
-    check("from nicegui import ui" in src and "app.storage" not in src,
+    # ⚠️ 2026-08-17 — `from nicegui import ui` 고정 문자열 대신 정규식을 씁니다.
+    #    `from nicegui import run, ui`(로그인 버튼 로딩 표시 수정, run.io_bound 사용)처럼
+    #    같은 줄에서 다른 이름과 같이 임포트해도 이 검사가 오탐(false positive)으로
+    #    실패하면 안 됩니다 — 이 검사의 목적은 "app.storage 직접 접근 여부"이지 임포트
+    #    문구 형태가 아닙니다.
+    check(bool(re.search(r'from nicegui import[^\n]*\bui\b', src)) and "app.storage" not in src,
           "화면 파일은 app.storage 를 직접 만지지 않음 (web/auth.py 경유)")
 
     # (d) XSS — 사용자/DB 문자열이 HTML 로 나가는 곳은 esc() 통과 (§0-3-9)
