@@ -48,6 +48,7 @@
 """
 
 import ast
+import asyncio
 import io
 import re
 import sys
@@ -493,8 +494,11 @@ def test_two_sessions_do_not_mix():
         conn_c = FakeConnection("C(로그인 안 한 방문자)")
 
         # ── 1. A 로그인 ──────────────────────────────────────────────────
+        # ⚠️ 2026-08-17 — login() 이 이제 async def 입니다(배포 후 "로그인이 안 된다"
+        # 사고 원인 수정 — web/auth.py 의 login() docstring 참고: 저장소 접근은 이벤트
+        # 루프에서, 네트워크 호출 한 줄만 run.io_bound 로). 테스트도 asyncio.run 으로 부릅니다.
         active["conn"] = conn_a
-        user_a = auth.login("a@example.com", "pw-a")
+        user_a = asyncio.run(auth.login("a@example.com", "pw-a"))
         check(getattr(user_a, "email", None) == "a@example.com", "A 로그인 성공")
         check(conn_a.user.get(auth.SB_TOKENS_KEY) ==
               {"access_token": "ACCESS::a@example.com", "refresh_token": "REFRESH::a@example.com"},
@@ -509,7 +513,7 @@ def test_two_sessions_do_not_mix():
 
         # ── 2. B 로그인 (A가 로그인해 있는 동안) ─────────────────────────
         active["conn"] = conn_b
-        auth.login("b@example.com", "pw-b")
+        asyncio.run(auth.login("b@example.com", "pw-b"))
         client_b = auth.get_client()
 
         check(conn_b.user.get(auth.SB_TOKENS_KEY) ==

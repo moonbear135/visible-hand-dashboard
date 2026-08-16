@@ -433,12 +433,13 @@ def _render_login_form() -> None:
         message.text = ''
         with _busy(login_btn):
             try:
-                # ⚠️ run.io_bound 로 감쌉니다 — login()이 동기 함수라 그냥 부르면 응답이
-                # 올 때까지 이 접속의 이벤트 루프 전체가 멈춰서, 방금 켠 버튼 로딩 표시조차
-                # 브라우저로 안 나가고 화면이 그대로 굳어 보입니다(2026-08-17 오너 신고 원인).
-                # io_bound 는 별도 스레드에서 돌려 이 지점에서 제어권을 돌려주므로, 로딩
-                # 표시가 실제로 화면에 그려진 뒤에 네트워크 응답을 기다립니다.
-                user = await run.io_bound(login, email_input.value or '', password_input.value or '')
+                # ⚠️ login() 자체를 io_bound로 감싸지 않습니다 — login()은 접속별
+                # 저장소(user_storage()/client_storage())를 읽고 쓰는데, io_bound
+                # 스레드 안에서는 그 접속 컨텍스트를 알 수 없어 깨집니다(자세한 사고 경위는
+                # web/auth.py 의 login() 함수 docstring 참고). login()은 `async def` 로
+                # 이벤트 루프에서 그대로 돌고, 그 안의 네트워크 호출 한 줄만 io_bound 를 씁니다 —
+                # 그 한 번의 `await` 만으로 버튼 로딩 표시가 화면에 그려질 시간은 충분합니다.
+                user = await login(email_input.value or '', password_input.value or '')
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {_fail(exc, "로그인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
                 return

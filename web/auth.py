@@ -24,7 +24,7 @@ import hashlib
 import hmac
 import os
 
-from nicegui import app
+from nicegui import app, run
 
 from utils.scorecard_db import (
     ScorecardError,
@@ -205,20 +205,31 @@ def get_client():
     return client
 
 
-def login(email: str, password: str):
+async def login(email: str, password: str):
     """이메일+비밀번호 로그인. 성공하면 **이 접속자의** 저장소에만 토큰을 넣습니다.
 
     실패는 `ScorecardError` 로 올라갑니다(호출한 화면이 사람이 읽는 문구로 보여줍니다).
     화면 이동(`ui.navigate`)은 일부러 여기서 하지 않습니다 — 인증 로직과 화면 전환을 섞으면
     테스트에서 이 함수를 직접 호출할 수 없게 되고(§0-3-8 자동 검증 필수), 나중에 다른
     화면이 이 함수를 재사용할 때도 걸림돌이 됩니다.
+
+    🔴 2026-08-17 (배포 직후 "로그인이 안 된다" 신고 — 근본 원인과 수정) — 이 함수를
+    통째로 `run.io_bound(login, ...)` 로 감쌌던 게 원인이었습니다. `run.io_bound` 는
+    별도 스레드에서 실행되는데, 그 스레드에는 **"지금 어느 접속인지" 를 담은 컨텍스트가
+    없어서** `get_client()`/`user_storage()` 가 접근하는 `app.storage.*` 가 그 안에서는
+    작동하지 않습니다(NiceGUI 공식 안내: storage는 io_bound 스레드 안에서 접근하기 전에
+    미리 동기적으로 읽어둬야 함 — GitHub Discussion #2228/#2801).
+    그래서 이 함수 자체는 (`get_client()`·저장소 쓰기 포함) **원래 이벤트 루프에서** 그대로
+    실행하고, 실제로 몇 초씩 걸리는 네트워크 호출(`sign_in`) **한 줄만** `run.io_bound` 로
+    감쌉니다. 로딩 스피너가 보이는 데도(§ui.button.props('loading') 반영) 필요한 "제어권을
+    한 번 넘겨준다"는 효과는 이 한 줄의 `await` 만으로 충분합니다.
     """
     client = get_client()
     if client is None:
         raise ScorecardError(
             'Supabase 연결이 준비되지 않아 로그인할 수 없습니다. ' + (supabase_status().reason or '')
         )
-    response = sign_in(client, (email or '').strip(), password)
+    response = await run.io_bound(sign_in, client, (email or '').strip(), password)
 
     session = getattr(response, 'session', None)
     access_token = getattr(session, 'access_token', None)
