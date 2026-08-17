@@ -121,18 +121,11 @@ def is_admin() -> bool:
     return bool(user_storage().get('admin', False))
 
 
-# ── 0단계 데모 카운터 (임시) ─────────────────────────────────────────────
-# demo_page.py 의 저장소-지속성 검증용. 실제 화면(admin_page 등) 이전이 끝나면
-# demo_page.py 와 함께 지워도 됩니다.
-
-def get_demo_counter() -> int:
-    return user_storage().get('demo_count', 0)
-
-
-def bump_demo_counter() -> int:
-    value = get_demo_counter() + 1
-    user_storage()['demo_count'] = value
-    return value
+# (2026-08-17 삭제) 0단계 데모 카운터 `get_demo_counter`/`bump_demo_counter` 는
+#  `web/pages/demo_page.py` 와 함께 지웠습니다. 그 페이지는 "새로고침해도 app.storage.user
+#  값이 유지되는가"를 실기기로 확인하기 위한 0단계 검증용이었고, 8단계와 컷오버까지 전부
+#  끝나 역할이 사라졌습니다 (ENGINEERING_SPEC.md §0-3-10 — 안 쓰는 코드를 남기지 않습니다).
+#  저장소 지속성은 이제 실제 로그인 세션(아래 `SB_TOKENS_KEY`)이 매일 증명하고 있습니다.
 
 
 # =============================================================================

@@ -37,6 +37,13 @@ import csv
 import io
 import os
 
+# 🌐 조회(`load_stock_history`)가 파일을 여는 단일 창구. 원격 로드가 꺼져 있으면(기본값)
+#    예전과 똑같은 로컬 파일 읽기이고, 켜져 있으면 최신성 추적·전역 배너를 함께 받습니다.
+#    ⚠️ **기록(write) 경로는 이 모듈에서 예전 그대로 로컬 파일에 직접 씁니다** — 기록하는
+#       쪽은 GitHub Actions 안의 수집기이고, 그 환경에는 저장소가 통째로 체크아웃돼 있어
+#       원격을 거칠 이유가 없습니다(그리고 원격은 애초에 읽기 전용입니다).
+from utils import data_source
+
 
 # =============================================================================
 # 0. 파일 위치
@@ -306,18 +313,30 @@ def load_stock_history(path, key_field, key_value):
     """
     한 종목의 이력만 골라 **날짜 오름차순**으로 돌려줍니다.
     이력이 아직 하루치뿐이면 행이 1개인 것도 정상입니다(오늘 처음 쌓이기 시작했으므로).
+
+    🌐 2026-08-17 — 파일을 여는 일은 `utils/data_source.py` 가 합니다.
+       예전에는 이 함수만 `open()` 으로 직접 읽어서 최신성 추적 밖에 있었고, 원격 로드가
+       켜지고 Render Build Filters 로 `data/**` 가 무시되면 **배포 시점에 얼어붙은 사본**을
+       계속 내려주면서도 전역 배너가 뜨지 않았습니다(§0-1 위반). 이제 다른 스냅샷들과 같은
+       경로를 탑니다.
+       ⚠️ 시그니처·반환값(행 dict 목록, 실패 시 빈 목록)은 그대로입니다 —
+          `views/pegy_view.py`·`views/us_stocks_view.py`(Streamlit)도 영향 없습니다.
     """
-    if not key_value or not path or not os.path.exists(path):
+    if not key_value or not path:
         return []
     wanted = str(key_value)
     rows = []
     try:
-        # 파일 전체를 메모리에 올리지 않고 한 줄씩 훑으며 해당 종목만 골라 담습니다.
-        # (이력이 몇 년 쌓이면 전 종목 × 수백 일이라 파일이 수십 MB가 됩니다.)
-        with open(path, "r", encoding="utf-8-sig", newline="") as f:
-            for r in csv.DictReader(f):
-                if (r.get(key_field) or "") == wanted:
-                    rows.append(dict(r))
+        text, error, _version = data_source.read_text(path, encoding="utf-8-sig")
+        if error is not None or text is None:
+            return []
+        # ⚠️ 여기서 `csv.DictReader(text.splitlines())` 처럼 전체를 리스트로 펼치지 않습니다.
+        #    이력이 몇 년 쌓이면 전 종목 × 수백 일이라 파일이 수십 MB가 되는데, 한 종목만
+        #    필요한 화면이 그 전부를 dict 목록으로 들고 있을 이유가 없습니다. `io.StringIO`
+        #    를 **한 줄씩** 흘려보내며 원하는 종목 행만 담습니다(원본 설계 그대로).
+        for r in csv.DictReader(io.StringIO(text, newline="")):
+            if (r.get(key_field) or "") == wanted:
+                rows.append(dict(r))
     except Exception as e:
         print(f"⚠️ 종목별 이력 파일을 읽지 못했습니다({path}): {e}")
         return []

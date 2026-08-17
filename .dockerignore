@@ -13,3 +13,23 @@ tests/
 *.md
 .nicegui/
 node_modules/
+
+# 🔴 비밀 파일 — 이미지 레이어에 개인키가 구워지지 않게 (ENGINEERING_SPEC.md §0-3-9)
+#
+# `.gitignore` 에는 아래 3개가 이미 들어 있어서 git 에는 올라가지 않습니다(확인됨).
+# 그런데 `Dockerfile` 은 `COPY . .` 로 **작업 디렉터리 전체**를 복사하므로, 개발자가 로컬에서
+# `docker build .` 를 하면 로컬에 존재하는 이 파일들이 그대로 이미지 레이어에 들어갑니다.
+# 레이어는 지워도 이력에 남기 때문에 한 번 구워지면 되돌리기 어렵습니다.
+# (Render 빌드는 git 체크아웃 기준이라 애초에 이 파일들이 없지만, 방어선은 양쪽 다 둡니다.)
+service_account.json
+credentials.json
+token.json
+
+# 이미지에 필요 없는 나머지 — `.gitignore` 와 같은 목록(= 로컬에만 존재하는 것들)
+archive/
+check_*.py
+.streamlit/config.toml
+
+# ⚠️ `data/` 는 **절대 빼지 마세요.** 원격 로드가 실패했을 때 화면을 띄우는 로컬 폴백 사본이며
+#    (`utils/data_source.py` 3)번 경로), 빠지면 장애 시 숫자를 아무것도 못 그립니다.
+# ⚠️ `market_history.csv` 도 같은 이유로 이미지에 있어야 합니다(매크로 화면이 직접 읽습니다).

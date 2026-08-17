@@ -2,7 +2,8 @@
 📈 사장님 보고서 — 매일 쌓인 스냅샷으로 일간~연간 리포트를 보여주는 화면 (로그인 필요, URL `/report`).
 
 `views/report_view.py`(Streamlit, 1,030줄)의 NiceGUI 이식본입니다 (이전 계획서 5단계).
-Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 계획서 §11-1).
+컷오버(2026-08-17)가 끝나 **지금 사용자가 보는 화면은 이 파일**이고, Streamlit 쪽 원본은
+즉시 롤백에 대비해 최소 2주간만 살려둡니다(듀얼런 — 계획서 §11-1 · §0-3-10).
 
 🔴 이 화면도 '내 성적표'와 똑같이 **사용자의 실제 자산 정보**를 다룹니다.
    ENGINEERING_SPEC.md §0-3-8(최상위 금지사항)이 그대로 적용됩니다:
@@ -19,13 +20,15 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
    로그인 폼 없이 바로 본문이 보입니다(그 반대도 동일). 로그인 폼도 `web/auth_ui.py`
    하나를 두 화면이 같이 씁니다(§0-3-10).
 
-🚧 **스테이징 (§0-3-6)** — '내 성적표'와 같은 방식입니다. 드로어 메뉴에는 **관리자에게만**
-   보이고(`web/layout.py`), 주소를 직접 치면 들어올 수 있지만 로그인 없이는 아무 데이터도
-   그리지 않습니다(DB 는 RLS 로 본인 행만 허용). 오너 승인 후 메뉴를 공개로 바꿉니다.
+✅ **공개 전환 완료 (2026-08-17, §0-3-6 스테이징 절차 통과 후 오너 승인)** — 드로어 메뉴에
+   모든 방문자에게 보입니다(`web/layout.py` 의 `_MENU` 에서 `admin_only=False`).
+   ⚠️ 공개는 "메뉴에 보인다"까지이고, **데이터는 여전히 로그인한 본인 것만** 보입니다 —
+      로그인 없이 들어오면 로그인 폼만 그리고 숫자를 한 개도 그리지 않으며, DB 는 RLS 로
+      본인 행만 허용합니다(§0-3-8). 공개(공유)와 노출(사고)은 완전히 다릅니다.
    ⚠️ 원본의 `REPORT_ENABLED` 환경변수 게이트(`is_report_enabled()`)는 **옮기지 않았습니다.**
       그건 Streamlit 사이드바에 체크박스를 만들지 말지 고르는 장치였고, 여기서는 '내 성적표'와
-      똑같이 **메뉴 노출(관리자 전용) + 로그인**으로 같은 목적을 달성합니다 — 같은 일을 하는
-      장치를 두 개 두지 않습니다(§0-3-10). 공개 시점에 바꿀 곳도 `web/layout.py` 한 줄입니다.
+      똑같이 **메뉴 노출 + 로그인**으로 같은 목적을 달성합니다 — 같은 일을 하는 장치를 두 개
+      두지 않습니다(§0-3-10). 노출 여부를 다시 바꿀 곳도 `web/layout.py` 한 줄입니다.
 
 이식 방침
    - **계산·DB 계층(`utils/report_db.py`)은 한 줄도 건드리지 않습니다.** 이 파일은 순수
@@ -90,7 +93,10 @@ from utils.report_db import (
 
 from web.auth import get_client, has_supabase_session, logout
 from web.auth_ui import fail_message, render_auth
-from web.components import compact, error_banner, esc, info_banner, metric_card, pct_html, warning_banner
+from web.components import (
+    error_banner, esc, holdings_table_html, info_banner, metric_card,
+    pct_html, pct_text, warning_banner,
+)
 from web.layout import layout
 from web.state import data_path, load_json_file
 
@@ -127,11 +133,6 @@ def _fail(exc, fallback: str) -> str:
     return fail_message(exc, fallback, context='사장님 보고서')
 
 
-def _pct_text(value, digits: int = 2) -> str:
-    """색 없는 등락률(메트릭 카드의 큰 숫자 자리). 값이 없으면 '—' 입니다(§0-1)."""
-    return '—' if value is None else f'{value:+.{digits}f}%'
-
-
 def _pp_html(value) -> str:
     """비중 **변화량**(퍼센트포인트). 색 관례는 수익률과 같아 같은 함수를 씁니다(§0-3-10).
 
@@ -157,26 +158,11 @@ def _muted(text: str) -> None:
     ui.label(text).classes('vh-muted')
 
 
-def _table_html(headers, rows) -> str:
-    """가로 스크롤 되는 표 하나.
-
-    #127 의 결론 그대로 **순수 HTML `<table>` + `overflow-x: auto`** 입니다(스타일은
-    `web/theme.py` 의 `.vh-holdings-table` 한 곳에만 있습니다). 화면이 좁아지면 칸이 세로로
-    쌓이지 않고 가로로 스크롤될 뿐이라, 모바일에서도 표 구조가 그대로 유지됩니다.
-
-    ⚠️ `headers` 는 우리가 쓴 문구라 여기서 이스케이프하고, `rows` 의 각 칸은 색·굵기가 섞인
-       **HTML 조각**이라 **호출하는 쪽이 이스케이프까지 끝내서** 넘깁니다 (§0-3-9).
-    """
-    head = ''.join(f'<th>{esc(h)}</th>' for h in headers)
-    body = ''.join('<tr>' + ''.join(f'<td>{cell}</td>' for cell in row) + '</tr>' for row in rows)
-    return compact(f"""
-        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
-          <table class="vh-holdings-table">
-            <thead><tr>{head}</tr></thead>
-            <tbody>{body}</tbody>
-          </table>
-        </div>
-    """)
+# (2026-08-17) 이 자리에 있던 `_table_html()` 은 `web/components/html.py` 의
+#  `holdings_table_html()` 로 옮겼습니다 — '내 성적표'가 글자 그대로 같은 HTML 을 따로
+#  들고 있어서, 한쪽만 고치면 두 화면의 표가 어긋나는 구조였습니다 (§0-3-10).
+#  ⚠️ 계약은 그대로입니다: `headers` 는 그쪽이 이스케이프하고, 각 칸은 **호출하는 쪽이
+#     이스케이프까지 끝내서** 넘깁니다 (§0-3-9).
 
 
 def _display_indexes(market):
@@ -595,8 +581,8 @@ def _render_numbers(report, currency: str, incomplete: bool = False) -> None:
                     delta_html=pct_html(report.get("value_change_pct")))
 
     with ui.row().classes('w-full gap-4 items-stretch'):
-        metric_card('기간 시작 누적수익률', _pct_text(report.get("profit_pct_start")))
-        metric_card('기간 종료 누적수익률', _pct_text(report.get("profit_pct_end")))
+        metric_card('기간 시작 누적수익률', pct_text(report.get("profit_pct_start")))
+        metric_card('기간 종료 누적수익률', pct_text(report.get("profit_pct_end")))
     # 공식은 뺐지만, **누적과 기간 변화가 다른 숫자**라는 사실은 남깁니다 — 바로 위에 두 값이
     # 나란히 있어서 헷갈리면 숫자를 오해하게 됩니다.
     _muted('누적수익률은 매수 시점부터의 누적입니다(이 기간의 변화가 아닙니다).')
@@ -787,7 +773,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
         pct_html(totals["profit_pct"]),
         '',
     ])
-    ui.html(_table_html(
+    ui.html(holdings_table_html(
         ['종목', '비중', '수량', '평균매입가', '현재가', '평가금액', '평가손익', '수익률', '주가등락'],
         rows_html,
     )).classes('w-full')
@@ -849,7 +835,7 @@ def _render_weight_changes(history, base_date, market=None, indexes=None) -> Non
         esc(_weight_text(row["base_pct"])),
         _pp_html(row["change_pp"]),
     ] for row in weights["rows"]]
-    ui.html(_table_html(['종목', first_label, base_label, '변화'], rows_html)).classes('w-full')
+    ui.html(holdings_table_html(['종목', first_label, base_label, '변화'], rows_html)).classes('w-full')
 
     if weights["unpriced_first"] or weights["unpriced_base"]:
         # 정상일 땐 조용히, 실제로 '모름'이 있을 때만.
@@ -902,7 +888,7 @@ def _render_daily_picker(history, market, indexes, currency: str) -> None:
                     esc(_qty_text(row["quantity"])),
                     *cells,
                 ])
-            ui.html(_table_html(
+            ui.html(holdings_table_html(
                 ['거래일', '종가 수집 시각(KST)', '수량', '현재가', '평가금액', '평가손익', '수익률'],
                 rows_html,
             )).classes('w-full')
@@ -930,7 +916,7 @@ def _render_snapshot_table(rows_in_window, currency: str) -> None:
                 esc(f'{row.get("priced_count")}/{row.get("holdings_count")}'),
                 esc(benchmark),
             ])
-        ui.html(_table_html(
+        ui.html(holdings_table_html(
             ['거래일', '종가 수집 시각(KST)', '평가금액', '매입원가', '담긴 종목', '벤치마크'],
             rows_html,
         )).classes('w-full')

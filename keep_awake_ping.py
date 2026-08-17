@@ -2,6 +2,17 @@
 keep_awake_ping.py
 💤 Streamlit Community Cloud "12시간 무방문 시 잠들기" 방지용 헤드리스 브라우저 핑.
 
+🗑️ **컷오버 2주 뒤 삭제 대상** (2026-08-17 표시)
+────────────────────────────────────────────────────────────────────────────
+NiceGUI(Render) 컷오버가 끝나서 실서비스는 더 이상 Streamlit 이 아닙니다. 다만 즉시 롤백에
+대비해 Streamlit 앱을 **최소 2주는 살려두기로** 결정돼 있어, 그 유예 기간 동안만 이 스크립트를
+유지합니다. 유예가 끝나면 이 파일과 `.github/workflows/keep_awake.yml` 의 `streamlit_wake`
+job 블록을 함께 지우세요(같은 워크플로우의 `render_healthz` job 은 남겨둬야 합니다 —
+그쪽이 실서비스를 깨우는 쪽입니다).
+
+⚠️ 실서비스(Render)는 이 스크립트가 아니라 워크플로우의 `curl .../healthz` 한 줄이 깨웁니다.
+   Render 응답은 정적 JSON 이라 Selenium 이 필요 없습니다.
+
 2026-08-09에 curl 기반으로 먼저 만들었다가(.github/workflows/keep_awake.yml),
 2026-08-10 실측(Actions 로그)에서 `curl: (47) Maximum (50) redirects followed`로
 전부 실패하는 걸 확인했습니다. 원인: Streamlit의 "Yes, get this app back up!" 깨우기는

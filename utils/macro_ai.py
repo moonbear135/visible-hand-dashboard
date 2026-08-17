@@ -3,27 +3,21 @@ import json
 import time
 import google.generativeai as genai
 
-# 한글 이름 매핑 (scrape_daily.py와 맞춤)
-# ⚠️ 2026-08-10 (#69): 아래 6개(ELS_KnockIn / NDF_Night_Rate / Futures_Net_Sell /
-#    Non_Arbitrage_Ratio / Foreign_Broker_Dump / Put_Buy_Simple)는 점수 계산에서 제외되어
-#    더 이상 metrics_dict 에 담겨 오지 않습니다. 이 표에 남겨두는 이유는 이미 생성된
-#    data/macro_commentary.json 의 과거 코멘트 키를 읽을 때 이름이 필요하기 때문입니다.
-FRIENDLY_NAMES = {
-    "FX_Swap_Point": "외환 스왑포인트 (달러 유동성 부족 위험)",
-    "Put_OTM_OI": "풋옵션 미결제약정 (시장 하락에 베팅한 대기자금)",
-    "Short_Ratio": "공매도 거래 비중 (주가를 떨어뜨리려는 매도세)",
-    "ELS_KnockIn": "ELS 낙인 위험 (대규모 원금손실 구간 진입 여부)",
-    "VKOSPI_Skew": "공포지수 비대칭도 (투자자들의 불안 심리 강도)",
-    "Synthetic_Futures": "합성선물 가격 차이 (외국인의 파생상품 하방 압력)",
-    "NDF_Night_Rate": "야간 역외환율 변동 (원/달러 환율 급등 위험)",
-    "Futures_Net_Sell": "선물 순매도 규모 (선물 지수 하락 압박 세기)",
-    "Non_Arbitrage_Ratio": "비차익 프로그램 매도 비중 (컴퓨터 자동 매도량)",
-    "Foreign_Broker_Dump": "외국계 증권사 매도세 (외국인 투자자 이탈 속도)",
-    "Stock_Short_Balance": "주식 공매도 잔고 (공매도 세력이 아직 갚지 않은 주식수)",
-    "Put_Buy_Simple": "풋옵션 매수 강도 (단기 주가 하락 대비 베팅 규모)",
-    "Stock_Net_Sell": "주식 현물 순매도 규모 (주식을 파는 투자자 자금 규모)",
-    "KOSPI_5D_Return": "KOSPI 5일 낙폭 모멘텀 (지수 폭락 감지용 직접 지표)"
-}
+# 🔗 한글 이름 매핑 — **단일 출처는 `utils/constants.py`** (2026-08-17 통합)
+#
+# 예전에는 이 파일이 자기만의 `FRIENDLY_NAMES` 사전을 들고 있었고, 그 값이 화면
+# (`views/macro_view.py` / `web/pages/macro_page.py`)과 **실제로 어긋나 있었습니다.**
+# 이 이름은 아래에서 Gemini 프롬프트의 "현재 설명할 지표" 자리에 그대로 들어가므로,
+# AI 는 옛 이름("공포지수 비대칭도", "합성선물 가격 차이")을 보고 설명을 쓰는데 화면은
+# 그 코멘트를 새 이름("VKOSPI 공포지수", "선물 베이시스") 옆에 붙여 보여줬습니다.
+# 두 이름은 실제로 **가리키는 지표 자체가 다릅니다**(#70 프록시 → KRX 실측 전환).
+# 사전을 하나로 합쳐 그 어긋남이 구조적으로 불가능하게 만들었습니다 (§0-3-10).
+#
+# ⚠️ 옛 사전에 남아 있던 은퇴 지표 8개는 함께 걷어냈습니다. 아래 루프는
+#    `metrics_dict`(= 활성 지표만 담겨 옴)의 키로만 이 표를 조회하므로 은퇴 키가
+#    쓰이는 경로가 애초에 없었습니다. 과거 코멘트를 **화면에 그릴 때** 필요한 이름은
+#    화면 파일이 자기 사전으로 처리합니다(이 파일은 쓰기 전용 배치입니다).
+from utils.constants import MACRO_FRIENDLY_NAMES as FRIENDLY_NAMES
 
 def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
     """

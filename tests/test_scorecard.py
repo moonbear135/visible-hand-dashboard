@@ -953,8 +953,14 @@ def test_supabase_fallback():
         sdb.SUPABASE_PACKAGE_AVAILABLE = False
         status = supabase_status()
         check(status.available is False, "패키지·Secrets 둘 다 없으면 available=False")
-        check("supabase" in status.reason and "Secrets" in status.reason,
-              "사유에 패키지/Secrets 둘 다 언급")
+        check("supabase" in status.reason and "환경변수" in status.reason,
+              "사유에 패키지/접속정보 둘 다 언급")
+        # 2026-08-17 — 이 문구는 공개된 /scorecard·/report 의 '준비중' 안내로 **일반 사용자
+        # 화면에 그대로** 나갑니다. 컷오버 후 실제 배포처는 Render 이고, 이 함수는 아직
+        # 살아있는 Streamlit 쪽(views/)도 함께 쓰므로 **특정 플랫폼 이름이 들어가면 안 됩니다.**
+        for platform in ("Streamlit Cloud", "Render", "Settings → Secrets"):
+            check(platform not in status.reason,
+                  f"사유 문구에 플랫폼 이름('{platform}')이 들어있지 않음(중립적 표현)")
         check(create_supabase_client() is None, "클라이언트 생성은 None 반환(예외 아님)")
 
         # ② 패키지는 있는데 Secrets 미등록

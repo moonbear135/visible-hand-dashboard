@@ -1,9 +1,9 @@
 """
-NiceGUI 진입점 (Streamlit → NiceGUI 이전, 0단계).
+NiceGUI 진입점 — **지금 실서비스가 도는 곳**입니다 (2026-08-17 컷오버 완료).
 
-기존 `app.py`(Streamlit 진입점)는 컷오버 전까지 그대로 둡니다(듀얼런,
-NICEGUI_MIGRATION_PLAN.md §11-1 / ENGINEERING_SPEC.md §0-3-10). 이 파일은
-그 옆에 새로 생긴 NiceGUI 쪽 진입점입니다.
+기존 `app.py`(Streamlit 진입점)와 `views/` 는 **즉시 롤백에 대비해 컷오버 후 최소 2주간
+그대로 살려둡니다.** 유예가 끝나면 archive/ 로 옮겨 서비스 경로에서 제거합니다
+(ENGINEERING_SPEC.md §0-3-10 — 듀얼런은 기한이 있는 임시 상태입니다).
 
 실행 방법:
   로컬:  NICEGUI_STORAGE_SECRET=아무-긴-난수-문자열 python main.py
@@ -17,16 +17,19 @@ from nicegui import app, ui
 from utils import data_source
 import web.theme
 # @ui.page 등록을 위해 import 자체가 필요합니다 (모듈을 읽는 순간 경로가 등록됨).
-#   pegy_page      → '/'          (공개 기본 화면, 2단계에서 이전 완료)
-#   us_stocks_page → '/us'        (공개 화면, 3단계에서 이전 완료)
-#   scorecard_page → '/scorecard' (로그인 필요 · 스테이징, 4단계)
-#   report_page    → '/report'    (로그인 필요 · 스테이징, 5단계 — scorecard 와 같은 로그인 공유)
-#   macro_page     → '/admin/macro' (관리자 전용 · 오너 지시로 개발 중단 상태, 6단계)
-#   admin_page     → '/admin'     (1단계)
-#   demo_page      → '/demo'      (0단계 모바일 반응형 검증용. 실화면 검증이 끝나면 삭제 예정 — §0-3-10)
+#   pegy_page      → '/'            (공개 기본 화면)
+#   us_stocks_page → '/us'          (공개 화면)
+#   scorecard_page → '/scorecard'   (로그인 필요 · **2026-08-17 공개 전환 완료**)
+#   report_page    → '/report'      (로그인 필요 · **2026-08-17 공개 전환 완료**,
+#                                    scorecard 와 같은 로그인 세션을 공유합니다)
+#   macro_page     → '/admin/macro' (관리자 전용 · 오너 지시로 개발 중단 상태)
+#   admin_page     → '/admin'       (관리자 게이트)
+#
+# (2026-08-17 삭제) `demo_page → '/demo'` — 0단계 모바일 반응형·저장소 지속성 검증 전용
+#   화면이었습니다. 8단계와 컷오버가 모두 끝나 역할이 사라져 파일째 지웠습니다
+#   (`web/auth.py` 의 데모 카운터 두 함수도 함께 — ENGINEERING_SPEC.md §0-3-10).
 from web.pages import (  # noqa: F401
     admin_page,
-    demo_page,
     macro_page,
     pegy_page,
     report_page,

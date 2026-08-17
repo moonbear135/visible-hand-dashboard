@@ -163,8 +163,11 @@ ALLOWED_MUTABLE_GLOBALS = {
         "필터 드롭다운 항목(고정 문자열 목록).",
     ("web/pages/scorecard_page.py", "CURRENCY_TITLES"):
         "통화 코드 → 소제목 문구(고정 문자열).",
-    ("web/pages/scorecard_page.py", "_CHART_LAYOUT"):
-        "plotly 차트 배경/글자색 설정(고정 문자열·숫자). 차트 데이터는 여기 담기지 않음.",
+    # (2026-08-17 제거) `("web/pages/scorecard_page.py", "_CHART_LAYOUT")` 와
+    #  `("web/pages/macro_page.py", "_CHART_LAYOUT")` 두 항목은 그 전역이 사라져서 뺐습니다.
+    #  두 화면이 거의 같은 사전을 각각 들고 있던 것을 `web/components/widgets.py::chart_layout()`
+    #  **함수**로 합쳤고(§0-3-10), 함수는 호출할 때마다 새 dict 를 만들어 돌려주므로
+    #  모듈 전역 가변 상태가 애초에 생기지 않습니다(§0-3-8 관점에서도 더 안전).
     ("web/pages/report_page.py", "MARKET_TITLES"):
         "시장 코드 → 소제목 문구(고정 문자열). 사용자 데이터가 들어갈 자리가 없음.",
     # ── 6단계(macro) 이식분 — 전부 `views/macro_view.py` 에서 글자 그대로 옮긴 **설명 상수**
@@ -180,9 +183,6 @@ ALLOWED_MUTABLE_GLOBALS = {
         "점수에서 뺀 지표들의 '공부용' 설명 텍스트(고정 문자열). 어떤 값도 계산·저장하지 않음.",
     ("web/pages/macro_page.py", "DROPPED_AS_DUPLICATE"):
         "개념 중복으로 완전 제외한 지표 2개의 사유 문구(고정 문자열 튜플).",
-    ("web/pages/macro_page.py", "_CHART_LAYOUT"):
-        "plotly 차트 배경/글자색 설정(고정 문자열). 차트 데이터는 여기 담기지 않음 "
-        "(scorecard_page.py 의 같은 이름 상수와 동일한 사유).",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}

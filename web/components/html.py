@@ -135,6 +135,49 @@ def pct_html(value, digits: int = 2, suffix: str = '%') -> str:
 # =============================================================================
 # 카드 공통 조각 (pegy · us_stocks 가 같은 마크업을 씁니다 — §0-3-10)
 # =============================================================================
+def pct_text(value, digits: int = 2) -> str:
+    """색 없는 등락률 문자열 — 메트릭 카드의 큰 숫자 자리처럼 **색을 쓰지 않는** 곳용.
+
+    `pct_html()` 의 색 없는 짝입니다. '내 성적표'와 '사장님 보고서'가 각자 거의 같은
+    `_pct_text()` 를 들고 있었는데(자릿수 인자 유무만 달랐음), 한쪽만 서식이 바뀌면 두
+    화면의 숫자 표기가 어긋나므로 여기 한 곳으로 모았습니다 (§0-3-10 중복 금지 —
+    바로 위 `pct_html()` 을 모은 것과 같은 이유·같은 자리).
+
+    값이 없으면 0% 같은 숫자를 지어내지 않고 '—' 입니다(§0-1).
+    """
+    return '—' if value is None else f'{value:+.{digits}f}%'
+
+
+def holdings_table_html(headers, rows) -> str:
+    """가로 스크롤 되는 표 하나(보유 종목·기간 표 공용).
+
+    #127 의 결론 그대로 **순수 HTML `<table>` + `overflow-x: auto`** 입니다(스타일은
+    `web/theme.py` 의 `.vh-holdings-table` 한 곳에만 있습니다). 화면이 좁아지면 칸이 세로로
+    쌓이지 않고 가로로 스크롤될 뿐이라, 모바일에서도 표 구조가 그대로 유지됩니다.
+    (Streamlit 의 `st.columns()` 반응형 쌓기 자체가 없어졌으므로 여기서 다시 깨질 여지가
+     없습니다.)
+
+    2026-08-17 — '내 성적표'(`scorecard_page._render_table`)와 '사장님 보고서'
+    (`report_page._table_html`)가 **똑같은 표 껍데기 HTML** 을 각자 들고 있었습니다.
+    한쪽만 고치면 두 화면의 표가 어긋나므로 여기로 모았습니다 (§0-3-10).
+
+    :param headers: 열 제목 문자열 목록. **우리가 쓴 문구**라 여기서 이스케이프합니다.
+    :param rows: 행 목록. 각 행은 칸(cell) 목록이고, 각 칸은 색·굵기가 섞인 **HTML 조각**
+        이라 **호출하는 쪽이 이스케이프까지 끝내서** 넘겨야 합니다 (§0-3-9 XSS).
+    :return: `ui.html(...)` 에 그대로 넘길 HTML 문자열.
+    """
+    head = ''.join(f'<th>{esc(h)}</th>' for h in headers)
+    body = ''.join('<tr>' + ''.join(f'<td>{cell}</td>' for cell in row) + '</tr>' for row in rows)
+    return compact(f"""
+        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
+          <table class="vh-holdings-table">
+            <thead><tr>{head}</tr></thead>
+            <tbody>{body}</tbody>
+          </table>
+        </div>
+    """)
+
+
 def rank_prefix_html(rank_num) -> str:
     """카드 왼쪽 위의 커다란 순위 숫자."""
     return (

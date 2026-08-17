@@ -22,7 +22,10 @@ utils/macro_scoring.py
 import math
 import statistics
 
-from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
+# ⚠️ 2026-08-17 — `INVESTOR_WEIGHTS` 를 함께 import 하고 있었지만 이 파일에서 쓰이는 곳이
+#    한 군데도 없어(AST 확인) 걷어냈습니다. 상수 자체는 `utils/constants.py` 에 그대로 있고,
+#    실제로 쓰는 쪽(수급 가중 계산)은 거기서 직접 가져다 씁니다.
+from utils.constants import RISK_WEIGHTS
 # 2026-08-10 (#68): "실측값을 0~1 위험도로 바꾸는" 방법론을 새로 발명하지 않고, 이 프로젝트가
 # 이미 종목 스코어링에서 쓰고 있는 population z-score + 윈저라이즈 패턴을 그대로 재사용합니다.
 # (utils/scoring.py 상단 주석 참고 — Barra/Fama-French류 정규화 + winsorize)

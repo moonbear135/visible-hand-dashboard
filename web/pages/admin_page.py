@@ -74,8 +74,13 @@ def _render_console() -> None:
 
     with ui.card().classes('vh-card w-full'):
         ui.markdown('**⚙️ 관리자 시스템 정보**')
-        ui.label(f'DB 파일 경로: {HISTORY_FILE}')
-        ui.label(f'DB 파일 존재 여부: {os.path.exists(HISTORY_FILE)}')
+        # ⚠️ 2026-08-17 — 예전에는 서버의 **절대경로**를 그대로 찍었습니다
+        #    (`/app/market_history.csv` 처럼 배포 환경의 디렉터리 구조가 드러남).
+        #    관리자 전용 화면이라 위험도는 낮지만, 화면에 서버 내부 구조를 그릴 이유가
+        #    없습니다(§0-3-4). 여기서 실제로 알고 싶은 건 "그 파일이 있느냐"뿐이라
+        #    저장소 기준 파일명 + 있음/없음으로 줄였습니다.
+        ui.label(f'누적 이력 파일: {os.path.basename(HISTORY_FILE)} (저장소 루트)')
+        ui.label(f'파일 존재 여부: {"있음" if os.path.exists(HISTORY_FILE) else "없음"}')
 
     # 2026-08-17(6단계) — 수동 데이터 입력 콘솔은 원본(`views/macro_view.py` 가
     # `render_admin_console()` 을 화면 안에서 호출)과 **같은 자리**인 매크로 화면에

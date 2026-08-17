@@ -863,19 +863,30 @@ class SupabaseStatus:
 
 
 def supabase_status():
+    """연결 가능 여부 + **사용자 화면에 그대로 나가는** 사유 문구.
+
+    ⚠️ 2026-08-17 — 사유 문구에서 플랫폼 이름("Streamlit Cloud → Settings → Secrets")을
+       걷어냈습니다. 컷오버 후 실제 배포처는 Render(Environment) 인데, 이 문구는 공개된
+       `/scorecard`·`/report` 의 "준비중" 안내를 통해 **일반 사용자 화면에 그대로 나갑니다.**
+       옛 플랫폼 이름이 뜨면 사용자에게는 무의미하고 오너에게는 엉뚱한 곳을 보게 만듭니다.
+       ⚠️ 이 함수는 아직 살아있는 Streamlit 쪽(`views/`)도 그대로 쓰므로, 특정 플랫폼을
+          지칭하지 않는 **중립적인 표현**을 골랐습니다(양쪽 다 자연스럽게 읽힙니다).
+          플랫폼별 구체 절차는 화면의 "🔧 오너 설정 체크리스트"(관리자용 접기 영역)에
+          따로 적혀 있습니다.
+    """
     package_ok = SUPABASE_PACKAGE_AVAILABLE
     url, key = get_supabase_config()
     config_ok = bool(url and key)
     if not package_ok and not config_ok:
-        reason = ("`supabase` 패키지가 설치돼 있지 않고 접속 정보(Secrets)도 등록되지 "
-                  "않았습니다. (requirements.txt 반영 + Streamlit Cloud Secrets 등록 필요)")
+        reason = ("`supabase` 패키지가 설치돼 있지 않고 접속 정보(서버 환경변수)도 등록되지 "
+                  "않았습니다. (requirements.txt 반영 + 서버 환경변수 등록이 필요합니다)")
     elif not package_ok:
         reason = "`supabase` 파이썬 패키지가 설치돼 있지 않습니다. (requirements.txt 반영 후 재배포 필요)"
     elif not config_ok:
         missing = [n for n, v in ((SECRET_URL_KEY, url), (SECRET_ANON_KEY, key)) if not v]
         reason = ("Supabase 접속 정보가 등록되지 않았습니다: "
                   + ", ".join(missing)
-                  + " (Streamlit Cloud → Settings → Secrets 에 등록하세요)")
+                  + " (서버 환경변수에 등록해 주세요)")
     else:
         reason = ""
     return SupabaseStatus(
@@ -902,8 +913,15 @@ def create_supabase_client():
     url, key = get_supabase_config()
     try:
         return _supabase_create_client(url, key)
-    except Exception as exc:  # noqa: BLE001 - 원인을 화면에 그대로 보여주기 위함
-        raise ScorecardError(f"Supabase 클라이언트 생성 실패: {exc}") from exc
+    except Exception as exc:  # noqa: BLE001
+        # ⚠️ 2026-08-17 — 예전에는 `f"...: {exc}"` 로 예외 원문을 화면에 그대로 실었습니다.
+        #    이 예외에는 URL·라이브러리 내부 메시지가 섞일 수 있어 §0-3-4 위반이었습니다.
+        #    원문은 서버 로그로만 보내고, 사용자에게는 한국어 한 문장만 줍니다(§0-1 은 그대로
+        #    지켜집니다 — 실패 사실과 사람이 읽을 수 있는 이유는 화면까지 도달합니다).
+        print(f"⚠️ Supabase 클라이언트 생성 실패: {type(exc).__name__}: {exc}")
+        raise ScorecardError(
+            "Supabase 연결을 준비하지 못했습니다. 잠시 후 다시 시도해 주세요."
+        ) from exc
 
 
 def _require_client(client):
@@ -914,19 +932,154 @@ def _require_client(client):
     return client
 
 
+# -----------------------------------------------------------------------------
+# D-1. 인증 실패 문구 — 서버 응답 원문은 화면에 단 한 글자도 싣지 않습니다
+#      (§0-3-4 "사용자 화면에 코드가 노출되면 안 됨" + §0-3-9 "계정 열거 방어")
+#
+#  왜 이렇게까지 하는가
+#  ────────────────────────────────────────────────────────────────────────────
+#  Supabase Auth 는 실패 사유를 영어 원문("Invalid login credentials"), 심할 때는
+#  JSON 본문({'code':500,'error_code':'unexpected_failure','msg':'Database error
+#  querying schema'}) 그대로 돌려줍니다. 예전 `_auth_error()` 는 이걸 f-string 으로
+#  사용자 메시지에 그대로 박아서 두 가지 문제가 있었습니다.
+#
+#    ① 화면에 영어 원문·JSON·내부 error_code 가 그대로 노출 (§0-3-4 위반)
+#    ② "User already registered" 가 그대로 떠서, 아무 이메일이나 넣고 가입을
+#       눌러보는 것만으로 **그 사람이 회원인지 알아낼 수 있음** (계정 열거 공격,
+#       §0-3-9). 같은 파일의 `send_password_reset_code()` 는 이미 "가입 여부를
+#       알려주지 않는다"는 정책(PASSWORD_RESET_SENT_MESSAGE)을 지키고 있었는데,
+#       회원가입/로그인 경로만 정반대로 열려 있어 정책이 서로 어긋나 있었습니다.
+#
+#  → 사용자에게는 **행동별로 고정된 한국어 한 문장**만 주고, 원문은 서버 로그에만
+#    남깁니다. §0-1("실패를 조용히 덮지 않는다")과 모순되지 않습니다 — 실패했다는
+#    사실과 사람이 읽을 수 있는 이유는 화면까지 그대로 도달하고, 감추는 것은
+#    '내부 표현(코드/JSON/영문 원문)' 뿐입니다(§0-3-4 가 명시한 그 구분).
+# -----------------------------------------------------------------------------
+
+_AUTH_FALLBACK_MESSAGE = "요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요."
+
+_AUTH_FAIL_MESSAGES = {
+    # ⚠️ 로그인은 '계정 없음 / 비밀번호 틀림 / 서버 오류'를 절대 구분하지 않습니다.
+    #    구분하는 순간 그 차이 자체가 "이 이메일은 가입돼 있다"는 정보가 됩니다.
+    "로그인": "이메일 또는 비밀번호가 올바르지 않습니다.",
+    "회원가입": "가입 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "로그아웃": "로그아웃하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "재설정 코드 발송": "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.",
+    "새 비밀번호 설정": "새 비밀번호를 설정하지 못했습니다. 잠시 후 다시 시도해 주세요.",
+}
+
+# 아래 두 종류만 예외적으로 "무엇이 문제인지"를 한 걸음 더 알려줍니다. 사용자가 알아야
+# 다음 행동(기다린다 / 다른 비밀번호를 고른다)을 정할 수 있고, 둘 다 **계정 존재 여부와
+# 무관한 정보**라 열거 공격의 재료가 되지 않기 때문입니다.
+# ⚠️ 문구는 전부 우리가 직접 쓴 한국어 상수입니다 — 서버 원문을 옮겨 담지 않고,
+#    "39초 뒤에 다시" 같은 원문의 숫자도 싣지 않습니다(내부 정책 노출 최소화).
+_AUTH_RATE_LIMIT_MESSAGE = "요청이 너무 잦습니다. 잠시 후 다시 시도해 주세요."
+_AUTH_WEAK_PASSWORD_MESSAGE = (
+    "새 비밀번호가 보안 정책에 맞지 않습니다. 더 길고 복잡한 비밀번호로 다시 시도해 주세요."
+)
+
+# 판정용 키워드. Supabase/gotrue 버전에 따라 문구가 바뀔 수 있으므로 여러 표현을 함께
+# 봅니다. **매칭에 실패하면 그냥 위의 고정 문구로 떨어질 뿐이라(원문 노출 없음),
+# 이 목록이 낡아도 보안이 약해지지는 않습니다.**
+_RATE_LIMIT_MARKERS = (
+    "rate limit", "ratelimit", "too many requests", "429",
+    "only request this after", "over_email_send_rate_limit",
+)
+_WEAK_PASSWORD_MARKERS = (
+    "weak_password", "password should be", "password is too short",
+    "characters long", "pwned", "breach",
+)
+# ⚠️ 이 목록만은 낡으면 실제로 영향이 있습니다(아래 sign_up 참고) — 매칭에 실패하면
+#    중복 가입이 '일반 실패'로 떨어져 신규 가입과 화면이 달라집니다. 그래도 원문이
+#    노출되지는 않으므로 유출되는 건 "성공/실패" 한 비트뿐이고, 표현을 넓게 잡아
+#    그 확률을 줄였습니다.
+_USER_EXISTS_MARKERS = (
+    "user already registered", "already been registered", "user_already_exists",
+    "email_exists", "already exists", "already registered",
+)
+
+
+def _exception_text(exc):
+    """예외를 소문자 문자열로 — **분기 판정에만** 씁니다.
+
+    🔴 이 함수의 반환값은 어떤 경로로도 사용자 메시지에 들어가면 안 됩니다.
+       (여기 담기는 것이 바로 우리가 화면에서 없애려는 영문 원문·JSON 본문입니다.)
+    """
+    parts = [str(exc)]
+    for attr in ("message", "code", "error_code"):
+        value = getattr(exc, attr, None)
+        if value:
+            parts.append(str(value))
+    return " ".join(parts).lower()
+
+
+def _matches(exc, markers):
+    text = _exception_text(exc)
+    return any(marker in text for marker in markers)
+
+
+def _log_auth_failure(action, exc):
+    """원문은 **서버 로그(콘솔)에만** 남깁니다 — 화면으로는 나가지 않습니다.
+
+    §0-1 의 "로그만 남기는 것은 조치가 아니다"에 걸리지 않습니다: 사용자에게는 이미
+    한국어 실패 문구가 따로 나가고 있고, 이 로그는 오너가 원인을 찾기 위한 **추가**
+    수단입니다(실패 사실을 로그로 대체하는 것이 아닙니다).
+    """
+    print(f"⚠️ Supabase 인증 실패({action}): {type(exc).__name__}: {exc}")
+
+
+def is_user_already_registered(exc):
+    """이 예외가 '이미 가입된 이메일' 때문인가? (계정 열거 방어용 판정 — sign_up 참고)"""
+    return _matches(exc, _USER_EXISTS_MARKERS)
+
+
 def _auth_error(action, exc):
-    """Auth 예외를 사용자 문구로. 비밀번호·키 값은 절대 메시지에 넣지 않습니다."""
-    return ScorecardError(f"{action} 실패: {exc}")
+    """Auth 예외 → 사용자에게 보여줄 `ScorecardError`.
+
+    ⚠️ 예외 원문(`exc`)은 **메시지에 절대 넣지 않습니다.** 서버 로그로만 보냅니다.
+       반환 타입·호출 방식은 예전과 같아서(`raise _auth_error(...) from exc`)
+       Streamlit 쪽(`views/scorecard_view.py`)도 그대로 동작하며, 그쪽 화면에서도
+       똑같이 영문 원문이 사라집니다.
+    """
+    _log_auth_failure(action, exc)
+    if _matches(exc, _RATE_LIMIT_MARKERS):
+        message = _AUTH_RATE_LIMIT_MESSAGE
+    elif action == "새 비밀번호 설정" and _matches(exc, _WEAK_PASSWORD_MARKERS):
+        message = _AUTH_WEAK_PASSWORD_MESSAGE
+    else:
+        message = _AUTH_FAIL_MESSAGES.get(action, _AUTH_FALLBACK_MESSAGE)
+    return ScorecardError(message)
 
 
 def sign_up(client, email, password):
-    """회원가입. 성공 시 Supabase 응답 객체를 그대로 돌려줍니다."""
+    """회원가입. 성공 시 Supabase 응답 객체를 그대로 돌려줍니다.
+
+    ⚠️ **이미 가입된 이메일이어도 오류를 내지 않습니다**(반환값만 `None`) — 계정 열거
+       방어(§0-3-9). 화면은 신규 가입이든 중복이든 **똑같은 안내**를 보여주게 되고,
+       "이 이메일은 이미 회원이다"라는 사실은 화면 어디에도 드러나지 않습니다.
+       이건 같은 파일의 `send_password_reset_code()` 가 이미 지키던 정책
+       (`PASSWORD_RESET_SENT_MESSAGE` — "있다면 보냈습니다")과 같은 방침이며,
+       Supabase 공식 문서가 `resetPasswordForEmail` 에 대해 설명하는 것과도 같습니다.
+
+       §0-1 과의 관계: 여기서 삼키는 것은 **"실패"가 아니라 "정상적으로 예상된 결과"**
+       입니다(그 이메일에는 이미 계정이 있으니 새로 만들 것이 없음 — Supabase 서버도
+       이 경우 메일을 보내지 않거나 기존 계정 안내를 보냅니다). 진짜 장애(네트워크·
+       서버 오류·정책 위반)는 그대로 `ScorecardError` 로 올라갑니다. 삼킨 경우에도
+       서버 로그에는 반드시 흔적을 남깁니다(아래 `_log_auth_failure`).
+
+    반환: Supabase 응답 객체 / 중복 가입이면 `None`. **호출하는 두 화면
+          (`views/scorecard_view.py`, `web/auth_ui.py`) 모두 반환값을 쓰지 않습니다** —
+          성공 여부는 예외 발생 여부로만 판단합니다.
+    """
     _require_client(client)
     if not email or not password:
         raise ScorecardError("이메일과 비밀번호를 모두 입력해 주세요.")
     try:
         return client.auth.sign_up({"email": email, "password": password})
     except Exception as exc:  # noqa: BLE001
+        if is_user_already_registered(exc):
+            _log_auth_failure("회원가입(이미 가입된 이메일 — 화면에는 알리지 않음)", exc)
+            return None
         raise _auth_error("회원가입", exc) from exc
 
 

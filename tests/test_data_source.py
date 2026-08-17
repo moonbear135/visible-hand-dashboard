@@ -63,10 +63,40 @@ class FakeConnectionError(Exception):
 
 
 class FakeResponse:
-    def __init__(self, status_code, content=b"", etag=None):
+    """`requests.Response` 흉내.
+
+    2026-08-17 — 본문 수신이 `stream=True` + `iter_content()` 방식으로 바뀌면서
+    (응답 크기 상한 검사, 아래 [7] 참고) 이 가짜도 같은 모양을 갖춥니다.
+    `content_length`/`content_type` 에 값을 주면 해당 헤더를 실제로 내려보냅니다
+    (`content_length="auto"` 면 본문 길이를 그대로 씁니다).
+    """
+
+    def __init__(self, status_code, content=b"", etag=None,
+                 content_type=None, content_length=None, chunk_size=None):
         self.status_code = status_code
         self.content = content
-        self.headers = {"ETag": etag} if etag else {}
+        self.headers = {}
+        if etag:
+            self.headers["ETag"] = etag
+        if content_type is not None:
+            self.headers["Content-Type"] = content_type
+        if content_length is not None:
+            self.headers["Content-Length"] = (
+                str(len(content)) if content_length == "auto" else str(content_length)
+            )
+        self._chunk_size = chunk_size
+        self.closed = False
+        self.streamed_bytes = 0          # 실제로 메모리에 올린 양(상한 검사 검증용)
+
+    def iter_content(self, chunk_size=None):
+        size = self._chunk_size or chunk_size or 64 * 1024
+        for start in range(0, len(self.content), size):
+            piece = self.content[start:start + size]
+            self.streamed_bytes += len(piece)
+            yield piece
+
+    def close(self):
+        self.closed = True
 
 
 class FakeRequests:
@@ -76,8 +106,9 @@ class FakeRequests:
         self.script = list(script)
         self.calls = []
 
-    def get(self, url, headers=None, timeout=None):
-        self.calls.append({"url": url, "headers": dict(headers or {}), "timeout": timeout})
+    def get(self, url, headers=None, timeout=None, stream=False):
+        self.calls.append({"url": url, "headers": dict(headers or {}), "timeout": timeout,
+                           "stream": stream})
         item = self.script.pop(0) if self.script else FakeResponse(500)
         if isinstance(item, Exception):
             raise item
@@ -374,6 +405,42 @@ def test_cold_start_without_local_copy_is_a_real_failure():
               "(화면 자신의 빨간 실패 배너로 충분 — 없는 값을 '보이는 값'이라 말하지 않기)")
 
 
+def test_cold_start_backoff_is_enforced():
+    """🔴 2026-08-17 회귀 방지 — 원격이 **한 번도 성공한 적 없어도** 백오프가 걸려야 합니다.
+
+    예전 `_read_remote()` 는 `entry['text'] is not None and not _needs_fetch(...)` 였습니다.
+    그래서 URL 오타나 기동 시점부터의 장애처럼 성공 이력이 0인 상황에서는 백오프 검사가
+    통째로 건너뛰어졌고(= `next_attempt` 를 아무도 읽지 않음), 페이지를 열 때마다 파일마다
+    타임아웃(기본 8초)을 새로 기다렸습니다. "내 성적표"는 파일 6개를 읽으므로 한 번 열 때
+    최악 48초가 멈출 수 있었습니다.
+    """
+    print("\n[4-c] 원격 성공 이력이 0이어도 백오프가 실제로 걸린다 (2026-08-17 수정)")
+    with Sandbox(base_url="https://example.invalid/main", ttl=600) as box:
+        box.write_local("kospi200_pegy_latest.json", '{"from": "image"}')
+        path = box.path("kospi200_pegy_latest.json")
+        box.script(FakeTimeout("t"))
+
+        for _ in range(10):                            # 페이지 10회 로드
+            box.clock.advance(1)
+            data_source.read_text(path)
+        check(len(box.requests.calls) == 1,
+              "캐시된 본문이 한 번도 없어도 10회 로드에 HTTP 요청은 1회뿐(백오프 적용)",
+              f"실제 {len(box.requests.calls)}회")
+
+        text, error, _v = data_source.read_text(path)
+        check(text == '{"from": "image"}' and error is None,
+              "백오프 중에는 네트워크를 건드리지 않고 로컬 사본으로 화면을 띄움")
+        check(data_source.get_staleness_status() is not None,
+              "그동안 배너는 계속 떠 있음 (§0-1 — 사본임을 감추지 않음)")
+
+        box.clock.advance(data_source.RETRY_BACKOFF_SECONDS + 1)
+        box.script(FakeTimeout("t"))
+        data_source.read_text(path)
+        check(len(box.requests.calls) == 2,
+              "백오프가 끝나면 다시 시도함(영구 차단이 아님)",
+              f"실제 {len(box.requests.calls)}회")
+
+
 # =============================================================================
 # [5] 부가 규칙 — 줄바꿈 정규화 · 설정 오타
 # =============================================================================
@@ -554,6 +621,184 @@ def test_layout_global_banner():
 
 
 # =============================================================================
+# [8] 원격 응답 방어선 — 크기 상한 · 형식 확인 (2026-08-17 추가)
+#
+#  왜: 예전에는 `response.content` 를 무조건 통째로 메모리에 올렸습니다. Render 무료
+#  인스턴스는 512MB 뿐이라 비정상적으로 큰 응답 하나로 프로세스가 죽을 수 있고,
+#  HTML 에러/로그인 페이지가 데이터인 척 캐시에 들어갈 수도 있었습니다.
+#  어떤 차단이든 **기존 실패 경로**(백오프 + 캐시/로컬 사본 폴백 + 전역 배너)를 그대로
+#  타야 합니다 — 조용히 넘어가면 §0-1 위반입니다.
+# =============================================================================
+def test_response_size_and_type_guards():
+    print("\n[8] 원격 응답 크기 상한 · 형식 확인")
+    base = "https://example.invalid/main"
+
+    # ① Content-Length 사전 차단 — 본문을 한 바이트도 받지 않습니다.
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.write_local("us_stocks_latest.json", '{"from": "image"}')
+        path = box.path("us_stocks_latest.json")
+        huge = FakeResponse(200, b'{"n": 1}', content_type="text/plain",
+                            content_length=data_source.MAX_RESPONSE_BYTES + 1)
+        box.script(huge)
+        text, error, _v = data_source.read_text(path)
+        check(huge.streamed_bytes == 0,
+              "① Content-Length 가 상한을 넘으면 본문 수신 자체를 하지 않음",
+              f"실제로 받은 바이트: {huge.streamed_bytes}")
+        check(huge.closed is True, "   열어둔 연결(stream=True)을 반드시 닫음")
+        check(text == '{"from": "image"}' and error is None,
+              "   기존 실패 경로 그대로 — 로컬 사본으로 폴백")
+        status = data_source.get_staleness_status()
+        check(status is not None and "너무 큼" in (status["reason"] or ""),
+              "   배너에 사람이 읽는 사유가 뜸", f"실제: {status}")
+        check(status is not None and "Content-Length" not in status["message"]
+              and "example.invalid" not in status["message"],
+              "   배너 문구에 헤더 값·URL 이 없음 (§0-3-4)")
+
+    # ② Content-Length 가 없어도(청크 전송) 수신 도중에 상한을 넘으면 즉시 중단.
+    #    20MB 짜리 가짜 본문을 만들지 않기 위해 상한만 잠시 낮춰서 확인합니다.
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.write_local("us_stocks_latest.json", '{"from": "image"}')
+        path = box.path("us_stocks_latest.json")
+        saved_limit = data_source.MAX_RESPONSE_BYTES
+        data_source.MAX_RESPONSE_BYTES = 100
+        try:
+            oversized = FakeResponse(200, b"x" * 5_000, content_type="text/plain", chunk_size=64)
+            box.script(oversized)
+            text, error, _v = data_source.read_text(path)
+            check(oversized.streamed_bytes <= 100 + 64,
+                  "② Content-Length 가 없어도 상한을 넘는 순간 수신 중단(전체를 메모리에 안 올림)",
+                  f"실제로 받은 바이트: {oversized.streamed_bytes} / 전체 5000")
+            check(text == '{"from": "image"}' and error is None,
+                  "   그 경우에도 로컬 사본으로 폴백")
+        finally:
+            data_source.MAX_RESPONSE_BYTES = saved_limit
+
+    # ③ HTML 응답(로그인/에러 페이지)이 데이터인 척 캐시에 들어가지 않습니다.
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.write_local("us_stocks_latest.json", '{"from": "image"}')
+        path = box.path("us_stocks_latest.json")
+        html = FakeResponse(200, b"<html><body>Sign in</body></html>",
+                            content_type="text/html; charset=utf-8")
+        box.script(html)
+        text, error, _v = data_source.read_text(path)
+        check(html.streamed_bytes == 0, "③ HTML 응답은 본문을 받지도 않음")
+        check(text == '{"from": "image"}' and error is None,
+              "   HTML 이 데이터인 척 캐시에 들어가지 않고 사본으로 폴백")
+        status = data_source.get_staleness_status()
+        check(status is not None and "형식" in (status["reason"] or ""),
+              "   배너에 형식 문제라고 표시", f"실제: {status}")
+
+    # ④ 정상 응답(text/plain)은 그대로 통과 — 방어선이 정상 데이터를 막으면 안 됩니다.
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.path("us_stocks_latest.json")
+        box.script(FakeResponse(200, b'{"n": 7}', etag='"e"',
+                                content_type="text/plain; charset=utf-8", content_length="auto"))
+        text, error, _v = data_source.read_text(path)
+        check(text == '{"n": 7}' and error is None, "④ 정상 응답(text/plain)은 그대로 통과")
+        check(box.requests.calls[0]["stream"] is True,
+              "   stream=True 로 요청해 헤더를 먼저 확인함")
+        check(data_source.get_staleness_status() is None, "   배너 없음")
+
+    # ⑤ Content-Type 헤더가 아예 없으면 형식으로 막지 않습니다(§0-1 — 없는 정보로 판단 금지).
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.path("us_stocks_latest.json")
+        box.script(FakeResponse(200, b'{"n": 8}', etag='"e"'))
+        text, error, _v = data_source.read_text(path)
+        check(text == '{"n": 8}' and error is None,
+              "⑤ Content-Type 헤더가 없으면 형식 검사로 막지 않음")
+
+
+# =============================================================================
+# [9] `data_source` 를 우회하던 파일 4개 (2026-08-17 수정)
+#
+#  문제였던 것: 아래 4개는 `open()` 으로 직접 읽혀 최신성 추적 밖에 있었습니다. 원격 로드가
+#  켜지고 Render Build Filters 로 데이터 커밋이 재배포를 부르지 않게 되면 **배포 시점에
+#  얼어붙은 사본**을 계속 보여주면서도 `web/layout.py` 의 전역 배너가 뜨지 않았습니다(§0-1).
+#
+#    · market_history.csv               (사장님 보고서 한국 벤치마크)
+#    · data/us_index_history.json       (사장님 보고서 미국 벤치마크)
+#    · data/kospi200_stock_history.csv  (pegy 종목별 다운로드)
+#    · data/us_stocks_history.csv       (us_stocks 종목별 다운로드)
+# =============================================================================
+def test_bypass_files_go_through_data_source():
+    print("\n[9] 우회하던 데이터 파일 4개가 data_source 를 거치는지")
+
+    import utils.report_db as report_db
+    import utils.stock_history as stock_history
+
+    kr_history = stock_history.stock_history_path(stock_history.KOSPI_HISTORY_FILENAME)
+    us_history = stock_history.stock_history_path(stock_history.US_HISTORY_FILENAME)
+
+    def _load_all():
+        return (
+            report_db.load_kospi_close_history(),
+            report_db.load_us_index_closes(),
+            stock_history.load_stock_history(kr_history, stock_history.KOSPI_KEY_FIELD, "005930"),
+            stock_history.load_stock_history(us_history, stock_history.US_KEY_FIELD, "AAPL"),
+        )
+
+    saved_env = os.environ.get(data_source.ENV_BASE_URL)
+    saved_requests = data_source.requests
+    try:
+        # ① 기본값(원격 꺼짐) — 저장소의 실제 파일을 예전과 똑같이 읽습니다.
+        os.environ.pop(data_source.ENV_BASE_URL, None)
+        data_source.reset_cache()
+        baseline = _load_all()
+        check(len(baseline[0]) > 0 and len(baseline[1]) > 0,
+              "① 원격이 꺼져 있으면 저장소의 실제 벤치마크 파일을 그대로 읽음",
+              f"코스피 {len(baseline[0])}일 / 미국 {sorted(baseline[1])}")
+        check(data_source.get_staleness_status() is None, "   배너 없음(예전과 동일)")
+
+        # ② 원격을 켜고 전부 실패시키면 → 로컬 사본으로 폴백하되 **배너에 4개가 다 잡혀야** 합니다.
+        class _AlwaysFails:
+            @staticmethod
+            def get(url, headers=None, timeout=None, stream=False):
+                raise FakeTimeout("synthetic")
+
+        data_source.requests = _AlwaysFails
+        os.environ[data_source.ENV_BASE_URL] = "https://example.invalid/main"
+        data_source.reset_cache()
+        fallback = _load_all()
+        check(fallback == baseline,
+              "② 원격 실패 시 로컬 사본으로 폴백 — 값은 원격 꺼짐일 때와 동일")
+
+        status = data_source.get_staleness_status()
+        files = set((status or {}).get("files") or [])
+        expected = {
+            "market_history.csv",
+            "data/us_index_history.json",
+            "data/kospi200_stock_history.csv",
+            "data/us_stocks_history.csv",
+        }
+        check(expected <= files,
+              "   4개 파일이 모두 최신성 추적(전역 배너) 대상에 들어옴",
+              f"빠진 파일: {sorted(expected - files)}")
+    finally:
+        data_source.requests = saved_requests
+        if saved_env is None:
+            os.environ.pop(data_source.ENV_BASE_URL, None)
+        else:
+            os.environ[data_source.ENV_BASE_URL] = saved_env
+        data_source.reset_cache()
+
+    # ③ 소스 수준 회귀 방지 — 그 읽기 함수들이 다시 `open()` 으로 돌아가지 않도록.
+    report_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
+    history_src = (REPO_ROOT / "utils" / "stock_history.py").read_text(encoding="utf-8")
+    check("from utils import data_source" in report_src
+          and "data_source.read_text(path" in report_src,
+          "③ utils/report_db.py 가 data_source.read_text 를 씀")
+    check("from utils import data_source" in history_src
+          and "data_source.read_text(path" in history_src,
+          "   utils/stock_history.py 가 data_source.read_text 를 씀")
+    check("io.StringIO(text" in history_src,
+          "   파일 전체를 리스트로 펼치지 않고 한 줄씩 훑는 설계를 유지 "
+          "(이력이 몇 년 쌓이면 수십 MB)")
+    # 기록(write) 경로는 그대로 로컬 파일이어야 합니다 — 원격은 읽기 전용입니다.
+    check('open(path, "w"' in history_src,
+          "   기록 경로는 예전 그대로 로컬 파일에 직접 씀(원격 전환하지 않음)")
+
+
+# =============================================================================
 def main():
     print("=" * 74)
     print("🌐 데이터 원격 로드 검증 (NICEGUI_MIGRATION_PLAN.md §8-5 · ENGINEERING_SPEC §0-1)")
@@ -566,10 +811,13 @@ def main():
     test_retry_backoff_and_recovery()
     test_cold_start_falls_back_to_local_copy()
     test_cold_start_without_local_copy_is_a_real_failure()
+    test_cold_start_backoff_is_enforced()
     test_newlines_are_normalised_like_local_read()
     test_misconfigured_base_url_is_visible()
     test_web_state_integration()
     test_layout_global_banner()
+    test_response_size_and_type_guards()
+    test_bypass_files_go_through_data_source()
 
     print("\n" + "=" * 74)
     if FAILURES:

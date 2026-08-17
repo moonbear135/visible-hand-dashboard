@@ -29,6 +29,31 @@ _BANNER_PALETTE = {
 }
 
 
+def chart_layout(**overrides) -> dict:
+    """plotly `fig.update_layout(**...)` 에 넘길 **어두운 테마 공통 설정**.
+
+    2026-08-17 — `web/pages/scorecard_page.py` 와 `web/pages/macro_page.py` 가 거의 같은
+    `_CHART_LAYOUT` 사전을 각각 들고 있었습니다(차이는 `piecolorway` / `colorway` 뿐).
+    테마 색을 한쪽만 고치면 두 화면의 차트 배경·글자색이 어긋나므로 여기로 모으고,
+    화면마다 다른 부분만 인자로 받습니다 (§0-3-10 중복 금지).
+
+    ⚠️ **매번 새 dict 를 만들어 돌려줍니다.** 모듈 전역에 사전 하나를 두고 공유하면
+       누군가 `fig.update_layout` 에 넘기기 전에 제자리 수정을 했을 때 다른 화면까지
+       조용히 바뀝니다(§0-3-8 이 전역 가변 상태를 경계하는 것과 같은 이유).
+
+    :param overrides: `colorway=[...]`(선/막대 색), `piecolorway=[...]`(원형차트 조각 색),
+        `margin=dict(...)`, `showlegend=False` 등 화면별로 다른 값만 넘기세요.
+        같은 키를 넘기면 기본값을 덮어씁니다.
+    """
+    layout = dict(
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor="rgba(0,0,0,0)",
+        font=dict(color="#e2e8f0"),
+    )
+    layout.update(overrides)
+    return layout
+
+
 def banner(kind: str, body_html: str) -> None:
     """지속 표시 배너. `body_html` 은 **호출하는 쪽이 이스케이프까지 끝낸** HTML 입니다."""
     background, border, color = _BANNER_PALETTE[kind]

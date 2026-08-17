@@ -91,6 +91,27 @@ RETRY_BACKOFF_SECONDS = 60.0
 # 상대 서버에 우리가 누구인지 밝힙니다 (§0-3-2 크롤링 매너).
 USER_AGENT = 'visible-hand-dashboard/1.0 (+https://visiblehand.co.kr)'
 
+# ── 원격 응답 방어선 (2026-08-17 추가) ────────────────────────────────────────
+# 예전에는 `response.content` 를 무조건 통째로 메모리에 올렸습니다. 상한도, 형식 확인도
+# 없어서 ① 비정상적으로 큰 응답(잘못된 URL 이 거대한 파일을 가리키거나 응답이 오염된 경우)
+# 이 그대로 캐시에 얹히고, ② 로그인 페이지·에러 페이지 같은 **HTML 응답이 JSON 인 척**
+# 캐시에 들어갈 수 있었습니다. Render 무료 인스턴스는 메모리가 512MB 뿐이라 ①은 실제로
+# OOM(프로세스 강제 종료)으로 이어질 수 있습니다.
+#
+# 상한값 근거: 현재 저장소에서 가장 큰 파일이 `data/us_stocks_raw_latest.json` 약 4.1MB
+# 입니다. 20MB 는 정상 데이터가 몇 배로 불어나도 걸리지 않을 만큼 넉넉하면서, 사고성
+# 거대 응답은 확실히 막는 선입니다.
+MAX_RESPONSE_BYTES = 20 * 1024 * 1024
+_CHUNK_BYTES = 64 * 1024
+
+# 우리가 받는 것은 JSON/CSV 텍스트뿐입니다. raw.githubusercontent.com 은 `text/plain` 으로
+# 내려줍니다. ⚠️ 헤더가 아예 없으면 형식으로 막지 않습니다 — "없는 정보로 판단을 지어내지
+# 않는다"(§0-1). 막고 싶은 건 명백히 다른 것(HTML 에러/로그인 페이지)이 섞여 들어오는 경우입니다.
+ALLOWED_CONTENT_TYPES = (
+    'text/plain', 'text/csv', 'text/json',
+    'application/json', 'application/csv', 'application/octet-stream',
+)
+
 # ⚠️ 전역 캐시. 키는 **저장소 기준 상대경로 문자열**('data/us_stocks_latest.json') 뿐이고,
 #    값은 모든 접속자에게 동일한 스냅샷 텍스트와 그 메타데이터뿐입니다 (§0-3-8).
 _CACHE = {}
@@ -211,8 +232,68 @@ def _normalise_newlines(text: str) -> str:
     return text.replace('\r\n', '\n').replace('\r', '\n')
 
 
+class _ResponseTooLarge(Exception):
+    """상한을 넘는 응답. 밖으로 새지 않고 `_http_get()` 안에서 실패 사유로 바뀝니다."""
+
+
+def _header(response, name: str) -> Optional[str]:
+    try:
+        value = (response.headers or {}).get(name)
+    except Exception:                                 # pragma: no cover
+        return None
+    return str(value) if value else None
+
+
+def _declared_length_over_limit(response) -> Optional[int]:
+    """`Content-Length` 가 상한을 넘으면 그 값을, 아니면 None.
+
+    **본문을 한 바이트도 받기 전에** 차단하기 위한 사전 검사입니다. 헤더가 없거나(청크 전송)
+    숫자가 아니면 None 을 돌려주고, 실제 수신 중에 `_read_body()` 가 다시 셉니다.
+    """
+    raw = _header(response, 'Content-Length')
+    if raw is None:
+        return None
+    try:
+        declared = int(raw.strip())
+    except (TypeError, ValueError):
+        return None
+    return declared if declared > MAX_RESPONSE_BYTES else None
+
+
+def _rejected_content_type(response) -> Optional[str]:
+    """받아도 되는 형식이 아니면 그 Content-Type 문자열을, 괜찮으면 None."""
+    raw = _header(response, 'Content-Type')
+    if raw is None:
+        return None                                   # 헤더 없음 → 형식으로 막지 않습니다
+    main = raw.split(';', 1)[0].strip().lower()
+    return None if main in ALLOWED_CONTENT_TYPES else raw
+
+
+def _read_body(response) -> bytes:
+    """본문을 **상한까지만** 받습니다. 넘으면 그 자리에서 중단(`_ResponseTooLarge`).
+
+    `stream=True` 와 짝을 이룹니다 — 20MB 를 넘어서는 바이트는 애초에 메모리에 쌓이지
+    않습니다(상한을 넘는 순간 멈추고 연결을 닫습니다).
+    """
+    chunks = []
+    total = 0
+    for chunk in response.iter_content(chunk_size=_CHUNK_BYTES):
+        if not chunk:
+            continue
+        total += len(chunk)
+        if total > MAX_RESPONSE_BYTES:
+            raise _ResponseTooLarge(total)
+        chunks.append(chunk)
+    return b''.join(chunks)
+
+
 def _http_get(url: str, etag: Optional[str], encoding: str) -> dict:
-    """조건부 GET 1회. 예외를 밖으로 던지지 않고 결과 dict 로 정리해 돌려줍니다."""
+    """조건부 GET 1회. 예외를 밖으로 던지지 않고 결과 dict 로 정리해 돌려줍니다.
+
+    ⚠️ 실패 사유(`reason`)는 **사람이 읽는 짧은 한국어**뿐입니다 — URL·예외 원문·헤더 값은
+       서버 로그에만 남깁니다(§0-3-4). 어떤 실패든 호출자(`_read_remote`)의 기존 실패 경로
+       (백오프 + 캐시/로컬 사본 폴백 + 전역 배너)를 그대로 탑니다(§0-1).
+    """
     if requests is None:                              # pragma: no cover
         return {'kind': 'error', 'reason': '원격 로더 구성요소 없음'}
 
@@ -221,7 +302,8 @@ def _http_get(url: str, etag: Optional[str], encoding: str) -> dict:
         headers['If-None-Match'] = etag
 
     try:
-        response = requests.get(url, headers=headers,
+        # stream=True — 헤더를 먼저 받아보고 본문을 받을지 결정합니다(아래 사전 검사 2종).
+        response = requests.get(url, headers=headers, stream=True,
                                 timeout=_positive_float(ENV_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS))
     except Exception as exc:                          # noqa: BLE001 — 상세는 로그로만 (§0-3-4)
         print(f'⚠️ 원격 데이터 요청 실패 ({url}): {type(exc).__name__}: {exc}')
@@ -230,26 +312,50 @@ def _http_get(url: str, etag: Optional[str], encoding: str) -> dict:
             return {'kind': 'error', 'reason': '응답 시간 초과'}
         return {'kind': 'error', 'reason': '네트워크 연결 실패'}
 
-    status = getattr(response, 'status_code', None)
-    if status == 304:
-        return {'kind': 'not_modified'}
-    if status != 200:
-        print(f'⚠️ 원격 데이터 응답 코드 이상 ({url}): {status}')
-        return {'kind': 'error', 'reason': f'서버 응답 코드 {status}'}
-
     try:
-        body = response.content
-        text = _normalise_newlines(body.decode(encoding))
-    except Exception as exc:                          # noqa: BLE001
-        print(f'⚠️ 원격 데이터 디코딩 실패 ({url}): {exc}')
-        return {'kind': 'error', 'reason': '내려받은 내용을 해석하지 못함'}
+        status = getattr(response, 'status_code', None)
+        if status == 304:
+            return {'kind': 'not_modified'}
+        if status != 200:
+            print(f'⚠️ 원격 데이터 응답 코드 이상 ({url}): {status}')
+            return {'kind': 'error', 'reason': f'서버 응답 코드 {status}'}
 
-    header_etag = None
-    try:
-        header_etag = (response.headers or {}).get('ETag')
-    except Exception:                                 # pragma: no cover
-        header_etag = None
-    return {'kind': 'ok', 'text': text, 'etag': header_etag}
+        # ① 크기 사전 차단 — 본문을 받기 전에 헤더만 보고 끊습니다.
+        declared = _declared_length_over_limit(response)
+        if declared is not None:
+            print(f'⚠️ 원격 데이터가 상한을 넘습니다 ({url}): '
+                  f'Content-Length={declared} > {MAX_RESPONSE_BYTES}')
+            return {'kind': 'error', 'reason': '내려받을 파일이 너무 큼'}
+
+        # ② 형식 확인 — HTML 에러/로그인 페이지가 데이터인 척 캐시에 들어가는 것을 막습니다.
+        bad_type = _rejected_content_type(response)
+        if bad_type is not None:
+            print(f'⚠️ 원격 데이터 형식이 예상과 다릅니다 ({url}): Content-Type={bad_type}')
+            return {'kind': 'error', 'reason': '응답 형식이 올바르지 않음'}
+
+        try:
+            body = _read_body(response)
+        except _ResponseTooLarge as exc:
+            print(f'⚠️ 원격 데이터가 상한을 넘어 수신을 중단했습니다 ({url}): '
+                  f'{exc.args[0] if exc.args else "?"} > {MAX_RESPONSE_BYTES}')
+            return {'kind': 'error', 'reason': '내려받을 파일이 너무 큼'}
+        except Exception as exc:                      # noqa: BLE001
+            print(f'⚠️ 원격 데이터 수신 실패 ({url}): {type(exc).__name__}: {exc}')
+            return {'kind': 'error', 'reason': '내려받는 중 연결이 끊김'}
+
+        try:
+            text = _normalise_newlines(body.decode(encoding))
+        except Exception as exc:                      # noqa: BLE001
+            print(f'⚠️ 원격 데이터 디코딩 실패 ({url}): {exc}')
+            return {'kind': 'error', 'reason': '내려받은 내용을 해석하지 못함'}
+
+        return {'kind': 'ok', 'text': text, 'etag': _header(response, 'ETag')}
+    finally:
+        # stream=True 로 열어둔 연결은 반드시 닫습니다(상한 초과로 중간에 끊은 경우 포함).
+        try:
+            response.close()
+        except Exception:                             # pragma: no cover
+            pass
 
 
 def _hit(entry: dict, known_version) -> Tuple[Optional[str], Optional[str], Any]:
@@ -267,22 +373,63 @@ def _needs_fetch(entry: dict, now: float, ttl: float) -> bool:
     return (now - entry['fetched_at']) >= ttl
 
 
+def _fallback_to_local(entry: dict, local_path: str, encoding: str, known_version,
+                       reason: str) -> Tuple[Optional[str], Optional[str], Any]:
+    """원격을 쓸 수 없는 상태 → 이미지에 함께 배포된 사본으로 폴백합니다.
+
+    ⚠️ 부르기 전에 `entry['failure_reason']` 이 반드시 채워져 있어야 합니다 —
+       `get_staleness_status()` 가 그 값을 보고 **전역 배너**를 띄웁니다. 배너 없이 사본을
+       조용히 내보내면 "오래된 값을 최신인 척" 보여주게 되어 §0-1 위반입니다.
+    """
+    text, local_error, version = _read_local(local_path, encoding, known_version)
+    with _LOCK:
+        if text is None and local_error is not None:
+            entry['local_fallback'] = False
+            # 진짜 실패 — 화면은 예전처럼 빨간 배너만 띄우고 숫자를 그리지 않습니다 (§0-1).
+            return None, f'최신 데이터를 내려받지 못했고({reason}), 서버에 함께 배포된 사본도 없습니다.', None
+        entry['local_fallback'] = True
+        entry['fetched_at_wall'] = _local_mtime_wall(local_path)
+    return text, None, version
+
+
 def _read_remote(rel_path: str, local_path: str, base: str,
                  encoding: str, known_version) -> Tuple[Optional[str], Optional[str], Any]:
     ttl = _positive_float(ENV_TTL_SECONDS, DEFAULT_TTL_SECONDS)
     now = time.monotonic()
 
+    etag = None
+    backoff_reason = None
     with _LOCK:
         entry = _CACHE.get(rel_path)
         if entry is None:
             entry = _new_entry()
             _CACHE[rel_path] = entry
-        if entry['text'] is not None and not _needs_fetch(entry, now, ttl):
-            return _hit(entry, known_version)         # 캐시 유효 → 네트워크 0회
-        if entry['fetching'] and entry['text'] is not None:
-            return _hit(entry, known_version)         # 다른 요청이 이미 받아오는 중
-        entry['fetching'] = True
-        etag = entry['etag']
+
+        # 🔴 2026-08-17 수정 — 백오프/TTL 판정을 **캐시 본문 유무보다 먼저** 봅니다.
+        #
+        # 예전 조건은 `entry['text'] is not None and not _needs_fetch(...)` 였습니다. 그래서
+        # 원격이 **한 번도 성공한 적 없으면**(URL 오타, 기동 시점부터 GitHub 장애) 이 가드가
+        # 통째로 건너뛰어지고, `_needs_fetch()` 안에 들어 있던 백오프 검사(`next_attempt`)가
+        # 아예 실행되지 않았습니다. `next_attempt` 는 실패할 때마다 세팅되는데 **읽는 사람이
+        # 없었습니다.** 실측: 원격 성공 이력 없는 상태로 페이지를 10번 열면 HTTP 요청도 10번
+        # 나갔고, "내 성적표"는 파일 6개를 읽으므로 한 번 열 때마다 최악 48초(8초 타임아웃 × 6)
+        # 멈출 수 있었습니다.
+        #
+        # 핵심 규칙: **캐시된 본문이 없어도 백오프 중이면 네트워크를 타지 않고 곧바로 로컬
+        # 사본으로 넘어간다.** (배너는 직전 실패의 `failure_reason` 으로 계속 떠 있습니다.)
+        if not _needs_fetch(entry, now, ttl):
+            if entry['text'] is not None:
+                return _hit(entry, known_version)     # 캐시 유효(또는 백오프 중) → 네트워크 0회
+            backoff_reason = entry['failure_reason'] or '원인 미상'
+        else:
+            if entry['fetching'] and entry['text'] is not None:
+                return _hit(entry, known_version)     # 다른 요청이 이미 받아오는 중
+            entry['fetching'] = True
+            etag = entry['etag']
+
+    if backoff_reason is not None:
+        # 네트워크를 건드리지 않고 사본으로 (위 주석의 "즉시 실패/폴백" 경로).
+        return _fallback_to_local(entry, local_path, encoding, known_version, backoff_reason)
 
     try:
         outcome = _http_get(f'{base}/{rel_path}', etag, encoding)
@@ -314,15 +461,7 @@ def _read_remote(rel_path: str, local_path: str, base: str,
             return _hit(entry, known_version)         # 마지막 성공분 + 전역 배너
 
     # 원격 캐시가 아예 없습니다 → 이미지에 함께 배포된 사본으로 폴백합니다.
-    text, local_error, version = _read_local(local_path, encoding, known_version)
-    with _LOCK:
-        if text is None and local_error is not None:
-            entry['local_fallback'] = False
-            # 진짜 실패 — 화면은 예전처럼 빨간 배너만 띄우고 숫자를 그리지 않습니다 (§0-1).
-            return None, f'최신 데이터를 내려받지 못했고({reason}), 서버에 함께 배포된 사본도 없습니다.', None
-        entry['local_fallback'] = True
-        entry['fetched_at_wall'] = _local_mtime_wall(local_path)
-    return text, None, version
+    return _fallback_to_local(entry, local_path, encoding, known_version, reason)
 
 
 def _mark_success(entry: dict) -> None:
@@ -336,19 +475,43 @@ def _mark_success(entry: dict) -> None:
 # =============================================================================
 # 5. 공개 API
 # =============================================================================
+# 저장소 **루트**에 있으면서 원격 대상으로 삼는 파일 (2026-08-17 추가).
+#
+# 원칙은 `data/` 바로 아래 파일만 원격 대상으로 삼는 것이고, 아래 목록은 그 예외입니다.
+# `market_history.csv` 를 넣은 이유:
+#   · "사장님 보고서"의 **한국 벤치마크(코스피 종가)** 원본이 이 파일입니다.
+#   · 오너가 Render Build Filters(Ignored Paths)에 이 파일을 넣으면 데이터 커밋이 재배포를
+#     부르지 않게 되고, 그 순간부터 이미지에 구워진 사본은 **얼어붙습니다.** 그런데 예전
+#     코드는 이 파일을 `open()` 으로 직접 읽어서 `data_source` 의 최신성 추적 밖에 있었고,
+#     그래서 값이 아무리 오래돼도 `web/layout.py` 의 전역 배너가 뜨지 않았습니다(§0-1 위반).
+#
+# ⚠️ **읽기 경로만** 원격을 탑니다 — "쓰기 충돌 때문에 이 파일은 원격 전환 안 함" 이라는
+#    기존 결정은 그대로 유지됩니다. 이 파일은 앱이 직접 쓰기도 하는 유일한 데이터 파일이고
+#    (`utils/db.py` 관리자 수동 입력 ← `web/pages/macro_page.py`), 그 읽기·쓰기 짝은 지금도
+#    pandas 로 **로컬 파일만** 다루며 이번 변경에서 한 줄도 건드리지 않았습니다.
+#    즉 원격을 켜면 매크로 화면은 로컬 사본을, 보고서의 벤치마크는 원격(=배치가 저장소에
+#    커밋해 온 누적 이력)을 봅니다. 벤치마크 용도로는 "확정 커밋된 이력"쪽이 맞습니다.
+_REMOTE_ROOT_FILES = ('market_history.csv',)
+
+
 def remote_relative_path(path: str) -> Optional[str]:
     """이 로컬 경로가 **원격에서 받아올 수 있는 파일**이면 저장소 기준 상대경로를 돌려줍니다.
 
-    `data/` 바로 아래 파일만 대상입니다. 그 외(테스트가 만든 임시 경로, `data/us_sample/`
-    같은 하위 폴더, 저장소 밖 경로)는 None → 예전과 똑같이 로컬 파일만 읽습니다.
+    `data/` 바로 아래 파일과 위 `_REMOTE_ROOT_FILES` 목록만 대상입니다. 그 외(테스트가 만든
+    임시 경로, `data/us_sample/` 같은 하위 폴더, 저장소 밖 경로)는 None → 예전과 똑같이
+    로컬 파일만 읽습니다.
     """
     try:
         absolute = os.path.abspath(path)
     except Exception:                                 # pragma: no cover
         return None
-    if os.path.dirname(absolute) != DATA_DIR:
-        return None
-    return f'data/{os.path.basename(absolute)}'
+    directory = os.path.dirname(absolute)
+    name = os.path.basename(absolute)
+    if directory == DATA_DIR:
+        return f'data/{name}'
+    if directory == _REPO_ROOT and name in _REMOTE_ROOT_FILES:
+        return name
+    return None
 
 
 def read_text(path: str, *, encoding: str = 'utf-8',

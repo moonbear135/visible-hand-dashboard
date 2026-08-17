@@ -169,6 +169,16 @@ def _render_signup_form() -> None:
         )
 
     email_input = ui.input('이메일').classes('w-full max-w-sm')
+    # ⚠️ 계정 열거(user enumeration) 방어와 UX 를 함께 만족시키기 위한 안내입니다.
+    #    `utils/scorecard_db.py::sign_up()` 은 **이미 가입된 이메일인지 여부를 화면에
+    #    알려주지 않습니다**(§0-3-9). 그래서 중복 가입을 시도한 사람은 "접수됐다"는 안내를
+    #    받고도 메일이 오지 않을 수 있는데, 아무 설명이 없으면 그 사람만 영문을 모른 채
+    #    막힙니다. 이 문구는 **누구에게나 항상 보이므로** 특정 이메일의 가입 여부를
+    #    알려주지 않으면서도 다음에 뭘 하면 되는지는 알려줍니다.
+    ui.label(
+        '이미 가입된 이메일로 다시 가입하면 안내 메일이 오지 않을 수 있습니다 — '
+        '그럴 때는 위 "비밀번호 찾기" 탭에서 비밀번호를 새로 정해 주세요.'
+    ).classes('vh-muted')
     password_input = ui.input('비밀번호', password=True, password_toggle_button=True).classes('w-full max-w-sm')
     ui.label('8자 이상을 권장합니다. Supabase Auth 의 정책이 그대로 적용됩니다.').classes('vh-muted')
     confirm_input = ui.input('비밀번호 확인', password=True, password_toggle_button=True).classes('w-full max-w-sm')

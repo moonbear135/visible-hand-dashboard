@@ -73,7 +73,7 @@ from utils.macro_scoring import (
 
 from web.auth import is_admin
 from web.components import (
-    banner, compact, download_button, error_banner, esc,
+    banner, chart_layout, compact, download_button, error_banner, esc,
     info_banner, success_banner, warning_banner,
 )
 from web.layout import layout
@@ -95,12 +95,16 @@ except ImportError:  # pragma: no cover - 배포 환경엔 항상 설치됨
 # 배경 투명화·글자색·선 색만 지정합니다 (계획서 §7, scorecard_page.py 와 같은 이유).
 # `colorway` 첫 색(#636EFA)이 plotly 기본 팔레트의 첫 색이라, Streamlit 에서 보던 선 색과
 # 같은 색이 나옵니다.
-_CHART_LAYOUT = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#e2e8f0"),
-    colorway=["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A"],
-)
+#
+# (2026-08-17) 배경·글자색 공통 부분은 `web/components/widgets.py::chart_layout()` 로
+#  옮겼습니다 — '내 성적표'가 거의 같은 사전을 따로 들고 있어서(차이는 `colorway` /
+#  `piecolorway` 뿐) 테마 색을 한쪽만 고치면 두 화면이 어긋나는 구조였습니다 (§0-3-10).
+_LINE_COLORS = ("#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A")
+
+
+def _chart_layout() -> dict:
+    """이 화면의 선 차트 레이아웃 = 공통 다크 테마 + 이 화면 고유 선 색."""
+    return chart_layout(colorway=list(_LINE_COLORS))
 
 
 
@@ -1020,9 +1024,13 @@ def _render_admin_console() -> None:
     함정(#85/#114)이 없어져 `key=` 인자가 통째로 사라졌고, 입력값은 이 함수의 **지역
     변수(위젯 객체)** 로만 존재합니다 — 모듈 전역에 두지 않습니다(§0-3-8).
     """
+    # ⚠️ 2026-08-17 — 서버 **절대경로** 노출을 걷어냈습니다(`web/pages/admin_page.py` 와 동일한
+    #    이유·표기). 관리자 전용이라 위험도는 낮지만 화면에 서버 내부 디렉터리 구조를 그릴
+    #    이유가 없고(§0-3-4), 여기서 실제로 알고 싶은 건 "그 파일이 있느냐"뿐입니다.
     banner('info',
-           f'⚙️ [관리자 시스템 정보]<br>· <b>DB 파일 경로:</b> {esc(HISTORY_FILE)}'
-           f'<br>· <b>DB 파일 존재 여부:</b> {esc(os.path.exists(HISTORY_FILE))}')
+           f'⚙️ [관리자 시스템 정보]<br>· <b>누적 이력 파일:</b> {esc(os.path.basename(HISTORY_FILE))}'
+           ' (저장소 루트)'
+           f'<br>· <b>파일 존재 여부:</b> {esc("있음" if os.path.exists(HISTORY_FILE) else "없음")}')
 
     with ui.expansion('🛠️ 관리자 전용 데이터 수동 제어실 (비상 입력 및 가이드)', value=True).classes('w-full'):
         ui.markdown(
@@ -1381,7 +1389,7 @@ def _render_trend_chart(history_df) -> None:
             if PLOTLY_AVAILABLE:
                 fig = px.line(chart_data.reset_index(), x="Date", y="위험 지수")
                 # 다크 배경용 색만 얹고, 그 다음 줄의 원본 설정(margin/height)이 최종값이 되게 합니다.
-                fig.update_layout(**_CHART_LAYOUT)
+                fig.update_layout(**_chart_layout())
                 fig.update_layout(margin=dict(l=0, r=0, t=10, b=0), height=300)
                 ui.plotly(fig).classes('w-full').style('height: 300px;')
             else:  # pragma: no cover - 배포 환경엔 항상 설치됨
@@ -1539,8 +1547,18 @@ def _render_dashboard() -> None:
         """
     )
 
-    with ui.row().classes('w-full no-wrap items-start gap-3'):
-        with ui.element('div').classes('flex-1 min-w-0'):
+    # ⚠️ 2026-08-17 — #130 류(한글이 한 글자씩 세로로 쌓이는 현상) 재발 방지 패턴을
+    #    `web/pages/scorecard_page.py`(과 `report_page.py`)와 똑같이 적용했습니다.
+    #      [예전] `no-wrap` + 상태문구에 `flex-1 min-w-0`
+    #             → 폭이 모자라면 상태문구가 0 가까이 수축하고, 한글은 띄어쓰기가 없어도
+    #               글자 사이에서 줄바꿈되므로 한 글자씩 세로로 쌓입니다.
+    #      [지금] ① `no-wrap` 제거 → 좁으면 버튼이 통째로 다음 줄로 내려감(허용 패턴 C)
+    #             ② 상태문구는 `flex: 1 1 260px` → 남는 폭이 260px 미만이면 줄바꿈.
+    #                (`flex-1` = basis 0 은 절대 다음 줄로 안 내려가 오히려 같은 사고가 납니다)
+    #             ③ `vh-keep-all` → CJK 는 띄어쓰기 자리에서만 줄바꿈 (web/theme.py)
+    #             ④ 버튼은 `shrink-0` 유지 → 절대 수축하지 않음
+    with ui.row().classes('w-full items-start gap-3'):
+        with ui.element('div').classes('vh-keep-all').style('flex: 1 1 260px; min-width: 0;'):
             clean_status = log_msg.split('|')[0].strip()
             if is_live:
                 success_banner(clean_status)

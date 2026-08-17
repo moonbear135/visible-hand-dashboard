@@ -917,6 +917,50 @@ def test_short_indicators_reclassified():
           "재분배 계산 근거(85.48)가 문서에 남아 있음")
 
 
+def test_friendly_names_single_source():
+    """[17] 지표 표기명이 세 곳에서 어긋나지 않는가 (2026-08-17 통합)
+
+    문제였던 것: 같은 `FRIENDLY_NAMES` 가 세 곳에 각각 있었고 실제로 값이 달랐습니다.
+    특히 `utils/macro_ai.py` 는 이 이름을 **Gemini 프롬프트에 그대로 넣기** 때문에,
+    AI 는 옛 이름("공포지수 비대칭도")을 보고 설명을 쓰는데 화면은 그 코멘트를 새 이름
+    ("VKOSPI 공포지수") 옆에 붙여 보여줬습니다. 두 이름은 가리키는 지표 자체가 다릅니다
+    (#70 에서 프록시 → KRX 실측으로 바뀌면서 내용이 바뀜).
+
+    이제 단일 출처는 `utils/constants.py::MACRO_FRIENDLY_NAMES` 이고, 화면 2개의 리터럴은
+    (Streamlit 무변경 원칙 + 기존 대조 테스트 때문에) 그대로 두되 **여기서 매번 대조**합니다.
+    """
+    print("\n[17] 지표 표기명 단일 출처 — 세 곳이 어긋나지 않는가 (2026-08-17)")
+    from utils.constants import MACRO_FRIENDLY_NAMES, RISK_WEIGHTS
+
+    view = _literal_from_source(REPO_ROOT / "views" / "macro_view.py", "FRIENDLY_NAMES")
+    page = _literal_from_source(REPO_ROOT / "web" / "pages" / "macro_page.py", "FRIENDLY_NAMES")
+
+    check(view is not None and page is not None, "두 화면 파일에서 표기명 사전을 읽음")
+    check(view == page, "① Streamlit 화면과 NiceGUI 화면의 표기명이 동일")
+    _diff = set((MACRO_FRIENDLY_NAMES or {}).items()) ^ set((view or {}).items())
+    check(MACRO_FRIENDLY_NAMES == view,
+          "② 단일 출처(utils/constants.MACRO_FRIENDLY_NAMES)가 화면과 글자 단위로 동일"
+          + (f" — 차이: {sorted(_diff)}" if _diff else ""))
+    check(set(MACRO_FRIENDLY_NAMES) == set(RISK_WEIGHTS),
+          "③ 표기명 키가 활성 지표와 정확히 일치(은퇴 지표 이름이 섞여 있지 않음)")
+
+    # ④ macro_ai 가 자기 사전을 다시 갖지 않는가 — 갈라짐이 재발하는 유일한 경로입니다.
+    ai_src = (REPO_ROOT / "utils" / "macro_ai.py").read_text(encoding="utf-8")
+    check("from utils.constants import MACRO_FRIENDLY_NAMES" in ai_src,
+          "④ utils/macro_ai.py 가 단일 출처를 import 함")
+    check("FRIENDLY_NAMES = {" not in ai_src,
+          "   자체 사전을 다시 정의하지 않음(중복 재발 방지, §0-3-10)")
+    # ⑤ 프롬프트가 여전히 이 이름을 쓰는지(배선이 끊기지 않았는지)
+    check("FRIENDLY_NAMES.get(key, key)" in ai_src and "현재 설명할 지표: {name}" in ai_src,
+          "⑤ 프롬프트의 '현재 설명할 지표' 자리에 그 이름이 그대로 들어감")
+    # 프롬프트 문자열이 실제로 깨지지 않고 만들어지는지 (f-string 포맷 스모크)
+    name = MACRO_FRIENDLY_NAMES["VKOSPI_Skew"]
+    line = (f"- 현재 설명할 지표: {name}\n"
+            f"- 이 지표의 현재 위험도 수치: {0.42:.3f} (0에 가까울수록 안전, 1에 가까울수록 매우 위험)")
+    check("VKOSPI 공포지수" in line and "0.420" in line,
+          "   프롬프트 문자열이 정상적으로 조립됨(포맷 깨짐 없음)")
+
+
 def main():
     print("=" * 74)
     print("🛡️ 매크로 실측 지표 정규화(#68) + 실측불가 6개 제외·가중치 재분배(#69)")
@@ -941,6 +985,8 @@ def main():
     test_krx_wiring()
     # --- 2026-08-10 (#72) 공매도 2종 실측 불가 재분류 ---
     test_short_indicators_reclassified()
+    # --- 2026-08-17 지표 표기명 단일 출처 통합 ---
+    test_friendly_names_single_source()
 
     print("\n" + "=" * 74)
     if FAILURES:

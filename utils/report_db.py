@@ -61,12 +61,20 @@ REPORT_WORK_ORDER.md 에 따라 만든 모듈입니다. 화면(`views/report_vie
 from __future__ import annotations
 
 import csv
+import io
 import json
 import os
 import re
 import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
+
+# 🌐 벤치마크 원본 파일 2개(`market_history.csv`, `data/us_index_history.json`)를 여는 단일
+#    창구입니다. 원격 로드가 꺼져 있으면(기본값) 예전과 똑같은 로컬 파일 읽기이고,
+#    켜져 있으면 다른 스냅샷들과 같은 최신성 추적·전역 배너를 함께 받습니다 (§0-1).
+#    ⚠️ streamlit 을 import 하지 않는 모듈이라 이 파일의 "service_role 격리" 원칙에
+#       영향이 없습니다(`utils/data_source.py` 는 os/requests 만 씁니다).
+from utils import data_source
 
 # ⚠️ "내 성적표" 데이터 계층의 **읽기 전용 재사용**입니다(작업지시서 §7 — 기존 파일을 고치지
 #    않되 import 는 권장). 시장/통화 상수, 종목 평가, 가격 조회 함수를 그대로 씁니다:
@@ -1206,6 +1214,16 @@ def build_weight_comparison(history):
 #  미국 : `data/us_index_history.json` (collector_us_indices.py 산출물).
 #         ⚠️ 값은 지수 포인트가 아니라 **추종 ETF 종가**입니다 — 그래서 심볼 이름에
 #            PROXY 가 들어갑니다. 자세한 조사 근거는 그 수집기 파일 상단 주석 참고.
+#
+#  🌐 2026-08-17 — 두 파일 모두 `open()` 직접 호출을 걷어내고 `utils/data_source.py` 를
+#     거칩니다. 예전에는 이 두 개만 최신성 추적 밖에 있어서, 원격 로드가 켜지고 Render
+#     Build Filters 로 데이터 커밋이 재배포를 부르지 않게 되면 **배포 시점에 얼어붙은
+#     사본**을 계속 보여주면서도 `web/layout.py` 의 전역 배너가 뜨지 않았습니다(§0-1 위반).
+#     이제 다른 스냅샷 6개와 완전히 같은 경로를 타므로, 값이 오래되면 화면 상단에 배너가
+#     뜹니다.
+#     ⚠️ **함수 시그니처·반환값은 그대로입니다** — 실패하면 예전처럼 빈 dict 이고,
+#        `DATA_SOURCE_BASE_URL` 이 없으면(=기본값) 예전과 글자 그대로 같은 로컬 읽기입니다.
+#        `views/report_view.py`(Streamlit)도 아무 영향 없이 그대로 동작합니다.
 # =============================================================================
 MARKET_HISTORY_FILENAME = "market_history.csv"
 MARKET_HISTORY_DATE_COLUMN = "날짜"
@@ -1231,29 +1249,33 @@ def load_kospi_close_history(csv_path=None):
     `market_history.csv` → {"YYYY-MM-DD": 코스피 종가}. **읽기 전용**입니다.
     파일이 없거나 컬럼 이름이 바뀌었으면 빈 dict — 벤치마크만 "없음"이 되고 리포트 나머지는
     정상 동작합니다(조용히 0으로 채우지 않습니다).
+
+    🌐 파일을 여는 일은 `utils/data_source.py` 가 합니다(위 섹션 주석 참고). 값이 오래되면
+       전역 배너가 뜨고, 여기서는 예전과 똑같이 파싱만 합니다.
     """
     path = csv_path or os.path.join(repo_root(), MARKET_HISTORY_FILENAME)
-    if not os.path.exists(path):
+    # utf-8-sig: 엑셀에서 저장된 BOM 이 있어도 첫 컬럼명이 깨지지 않게(기존 다운로드 모듈과 동일 관례)
+    text, error, _version = data_source.read_text(path, encoding="utf-8-sig")
+    if error is not None or text is None:
         return {}
     closes = {}
-    # utf-8-sig: 엑셀에서 저장된 BOM 이 있어도 첫 컬럼명이 깨지지 않게(기존 다운로드 모듈과 동일 관례)
-    with open(path, "r", encoding="utf-8-sig", newline="") as f:
-        reader = csv.DictReader(f)
-        if not reader.fieldnames or MARKET_HISTORY_DATE_COLUMN not in reader.fieldnames \
-                or MARKET_HISTORY_KOSPI_COLUMN not in reader.fieldnames:
-            return {}
-        for row in reader:
-            raw_date = (row.get(MARKET_HISTORY_DATE_COLUMN) or "").strip()
-            raw_close = (row.get(MARKET_HISTORY_KOSPI_COLUMN) or "").strip()
-            if not raw_date or not raw_close:
-                continue
-            try:
-                day = to_date(raw_date)
-                close = float(raw_close.replace(",", ""))
-            except (ValueError, TypeError):
-                continue
-            if close > 0:
-                closes[day.isoformat()] = close
+    # 통째로 리스트에 담지 않고 `csv.DictReader` 로 **한 줄씩** 훑습니다(원본과 동일).
+    reader = csv.DictReader(io.StringIO(text, newline=""))
+    if not reader.fieldnames or MARKET_HISTORY_DATE_COLUMN not in reader.fieldnames \
+            or MARKET_HISTORY_KOSPI_COLUMN not in reader.fieldnames:
+        return {}
+    for row in reader:
+        raw_date = (row.get(MARKET_HISTORY_DATE_COLUMN) or "").strip()
+        raw_close = (row.get(MARKET_HISTORY_KOSPI_COLUMN) or "").strip()
+        if not raw_date or not raw_close:
+            continue
+        try:
+            day = to_date(raw_date)
+            close = float(raw_close.replace(",", ""))
+        except (ValueError, TypeError):
+            continue
+        if close > 0:
+            closes[day.isoformat()] = close
     return closes
 
 
@@ -1261,12 +1283,21 @@ def load_us_index_closes(data_dir=None):
     """
     `data/us_index_history.json` → {벤치마크키: {"label_ko":..., "closes": {날짜: 종가}, ...}}.
     파일이 없으면 빈 dict(아직 한 번도 수집하지 않은 상태 — 화면은 "벤치마크 없음").
+
+    🌐 파일을 여는 일은 `utils/data_source.py` 가 합니다(위 섹션 주석 참고).
     """
     path = os.path.join(data_dir or default_data_dir(), US_INDEX_HISTORY_FILENAME)
-    if not os.path.exists(path):
+    text, error, _version = data_source.read_text(path, encoding="utf-8")
+    if error is not None or text is None:
         return {}
-    with open(path, "r", encoding="utf-8") as f:
-        payload = json.load(f)
+    try:
+        payload = json.loads(text)
+    except Exception as exc:                          # noqa: BLE001 — 상세는 로그로만 (§0-3-4)
+        # 예전에는 `json.load()` 예외가 그대로 호출부까지 올라갔지만, 그 경로는 화면에
+        # 트레이스백을 띄우는 §0-3-4 위반이었습니다. 손상된 파일은 "벤치마크 없음"으로
+        # 정직하게 표시하고(§0-1 — 0으로 채우지 않음), 원인은 서버 로그에만 남깁니다.
+        print(f"⚠️ 미국 벤치마크 스냅샷 파싱 실패 ({US_INDEX_HISTORY_FILENAME}): {exc}")
+        return {}
     indices = (payload or {}).get("indices")
     return indices if isinstance(indices, dict) else {}
 

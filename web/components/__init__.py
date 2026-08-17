@@ -22,9 +22,11 @@ from web.components.html import (  # noqa: F401
     graham_financial_box,
     graham_reference_box,
     graham_unavailable_box,
+    holdings_table_html,
     info_badge,
     loss_banner_html,
     pct_html,
+    pct_text,
     quality_badge,
     quant_score_badge,
     rank_prefix_html,
@@ -34,6 +36,7 @@ from web.components.html import (  # noqa: F401
 from web.components.stock_download import render_stock_download_tool  # noqa: F401
 from web.components.widgets import (  # noqa: F401
     banner,
+    chart_layout,
     disclaimer_footer,
     download_button,
     error_banner,

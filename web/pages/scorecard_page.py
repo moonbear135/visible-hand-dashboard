@@ -2,7 +2,8 @@
 📊 내 성적표 — 내 보유 종목 입력 + 손익/비중 + 밸류에이션 대조 (로그인 필요, URL `/scorecard`).
 
 `views/scorecard_view.py`(Streamlit, 1,206줄)의 NiceGUI 이식본입니다 (이전 계획서 4단계).
-Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 계획서 §11-1).
+컷오버(2026-08-17)가 끝나 **지금 사용자가 보는 화면은 이 파일**이고, Streamlit 쪽 원본은
+즉시 롤백에 대비해 최소 2주간만 살려둡니다(듀얼런 — 계획서 §11-1 · §0-3-10).
 
 🔴 이 화면은 이 프로젝트에서 **유일하게 사용자의 실제 자산 정보를 다루는 화면**입니다.
    ENGINEERING_SPEC.md §0-3-8(최상위 금지사항)을 먼저 읽고 고치세요. 요약하면:
@@ -14,7 +15,13 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
       `client`(그 접속 전용 Supabase 클라이언트)와 `user_id`를 **인자로 받아야만** 동작합니다
       (§0-3-8 "함수 설계 원칙", `web/auth.py` 참고).
    3. 이 규칙이 지켜지는지 `tests/test_web_session_isolation.py` 가 자동으로 검사합니다.
-      그 테스트가 통과하기 전까지 이 화면은 공개되지 않습니다(§0-3-6 승인 조건).
+      그 테스트 통과가 §0-3-6 공개 승인의 조건이었고, **2026-08-17 공개 전환 완료** 이후에도
+      이 테스트는 계속 회귀 방어선으로 남습니다(실패하면 즉시 원인을 찾아야 합니다).
+
+✅ **공개 전환 완료 (2026-08-17)** — 드로어 메뉴에 모든 방문자에게 보입니다
+   (`web/layout.py` 의 `_MENU` 에서 `admin_only=False`). 공개된 것은 "메뉴 노출"까지이고,
+   **데이터는 여전히 로그인한 본인 것만** 보입니다(§0-3-8 — 공개[공유]와 노출[사고]은
+   완전히 다릅니다). 로그인 없이 들어오면 로그인 폼만 그리고 숫자를 한 개도 그리지 않습니다.
 
 이식 방침 (2·3단계와 동일)
    - **계산·DB 계층(`utils/scorecard_db.py`)은 한 줄도 건드리지 않습니다.** 이 파일은 순수
@@ -22,7 +29,8 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
    - 사용자 입력·DB 값이 HTML 로 나가는 곳은 전부 `esc()` 를 거칩니다 (§0-3-9 XSS).
    - "종목 관리" 줄(종목명 + ✏️ + 🗑️)은 #127~#130 에서 여섯 번 싸운 그 레이아웃입니다.
      `st.columns()` 가 사라졌으므로 `ui.row().classes('no-wrap ...')` 하나로 항상 한 줄입니다
-     (`web/pages/demo_page.py` 의 "패턴 A" 와 동일 — 실기기 검증 완료된 방식).
+     (0단계 데모 화면에서 실기기로 검증했던 "패턴 A" 와 동일한 방식. 그 데모 페이지
+      `web/pages/demo_page.py` 는 역할이 끝나 2026-08-17 에 삭제됐습니다).
    - 비밀번호 찾기는 **지금 잘 동작하는 코드(OTP) 방식을 그대로** 유지합니다 (계획서 §6-3 주의 4).
    - 🔐 **로그인 전 화면(로그인/회원가입/비밀번호 찾기 3탭)은 이 파일에 없습니다** — 2026-08-17
      5단계에서 '사장님 보고서'(/report)가 **같은 로그인 세션·같은 폼**을 쓰게 되면서
@@ -70,7 +78,10 @@ from web.auth import get_client, has_supabase_session, logout
 #    `web/auth_ui.py` 한 곳에 두고 두 화면이 같이 씁니다 (§0-3-10 중복 금지).
 #    2026-08-17(5단계) 이전까지는 이 파일 안에 있던 코드이며, 옮기면서 동작은 바꾸지 않았습니다.
 from web.auth_ui import fail_message, render_auth
-from web.components import compact, error_banner, esc, info_banner, metric_card, pct_html, warning_banner
+from web.components import (
+    chart_layout, compact, error_banner, esc, holdings_table_html, info_banner,
+    metric_card, pct_html, pct_text, warning_banner,
+)
 from web.layout import layout
 from web.state import data_path, load_json_file
 
@@ -121,16 +132,22 @@ _SLICE_COLORS = (
 # 차트 배경/글자색 — 이 화면은 다크 모드 고정(web/layout.py)이라 plotly 기본 흰 배경을 쓰면
 # 차트만 하얗게 뜹니다. **figure 의 데이터(names/values)는 원본과 한 글자도 다르지 않고**,
 # 배경 투명화와 글자색·조각 색만 지정합니다 (계획서 §7).
-_CHART_LAYOUT = dict(
-    paper_bgcolor="rgba(0,0,0,0)",
-    plot_bgcolor="rgba(0,0,0,0)",
-    font=dict(color="#e2e8f0"),
-    margin=dict(t=10, b=10, l=10, r=10),
-    showlegend=False,
-    # 조각 색 안전망 ①. 아래 `_pie()` 에서 trace 에 직접 색을 넣는 게 본 수정이고,
-    # 이건 혹시 그쪽이 무시되는 plotly 버전에서도 검은 도넛이 되지 않게 하는 이중 보험입니다.
-    piecolorway=list(_SLICE_COLORS),
-)
+#
+# (2026-08-17) 배경·글자색 공통 부분은 `web/components/widgets.py::chart_layout()` 로
+#  옮겼습니다 — 매크로 화면이 거의 같은 사전을 따로 들고 있어서(차이는 `piecolorway`/
+#  `colorway` 뿐) 테마 색을 한쪽만 고치면 두 화면이 어긋나는 구조였습니다 (§0-3-10).
+#  이 화면만의 값(여백·범례·조각 색)은 아래 `_pie()` 에서 인자로 넘깁니다.
+
+
+def _chart_layout() -> dict:
+    """이 화면의 원형차트 레이아웃 = 공통 다크 테마 + 이 화면 고유값."""
+    return chart_layout(
+        margin=dict(t=10, b=10, l=10, r=10),
+        showlegend=False,
+        # 조각 색 안전망 ①. 아래 `_pie()` 에서 trace 에 직접 색을 넣는 게 본 수정이고,
+        # 이건 혹시 그쪽이 무시되는 plotly 버전에서도 검은 도넛이 되지 않게 하는 이중 보험입니다.
+        piecolorway=list(_SLICE_COLORS),
+    )
 
 
 # =============================================================================
@@ -198,8 +215,9 @@ def _row_label_html(row, indexes) -> str:
 #  해서 `web/components/html.py::pct_html()` 한 곳에 두고 두 화면이 같이 씁니다 (§0-3-10).
 
 
-def _pct_text(value) -> str:
-    return "—" if value is None else f"{value:+.2f}%"
+# (2026-08-17) `pct_text()` 는 `web/components/html.py::pct_text()` 로 옮겼습니다 —
+#  '사장님 보고서'가 거의 같은 함수를 따로 들고 있어서(자릿수 인자 유무만 달랐음)
+#  한쪽만 서식이 바뀌면 두 화면의 숫자 표기가 어긋나는 구조였습니다 (§0-3-10).
 
 
 def _parse_positive_number(raw, label):
@@ -594,7 +612,7 @@ def _render_currency_block(client, user_id: str, group: dict, market: dict, on_c
             profit = group["total_profit"]
             metric_card('평가금액 합계', format_amount(group["total_value"], currency))
             metric_card('평가손익', format_amount(profit, currency),
-                        _pct_text(profit / base * 100 if base else None))
+                        pct_text(profit / base * 100 if base else None))
         else:
             metric_card('평가금액 합계', '—')
             metric_card('평가손익', '—')
@@ -647,13 +665,18 @@ def _render_table(rows, indexes, currency: str) -> None:
     #127 의 결론 그대로 **순수 HTML `<table>` + `overflow-x: auto`** 입니다. 화면이 좁아지면
     세로로 쌓이지 않고 가로 스크롤될 뿐이라, 모바일에서도 표 구조가 그대로 유지됩니다.
     (Streamlit 의 `st.columns()` 반응형 쌓기 자체가 없어졌으므로 여기서 다시 깨질 여지가 없습니다.)
+
+    (2026-08-17) 표 껍데기 HTML 은 `web/components/html.py::holdings_table_html()` 로
+    옮겼습니다 — '사장님 보고서'가 글자 그대로 같은 HTML 을 따로 들고 있었습니다 (§0-3-10).
+    이 함수에는 **이 화면만의 열 구성과 칸 서식**만 남습니다.
+
+    🔐 §0-3-9 — 각 칸은 여기서 `esc()` 까지 끝내서 넘깁니다(공용 함수는 칸 내용을 HTML
+       조각으로 그대로 받습니다). `_row_label_html()`·`pct_html()` 은 내부에서 이미
+       이스케이프를 마친 조각을 돌려줍니다.
     """
     headers = ['종목', '수량', '평균매입가', '현재가', '평가손익', '수익률', '비중']
-    head_html = ''.join(f'<th>{esc(h)}</th>' for h in headers)
-
-    body_rows = []
-    for row in rows:
-        cells = [
+    body_rows = [
+        [
             _row_label_html(row, indexes),
             esc(f'{row["quantity"]:,.6g}'),
             esc(format_amount(row["avg_purchase_price"], currency)),
@@ -662,16 +685,9 @@ def _render_table(rows, indexes, currency: str) -> None:
             pct_html(row.get("profit_pct")),
             esc(f'{row["weight_pct"]:.1f}%' if row.get("weight_pct") is not None else '—'),
         ]
-        body_rows.append('<tr>' + ''.join(f'<td>{c}</td>' for c in cells) + '</tr>')
-
-    ui.html(compact(f"""
-        <div style="overflow-x: auto; -webkit-overflow-scrolling: touch; width: 100%;">
-          <table class="vh-holdings-table">
-            <thead><tr>{head_html}</tr></thead>
-            <tbody>{''.join(body_rows)}</tbody>
-          </table>
-        </div>
-    """)).classes('w-full')
+        for row in rows
+    ]
+    ui.html(holdings_table_html(headers, body_rows)).classes('w-full')
 
 
 def _render_row_manager(client, user_id: str, rows, indexes, view: dict, redraw, on_changed) -> None:
@@ -832,7 +848,7 @@ def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
     fig.update_traces(marker=dict(
         colors=[_SLICE_COLORS[i % len(_SLICE_COLORS)] for i in range(len(names))],
     ))
-    fig.update_layout(**_CHART_LAYOUT)
+    fig.update_layout(**_chart_layout())
     ui.plotly(fig).classes('w-full h-80')
 
 
