@@ -119,10 +119,12 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
    `.github/workflows/keep_awake.yml`의 `streamlit_wake` job 삭제(코드 주석에 표시돼
    있음).
 5. **⏳ 진행 중 — "내 성적표" v2(스크린샷 OCR) (2026-08-17 착수).** 자세한 스케줄·설계 결정은
-   `SCORECARD_V2_OCR_WORK_ORDER.md`(레포 루트) 참고. 2~4단계(설계·코드 구현·오프라인 테스트)
-   완료, 하루 10회 업로드 제한(사용자별, KST 자정 리셋)까지 구현·커밋 완료. `SCORECARD_OCR_
-   ENABLED` 플래그로 기본 숨김. 1단계(오너의 Gemini API 결제 프로젝트 설정)와 5단계(실기기
-   실검증)는 아직 미착수 — 다음 세션은 여기서부터.
+   `SCORECARD_V2_OCR_WORK_ORDER.md`(레포 루트) 참고. 1~4단계(오너 결제 설정·설계·코드 구현·
+   오프라인 테스트) **전부 완료**, 하루 10회 업로드 제한(사용자별, KST 자정 리셋)까지 구현·커밋
+   완료. `SCORECARD_OCR_ENABLED` 플래그로 기본 숨김. `visiblehand` 프로젝트에 Gemini API 유료
+   등급 활성화 확인됨(2026-08-17, AI Studio "설정 완료" 화면 확인). 남은 건 **5단계(실기기
+   실검증)뿐** — Render에 `GEMINI_API_KEY` 확인 → `SCORECARD_OCR_ENABLED` 켜서 실제 브로커
+   스크린샷으로 테스트 — 다음 세션은 여기서부터.
 6. **⏳ 대기 — `google-generativeai` → `google-genai` 마이그레이션 (2026-08-17 판단).**
    `google-generativeai`는 구글이 지원 종료(EOL) 선언한 패키지(`ENGINEERING_SPEC.md`
    §0-3-12 참고). `utils/macro_ai.py`(운영 중)와 `utils/scorecard_ocr.py`(v2 OCR) 둘 다
