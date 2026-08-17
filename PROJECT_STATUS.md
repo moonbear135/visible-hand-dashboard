@@ -101,14 +101,18 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ### 0-5. 지금 열려있는 일 (다음에 반드시 확인/처리할 것) — §4는 낡았으니 여기부터
 
-1. **🔴 Render Build Filters에 `market_history.csv` 추가 필요.** `data/**`는 이미
-   Ignored Paths에 등록돼 있지만 `market_history.csv`는 저장소 루트라 별도 등록이
-   필요합니다. 안 하면 평일 자동 커밋마다 재배포가 계속 발생해 §8-5(런타임 데이터 로드)
-   작업의 효과(로그인 유지)가 반감됩니다. Render 대시보드 → 서비스 → Settings →
-   Build & Deploy → Build Filters → Ignored Paths에 `market_history.csv` 한 줄 추가.
-2. **🟡 무료 티어 "15분 무접속 시 재시작" 문제 — §8-5로도 완전 해결 안 됨.** 공개
-   화면(성적표·보고서)에 실사용자가 늘면 유료(Starter, 월 $7선) 승격을 검토하세요.
-   지금은 오너 확인 수준이라 급하지 않습니다.
+1. **✅ 완료 — Render Build Filters에 `market_history.csv` 추가 (2026-08-17, 오너 직접
+   처리).** Ignored Paths에서 빼서 Included Paths로 옮김(루트 파일이라 `data/**` 규칙과
+   무관). 이제 평일 자동 커밋마다 불필요한 재배포가 안 발생함.
+2. **✅ 완화 — 무료 티어 "15분 무접속 시 재시작" 문제 (2026-08-17).** 기존
+   `keep_awake.yml`의 `render_healthz` job을 별도 워크플로우
+   `.github/workflows/render_keep_awake.yml`로 분리해 **10분 간격**(정시 혼잡 회피용
+   3,13,23,33,43,53분) 크론으로 촘촘하게 핑을 보내도록 바꿈 — Streamlit(12시간 기준,
+   `keep_awake.yml`에 그대로 남음)과 슬립 기준이 10배 이상 달라 스케줄을 분리한 것.
+   public repo라 Actions 사용 시간 무제한이라 비용 부담 없음. ⚠️ **100% 보장은
+   아님** — GitHub Actions 스케줄은 워크로드 몰릴 때 지연될 수 있어 가끔 콜드스타트가
+   한 번씩 있을 수 있음(지어내지 않기). 완전한 상시 기동이 필요해지면 그때는 유료
+   (Starter, 월 $7선) 승격이 유일한 확실한 해법 — 지금은 이 정도로 충분해 보류.
 3. **🟡 원격 데이터 로드(`DATA_SOURCE_BASE_URL`) 실검증** — env var는 등록 완료,
    "마지막 동기화" 시각 갱신도 1회 확인됨. 다만 실패 시 배너가 뜨는지(일부러 오타
    주소로 테스트), 백오프가 실제로 걸리는지는 실기기에서 추가로 봐도 좋습니다.

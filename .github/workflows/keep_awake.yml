@@ -1,20 +1,16 @@
 name: Keep App Awake
 
 # =============================================================================
-# 💤 무료 호스팅의 "일정 시간 무방문 시 잠들기"를 막는 주기 핑
+# 💤 Streamlit Community Cloud 전용 — 12시간 무방문 슬립 방지
 #
-# 2026-08-17 (NiceGUI 컷오버 후) — **깨워야 할 앱이 두 개가 됐습니다.**
+# 2026-08-17 (NiceGUI 컷오버 후) — Render 실서비스용 핑은 슬립 기준이 훨씬 촘촘해서
+# (15분 vs Streamlit 12시간) 별도 워크플로우 `render_keep_awake.yml` 로 분리했습니다.
+# 이 파일에는 이제 **Streamlit(롤백 대비 유예 기간용) job만** 남아있습니다.
 #
-#   ① Render (실서비스, 지금 사용자가 접속하는 곳)  ← job: render_healthz
-#   ② Streamlit Community Cloud (컷오버 후 롤백 대비 유예 기간)  ← job: streamlit_wake
-#
-# 예전에는 ②만 깨우고 있었습니다. 컷오버 후에는 정작 실서비스인 ①이 아무도 안 깨워서,
-# 첫 방문자가 콜드 스타트(무료 인스턴스 기동, 수십 초)를 그대로 맞는 상태였습니다.
-# `main.py` 에 "무료 인스턴스 깨우기용"이라고 만들어 둔 `/healthz` 엔드포인트가 있는데도
-# 아무도 부르지 않고 있었습니다.
-#
-# 두 job 을 **일부러 분리**했습니다 — 한쪽이 실패해도 다른 쪽은 그대로 돌고, 아래 ②를
-# 정리할 때 job 블록 하나만 통째로 지우면 되게 하기 위해서입니다.
+# 🗑️ 정리 방법 (2026-08-31 이후, 롤백 유예 기간 종료 시): **이 파일 전체**와
+#    `keep_awake_ping.py` 를 지우면 됩니다. `render_keep_awake.yml` 은 그대로 두세요.
+#    (같이 정리할 것: `index.html` 의 Streamlit iframe, `views/` 아카이빙 —
+#    ENGINEERING_SPEC.md §0-3-10)
 #
 # 데이터 수집 워크플로우와는 완전히 무관합니다(수집도, 커밋도 하지 않습니다).
 # =============================================================================
@@ -24,64 +20,19 @@ on:
     # 8시간마다 1번 — Streamlit 의 12시간 잠들기 기준보다 넉넉히 여유를 둠(GitHub Actions
     # 스케줄 자체가 몇 분씩 밀리는 경우가 있어, 자정 근처의 트래픽 몰림도 피하려고 정각을
     # 살짝 비껴 13분으로 설정).
-    #
-    # ⚠️ Render 무료 인스턴스는 **15분 무요청이면 잠듭니다** — 8시간 간격으로는 "항상 깨어
-    #    있게" 만들 수 없습니다. 그건 이 워크플로우로 달성할 수 있는 목표가 아니고
-    #    (5분 간격 크론은 Actions 사용량·상대 서버 매너 양쪽에서 과합니다 — §0-3-2),
-    #    여기서 얻는 것은 "엔드포인트가 살아 있는지 8시간마다 확인" + "그 시점 기동"입니다.
-    #    상시 기동이 필요해지면 유료 인스턴스가 정답입니다(지어내지 않기 — §0-1).
     - cron: '13 */8 * * *'
   workflow_dispatch: {}
     # 깃허브 웹 화면(Actions 탭)에서 수동으로 즉시 실행할 수 있는 버튼 활성화
 
 jobs:
   # ===========================================================================
-  # ① Render (실서비스) — 정적 JSON 응답이라 curl 한 줄이면 충분합니다.
-  #    Streamlit 과 달리 JavaScript 버튼을 누를 필요가 없어 Selenium 이 불필요합니다.
-  # ===========================================================================
-  render_healthz:
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    env:
-      # 기본값은 커스텀 도메인입니다. 도메인 설정을 바꿨거나 onrender.com 주소를 직접
-      # 때리고 싶으면 저장소 Settings → Secrets and variables → Actions → **Variables** 에
-      # `RENDER_HEALTH_URL` 을 만들어 덮어쓰면 됩니다(코드 수정 불필요).
-      RENDER_HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://visiblehand.co.kr/healthz' }}
-    steps:
-      - name: Render /healthz 핑 (무료 인스턴스 깨우기)
-        run: |
-          set -euo pipefail
-          echo "방문: ${RENDER_HEALTH_URL}"
-          # --fail : HTTP 4xx/5xx 면 0이 아닌 종료코드 → 실패가 화면(Actions 빨간 X)까지
-          #          도달합니다. 조용히 성공한 척하지 않습니다 (ENGINEERING_SPEC.md §0-1).
-          # --max-time 60 : 무료 인스턴스가 잠들어 있으면 첫 응답까지 수십 초 걸립니다.
-          # -sS : 진행률 막대는 끄되 오류 메시지는 보이게.
-          body="$(curl --fail --show-error --silent --location --max-time 60 \
-                       --retry 2 --retry-delay 10 \
-                       -H 'User-Agent: visible-hand-keep-awake/1.0' \
-                       "${RENDER_HEALTH_URL}")"
-          echo "응답: ${body}"
-          # 엉뚱한 주소가 200을 돌려주는 경우(예: 도메인이 아직 옛 호스팅을 가리킴)를
-          # 걸러냅니다 — 우리 /healthz 는 반드시 {"ok":true} 를 돌려줍니다.
-          case "${body}" in
-            *'"ok"'*'true'*) echo "✅ Render 인스턴스 정상 응답" ;;
-            *) echo "❌ /healthz 응답이 예상과 다릅니다. RENDER_HEALTH_URL 이 실제 Render 서비스를"
-               echo "   가리키는지 확인하세요(저장소 Variables 에서 덮어쓸 수 있습니다)."
-               exit 1 ;;
-          esac
-
-  # ===========================================================================
-  # ② Streamlit Community Cloud — 🗑️ **컷오버 2주 뒤 삭제 대상** (2026-08-17 기준)
+  # Streamlit Community Cloud — 🗑️ **컷오버 2주 뒤(2026-08-31) 삭제 대상**
   #
   #    컷오버 후에도 즉시 롤백에 대비해 Streamlit 앱을 최소 2주는 살려두기로 결정돼
   #    있습니다. 이 job 이 없으면 그 2주 동안 Streamlit 쪽이 잠들어, 정작 롤백해야 하는
   #    순간에 콜드 스타트를 맞습니다. 그래서 유예 기간 동안만 유지합니다.
   #
-  #    🗑️ 정리 방법 (2주 뒤): **이 job 블록 전체**와 `keep_awake_ping.py` 를 지우면 됩니다.
-  #       위 `render_healthz` job 은 그대로 두세요. (같이 정리할 것: `index.html` 의
-  #       Streamlit iframe, `views/` 아카이빙 — ENGINEERING_SPEC.md §0-3-10)
-  #
-  #    ⚠️ 왜 여기만 Selenium 인가: 2026-08-09 최초 버전은 curl 이었는데 실측(Actions 로그)에서
+  #    ⚠️ 왜 Selenium 인가: 2026-08-09 최초 버전은 curl 이었는데 실측(Actions 로그)에서
   #       `curl: (47) Maximum (50) redirects followed` 로 전부 실패했습니다. Streamlit 의
   #       "Yes, get this app back up!" 깨우기는 브라우저에서 JavaScript 로 버튼을 눌러야
   #       실행되는 클라이언트 사이드 동작이라 순수 HTTP 요청으로는 안 됩니다.

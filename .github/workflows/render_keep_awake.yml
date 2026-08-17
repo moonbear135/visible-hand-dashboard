@@ -1,0 +1,64 @@
+name: Render Keep Awake
+
+# =============================================================================
+# 💤 Render 무료 인스턴스 전용 — 15분 무요청 슬립 방지
+#
+# 2026-08-17 신설 (기존 keep_awake.yml 에서 render_healthz job 분리).
+#
+# 분리 이유: Render 무료 인스턴스는 "15분 무요청이면 잠듭니다". 반면 Streamlit
+# Community Cloud 는 "12시간 무방문이면 잠듭니다"(keep_awake.yml 의 streamlit_wake
+# job 이 담당). 두 슬립 기준이 10배 이상 차이 나는데 같은 스케줄을 공유하면 둘 중
+# 하나는 항상 낭비되거나 부족합니다. 그래서 Render 쪽만 훨씬 촘촘한 별도 스케줄로
+# 뗐습니다.
+#
+# ⚠️ 100% 보장은 아닙니다 — GitHub 공식 문서에 "스케줄 이벤트는 Actions 워크로드가
+# 몰리는 시간대(특히 매 정시 00분 근처)에 지연될 수 있다"고 명시돼 있습니다. 그래서
+# 10분 간격 + 정시를 살짝 비낀 오프셋(3,13,23...)을 써서 몰림을 피하고, 그래도 가끔
+# 콜드스타트가 한 번씩 발생할 수 있다는 점은 감안하세요. 상시 100% 무슬립이
+# 필요해지면 그건 유료 인스턴스로만 확실히 해결됩니다(§0-5 2번 참고, 지어내지
+# 않기 — ENGINEERING_SPEC.md §0-1).
+#
+# public repo 라 GitHub Actions 사용 시간은 무제한 무료입니다 — 10분 간격(하루
+# ~144회, curl 한 줄짜리 가벼운 잡)이어도 비용 부담 없습니다.
+#
+# 데이터 수집 워크플로우와는 완전히 무관합니다(수집도, 커밋도 하지 않습니다).
+# =============================================================================
+
+on:
+  schedule:
+    # 매시 3, 13, 23, 33, 43, 53분 — 10분 간격, 정시(00분) 혼잡 시간대를 살짝 비낌.
+    - cron: '3,13,23,33,43,53 * * * *'
+  workflow_dispatch: {}
+    # 깃허브 웹 화면(Actions 탭)에서 수동으로 즉시 실행할 수 있는 버튼 활성화
+
+jobs:
+  render_healthz:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    env:
+      # 기본값은 커스텀 도메인입니다. 도메인 설정을 바꿨거나 onrender.com 주소를 직접
+      # 때리고 싶으면 저장소 Settings → Secrets and variables → Actions → **Variables** 에
+      # `RENDER_HEALTH_URL` 을 만들어 덮어쓰면 됩니다(코드 수정 불필요).
+      RENDER_HEALTH_URL: ${{ vars.RENDER_HEALTH_URL || 'https://visiblehand.co.kr/healthz' }}
+    steps:
+      - name: Render /healthz 핑 (무료 인스턴스 깨우기)
+        run: |
+          set -euo pipefail
+          echo "방문: ${RENDER_HEALTH_URL}"
+          # --fail : HTTP 4xx/5xx 면 0이 아닌 종료코드 → 실패가 화면(Actions 빨간 X)까지
+          #          도달합니다. 조용히 성공한 척하지 않습니다 (ENGINEERING_SPEC.md §0-1).
+          # --max-time 60 : 무료 인스턴스가 잠들어 있으면 첫 응답까지 수십 초 걸립니다.
+          # -sS : 진행률 막대는 끄되 오류 메시지는 보이게.
+          body="$(curl --fail --show-error --silent --location --max-time 60 \
+                       --retry 2 --retry-delay 10 \
+                       -H 'User-Agent: visible-hand-keep-awake/1.0' \
+                       "${RENDER_HEALTH_URL}")"
+          echo "응답: ${body}"
+          # 엉뚱한 주소가 200을 돌려주는 경우(예: 도메인이 아직 옛 호스팅을 가리킴)를
+          # 걸러냅니다 — 우리 /healthz 는 반드시 {"ok":true} 를 돌려줍니다.
+          case "${body}" in
+            *'"ok"'*'true'*) echo "✅ Render 인스턴스 정상 응답" ;;
+            *) echo "❌ /healthz 응답이 예상과 다릅니다. RENDER_HEALTH_URL 이 실제 Render 서비스를"
+               echo "   가리키는지 확인하세요(저장소 Variables 에서 덮어쓸 수 있습니다)."
+               exit 1 ;;
+          esac
