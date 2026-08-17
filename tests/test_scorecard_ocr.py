@@ -205,13 +205,14 @@ def test_ui_upload_handler_never_auto_saves():
     """
     handler_src = _upload_handler_source()
     assert "add_lot(" not in handler_src, "OCR 업로드 핸들러가 add_lot()을 직접 불러 자동 저장하면 안 됨"
-    # 2026-08-17 수정 — 여러 장을 연달아 올려도 이전 인식 결과가 사라지지 않도록, 추출
-    # 결과를 바로 그리지 않고 `_accumulated_items`에 누적한 뒤 `_render_ocr_items()`로
-    # (인자 없이) 목록 전체를 다시 그립니다. 여전히 목록으로만 그려질 뿐 저장은 안 됩니다.
-    assert "_accumulated_items.extend(result[" in handler_src, (
-        "추출 결과는 누적 목록에 더해지기만 하고(프리필 대기) 저장되지 않아야 함"
-    )
-    assert "_render_ocr_items()" in handler_src, "화면은 누적 목록 전체를 다시 그려야 함"
+    # 2026-08-17 버그 수정 — 여러 장 업로드 시 이전 결과가 지워지던 문제를 고치면서
+    # "이번 결과만 그리기"(`_render_ocr_items(result['items'])`)에서 "누적 목록에 추가 후
+    # 전체를 다시 그리기"(`extracted_items.extend(...)` + 인자 없는 `_render_ocr_items()`)로
+    # 바꿨습니다. 여전히 렌더링(프리필 대기)만 하고 저장은 안 하는지가 이 테스트의 핵심이므로
+    # 새 형태에 맞춥니다.
+    assert "extracted_items.extend(result" in handler_src, \
+        "새로 인식된 항목은 누적 목록에 추가되어야 함(여러 장 업로드 시 이전 결과 유지)"
+    assert "_render_ocr_items()" in handler_src, "추출 결과는 목록으로만 그려지고(프리필 대기) 저장되지 않아야 함"
 
 
 def test_low_confidence_rows_are_visually_flagged_in_ui():
@@ -219,10 +220,24 @@ def test_low_confidence_rows_are_visually_flagged_in_ui():
     body = _source_block(
         _page_source(),
         "def _render_ocr_items() -> None:",
-        "\n        def _show_ocr_error(",
+        "\n        async def _on_ocr_upload(",
     )
     assert "low_conf" in body and "ui.badge(" in body, "낮은 확신도 행에 배지가 붙어야 함"
     assert "#f59e0b" in body, "낮은 확신도 행에 강조 테두리(경고색)가 있어야 함"
+
+
+def test_multiple_uploads_accumulate_instead_of_replacing():
+    """여러 장을 연달아 올리면 이전 장의 인식 결과가 사라지지 않고 누적되어야 합니다.
+
+    2026-08-17 오너 실사용 중 재현된 버그: 3장을 올렸을 때 마지막 장의 결과만 남고
+    가운데 장(예: 국제 금) 결과가 화면에서 사라짐 — `extracted_box.clear()`로 매번
+    통째로 지우고 "이번 장 결과만" 다시 그렸던 게 원인. 목록 변수가 세션(페이지 함수)
+    지역 변수를 벗어나지 않고(§0-3-8) 계속 append되는지를 소스로 확인합니다.
+    """
+    src = _page_source()
+    assert "extracted_items: list = []" in src, \
+        "누적용 목록이 페이지 지역 변수로 선언되어 있어야 함(모듈 전역 금지, §0-3-8)"
+    assert "extracted_items.extend(" in src, "새 인식 결과는 기존 목록에 추가(extend)되어야 함 — 교체 금지"
 
 
 # =============================================================================
@@ -567,11 +582,17 @@ def test_upload_size_limit_is_enforced_on_the_server_not_only_in_the_browser():
 
 
 def test_upload_failures_do_not_pile_up_on_screen():
-    """실패 문구는 다음 업로드 때 지워지는 자리(`extracted_box`)에 그려야 합니다.
+    """실패 문구는 매번 지워지는 전용 자리(`error_slot`)에 그려야 합니다.
 
     그냥 `error_banner()` 를 부르면 업로드 위젯의 부모 슬롯 끝에 매번 새로 덧붙어, 실패가
     쌓이고 다음 업로드가 성공해도 직전 실패 문구가 남습니다(§0-3-4 — 화면이 지금 상태를
     정확히 보여줘야 함).
+
+    2026-08-17 버그 수정 — 예전엔 이 "매번 지우는 자리"가 하필 인식 결과 목록
+    (`extracted_box`)과 같은 상자여서, 실패 배너 하나가 뜰 때마다 이미 성공한 이전 장의
+    결과까지 같이 지워졌습니다(여러 장 업로드 버그의 원인 중 하나). 이제 실패 배너 전용
+    `error_slot`으로 분리했으므로, 여기서는 ①`error_slot`만 지우고 다시 그리는지,
+    ②그 과정에서 `extracted_box`(성공 결과 누적 목록)는 건드리지 않는지 둘 다 확인합니다.
     """
     page_src = _page_source()
     handler_src = _upload_handler_source()
@@ -582,12 +603,13 @@ def test_upload_failures_do_not_pile_up_on_screen():
     helper_src = _source_block(
         page_src,
         "def _show_ocr_error(text: str) -> None:",
-        "\n        async def _on_ocr_upload(",
+        "\n        def _make_ocr_fill_handler(",
     )
-    # 2026-08-17 수정 — 실패해도 이미 쌓인 성공 항목이 사라지면 안 되므로, 직접
-    # `extracted_box.clear()` 를 부르는 대신 누적 목록을 다시 그리는 `_render_ocr_items()`
-    # 를 거쳐 지워지는 자리(`extracted_box`)에 배너를 붙입니다.
-    assert "_render_ocr_items()" in helper_src and "with extracted_box:" in helper_src
+    assert "error_slot.clear()" in helper_src and "with error_slot:" in helper_src
+    assert "extracted_box.clear()" not in helper_src, (
+        "실패 배너 표시가 성공 결과 목록(extracted_box)까지 지우면 안 됨 — "
+        "여러 장 업로드 시 이전 장의 성공 결과가 실패 배너 때문에 사라지는 회귀를 막는 테스트"
+    )
 
 
 def test_ocr_module_keeps_no_mutable_module_level_state():

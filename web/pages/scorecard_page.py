@@ -585,13 +585,37 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         ).classes('vh-muted')
 
         extracted_box = ui.column().classes('w-full gap-2')
+        error_slot = ui.column().classes('w-full')
+        quota_label = ui.label('').classes('vh-muted')
 
-        # 🔧 2026-08-17 버그 수정 — 여러 장을 연달아 올리면 앞서 인식된 종목들이 사라지던
-        # 문제(오너 실검증 중 발견: 3장 업로드 시 마지막 1장 결과만 남음)의 원인입니다.
-        # 예전에는 업로드마다 `extracted_box.clear()` 로 화면을 통째로 지우고 "이번 파일
-        # 결과만" 다시 그렸습니다. 이제 성공한 항목을 이 리스트에 계속 **누적**하고, 화면은
-        # 항상 이 리스트 전체를 다시 그립니다 — 이전 파일의 인식 결과가 사라지지 않습니다.
-        _accumulated_items: list = []
+        # 2026-08-17 버그 수정 (오너 실사용 중 발견·재현 — 스크린샷 3장 업로드 시 가운데
+        # 장의 인식 결과가 사라짐) — `ui.upload`는 기본적으로 여러 장 선택을 허용하고
+        # (이 코드에서 `multiple=False`를 준 적이 없음), 여러 장을 고르면 장마다 `on_upload`
+        # 이벤트가 **따로따로** 발생합니다. 그런데 예전 코드는 매번 `extracted_box.clear()`로
+        # 화면을 통째로 지우고 "이번 장에서 나온 항목만" 다시 그렸습니다 — 그래서 먼저 처리된
+        # 장들의 인식 결과가 마지막 장이 처리되는 순간 화면에서 사라졌습니다. 원본 이미지는
+        # 여전히 장당 처리 직후 폐기하지만(§0-3-8), **인식된 텍스트 결과**는 이 페이지를
+        # 보는 동안 계속 쌓여야 합니다. `extracted_items`는 `@ui.page` 함수의 지역 변수라
+        # 접속(세션)마다 따로 생기므로 §0-3-8 "모듈 전역 금지" 규칙에 어긋나지 않습니다.
+        #
+        # 이 김에 실패 배너 자리(`error_slot`)도 결과 목록(`extracted_box`)에서 분리했습니다.
+        # 예전엔 "실패 배너가 계속 쌓이지 않게" 매번 지우던 자리가 하필 결과 목록과 같은
+        # 상자여서, 그 지우기가 이번 버그의 또 다른 원인이기도 했습니다. 이제 "실패 배너는
+        # 안 쌓이게 지우기"와 "성공한 결과는 안 지우고 쌓기"를 각자 다른 상자가 맡습니다.
+        # 남은 횟수 표시(`quota_label`)도 장마다 새 라벨을 쌓지 않도록 하나만 두고 갱신합니다.
+        extracted_items: list = []
+
+        def _show_ocr_error(text: str) -> None:
+            """실패 문구를 전용 자리(`error_slot`)에 그립니다.
+
+            ⚠️ 2026-08-17 검토에서 고친 자리 — 예전에는 결과 목록(`extracted_box`)을 같이
+            지웠는데, 그러면 이미 성공적으로 인식해둔 이전 장의 결과까지 실패 배너 하나 때문에
+            날아갑니다. `error_slot`만 지우고 다시 그리므로 ① 배너가 계속 쌓이지 않고
+            ② 이미 인식해둔 성공 결과는 그대로 남습니다.
+            """
+            error_slot.clear()
+            with error_slot:
+                error_banner(text)
 
         def _make_ocr_fill_handler(item: dict):
             def _click() -> None:
@@ -605,10 +629,11 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             return _click
 
         def _render_ocr_items() -> None:
-            """`_accumulated_items` 전체(지금까지 올린 모든 파일의 성공 결과)를 다시 그립니다."""
+            """`extracted_items`(누적 목록) 전체를 다시 그립니다 — 이번에 새로 온 항목만이
+            아니라 지금까지 이 페이지에서 인식된 모든 항목입니다."""
             extracted_box.clear()
             with extracted_box:
-                for item in _accumulated_items:
+                for item in extracted_items:
                     low_conf = item.get('confidence') == 'low'
                     name_text = item.get('raw_name') or '(이름 미인식)'
                     qty_text = _ocr_value_text(item.get('quantity')) or '수량 미인식'
@@ -623,21 +648,6 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                             ui.badge('⚠️ 확인 필요', color='amber-8').classes('shrink-0')
                         ui.button('입력창에 채우기', on_click=_make_ocr_fill_handler(item)) \
                             .props('flat dense no-caps').classes('shrink-0')
-
-        def _show_ocr_error(text: str) -> None:
-            """실패 문구를 **결과 목록과 같은 자리**에, 이미 쌓인 성공 항목은 지우지 않고 그립니다.
-
-            ⚠️ 2026-08-17 검토에서 고친 자리 — 예전에는 `error_banner()` 를 그냥 불렀는데,
-            그러면 배너가 업로드 위젯의 부모 슬롯(입력 폼 전체) 끝에 **매번 새로 덧붙어**
-            ① 업로드를 여러 번 실패하면 배너가 계속 쌓이고, ② 다음 업로드가 성공해도 직전
-            실패 배너가 화면에 그대로 남아 사용자가 지금 상태를 알 수 없었습니다(§0-3-4).
-            지금은 `_render_ocr_items()` 로 누적된 성공 항목을 먼저 다시 그린 뒤 그 아래에
-            이번 실패 배너를 붙입니다 — 실패한 장 때문에 이전에 성공한 장들까지 함께
-            사라지지 않습니다.
-            """
-            _render_ocr_items()
-            with extracted_box:
-                error_banner(text)
 
         async def _on_ocr_upload(event) -> None:
             image_bytes = await event.file.read()
@@ -682,18 +692,20 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 return
             finally:
                 image_bytes = None   # 이 핸들러가 원본 바이트를 계속 들고 있지 않게 참조를 끊습니다(§0-3-8).
-            # 이번 파일에서 새로 인식된 항목을 기존 누적 리스트 뒤에 덧붙입니다 — 덮어쓰지
-            # 않습니다(위 `_accumulated_items` 주석 참고, 2026-08-17 버그 수정).
-            _accumulated_items.extend(result['items'])
+            # 이번 장이 성공했으니 직전에 남아있던 실패 배너(있었다면)는 지웁니다 — 지금은
+            # 성공했다는 사실을 화면에 명확히 반영합니다. (성공 결과가 담긴 extracted_box는
+            # 건드리지 않습니다 — 여러 장을 올려도 이전 장 결과가 안 지워지는 게 이번 수정의
+            # 핵심입니다.)
+            error_slot.clear()
+            # 새로 인식된 항목을 기존 누적 목록에 "추가"합니다(교체가 아님).
+            extracted_items.extend(result['items'])
             _render_ocr_items()
-            # 남은 횟수는 결과 목록과 같은 자리에 붙여, 다음 업로드 때 함께 지워지게 합니다
-            # (`_render_ocr_items()` 가 맨 앞에서 `extracted_box.clear()` 를 하므로 그 뒤에
-            #  그립니다 — 순서를 바꾸면 이 줄이 지워집니다).
-            with extracted_box:
-                ui.label(
-                    f'오늘 남은 스크린샷 업로드 횟수: {quota["remaining"]}회 '
-                    f'(하루 {DAILY_OCR_UPLOAD_LIMIT}회)'
-                ).classes('vh-muted')
+            # 남은 횟수는 매번 갱신되는 전용 라벨 하나에만 반영합니다 — 장마다 새 라벨을
+            # 쌓지 않으므로 여러 장을 올려도 "오늘 남은 ..." 문구는 한 줄로 최신값만 보입니다.
+            quota_label.text = (
+                f'오늘 남은 스크린샷 업로드 횟수: {quota["remaining"]}회 '
+                f'(하루 {DAILY_OCR_UPLOAD_LIMIT}회)'
+            )
 
         ui.upload(
             label='📷 브로커 앱 스크린샷 업로드',
