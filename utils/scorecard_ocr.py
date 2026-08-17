@@ -129,10 +129,11 @@ def _extract_with_gemini(image_bytes: bytes) -> dict:
         raise OcrError(
             "OCR 기능을 쓰려면 서버에 GEMINI_API_KEY 설정이 필요합니다. 관리자에게 문의해 주세요."
         )
-    if not image_bytes:
-        raise OcrError("업로드된 이미지가 비어 있습니다. 다시 업로드해 주세요.")
-
-    mime_type = _sniff_mime_type(image_bytes)
+    # 빈 파일·이미지 아님 판정은 화면(`web/pages/scorecard_page.py`)이 하루 한도를 차감하기
+    # 전에 이미 한 번 합니다. 여기서 또 부르는 이유는 이 모듈만 단독으로 불러도(테스트·다른
+    # 호출부) 같은 방어가 걸리게 하기 위함이고, 두 곳이 **같은 함수**를 쓰므로 판정 기준이
+    # 서로 갈릴 수 없습니다(§0-3-10 중복 금지).
+    mime_type = ensure_supported_image_format(image_bytes)
 
     genai.configure(api_key=api_key)
     try:
@@ -153,6 +154,27 @@ def _extract_with_gemini(image_bytes: bytes) -> dict:
         raise OcrError("스크린샷에서 아무 내용도 인식하지 못했습니다 — 직접 입력해 주세요.")
 
     return _parse_response_text(text)
+
+
+def ensure_supported_image_format(image_bytes: bytes) -> str:
+    """업로드된 바이트가 우리가 처리할 수 있는 이미지인지 확인하고 그 MIME 타입을 돌려줍니다.
+
+    아니면 `OcrError` — 지어내지 않고 사람이 읽을 문장으로 실패시킵니다(§0-1).
+
+    ⚠️ 2026-08-18 신설(공개 함수인 이유) — 화면이 **하루 업로드 한도를 차감하기 전에**
+       이 검사를 먼저 할 수 있어야 하기 때문입니다. 예전에는 이 판정이 유료 호출 함수
+       안쪽(= 한도 차감 뒤)에서만 일어나서, 이미지가 아닌 파일을 올리면 외부 API 로는
+       아무것도 안 나가는데(돈은 안 나감) 사용자의 한도만 1회 깎였습니다. 그건 데이터
+       계층(`utils/scorecard_db.py`)의 한도 함수가 독스트링에서 이미 약속한
+       "유료 호출이 없었던 업로드는 한 번으로 세지 않는다"와 어긋납니다.
+       (이 모듈은 그 한도 계층을 import 하지도, 이름으로 부르지도 않습니다 — 순서를 정하는
+        건 화면이고 이 모듈은 계속 네트워크·DB 없이 단독 테스트 가능한 순수 변환기입니다.)
+       판정 로직 자체는 아래 `_sniff_mime_type()` 하나뿐이라 화면과 이 모듈이 서로 다른
+       기준으로 갈릴 일은 없습니다(§0-3-10).
+    """
+    if not image_bytes:
+        raise OcrError("업로드된 이미지가 비어 있습니다. 다시 업로드해 주세요.")
+    return _sniff_mime_type(image_bytes)
 
 
 def _sniff_mime_type(image_bytes: bytes) -> str:

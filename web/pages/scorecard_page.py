@@ -81,7 +81,11 @@ from utils.scorecard_db import (
 # AI provider가 나중에 바뀌어도 이 import 한 줄 말고는 아무것도 안 바뀝니다. 이 파일에는
 # provider 회사 이름이 등장하지 않습니다(ENGINEERING_SPEC.md §0-3-11 — 어느 provider인지는
 # utils/scorecard_ocr.py 안에서만 갈립니다. `SCORECARD_V2_OCR_WORK_ORDER.md` 참고).
-from utils.scorecard_ocr import OcrError, extract_holdings_from_image
+from utils.scorecard_ocr import (
+    OcrError,
+    ensure_supported_image_format,
+    extract_holdings_from_image,
+)
 
 from web.auth import get_client, has_supabase_session, logout
 # 🔐 로그인/회원가입/비밀번호 찾기 폼은 '사장님 보고서'(/report)와 **완전히 같은 화면**이라
@@ -588,15 +592,35 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         error_slot = ui.column().classes('w-full')
         quota_label = ui.label('').classes('vh-muted')
 
+        def _set_quota_label(quota: dict) -> None:
+            """남은 횟수 문구를 만드는 **유일한 자리**.
+
+            성공했을 때와 실패했을 때가 각자 문장을 만들면 언젠가 둘이 어긋납니다
+            (§0-3-10). 한도는 유료 호출 *전에* 차감되므로, 차감이 끝난 뒤라면 성공이든
+            실패든 화면은 똑같이 줄어든 숫자를 보여줘야 사실과 맞습니다(§0-1).
+            """
+            quota_label.text = (
+                f'오늘 남은 스크린샷 업로드 횟수: {quota["remaining"]}회 '
+                f'(하루 {DAILY_OCR_UPLOAD_LIMIT}회)'
+            )
+
         # 2026-08-17 버그 수정 (오너 실사용 중 발견·재현 — 스크린샷 3장 업로드 시 가운데
-        # 장의 인식 결과가 사라짐) — `ui.upload`는 기본적으로 여러 장 선택을 허용하고
-        # (이 코드에서 `multiple=False`를 준 적이 없음), 여러 장을 고르면 장마다 `on_upload`
-        # 이벤트가 **따로따로** 발생합니다. 그런데 예전 코드는 매번 `extracted_box.clear()`로
-        # 화면을 통째로 지우고 "이번 장에서 나온 항목만" 다시 그렸습니다 — 그래서 먼저 처리된
-        # 장들의 인식 결과가 마지막 장이 처리되는 순간 화면에서 사라졌습니다. 원본 이미지는
-        # 여전히 장당 처리 직후 폐기하지만(§0-3-8), **인식된 텍스트 결과**는 이 페이지를
-        # 보는 동안 계속 쌓여야 합니다. `extracted_items`는 `@ui.page` 함수의 지역 변수라
-        # 접속(세션)마다 따로 생기므로 §0-3-8 "모듈 전역 금지" 규칙에 어긋나지 않습니다.
+        # 장의 인식 결과가 사라짐) — 이 업로드 위젯은 한 번에 한 장만 고를 수 있지만
+        # (NiceGUI `ui.upload` 의 `multiple` 기본값이 `False` 이고 아래에서 켜지 않습니다),
+        # 사용자는 **한 장을 올린 뒤 이어서 다음 장을 올리는 식으로 연달아** 씁니다. 그러면
+        # 장마다 `_on_ocr_upload` 가 **따로따로** 실행됩니다. 그런데 예전 코드는 매번
+        # `extracted_box.clear()`로 화면을 통째로 지우고 "이번 장에서 나온 항목만" 다시
+        # 그렸습니다 — 그래서 먼저 올린 장들의 인식 결과가 다음 장이 처리되는 순간 화면에서
+        # 사라졌습니다. 원본 이미지는 여전히 장당 처리 직후 폐기하지만(§0-3-8), **인식된
+        # 텍스트 결과**는 이 페이지를 보는 동안 계속 쌓여야 합니다. `extracted_items`는
+        # `@ui.page` 함수의 지역 변수라 접속(세션)마다 따로 생기므로 §0-3-8 "모듈 전역 금지"
+        # 규칙에 어긋나지 않습니다.
+        #
+        # ⚠️ 2026-08-18 주석 정정 — 위 원인 설명이 원래는 *"`ui.upload` 가 여러 장 동시
+        #    선택을 허용해서"* 라고 적혀 있었지만, NiceGUI 3.16 `Upload.__init__` 확인 결과
+        #    `multiple` 기본값은 `False` 라 사실이 아니었습니다. 고친 코드와 회귀 테스트는
+        #    그대로 유효하고 바뀐 건 원인 설명뿐입니다 — 다음 세션이 "동시 선택"을 전제로
+        #    엉뚱한 곳을 고치지 않도록 정정합니다(§0-1: 주석도 사실이어야 합니다).
         #
         # 이 김에 실패 배너 자리(`error_slot`)도 결과 목록(`extracted_box`)에서 분리했습니다.
         # 예전엔 "실패 배너가 계속 쌓이지 않게" 매번 지우던 자리가 하필 결과 목록과 같은
@@ -661,6 +685,20 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                         '줄이거나 화면을 나눠서 캡처해 주세요.'
                     )
                     return
+                # 🔒 이미지 형식 확인도 **한도를 차감하기 전에** 끝냅니다(2026-08-18 수정).
+                #    업로드 위젯의 `accept` 는 브라우저 쪽 검사라 우회되고(§0-3-9), 형식
+                #    판별은 바이트 앞부분 몇 개만 보면 되는 일이라 유료 호출이 전혀 필요
+                #    없습니다. 예전에는 이 판정이 아래 외부 호출 함수 **안쪽**에서만
+                #    일어나서, 이미지가 아닌 파일을 올리면 돈은 안 나가는데 사용자의 하루
+                #    한도만 1회 깎였습니다 — `consume_ocr_quota` 독스트링이 약속한
+                #    "유료 호출이 없었던 업로드는 한 번으로 세지 않는다"와 어긋나던 자리입니다.
+                try:
+                    ensure_supported_image_format(image_bytes)
+                except OcrError as exc:
+                    # ⚠️ 여기서는 아직 차감이 없었으므로 남은 횟수 표시를 건드리지 않습니다
+                    #    (애초에 `quota` 가 아직 존재하지도 않습니다).
+                    _show_ocr_error(f'🚫 {exc}')
+                    return
                 # 🔒 하루 업로드 한도(로그인 사용자별) — **유료 API 를 부르기 전에** 1회를
                 #    차감합니다. 한도를 다 썼으면 여기서 예외가 나고 아래 호출은 실행되지
                 #    않습니다(= 돈이 나가지 않습니다). 세는 일은 전부 데이터 계층
@@ -679,6 +717,16 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 # OcrError 의 문구는 이미 "사람이 읽을 한 문장"으로만 만들어져 있습니다
                 # (원본 예외·스택은 utils/scorecard_ocr.py 가 로그로만 남김 — §0-3-4).
                 _show_ocr_error(f'🚫 {exc}')
+                # 2026-08-18 수정 — 이 자리까지 왔다는 건 바로 위 `consume_ocr_quota` 가
+                # 이미 성공해서 **한도가 실제로 1회 차감된 뒤**라는 뜻입니다(유료 호출은 그
+                # 다음 줄에서 일어납니다). 그런데 예전에는 실패 경로에서 남은 횟수 표시를
+                # 갱신하지 않아, 화면에는 실제보다 1 많은 숫자가 그대로 남았습니다(§0-1 —
+                # 화면이 사실과 달라짐). 성공 경로와 같은 함수로 갱신합니다.
+                # ⚠️ 아래 `except ScorecardError`·`except Exception` 분기에서는 **절대 같은
+                #    일을 하지 마세요** — 그쪽은 `quota` 가 아직 바인딩되지 않았을 수 있어
+                #    `UnboundLocalError` 가 납니다. 그리고 그 경우엔 차감 자체가 없었으므로
+                #    화면의 숫자도 이미 맞습니다.
+                _set_quota_label(quota)
                 return
             except ScorecardError as exc:
                 # 한도 초과(OcrQuotaExceeded)와 한도 기록 실패가 여기로 옵니다. 둘 다 이미
@@ -702,10 +750,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             _render_ocr_items()
             # 남은 횟수는 매번 갱신되는 전용 라벨 하나에만 반영합니다 — 장마다 새 라벨을
             # 쌓지 않으므로 여러 장을 올려도 "오늘 남은 ..." 문구는 한 줄로 최신값만 보입니다.
-            quota_label.text = (
-                f'오늘 남은 스크린샷 업로드 횟수: {quota["remaining"]}회 '
-                f'(하루 {DAILY_OCR_UPLOAD_LIMIT}회)'
-            )
+            _set_quota_label(quota)
 
         ui.upload(
             label='📷 브로커 앱 스크린샷 업로드',

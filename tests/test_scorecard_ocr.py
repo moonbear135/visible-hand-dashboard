@@ -830,6 +830,95 @@ def test_limit_is_checked_before_the_paid_api_call_in_ui(quota_db):
     )
 
 
+def test_non_image_upload_is_rejected_before_the_quota_is_consumed(quota_db):
+    """이미지가 아닌 파일은 **한도를 깎기 전에** 걸러야 합니다 (2026-08-18 수정).
+
+    `consume_ocr_quota` 독스트링이 이미 약속한 동작입니다 — "호출 전에 실패하는 경우
+    (파일이 이미지가 아님·용량 초과)는 애초에 여기까지 오지 않도록 화면이 그 검사들을 먼저
+    합니다. 유료 호출이 없었던 업로드는 한 번으로 세지 않습니다." 그런데 예전에는 형식
+    판별이 `extract_holdings_from_image()` **안쪽**에서만 일어나서, PDF 같은 파일을 올리면
+    외부 API 로는 아무것도 안 나가는데(돈은 안 나감) 사용자의 하루 한도만 1회 깎였습니다.
+    """
+    # ① 판정 함수 자체가 공개돼 있고, 유료 호출·저장소 없이 단독으로 동작하는지.
+    import utils.scorecard_ocr as ocr_mod
+    assert ocr_mod.ensure_supported_image_format(PNG_MAGIC) == "image/png"
+    with pytest.raises(ocr_mod.OcrError):
+        ocr_mod.ensure_supported_image_format(PDF_MAGIC)
+    with pytest.raises(ocr_mod.OcrError):
+        ocr_mod.ensure_supported_image_format(b"")
+
+    # ② 화면이 그 함수를 **한도 차감보다 먼저** 부르는지(순서가 곧 사용자의 남은 횟수입니다).
+    handler = _upload_handler_source()
+    assert "ensure_supported_image_format(" in handler, (
+        "업로드 핸들러가 형식 검사를 전혀 하지 않으면 이미지가 아닌 파일도 한도를 소모합니다"
+    )
+    assert handler.index("ensure_supported_image_format(") < handler.index(
+        "run.io_bound(consume_ocr_quota"
+    ), "형식 검사는 한도 차감보다 먼저 끝나야 합니다"
+    # ③ 그 실패 갈래는 남은 횟수 표시를 건드리지 않아야 합니다(차감이 없었으므로 화면이 이미
+    #    맞고, 애초에 `quota` 가 아직 바인딩되지 않아 만지면 UnboundLocalError 입니다).
+    pre_quota_src = handler[:handler.index("run.io_bound(consume_ocr_quota")]
+    assert "_set_quota_label(" not in pre_quota_src, (
+        "한도를 깎기 전 실패 갈래에서 남은 횟수를 갱신하면 안 됩니다(UnboundLocalError)"
+    )
+
+
+def test_failed_upload_updates_the_remaining_quota_on_screen(quota_db):
+    """업로드가 실패해도 **이미 차감된** 한도가 화면에 반영돼야 합니다 (2026-08-18 수정).
+
+    한도는 유료 호출 *전에* 깎이므로(비용을 묶는 게 목적), 인식이 실패했어도 그 1회는
+    실제로 사라진 상태입니다. 그런데 예전에는 실패 경로에서 `quota_label` 을 갱신하지 않아
+    화면에 **실제보다 1 많은 숫자**가 남았습니다 — 화면이 사실과 달라지는 §0-1 위반입니다.
+
+    ⚠️ 이 테스트는 `except OcrError` 갈래만 봅니다. `except ScorecardError`(한도 초과·기록
+       실패)와 `except Exception` 갈래는 `quota` 가 아직 바인딩되지 않았을 수 있어 같은
+       일을 하면 `UnboundLocalError` 가 납니다 — 그 두 갈래가 남은 횟수를 건드리지 않는
+       것까지 함께 고정합니다.
+    """
+    page_src = _page_source()
+    handler = _upload_handler_source()
+
+    # ① 문구를 만드는 자리가 정확히 하나인지(성공·실패가 각자 만들면 언젠가 어긋납니다).
+    assert "def _set_quota_label(" in page_src, "남은 횟수 문구는 전용 함수 하나에서만 만듭니다"
+    assert page_src.count("오늘 남은 스크린샷 업로드 횟수") == 1, (
+        "남은 횟수 문구가 두 곳 이상에서 만들어지면 성공·실패 경로가 서로 어긋납니다(§0-3-10)"
+    )
+
+    # ② 실패(OcrError) 갈래가 그 함수를 부르는지.
+    #    ⚠️ 핸들러 안에는 `except OcrError` 가 둘 있습니다 — 한도 차감 **전**의 형식 검사용
+    #       (더 깊이 들여쓰인 중첩 try)과, 유료 호출을 감싼 바깥쪽 것. 여기서 봐야 하는 건
+    #       바깥쪽이므로 들여쓰기까지 표식에 넣어 정확히 그 갈래만 잘라냅니다.
+    ocr_branch = _source_block(
+        handler, "\n            except OcrError as exc:", "\n            except ScorecardError as exc:")
+    assert "_set_quota_label(quota)" in ocr_branch, (
+        "인식 실패 시 남은 횟수를 갱신하지 않으면 화면에 실제보다 1 많은 숫자가 남습니다(§0-1)"
+    )
+    assert "_show_ocr_error(" in ocr_branch and "return" in ocr_branch
+
+    # ③ 성공 갈래도 같은 함수를 쓰는지(직접 quota_label.text 를 만지는 자리가 없어야 함).
+    assert handler.count("_set_quota_label(quota)") == 2, (
+        "성공·실패 두 경로 모두 같은 함수로 남은 횟수를 갱신해야 합니다"
+    )
+    assert "quota_label.text" not in handler, (
+        "핸들러가 라벨 텍스트를 직접 조립하면 문구가 두 벌이 됩니다 — _set_quota_label() 사용"
+    )
+
+    # ④ quota 가 바인딩되지 않았을 수 있는 두 갈래는 건드리지 않는지(UnboundLocalError 방지).
+    for start, end in (("\n            except ScorecardError as exc:", "\n            except Exception as exc:"),
+                       ("\n            except Exception as exc:", "\n            finally:")):
+        branch = _source_block(handler, start, end)
+        assert "_set_quota_label(" not in branch, (
+            f"'{start}' 갈래는 quota 가 없을 수 있어 남은 횟수를 갱신하면 UnboundLocalError 입니다"
+        )
+
+    # ⑤ 실제 숫자가 맞는지는 데이터 계층이 정합니다 — 실패해도 차감이 남아 있음을 고정합니다.
+    client = _fake_client()
+    first = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    assert first["remaining"] == quota_db.DAILY_OCR_UPLOAD_LIMIT - 1, (
+        "차감은 유료 호출 전에 일어나므로, 그 뒤 인식이 실패해도 남은 횟수는 줄어든 값입니다"
+    )
+
+
 def test_limit_exceeded_is_shown_to_the_user_not_silently_ignored(quota_db):
     """§0-1 — 한도 초과를 조용히 무시하지 않고 사람이 읽을 문장으로 보여줍니다."""
     message = quota_db.OCR_QUOTA_EXCEEDED_MESSAGE
