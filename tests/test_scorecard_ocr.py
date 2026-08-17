@@ -205,15 +205,21 @@ def test_ui_upload_handler_never_auto_saves():
     """
     handler_src = _upload_handler_source()
     assert "add_lot(" not in handler_src, "OCR 업로드 핸들러가 add_lot()을 직접 불러 자동 저장하면 안 됨"
-    assert "_render_ocr_items(result" in handler_src, "추출 결과는 목록으로만 그려지고(프리필 대기) 저장되지 않아야 함"
+    # 2026-08-17 수정 — 여러 장을 연달아 올려도 이전 인식 결과가 사라지지 않도록, 추출
+    # 결과를 바로 그리지 않고 `_accumulated_items`에 누적한 뒤 `_render_ocr_items()`로
+    # (인자 없이) 목록 전체를 다시 그립니다. 여전히 목록으로만 그려질 뿐 저장은 안 됩니다.
+    assert "_accumulated_items.extend(result[" in handler_src, (
+        "추출 결과는 누적 목록에 더해지기만 하고(프리필 대기) 저장되지 않아야 함"
+    )
+    assert "_render_ocr_items()" in handler_src, "화면은 누적 목록 전체를 다시 그려야 함"
 
 
 def test_low_confidence_rows_are_visually_flagged_in_ui():
     """확신도가 낮은 행은 배지/테두리로 강조되어야 합니다(재확인 유도)."""
     body = _source_block(
         _page_source(),
-        "def _render_ocr_items(items: list) -> None:",
-        "\n        async def _on_ocr_upload(",
+        "def _render_ocr_items() -> None:",
+        "\n        def _show_ocr_error(",
     )
     assert "low_conf" in body and "ui.badge(" in body, "낮은 확신도 행에 배지가 붙어야 함"
     assert "#f59e0b" in body, "낮은 확신도 행에 강조 테두리(경고색)가 있어야 함"
@@ -576,9 +582,12 @@ def test_upload_failures_do_not_pile_up_on_screen():
     helper_src = _source_block(
         page_src,
         "def _show_ocr_error(text: str) -> None:",
-        "\n        def _make_ocr_fill_handler(",
+        "\n        async def _on_ocr_upload(",
     )
-    assert "extracted_box.clear()" in helper_src and "with extracted_box:" in helper_src
+    # 2026-08-17 수정 — 실패해도 이미 쌓인 성공 항목이 사라지면 안 되므로, 직접
+    # `extracted_box.clear()` 를 부르는 대신 누적 목록을 다시 그리는 `_render_ocr_items()`
+    # 를 거쳐 지워지는 자리(`extracted_box`)에 배너를 붙입니다.
+    assert "_render_ocr_items()" in helper_src and "with extracted_box:" in helper_src
 
 
 def test_ocr_module_keeps_no_mutable_module_level_state():

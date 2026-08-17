@@ -586,18 +586,12 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
 
         extracted_box = ui.column().classes('w-full gap-2')
 
-        def _show_ocr_error(text: str) -> None:
-            """실패 문구를 **결과 목록과 같은 자리**에 그립니다.
-
-            ⚠️ 2026-08-17 검토에서 고친 자리 — 예전에는 `error_banner()` 를 그냥 불렀는데,
-            그러면 배너가 업로드 위젯의 부모 슬롯(입력 폼 전체) 끝에 **매번 새로 덧붙어**
-            ① 업로드를 여러 번 실패하면 배너가 계속 쌓이고, ② 다음 업로드가 성공해도 직전
-            실패 배너가 화면에 그대로 남아 사용자가 지금 상태를 알 수 없었습니다(§0-3-4).
-            여기 담으면 다음 업로드 때 `extracted_box.clear()` 로 함께 지워집니다.
-            """
-            extracted_box.clear()
-            with extracted_box:
-                error_banner(text)
+        # 🔧 2026-08-17 버그 수정 — 여러 장을 연달아 올리면 앞서 인식된 종목들이 사라지던
+        # 문제(오너 실검증 중 발견: 3장 업로드 시 마지막 1장 결과만 남음)의 원인입니다.
+        # 예전에는 업로드마다 `extracted_box.clear()` 로 화면을 통째로 지우고 "이번 파일
+        # 결과만" 다시 그렸습니다. 이제 성공한 항목을 이 리스트에 계속 **누적**하고, 화면은
+        # 항상 이 리스트 전체를 다시 그립니다 — 이전 파일의 인식 결과가 사라지지 않습니다.
+        _accumulated_items: list = []
 
         def _make_ocr_fill_handler(item: dict):
             def _click() -> None:
@@ -610,10 +604,11 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 )
             return _click
 
-        def _render_ocr_items(items: list) -> None:
+        def _render_ocr_items() -> None:
+            """`_accumulated_items` 전체(지금까지 올린 모든 파일의 성공 결과)를 다시 그립니다."""
             extracted_box.clear()
             with extracted_box:
-                for item in items:
+                for item in _accumulated_items:
                     low_conf = item.get('confidence') == 'low'
                     name_text = item.get('raw_name') or '(이름 미인식)'
                     qty_text = _ocr_value_text(item.get('quantity')) or '수량 미인식'
@@ -629,8 +624,22 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                         ui.button('입력창에 채우기', on_click=_make_ocr_fill_handler(item)) \
                             .props('flat dense no-caps').classes('shrink-0')
 
+        def _show_ocr_error(text: str) -> None:
+            """실패 문구를 **결과 목록과 같은 자리**에, 이미 쌓인 성공 항목은 지우지 않고 그립니다.
+
+            ⚠️ 2026-08-17 검토에서 고친 자리 — 예전에는 `error_banner()` 를 그냥 불렀는데,
+            그러면 배너가 업로드 위젯의 부모 슬롯(입력 폼 전체) 끝에 **매번 새로 덧붙어**
+            ① 업로드를 여러 번 실패하면 배너가 계속 쌓이고, ② 다음 업로드가 성공해도 직전
+            실패 배너가 화면에 그대로 남아 사용자가 지금 상태를 알 수 없었습니다(§0-3-4).
+            지금은 `_render_ocr_items()` 로 누적된 성공 항목을 먼저 다시 그린 뒤 그 아래에
+            이번 실패 배너를 붙입니다 — 실패한 장 때문에 이전에 성공한 장들까지 함께
+            사라지지 않습니다.
+            """
+            _render_ocr_items()
+            with extracted_box:
+                error_banner(text)
+
         async def _on_ocr_upload(event) -> None:
-            extracted_box.clear()
             image_bytes = await event.file.read()
             try:
                 # 🔒 서버 쪽 크기 확인. 아래 ui.upload(max_file_size=...) 는 브라우저에서만
@@ -673,7 +682,10 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 return
             finally:
                 image_bytes = None   # 이 핸들러가 원본 바이트를 계속 들고 있지 않게 참조를 끊습니다(§0-3-8).
-            _render_ocr_items(result['items'])
+            # 이번 파일에서 새로 인식된 항목을 기존 누적 리스트 뒤에 덧붙입니다 — 덮어쓰지
+            # 않습니다(위 `_accumulated_items` 주석 참고, 2026-08-17 버그 수정).
+            _accumulated_items.extend(result['items'])
+            _render_ocr_items()
             # 남은 횟수는 결과 목록과 같은 자리에 붙여, 다음 업로드 때 함께 지워지게 합니다
             # (`_render_ocr_items()` 가 맨 앞에서 `extracted_box.clear()` 를 하므로 그 뒤에
             #  그립니다 — 순서를 바꾸면 이 줄이 지워집니다).
