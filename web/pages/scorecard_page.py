@@ -48,6 +48,7 @@ from nicegui import run, ui
 
 from utils.company_names_kr import resolve_korean_name
 from utils.scorecard_db import (
+    DAILY_OCR_UPLOAD_LIMIT,
     KR_ALL_MARKET_PRICES_FILENAME,
     KR_TICKER_MASTER_FILENAME,
     MARKET_KR,
@@ -57,11 +58,13 @@ from utils.scorecard_db import (
     NO_FX_CONVERSION_NOTICE,
     SNAPSHOT_FILENAMES,
     SORT_FIELD_OPTIONS,
+    ScorecardError,
     US_ALL_ETF_PRICES_FILENAME,
     US_ALL_MARKET_PRICES_FILENAME,
     add_lot,
     build_portfolio,
     build_universe_index,
+    consume_ocr_quota,
     current_user,
     delete_holding,
     fetch_holdings,
@@ -574,6 +577,12 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             '스크린샷에서 읽은 값은 아래 입력창에 채워지기만 합니다 — 자동 저장되지 않으니 '
             '반드시 확인·수정 후 "➕ 추가 / 평균단가 재계산" 버튼을 직접 눌러 주세요.'
         ).classes('vh-muted')
+        # 한도를 **미리** 알려줍니다 — 다 쓴 뒤에야 알게 되면 그건 좋은 안내가 아닙니다.
+        # 숫자는 항상 상수에서 옵니다(§0-3-10 — 화면에 10을 따로 적지 않습니다).
+        ui.label(
+            f'스크린샷 업로드는 하루 {DAILY_OCR_UPLOAD_LIMIT}회까지 가능합니다(매일 자정 초기화). '
+            '아래 입력창에 직접 입력하는 건 횟수 제한이 없습니다.'
+        ).classes('vh-muted')
 
         extracted_box = ui.column().classes('w-full gap-2')
 
@@ -633,6 +642,15 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                         '줄이거나 화면을 나눠서 캡처해 주세요.'
                     )
                     return
+                # 🔒 하루 업로드 한도(로그인 사용자별) — **유료 API 를 부르기 전에** 1회를
+                #    차감합니다. 한도를 다 썼으면 여기서 예외가 나고 아래 호출은 실행되지
+                #    않습니다(= 돈이 나가지 않습니다). 세는 일은 전부 데이터 계층
+                #    (`utils/scorecard_db.py::consume_ocr_quota`)이 하고, 이 화면은 그 결과만
+                #    씁니다 — 이 파일에서 Supabase 를 직접 부르지 않습니다(§4-3).
+                #    ⚠️ `user_id` 는 이 함수가 인자로 받은 **이 접속자 본인**의 id 입니다.
+                #       전역에서 "지금 누구지"를 추측하지 않으므로 다른 사용자의 한도와 절대
+                #       섞이지 않습니다(§0-3-8).
+                quota = await run.io_bound(consume_ocr_quota, client, user_id)
                 # 실제 네트워크 호출(외부 OCR provider — 어떤 회사 모델인지는 extract_holdings_
                 # from_image() 안에서만 갈립니다, §0-3-11) 한 곳만 별도 스레드로 넘깁니다.
                 # 그대로 이벤트 루프에서 기다리면 이 접속뿐 아니라 서버 전체가 멈춥니다
@@ -643,12 +661,27 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 # (원본 예외·스택은 utils/scorecard_ocr.py 가 로그로만 남김 — §0-3-4).
                 _show_ocr_error(f'🚫 {exc}')
                 return
+            except ScorecardError as exc:
+                # 한도 초과(OcrQuotaExceeded)와 한도 기록 실패가 여기로 옵니다. 둘 다 이미
+                # "사람이 읽을 한국어 한 문장"이고, 어느 쪽이든 **유료 호출은 일어나지
+                # 않았습니다.** 한도 기록 자체가 실패했을 때 그냥 통과시키지 않는 이유:
+                # 세지 못하는 상태에서 유료 API 만 열리면 한도가 없는 것과 같습니다(§0-1).
+                _show_ocr_error(f'🚫 {exc}')
+                return
             except Exception as exc:                       # noqa: BLE001 — 실패를 조용히 삼키지 않음(§0-1)
                 _show_ocr_error(f'🚫 {_fail(exc, "스크린샷을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
                 return
             finally:
                 image_bytes = None   # 이 핸들러가 원본 바이트를 계속 들고 있지 않게 참조를 끊습니다(§0-3-8).
             _render_ocr_items(result['items'])
+            # 남은 횟수는 결과 목록과 같은 자리에 붙여, 다음 업로드 때 함께 지워지게 합니다
+            # (`_render_ocr_items()` 가 맨 앞에서 `extracted_box.clear()` 를 하므로 그 뒤에
+            #  그립니다 — 순서를 바꾸면 이 줄이 지워집니다).
+            with extracted_box:
+                ui.label(
+                    f'오늘 남은 스크린샷 업로드 횟수: {quota["remaining"]}회 '
+                    f'(하루 {DAILY_OCR_UPLOAD_LIMIT}회)'
+                ).classes('vh-muted')
 
         ui.upload(
             label='📷 브로커 앱 스크린샷 업로드',

@@ -42,6 +42,17 @@ import math
 import os
 import re
 from dataclasses import dataclass
+from datetime import datetime
+
+# 🕐 "오늘"의 기준 시간대. 이 프로젝트가 화면에서 오늘 날짜를 정할 때 쓰는 방식과 **같은
+#    관례**입니다(`web/pages/macro_page.py`, `utils/db.py`, `utils/scheduler.py` 등 —
+#    전부 이 try/except 블록을 그대로 씁니다). zoneinfo 가 없는 환경에서도 import 가
+#    깨지지 않도록 감싸고, 그때는 서버 로컬 시간으로 물러섭니다.
+try:  # pragma: no cover - 환경에 따라 갈리는 import
+    from zoneinfo import ZoneInfo
+    KST = ZoneInfo("Asia/Seoul")
+except Exception:  # pragma: no cover
+    KST = None
 
 # streamlit 은 st.secrets 를 읽을 때만 씁니다. 오프라인 테스트(스트림릿 미설치)에서도
 # 이 모듈을 그대로 import 할 수 있어야 하므로 선택적 의존성으로 감쌉니다.
@@ -1472,3 +1483,176 @@ def add_lot(client, user_id, market, ticker, quantity, purchase_price, stock_nam
         stock_name=merged.get("stock_name"),
     )
     return "merge", merged
+
+
+# =============================================================================
+# E. 📷 스크린샷 OCR 업로드 — 사용자별 하루 한도 (2026-08-17 오너 결정)
+# =============================================================================
+#  왜 여기(=데이터 계층)에 있는가
+#    "📷 스크린샷으로 채우기"는 **유료 외부 AI API** 를 호출합니다. 한 사람이 반복 업로드하면
+#    비용이 그대로 늘어나므로 로그인 사용자 1명당 하루 N회로 제한합니다. 그러려면 "누가
+#    오늘 몇 번 썼는지"를 **서버가 재시작돼도 남게** 저장해야 하는데, 이 프로젝트에서
+#    사용자별 영속 데이터는 전부 Supabase 이고 그 접근은 **이 파일 하나로만** 합니다
+#    (§4-3 계층 분리 — 화면은 Supabase 를 직접 부르지 않습니다). 그래서 새 저장 방식을
+#    발명하지 않고 바로 위 `holdings` CRUD 와 똑같은 모양으로 표 하나를 더 씁니다(§0-3-10).
+#
+#    ⚠️ `utils/scorecard_ocr.py`(OCR 모듈)에 두지 않은 이유: 그 모듈은 Supabase 를 전혀
+#       모르는 순수 변환기라서, 네트워크·DB 없이 단독 테스트가 됩니다. 거기에 DB 의존을
+#       넣으면 그 성질이 깨집니다.
+#
+#  Supabase 가 없으면 어떻게 되는가 (오너 질문에 대한 답)
+#    아래 함수들은 `_require_client()` 로 **막습니다(fail-closed)**. 이건 새 판단이 아니라
+#    기존 관례 그대로입니다 — 이 파일의 모든 사용자 데이터 함수가 그렇게 동작하고, 애초에
+#    `/scorecard` 화면은 Supabase 가 없으면 로그인 자체가 불가능해 "준비중" 안내만 뜹니다
+#    (`web/pages/scorecard_page.py::scorecard_page()`). 즉 "연결이 없으면 무제한 허용"
+#    같은 예외 경로를 만들지 않습니다. 그렇게 하면 한도를 세지 못하는 상태에서 유료 API 만
+#    열리는, 정확히 반대 방향의 사고가 됩니다.
+# -----------------------------------------------------------------------------
+
+OCR_USAGE_TABLE = "ocr_usage_daily"
+
+# 🔢 하루 몇 회까지 허용하는가 — **이 상수가 단일 출처입니다** (§0-3-10 중복 금지).
+#    화면 안내 문구·한도 검사·테스트가 전부 이 값을 참조하고, 숫자를 따로 적어두는 곳은
+#    어디에도 없습니다(아래 안내 문구도 f-string 으로 이 값에서 만듭니다).
+DAILY_OCR_UPLOAD_LIMIT = 10
+
+# 한도를 다 썼을 때 사용자가 보는 문장. **조용히 무시하지 않습니다**(§0-1) — 왜 안 되는지,
+# 언제 다시 되는지, 지금 당장 대신 쓸 수 있는 방법(직접 입력)까지 한 문장에 담습니다.
+OCR_QUOTA_EXCEEDED_MESSAGE = (
+    f"오늘 스크린샷 업로드 한도({DAILY_OCR_UPLOAD_LIMIT}회)를 다 쓰셨어요. "
+    "내일 다시 시도하시거나, 아래 입력창에 직접 입력해 주세요 — "
+    "직접 입력은 횟수 제한 없이 언제든 쓸 수 있습니다."
+)
+
+
+class OcrQuotaExceeded(ScorecardError):
+    """하루 업로드 한도 소진. **유료 API 를 부르기 전에** 던집니다.
+
+    `ScorecardError` 를 상속하므로 화면의 기존 오류 처리(`web/auth_ui.py::fail_message`)가
+    이 한국어 문장을 그대로 사용자에게 보여줍니다 — 새 처리 경로가 필요 없습니다.
+    """
+
+
+def ocr_usage_today():
+    """한도가 초기화되는 '오늘' (date).
+
+    ⚠️ 기준 시간대는 **한국시간(KST)** 입니다. 사용자 브라우저의 로컬 시간이 아닙니다
+       — 접속자마다 다른 자정을 쓰면 같은 사람이 시간대를 바꿔가며 한도를 늘릴 수 있고,
+       서버는 어차피 그 값을 검증할 수 없습니다. 대신 UTC 도 쓰지 않았습니다: 이 서비스의
+       사용자는 한국 사용자라 UTC 자정은 **오전 9시에 한도가 리셋되는 것처럼** 보입니다.
+       KST 는 이 프로젝트가 화면에서 "오늘"을 정할 때 이미 쓰고 있는 기준과 같습니다
+       (`web/pages/macro_page.py` 의 오늘 날짜 계산과 동일한 한 줄).
+       같은 이유로 DB 의 `now()`/`current_date`(UTC)로 세지 않고, 앱이 정한 날짜를
+       `usage_date` 컬럼에 명시적으로 넣습니다.
+    """
+    return (datetime.now(KST) if KST else datetime.now()).date()
+
+
+def _usage_date_text(usage_date=None):
+    """`usage_date` → DB `date` 컬럼에 넣을 'YYYY-MM-DD'. 미지정이면 오늘(KST)."""
+    value = usage_date if usage_date is not None else ocr_usage_today()
+    return value.isoformat() if hasattr(value, "isoformat") else str(value)
+
+
+def _usage_count_of(row):
+    """저장된 사용 횟수 → int. 값을 못 읽으면 0으로 **넘겨짚지 않고** 실패시킵니다(§0-1).
+
+    (읽지 못한 값을 0으로 치면 "한도가 조용히 초기화되는" 조용한 실패가 됩니다.)
+    """
+    if not row:
+        return 0
+    raw = row.get("used_count")
+    try:
+        return int(float(raw))
+    except (TypeError, ValueError) as exc:
+        raise ScorecardError(
+            "업로드 한도 기록을 읽지 못했습니다. 잠시 후 다시 시도해 주세요."
+        ) from exc
+
+
+def _fetch_ocr_usage_row(client, user_id, date_text):
+    """(user_id, usage_date) 1행 조회. 없으면 None.
+
+    ⚠️ RLS 가 이미 남의 행을 막지만 앱에서도 `user_id` 를 명시적으로 겁니다 —
+       `fetch_holdings()` 와 똑같은 이중 방어입니다(§0-3-8 사용자별 격리).
+    """
+    rows = _execute(
+        client.table(OCR_USAGE_TABLE).select("*")
+              .eq("user_id", user_id).eq("usage_date", date_text),
+        "업로드 한도 조회",
+    )
+    return dict(rows[0]) if rows else None
+
+
+def ocr_quota_status(client, user_id, usage_date=None):
+    """오늘 사용량 조회 — **세기만 하고 늘리지 않습니다**(화면 표시용).
+
+    반환: {"limit": int, "used": int, "remaining": int}
+    """
+    _require_client(client)
+    if not user_id:
+        raise ScorecardError("로그인 정보가 없어 업로드 한도를 확인할 수 없습니다.")
+    used = _usage_count_of(_fetch_ocr_usage_row(client, user_id, _usage_date_text(usage_date)))
+    return {
+        "limit": DAILY_OCR_UPLOAD_LIMIT,
+        "used": used,
+        "remaining": max(0, DAILY_OCR_UPLOAD_LIMIT - used),
+    }
+
+
+def consume_ocr_quota(client, user_id, usage_date=None):
+    """스크린샷 OCR **1회분을 먼저 차감**하고 남은 횟수를 돌려줍니다.
+
+    반환: {"limit": int, "used": int, "remaining": int}
+    한도를 이미 다 썼으면 `OcrQuotaExceeded` — 호출부는 이때 유료 API 를 부르지 않습니다.
+
+    ⚠️ 왜 '호출 성공 후'가 아니라 '호출 전'에 차감하는가
+       한도의 목적은 **유료 호출 횟수**를 묶는 것입니다. 성공했을 때만 세면, 인식이 안 되는
+       이미지를 계속 올려 API 를 무한히 부를 수 있어 한도가 사실상 없는 것과 같습니다.
+       대신 호출 전에 실패하는 경우(파일이 이미지가 아님·용량 초과)는 애초에 여기까지
+       오지 않도록 화면이 그 검사들을 먼저 합니다 — 유료 호출이 없었던 업로드는 한 번으로
+       세지 않습니다.
+
+    ⚠️ 동시 업로드에 대한 정직한 한계
+       '읽고 → 1 더해 쓰기' 이므로, 같은 사용자가 **정확히 동시에** 두 장을 올리면 둘 다
+       같은 값을 읽어 한 번만 올라갈 수 있습니다(최악의 경우 하루 11회). 이걸 완전히 막으려면
+       DB 함수(RPC)로 원자적 증가를 해야 하는데, 이 기능의 목적(비용 폭주 방지)에 비해
+       구조를 키우는 값이 더 큽니다 — 지금은 이 한계를 알고 그대로 둡니다(§0-3-10).
+       그래도 사용자가 스스로 되돌릴 수는 없습니다: 카운터를 줄이거나 지우는 경로는
+       `sql/scorecard_schema.sql` 의 트리거·권한 설정으로 DB 에서 막혀 있습니다.
+    """
+    _require_client(client)
+    if not user_id:
+        raise ScorecardError("로그인 정보가 없어 업로드 한도를 확인할 수 없습니다.")
+
+    date_text = _usage_date_text(usage_date)
+    row = _fetch_ocr_usage_row(client, user_id, date_text)
+    used = _usage_count_of(row)
+
+    if used >= DAILY_OCR_UPLOAD_LIMIT:
+        raise OcrQuotaExceeded(OCR_QUOTA_EXCEEDED_MESSAGE)
+
+    if row is None:
+        # 그 사용자의 그날 첫 업로드 — 날짜가 바뀌면 이 자리에서 **새 행**이 생깁니다.
+        # (어제 행을 고치지 않으므로 자정이 지나면 자연스럽게 0부터 다시 셉니다.)
+        _execute(
+            client.table(OCR_USAGE_TABLE).insert({
+                "user_id": user_id,
+                "usage_date": date_text,
+                "used_count": 1,
+            }),
+            "업로드 한도 기록",
+        )
+    else:
+        _execute(
+            client.table(OCR_USAGE_TABLE).update({"used_count": used + 1})
+                  .eq("id", row.get("id")).eq("user_id", user_id),
+            "업로드 한도 기록",
+        )
+
+    used += 1
+    return {
+        "limit": DAILY_OCR_UPLOAD_LIMIT,
+        "used": used,
+        "remaining": max(0, DAILY_OCR_UPLOAD_LIMIT - used),
+    }

@@ -17,6 +17,9 @@
     ⑦ 2026-08-17 검토에서 추가 — provider 분기(OCR_PROVIDER)가 실제로 동작하는지,
        이미지 형식을 지어내지 않고 실제 바이트대로 보내는지, 업로드 크기 제한이 브라우저뿐
        아니라 서버에서도 걸리는지, 실패 문구가 화면에 쌓이지 않는지
+    ⑧ 2026-08-17 오너 결정 — **사용자별 하루 업로드 한도**(유료 API 호출 횟수 제한):
+       경계값(마지막 1회는 되고 그 다음은 안 됨), 사용자 간 격리, 자정(날짜 변경) 리셋,
+       저장소가 없을 때 기존 관례대로 fail-closed 인지, 한도 초과가 조용히 무시되지 않는지
 
 ⚠️ 기존 `tests/test_scorecard.py` 스위트는 이 작업으로 회귀되지 않아야 하며, 그건 같이
    `pytest tests/test_scorecard_ocr.py tests/test_scorecard.py` 로 확인합니다(이 파일이
@@ -599,3 +602,268 @@ def test_ocr_module_keeps_no_mutable_module_level_state():
     assert not any(isinstance(n, ast.Global) for n in ast.walk(tree)), (
         "global 선언으로 모듈 상태를 다시 묶는 코드가 없어야 합니다(§0-3-8)"
     )
+
+
+# =============================================================================
+# ⑧ 하루 업로드 한도 (2026-08-17 오너 결정) — 유료 API 호출 횟수를 사용자별로 묶습니다
+# =============================================================================
+#  카운터는 `utils/scorecard_db.py` 가 Supabase(`ocr_usage_daily`)에 저장합니다. 여기서는
+#  네트워크 없이, 이미 있는 가짜 Supabase 클라이언트(`tests/test_scorecard.py::FakeClient`)를
+#  그대로 재사용해서 배선을 검증합니다(§0-3-10 — 테스트용 가짜를 새로 만들지 않습니다).
+# =============================================================================
+from datetime import date as _date, datetime as _datetime  # noqa: E402
+
+
+@pytest.fixture
+def quota_db():
+    """한도 로직이 들어 있는 데이터 계층 모듈."""
+    from utils import scorecard_db
+    return scorecard_db
+
+
+def _fake_client(rows=None, fail=False):
+    """기존 스위트의 가짜 Supabase 클라이언트를 재사용합니다.
+
+    (함수 안에서 import 하는 건 `tests/test_data_source.py` 가 다른 테스트 모듈의 도우미를
+     가져다 쓰는 방식과 같습니다 — 테스트 디렉터리가 sys.path 에 들어간 뒤에 부릅니다.)
+    """
+    from test_scorecard import FakeClient
+    return FakeClient(rows=rows, fail=fail)
+
+
+DAY_ONE = _date(2026, 8, 17)
+DAY_TWO = _date(2026, 8, 18)
+
+
+def test_owner_decided_limit_is_ten_per_user_per_day(quota_db):
+    """오너가 정한 값(하루 10회)을 코드에 고정합니다 — 조용히 바뀌면 이 테스트가 깨집니다."""
+    assert quota_db.DAILY_OCR_UPLOAD_LIMIT == 10
+
+
+def test_uploads_up_to_the_limit_pass_and_the_next_one_is_blocked(quota_db):
+    """경계값 — 마지막 1회(10회째)까지는 통과, 그 다음(11회째)은 차단."""
+    client = _fake_client()
+    limit = quota_db.DAILY_OCR_UPLOAD_LIMIT
+
+    for attempt in range(1, limit):                 # 1 ~ 9회째
+        quota = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+        assert quota["used"] == attempt
+        assert quota["remaining"] == limit - attempt
+
+    last = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)   # 10회째 = 한도 그 자체
+    assert last["used"] == limit and last["remaining"] == 0, (
+        "한도와 '같은' 횟수까지는 허용해야 합니다(10회 제한 = 10번은 쓸 수 있음)"
+    )
+
+    with pytest.raises(quota_db.OcrQuotaExceeded):                            # 11회째
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+
+def test_blocked_upload_does_not_increase_the_counter_any_further(quota_db):
+    """한도 초과 요청이 카운터를 계속 부풀리지 않는지(막힌 시도는 세지 않습니다)."""
+    client = _fake_client()
+    limit = quota_db.DAILY_OCR_UPLOAD_LIMIT
+    for _ in range(limit):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    for _ in range(3):
+        with pytest.raises(quota_db.OcrQuotaExceeded):
+            quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    rows = [r for r in client.store["rows"] if r["user_id"] == "user-a"]
+    assert len(rows) == 1 and int(rows[0]["used_count"]) == limit
+
+
+def test_quota_is_isolated_between_users(quota_db):
+    """§0-3-8 — A 가 한도를 다 써도 B 는 아무 영향이 없어야 합니다."""
+    client = _fake_client()
+    limit = quota_db.DAILY_OCR_UPLOAD_LIMIT
+
+    for _ in range(limit):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    with pytest.raises(quota_db.OcrQuotaExceeded):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+    first_for_b = quota_db.consume_ocr_quota(client, "user-b", usage_date=DAY_ONE)
+    assert first_for_b["used"] == 1, "B 의 카운터는 A 의 사용량과 완전히 별개여야 합니다"
+    assert first_for_b["remaining"] == limit - 1
+
+    by_user = {r["user_id"]: int(r["used_count"]) for r in client.store["rows"]}
+    assert by_user == {"user-a": limit, "user-b": 1}
+
+
+def test_every_quota_query_is_filtered_by_user_id(quota_db):
+    """조회·기록 쿼리가 항상 사용자 id 로 좁혀지는지(앱 쪽 이중 방어 — RLS 와 별개)."""
+    client = _fake_client()
+    quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+    assert client.store["last_table"] == quota_db.OCR_USAGE_TABLE
+    for op, filters, payload in client.store["calls"]:
+        columns = [col for col, _ in filters]
+        if op == "insert":
+            # 새 행은 필터가 아니라 저장값에 소유자·날짜가 박힙니다.
+            assert (payload or {}).get("user_id") == "user-a"
+            assert (payload or {}).get("usage_date") == DAY_ONE.isoformat()
+            continue
+        assert "user_id" in columns, f"{op} 쿼리에 user_id 필터가 없습니다(§0-3-8)"
+        if op == "select":
+            assert "usage_date" in columns, "조회는 사용자 + 날짜로 좁혀야 합니다"
+
+
+def test_counter_resets_when_the_date_changes(quota_db):
+    """자정이 지나면(날짜가 바뀌면) 다시 처음부터 셉니다."""
+    client = _fake_client()
+    limit = quota_db.DAILY_OCR_UPLOAD_LIMIT
+
+    for _ in range(limit):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    with pytest.raises(quota_db.OcrQuotaExceeded):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+    next_day = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_TWO)
+    assert next_day["used"] == 1 and next_day["remaining"] == limit - 1
+
+    stored = {r["usage_date"]: int(r["used_count"]) for r in client.store["rows"]}
+    assert stored == {DAY_ONE.isoformat(): limit, DAY_TWO.isoformat(): 1}, (
+        "어제 행을 덮어쓰지 않고 새 날짜 행이 따로 생겨야 합니다(사용 기록 보존)"
+    )
+
+
+def test_today_is_decided_on_the_server_in_kst(quota_db):
+    """'자정'의 기준은 브라우저 로컬 시간이 아니라 **서버가 정한 한국시간(KST)** 입니다.
+
+    (이 프로젝트가 화면에서 '오늘'을 정할 때 이미 쓰는 기준과 같습니다 — 새 관례를
+     만들지 않았습니다.)
+    """
+    assert quota_db.KST is not None, "zoneinfo 가 있는 환경에서는 KST 로 판단해야 합니다"
+    assert str(quota_db.KST) == "Asia/Seoul"
+    before = _datetime.now(quota_db.KST).date()
+    value = quota_db.ocr_usage_today()
+    after = _datetime.now(quota_db.KST).date()
+    assert value in (before, after)          # 자정을 막 지나는 순간에도 흔들리지 않게
+    assert isinstance(value, _date)
+
+
+def test_quota_fails_closed_when_storage_is_not_connected(quota_db):
+    """저장소(Supabase)가 없으면 **기존 관례 그대로 막습니다** — 무제한 허용이 아닙니다.
+
+    `fetch_holdings()` 등 이 파일의 모든 사용자 데이터 함수가 클라이언트 없이는
+    `ScorecardError` 를 던집니다. 한도 카운터만 예외를 두면, 횟수를 세지 못하는 상태에서
+    유료 API 만 열리는 정반대 방향의 사고가 됩니다.
+    """
+    with pytest.raises(quota_db.ScorecardError):
+        quota_db.consume_ocr_quota(None, "user-a", usage_date=DAY_ONE)
+    with pytest.raises(quota_db.ScorecardError):
+        quota_db.fetch_holdings(None, "user-a")          # 기존 함수도 같은 동작(관례 확인)
+    with pytest.raises(quota_db.ScorecardError):
+        quota_db.consume_ocr_quota(_fake_client(), "", usage_date=DAY_ONE)
+
+
+def test_storage_failure_does_not_silently_allow_the_paid_call(quota_db):
+    """카운터 기록이 실패하면 조용히 통과시키지 않고 예외를 올립니다(§0-1)."""
+    client = _fake_client(fail=True)
+    with pytest.raises(quota_db.ScorecardError):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+
+def test_corrupt_counter_value_is_not_treated_as_zero(quota_db):
+    """읽을 수 없는 값을 0으로 넘겨짚으면 한도가 조용히 초기화됩니다 — 그러지 않는지 확인."""
+    client = _fake_client(rows=[{
+        "id": "row-1", "user_id": "user-a",
+        "usage_date": DAY_ONE.isoformat(), "used_count": "??",
+    }])
+    with pytest.raises(quota_db.ScorecardError):
+        quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+
+
+def test_quota_status_reads_without_incrementing(quota_db):
+    """표시용 조회는 카운터를 건드리지 않아야 합니다."""
+    client = _fake_client()
+    quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
+    for _ in range(3):
+        status = quota_db.ocr_quota_status(client, "user-a", usage_date=DAY_ONE)
+    assert status["used"] == 1
+    assert status["remaining"] == quota_db.DAILY_OCR_UPLOAD_LIMIT - 1
+    assert int(client.store["rows"][0]["used_count"]) == 1
+
+
+def test_limit_is_checked_before_the_paid_api_call_in_ui(quota_db):
+    """화면 배선 — 한도 차감이 **유료 호출보다 먼저** 일어나는지(순서가 곧 비용입니다)."""
+    handler = _upload_handler_source()
+    assert "consume_ocr_quota" in handler, "업로드 핸들러가 한도를 전혀 확인하지 않습니다"
+    assert handler.index("consume_ocr_quota") < handler.index("extract_holdings_from_image"), (
+        "한도 확인이 유료 API 호출보다 뒤에 있으면 한도를 넘겨도 돈이 나갑니다"
+    )
+    # 유료 호출이 아예 없는 업로드(용량 초과)는 한도를 소모하지 않아야 합니다.
+    assert handler.index("len(image_bytes) > MAX_OCR_IMAGE_BYTES") < handler.index("consume_ocr_quota"), (
+        "서버 쪽 용량 검사는 한도 차감보다 먼저 끝나야 합니다"
+    )
+
+
+def test_limit_exceeded_is_shown_to_the_user_not_silently_ignored(quota_db):
+    """§0-1 — 한도 초과를 조용히 무시하지 않고 사람이 읽을 문장으로 보여줍니다."""
+    message = quota_db.OCR_QUOTA_EXCEEDED_MESSAGE
+    assert str(quota_db.DAILY_OCR_UPLOAD_LIMIT) in message, "몇 회 제한인지 문구에 있어야 함"
+    assert "한도" in message and "내일" in message and "직접 입력" in message, (
+        "왜 안 되는지 · 언제 다시 되는지 · 지금 대신 쓸 방법까지 알려줘야 합니다"
+    )
+    handler = _upload_handler_source()
+    assert "except ScorecardError as exc:" in handler, (
+        "한도 초과 예외를 잡아 화면에 보여주는 갈래가 없으면 조용한 실패가 됩니다"
+    )
+    quota_branch = _source_block(handler, "except ScorecardError as exc:", "except Exception as exc:")
+    assert "_show_ocr_error(" in quota_branch and "return" in quota_branch
+
+
+def test_manual_entry_is_never_blocked_by_the_upload_limit(quota_db):
+    """수동 입력 폼은 한도와 무관하게 계속 쓸 수 있어야 합니다(오너 지시)."""
+    page_src = _page_source()
+    submit_src = _source_block(page_src, "    def _submit() -> None:", "\ndef _render_currency_block(")
+    assert "consume_ocr_quota" not in submit_src, (
+        "직접 입력 저장 경로(_submit)가 업로드 한도를 소모하면 안 됩니다"
+    )
+    assert "add_lot(" in submit_src, "직접 입력 저장 경로는 그대로 살아 있어야 합니다"
+    # 입력창·추가 버튼은 OCR 플래그 블록 **밖**에 있어야 합니다(플래그가 꺼져도 동작).
+    form_src = _source_block(page_src, "\ndef _render_input_form(", "\ndef _render_currency_block(")
+    assert form_src.index("if SCORECARD_OCR_ENABLED:") < form_src.index("query_input = ui.input("), (
+        "직접 입력 폼이 OCR 블록 안으로 들어가면 플래그·한도에 묶여버립니다"
+    )
+
+
+def test_limit_number_is_a_single_constant_not_a_magic_number(quota_db):
+    """§0-3-10 — 숫자 10을 여기저기 적어두지 않고 상수 하나만 씁니다."""
+    page_src = _page_source()
+    assert "DAILY_OCR_UPLOAD_LIMIT" in page_src, "화면은 상수를 import 해서 써야 합니다"
+    assert f"{quota_db.DAILY_OCR_UPLOAD_LIMIT}회" not in page_src, (
+        "화면 문구에 한도 숫자를 직접 적으면 상수를 바꿔도 문구가 따라오지 않습니다"
+    )
+    db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
+    assert db_src.count("DAILY_OCR_UPLOAD_LIMIT = ") == 1, "한도 정의는 정확히 한 곳"
+    # SQL 스키마에도 숫자를 박아두지 않았는지(앱 상수와 어긋나는 두 번째 출처 금지)
+    schema = (REPO_ROOT / "sql" / "scorecard_schema.sql").read_text(encoding="utf-8")
+    assert "ocr_usage_daily" in schema, "카운터 표가 기존 스키마 파일에 정의돼 있어야 합니다"
+    assert f"used_count <= {quota_db.DAILY_OCR_UPLOAD_LIMIT}" not in schema
+
+
+def test_counter_table_follows_existing_schema_conventions(quota_db):
+    """새 저장 방식을 발명하지 않고 기존 표(holdings)와 같은 관례를 따르는지."""
+    schema = (REPO_ROOT / "sql" / "scorecard_schema.sql").read_text(encoding="utf-8")
+    section = schema[schema.index("create table if not exists public.ocr_usage_daily"):]
+    assert "references auth.users (id) on delete cascade" in section, "사용자 삭제 시 함께 정리"
+    assert "unique (user_id, usage_date)" in section, "사용자 × 날짜 1행"
+    assert "enable row level security" in section, "RLS 없이 두면 남의 카운터가 보입니다"
+    assert "auth.uid() = user_id" in section, "본인 행만 읽고 쓰게 하는 정책이 있어야 합니다"
+    assert "revoke all on public.ocr_usage_daily from anon" in section
+    # 사용자가 스스로 카운터를 되돌리는 길(삭제/감소)이 열려 있으면 한도가 무의미해집니다.
+    assert "for delete" not in section, "delete 정책을 열면 행을 지워 한도를 리셋할 수 있습니다"
+    assert "사용 횟수는 줄일 수 없습니다" in section, "감소 방지 트리거가 있어야 합니다"
+
+
+def test_quota_layer_does_not_leak_into_the_ocr_module(quota_db):
+    """OCR 모듈은 계속 '네트워크·DB 없이 단독 테스트 가능한' 순수 변환기로 남아야 합니다."""
+    ocr_src = _ocr_module_source()
+    # (주석에 파일 이름이 등장하는 건 의존이 아니므로 **실제 import 문**만 봅니다.)
+    assert not re.search(r"^\s*(from|import)\s+\S*scorecard_db", ocr_src, re.M), (
+        "OCR 모듈에 저장소 의존을 넣으면 오프라인 단독 테스트가 깨집니다(§4-3 계층 분리)"
+    )
+    assert not re.search(r"^\s*(from|import)\s+\S*supabase", ocr_src, re.M | re.I)
+    assert "consume_ocr_quota" not in ocr_src
