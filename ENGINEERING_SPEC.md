@@ -4,6 +4,12 @@
 > **크롤링·가공·검증 파이프라인의 무결성을 보장하기 위한 불변 규칙서입니다.**
 > **코드를 수정하는 AI 또는 개발자는 반드시 이 문서를 먼저 읽어야 합니다.**
 
+> 📌 **문서 신선도 안내 (2026-08-17 추가)**
+> **코딩 원칙(§0-1 ~ §9)은 프레임워크·호스팅과 무관하게 지금도 그대로 유효합니다** — 이 부분은
+> 낡지 않았습니다. 다만 본문 곳곳의 **코드 예시·파일 경로 일부는 NiceGUI 이전(2026-08-17) 전의
+> Streamlit 기준**입니다(예: `st.error()` 표기, `views/` 화면 경로). **지금 아키텍처·배포·화면
+> 구조는 `PROJECT_STATUS.md` §0을 먼저 보세요.** 현재 파일 구조는 이 문서 §10에 갱신해 두었습니다.
+
 ---
 
 ## 0. 프로젝트 개요
@@ -12,10 +18,10 @@
 |------|------|
 | **프로젝트명** | 잘 보면 보이는 손 (The Visible Hand) |
 | **목적** | KOSPI 200 시가총액 상위 종목의 퀀트 밸류에이션(PEGY) 대시보드 |
-| **프론트엔드** | Streamlit (`visiblehand.py`) |
+| **프론트엔드** | 🚀 NiceGUI (`main.py` + `web/`) — 2026-08-17 컷오버 완료. 🕰️ 구 Streamlit(`visiblehand.py`·`app.py`·`views/`)은 롤백용으로 동결 보관 중(§10) |
 | **데이터 수집** | 네이버 증권 웹 스크래핑 (`collector_kospi200.py`, `scrape_daily.py`) |
 | **검증 파이프라인** | 3단계 DataValidator (`utils/data_validator.py`) |
-| **배포** | GitHub Pages (정적 JSON) + Streamlit Cloud |
+| **배포** | 🚀 Render (Docker, `Dockerfile`) + GitHub Actions 자동 수집. 🕰️ 구 Streamlit Community Cloud 앱은 롤백 안전장치로 유지 중 — 기한·정리 대상은 `PROJECT_STATUS.md` §0-2·§0-5-4 |
 
 ---
 
@@ -437,15 +443,25 @@ if kospi_close is None:
 
 ### 0-3-10. 코드는 단순하게 · 중복은 만들지 않는다 (2026-08-16 추가, NiceGUI 이전 착수 전 오너 지시)
 
-> **"기존 코드를 안 지운다"는 안전 원칙(듀얼런, §11-1)이 "정리 안 된 코드가 쌓여도 된다"는
+> **"기존 코드를 안 지운다"는 안전 원칙(듀얼런)이 "정리 안 된 코드가 쌓여도 된다"는
 > 뜻은 아닙니다.** 같은 로직을 화면마다·파일마다 복붙하지 말고, 짧고 간단하게 쓸 수 있는
 > 방법이 있으면 그 방법을 씁니다 — 이건 코드 미관 문제가 아니라 **자원(서버 컴퓨팅·메모리,
 > 그리고 다음에 이 코드를 읽고 고칠 사람의 시간) 낭비를 막는 문제**입니다.
 
 - **듀얼런은 기한이 있는 임시 상태**입니다. 새 프레임워크(`web/`)와 옛 프레임워크(`views/`)가
-  동시에 존재하는 기간은 "검증이 끝날 때까지"로 한정하고, 컷오버 후에는 §11-1·부록 B에 적힌
-  대로 옛 코드를 **archive/로 이동**해 실제 서비스 경로에서 제거합니다. "언젠가 정리하겠다"고
-  무기한 남겨두지 않습니다.
+  동시에 존재하는 기간은 "검증이 끝날 때까지"로 한정하고, 그 기간이 지나면 옛 코드를
+  **`archive/`로 이동**해 실제 서비스 경로에서 제거합니다. "언젠가 정리하겠다"고 무기한
+  남겨두지 않습니다.
+  > 📌 **지금 적용되는 기한과 정리 대상 목록은 `PROJECT_STATUS.md` §0-2·§0-5-4가 살아있는
+  > 단일 출처입니다** (2026-08-17 컷오버 완료 → 그 시점부터 최소 2주간 Streamlit 앱·`views/`·
+  > `visiblehand.py`·`app.py`를 롤백 안전장치로 **수정 없이** 유지 → 유예 종료 후 `archive/`
+  > 이동 + 의존성·워크플로우 정리). 날짜를 이 문서에 복사해 두지 않는 이유는, 기한이 바뀌었을 때
+  > 두 문서가 어긋나면 어느 쪽이 진짜인지 알 수 없게 되기 때문입니다(§0-1과 같은 이유).
+  >
+  > *(2026-08-17 정정: 이 항목은 원래 "§11-1·부록 B"를 인용했는데 이 문서에는 없는 번호입니다.
+  > 같은 시기에 쓰인 §0-3-9의 "§8-4", 코드 주석의 "계획서 §8-5"와 마찬가지로 저장소 밖
+  > `NICEGUI_MIGRATION_PLAN.md`의 절 번호를 가리킨 것으로 보이며, 저장소 안에서는 확인할 수
+  > 없어 위의 살아있는 출처로 대체했습니다. 규칙 자체는 바꾸지 않았습니다.)*
 - **새로 짜는 코드도 처음부터 중복을 피합니다.** 예: `pegy`·`us_stocks` 두 화면이 카드 구조가
   거의 같다면 각자 따로 그리지 말고 `web/components/`의 공용 함수 하나를 두 화면이 같이
   씁니다(이전 계획서 §4-1이 이미 이 순서를 그렇게 짠 이유이기도 합니다). 같은 로직이 두 곳 이상에
@@ -501,10 +517,16 @@ if kospi_close is None:
                  │
                  ▼
 ┌─────────────────────────────────────────┐
-│  6. Dashboard (visiblehand.py)          │
-│     Streamlit 대시보드 렌더링            │
+│  6. Dashboard (main.py + web/)          │
+│     NiceGUI 대시보드 렌더링              │
 └─────────────────────────────────────────┘
 ```
+
+> 🕰️ 6번 상자는 2026-08-17 컷오버 전까지 `visiblehand.py`(Streamlit)였습니다. 화면 계층만
+> 바뀌었고 **1~5번(수집·검증·스코어링·저장)은 그대로 재사용**합니다 — 계산 로직은 이전하지
+> 않았습니다(`PROJECT_STATUS.md` §0-4). 실행 중 `data/*.json`을 원격에서 읽는 경로
+> (`utils/data_source.py`)가 5번과 6번 사이에 추가로 끼어 있을 수 있습니다(환경변수
+> `DATA_SOURCE_BASE_URL` 설정 시에만 — 미설정이면 기존과 100% 동일하게 로컬 파일만 읽습니다).
 
 ---
 
@@ -726,9 +748,15 @@ t_fair   = min(t_eps × min(growth + sh_yield, 25.0), price × 2.5)
 
 | 파일 | 역할 | 수정 시 주의 |
 |------|------|-------------|
-| `visiblehand.py` | Streamlit 메인 앱 | UI만 담당. 데이터 가공 로직 절대 여기에 넣지 말 것 |
-| `views/pegy_view.py` | PEGY 밸류에이션 페이지 | JSON 데이터 읽기 전용. 가공은 collector에서 완료 |
-| `views/macro_view.py` | 매크로 방공망 페이지 | market_history.csv 읽기 전용 |
+| `visiblehand.py` | 🕰️ 구 Streamlit 메인 앱 (동결) | UI만 담당. 데이터 가공 로직 절대 여기에 넣지 말 것 |
+| `views/pegy_view.py` | 🕰️ 구 PEGY 밸류에이션 페이지 (동결) | JSON 데이터 읽기 전용. 가공은 collector에서 완료 |
+| `views/macro_view.py` | 🕰️ 구 매크로 방공망 페이지 (동결) | market_history.csv 읽기 전용 |
+
+> 🚀 **표현 계층은 2026-08-17부로 `main.py` + `web/pages/`(NiceGUI)로 옮겨졌습니다.** 위 세 파일을
+> 포함한 `views/`는 롤백 유예 기간 동안 **한 글자도 수정하지 않는** 동결 상태입니다(§0-3-10).
+> 화면을 고쳐야 하면 `web/pages/`를 고치세요 — 파일별 대응 관계는 §10, 공개 상태는
+> `PROJECT_STATUS.md` §0-3을 보세요. **"UI만 담당하고 데이터 가공 로직을 넣지 않는다"는 규칙
+> 자체는 `web/` 쪽에도 똑같이 적용됩니다.**
 
 ### 검증 계층 (Test Layer)
 
@@ -831,33 +859,147 @@ python -c "import json; d=json.load(open('data/kospi200_pegy_latest.json',encodi
 
 ---
 
-## 10. 📂 디렉토리 구조 (전체)
+## 10. 📂 디렉토리 구조 (전체) — 2026-08-17 갱신
+
+> ⚠️ **지금 이 저장소는 웹 프레임워크가 두 벌 들어있는 "듀얼런" 상태입니다.** 어느 쪽이
+> 실서비스인지 헷갈리면 잘못된 파일을 고치게 되므로, 아래 표시를 먼저 보세요.
+>
+> | 표시 | 뜻 |
+> |---|---|
+> | 🚀 **NiceGUI — 지금 실서비스** | `https://visiblehand.co.kr` (Render)가 실제로 실행하는 코드. **화면 수정은 여기서** |
+> | 🕰️ **Streamlit — 롤백 안전장치** | 2026-08-17 컷오버 전 코드. **수정 금지**(§0-3-10, 지금은 아무도 안 건드리는 참고용 사본). 유예 종료 후 `archive/`로 이동 예정 — **기한·정리 대상 목록은 `PROJECT_STATUS.md` §0-2·§0-5-4가 단일 출처** |
+> | (표시 없음) | 두 스택이 **공용으로 쓰는** 수집·계산·데이터 계층. 이전 대상이 아니었고 그대로 재사용됩니다 |
 
 ```
 visible_hand/
-├── ENGINEERING_SPEC.md          ← 이 문서 (AI 불변 규칙서)
-├── visiblehand.py               ← Streamlit 메인 앱
-├── app.py                       ← 앱 엔트리포인트
-├── collector_kospi200.py        ← KOSPI 200 수집기 (핵심)
-├── scrape_daily.py              ← 일별 매크로 지표 수집기
-├── test_harness.py              ← 통합 검증 하네스
-├── test_live.py                 ← 라이브 테스트
-├── requirements.txt             ← Python 의존성
-├── data/
-│   ├── kospi200_pegy_latest.json    ← 최신 200종목 스냅샷
-│   └── pegy_summary_history.json    ← 요약 지표 이력
-├── utils/
-│   ├── data_validator.py        ← 3단계 검증 + PERIOD_KEYWORDS (원본)
-│   ├── scoring.py               ← 100점 만점 퀀트 스코어링
-│   ├── guardrail.py             ← 하드 컷오프 방공망
-│   ├── db.py                    ← DB 유틸리티
-│   └── gdrive_helper.py         ← Google Drive 연동
-├── views/
-│   ├── pegy_view.py             ← PEGY 밸류에이션 뷰
-│   ├── macro_view.py            ← 매크로 방공망 뷰
-│   └── admin_view.py            ← 관리자 사이드바
-└── .github/                     ← GitHub Actions CI/CD
+│
+├── 🚀 main.py                    NiceGUI 진입점 (@ui.page 등록 · /healthz · ui.run)
+├── 🚀 web/                       NiceGUI 화면 계층 (표현 계층)
+│   ├── theme.py                    전역 CSS 등록 (⚠️ f-string 조립 금지 — 과거 #129 사고 원인)
+│   ├── auth.py                     app.storage(로그인 세션)를 다루는 **유일한** 파일 (§0-3-8)
+│   ├── auth_ui.py                  로그인/가입/비밀번호 찾기 폼 (scorecard·report 공용)
+│   ├── layout.py                   헤더+좌측 드로어, 메뉴(_MENU), 전역 "데이터 최신 아님" 배너
+│   ├── state.py                    읽기 전용 시장데이터 로더 (내부에서 data_source 경유)
+│   ├── components/                 화면 공용 UI 조각 (§0-3-10 중복 금지)
+│   │   ├── __init__.py
+│   │   ├── html.py                   HTML 문자열 조립 헬퍼 (순수 함수, NiceGUI 미의존)
+│   │   ├── widgets.py                배너·메트릭 카드·다운로드 버튼·페이지네이션
+│   │   └── stock_download.py         종목별 데이터 다운로드 도구 (공용)
+│   └── pages/                      화면 1개 = 파일 1개 (공개 상태는 PROJECT_STATUS.md §0-3)
+│       ├── pegy_page.py              /            코스피 PEGY (공개 기본 화면)
+│       ├── us_stocks_page.py         /us          미국주식 (공개)
+│       ├── scorecard_page.py         /scorecard   내 성적표 (공개, 로그인 필요)
+│       ├── report_page.py            /report      사장님 보고서 (공개, 로그인 필요)
+│       ├── macro_page.py             /admin/macro 매크로 방공망 (관리자 전용·개발 중단)
+│       └── admin_page.py             /admin       관리자 콘솔
+│
+├── 🕰️ visiblehand.py             구 Streamlit 메인 앱 (동결)
+├── 🕰️ app.py                     구 Streamlit 엔트리포인트 (동결)
+├── 🕰️ index.html                 구 GitHub Pages 래퍼(Streamlit iframe). 커스텀 도메인 해제됨
+├── 🕰️ keep_awake_ping.py         구 Streamlit 슬립 방지 핑 (파일 주석에 삭제 대상 표시됨)
+├── 🕰️ views/                     구 Streamlit 화면 계층 (동결) — web/pages/ 와 1:1 대응
+│   ├── pegy_view.py                → web/pages/pegy_page.py
+│   ├── us_stocks_view.py           → web/pages/us_stocks_page.py
+│   ├── scorecard_view.py           → web/pages/scorecard_page.py
+│   ├── report_view.py              → web/pages/report_page.py
+│   ├── macro_view.py               → web/pages/macro_page.py
+│   └── admin_view.py               → web/pages/admin_page.py
+│
+├── collector_kospi200.py         코스피 시총 상위 200 수집기 (핵심)
+├── collector_us_stocks.py        🇺🇸 미국주식 550종목 수집기 + 상단 지수 3종
+├── collector_us_indices.py       📈 리포트용 미국 벤치마크(S&P500·나스닥) 일별 종가 수집기
+├── scrape_daily.py               일별 매크로 위험 지표 수집기 → market_history.csv
+├── market_history.csv            날짜별 종합 위험 점수 이력 (원격 로드 대상 아님 — 로컬 유지)
+├── titles.json                   재무제표 항목명 목록 (현재 코드에서 참조하는 곳 없음)
+│
+├── utils/                        수집·검증·계산·데이터 계층 (두 스택 공용 — 계산 로직은 이전하지 않고 그대로 재사용)
+│   ├── data_validator.py           3단계 검증 + PERIOD_KEYWORDS (원본)
+│   ├── constants.py                전역 임계값·가중치 단일 출처
+│   ├── constants_us.py             🇺🇸 미국주식 전용 상수
+│   ├── scoring.py                  퀀트 스코어링 (코스피)
+│   ├── scoring_us.py               🇺🇸 미국주식 전용 스코어링 + 파생 밸류에이션
+│   ├── guardrail.py                하드 컷오프/차단·마스킹 판정
+│   ├── macro_scoring.py            매크로 종합점수 계산 (저장·표시 공용)
+│   ├── macro_ai.py                 매크로 AI 코멘트
+│   ├── krx_openapi.py              KRX OPEN API 최소 클라이언트 (매크로 2지표 전용)
+│   ├── db.py                       market_history.csv 저장·복구 계층
+│   ├── gdrive_helper.py            Google Drive 백업
+│   ├── scorecard_db.py             📊 "내 성적표" 데이터 계층 (Supabase 래퍼 + 순수 계산)
+│   ├── report_db.py                📈 "리포트" 데이터 계층 (스냅샷 적재 + 기간 집계)
+│   ├── data_source.py              🌐 data/*.json 원격 로더 (DATA_SOURCE_BASE_URL 미설정 시 기존과 동일)
+│   ├── stock_history.py            종목별 시계열 이력의 단일 출처
+│   ├── stock_export.py             종목별 데이터 다운로드(CSV/JSON) 변환
+│   ├── company_names_kr.py         🇺🇸 미국 종목 한글 표기
+│   └── scheduler.py                앱 내장 스케줄러 (기본 비활성 — 정식 경로는 GitHub Actions)
+│
+├── tests/                        오프라인 검증 스위트 (네트워크 불필요)
+│   ├── test_quant.py               퀀트 연산 엔진 무결성
+│   ├── test_us_stocks.py           🇺🇸 미국주식 수집기 기초틀
+│   ├── test_us_scoring.py          🇺🇸 미국주식 스코어링·전수수집 경로
+│   ├── test_macro_scoring.py       매크로 실측 지표 정규화
+│   ├── test_stock_history.py       종목별 이력 + 다운로드 내보내기
+│   ├── test_scorecard.py           📊 "내 성적표" 모듈
+│   ├── test_report.py              📈 "리포트" 모듈
+│   ├── test_data_source.py         🌐 원격 데이터 로드
+│   ├── test_web_session_isolation.py  🔴 §0-3-8 동시 접속 격리 — 가장 중요한 테스트
+│   └── fixtures/                   실응답 캡처 픽스처(JSON) — 지어낸 값이 아닌 실제 원문
+│
+├── sql/                          오너가 Supabase 대시보드에서 **1회 수동 실행**하는 스크립트
+│   ├── scorecard_schema.sql        📊 "내 성적표" 테이블 + RLS
+│   └── report_schema.sql           📈 "리포트" 스냅샷 테이블 + RLS
+│
+├── data/                         수집 산출물 (GitHub Actions가 커밋해 누적)
+│   ├── kospi200_pegy_latest.json     최신 코스피 200종목 스냅샷
+│   ├── pegy_summary_history.json     시장 전체 요약 이력 (종목별 이력 아님)
+│   ├── kospi200_stock_history.csv    종목별 날짜 이력 (코스피)
+│   ├── kr_all_market_prices.json     코스피+코스닥 전 종목 종가
+│   ├── us_stocks_latest.json         🇺🇸 미국주식 가공 스냅샷
+│   ├── us_stocks_raw_latest.json     🇺🇸 raw 보관본 (§0-3-3 raw/가공 분리)
+│   ├── us_summary_history.json       🇺🇸 요약 이력
+│   ├── us_stocks_history.csv         🇺🇸 종목별 날짜 이력
+│   ├── us_all_market_prices.json     🇺🇸 상장 전 종목 현재가
+│   ├── us_all_etf_prices.json        🇺🇸 ETF 현재가 (소스가 달라 파일 분리)
+│   ├── us_index_history.json         🇺🇸 벤치마크(S&P500·나스닥) 일별 종가
+│   ├── us_collect_checkpoint.json    🇺🇸 전수 수집 체크포인트
+│   └── macro_commentary.json         매크로 AI 코멘트
+│
+├── .github/workflows/
+│   ├── scrape.yml                  코스피 자동 수집 (평일 KST 16:05)
+│   ├── scrape_us.yml               🇺🇸 미국주식 자동 수집
+│   ├── scrape_report_snapshots.yml 📈 벤치마크 종가 + 사용자별 평가금액 스냅샷 적재
+│   ├── render_keep_awake.yml       🚀 Render 무료 인스턴스 슬립 방지 (10분 간격)
+│   └── keep_awake.yml              🕰️ Streamlit 슬립 방지 (유예 종료 시 streamlit_wake job 삭제 대상)
+│
+├── Dockerfile                    🚀 Render 배포용 (Streamlit Cloud는 사용 안 함)
+├── requirements.txt              Python 의존성 (streamlit·altair는 유예 종료 후 제거 대상)
+├── .gitattributes                줄바꿈(CRLF/LF) 잡음 방지 — `git add --renormalize` 금지
+├── .gitignore / .dockerignore    비밀 파일·archive/ 등 제외 규칙
+├── .devcontainer/devcontainer.json  🕰️ Codespaces 설정 (streamlit run app.py 기준)
+│
+├── ENGINEERING_SPEC.md           ← 이 문서 (코딩 원칙 · AI 불변 규칙서)
+├── PROJECT_STATUS.md             ← **현황판. 다음 세션은 여기부터, 특히 §0**
+├── TASK_HISTORY.md               번호별 전체 작업 이력
+├── SCORECARD_WORK_ORDER.md       📊 "내 성적표" v1 실행 지시서 (완료, 역사 기록)
+├── REPORT_WORK_ORDER.md          📈 "리포트" v1 실행 지시서 (완료, 역사 기록)
+├── US_STOCKS_WORK_ORDER.md       🇺🇸 미국주식 v1 실행 지시서 (완료, 역사 기록)
+├── MY_SCORECARD_MODULE_NOTES.md  📊 "내 성적표" 마인드맵 1차 검토 메모
+├── MACRO_REDESIGN_PROPOSAL.md    매크로 지표 재설계 제안서 (⚠️ 매크로는 오너 지시로 중단 상태)
+├── AUDIT_REPORT.md               2026-08-05 1차 감사 보고서
+├── AUDIT_REPORT_V2.md            2026-08-06 2차 감사 보고서
+└── 로컬_데이터_최신화_방법.txt    로컬에서 수동으로 데이터 최신화하는 절차 메모
 ```
+
+**이 트리를 읽을 때 주의할 점**
+
+- `data/`의 파일 목록은 **코드가 읽고 쓰는 경로 기준**입니다. 실제 파일 존재 여부는 그 수집기가
+  언제 마지막으로 성공했는지에 달려 있습니다(없으면 지어내지 말고 "수집 실패"로 표시 — §0-1).
+- `archive/`, `data/us_sample/`, `service_account.json`, `credentials.json`, `token.json`,
+  `check_*.py`는 `.gitignore` 대상이라 위 트리에 없습니다(존재하지 않는다는 뜻이 아닙니다).
+- §6·§8·§9가 실행하라고 적어둔 `test_harness.py`는 **저장소 루트에 없습니다** —
+  `.gitignore`된 `archive/`로 들어가 있다고 `AUDIT_REPORT.md` §10이 기록하고 있습니다.
+  지금 **실제로 돌릴 수 있는 검증 스위트는 위 `tests/`** 입니다.
+- 화면(`web/pages/`)을 새로 추가할 때는 `web/layout.py`의 `_MENU`에도 한 줄 추가해야 하고,
+  **완성되기 전에는 메뉴를 미리 만들지 않습니다**(누르면 404 — 그 파일 주석 참고).
 
 ---
 

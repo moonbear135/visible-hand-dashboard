@@ -1,5 +1,14 @@
 # 📊 "내 성적표" v1 신규 구축 — 실행 지시서 (오푸스5 최고성능용)
 
+> ⚠️ **이 문서는 v1 빌드 당시(2026-08-11, Streamlit) 기준의 역사 기록입니다 — 지금 아키텍처가
+> 아닙니다.** 이 지시서대로 새로 만들지 마세요: **"내 성적표"는 이미 완성돼 `/scorecard`로
+> 실서비스 중**입니다(2026-08-17 공개 전환). 화면은 `views/scorecard_view.py`가 아니라
+> **`web/pages/scorecard_page.py`(NiceGUI)** 가 그리고, 로그인 세션은 `web/auth.py`가 **유일하게**
+> 다룹니다(§0-3-8). 배포도 Streamlit Cloud가 아니라 **Render**여서 아래 §1의 "Streamlit Cloud
+> Secrets에 등록" 절차는 지금은 **Render Environment 등록**으로 바뀌었습니다 —
+> "**GitHub Actions Secrets와 다른 곳**"이라는 구분 자체는 지금도 그대로 유효합니다.
+> 현재 아키텍처·공개 상태는 `PROJECT_STATUS.md` §0을 보세요.
+
 > 이 문서는 **다른 세션·다른 모델(오푸스)이 이 대화의 맥락 없이 처음부터 읽어도 작업을 시작할 수 있도록**
 > 만든 독립 실행 지시서입니다. 2026-08-06 밤 1차 검토 메모(`MY_SCORECARD_MODULE_NOTES.md`)와
 > 2026-08-10~11 오너 대화에서 확정된 내용을 종합해 정리했습니다.

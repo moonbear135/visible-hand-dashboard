@@ -1,5 +1,13 @@
 # 🇺🇸 미국주식 페이지 신규 구축 — 실행 지시서 (오푸스용)
 
+> ⚠️ **이 문서는 v1 빌드 당시(2026-08-06, Streamlit) 기준의 역사 기록입니다 — 지금 아키텍처가
+> 아닙니다.** 이 지시서대로 새로 만들지 마세요: **미국주식 화면은 이미 완성돼 `/us`로 공개
+> 실서비스 중**입니다(2026-08-08 공개 전환). 화면은 `views/us_stocks_view.py`가 아니라
+> **`web/pages/us_stocks_page.py`(NiceGUI)** 가 그리고, 메뉴 배선도 `visiblehand.py` 사이드바가
+> 아니라 `web/layout.py`의 `_MENU`에서 합니다. 수집기·스코어링(`collector_us_stocks.py`,
+> `utils/scoring_us.py`, `utils/constants_us.py`)은 이 지시서대로 만들어져 **지금도 그대로
+> 쓰입니다.** 현재 아키텍처는 `PROJECT_STATUS.md` §0을 보세요.
+
 > 이 문서는 **다른 세션·다른 모델(오푸스)이 이 대화의 맥락 없이 처음부터 읽어도 작업을 시작할 수 있도록** 만든
 > 독립 실행 지시서입니다. 2026-08-06 밤, 소넷과의 대화에서 조사·확정된 내용을 정리했습니다.
 > 작업 시작 전 반드시 `ENGINEERING_SPEC.md` 전체와 `PROJECT_STATUS.md`를 먼저 읽으세요(§0-2 절차).
