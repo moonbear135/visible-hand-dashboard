@@ -113,9 +113,15 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
    아님** — GitHub Actions 스케줄은 워크로드 몰릴 때 지연될 수 있어 가끔 콜드스타트가
    한 번씩 있을 수 있음(지어내지 않기). 완전한 상시 기동이 필요해지면 그때는 유료
    (Starter, 월 $7선) 승격이 유일한 확실한 해법 — 지금은 이 정도로 충분해 보류.
-3. **🟡 원격 데이터 로드(`DATA_SOURCE_BASE_URL`) 실검증** — env var는 등록 완료,
-   "마지막 동기화" 시각 갱신도 1회 확인됨. 다만 실패 시 배너가 뜨는지(일부러 오타
-   주소로 테스트), 백오프가 실제로 걸리는지는 실기기에서 추가로 봐도 좋습니다.
+3. **✅ 실검증 완료 — 원격 데이터 로드(`DATA_SOURCE_BASE_URL`) (2026-08-17).** Render
+   Environment의 `DATA_SOURCE_BASE_URL` 끝에 일부러 오타(`x`)를 붙여 재배포한 뒤 실제
+   확인: ① `/scorecard`에 실패 사유(HTTP 404)와 폴백 사본 시각까지 정확히 담긴 빨간
+   배너 정상 노출, 서비스는 로컬 사본으로 안 끊김. ② Render Logs에서 `kospi200_pegy_
+   latest.json`이 12:28:04에 1회 실패한 뒤 같은 파일로 22초 동안 페이지를 5번
+   새로고침해도(07·23·24·25·26초) 재요청 로그가 **한 번도 안 찍힘** — `RETRY_BACKOFF_
+   SECONDS = 60.0`이 실제로 작동함을 확인. ③ 오타 제거 후 재배포 → 배너 정상 소멸,
+   실제 보유 종목 데이터 정상 표시까지 확인. 테스트 중 겪은 1회성 로그아웃은 재배포로
+   인스턴스가 재시작되며 메모리 세션이 초기화된 것으로, 버그 아님(정상 동작).
 4. **⏳ 2026-08-31 이후 정리 작업** — Streamlit 앱 정지, `views/`·`visiblehand.py`·
    `app.py`·`index.html`·`CNAME`·`keep_awake_ping.py`의 Streamlit 관련 부분을
    `archive/`로 이동, `requirements.txt`에서 streamlit·altair 등 제거,
