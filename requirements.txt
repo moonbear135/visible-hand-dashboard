@@ -21,10 +21,11 @@ bcrypt
 supabase
 
 # 2026-08-16 — Streamlit → NiceGUI 이전(NICEGUI_MIGRATION_PLAN.md) 0단계.
-# `streamlit`/`altair`는 컷오버 전까지 지우지 않습니다(듀얼런, ENGINEERING_SPEC.md §0-3-10) —
-# main.py(NiceGUI)와 app.py(Streamlit)가 당분간 같은 저장소에서 나란히 삽니다.
-# 2026-08-17 컷오버 완료 — 지금은 롤백 안전장치로 유지 중. 실제 제거 시점·대상은
-# PROJECT_STATUS.md §0-2·§0-5-4가 살아있는 단일 출처입니다(이 줄이 낡아도 그쪽만 보면 됨).
+# `streamlit`/`altair`는 컷오버 전까지 지우지 않습니다(듀얼런, ENGINEERING_SPEC.md §0-3-10 ·
+# NICEGUI_MIGRATION_PLAN.md §11-1) — main.py(NiceGUI)와 app.py(Streamlit)가 당분간 같은
+# 저장소에서 나란히 삽니다. 2026-08-17 컷오버 완료 — 지금은 롤백 안전장치로 유지 중.
+# 실제 제거 대상·시점은 NICEGUI_MIGRATION_PLAN.md 부록 B(가장 구체적) 또는
+# PROJECT_STATUS.md §0-2·§0-5-4(지금 상태 요약)를 보세요 — 이 줄엔 날짜를 복사해두지 않습니다.
 nicegui
 
 # 2026-08-10 (TASK_HISTORY #70) — KRX OPEN API 연동에 **새 의존성을 추가하지 않았습니다.**
