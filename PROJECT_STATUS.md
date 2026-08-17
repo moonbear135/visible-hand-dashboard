@@ -118,7 +118,18 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
    `archive/`로 이동, `requirements.txt`에서 streamlit·altair 등 제거,
    `.github/workflows/keep_awake.yml`의 `streamlit_wake` job 삭제(코드 주석에 표시돼
    있음).
-5. **참고**: §4(매크로 재설계) 이하 Streamlit 시절 "지금 열려있는 일" 목록은 이제
+5. **⏳ 진행 중 — "내 성적표" v2(스크린샷 OCR) (2026-08-17 착수).** 자세한 스케줄·설계 결정은
+   `SCORECARD_V2_OCR_WORK_ORDER.md`(레포 루트) 참고. 2~4단계(설계·코드 구현·오프라인 테스트)
+   완료, 하루 10회 업로드 제한(사용자별, KST 자정 리셋)까지 구현·커밋 완료. `SCORECARD_OCR_
+   ENABLED` 플래그로 기본 숨김. 1단계(오너의 Gemini API 결제 프로젝트 설정)와 5단계(실기기
+   실검증)는 아직 미착수 — 다음 세션은 여기서부터.
+6. **⏳ 대기 — `google-generativeai` → `google-genai` 마이그레이션 (2026-08-17 판단).**
+   `google-generativeai`는 구글이 지원 종료(EOL) 선언한 패키지(`ENGINEERING_SPEC.md`
+   §0-3-12 참고). `utils/macro_ai.py`(운영 중)와 `utils/scorecard_ocr.py`(v2 OCR) 둘 다
+   이 패키지를 씀 — 마이그레이션 대상은 두 파일 동시. **오너 판단: v2 OCR 5단계 실검증이
+   끝나고 안정된 뒤에 진행(안전 우선, 지금 옮기면 검증 전 코드가 한꺼번에 바뀌어 원인 추적이
+   어려워짐).** 5단계 실검증 완료 전까지는 착수하지 않습니다.
+7. **참고**: §4(매크로 재설계) 이하 Streamlit 시절 "지금 열려있는 일" 목록은 이제
    대부분 낡았거나(성적표·보고서 공개는 새 사이트 기준으로 §0-3 참고) 매크로처럼
    여전히 유효한 오너 지시(중단 상태 유지)만 남아있습니다 — 필요할 때만 개별 대조하세요.
 
