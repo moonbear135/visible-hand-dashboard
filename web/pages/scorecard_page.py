@@ -42,7 +42,9 @@
      표시하고 평가금액·수익률을 계산하지 않습니다 (§0-1).
 """
 
-from nicegui import ui
+import os
+
+from nicegui import run, ui
 
 from utils.company_names_kr import resolve_korean_name
 from utils.scorecard_db import (
@@ -72,6 +74,11 @@ from utils.scorecard_db import (
     user_id_of,
     valuation_summary,
 )
+# 📊 v2(2026-08-17) — 스크린샷 OCR 프리필. 화면은 이 함수 하나만 알면 됩니다 — 실제 외부
+# AI provider가 나중에 바뀌어도 이 import 한 줄 말고는 아무것도 안 바뀝니다. 이 파일에는
+# provider 회사 이름이 등장하지 않습니다(ENGINEERING_SPEC.md §0-3-11 — 어느 provider인지는
+# utils/scorecard_ocr.py 안에서만 갈립니다. `SCORECARD_V2_OCR_WORK_ORDER.md` 참고).
+from utils.scorecard_ocr import OcrError, extract_holdings_from_image
 
 from web.auth import get_client, has_supabase_session, logout
 # 🔐 로그인/회원가입/비밀번호 찾기 폼은 '사장님 보고서'(/report)와 **완전히 같은 화면**이라
@@ -106,6 +113,23 @@ CURRENCY_TITLES = {
 # ⚠️ 이 상수는 DB 정의에서 그대로 유도한 값이지 임의로 정한 값이 아닙니다
 #    (views/scorecard_view.py 의 MAX_INPUT_VALUE 와 동일 — 컷오버 때 옛 파일이 사라지며 일원화됩니다).
 MAX_INPUT_VALUE = 10 ** 14  # 이 값 **이상**은 저장 불가
+
+# 2026-08-17 — "성적표 v2" 스크린샷 OCR 프리필 기능의 스테이징 플래그
+# (ENGINEERING_SPEC.md §0-3-6 "신규 기능은 스테이징 후 오너 승인 전까지 기본 숨김",
+# SCORECARD_V2_OCR_WORK_ORDER.md). 기본값은 항상 꺼짐(False) — 값이 정확히 "true"(대소문자
+# 무관)일 때만 켜집니다. 이렇게 하지 않고 "값이 있으면 켜짐"으로 판정하면, 환경변수를
+# 실수로 빈 문자열 아닌 아무 값으로만 채워도 켜지는 사고가 날 수 있습니다.
+# ⚠️ `web/auth.py::get_admin_password_hash()` 와 같은 자리(화면/모듈이 직접 쓰는 곳에서
+# `os.environ` 을 읽는 것)의 기존 관례를 그대로 따릅니다 — 이 프로젝트에는 별도의 "설정
+# 레지스트리" 모듈이 없고(§0-3-10 YAGNI), `utils/constants.py` 는 순수 상수(문자열/숫자/
+# 사전)만 담아 왔으므로 환경변수를 읽는 코드를 거기로 옮기지 않습니다.
+SCORECARD_OCR_ENABLED = (os.environ.get("SCORECARD_OCR_ENABLED") or "").strip().lower() == "true"
+
+# 스크린샷 업로드 허용 최대 크기. **브라우저 검사와 서버 검사가 같은 값을 쓰도록** 상수를
+# 하나만 둡니다(§0-3-10). `ui.upload(max_file_size=...)` 는 Quasar(브라우저) 쪽 검사라
+# 업로드 주소로 직접 POST 하면 그대로 지나가므로, 서버에서 한 번 더 확인해야 실제 방어가
+# 됩니다(§0-3-9 — 이미 널리 알려진 대용량 업로드 남용). 폰 스크린샷은 보통 1~5MB입니다.
+MAX_OCR_IMAGE_BYTES = 15 * 1024 * 1024
 
 # 정렬 드롭다운의 "정렬하지 않음" 항목 (추가한 순서 그대로)
 _SORT_NONE = "기본순서"
@@ -248,6 +272,17 @@ def _parse_positive_number(raw, label):
             f"{MAX_INPUT_VALUE - 1:,}(약 100조 미만)입니다: {raw!r}"
         )
     return number
+
+
+def _ocr_value_text(value) -> str:
+    """OCR(`utils/scorecard_ocr.py`)이 읽은 숫자를 입력창에 채울 텍스트로 바꿉니다.
+
+    ⚠️ `None` 이면 빈 문자열을 돌려줍니다 — 값을 못 읽은 칸은 지어내지 않고 비워둬서
+    사용자가 직접 채우게 합니다(§0-1). 정수면 소수점을 붙이지 않습니다(10.0 → "10").
+    """
+    if value is None:
+        return ""
+    return str(int(value)) if float(value).is_integer() else str(value)
 
 
 # =============================================================================
@@ -504,6 +539,125 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             .classes('w-full')
 
     picker_block()
+
+    # =========================================================================
+    # 📊 v2(2026-08-17, 스테이징) — 스크린샷 OCR 프리필
+    # SCORECARD_OCR_ENABLED 가 꺼져 있으면(기본값) 이 블록은 아예 그려지지 않습니다
+    # (§0-3-6 신규 기능 기본 숨김). `query_input`/`qty_input`/`price_input` 은 아래에서
+    # 정의되지만, 이 안의 클릭 핸들러는 **버튼을 실제로 누르는 시점**(항상 아래 정의가
+    # 끝난 뒤)에만 실행되므로 파이썬 클로저 규칙상 문제가 없습니다.
+    #
+    # ⚠️ 여기서 하는 일은 **입력창 3칸에 값을 채우는 것뿐**입니다. 저장(Supabase
+    # insert/merge)은 사용자가 채워진 값을 검토·수정한 뒤 아래 기존 "➕ 추가" 버튼을 직접
+    # 눌러야만 일어납니다 — 종목 조회(`resolve_stock_query`)·가중평균 재계산(`add_lot`)도
+    # 이미 있는 `_submit()` 경로를 그대로 타므로 새 로직을 만들지 않았습니다(§0-3-10).
+    # =========================================================================
+    if SCORECARD_OCR_ENABLED:
+        ui.separator()
+        ui.markdown('#### 📷 스크린샷으로 채우기 (베타)')
+        # 상시 노출 경고 — 동의 체크박스 없이 업로드 버튼 바로 위에 항상 보입니다.
+        warning_banner(
+            '⚠️ 계좌번호·잔고 등 민감정보가 화면에 보이면 업로드 전에 폰 기본 마크업 기능'
+            '(검은 펜)으로 가려주세요. 아이폰은 스크린샷 미리보기(왼쪽 아래 썸네일)를 누르면 '
+            '펜 아이콘이, 안드로이드는 스크린샷 알림이나 갤러리의 편집(연필) 아이콘이 나옵니다. '
+            '업로드한 원본 이미지는 종목명·수량·매입가를 읽어낸 직후 폐기하며, 우리 데이터베이스나 '
+            '저장소에는 남기지 않습니다.'
+        )
+        # ⚠️ 문구를 "저장하지 않습니다"라고 단정하지 않는 이유(2026-08-17 검토, §0-1 — 사실이
+        #    아닌 것을 사용자에게 약속하지 않기): NiceGUI 3.x 는 업로드가 멀티파트 스풀
+        #    한계(기본 1MB)를 넘으면 프레임워크가 **먼저** OS 임시 파일에 받아쓰고, 그 임시
+        #    파일은 FileUpload 객체가 회수될 때 지워집니다(nicegui/elements/upload_files.py 의
+        #    LargeFileUpload + weakref.finalize). 즉 "우리가 저장하는" 곳은 없지만 "디스크에
+        #    단 한 순간도 닿지 않는다"고까지는 말할 수 없습니다. 우리가 통제하는 범위
+        #    (DB·스토리지·로그)에 대해서만 약속합니다.
+        ui.label(
+            '스크린샷에서 읽은 값은 아래 입력창에 채워지기만 합니다 — 자동 저장되지 않으니 '
+            '반드시 확인·수정 후 "➕ 추가 / 평균단가 재계산" 버튼을 직접 눌러 주세요.'
+        ).classes('vh-muted')
+
+        extracted_box = ui.column().classes('w-full gap-2')
+
+        def _show_ocr_error(text: str) -> None:
+            """실패 문구를 **결과 목록과 같은 자리**에 그립니다.
+
+            ⚠️ 2026-08-17 검토에서 고친 자리 — 예전에는 `error_banner()` 를 그냥 불렀는데,
+            그러면 배너가 업로드 위젯의 부모 슬롯(입력 폼 전체) 끝에 **매번 새로 덧붙어**
+            ① 업로드를 여러 번 실패하면 배너가 계속 쌓이고, ② 다음 업로드가 성공해도 직전
+            실패 배너가 화면에 그대로 남아 사용자가 지금 상태를 알 수 없었습니다(§0-3-4).
+            여기 담으면 다음 업로드 때 `extracted_box.clear()` 로 함께 지워집니다.
+            """
+            extracted_box.clear()
+            with extracted_box:
+                error_banner(text)
+
+        def _make_ocr_fill_handler(item: dict):
+            def _click() -> None:
+                query_input.value = item.get('raw_name') or ''
+                qty_input.value = _ocr_value_text(item.get('quantity'))
+                price_input.value = _ocr_value_text(item.get('avg_price'))
+                ui.notify(
+                    '입력창에 채웠습니다 — 확인·수정 후 "➕ 추가"를 눌러야 저장됩니다.',
+                    type='info',
+                )
+            return _click
+
+        def _render_ocr_items(items: list) -> None:
+            extracted_box.clear()
+            with extracted_box:
+                for item in items:
+                    low_conf = item.get('confidence') == 'low'
+                    name_text = item.get('raw_name') or '(이름 미인식)'
+                    qty_text = _ocr_value_text(item.get('quantity')) or '수량 미인식'
+                    price_text = _ocr_value_text(item.get('avg_price')) or '매입가 미인식'
+                    # 확신도가 낮은 행은 노란 테두리 + 배지로 강조해 재확인을 유도합니다.
+                    border = '2px solid #f59e0b' if low_conf else '1.5px solid #334155'
+                    with ui.row().classes('w-full items-center gap-2 no-wrap') \
+                            .style(f'border: {border}; border-radius: 10px; padding: 8px 12px;'):
+                        ui.label(f'{name_text} · {qty_text}주 · {price_text}') \
+                            .classes('flex-1 min-w-0 truncate')
+                        if low_conf:
+                            ui.badge('⚠️ 확인 필요', color='amber-8').classes('shrink-0')
+                        ui.button('입력창에 채우기', on_click=_make_ocr_fill_handler(item)) \
+                            .props('flat dense no-caps').classes('shrink-0')
+
+        async def _on_ocr_upload(event) -> None:
+            extracted_box.clear()
+            image_bytes = await event.file.read()
+            try:
+                # 🔒 서버 쪽 크기 확인. 아래 ui.upload(max_file_size=...) 는 브라우저에서만
+                #    거르므로, 업로드 주소로 직접 POST 하면 그대로 통과합니다 — 유료 외부
+                #    API 호출과 서버 메모리가 걸린 자리라 서버에서 다시 막습니다(§0-3-9).
+                if len(image_bytes) > MAX_OCR_IMAGE_BYTES:
+                    _show_ocr_error(
+                        f'🚫 이미지가 너무 큽니다 — {MAX_OCR_IMAGE_BYTES // (1024 * 1024)}MB 이하로 '
+                        '줄이거나 화면을 나눠서 캡처해 주세요.'
+                    )
+                    return
+                # 실제 네트워크 호출(외부 OCR provider — 어떤 회사 모델인지는 extract_holdings_
+                # from_image() 안에서만 갈립니다, §0-3-11) 한 곳만 별도 스레드로 넘깁니다.
+                # 그대로 이벤트 루프에서 기다리면 이 접속뿐 아니라 서버 전체가 멈춥니다
+                # (§0-3-10, web/auth_ui.py 의 `busy()` 주석과 동일한 이유).
+                result = await run.io_bound(extract_holdings_from_image, image_bytes)
+            except OcrError as exc:
+                # OcrError 의 문구는 이미 "사람이 읽을 한 문장"으로만 만들어져 있습니다
+                # (원본 예외·스택은 utils/scorecard_ocr.py 가 로그로만 남김 — §0-3-4).
+                _show_ocr_error(f'🚫 {exc}')
+                return
+            except Exception as exc:                       # noqa: BLE001 — 실패를 조용히 삼키지 않음(§0-1)
+                _show_ocr_error(f'🚫 {_fail(exc, "스크린샷을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
+                return
+            finally:
+                image_bytes = None   # 이 핸들러가 원본 바이트를 계속 들고 있지 않게 참조를 끊습니다(§0-3-8).
+            _render_ocr_items(result['items'])
+
+        ui.upload(
+            label='📷 브로커 앱 스크린샷 업로드',
+            auto_upload=True,
+            # 브라우저 쪽 1차 검사(사용자에게 즉시 피드백). 실제 방어는 위 서버 쪽 확인입니다.
+            max_file_size=MAX_OCR_IMAGE_BYTES,
+            on_upload=_on_ocr_upload,
+        ).props('accept=".png,.jpg,.jpeg,.webp"').classes('w-full')
+        ui.separator()
 
     # ⚠️ 오너 지시: "종목코드 / 티커 / 종목명 이게 전부 다 한곳에서 기능할 수 있게" —
     #    코드를 쳐도, 이름을 쳐도(한글 포함) 한 칸에서 알아서 찾습니다. 유니버스 밖 종목은
