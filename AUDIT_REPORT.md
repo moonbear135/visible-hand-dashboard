@@ -1,5 +1,11 @@
 # 🔍 데이터 무결성 감사 보고서 (AUDIT_REPORT)
 
+> ⚠️ **2026-08-17 안내**: 이 감사는 Streamlit 단일 스택 시절(2026-08-05) 기록입니다. 그 뒤
+> NiceGUI 이전 컷오버 직후 **더 최근 전체 코드 감사**가 한 번 더 있었습니다(`TASK_HISTORY.md`
+> #142 — §0-3-8 개인정보 격리 0건 확인, 계정 열거 취약점 수정 등). 최신 상태는 이 문서가 아니라
+> `PROJECT_STATUS.md` §0을 먼저 보세요. 이 문서는 그 시점 감사의 원본 기록으로 그대로 둡니다
+> (§10의 "삭제 대기" 목록은 지금은 전부 해소됐음 — 아래 §10 하단의 2026-08-17 재확인 참고).
+
 > **감사 일자**: 2026-08-05
 > **수정 반영일**: 2026-08-05 (동일자 후속 수정 패스)
 > **감사 범위**: 프로젝트 내 모든 `.py` 파일 (25개), `.github/workflows`, `data/*.json`, `market_history.csv`, `ENGINEERING_SPEC.md`
@@ -564,6 +570,16 @@ from collector_kospi200_2 import run_kospi200_collector             # ← Import
 > `patch.py`, `patch_macro.py`, `update_snapshot.py`, `templates/test_dashboard.html`, `error.log`, `output.log`, `git_history_target.txt`
 > (삭제해도 대시보드 동작에는 전혀 영향이 없습니다. 특히 `templates/test_dashboard.html` 은 GitHub Pages 로 외부 공개되므로 삭제를 권장합니다.)
 > ⏸️ **보류**: `archive/test_harness.py` 를 archive 밖으로 복구하는 건은 SPEC 검증 절차 재설계가 필요해 보류했습니다. 대신 `tests/test_quant.py` 를 실제 동작에 맞게 재작성해 **지금 바로 실행 가능한 검증 스위트**를 확보했습니다(§11 참조).
+
+> 📌 **2026-08-17 재확인 — 위 "⏸️ 보류(오너 결정 필요 — 삭제 권한)" 목록은 이제 전부 해소됐습니다.**
+> 저장소를 직접 열어 확인한 결과, `patch.py`·`patch_macro.py`·`update_snapshot.py`·`error.log`·
+> `output.log`·`git_history_target.txt`는 루트에 더 이상 없고, `templates/`도 비어있어
+> `templates/test_dashboard.html`도 없습니다(어느 정리 작업에서 지워졌는지는 이 보고서만으로는
+> 특정할 수 없어 굳이 추측하지 않습니다 — `TASK_HISTORY.md`의 저장소 정리 관련 항목을 대조하면
+> 나올 수 있습니다). `archive/` 안의 `init_history.py`·`recalculate_history.py`·`patch_fridays.py`·
+> `test_harness.py`는 여전히 존재하지만, 이 문서가 이미 적어둔 대로 상대경로가 `archive/` 기준이라
+> 지금 위치에선 무해합니다 — 별도 조치 불필요. 즉 **이 §10 전체는 지금은 "완료된 과거 기록"이지,
+> "지금 결정할 대기 항목"이 아닙니다.**
 
 ---
 
