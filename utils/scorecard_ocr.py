@@ -57,7 +57,10 @@ class OcrError(RuntimeError):
 # 2026-08-17 (SCORECARD_V2_OCR_WORK_ORDER.md) — 저비용 고효율 모델. macro_ai.py 의
 # `gemini-2.5-flash`(텍스트 코멘트용)와는 별개 모델입니다: 이 작업은 이미지 인식이라
 # `-lite` 모델로도 충분하고, 성적표 v2 작업지시서에서 이 모델로 확정했습니다.
-GEMINI_MODEL_NAME = "gemini-2.5-flash-lite"
+# 2026-08-17 정정(실검증 중 발견): 원래 넣었던 `gemini-2.5-flash-lite`가 신규 프로젝트에
+# 더 이상 제공되지 않아(구글 API가 404 NotFound + `gemini-3.5-flash-lite`로 교체 안내)
+# 실제 Render 배포 로그에서 확인 후 아래로 교체. §0-3-12(외부 의존성 능동 점검) 적용 사례.
+GEMINI_MODEL_NAME = "gemini-3.5-flash-lite"
 
 _ALLOWED_CONFIDENCE = ("high", "low")
 

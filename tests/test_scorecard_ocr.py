@@ -168,7 +168,7 @@ def test_model_name_matches_work_order(ocr_module, monkeypatch):
     ]})
     _fake_model, fake_genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
     ocr_module.extract_holdings_from_image(PNG_MAGIC)
-    assert fake_genai.requested_model_name == "gemini-2.5-flash-lite"
+    assert fake_genai.requested_model_name == "gemini-3.5-flash-lite"
 
 
 # =============================================================================
@@ -450,7 +450,7 @@ def test_ocr_provider_branching_isolated_to_ocr_module():
     """provider 분기(`OCR_PROVIDER`)와 Gemini 모델 이름은 utils/scorecard_ocr.py 안에만 있음."""
     src = _ocr_module_source()
     assert "OCR_PROVIDER" in src
-    assert "gemini-2.5-flash-lite" in src
+    assert "gemini-3.5-flash-lite" in src
     assert '"gemini"' in src
 
 
@@ -486,7 +486,7 @@ def test_work_order_document_exists():
     doc = REPO_ROOT / "SCORECARD_V2_OCR_WORK_ORDER.md"
     assert doc.exists(), "SCORECARD_V2_OCR_WORK_ORDER.md 가 레포 루트에 있어야 함"
     text = doc.read_text(encoding="utf-8")
-    for token in ("extract_holdings_from_image", "OCR_PROVIDER", "gemini-2.5-flash-lite",
+    for token in ("extract_holdings_from_image", "OCR_PROVIDER", "gemini-3.5-flash-lite",
                   "SCORECARD_OCR_ENABLED"):
         assert token in text, f"작업지시서에 '{token}' 근거가 남아 있어야 함"
 
@@ -508,7 +508,7 @@ def test_explicit_provider_value_is_honoured(ocr_module, monkeypatch):
         monkeypatch.setenv("OCR_PROVIDER", value)
         result = ocr_module.extract_holdings_from_image(PNG_MAGIC)
         assert result["items"][0]["raw_name"] == "삼성전자", f"{value!r} 로도 gemini 분기를 타야 함"
-        assert fake_genai.requested_model_name == "gemini-2.5-flash-lite"
+        assert fake_genai.requested_model_name == "gemini-3.5-flash-lite"
 
 
 @pytest.mark.parametrize("image_bytes, expected_mime", [
