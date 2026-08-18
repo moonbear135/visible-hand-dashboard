@@ -808,11 +808,53 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 # 반복해야 해서 번거롭다는 피드백. 목록 전체를 한 번에 등록하는 버튼을
                 # 아래에 둡니다(항목이 하나도 없으면 굳이 보여줄 필요가 없어 숨깁니다).
                 if extracted_items:
-                    with ui.row().classes('w-full justify-end'):
+                    # "🔁 중복 의심" 배지와 같은 기준(signature_counts, 위에서 계산)으로
+                    # 실제 중복이 하나라도 있을 때만 정리 버튼을 보여줍니다 — 없는데도
+                    # 늘 보이면 눌러도 아무 일도 안 일어나는 버튼이 됩니다.
+                    has_duplicates = any(count > 1 for count in signature_counts.values())
+                    with ui.row().classes('w-full justify-end gap-2'):
+                        if has_duplicates:
+                            ui.button(
+                                '🧹 중복 의심 정리', on_click=_clear_duplicate_ocr_items,
+                            ).props('flat dense no-caps color=warning') \
+                                .tooltip('종목·수량·매입가가 완전히 같은 항목을 하나만 남기고 지웁니다.')
                         ui.button(
                             f'🚀 인식된 종목 {len(extracted_items)}개 전부 등록',
                             on_click=_bulk_add_all_ocr_items,
                         ).props('no-caps color=primary')
+
+        def _clear_duplicate_ocr_items() -> None:
+            """"🔁 중복 의심" 항목을 조합(이름·수량·매입가)당 하나만 남기고 지웁니다.
+
+            2026-08-18 오너 요청 — 같은 계좌 스크린샷을 여러 장 올리면 완전히 같은
+            항목이 여러 개 쌓이는데, 하나씩 눌러 지우기 번거롭다는 피드백.
+            ⚠️ "완전히 같은 이름·수량·매입가"인 항목만 지웁니다 — 위 목록에 뜨는
+            "🔁 중복 의심" 배지와 **똑같은 판정 기준**을 그대로 씁니다(§0-3-10). 값이
+            조금이라도 다르면(예: 수량은 같은데 매입가가 다름) 서로 다른 항목일 수 있어
+            지우지 않고 그대로 두어 사람이 직접 보고 판단하게 합니다(§0-1).
+            """
+            seen = set()
+            keep = []
+            removed = 0
+            for item in extracted_items:
+                if not item.get('raw_name'):
+                    keep.append(item)
+                    continue
+                sig = (item.get('raw_name'), item.get('quantity'), item.get('avg_price'))
+                if sig in seen:
+                    removed += 1
+                    continue
+                seen.add(sig)
+                keep.append(item)
+            if not removed:
+                ui.notify('정리할 중복 항목이 없습니다.', type='info')
+                return
+            extracted_items[:] = keep
+            _render_ocr_items()
+            ui.notify(
+                f'🧹 완전히 같은 항목 {removed}개를 지웠습니다(종목별로 하나씩만 남김).',
+                type='info',
+            )
 
         def _bulk_add_all_ocr_items() -> None:
             """인식된 목록 전체를 한 번에 등록합니다(종목마다 "채우기 → 추가"를
