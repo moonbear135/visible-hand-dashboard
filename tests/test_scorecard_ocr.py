@@ -669,12 +669,11 @@ DAY_TWO = _date(2026, 8, 18)
 def test_owner_decided_limit_is_pinned(quota_db):
     """오너가 정한 값을 코드에 고정합니다 — 조용히 바뀌면 이 테스트가 깨집니다.
 
-    ⚠️ 2026-08-18 — v2 OCR 5단계 실기기 검증이 마무리 단계라 100 → 15로 재조정(오너
-    결정, "아직 테스트를 더 해볼 수도 있다"는 이유로 원래 상시값 10보다는 여유를 둠 —
-    utils/scorecard_db.py 상단 주석 참고). 검증이 완전히 끝나면 상시 값(예: 10)으로
-    다시 낮출지 오너가 정할 것 — 그때도 이 assert를 같이 바꿀 것.
+    ⚠️ 2026-08-18 — 15로 낮췄다가, 같은 날 모바일 실기기 검증 중 한도초과 오류를 만나
+    200으로 다시 올림(오너 결정 — utils/scorecard_db.py 상단 주석 참고). 검증이 완전히
+    끝나면 상시 값(예: 10)으로 다시 낮출지 오너가 정할 것 — 그때도 이 assert를 같이 바꿀 것.
     """
-    assert quota_db.DAILY_OCR_UPLOAD_LIMIT == 15
+    assert quota_db.DAILY_OCR_UPLOAD_LIMIT == 200
 
 
 def test_uploads_up_to_the_limit_pass_and_the_next_one_is_blocked(quota_db):
