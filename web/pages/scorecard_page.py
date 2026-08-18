@@ -806,6 +806,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
 
         async def _on_ocr_upload(event) -> None:
             image_bytes = await event.file.read()
+            # 2026-08-18 오너 실사용 피드백 — 종목 수가 많은 스크린샷은 읽는 데 3~5초
+            # 이상 걸리는데 그동안 화면에 아무 표시가 없어 멈춘 것처럼 보였다는 지적.
+            # 처리 중임을 알리는 스피너를 띄우고, 아래 finally 에서 성공·실패 어느
+            # 경로로 끝나든 항상 닫습니다(§0-1 — "지금 뭘 하고 있는지" 조용히 감추지 않음).
+            processing_notif = ui.notification(
+                '🔎 스크린샷을 읽는 중입니다... (종목 수에 따라 몇 초 걸릴 수 있어요)',
+                type='ongoing', spinner=True, timeout=None, position='center',
+            )
             try:
                 # 🔒 서버 쪽 크기 확인. 아래 ui.upload(max_file_size=...) 는 브라우저에서만
                 #    거르므로, 업로드 주소로 직접 POST 하면 그대로 통과합니다 — 유료 외부
@@ -871,6 +879,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 return
             finally:
                 image_bytes = None   # 이 핸들러가 원본 바이트를 계속 들고 있지 않게 참조를 끊습니다(§0-3-8).
+                processing_notif.dismiss()   # 위에서 띄운 "읽는 중" 스피너는 결과와 무관하게 항상 닫습니다.
             # 이번 장이 성공했으니 직전에 남아있던 실패 배너(있었다면)는 지웁니다 — 지금은
             # 성공했다는 사실을 화면에 명확히 반영합니다. (성공 결과가 담긴 extracted_box는
             # 건드리지 않습니다 — 여러 장을 올려도 이전 장 결과가 안 지워지는 게 이번 수정의
