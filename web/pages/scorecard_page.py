@@ -734,6 +734,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 # `is`(같은 객체인지)로 정확히 이 버튼이 속한 항목만 지웁니다.
                 extracted_items[:] = [i for i in extracted_items if i is not item]
                 _render_ocr_items()
+                # 2026-08-18 — 삭제는 화면에서 그 행이 사라지는 것 말고는 아무 표시가
+                # 없어서, 눌렀는지 안 눌렸는지 확인이 안 된다는 보고(위 "채우기" 버튼과
+                # 같은 문제)를 받아 짧은 확인 토스트를 추가합니다.
+                ui.notify(
+                    f'{item.get("raw_name") or "이 항목"}을(를) 목록에서 지웠습니다.',
+                    type='info',
+                )
             return _click
 
         def _render_ocr_items() -> None:
@@ -869,9 +876,22 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             # 건드리지 않습니다 — 여러 장을 올려도 이전 장 결과가 안 지워지는 게 이번 수정의
             # 핵심입니다.)
             error_slot.clear()
-            # 새로 인식된 항목을 기존 누적 목록에 "추가"합니다(교체가 아님).
-            extracted_items.extend(result['items'])
-            _render_ocr_items()
+            # 2026-08-18 오너 실사용 피드백 — 여러 장을 연달아 올렸는데 목록 개수가 어느
+            # 순간부터 더 안 늘어나서 "고장났나?" 싶었다는 보고. 원인 확인: OCR 호출이
+            # **실패한 게 아니라**, 그 스크린샷에서 실제로 종목을 하나도 못 읽어서
+            # `result['items']`가 빈 리스트로 "성공"한 경우였습니다(예: 종목 목록이 아닌
+            # 요약·탭 화면만 찍힌 스크린샷). 예외가 안 났으니 실패 배너도 안 뜨고, 늘어날
+            # 항목도 없으니 목록도 그대로라 화면상 "아무 반응 없음"으로 보였습니다 — 이것도
+            # 조용한 실패입니다(§0-1). 빈 결과도 명시적으로 알려줍니다.
+            if not result['items']:
+                _show_ocr_error(
+                    '⚠️ 이 스크린샷에서는 종목을 하나도 인식하지 못했습니다 — 종목 목록이 '
+                    '보이는 화면인지 확인하거나, 다른 스크린샷으로 다시 시도해 주세요.'
+                )
+            else:
+                # 새로 인식된 항목을 기존 누적 목록에 "추가"합니다(교체가 아님).
+                extracted_items.extend(result['items'])
+                _render_ocr_items()
             # 남은 횟수는 매번 갱신되는 전용 라벨 하나에만 반영합니다 — 장마다 새 라벨을
             # 쌓지 않으므로 여러 장을 올려도 "오늘 남은 ..." 문구는 한 줄로 최신값만 보입니다.
             _set_quota_label(quota)
