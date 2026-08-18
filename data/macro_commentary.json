@@ -1,0 +1,20 @@
+{
+    "date": "2026-08-18",
+    "score": 42.1,
+    "comments": {
+        "FX_Swap_Point": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음).",
+        "Put_OTM_OI": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음).",
+        "VKOSPI_Skew": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음).",
+        "Synthetic_Futures": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음).",
+        "Stock_Net_Sell": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음).",
+        "KOSPI_5D_Return": "⚠️ AI 코멘트 생성에 실패했습니다 (표시할 분석 없음)."
+    },
+    "comment_dates": {
+        "FX_Swap_Point": null,
+        "Put_OTM_OI": null,
+        "VKOSPI_Skew": null,
+        "Synthetic_Futures": null,
+        "Stock_Net_Sell": null,
+        "KOSPI_5D_Return": null
+    }
+}
