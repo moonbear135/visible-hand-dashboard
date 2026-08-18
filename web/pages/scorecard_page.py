@@ -697,6 +697,22 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 )
             return _click
 
+        def _make_ocr_remove_handler(item: dict):
+            def _click() -> None:
+                # 2026-08-18 오너 실사용 피드백 — 업로드 위젯에서 스크린샷 파일 자체를
+                # 지워도(예: 잘못 올린 장을 치울 때) 이미 인식된 목록(`extracted_items`)은
+                # 지워지지 않고 그대로 남습니다. 같은 사진을 다시 올리면 인식 결과가 또
+                # 하나 쌓여 목록에 중복이 생깁니다 — 이 자체는 여러 장 업로드 시 이전 결과가
+                # 사라지던 예전 버그(2026-08-17 수정)의 재발을 막으려고 일부러 "절대 자동
+                # 삭제하지 않는" 설계를 유지한 결과입니다. 그래서 자동으로 지우는 대신,
+                # 필요할 때 사용자가 직접 지울 수 있는 버튼을 항목마다 둡니다.
+                # list.remove() 는 값(==)이 같은 첫 항목을 지웁니다 — 완전히 똑같은 내용의
+                # 중복 항목(예: 같은 사진 재업로드)이 여러 개면 엉뚱한 쪽이 지워질 수 있어
+                # `is`(같은 객체인지)로 정확히 이 버튼이 속한 항목만 지웁니다.
+                extracted_items[:] = [i for i in extracted_items if i is not item]
+                _render_ocr_items()
+            return _click
+
         def _render_ocr_items() -> None:
             """`extracted_items`(누적 목록) 전체를 다시 그립니다 — 이번에 새로 온 항목만이
             아니라 지금까지 이 페이지에서 인식된 모든 항목입니다."""
@@ -719,11 +735,21 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                         if filled:
                             # 이미 눌러서 입력창에 채운 적이 있다는 표시 — 몇 번 눌렀는지가
                             # 아니라 "적어도 한 번은 성공했다"만 알려주면 충분합니다.
-                            ui.badge('✓ 채움', color='positive').classes('shrink-0')
+                            # 2026-08-18 오너 피드백 — 배지가 잘 안 보인다고 해서 글씨/여백을
+                            # 키웠습니다(기본 배지 크기는 작은 편이라 style로 직접 확대).
+                            ui.badge('✓ 채움', color='positive') \
+                                .classes('shrink-0') \
+                                .style('font-size: 0.95rem; padding: 6px 10px; font-weight: 700;')
                         ui.button(
                             '다시 채우기' if filled else '입력창에 채우기',
                             on_click=_make_ocr_fill_handler(item),
                         ).props('flat dense no-caps').classes('shrink-0')
+                        # 2026-08-18 — 업로드 위젯에서 스크린샷을 지운 뒤 실수로 같은 걸
+                        # 다시 올려 목록에 중복이 생겼을 때, 사용자가 직접 그 행을 지울 수
+                        # 있게 합니다(위 _make_ocr_remove_handler 주석 참고).
+                        ui.button(icon='delete', on_click=_make_ocr_remove_handler(item)) \
+                            .props('flat dense round').classes('shrink-0') \
+                            .tooltip('이 항목 목록에서 지우기(입력창·저장된 보유종목에는 영향 없음)')
 
         async def _on_ocr_upload(event) -> None:
             image_bytes = await event.file.read()
@@ -838,9 +864,17 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             # 2026-08-18 — resolve_error 는 두 문장짜리 상세 사유라 토스트로 보기엔 깁니다
             # ("읽는 데 시간이 오래 걸린다" 피드백). 토스트는 짧게, 상세 사유는 인라인
             # 라벨(message)에 그대로 남겨 필요하면 읽을 수 있게 합니다.
+            # ⚠️ 여기서 " — "를 줄바꿈으로 바꾸는 건 **화면 표시만** 손보는 것입니다 —
+            # `resolve_stock_query()`(데이터 계층, utils/scorecard_db.py)가 돌려주는 문구
+            # 자체는 그대로 두고 건드리지 않습니다(§4-3, 화면 파일이 데이터 계층 문구를
+            # 새로 짓지 않습니다). 그 함수가 반환하는 실패 문구는 항상 이 " — " 한 번으로
+            # "무엇을 못 찾았는지"와 "왜 못 찾았는지"를 잇는 형태라, 여기서 줄을 나눠도
+            # 뜻이 바뀌지 않습니다(2026-08-18 오너 피드백 — 한 줄로 길게 붙어 있어 가독성
+            # 이 떨어진다는 지적).
+            detail = (resolve_error or '').replace(' — ', '\n')
             _notify_fail(
                 message,
-                f'🚫 {resolve_error}',
+                f'🚫 {detail}',
                 toast='🚫 이 종목은 찾지 못했습니다 — 아래 문구에서 이유를 확인해 주세요.',
             )
             return
@@ -887,7 +921,10 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
     ui.button('➕ 추가 / 평균단가 재계산', on_click=_submit).props('no-caps')
     # 실패 사유는 이 버튼 바로 밑에 둡니다 — 방금 누른 버튼과 같은 화면 안에 있어야
     # 스크롤 없이 바로 보입니다(2026-08-18 오너 피드백, 위 `form = {...}` 옆 주석 참고).
-    message = ui.label('').classes('text-red-400 text-base')
+    # `whitespace-pre-line` — _submit() 안에서 상세 사유에 넣는 "\n" 이 실제 줄바꿈으로
+    # 보이려면 이 클래스가 필요합니다(기본 HTML은 텍스트 안의 \n을 무시하고 한 줄로
+    # 붙여버립니다).
+    message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
 
 # =============================================================================
