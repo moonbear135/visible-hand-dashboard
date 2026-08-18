@@ -562,6 +562,10 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
     def _on_market(event) -> None:
         form['market'] = event.value
         picker_block.refresh()
+        # `_update_currency_hint` 는 이 함수보다 코드상 아래(종목 입력창 근처)에서
+        # 정의되지만, 클로저 규칙상 실제로 클릭돼서 이 함수가 호출되는 시점에는 이미
+        # 정의가 끝난 뒤라 문제없습니다(위 `message`/`picker_block` 재배치와 같은 패턴).
+        _update_currency_hint()
 
     ui.toggle({MARKET_KR: MARKET_LABELS[MARKET_KR], MARKET_US: MARKET_LABELS[MARKET_US]},
               value=MARKET_KR, on_change=_on_market) \
@@ -582,7 +586,15 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                   label=f'🔍 종목 빠른 검색 ({scope} — 그 밖은 아래 칸에 코드를 직접 입력)') \
             .classes('w-full')
 
-    picker_block()
+    # 2026-08-18 오너 피드백 — 이 검색창(picker_block)을 실제로 부르는 자리(호출부)는
+    # 일부러 화면 맨 위가 아니라 아래(종목 입력창 바로 위)로 옮겼습니다. 스크린샷에서
+    # 종목명이 잘려서 인식됐을 때(예: "SOL AI반도체...") 사용자가 입력창을 고치다가
+    # 바로 옆에서 검색해 정확한 이름을 찾을 수 있어야 하는데, 검색창이 화면 맨 위(시장
+    # 토글 바로 밑)에 있으면 너무 멀어서 안 보이고 안 쓰입니다. `@ui.refreshable` 은
+    # 처음 호출한 자리에 그려지고 `.refresh()`는 그 자리를 갱신하므로, 정의(위)와
+    # 호출(아래, `query_input` 바로 위)을 분리해도 동작에는 아무 문제가 없습니다.
+    # `_picked()`가 참조하는 `query_input` 도 실제 클릭 시점(항상 이 함수 전체가 끝난
+    # 뒤)에는 이미 정의돼 있으므로 클로저 규칙상 문제없습니다(위 `message` 이동과 동일 패턴).
 
     # =========================================================================
     # 📊 v2(2026-08-17, 스테이징) — 스크린샷 OCR 프리필
@@ -624,6 +636,17 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             f'스크린샷 업로드는 하루 {DAILY_OCR_UPLOAD_LIMIT}회까지 가능합니다(매일 자정 초기화). '
             '아래 입력창에 직접 입력하는 건 횟수 제한이 없습니다.'
         ).classes('vh-muted')
+        # 2026-08-18 오너 실사용 피드백 — 해외주식(예: 엔비디아) 스크린샷을 인식해서
+        # "입력창에 채우기"를 눌렀는데, 위 시장 토글이 여전히 "한국(원화)"로 남아 있으면
+        # 국내 종목·ETF 목록에서만 이름을 찾다가 실패합니다(전혀 다른 국내 상장 ETF들만
+        # 후보로 뜸). OCR 은 스크린샷이 국내 계좌인지 해외 계좌인지 스스로 구분하지
+        # 못합니다(§0-1 — 확실하지 않은 걸 추측해서 자동으로 시장을 바꾸지 않음). 그래서
+        # 자동으로 맞추는 대신, 채우기 전에 사람이 직접 맞추도록 눈에 띄게 알려줍니다.
+        warning_banner(
+            '⚠️ 해외주식(달러) 스크린샷이면 "입력창에 채우기"를 누르기 전에 위에서 먼저 '
+            '"🇺🇸 미국 (달러)"를 선택해 주세요 — 국내(원화)가 선택된 채로 채우면 종목을 '
+            '못 찾거나 엉뚱한 국내 종목이 나올 수 있습니다.'
+        )
 
         extracted_box = ui.column().classes('w-full gap-2')
         error_slot = ui.column().classes('w-full')
@@ -862,6 +885,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         ).props('accept=".png,.jpg,.jpeg,.webp"').classes('w-full')
         ui.separator()
 
+    # 2026-08-18 오너 피드백 — "종목 빠른 검색"을 여기(종목 입력창 바로 위)에서 부릅니다.
+    # 스크린샷에서 종목명이 잘려서 인식됐을 때(예: "SOL AI반도체...") 아래 입력창을
+    # 고치다가 바로 여기서 검색해 정확한 이름을 찾을 수 있습니다. 검색 결과를 고르면
+    # `_picked()`(위 picker_block 안)가 곧바로 `query_input.value`를 채웁니다 — 이미
+    # 연동되어 있던 기능이라 새 로직 없이 호출 위치만 옮겼습니다.
+    picker_block()
+
     # ⚠️ 오너 지시: "종목코드 / 티커 / 종목명 이게 전부 다 한곳에서 기능할 수 있게" —
     #    코드를 쳐도, 이름을 쳐도(한글 포함) 한 칸에서 알아서 찾습니다. 유니버스 밖 종목은
     #    코드를 알면 그대로 받아들여 "현재가 없음"으로 정직하게 표시합니다.
@@ -870,6 +900,20 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         placeholder='예: 005930 / 삼성전자 / NVDA',
     ).classes('w-full') \
         .tooltip('종목코드를 아시면 코드로, 모르시면 이름으로 입력하세요 — 둘 다 자동으로 찾아드립니다.')
+
+    # 2026-08-18 오너 피드백 — 해외주식을 원화로 입력하면 못 찾는 게 맞는 동작이지만
+    # ("좋은 현상"이라는 확인을 받음), 왜 안 되는지 이유를 미리 알려주지 않으면 계속
+    # 헷갈립니다. 위 시장 토글 상태에 맞춰 통화를 알려주는 라벨을 입력창 바로 위에 둡니다.
+    currency_hint = ui.label('').classes('vh-muted')
+
+    def _update_currency_hint() -> None:
+        currency_hint.text = (
+            '🇰🇷 매입가는 원화(KRW)로 입력해 주세요.' if form['market'] == MARKET_KR
+            else '🇺🇸 매입가는 달러(USD)로 입력해 주세요 — 해외주식을 원화로 입력하면 '
+                 '종목을 찾지 못합니다. 환율 변환은 하지 않습니다.'
+        )
+
+    _update_currency_hint()
 
     with ui.row().classes('w-full gap-4 items-start'):
         qty_input = ui.input('수량', placeholder='예: 10').style('flex: 1 1 160px;')
