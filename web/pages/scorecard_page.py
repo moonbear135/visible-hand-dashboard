@@ -717,6 +717,19 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             """`extracted_items`(누적 목록) 전체를 다시 그립니다 — 이번에 새로 온 항목만이
             아니라 지금까지 이 페이지에서 인식된 모든 항목입니다."""
             extracted_box.clear()
+            # 2026-08-18 오너 피드백 — 자동으로 지우지는 않지만(위 _make_ocr_remove_handler
+            # 주석 참고: 자동 삭제는 예전 "여러 장 업로드 시 결과가 사라지는" 버그를 다시
+            # 부를 위험이 있어 일부러 안 넣음), 종목명·수량·매입가가 완전히 같은 항목이 목록에
+            # 두 개 이상 있으면(대개 같은 스크린샷을 실수로 두 번 올린 경우) 배지로 알려줘서
+            # 사용자가 직접 보고 판단해 지울 수 있게 합니다. 이름을 못 읽은 행("(이름 미인식)")
+            # 끼리는 우연히 값이 같을 수 있어 이 판정에서 제외합니다(§0-1 — 확실하지 않은 걸
+            # "중복"이라고 단정하지 않음).
+            signature_counts: dict = {}
+            for item in extracted_items:
+                if item.get('raw_name'):
+                    sig = (item.get('raw_name'), item.get('quantity'), item.get('avg_price'))
+                    signature_counts[sig] = signature_counts.get(sig, 0) + 1
+
             with extracted_box:
                 for item in extracted_items:
                     low_conf = item.get('confidence') == 'low'
@@ -724,6 +737,9 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                     name_text = item.get('raw_name') or '(이름 미인식)'
                     qty_text = _ocr_value_text(item.get('quantity')) or '수량 미인식'
                     price_text = _ocr_value_text(item.get('avg_price')) or '매입가 미인식'
+                    sig = ((item.get('raw_name'), item.get('quantity'), item.get('avg_price'))
+                           if item.get('raw_name') else None)
+                    is_duplicate = bool(sig) and signature_counts.get(sig, 0) > 1
                     # 확신도가 낮은 행은 노란 테두리 + 배지로 강조해 재확인을 유도합니다.
                     border = '2px solid #f59e0b' if low_conf else '1.5px solid #334155'
                     with ui.row().classes('w-full items-center gap-2 no-wrap') \
@@ -732,6 +748,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                             .classes('flex-1 min-w-0 truncate')
                         if low_conf:
                             ui.badge('⚠️ 확인 필요', color='amber-8').classes('shrink-0')
+                        if is_duplicate:
+                            ui.badge('🔁 중복 의심', color='orange-8') \
+                                .classes('shrink-0') \
+                                .style('font-size: 0.95rem; padding: 6px 10px; font-weight: 700;') \
+                                .tooltip('종목·수량·매입가가 같은 항목이 목록에 또 있습니다 — '
+                                         '같은 스크린샷을 두 번 올렸을 수 있어요. 필요 없으면 '
+                                         '오른쪽 삭제 버튼으로 직접 지워 주세요.')
                         if filled:
                             # 이미 눌러서 입력창에 채운 적이 있다는 표시 — 몇 번 눌렀는지가
                             # 아니라 "적어도 한 번은 성공했다"만 알려주면 충분합니다.
