@@ -281,6 +281,30 @@ def _parse_positive_number(raw, label):
     return number
 
 
+def _notify_fail(message_label, text: str) -> None:
+    """실패를 **확실하게** 알립니다 — 인라인 문구 하나만으로는 부족하다는 실사용 피드백 반영.
+
+    2026-08-18 오너 실사용 피드백 — 예전엔 조용한 빨간 인라인 라벨(`ui.label(...).classes
+    ('text-red-400')`) 하나뿐이었는데, 화면 아래쪽에 있으면 스크롤 밖이라 "실패 알람 자체를
+    전혀 못 봤다"는 보고를 받았습니다(예: 금현물처럼 이 앱이 다루지 않는 종목을 입력했을 때).
+    그래서 이제 같은 실패를 **두 곳에 동시에** 보여줍니다 — ① 기존 인라인 라벨(스크린리더·
+    조용한 재확인용으로 남겨둠) ② 화면 중앙에 사용자가 직접 닫기 전까지 사라지지 않는 큰
+    토스트(`ui.notify`, `timeout=0`). 추가 폼(`_submit`)과 수정 폼(`_render_edit_card`)이
+    이 함수 하나를 공유하므로, 실패 알림 방식이 두 화면에서 서로 다르게 어긋나지
+    않습니다(§0-3-10).
+    """
+    message_label.text = text
+    ui.notify(
+        text,
+        type='negative',
+        position='center',
+        multi_line=True,
+        close_button='닫기',
+        timeout=0,  # 자동으로 사라지지 않음 — 사용자가 직접 닫아야 함(놓치지 않도록)
+        classes='text-lg whitespace-pre-line',
+    )
+
+
 def _ocr_value_text(value) -> str:
     """OCR(`utils/scorecard_ocr.py`)이 읽은 숫자를 입력창에 채울 텍스트로 바꿉니다.
 
@@ -783,13 +807,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             broad_index=market["kr_master"] if market_code == MARKET_KR else None,
         )
         if not resolved_ticker:
-            message.text = f'🚫 {resolve_error}'
+            _notify_fail(message, f'🚫 {resolve_error}')
             return
         try:
             quantity = _parse_positive_number(qty_input.value, '수량')
             price = _parse_positive_number(price_input.value, '매입가')
         except ValueError as exc:
-            message.text = f'🚫 {exc}'
+            _notify_fail(message, f'🚫 {exc}')
             return
 
         try:
@@ -800,24 +824,29 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 stock_name=resolved_name,
             )
         except Exception as exc:                   # noqa: BLE001
-            message.text = f'🚫 저장하지 못했습니다: {_fail(exc, "잠시 후 다시 시도해 주세요.")}'
+            _notify_fail(message, f'🚫 저장하지 못했습니다: {_fail(exc, "잠시 후 다시 시도해 주세요.")}')
             return
 
         currency = merged["currency"]
-        prefix = f'ℹ️ {resolved_name} ({resolved_ticker}) 로 인식했습니다.\n' if resolved_name else ''
+        # 2026-08-18 오너 실사용 피드백 — 예전 문장이 너무 길고 한 줄로 이어져 토스트 글씨가
+        # 작게 느껴졌습니다. 줄을 나누고("\n") 아래 ui.notify 의 classes 로 글씨를 키웁니다
+        # (multi_line=True 만으로는 실제 줄바꿈이 생기지 않아 whitespace-pre-line 클래스를
+        # 같이 씁니다 — Quasar Notify 는 \n 을 자동으로 <br> 로 바꾸지 않습니다).
+        prefix = f'ℹ️ {resolved_name} ({resolved_ticker})\n' if resolved_name else ''
         if action == 'merge':
-            text = (f'{prefix}✅ 기존 보유분과 합쳐 평균단가를 다시 계산했습니다 — '
-                    f'{merged["ticker"]} {merged["quantity"]:,.6g}주 / '
+            text = (f'{prefix}✅ 평균단가 재계산 완료\n'
+                    f'{merged["ticker"]} {merged["quantity"]:,.6g}주 · '
                     f'평균 {format_amount(merged["avg_purchase_price"], currency)}')
         else:
-            text = f'{prefix}✅ {merged["ticker"]} 을(를) 추가했습니다.'
+            text = f'{prefix}✅ {merged["ticker"]} 추가 완료'
 
         # 입력창 비우기 — NiceGUI 는 값을 대입하면 그대로 브라우저까지 반영됩니다
         # (Streamlit 의 위젯 키 함정(#85)이 구조적으로 없습니다 — 계획서 §3-3).
         query_input.value = ''
         qty_input.value = ''
         price_input.value = ''
-        ui.notify(text, type='positive', multi_line=True, close_button='닫기')
+        ui.notify(text, type='positive', multi_line=True, close_button='닫기',
+                  classes='text-lg whitespace-pre-line')
         on_changed()
 
     ui.button('➕ 추가 / 평균단가 재계산', on_click=_submit).props('no-caps')
@@ -1013,15 +1042,15 @@ def _render_edit_card(client, user_id: str, row, indexes, view: dict, redraw, on
                 quantity = _parse_positive_number(qty_input.value, '수량')
                 price = _parse_positive_number(price_input.value, '매입가')
             except ValueError as exc:
-                message.text = f'🚫 {exc}'
+                _notify_fail(message, f'🚫 {exc}')
                 return
             try:
                 update_holding(client, user_id, row.get("id"), quantity, price)
             except Exception as exc:               # noqa: BLE001
-                message.text = f'🚫 {_fail(exc, "수정하지 못했습니다. 잠시 후 다시 시도해 주세요.")}'
+                _notify_fail(message, f'🚫 {_fail(exc, "수정하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
                 return
             view['editing'] = None
-            ui.notify('✅ 수정했습니다.', type='positive')
+            ui.notify('✅ 수정했습니다.', type='positive', classes='text-lg')
             on_changed()
 
         def _cancel() -> None:
