@@ -31,16 +31,33 @@ from web.components.widgets import error_banner
 #    2026-08-17 오너 승인으로 공개 전환되었습니다(계획서 §9 "4. scorecard" ⑦ 동시 로그인
 #    격리 검증 + 실기기 확인 완료). 로그인 없이는 아무 데이터도 그리지 않으며(로그인 폼만),
 #    DB 는 RLS 로 본인 행만 허용합니다(§0-3-8). 두 화면은 같은 로그인 세션을 씁니다(오너 확정).
-_MENU = [
-    ('/', '🇰🇷 한국 주식은 이가격이에요', False),
-    ('/us', '🇺🇸 미국 주식은 이가격이에요', False),
-    ('/scorecard', '📊 내 성적표', False),
-    ('/report', '📈 사장님 보고서', False),
+#
+# 2026-08-18 오너 피드백 — 예전 Streamlit 버전은 메뉴가 "사실 이 가격이에요"/"내 성적표"
+# 두 그룹으로 묶여 있어 한눈에 보기 편했는데, 지금(NiceGUI)은 4개가 한 줄로 쭉 나열돼 있어
+# 정렬이 안 보기 편하다는 지적. 평평한 리스트 대신 **그룹(섹션 제목) + 하위 항목** 구조로
+# 되돌립니다. 관리자 전용 항목은 별도 그룹으로 마지막에 붙입니다.
+_MENU_GROUPS = [
+    ('💡 사실 이 가격이에요', [
+        ('/', '🇰🇷 한국 주식은 이가격이에요', False),
+        ('/us', '🇺🇸 미국 주식은 이가격이에요', False),
+    ]),
+    ('📊 내 성적표', [
+        ('/scorecard', '💼 내 보유종목', False),
+        ('/report', '📈 사장님 보고서', False),
+    ]),
     # 🏢 매크로 방공망 — **관리자 전용**(공개 화면에서 내려온 지 2026-08-05부터)이고,
     #    오너 지시(2026-08-10)로 **개발 중단 상태**입니다. 메뉴에도 관리자에게만 보입니다.
-    ('/admin/macro', '🏢 매크로 방공망 (관리자 전용)', True),
-    ('/admin', '⚙️ 관리자 콘솔', True),
+    ('⚙️ 관리자', [
+        ('/admin/macro', '🏢 매크로 방공망 (관리자 전용)', True),
+        ('/admin', '⚙️ 관리자 콘솔', True),
+    ]),
 ]
+
+# 하위호환용 평평한 목록 — `_MENU_GROUPS` 를 펼친 것뿐이라 항목(경로·라벨·관리자전용) 값은
+# 그룹으로 나누기 전과 완전히 동일합니다(§0-3-10 — 값의 출처를 하나로 유지). 기존에
+# `web.layout._MENU` 를 직접 참조하던 배선 검사(`tests/test_web_session_isolation.py`
+# [8] 매크로 배선)가 계속 통과하도록 남겨둡니다.
+_MENU = [item for _, group_items in _MENU_GROUPS for item in group_items]
 
 
 @contextmanager
@@ -56,17 +73,35 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
 
     with ui.header().classes('items-center justify-between q-pa-sm'):
         with ui.row().classes('items-center gap-2'):
-            ui.button(icon='menu', on_click=lambda: drawer.toggle()).props('flat dense round')
+            # 2026-08-18 오너 피드백 — "사이드탭 여는 버튼이 너무 안 보여": 기존 `flat` 버튼은
+            # 배경 없이 아이콘만 떠 있어 헤더 색 위에서 존재감이 거의 없었습니다. 흰 원형
+            # 배경 + 진한 아이콘 색으로 바꿔, 눌러야 할 자리라는 게 한눈에 보이게 했습니다.
+            ui.button(icon='menu', on_click=lambda: drawer.toggle()) \
+                .props('round unelevated color=white text-color=primary size=md') \
+                .classes('shadow-2')
             ui.label('💡 잘 보면 보이는 손').classes('text-lg font-bold')
         ui.label(title).classes('text-sm opacity-70')
 
     admin = is_admin()
     with ui.left_drawer(value=False) as drawer:
-        with ui.column().classes('gap-2 p-2'):
-            for path, label, admin_only in _MENU:
-                if admin_only and not admin:
+        with ui.column().classes('gap-1 p-2'):
+            # 2026-08-18 오너 피드백 — 예전 Streamlit 메뉴처럼 "그룹 제목 + 하위 항목"으로
+            # 묶어서 정렬을 보기 편하게 바꿨습니다(위 `_MENU_GROUPS` 참고). 그룹 제목은
+            # 클릭 대상이 아니라 구획을 나누는 안내용이라 링크가 아닌 라벨로 둡니다.
+            for group_label, items in _MENU_GROUPS:
+                visible_items = [
+                    (path, label) for path, label, admin_only in items
+                    if not admin_only or admin
+                ]
+                if not visible_items:
                     continue
-                ui.link(label, path).classes('text-base no-underline')
+                ui.label(group_label).classes(
+                    'text-xs font-bold uppercase tracking-wide opacity-60 mt-3 mb-1'
+                )
+                for path, label in visible_items:
+                    ui.link(label, path).classes(
+                        'text-base no-underline pl-3 py-1 rounded-borders vh-menu-link'
+                    )
 
     with ui.column().classes(f'w-full {width_class} mx-auto p-4 gap-4 vh-page'):
         # 🚨 "지금 보이는 값이 최신이 아닐 수 있음" 전역 배너 자리 (NICEGUI_MIGRATION_PLAN §8-5).

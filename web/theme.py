@@ -40,6 +40,16 @@ _CSS = """
     font-size: 0.85rem;
 }
 
+/* 2026-08-18: 좌측 드로어 메뉴 항목 — 예전 Streamlit 메뉴처럼 "지금 마우스가 있는 줄"이
+   눈에 띄게 옅은 배경이 깔리도록. web/layout.py 의 그룹 메뉴 링크에 붙습니다. */
+.vh-menu-link {
+    display: block;
+    transition: background-color 0.15s ease-in-out;
+}
+.vh-menu-link:hover {
+    background-color: rgba(148, 163, 184, 0.12);
+}
+
 /* ── 2단계(pegy) 이식분 ───────────────────────────────────────────────── */
 /* 페이지 배경 — 카드가 전부 짙은 남색(#0f172a 계열)이라 밝은 배경 위에 두면
    기존 화면과 인상이 크게 달라집니다. Streamlit 다크 테마 배경(#0e1117)에 맞춥니다. */

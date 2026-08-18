@@ -155,8 +155,11 @@ ALLOWED_MUTABLE_GLOBALS = {
         "없습니다 — `read_text()` 는 `data/` 안의 파일 경로만 받습니다 (§0-3-8 구분선).",
     ("web/components/widgets.py", "_BANNER_PALETTE"):
         "배너 색상 상수표(문자열 튜플). 값이 CSS 색상 문자열이라 데이터가 들어갈 자리가 없음.",
+    ("web/layout.py", "_MENU_GROUPS"):
+        "메뉴 정의(그룹 제목 · [경로·라벨·관리자전용 플래그] 목록). 고정 문자열/불리언뿐 "
+        "(2026-08-18 — 예전 Streamlit처럼 그룹으로 묶어 보기 편하게 바꾸며 `_MENU` 에서 이름 변경).",
     ("web/layout.py", "_MENU"):
-        "메뉴 정의(경로·라벨·관리자전용 플래그). 고정 문자열/불리언뿐.",
+        "위 `_MENU_GROUPS` 를 펼친 하위호환용 평평한 목록. 값 출처가 같아 고정 문자열/불리언뿐.",
     ("web/pages/pegy_page.py", "FILTER_PRESETS"):
         "필터 드롭다운 항목(고정 문자열 목록).",
     ("web/pages/us_stocks_page.py", "FILTER_PRESETS"):
@@ -719,11 +722,23 @@ def test_scorecard_page_wiring():
     check("@ui.refreshable" in src, "부분 갱신(@ui.refreshable) 사용 — 전체 리렌더 없음 (완료기준 ③)")
     check(src.count("no-wrap") >= 2 and "flex-1 min-w-0" in src and "shrink-0" in src,
           "'종목 관리' 줄이 항상 한 줄 유지되는 flex 패턴 사용 (완료기준 ④, #127~#130)")
-    check("ui.plotly(fig).classes('w-full h-80')" in src,
-          "원형차트에 높이(h-80)를 명시 — 안 주면 0px 로 그려짐 (완료기준 ⑤)")
+    # 2026-08-18 오너 피드백 — 조각 안에 "종목명+비율"을 같이 넣으면 작은 조각에서 글자가
+    # 겹쳐 읽을 수 없었고, 조각 색과 글자 색 대비도 부족했습니다. 원형차트를 Streamlit 원본과
+    # 글자 단위로 똑같이 유지하던 걸 그만두고 의도적으로 아래처럼 바꿨습니다(더 이상 "원본과
+    # 동일"이 완료기준이 아닙니다 — §0-1, 낡은 완료기준을 그대로 두면 실제로는 통과해야 할
+    # 의도된 변경이 계속 실패로 잡힙니다):
+    #   · 조각 안 글자는 비율만(이름은 범례로), 어두운 고정색 글자로 밝은 조각에서도 읽히게
+    #   · 조각 사이에 어두운 윤곽선을 둘러 경계를 또렷하게
+    #   · 범례가 아래로 옮겨가며 세로 공간이 더 필요해져 높이를 h-80(320px)→h-96(384px)로 키움
+    check("ui.plotly(fig).classes('w-full h-96')" in src,
+          "원형차트에 높이(h-96)를 명시 — 안 주면 0px 로 그려짐, 범례가 아래로 옮겨가며 키움 "
+          "(완료기준 ⑤, 2026-08-18 갱신)")
     check("px.pie(names=names, values=values, hole=0.35)" in src
-          and 'fig.update_traces(textposition="inside", textinfo="percent+label")' in src,
-          "원형차트 figure 생성 코드가 Streamlit 원본과 동일(px.pie · hole=0.35 · 같은 traces)")
+          and 'textinfo="percent"' in src
+          and 'color="#0f172a"' in src
+          and 'line=dict(color="#0f172a", width=2)' in src,
+          "원형차트 figure 생성 — px.pie·hole=0.35는 유지, 조각 안 글자는 비율만+어두운 "
+          "고정색(대비 확보), 조각 사이 윤곽선 추가 (2026-08-18 가시성 개선, 의도된 변경)")
 
     # (f) 원/달러 분리 (완료기준 ⑥) — 통화별로 따로 그리는 구조인지
     check('for currency in ("KRW", "USD")' in src,
