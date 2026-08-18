@@ -626,6 +626,30 @@ def load_us_all_etf_prices(data_dir=None):
     return build_universe_index(payload, MARKET_US), (payload or {}).get("metadata")
 
 
+def _name_match_candidates(stock: dict) -> list:
+    """이름 매칭에 쓸 후보 문자열 — 영문명(`name`)과, 있으면 한글명(`name_kr`) 둘 다.
+
+    2026-08-18 오너 실사용 버그 발견 — "스페이스X" 스크린샷을 올렸는데, 이 앱이 추적하는
+    미국 시가총액 상위 550 안에 SPCX가 분명히 있는데도(실측: 랭킹 8위) 못 찾았습니다.
+    원인: `find_ticker_by_name()`이 그동안 스냅샷의 영문 `name` 필드만 봤기 때문입니다
+    ("Space Exploration Technologies Corp. Class A Common Stock") — 한국 증권사 앱은
+    거의 다 한글명("스페이스X", "애플", "엔비디아" …)을 보여주므로, 영문명만 비교하면
+    미국 종목은 한글로는 사실상 못 찾았습니다(이전에 "애플"도 같은 이유로 실패했던 것과
+    동일 원인 — 그때는 실패 문구만 고치고 이 근본 원인은 못 잡았습니다).
+    스냅샷에 이미 계산돼 있는 `name_kr`(`utils/company_names_kr.py`로 만든 값,
+    `web/pages/scorecard_page.py`의 `_us_korean_name()`이 화면 표시에 쓰는 것과 같은 값)을
+    함께 봅니다 — 새로 만들지 않고 이미 있는 값을 그대로 재사용합니다(§0-3-10).
+    한국 종목 데이터에는 애초에 `name_kr` 필드가 없어(이미 한글이라 필요 없음) 이 함수는
+    한국 시장에도 안전하게 그대로 씁니다.
+    """
+    candidates = []
+    for field in ("name", "name_kr"):
+        value = str(stock.get(field) or "").strip()
+        if value:
+            candidates.append(value)
+    return candidates
+
+
 def find_ticker_by_name(market, name, indexes):
     """
     2026-08-11 오너 요청 — 종목코드를 몰라도 종목명만으로 입력할 수 있게 하는 보조 조회.
@@ -644,7 +668,7 @@ def find_ticker_by_name(market, name, indexes):
 
     index = indexes.get(market_code) or {}
     exact = [(key, stock) for key, stock in index.items()
-             if str(stock.get("name", "")).strip() == query]
+             if query in _name_match_candidates(stock)]
     if len(exact) == 1:
         key, stock = exact[0]
         return key, stock.get("name"), None
@@ -652,12 +676,12 @@ def find_ticker_by_name(market, name, indexes):
         return None, None, "같은 이름의 종목이 여러 개 있습니다 — 종목코드를 직접 입력해 주세요."
 
     partial = [(key, stock) for key, stock in index.items()
-               if query in str(stock.get("name", ""))]
+               if any(query in candidate for candidate in _name_match_candidates(stock))]
     if len(partial) == 1:
         key, stock = partial[0]
         return key, stock.get("name"), None
     if len(partial) > 1:
-        names = sorted({str(stock.get("name", "")) for _, stock in partial})
+        names = sorted({str(stock.get("name_kr") or stock.get("name") or "") for _, stock in partial})
         return None, None, "이름이 비슷한 종목이 여러 개 있어 특정할 수 없습니다: " + ", ".join(names[:10])
 
     # 2026-08-18 오너 실사용 피드백 — 미국 종목(예: 뉴스케일파워)을 시장 토글을 "미국(달러)"로
