@@ -517,7 +517,13 @@ if kospi_close is None:
 - **첫 적용 사례**: 2026-08-17, `google-generativeai`가 지원 종료(`google-genai`로 대체)임을
   코드 실행 중 경고(`FutureWarning`)로 발견 — `utils/macro_ai.py`(운영 중)와
   `utils/scorecard_ocr.py`(§0-3-11 적용) 두 파일이 이 패키지를 쓰므로, 옮기게 되면 둘을 같이
-  옮깁니다.
+  옮깁니다. **✅ 2026-08-18 마이그레이션 완료** — v2 OCR 5·6단계 실검증·공개전환이 끝난
+  뒤 오너 지시로 두 파일을 한 번에 옮겼습니다. API 모양이 통째로 바뀌어(`genai.configure()` +
+  `genai.GenerativeModel(name).generate_content(...)` → `genai.Client(api_key=...)` 로 호출
+  전용 클라이언트를 만들어 `client.models.generate_content(model=..., contents=..., config=...)`
+  호출) 두 파일의 실제 호출부와 `tests/test_scorecard_ocr.py` 의 가짜 SDK 스텁을 함께 고쳤고,
+  네트워크가 되는 별도 환경에서 실제 `google-genai` 패키지를 설치해 새 호출부가 (인증 이전
+  단계까지) SDK 시그니처와 정확히 맞는지 구조적으로 확인했습니다.
 - §0-3-11(provider 교체 가능 설계)과 같이 적용되면 이 작업이 더 쉬워집니다 — 이미 함수 경계
   뒤에 감춰뒀다면, 그 함수 안쪽 구현만 바꾸면 되니까요.
 

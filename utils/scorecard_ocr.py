@@ -42,11 +42,21 @@ import math
 import os
 import re
 
+# ⚠️ 2026-08-18 마이그레이션 — 구글이 지원 종료(EOL)를 선언한 `google-generativeai` 대신
+#    후속 패키지 `google-genai` 를 씁니다(ENGINEERING_SPEC.md §0-3-12, PROJECT_STATUS.md
+#    §0-5-6). API 모양이 통째로 바뀌었습니다: 예전엔 `genai.configure(api_key=...)` 로 전역
+#    설정 후 `genai.GenerativeModel(name).generate_content(...)` 를 불렀는데, 새 SDK는
+#    설정을 전역에 두지 않고 `genai.Client(api_key=...)` 로 매 호출마다 별도 클라이언트를
+#    만들어 `client.models.generate_content(model=..., contents=..., config=...)` 로 부릅니다.
+#    같은 패키지를 쓰는 `utils/macro_ai.py` 도 같이 옮겼습니다(§0-3-10 — 한 곳만 옮기면
+#    두 패턴이 공존해 유지보수가 더 어려워짐).
 try:  # pragma: no cover - 환경에 따라 갈리는 import (macro_ai.py / scorecard_db.py 와 동일 패턴)
-    import google.generativeai as genai
+    from google import genai
+    from google.genai import types as genai_types
     GENAI_PACKAGE_AVAILABLE = True
 except ImportError:  # pragma: no cover
     genai = None
+    genai_types = None
     GENAI_PACKAGE_AVAILABLE = False
 
 
@@ -135,12 +145,19 @@ def _extract_with_gemini(image_bytes: bytes) -> dict:
     # 서로 갈릴 수 없습니다(§0-3-10 중복 금지).
     mime_type = ensure_supported_image_format(image_bytes)
 
-    genai.configure(api_key=api_key)
+    # 2026-08-18 — `genai.configure()` + `genai.GenerativeModel(name)`(구 SDK) 대신
+    # `genai.Client(api_key=...)` 로 이 호출 전용 클라이언트를 만듭니다(신 SDK, 전역 설정 없음).
+    client = genai.Client(api_key=api_key)
     try:
-        model = genai.GenerativeModel(GEMINI_MODEL_NAME)
-        response = model.generate_content(
-            [_PROMPT, {"mime_type": mime_type, "data": image_bytes}],
-            generation_config={"response_mime_type": "application/json"},
+        response = client.models.generate_content(
+            model=GEMINI_MODEL_NAME,
+            contents=[
+                _PROMPT,
+                genai_types.Part.from_bytes(data=image_bytes, mime_type=mime_type),
+            ],
+            config=genai_types.GenerateContentConfig(
+                response_mime_type="application/json",
+            ),
         )
     except Exception as exc:  # noqa: BLE001 — 원문은 로그로만, 화면엔 사람이 읽을 문장만(§0-3-4)
         print(f"⚠️ Gemini OCR 요청 실패: {type(exc).__name__}: {exc}")

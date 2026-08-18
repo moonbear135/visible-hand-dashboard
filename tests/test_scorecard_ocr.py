@@ -65,45 +65,82 @@ class _FakeResponse:
         self.text = text
 
 
-class _FakeModel:
+class _FakeModels:
+    """`client.models` 를 흉내내는 최소 스텁 — 신 SDK(`google-genai`)는 모델 객체를 미리
+    만들지 않고, 호출마다 `generate_content(model=<이름 문자열>, contents=..., config=...)`
+    를 씁니다(2026-08-18 마이그레이션, `utils/scorecard_ocr.py` §0-3-12 참고)."""
+
     def __init__(self, response_text=None, exc=None):
         self._response_text = response_text
         self._exc = exc
-        self.calls = []
+        self.calls = []  # 각 원소: {"model", "contents", "config"}
+        self.requested_model_name = None
 
-    def generate_content(self, parts, **kwargs):
-        self.calls.append((parts, kwargs))
+    def generate_content(self, *, model, contents, config=None):
+        self.requested_model_name = model
+        self.calls.append({"model": model, "contents": contents, "config": config})
         if self._exc:
             raise self._exc
         return _FakeResponse(self._response_text)
 
 
+class _FakeClient:
+    def __init__(self, models):
+        self.models = models
+
+
 class _FakeGenAI:
-    """`google.generativeai` 모듈을 흉내내는 최소 스텁 — 실제 패키지가 없어도 검증 가능."""
+    """`google.genai` 모듈을 흉내내는 최소 스텁 — 실제 패키지가 없어도 검증 가능."""
 
-    def __init__(self, model):
-        self._model = model
-        self.configured_with = None
-        self.requested_model_name = None
+    def __init__(self, models):
+        self._models = models
+        self.configured_with = None  # Client(api_key=...) 에 실제로 넘어온 값
 
-    def configure(self, api_key):
+    def Client(self, api_key):  # noqa: N802 - 실제 라이브러리 이름 그대로
         self.configured_with = api_key
+        return _FakeClient(self._models)
 
-    def GenerativeModel(self, name):  # noqa: N802 - 실제 라이브러리 메서드 이름 그대로
-        self.requested_model_name = name
-        return self._model
+
+class _FakePart:
+    """`google.genai.types.Part.from_bytes(data=..., mime_type=...)` 흉내.
+
+    실제 SDK는 pydantic 모델을 돌려주지만, 테스트에서는 "어떤 바이트·mime_type 이 실제로
+    전송 대상에 담겼는가"만 확인하면 되므로 그 두 값을 그대로 들고 있는 단순 객체면 충분."""
+
+    def __init__(self, data, mime_type):
+        self.data = data
+        self.mime_type = mime_type
+
+
+class _FakeGenAITypes:
+    """`google.genai.types` 모듈을 흉내내는 최소 스텁."""
+
+    class Part:
+        @staticmethod
+        def from_bytes(*, data, mime_type):
+            return _FakePart(data, mime_type)
+
+    class GenerateContentConfig:
+        def __init__(self, **kwargs):
+            # 실제 SDK는 pydantic 모델이지만, 테스트는 넘어온 키워드를 그대로 확인하면
+            # 충분하므로 dict 처럼 접근 가능한 단순 네임스페이스로 둡니다.
+            self.__dict__.update(kwargs)
+
+        def __getitem__(self, key):  # 기존 테스트의 dict 스타일 접근과 호환
+            return self.__dict__[key]
 
 
 def _wire_fake_gemini(mod, monkeypatch, *, response_text=None, exc=None, api_key="test-key"):
-    fake_model = _FakeModel(response_text=response_text, exc=exc)
-    fake_genai = _FakeGenAI(fake_model)
+    fake_models = _FakeModels(response_text=response_text, exc=exc)
+    fake_genai = _FakeGenAI(fake_models)
     monkeypatch.setattr(mod, "genai", fake_genai)
+    monkeypatch.setattr(mod, "genai_types", _FakeGenAITypes)
     monkeypatch.setattr(mod, "GENAI_PACKAGE_AVAILABLE", True)
     if api_key is not None:
         monkeypatch.setenv("GEMINI_API_KEY", api_key)
     else:
         monkeypatch.delenv("GEMINI_API_KEY", raising=False)
-    return fake_model, fake_genai
+    return fake_models, fake_genai
 
 
 def _page_source() -> str:
@@ -166,9 +203,9 @@ def test_model_name_matches_work_order(ocr_module, monkeypatch):
     response_json = json.dumps({"items": [
         {"raw_name": "테스트", "quantity": 1, "avg_price": 1, "confidence": "high"}
     ]})
-    _fake_model, fake_genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
+    fake_models, _fake_genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
     ocr_module.extract_holdings_from_image(PNG_MAGIC)
-    assert fake_genai.requested_model_name == "gemini-3.5-flash-lite"
+    assert fake_models.requested_model_name == "gemini-3.5-flash-lite"
 
 
 # =============================================================================
@@ -490,10 +527,15 @@ def test_original_image_bytes_not_persisted_to_disk_or_db():
 # 기타 배선 확인
 # =============================================================================
 def test_requirements_txt_has_uncommented_dependency():
+    """2026-08-18 — `google-generativeai`(EOL) → `google-genai` 마이그레이션 후에도
+    실제 의존성 줄이 주석 처리되지 않고 남아 있는지(ENGINEERING_SPEC.md §0-3-12)."""
     req = (REPO_ROOT / "requirements.txt").read_text(encoding="utf-8")
     lines = [ln.strip() for ln in req.splitlines()]
-    assert any(ln == "google-generativeai" for ln in lines), (
-        "google-generativeai 가 주석 처리되지 않은 실제 의존성 줄로 있어야 함"
+    assert any(ln == "google-genai" for ln in lines), (
+        "google-genai 가 주석 처리되지 않은 실제 의존성 줄로 있어야 함"
+    )
+    assert not any(ln == "google-generativeai" for ln in lines), (
+        "옛 패키지(google-generativeai)가 다시 살아나지 않아야 함(EOL, §0-3-12)"
     )
 
 
@@ -525,11 +567,11 @@ def test_explicit_provider_value_is_honoured(ocr_module, monkeypatch):
         {"raw_name": "삼성전자", "quantity": 1, "avg_price": 1000, "confidence": "high"}
     ]}, ensure_ascii=False)
     for value in ("gemini", "Gemini", "  GEMINI  "):
-        _fake_model, fake_genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
+        fake_models, _fake_genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
         monkeypatch.setenv("OCR_PROVIDER", value)
         result = ocr_module.extract_holdings_from_image(PNG_MAGIC)
         assert result["items"][0]["raw_name"] == "삼성전자", f"{value!r} 로도 gemini 분기를 타야 함"
-        assert fake_genai.requested_model_name == "gemini-3.5-flash-lite"
+        assert fake_models.requested_model_name == "gemini-3.5-flash-lite"
 
 
 @pytest.mark.parametrize("image_bytes, expected_mime", [
@@ -546,15 +588,17 @@ def test_image_format_is_read_from_bytes_not_guessed(ocr_module, monkeypatch, im
     response_json = json.dumps({"items": [
         {"raw_name": "종목", "quantity": 1, "avg_price": 1, "confidence": "high"}
     ]})
-    fake_model, _genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
+    fake_models, _genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=response_json)
     ocr_module.extract_holdings_from_image(image_bytes)
 
-    parts, kwargs = fake_model.calls[0]
-    image_part = next(part for part in parts if isinstance(part, dict))
-    assert image_part["mime_type"] == expected_mime
-    assert image_part["data"] == image_bytes
+    call = fake_models.calls[0]
+    # `contents` 리스트 안에서 이미지 조각(`genai_types.Part.from_bytes(...)` 결과, 텍스트
+    # 프롬프트가 아닌 것)을 찾습니다 — 신 SDK 는 이미지를 dict 가 아니라 Part 객체로 보냅니다.
+    image_part = next(part for part in call["contents"] if not isinstance(part, str))
+    assert image_part.mime_type == expected_mime
+    assert image_part.data == image_bytes
     # JSON 으로만 답하라고 요청해야 파싱 실패 확률이 낮아집니다.
-    assert kwargs["generation_config"]["response_mime_type"] == "application/json"
+    assert call["config"]["response_mime_type"] == "application/json"
 
 
 def test_unknown_file_type_is_rejected_before_calling_the_paid_api(ocr_module, monkeypatch):
@@ -563,10 +607,10 @@ def test_unknown_file_type_is_rejected_before_calling_the_paid_api(ocr_module, m
     동시에 §0-3-9 — 업로드 위젯의 `accept` 는 브라우저 쪽 검사라 우회 가능하므로, 이미지가
     아닌 파일이 외부 유료 API 로 나가는 경로 자체가 없어야 합니다.
     """
-    fake_model, _genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=json.dumps({"items": []}))
+    fake_models, _genai = _wire_fake_gemini(ocr_module, monkeypatch, response_text=json.dumps({"items": []}))
     with pytest.raises(ocr_module.OcrError):
         ocr_module.extract_holdings_from_image(PDF_MAGIC)
-    assert fake_model.calls == [], "형식을 모르는 파일은 provider 로 나가지 않아야 함"
+    assert fake_models.calls == [], "형식을 모르는 파일은 provider 로 나가지 않아야 함"
 
 
 def test_upload_size_limit_is_enforced_on_the_server_not_only_in_the_browser():

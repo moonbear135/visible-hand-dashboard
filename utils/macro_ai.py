@@ -1,7 +1,14 @@
 import os
 import json
 import time
-import google.generativeai as genai
+
+# ⚠️ 2026-08-18 마이그레이션 — `google-generativeai`(구글 지원 종료)에서 후속 패키지
+# `google-genai` 로 옮김(ENGINEERING_SPEC.md §0-3-12, PROJECT_STATUS.md §0-5-6).
+# `utils/scorecard_ocr.py` 도 같은 패키지를 써서 같이 옮겼습니다(§0-3-10). API 모양이
+# 바뀌어 `genai.configure()` + `genai.GenerativeModel(name)` 대신 `genai.Client(api_key=...)`
+# 로 호출 전용 클라이언트를 만들고 `client.models.generate_content(model=..., contents=...)`
+# 를 씁니다.
+from google import genai
 
 # 🔗 한글 이름 매핑 — **단일 출처는 `utils/constants.py`** (2026-08-17 통합)
 #
@@ -38,13 +45,14 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
         print("⚠️ GEMINI_API_KEY가 없습니다. AI 코멘트 생성을 건너뜁니다.")
         return
         
-    genai.configure(api_key=api_key)
-    
-    # gemini-2.5-flash 모델 등 저비용 고효율 모델 사용
-    try:
-        model = genai.GenerativeModel('gemini-2.5-flash')
-    except Exception:
-        model = genai.GenerativeModel('gemini-1.5-flash')
+    # 2026-08-18 마이그레이션 참고 — 예전 SDK에서도 `GenerativeModel(name)` 생성 자체는
+    # 모델 이름을 검증하지 않아(실패는 항상 실제 `generate_content()` 호출 시점에만 났음),
+    # 위에 있던 try/except 폴백은 실제로는 한 번도 타지 않던 죽은 코드였습니다. 새 SDK는
+    # 애초에 "모델 객체"를 미리 만들지 않고 호출마다 모델 이름을 문자열로 넘기므로 그 구조를
+    # 그대로 옮기지 않습니다. 실제 실패는 아래 반복문의 지표별 try/except가 그대로 잡아 그
+    # 지표만 실패 문구로 남기고 나머지는 계속 진행합니다(기존 동작과 동일 — §0-1).
+    client = genai.Client(api_key=api_key)
+    model_name = 'gemini-2.5-flash'  # 저비용 고효율 모델 사용
     
     data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -93,7 +101,7 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
         
         try:
             print(f"   💬 [{key}] 코멘트 요청 중...")
-            response = model.generate_content(prompt)
+            response = client.models.generate_content(model=model_name, contents=prompt)
             if response and response.text:
                 new_comments[key] = response.text.strip()
                 comment_dates[key] = today_str      # 실제 생성 성공 시에만 오늘 날짜 기록
