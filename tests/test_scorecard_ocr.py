@@ -666,27 +666,32 @@ DAY_ONE = _date(2026, 8, 17)
 DAY_TWO = _date(2026, 8, 18)
 
 
-def test_owner_decided_limit_is_ten_per_user_per_day(quota_db):
-    """오너가 정한 값(하루 10회)을 코드에 고정합니다 — 조용히 바뀌면 이 테스트가 깨집니다."""
-    assert quota_db.DAILY_OCR_UPLOAD_LIMIT == 10
+def test_owner_decided_limit_is_pinned(quota_db):
+    """오너가 정한 값을 코드에 고정합니다 — 조용히 바뀌면 이 테스트가 깨집니다.
+
+    ⚠️ 2026-08-18 — v2 OCR 5단계 실기기 재검증 중 배포 지연으로 하루 한도(원래 10)를
+    소진해 검증이 막혀, 검증이 끝날 때까지 100으로 임시 상향(오너 결정, utils/scorecard_db.py
+    상단 주석 참고). 검증이 끝나면 10으로 되돌리고 이 assert도 같이 되돌릴 것.
+    """
+    assert quota_db.DAILY_OCR_UPLOAD_LIMIT == 100
 
 
 def test_uploads_up_to_the_limit_pass_and_the_next_one_is_blocked(quota_db):
-    """경계값 — 마지막 1회(10회째)까지는 통과, 그 다음(11회째)은 차단."""
+    """경계값 — 마지막 1회(한도째)까지는 통과, 그 다음(한도+1회째)은 차단."""
     client = _fake_client()
     limit = quota_db.DAILY_OCR_UPLOAD_LIMIT
 
-    for attempt in range(1, limit):                 # 1 ~ 9회째
+    for attempt in range(1, limit):                 # 1 ~ (한도-1)회째
         quota = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
         assert quota["used"] == attempt
         assert quota["remaining"] == limit - attempt
 
-    last = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)   # 10회째 = 한도 그 자체
+    last = quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)   # 한도째 = 한도 그 자체
     assert last["used"] == limit and last["remaining"] == 0, (
-        "한도와 '같은' 횟수까지는 허용해야 합니다(10회 제한 = 10번은 쓸 수 있음)"
+        "한도와 '같은' 횟수까지는 허용해야 합니다(한도가 N회면 N번은 쓸 수 있음)"
     )
 
-    with pytest.raises(quota_db.OcrQuotaExceeded):                            # 11회째
+    with pytest.raises(quota_db.OcrQuotaExceeded):                            # (한도+1)회째
         quota_db.consume_ocr_quota(client, "user-a", usage_date=DAY_ONE)
 
 
