@@ -551,7 +551,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
     # ⚠️ 이 dict 는 **페이지 함수 호출마다 새로 만들어지는 지역 상태**입니다(접속마다 별개).
     #    모듈 전역에 두면 접속자끼리 입력값이 섞입니다(§0-3-8).
     form = {'market': MARKET_KR}
-    message = ui.label('').classes('text-red-400')
+    # ⚠️ 2026-08-18 오너 실사용 피드백 — 실패 문구 라벨(`message`)이 예전엔 여기(화면
+    # 맨 위, 토글 버튼보다도 위)에 있어서 "아래 문구에서 이유가 안 보인다"는 보고를
+    # 받았습니다. 사용자는 스크린샷 업로드·입력창·"➕ 추가" 버튼을 보고 있는 화면
+    # 아래쪽에 있는데, 실패 사유는 스크롤을 한참 올려야 하는 맨 위에 있었던 것입니다.
+    # `message` 라벨은 이제 아래쪽 "➕ 추가" 버튼 바로 밑에서 정의합니다(코드 뒷부분
+    # 참고) — 파이썬 클로저 규칙상 `_submit()`이 실제로 호출되는 시점(버튼 클릭)에는
+    # 이미 이 함수 전체가 다 실행된 뒤라 정의 위치를 옮겨도 동작에는 영향이 없습니다.
 
     def _on_market(event) -> None:
         form['market'] = event.value
@@ -677,6 +683,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 query_input.value = item.get('raw_name') or ''
                 qty_input.value = _ocr_value_text(item.get('quantity'))
                 price_input.value = _ocr_value_text(item.get('avg_price'))
+                # 2026-08-18 오너 실사용 피드백 — 이 버튼과 실제 입력창은 화면에서 한참
+                # 떨어져 있고(스크린샷 업로드 영역 전체를 사이에 두고 있음), 클릭 후
+                # 서버 왕복(네트워크 지연)이 있는 짧은 순간엔 "눌렸는지" 알 길이 없어서
+                # 같은 버튼을 여러 번 누르게 된다는 보고. `item['filled']`를 표시해두고
+                # 목록을 다시 그려서, 버튼 자리에 눌렀다는 표시(✓ 채움)가 스크롤 없이
+                # 바로 남게 합니다.
+                item['filled'] = True
+                _render_ocr_items()
                 ui.notify(
                     '입력창에 채웠습니다 — 확인·수정 후 "➕ 추가"를 눌러야 저장됩니다.',
                     type='info',
@@ -690,6 +704,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             with extracted_box:
                 for item in extracted_items:
                     low_conf = item.get('confidence') == 'low'
+                    filled = item.get('filled', False)
                     name_text = item.get('raw_name') or '(이름 미인식)'
                     qty_text = _ocr_value_text(item.get('quantity')) or '수량 미인식'
                     price_text = _ocr_value_text(item.get('avg_price')) or '매입가 미인식'
@@ -701,8 +716,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                             .classes('flex-1 min-w-0 truncate')
                         if low_conf:
                             ui.badge('⚠️ 확인 필요', color='amber-8').classes('shrink-0')
-                        ui.button('입력창에 채우기', on_click=_make_ocr_fill_handler(item)) \
-                            .props('flat dense no-caps').classes('shrink-0')
+                        if filled:
+                            # 이미 눌러서 입력창에 채운 적이 있다는 표시 — 몇 번 눌렀는지가
+                            # 아니라 "적어도 한 번은 성공했다"만 알려주면 충분합니다.
+                            ui.badge('✓ 채움', color='positive').classes('shrink-0')
+                        ui.button(
+                            '다시 채우기' if filled else '입력창에 채우기',
+                            on_click=_make_ocr_fill_handler(item),
+                        ).props('flat dense no-caps').classes('shrink-0')
 
         async def _on_ocr_upload(event) -> None:
             image_bytes = await event.file.read()
@@ -864,6 +885,9 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         on_changed()
 
     ui.button('➕ 추가 / 평균단가 재계산', on_click=_submit).props('no-caps')
+    # 실패 사유는 이 버튼 바로 밑에 둡니다 — 방금 누른 버튼과 같은 화면 안에 있어야
+    # 스크롤 없이 바로 보입니다(2026-08-18 오너 피드백, 위 `form = {...}` 옆 주석 참고).
+    message = ui.label('').classes('text-red-400 text-base')
 
 
 # =============================================================================
