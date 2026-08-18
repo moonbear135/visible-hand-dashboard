@@ -281,21 +281,28 @@ def _parse_positive_number(raw, label):
     return number
 
 
-def _notify_fail(message_label, text: str) -> None:
-    """실패를 **확실하게** 알립니다 — 인라인 문구 하나만으로는 부족하다는 실사용 피드백 반영.
+def _notify_fail(message_label, text: str, *, toast: str | None = None) -> None:
+    """실패를 **확실하게, 그러나 짧게** 알립니다.
 
-    2026-08-18 오너 실사용 피드백 — 예전엔 조용한 빨간 인라인 라벨(`ui.label(...).classes
+    2026-08-18 오너 실사용 피드백 ①: 예전엔 조용한 빨간 인라인 라벨(`ui.label(...).classes
     ('text-red-400')`) 하나뿐이었는데, 화면 아래쪽에 있으면 스크롤 밖이라 "실패 알람 자체를
     전혀 못 봤다"는 보고를 받았습니다(예: 금현물처럼 이 앱이 다루지 않는 종목을 입력했을 때).
-    그래서 이제 같은 실패를 **두 곳에 동시에** 보여줍니다 — ① 기존 인라인 라벨(스크린리더·
-    조용한 재확인용으로 남겨둠) ② 화면 중앙에 사용자가 직접 닫기 전까지 사라지지 않는 큰
-    토스트(`ui.notify`, `timeout=0`). 추가 폼(`_submit`)과 수정 폼(`_render_edit_card`)이
+    그래서 이제 같은 실패를 **두 곳에 동시에** 보여줍니다 — ① 기존 인라인 라벨(자세한 사유가
+    필요할 때 읽는 용도로 남겨둠) ② 화면 중앙에 사용자가 직접 닫기 전까지 사라지지 않는 큰
+    토스트(`ui.notify`, `timeout=0`).
+
+    2026-08-18 오너 실사용 피드백 ②(바로 이어서): 토스트에 `resolve_stock_query()`가 만든
+    상세 사유(두 문장, 꽤 긺)를 그대로 넣었더니 "읽는 데 시간이 너무 오래 걸린다"는 반응.
+    그래서 `toast` 를 따로 받습니다 — 넘기면 **토스트는 그 짧은 문구만** 쓰고, 상세 사유는
+    여전히 인라인 라벨(`message_label`)에 전부 남아 궁금하면 아래로 내려서 읽을 수
+    있습니다. `toast` 를 안 넘기면(예: 이미 짧은 "수량을 입력해 주세요." 류) 토스트와
+    인라인 라벨에 같은 문구를 씁니다. 추가 폼(`_submit`)과 수정 폼(`_render_edit_card`)이
     이 함수 하나를 공유하므로, 실패 알림 방식이 두 화면에서 서로 다르게 어긋나지
     않습니다(§0-3-10).
     """
     message_label.text = text
     ui.notify(
-        text,
+        toast or text,
         type='negative',
         position='center',
         multi_line=True,
@@ -807,7 +814,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             broad_index=market["kr_master"] if market_code == MARKET_KR else None,
         )
         if not resolved_ticker:
-            _notify_fail(message, f'🚫 {resolve_error}')
+            # 2026-08-18 — resolve_error 는 두 문장짜리 상세 사유라 토스트로 보기엔 깁니다
+            # ("읽는 데 시간이 오래 걸린다" 피드백). 토스트는 짧게, 상세 사유는 인라인
+            # 라벨(message)에 그대로 남겨 필요하면 읽을 수 있게 합니다.
+            _notify_fail(
+                message,
+                f'🚫 {resolve_error}',
+                toast='🚫 이 종목은 찾지 못했습니다 — 아래 문구에서 이유를 확인해 주세요.',
+            )
             return
         try:
             quantity = _parse_positive_number(qty_input.value, '수량')
