@@ -171,10 +171,18 @@ _SLICE_COLORS = (
 
 
 def _chart_layout() -> dict:
-    """이 화면의 원형차트 레이아웃 = 공통 다크 테마 + 이 화면 고유값."""
+    """이 화면의 원형차트 레이아웃 = 공통 다크 테마 + 이 화면 고유값.
+
+    2026-08-18 오너 피드백 — 조각 안에 "종목명+비율"을 같이 욱여넣다 보니(특히 한 종목이
+    70~90%대를 차지하는 흔한 구성에서) 작은 조각들은 글자가 겹쳐서 이름도 비율도 읽을 수
+    없었습니다. 조각 안 글자는 비율만 남기고(아래 `_pie()`), 종목명은 오른쪽 범례로 옮겨
+    각자 자기 자리(범례엔 이름, 조각엔 숫자)에서 읽히게 합니다.
+    """
     return chart_layout(
-        margin=dict(t=10, b=10, l=10, r=10),
-        showlegend=False,
+        margin=dict(t=10, b=10, l=10, r=110),
+        showlegend=True,
+        legend=dict(font=dict(size=12), orientation='v', x=1.0, y=0.5,
+                    xanchor='left', yanchor='middle'),
         # 조각 색 안전망 ①. 아래 `_pie()` 에서 trace 에 직접 색을 넣는 게 본 수정이고,
         # 이건 혹시 그쪽이 무시되는 plotly 버전에서도 검은 도넛이 되지 않게 하는 이중 보험입니다.
         piecolorway=list(_SLICE_COLORS),
@@ -1507,7 +1515,11 @@ def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
         return
 
     fig = px.pie(names=names, values=values, hole=0.35)
-    fig.update_traces(textposition="inside", textinfo="percent+label")
+    # 2026-08-18 오너 피드백 — 조각 안에 이름까지 넣으면 작은 조각에서 글자가 겹쳐 안 보였습니다.
+    # 조각에는 비율만 남기고(그마저도 너무 작은 조각은 plotly 가 알아서 숨김), 종목명은
+    # 위 `_chart_layout()` 에서 켠 범례로 옮겼습니다 — 마우스를 올리면(호버) 이름·비율·값이
+    # 다 나오므로 정보 자체가 없어지는 건 아닙니다.
+    fig.update_traces(textposition="inside", textinfo="percent")
     # 조각 색 안전망 ② (본 수정). 종목 수가 팔레트보다 많으면 처음부터 다시 돌려 씁니다
     # (plotly 가 colorway 를 재사용하는 방식과 동일). 라벨 순서 = 색 순서라 항상 1:1 로 맞습니다.
     fig.update_traces(marker=dict(
@@ -1518,81 +1530,87 @@ def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
 
 
 def _render_valuation_picker(rows, indexes, currency: str) -> None:
-    """"💡 사실 이 가격이에요" — 종목을 고르면 그 종목의 밸류에이션 카드를 보여줍니다."""
-    ui.markdown('**💡 사실 이 가격이에요 — 밸류에이션 요약**')
+    """"💡 사실 이 가격이에요" — 종목을 고르면 그 종목의 밸류에이션 카드를 보여줍니다.
+
+    2026-08-18 오너 피드백 — 성적표 화면이 이 블록까지 기본으로 펼쳐져 있어 복잡해
+    보인다는 지적. 바로 아래(카드 안) "이 종목 수집 시 남은 경고"가 이미 기본 접힘인
+    것과 같은 패턴으로, 이 블록 전체를 `ui.expansion`으로 감쌌습니다. 안쪽 로직(종목
+    선택·카드 내용)은 하나도 바뀌지 않았고, 그릴 위치만 접기 안으로 옮겼습니다.
+    """
     labels = {}
     for row in rows:
         labels[_row_label(row, indexes)] = row
     if not labels:
         return
 
-    state = {'picked': next(iter(labels))}
+    with ui.expansion('💡 사실 이 가격이에요 — 밸류에이션 요약').classes('w-full'):
+        state = {'picked': next(iter(labels))}
 
-    def _on_pick(event) -> None:
-        if event.value:
-            state['picked'] = event.value
-            card.refresh()
+        def _on_pick(event) -> None:
+            if event.value:
+                state['picked'] = event.value
+                card.refresh()
 
-    ui.select(list(labels.keys()), value=state['picked'], label='종목 선택', on_change=_on_pick) \
-        .classes('w-full')
+        ui.select(list(labels.keys()), value=state['picked'], label='종목 선택', on_change=_on_pick) \
+            .classes('w-full')
 
-    @ui.refreshable
-    def card() -> None:
-        row = labels.get(state['picked'])
-        if row is None:
-            return
-        summary = valuation_summary(row["market"], row["ticker"], indexes)
-        if not summary.get("found"):
-            info_banner(f'ℹ️ 밸류에이션 정보 없음 — {summary.get("reason")}')
-            return
-        if not summary.get("verified"):
-            warning_banner(f'⚠️ 이 종목은 수집 검증을 통과하지 못했습니다 — {summary.get("reason")}')
-            return
+        @ui.refreshable
+        def card() -> None:
+            row = labels.get(state['picked'])
+            if row is None:
+                return
+            summary = valuation_summary(row["market"], row["ticker"], indexes)
+            if not summary.get("found"):
+                info_banner(f'ℹ️ 밸류에이션 정보 없음 — {summary.get("reason")}')
+                return
+            if not summary.get("verified"):
+                warning_banner(f'⚠️ 이 종목은 수집 검증을 통과하지 못했습니다 — {summary.get("reason")}')
+                return
 
-        score, score_max = summary.get("quant_score"), summary.get("score_max")
-        with ui.row().classes('w-full gap-4 items-stretch'):
-            metric_card('현재가', format_amount(summary.get("price"), currency))
-            metric_card('Trailing PEGY',
-                        f'{summary["t_pegy"]:.2f}' if summary.get("t_pegy") is not None else '—')
-            metric_card('Forward PEGY',
-                        f'{summary["f_pegy"]:.2f}' if summary.get("f_pegy") is not None else '—')
-            metric_card('퀀트 점수',
-                        f'{score} / {score_max}' if score is not None and score_max else '—')
-        if summary.get("badge"):
-            ui.html(f'<div><b>판정:</b> {esc(str(summary["badge"]))}</div>').classes('w-full')
-
-        if summary.get("t_fair") is not None or summary.get("f_target") is not None:
+            score, score_max = summary.get("quant_score"), summary.get("score_max")
             with ui.row().classes('w-full gap-4 items-stretch'):
-                metric_card('Trailing 적정가',
-                            format_amount(summary["t_fair"], currency)
-                            if summary.get("t_fair") is not None else '—')
-                metric_card('Forward 목표가',
-                            format_amount(summary["f_target"], currency)
-                            if summary.get("f_target") is not None else '—')
+                metric_card('현재가', format_amount(summary.get("price"), currency))
+                metric_card('Trailing PEGY',
+                            f'{summary["t_pegy"]:.2f}' if summary.get("t_pegy") is not None else '—')
+                metric_card('Forward PEGY',
+                            f'{summary["f_pegy"]:.2f}' if summary.get("f_pegy") is not None else '—')
+                metric_card('퀀트 점수',
+                            f'{score} / {score_max}' if score is not None and score_max else '—')
+            if summary.get("badge"):
+                ui.html(f'<div><b>판정:</b> {esc(str(summary["badge"]))}</div>').classes('w-full')
 
-        # "내 평균매입가 vs 현재가" 배너 — 오너 지시대로 국내 관례(오르면 빨강/내리면 파랑).
-        # ⚠️ Streamlit 에서는 마크다운(KaTeX)이 "$147.80 VS $159.80" 의 $ 두 개 사이를 수식으로
-        #    오인해 `\$` 이스케이프가 필요했지만, 여기서는 마크다운을 거치지 않는 HTML 이라
-        #    그 우회가 필요 없습니다(값은 동일).
-        price = summary.get("price")
-        avg_price = row.get("avg_purchase_price")
-        if price is not None and avg_price:
-            diff_pct = (price - avg_price) / avg_price * 100
-            up = diff_pct >= 0
-            (error_banner if up else info_banner)(
-                f'{"📈" if up else "📉"} 내 평균매입가 {format_amount(avg_price, currency)} VS '
-                f'현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)'
-            )
-        else:
-            info_banner(
-                f'내 평균매입가 {format_amount(avg_price, currency)} vs '
-                f'현재가 {format_amount(price, currency)}'
-            )
-        ui.label('판단은 각자의 몫입니다(매수/매도 권유가 아닙니다).').classes('vh-muted')
+            if summary.get("t_fair") is not None or summary.get("f_target") is not None:
+                with ui.row().classes('w-full gap-4 items-stretch'):
+                    metric_card('Trailing 적정가',
+                                format_amount(summary["t_fair"], currency)
+                                if summary.get("t_fair") is not None else '—')
+                    metric_card('Forward 목표가',
+                                format_amount(summary["f_target"], currency)
+                                if summary.get("f_target") is not None else '—')
 
-        if summary.get("data_issues"):
-            with ui.expansion('이 종목 수집 시 남은 경고').classes('w-full'):
-                for issue in summary["data_issues"]:
-                    ui.label(f'- {issue}')
+            # "내 평균매입가 vs 현재가" 배너 — 오너 지시대로 국내 관례(오르면 빨강/내리면 파랑).
+            # ⚠️ Streamlit 에서는 마크다운(KaTeX)이 "$147.80 VS $159.80" 의 $ 두 개 사이를 수식으로
+            #    오인해 `\$` 이스케이프가 필요했지만, 여기서는 마크다운을 거치지 않는 HTML 이라
+            #    그 우회가 필요 없습니다(값은 동일).
+            price = summary.get("price")
+            avg_price = row.get("avg_purchase_price")
+            if price is not None and avg_price:
+                diff_pct = (price - avg_price) / avg_price * 100
+                up = diff_pct >= 0
+                (error_banner if up else info_banner)(
+                    f'{"📈" if up else "📉"} 내 평균매입가 {format_amount(avg_price, currency)} VS '
+                    f'현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)'
+                )
+            else:
+                info_banner(
+                    f'내 평균매입가 {format_amount(avg_price, currency)} vs '
+                    f'현재가 {format_amount(price, currency)}'
+                )
+            ui.label('판단은 각자의 몫입니다(매수/매도 권유가 아닙니다).').classes('vh-muted')
 
-    card()
+            if summary.get("data_issues"):
+                with ui.expansion('이 종목 수집 시 남은 경고').classes('w-full'):
+                    for issue in summary["data_issues"]:
+                        ui.label(f'- {issue}')
+
+        card()
