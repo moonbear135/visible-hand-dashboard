@@ -175,14 +175,18 @@ def _chart_layout() -> dict:
 
     2026-08-18 오너 피드백 — 조각 안에 "종목명+비율"을 같이 욱여넣다 보니(특히 한 종목이
     70~90%대를 차지하는 흔한 구성에서) 작은 조각들은 글자가 겹쳐서 이름도 비율도 읽을 수
-    없었습니다. 조각 안 글자는 비율만 남기고(아래 `_pie()`), 종목명은 오른쪽 범례로 옮겨
-    각자 자기 자리(범례엔 이름, 조각엔 숫자)에서 읽히게 합니다.
+    없었습니다. 조각 안 글자는 비율만 남기고(아래 `_pie()`), 종목명은 범례로 옮겨 각자
+    자기 자리(범례엔 이름, 조각엔 숫자)에서 읽히게 합니다.
+
+    ⚠️ 2026-08-18 추가 피드백 — 범례를 오른쪽 세로로 두니 원(도넛) 자체가 좁아져
+    "깔끔한 맛이 안 난다"는 지적. 범례를 **아래쪽 가로**로 옮겨 원이 옆으로 눌리지 않고
+    가로 폭을 꽉 채우도록 키웠습니다(모바일에서 이미 세로로 쌓이던 배치와도 더 잘 맞음).
     """
     return chart_layout(
-        margin=dict(t=10, b=10, l=10, r=110),
+        margin=dict(t=10, b=70, l=10, r=10),
         showlegend=True,
-        legend=dict(font=dict(size=12), orientation='v', x=1.0, y=0.5,
-                    xanchor='left', yanchor='middle'),
+        legend=dict(font=dict(size=13, color="#e2e8f0"), orientation='h',
+                    x=0.5, y=-0.08, xanchor='center', yanchor='top'),
         # 조각 색 안전망 ①. 아래 `_pie()` 에서 trace 에 직접 색을 넣는 게 본 수정이고,
         # 이건 혹시 그쪽이 무시되는 plotly 버전에서도 검은 도넛이 되지 않게 하는 이중 보험입니다.
         piecolorway=list(_SLICE_COLORS),
@@ -1497,9 +1501,11 @@ def _render_charts(rows, indexes, currency: str) -> None:
 def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
     """`px.pie(...)` — plotly 가 없으면 표로 대체합니다(원본과 동일 폴백).
 
-    ⚠️ `.classes('w-full h-80')` 의 **높이(h-80)를 반드시 유지**하세요. NiceGUI 의 `ui.plotly`
+    ⚠️ `.classes('w-full h-96')` 의 **높이를 반드시 유지**하세요. NiceGUI 의 `ui.plotly`
        는 부모 높이를 상속하지 않아, 높이를 안 주면 0px 로 그려져 차트가 통째로 사라집니다
        (계획서 §7 — 첫 이식 때 흔한 실수라 완료기준에 포함돼 있습니다).
+       (2026-08-18: 범례가 아래쪽 가로로 옮겨가면서(`_chart_layout()`) 세로 공간이 더
+       필요해져 h-80(320px) → h-96(384px) 로 높였습니다 — 안 그러면 범례가 잘립니다.)
     """
     if not PLOTLY_AVAILABLE:                       # pragma: no cover - 배포 환경엔 항상 설치됨
         body = ''.join(
@@ -1519,14 +1525,29 @@ def _pie(names, values, *, fallback_header: str, fallback_rows) -> None:
     # 조각에는 비율만 남기고(그마저도 너무 작은 조각은 plotly 가 알아서 숨김), 종목명은
     # 위 `_chart_layout()` 에서 켠 범례로 옮겼습니다 — 마우스를 올리면(호버) 이름·비율·값이
     # 다 나오므로 정보 자체가 없어지는 건 아닙니다.
-    fig.update_traces(textposition="inside", textinfo="percent")
+    #
+    # ⚠️ 2026-08-18 추가 피드백 — "원형차트의 색깔하고 글자 색깔하고 매칭이 안되는게 너무
+    # 큰것 같아": 조각 안 비율 글자가 차트 공통 폰트색(밝은 회색 `#e2e8f0`, `chart_layout()`)
+    # 을 그대로 물려받다 보니, `_SLICE_COLORS` 의 밝은 톤(주황 `#FFA15A`, 하늘색 `#19D3F3`,
+    # 연두 `#B6E880`, 연분홍 `#FF97FF`, 노랑 `#FECB52`) 위에서는 거의 안 읽혔습니다.
+    # → 조각 안 글자만 **어두운 고정색**(`#0f172a`, 이 앱 배경색)으로 못 박아 밝은 조각·
+    # 어두운 조각 어디서나 대비가 나오게 했습니다(범례 글자는 기존처럼 밝은 회색 유지).
+    fig.update_traces(
+        textposition="inside",
+        textinfo="percent",
+        textfont=dict(size=14, color="#0f172a"),
+        insidetextfont=dict(size=14, color="#0f172a"),
+    )
     # 조각 색 안전망 ② (본 수정). 종목 수가 팔레트보다 많으면 처음부터 다시 돌려 씁니다
     # (plotly 가 colorway 를 재사용하는 방식과 동일). 라벨 순서 = 색 순서라 항상 1:1 로 맞습니다.
+    # 조각 사이에 어두운 윤곽선(2px)을 둘러 "윤곽선을 달라"는 요청대로 경계를 또렷이 하고,
+    # 비슷한 색 조각끼리 붙어도 구분이 되게 했습니다.
     fig.update_traces(marker=dict(
         colors=[_SLICE_COLORS[i % len(_SLICE_COLORS)] for i in range(len(names))],
+        line=dict(color="#0f172a", width=2),
     ))
     fig.update_layout(**_chart_layout())
-    ui.plotly(fig).classes('w-full h-80')
+    ui.plotly(fig).classes('w-full h-96')
 
 
 def _render_valuation_picker(rows, indexes, currency: str) -> None:
