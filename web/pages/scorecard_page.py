@@ -804,6 +804,163 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                             .props('flat dense round').classes('shrink-0') \
                             .tooltip('이 항목 목록에서 지우기(입력창·저장된 보유종목에는 영향 없음)')
 
+                # 2026-08-18 오너 요청 — 종목이 여러 개 인식되면 하나씩 "채우기 → 추가"를
+                # 반복해야 해서 번거롭다는 피드백. 목록 전체를 한 번에 등록하는 버튼을
+                # 아래에 둡니다(항목이 하나도 없으면 굳이 보여줄 필요가 없어 숨깁니다).
+                if extracted_items:
+                    with ui.row().classes('w-full justify-end'):
+                        ui.button(
+                            f'🚀 인식된 종목 {len(extracted_items)}개 전부 등록',
+                            on_click=_bulk_add_all_ocr_items,
+                        ).props('no-caps color=primary')
+
+        def _bulk_add_all_ocr_items() -> None:
+            """인식된 목록 전체를 한 번에 등록합니다(종목마다 "채우기 → 추가"를
+            반복하지 않아도 되게 함, 2026-08-18 오너 요청).
+
+            ⚠️ 각 항목은 `_submit()`과 **똑같은** 조회(resolve_stock_query)·저장(add_lot)
+            경로를 그대로 탑니다 — 새 저장 로직을 따로 만들지 않습니다(§0-3-10). "추가"는
+            여기서도 여전히 더하기만 합니다 — 이미 있는 종목과 겹치면 수량이 합산됩니다
+            (§0-1, 빼는 동작을 추측해서 넣지 않음). 겹치는 게 걱정되면 이 버튼을 누르기
+            전에 아래 "⚠️ 전체 삭제" 버튼으로 먼저 기존 종목을 지워 주세요.
+            종목을 못 찾거나 값이 빠진 항목은 조용히 건너뛰지 않고 끝에 전부 알려줍니다
+            (§0-1). 완전히 같은 이름·수량·매입가 항목("🔁 중복 의심")은 한 번만 등록합니다.
+            """
+            if not extracted_items:
+                ui.notify('등록할 인식된 종목이 없습니다.', type='info')
+                return
+            market_code = form['market']
+            broad_index = market['kr_master'] if market_code == MARKET_KR else None
+
+            seen_signatures = set()
+            added, merged_list, skipped = [], [], []
+
+            for item in extracted_items:
+                raw_name = item.get('raw_name')
+                quantity = item.get('quantity')
+                avg_price = item.get('avg_price')
+                label = raw_name or '(이름 미인식)'
+
+                if not raw_name:
+                    skipped.append(f'{label} — 종목명을 읽지 못했습니다')
+                    continue
+                if quantity is None or avg_price is None:
+                    skipped.append(f'{label} — 수량 또는 매입가를 읽지 못했습니다')
+                    continue
+                if quantity <= 0 or avg_price <= 0:
+                    skipped.append(f'{label} — 수량·매입가는 0보다 커야 합니다')
+                    continue
+
+                sig = (raw_name, quantity, avg_price)
+                if sig in seen_signatures:
+                    skipped.append(f'{label} — 완전히 같은 항목이 목록에 또 있어 한 번만 등록했습니다')
+                    continue
+                seen_signatures.add(sig)
+
+                resolved_ticker, resolved_name, resolve_error = resolve_stock_query(
+                    market_code, raw_name, market['indexes'], broad_index=broad_index,
+                )
+                if not resolved_ticker:
+                    skipped.append(f'{label} — {resolve_error}')
+                    continue
+
+                try:
+                    action, merged = add_lot(
+                        client, user_id, market_code, resolved_ticker, quantity, avg_price,
+                        stock_name=resolved_name,
+                    )
+                except Exception as exc:                   # noqa: BLE001
+                    skipped.append(f'{label} — 저장 실패: {_fail(exc, "잠시 후 다시 시도해 주세요.")}')
+                    continue
+
+                if action == 'merge':
+                    merged_list.append(f'{resolved_name or resolved_ticker} → {merged["quantity"]:,.6g}주')
+                else:
+                    added.append(resolved_name or resolved_ticker)
+
+            parts = []
+            if added:
+                parts.append(f'✅ 새로 추가 {len(added)}개: ' + ', '.join(added))
+            if merged_list:
+                parts.append(f'✅ 기존 종목에 합산 {len(merged_list)}개: ' + ', '.join(merged_list))
+            if skipped:
+                parts.append(f'🚫 건너뜀 {len(skipped)}개:\n' + '\n'.join(skipped))
+            if not parts:
+                parts.append('등록된 항목이 없습니다.')
+
+            ui.notify(
+                '\n\n'.join(parts), type='warning' if skipped else 'positive',
+                multi_line=True, close_button='닫기', timeout=0,
+                classes='text-lg whitespace-pre-line',
+            )
+            if added or merged_list:
+                on_changed()
+
+        def _confirm_delete_all_holdings() -> None:
+            """현재 선택된 시장(원화/달러)의 보유 종목을 전부 지웁니다.
+
+            2026-08-18 오너 요청 — 스크린샷 한 장이 "그 계좌의 전체 잔고"를 보여주는
+            경우, 기존에 입력해둔 종목과 겹치면 "추가/평균단가 재계산"은 항상 더하기만
+            하므로(§0-1 — 빼는 동작은 추측해서 넣지 않음) 수량이 실제보다 부풀려집니다.
+            그래서 "기존 걸 통째로 지우고 방금 읽힌 목록으로 다시 채운다"는 흐름을 따로
+            제공합니다. 삭제는 되돌릴 수 없으므로 **반드시** 확인 대화상자를 거칩니다
+            (§0-1 — 되돌릴 수 없는 동작을 확인 없이 하지 않음).
+            """
+            try:
+                current_holdings = fetch_holdings(client, user_id)
+            except Exception as exc:                       # noqa: BLE001
+                ui.notify(
+                    f'🚫 {_fail(exc, "보유 종목을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}',
+                    type='negative', multi_line=True, close_button='닫기',
+                )
+                return
+            market_code = form['market']
+            targets = [h for h in current_holdings if h.get('market') == market_code]
+            if not targets:
+                ui.notify(f'{MARKET_LABELS[market_code]}에 삭제할 종목이 없습니다.', type='info')
+                return
+
+            def _do_delete_all() -> None:
+                failed = []
+                for holding in targets:
+                    holding_id = holding.get('id')
+                    if not holding_id:
+                        continue
+                    try:
+                        delete_holding(client, user_id, holding_id)
+                    except Exception as exc:               # noqa: BLE001
+                        failed.append(
+                            f'{holding.get("stock_name") or holding.get("ticker")}: '
+                            f'{_fail(exc, "삭제 실패")}'
+                        )
+                dialog.close()
+                deleted_count = len(targets) - len(failed)
+                if failed:
+                    ui.notify(
+                        f'✅ {deleted_count}개 삭제 완료, 🚫 {len(failed)}개 실패:\n'
+                        + '\n'.join(failed),
+                        type='warning', multi_line=True, close_button='닫기', timeout=0,
+                        classes='text-lg whitespace-pre-line',
+                    )
+                else:
+                    ui.notify(f'✅ {deleted_count}개 삭제했습니다.', type='positive')
+                on_changed()
+
+            with ui.dialog() as dialog, ui.card():
+                ui.label(
+                    f'⚠️ {MARKET_LABELS[market_code]} 보유 종목 {len(targets)}개를 전부 '
+                    '삭제합니다 — 이 작업은 되돌릴 수 없습니다.'
+                ).classes('text-base')
+                ui.label(
+                    '삭제 후에는 스크린샷에서 읽힌 목록의 "전부 등록" 버튼으로 다시 채울 수 있습니다.'
+                ).classes('vh-muted')
+                with ui.row().classes('w-full justify-end gap-2'):
+                    ui.button('취소', on_click=dialog.close).props('flat no-caps')
+                    ui.button(
+                        f'예, {len(targets)}개 삭제합니다', on_click=_do_delete_all,
+                    ).props('no-caps color=negative')
+            dialog.open()
+
         async def _on_ocr_upload(event) -> None:
             image_bytes = await event.file.read()
             # 2026-08-18 오너 실사용 피드백 — 종목 수가 많은 스크린샷은 읽는 데 3~5초
@@ -904,6 +1061,16 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             # 남은 횟수는 매번 갱신되는 전용 라벨 하나에만 반영합니다 — 장마다 새 라벨을
             # 쌓지 않으므로 여러 장을 올려도 "오늘 남은 ..." 문구는 한 줄로 최신값만 보입니다.
             _set_quota_label(quota)
+
+        # 2026-08-18 오너 요청 — 이 스크린샷이 계좌 전체 잔고를 보여주는 경우, 기존에
+        # 입력해둔 종목과 겹치면 위 "전부 등록"이 항상 더하기만 해서 수량이 부풀려집니다.
+        # 업로드 전에 미리 기존 종목을 지워둘 수 있도록 여기 둡니다(삭제는 위 함수 안에서
+        # 항상 확인 대화상자를 거칩니다 — §0-1, 되돌릴 수 없는 동작을 확인 없이 하지 않음).
+        with ui.row().classes('w-full items-center gap-2'):
+            ui.label('스크린샷이 계좌 전체 잔고라면, 올리기 전에 기존 종목을 먼저 지울 수 있어요.') \
+                .classes('vh-muted flex-1 min-w-0')
+            ui.button('⚠️ 현재 시장 종목 전체 삭제', on_click=_confirm_delete_all_holdings) \
+                .props('flat dense no-caps color=negative').classes('shrink-0')
 
         ui.upload(
             label='📷 브로커 앱 스크린샷 업로드',
