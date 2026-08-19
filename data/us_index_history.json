@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "collected_at_et": "2026-08-18T19:41:52.524484-04:00",
-    "collected_at_kst": "2026-08-19T08:41:52.524488+09:00",
+    "collected_at_et": "2026-08-19T19:41:54.552501-04:00",
+    "collected_at_kst": "2026-08-20T08:41:54.552506+09:00",
     "source_template": "https://stockanalysis.com/etf/{symbol}/history/__data.json",
     "is_etf_proxy": true,
     "close_kind": "unadjusted_close",
@@ -20,7 +20,7 @@
       "close_kind": "unadjusted_close",
       "source_symbol": "SPY",
       "source_provider": "tiingo",
-      "source_updated": "Tue, 18 Aug 2026 23:07:28 GMT",
+      "source_updated": "Wed, 19 Aug 2026 23:34:53 GMT",
       "proxy_symbol_verified": true,
       "proxy_name": "State Street SPDR S&P 500 ETF",
       "proxy_name_verified": true,
@@ -154,12 +154,13 @@
         "2026-08-13": 777.88,
         "2026-08-14": 776.34,
         "2026-08-17": 772.67,
-        "2026-08-18": 767.45
+        "2026-08-18": 767.45,
+        "2026-08-19": 769.06
       },
-      "count": 130,
+      "count": 131,
       "first_date": "2026-02-11",
-      "last_date": "2026-08-18",
-      "last_collected_at_kst": "2026-08-19T08:41:49.422951+09:00",
+      "last_date": "2026-08-19",
+      "last_collected_at_kst": "2026-08-20T08:41:52.331582+09:00",
       "last_error": null
     },
     "NASDAQ_PROXY_ONEQ": {
@@ -172,7 +173,7 @@
       "close_kind": "unadjusted_close",
       "source_symbol": "ONEQ",
       "source_provider": "spg",
-      "source_updated": "Tue, 18 Aug 2026 22:09:34 GMT",
+      "source_updated": "Wed, 19 Aug 2026 21:09:45 GMT",
       "proxy_symbol_verified": true,
       "proxy_name": "Fidelity Nasdaq Composite Index ETF",
       "proxy_name_verified": true,
@@ -306,12 +307,13 @@
         "2026-08-13": 105.63,
         "2026-08-14": 105.32,
         "2026-08-17": 105.04,
-        "2026-08-18": 103.58
+        "2026-08-18": 103.58,
+        "2026-08-19": 103.75
       },
-      "count": 130,
+      "count": 131,
       "first_date": "2026-02-11",
-      "last_date": "2026-08-18",
-      "last_collected_at_kst": "2026-08-19T08:41:52.524420+09:00",
+      "last_date": "2026-08-19",
+      "last_collected_at_kst": "2026-08-20T08:41:54.552417+09:00",
       "last_error": null
     }
   }
