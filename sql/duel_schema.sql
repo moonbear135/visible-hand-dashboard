@@ -11,7 +11,7 @@
 --       엽니다. 새 프로젝트를 만들지 마세요 — 이 표들은 기존 `auth.users` 를 참조합니다.
 --    2. 좌측 메뉴 → SQL Editor → New query
 --    3. 이 파일 전체를 붙여넣고 Run
---    4. 좌측 메뉴 → Table Editor 에서 아래 **10개 표**와 각각의 "RLS enabled" 표시를 눈으로 확인
+--    4. 좌측 메뉴 → Table Editor 에서 아래 **11개 표**와 각각의 "RLS enabled" 표시를 눈으로 확인
 --         비공개(계좌 소유자 전용)
 --           · public.duel_accounts          (§1)  가상계좌 — 사용자당 M1/M3/M6 정확히 3개
 --           · public.duel_positions         (§2)  가상 보유 포지션 (매수 전용)
@@ -21,6 +21,7 @@
 --           · public.duel_holding_snapshots (§5)  계좌 × 종목 × 거래일 상세 스냅샷
 --           · public.duel_nicknames         (§6)  무작위 닉네임 (비공개 대응표)
 --           · public.duel_public_consent    (§7)  공개 동의 상태 (boolean 7개)
+--           · public.duel_bracket_assignments (§8-3) 체급(원금 구간) 배정 — 계좌 × 시즌 = 1행
 --         발행 전용 공개표(로그인 사용자 전체가 읽기만)
 --           · public.duel_public_leaderboard (§8) 순위표
 --           · public.duel_public_holdings    (§8) 보유종목 상세
@@ -72,6 +73,19 @@
 --       근거는 §4 주석 참고(cascade / restrict 를 쓰면 안 되는 이유가 각각 있습니다).
 --   (h) `duel_daily_snapshots.cash_flow_kind` 에 `'mixed'` 를 추가했습니다. 근거는 §5 주석.
 --   (i) `duel_public_holdings` 에 `window_type` 을 넣어 순위표와 모양을 맞췄습니다(§8-2).
+--   (k) **2026-08-20 추가(5단계 구현 중 발견)** — `duel_bracket_assignments` 표(§8-3).
+--       작업지시서 5-3 은 "한 번 정해진 체급은 시즌(1년) 동안 바뀌지 않는다"를 확정했는데,
+--       **그 배정 결과를 적어 둘 자리가 이 스키마 어디에도 없었습니다.** 발행표에서 역으로
+--       읽으면 될 것 같지만 안 됩니다 — 발행표의 행은 최소 인원 미달(5-6)이나 철회(5-8)로
+--       **지워지는** 행이라, 그걸 기억 장치로 쓰면 지워지는 순간 배치가 체급을 처음부터
+--       다시 매깁니다(= 시즌 고정 규칙이 조용히 사라짐). §8-3 참고.
+--   (l) **2026-08-20 수정(5단계 구현 중 발견한 진짜 버그)** — `duel_public_leaderboard` 의
+--       유니크 제약을 `(published_date, window_type, bracket_key, **rank**)` 에서
+--       `(published_date, window_type, bracket_key, **nickname**)` 으로 바꿨습니다.
+--       예전 제약은 **동점자 두 명이 같은 순위를 받는 순간 발행 전체를 거절**합니다. 그리고
+--       동점은 예외 상황이 아닙니다 — 아무것도 사지 않고 현금만 들고 있는 계좌의 TWR 은
+--       정확히 0.000000% 라, 참가자가 500명(5-6 최소 인원)쯤 되면 0% 동점자가 거의 확실히
+--       생깁니다. 읽기 성능을 위해 같은 컬럼 조합의 **일반 인덱스**는 그대로 남깁니다. §8-1.
 --   (j) **2026-08-20 추가** — 옵트인 RPC `public.duel_opt_in()`(§9-10). 오너가 "참여 즉시
 --       시드머니 지급"(작업지시서 미결항목 2번 (B)안)을 확정했는데, 현금 원장은 사용자에게
 --       쓰기를 열어 줄 수 없는 표입니다(§4 · §9-4). 그렇다고 사용자 접속 앱 서버에 배치
@@ -841,9 +855,57 @@ create table if not exists public.duel_public_leaderboard (
     twr_pct        numeric(20, 6),
 
     created_at     timestamptz not null default now(),
-    constraint duel_public_rank_unique
-        unique (published_date, window_type, bracket_key, rank)
+
+    -- 🔴 2026-08-20 수정 — 자세한 근거는 바로 아래 §8-1 블록. 요약: 예전 제약은 rank 를
+    --    유니크 키에 넣어서 **동점자 두 명이 들어오는 순간 발행이 통째로 거절**됐습니다.
+    --    한 참가자가 같은 그룹·같은 날짜에 두 번 실리는 것을 막는 게 진짜 목적이므로,
+    --    키를 rank 가 아니라 nickname 으로 잡습니다.
+    constraint duel_public_leaderboard_participant_unique
+        unique (published_date, window_type, bracket_key, nickname)
 );
+
+-- -----------------------------------------------------------------------------
+-- 8-1. 🔴 유니크 제약 교체 (2026-08-20 · 5단계 구현 중 발견한 실제 버그)
+-- -----------------------------------------------------------------------------
+--  **무엇이 잘못돼 있었나.** 최초 스크립트는
+--      constraint duel_public_rank_unique unique (published_date, window_type, bracket_key, rank)
+--  였습니다. "같은 그룹에 같은 순위가 두 번 들어가면 안 된다"는 뜻이었는데, 이건 순위에
+--  **동점이 없다는 가정**입니다. 그 가정은 사실이 아닙니다:
+--    · 순위 기준은 TWR(누적 수익률)입니다. 아무것도 사지 않고 현금만 들고 있는 계좌의 TWR 은
+--      **정확히 0.000000%** 입니다(계산식이 그렇게 나옵니다 — `duel_rules.compute_twr()`).
+--    · 5-6 이 요구하는 발행 최소 인원이 **500명**입니다. 500명 중 "아직 아무것도 안 산 사람"이
+--      두 명 이상일 확률은 사실상 1 입니다.
+--    · 동점자에게 억지로 다른 순위를 매기려면 어딘가에서 순서를 지어내야 하고(닉네임 가나다순?
+--      계좌 생성순?), 그건 사실이 아닌 정보를 남에게 발행하는 일입니다(§0-1). 그래서 앱은
+--      동점에 **같은 순위**를 줍니다(1, 2, 2, 4 — `duel_rules.rank_participants()`).
+--  → 즉 예전 제약을 그대로 두면, **참가자가 500명을 넘겨 처음으로 순위표가 열리는 바로 그날
+--    밤에 발행 배치가 유니크 위반으로 실패**합니다. 지금 고칩니다.
+--
+--  **무엇으로 바꾸는가.** 이 표에서 실제로 막아야 하는 중복은 "같은 순위"가 아니라
+--  **"같은 참가자가 한 그룹·한 날짜에 두 번"** 입니다(발행 배치가 두 번 돌거나 절반만 지워진
+--  상태에서 다시 넣는 경우). 그래서 키의 마지막 컬럼을 rank → nickname 으로 바꿉니다.
+--  `duel_public_holdings_unique (published_date, nickname, ticker)` 와 같은 발상입니다.
+--
+--  **읽기 성능은 그대로 유지**합니다 — 화면 질의는
+--  `where published_date=? and window_type=? and bracket_key=? order by rank` 이므로,
+--  없어진 유니크 인덱스와 **같은 컬럼 조합의 일반 인덱스**를 아래에 다시 만듭니다.
+--
+--  ⚠️ 이 블록은 이미 예전 스크립트를 실행한 프로젝트를 위한 것입니다. 처음 설치하는
+--     프로젝트에서는 위 create table 이 이미 새 제약으로 만들어지므로 아무 일도 하지 않습니다.
+--     (drop … if exists → add 순서라 여러 번 실행해도 안전합니다.)
+-- -----------------------------------------------------------------------------
+alter table public.duel_public_leaderboard
+    drop constraint if exists duel_public_rank_unique;
+
+alter table public.duel_public_leaderboard
+    drop constraint if exists duel_public_leaderboard_participant_unique;
+alter table public.duel_public_leaderboard
+    add  constraint duel_public_leaderboard_participant_unique
+         unique (published_date, window_type, bracket_key, nickname);
+
+-- 화면 질의용(순위 정렬). 위에서 유니크를 떼면서 사라진 인덱스를 같은 컬럼으로 되살립니다.
+create index if not exists duel_public_leaderboard_group_rank_idx
+    on public.duel_public_leaderboard (published_date, window_type, bracket_key, rank);
 
 -- 철회(5-8)·최소인원 미달(5-6) 시 "이 닉네임의 발행 행을 전부 삭제"가 실제 질의입니다.
 -- 초안에는 인덱스가 없었는데, 이 경로는 사용자 대기 시간에 직접 걸리는 삭제라 필요합니다.
@@ -888,6 +950,60 @@ create index if not exists duel_public_holdings_nickname_idx
 
 comment on table public.duel_public_holdings is
     '결투다! 발행 전용 공개 보유종목 상세. user_id/account_id 를 담지 않습니다. 동의하지 않은 항목(quantity/buy_amount)은 NULL 이며 화면은 "비공개"로 표시합니다.';
+
+
+-- =============================================================================
+-- 8-3. duel_bracket_assignments — 체급 배정 기록 (**비공개**)
+--      2026-08-20 추가 · 5단계 구현 중 발견한 구조적 누락 (머리말 (k))
+-- =============================================================================
+--  **왜 이 표가 없으면 안 되는가.** 작업지시서 5-3(4·5차 확정)은 이렇게 못 박습니다:
+--
+--      "한 번 정해진 체급(구간)은 다음 정기 시즌이 오기 전까지 바뀌지 않습니다.
+--       시즌 도중에 '내 성적표'의 매입원가합계가 실제로 늘거나 줄어도, 그 시즌 안에서는
+--       처음 배정된 체급 그대로 유지되고, 순위는 그 고정된 체급 안에서 TWR 로만 갈립니다."
+--
+--  그런데 **발행 배치는 매일 밤 돕니다.** 매일 밤 "지금 이 사람의 매입원가합계는 얼마지"를
+--  다시 물어 체급을 다시 매기면, 위 규칙은 코드 어디에도 위반이라고 적히지 않은 채
+--  **조용히 사라집니다.** 그러면 원금이 큰 사람이 시즌 중에 유리한 체급으로 옮겨 다니는
+--  것과 같아지고, 그건 "체급을 맞춰 공정하게 겨룬다"는 이 기능의 존재 이유를 없앱니다.
+--
+--  **발행표를 기억 장치로 쓸 수는 없나 → 없습니다.** `duel_public_leaderboard` 의 행에도
+--  bracket_key 가 있지만, 그 행은 최소 인원 미달(5-6)이나 철회(5-8)로 **지워지는 행**입니다.
+--  지워지는 것을 기억 장치로 쓰면, 지워진 다음 날 배치가 체급을 처음부터 다시 매깁니다.
+--  그래서 배정 기록은 **지워지지 않는 비공개 표**에 따로 있어야 합니다.
+--
+--  🔴 **이 표에 매입원가합계(금액)를 저장하지 않습니다.** 저장하고 싶은 유혹이 있습니다
+--     ("왜 이 체급이 됐는지 나중에 확인하려면?"). 하지만 그 순간 이 표는 **사용자의 실제
+--     자산 규모를 담은 표**가 되고, 그건 §0-3-8 이 가장 경계하는 물건입니다. 체급 문자열은
+--     어차피 사용자가 공개에 동의해 발행되는 값이지만, 정확한 금액은 아닙니다.
+--     "왜 이 체급인가"가 필요하면 그날의 계산을 배치 로그에서 보면 됩니다.
+--
+--  · 갱신(update) 권한을 **아무에게도 주지 않습니다**(§9-9). 시즌이 바뀌면 `season_key` 가
+--    다른 **새 행**이 생기는 것이지, 기존 행이 고쳐지는 게 아닙니다. 즉 "시즌 중 체급 고정"이
+--    앱의 조심성이 아니라 **DB 권한**으로 강제됩니다 — 배치 코드에 버그가 나도 이미 배정된
+--    체급을 바꿀 수 있는 문법 자체가 없습니다(§0-3-9).
+--  · `season_key` 는 시즌 **시작일** 문자열입니다(예: '2026-01-01'). 연도만 쓰면 나중에
+--    시즌 길이·기준일을 바꿨을 때 같은 연도 안에 시즌이 둘 생기며 키가 충돌합니다.
+--    값을 만드는 곳은 앱 한 곳뿐입니다(`duel_rules.season_key_for_date()`) — 경계 계산을
+--    SQL 에도 적으면 두 곳이 언젠가 어긋납니다(§0-3-10).
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_bracket_assignments (
+    account_id  uuid not null references public.duel_accounts (id) on delete cascade,
+    season_key  text not null check (length(btrim(season_key)) > 0),
+    bracket_key text not null check (length(btrim(bracket_key)) > 0),
+    assigned_at timestamptz not null default now(),
+    primary key (account_id, season_key)
+);
+
+-- 배치의 실제 질의는 "이번 시즌 배정을 전부 한 번에 읽기"입니다(계좌별 반복 조회 금지 —
+-- §0-3-2). 기본키는 account_id 가 앞이라 그 질의를 못 타므로 별도 인덱스를 둡니다.
+create index if not exists duel_bracket_assignments_season_idx
+    on public.duel_bracket_assignments (season_key, bracket_key);
+
+comment on table public.duel_bracket_assignments is
+    '결투다! 체급(원금 구간) 배정 기록(비공개). 계좌 × 시즌 = 1행이며 한 번 쓰이면 그 시즌 동안 바뀌지 않습니다(5-3 "체급은 시즌 동안 고정" 의 강제 장치 — update 권한을 아무에게도 주지 않습니다). 매입원가합계 금액 자체는 저장하지 않습니다(§0-3-8).';
+comment on column public.duel_bracket_assignments.season_key is
+    '시즌 시작일 문자열(예: 2026-01-01). 값을 만드는 유일한 자리는 utils/duel_rules.py::season_key_for_date() 입니다 — 경계 계산을 SQL 에 두 번 적지 않습니다(§0-3-10).';
 
 
 -- =============================================================================
@@ -952,6 +1068,7 @@ alter table public.duel_nicknames          enable row level security;
 alter table public.duel_public_consent     enable row level security;
 alter table public.duel_public_leaderboard enable row level security;
 alter table public.duel_public_holdings    enable row level security;
+alter table public.duel_bracket_assignments enable row level security;
 
 
 -- 9-1. duel_accounts — 본인 계좌 조회 + 옵트인 시 개설 -------------------------
@@ -1049,6 +1166,18 @@ create policy duel_consent_update_own on public.duel_public_consent
     with check (public.duel_account_is_mine(account_id));
 
 
+-- 9-7-1. duel_bracket_assignments — 본인 것만 **조회**만 (2026-08-20 추가 · §8-3) ----
+--  insert/update/delete 정책은 **아무에게도** 없습니다. 체급을 정하는 것은 발행 배치의
+--  일이고(service_role 이 RLS 를 우회해 씁니다), 사용자가 자기 체급을 고를 수 있으면
+--  "가벼운 체급으로 내려가서 1등하기"가 그대로 가능해집니다.
+--  select 를 열어 두는 이유는 화면이 "당신은 이번 시즌 ○○ 체급입니다"를 보여줘야 하기
+--  때문입니다 — 본인 계좌 것만 보입니다(§9-0 의 소유자 판정 함수).
+drop policy if exists duel_bracket_assignments_select_own on public.duel_bracket_assignments;
+create policy duel_bracket_assignments_select_own on public.duel_bracket_assignments
+    for select to authenticated
+    using (public.duel_account_is_mine(account_id));
+
+
 -- 9-8. 발행표 2개 — 로그인 사용자 전체에게 select 만 -------------------------
 --  ⚠️ insert/update/delete 정책을 **아무에게도** 만들지 않았습니다. 발행표에 쓰는 주체는
 --     야간 배치(service_role)뿐이고, 그 키는 RLS 자체를 우회합니다. 정책을 하나라도 열면
@@ -1082,6 +1211,7 @@ revoke all on public.duel_nicknames          from anon;
 revoke all on public.duel_public_consent     from anon;
 revoke all on public.duel_public_leaderboard from anon;
 revoke all on public.duel_public_holdings    from anon;
+revoke all on public.duel_bracket_assignments from anon;
 
 grant select, insert         on public.duel_accounts           to authenticated;
 grant select                 on public.duel_positions          to authenticated;
@@ -1093,6 +1223,7 @@ grant select, insert         on public.duel_nicknames          to authenticated;
 grant select, insert, update on public.duel_public_consent     to authenticated;
 grant select                 on public.duel_public_leaderboard to authenticated;
 grant select                 on public.duel_public_holdings    to authenticated;
+grant select                 on public.duel_bracket_assignments to authenticated;
 
 -- 🔧 bigserial 표(duel_cash_ledger · 발행표 2개)의 **시퀀스 권한**을 잊지 마세요.
 --    테이블에 insert 권한이 있어도 시퀀스에 usage 가 없으면
@@ -1118,6 +1249,14 @@ grant select, insert, update on public.duel_daily_snapshots   to service_role;
 grant select, insert, update on public.duel_holding_snapshots to service_role;
 grant select, insert, update on public.duel_nicknames         to service_role;
 grant select, insert, update on public.duel_public_consent    to service_role;
+
+-- 🔴 체급 배정 기록은 배치에게도 **insert 와 select 만** 줍니다(2026-08-20 · §8-3).
+--    "체급은 시즌 동안 고정"(5-3)을 **권한으로** 강제하는 자리입니다 — 배치 코드에 버그가
+--    나도 이미 배정된 체급을 바꿀 문법 자체가 없습니다. 시즌이 바뀌면 season_key 가 다른
+--    **새 행**이 생기는 것이지, 기존 행이 고쳐지는 게 아닙니다.
+--    (`duel_cash_ledger` 에 update 를 안 준 것과 같은 종류의 판단입니다.)
+revoke update, delete on public.duel_bracket_assignments from service_role;
+grant  select, insert on public.duel_bracket_assignments to service_role;
 
 -- 🔴 현금 원장은 배치에게도 **insert 와 select 만** 줍니다. append-only 는 §4-2 트리거가
 --    막지만, 권한까지 함께 거둬야 "실수로 update 문을 짰다"가 배포 전에 잡힙니다.

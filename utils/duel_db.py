@@ -78,6 +78,15 @@ from datetime import date, datetime
 
 # 🧮 규칙 계산의 단일 출처. 이 파일은 계산하지 않고 **호출**합니다(위 머리말 참고).
 from utils import duel_rules
+
+# 🔴 "내 성적표"(실제 자산) 모듈. **오직 표 이름 하나**(`HOLDINGS_TABLE`)를 위해 import
+#    합니다 — 체급(원금 구간) 산정에 실제 매입원가합계가 필요하기 때문입니다(5-3).
+#    표 이름을 여기 문자열로 다시 적으면, 저쪽에서 이름을 바꾸는 날 이 배치만 조용히
+#    빈 결과를 받습니다(§0-3-10).
+#    ⚠️ 이 import 는 **B 절의 `fetch_real_principal_holdings()` 한 함수**를 위한 것이고,
+#       그 함수는 `consent_real_principal_bracket` 에 동의한 사용자 id 를 **필수 인자**로만
+#       받습니다. A 절(사용자 세션)에는 `holdings` 를 건드리는 코드가 하나도 없습니다.
+from utils import scorecard_db
 from utils.duel_rules import (
     ACCOUNT_WINDOW_TYPES,
     KST,
@@ -128,10 +137,19 @@ HOLDING_SNAPSHOTS_TABLE = "duel_holding_snapshots"
 NICKNAMES_TABLE = "duel_nicknames"
 CONSENT_TABLE = "duel_public_consent"
 
-# 🔒 발행 전용 공개표(`duel_public_leaderboard` / `duel_public_holdings`)의 이름은 **여기에
-#    적지 않았습니다.** 5단계 전까지 이 파일에 그 표를 건드릴 코드가 하나도 없어야 하고,
-#    상수만 미리 놓아두면 "이미 절반 열려 있는" 모양이 됩니다(§0-3-8 은 "조심하기"가 아니라
-#    구조적 방어를 요구합니다). 아래 §C 의 TODO 를 참고하세요.
+# 🔴 발행 전용 공개표 2개 + 체급 배정 기록 (2026-08-20 · 5단계에서 추가).
+#
+#    ⚠️ 이 세 이름은 **B 절(배치·service_role)에서만** 쓰입니다. A 절(사용자 세션)에는
+#       이 표를 건드리는 함수가 하나도 없어야 하고, `tests/test_duel_publish.py` 의 AST
+#       검사가 그것을 고정합니다. 발행표에는 사용자에게 select 권한밖에 없고
+#       (스키마 §9-8 · §9-9), 체급 배정은 아무에게도 쓰기 권한이 없습니다(§8-3).
+#
+#    ⚠️ 2026-08-20 이전 이 자리에는 "5단계 전까지 이름조차 적지 않는다"는 주석이 있었습니다.
+#       그 단계가 지금이라 상수를 놓습니다 — 다만 **쓰는 자리를 B 절 한 곳으로 묶는** 규율은
+#       그대로 유지합니다(§0-3-8 은 조심이 아니라 구조를 요구합니다).
+PUBLIC_LEADERBOARD_TABLE = "duel_public_leaderboard"
+PUBLIC_HOLDINGS_TABLE = "duel_public_holdings"
+BRACKET_ASSIGNMENTS_TABLE = "duel_bracket_assignments"
 
 #: 옵트인 RPC 의 이름. `sql/duel_schema.sql` §9-10 의 함수 이름과 **문자 그대로** 같아야
 #: 합니다(표 이름 상수들과 같은 규약).
@@ -381,6 +399,23 @@ def _assert_unique_keys(rows, key_fields, label):
                 " — 임의로 합치거나 버리지 않고 중단합니다(원본 데이터를 확인하세요)."
             )
         seen.add(key)
+
+
+def _filter_is_null(query, column):
+    """
+    `where <column> is null` 필터. PostgREST 의 `.filter(col, "is", "null")` 형태를 씁니다.
+
+    `.is_()` 대신 `.filter()` 를 쓰는 이유: NULL 아님(`not.is`)까지 한 가지 방법으로 표현할
+    수 있어서, 두 조건이 **같은 모양**으로 읽히기 때문입니다(클라이언트 버전에 따라
+    `.not_.is_()` 체인의 유무가 갈리는 것도 피합니다).
+    """
+    return query.filter(column, "is", "null")
+
+
+def _filter_not_null(query, column):
+    """`where <column> is not null` 필터. 위 함수와 짝입니다."""
+    return query.filter(column, "not.is", "null")
+
 
 
 # #############################################################################
@@ -800,10 +835,18 @@ def save_consent(client, account_id, **consent_flags):
        켜는 중간 상태가 정상이기 때문입니다. "전부 아니면 전무"(5-2-2)는 **발행 대상이 되는
        조건**(= final_confirmed)에 걸리는 규칙이고, 위 ①이 정확히 그걸 강제합니다.
 
-    ⚠️ 철회(revoked_at)와 3개월 재동의 차단은 이 함수의 범위가 **아닙니다** — 5단계입니다.
-       TODO(작업지시서 5-8): 철회 저장·재동의 차단 판정은 발행 인프라와 함께 만듭니다.
-       (지금 철회를 반쯤 구현해 두면, 발행표가 없는 상태에서 "철회했는데 지울 게 없는"
-        어중간한 경로가 생깁니다.)
+    ④ **철회 후 3개월 재동의 차단**(5-8-2, 2026-08-20 추가). 저장을 시작하기 전에 이 계좌의
+       기존 동의 행을 한 번 읽어 `revoked_at` 을 확인하고, 아직 3개월이 안 지났으면 **언제
+       풀리는지 날짜까지 적힌 한국어 오류**로 거절합니다. 화면만 막으면 안 된다는 것이
+       5-8-2 의 명문이라 저장 경로인 여기에 둡니다(발행 배치 쪽은
+       `utils/duel_publish.py` 가 `final_confirmed=true and revoked_at is null` 로 한 번 더
+       거릅니다 — 앱·배치 양쪽 확인).
+       ⚠️ 판정 자체는 이 파일이 하지 않습니다. `duel_rules.resolve_reconsent_block()` 이
+          "3개월"이라는 숫자와 경계 규칙의 단일 출처입니다(§0-3-10).
+
+    ⚠️ 철회 **저장**은 이 함수가 아니라 `revoke_consent()` 입니다(바로 아래). 한 함수가
+       "켜기"와 "끄기"를 둘 다 하면, 나중에 누가 `save_consent(..., revoked_at=None)` 같은
+       인자를 붙여 철회를 되돌리는 경로를 만들게 됩니다.
 
     반환: 저장된 동의 행 dict.
     """
@@ -839,11 +882,218 @@ def save_consent(client, account_id, **consent_flags):
         # 최종확인을 끄면 시각도 함께 지웁니다(CHECK 가 둘의 짝을 요구합니다).
         payload["final_confirmed_at"] = None
 
+    # 5-8-2 — 철회 후 3개월 동안은 어떤 동의 저장도 진행하지 않습니다(아래 함수 참고).
+    #  ⚠️ 순서가 중요합니다: **입력 검증을 전부 마친 뒤**에 조회합니다. 오타나 잘못된
+    #     값처럼 저장 자체가 불가능한 요청 때문에 DB 를 왕복하지 않기 위해서입니다.
+    _assert_reconsent_allowed(client, account)
+
     rows = _execute(
         client.table(CONSENT_TABLE).upsert(payload, on_conflict="account_id"),
         "공개 동의 저장",
     )
     return _first_row(rows, "공개 동의 저장")
+
+
+# -----------------------------------------------------------------------------
+# A-4. 동의 철회 + 3개월 재동의 차단 (작업지시서 5-8) — 2026-08-20 추가
+# -----------------------------------------------------------------------------
+def fetch_my_consent(client, account_id):
+    """
+    본인 계좌의 공개 동의 행 1개(없으면 None). 화면이 체크박스 상태를 그릴 때,
+    그리고 아래 두 함수가 철회 이력을 확인할 때 씁니다.
+
+    ⚠️ 없는 것과 실패한 것은 다릅니다 — 질의가 실패하면 `_execute()` 가 예외를 냅니다.
+       "행이 없다"만 None 입니다(§0-1).
+    """
+    _require_client(client)
+    account = _require_text(account_id, "계좌 ID")
+    rows = _execute(
+        client.table(CONSENT_TABLE).select("*").eq("account_id", account).limit(1),
+        "공개 동의 조회",
+    )
+    return dict(rows[0]) if rows else None
+
+
+def _assert_reconsent_allowed(client, account_id, *, now_kst=None):
+    """
+    철회 후 **3개월 재동의 차단**(5-8-2)을 저장 경로에서 강제합니다.
+
+    왜 앱에서도 막는가: 5-8-2 는 "애플리케이션과 배치 **양쪽에서** 확인하세요. 화면만 막으면
+    배치가 되살립니다"라고 명시합니다. 여기가 그 '애플리케이션' 쪽입니다.
+    (DB 쪽은 `duel_consent_guard()` 트리거가 "철회 기록 자체를 지우는 것"을 막고,
+     발행 쪽은 `utils/duel_publish.py` 가 철회된 계좌를 발행 대상에서 거릅니다.)
+
+    ⚠️ 3개월이라는 숫자와 경계 규칙(정확히 3개월이 되는 순간 풀림)은 이 파일이 정하지
+       않습니다 — `duel_rules.resolve_reconsent_block()` 이 단일 출처입니다(§0-3-10).
+    ⚠️ 사용자에게 **언제 풀리는지 날짜를 알려 줍니다.** "지금은 안 됩니다"만 말하면 사용자는
+       며칠마다 다시 눌러 보게 되고, 그건 우리가 정보를 숨긴 것입니다(§0-1 / §0-3-4).
+    """
+    existing = fetch_my_consent(client, account_id)
+    if not existing:
+        return None
+    block = duel_rules.resolve_reconsent_block(existing.get("revoked_at"), now_kst)
+    if block["blocked"]:
+        raise DuelDbError(
+            "공개 동의를 철회한 뒤에는 3개월 동안 다시 동의할 수 없습니다."
+            f" {block['unblocks_on'].isoformat()} 부터 다시 신청하실 수 있습니다."
+            " (철회하면 그때까지 발행됐던 공개 기록은 전부 영구 삭제되므로,"
+            " 되돌리기가 아니라 처음부터 다시 시작하는 절차입니다.)"
+        )
+    return existing
+
+
+def revoke_consent(client, account_id, *, now_kst=None):
+    """
+    공개 동의를 **철회**합니다(`duel_public_consent.revoked_at` 기록). 작업지시서 5-8 참고.
+
+    ── 이 함수가 하는 일 / 하지 않는 일 ──────────────────────────────────────────
+    하는 일: 동의 행에 `revoked_at` 을 찍고, `final_confirmed` 와 항목별 동의 7개를 전부
+             끕니다. 그 결과 이 계좌는 **다음 발행 대상에서 즉시 빠집니다.**
+    하지 않는 일: **행을 지우지 않습니다**(5-8-3). `revoked_at` 한 줄은 3개월 재동의 차단을
+             판정하는 데 필요한 **비공개 관리 기록**이고, 삭제 대상인 "발행된 공개 기록"과는
+             다른 것입니다. 스키마 §7 의 컬럼 주석에도 같은 구분이 적혀 있습니다.
+    하지 않는 일 ②: **이미 발행된 공개 행을 지우지 않습니다.** 그건 야간 배치만 할 수 있는
+             일이라(발행표에는 사용자 쓰기 권한이 아예 없습니다 — 스키마 §9-8),
+             `utils/duel_publish.py::purge_revoked_accounts()` 가 야간 배치에서 처리합니다.
+             ⚠️ 즉 **철회 시점과 공개 기록이 실제로 사라지는 시점 사이에 최대 하루의 간격이
+                있습니다.** 이 사실을 화면에 그대로 써야 합니다(§0-1 — 조용히 넘기지 않기).
+                즉시 삭제가 필요한지는 오너 결정 사항입니다(작업 보고 (h) 참고).
+
+    ── 왜 항목별 동의 5개 + 실제 매입총합 동의까지 함께 끄는가 ────────────────────
+    DB CHECK(`duel_consent_revoked_not_confirmed`)는 "철회 + 최종확인"이 동시에 서지
+    못하게만 합니다. 5개 항목은 그대로 true 로 남길 수도 있는데, 그러면 남은 상태가
+    "최종확인 직전까지 다 체크한 사람"과 **글자 그대로 같아집니다** — 화면이 그 상태를
+    "동의 중"으로 그릴 위험이 있고, 나중에 어떤 코드가 `final_confirmed` 하나만 켜면
+    `duel_consent_final_requires_all` CHECK 를 그냥 통과해 버립니다. 전부 꺼 두면 그
+    실수는 CHECK 에 걸려 막힙니다(§0-3-9 — 조심이 아니라 구조로).
+    `consent_real_principal_bracket` 도 끕니다 — 철회한 사용자의 실제 `holdings` 를 읽을
+    이유가 하나도 남지 않게 하기 위해서입니다(5-3 / §0-3-8).
+
+    ── 두 번 눌러도 안전합니다(멱등) ─────────────────────────────────────────────
+    이미 철회된 계좌면 **아무것도 쓰지 않고** 기존 행을 그대로 돌려줍니다. `revoked_at` 을
+    지금 시각으로 다시 찍으면 3개월 차단이 그만큼 **연장**되는데, 그건 사용자가 버튼을 두 번
+    눌렀다는 이유로 불이익을 주는 일입니다.
+
+    반환: 갱신된(또는 이미 철회된) 동의 행 dict.
+    """
+    _require_client(client)
+    account = _require_text(account_id, "계좌 ID")
+
+    existing = fetch_my_consent(client, account)
+    if not existing:
+        raise DuelDbError(
+            "이 계좌에는 철회할 공개 동의 기록이 없습니다"
+            " (아직 공개 순위표에 참여한 적이 없습니다)."
+        )
+    if existing.get("revoked_at"):
+        # 이미 철회됨 — 재기록하지 않습니다(위 '멱등' 문단 참고).
+        return existing
+
+    payload = {flag: False for flag in CONSENT_ITEM_FLAGS}
+    payload[CONSENT_REAL_PRINCIPAL_FLAG] = False
+    payload["final_confirmed"] = False
+    payload["final_confirmed_at"] = None
+    payload["revoked_at"] = _now_kst(now_kst).isoformat()
+
+    rows = _execute(
+        client.table(CONSENT_TABLE).update(payload).eq("account_id", account),
+        "공개 동의 철회",
+    )
+    return _first_row(rows, "공개 동의 철회")
+
+
+# -----------------------------------------------------------------------------
+# A-5. 무작위 닉네임 만들기 (작업지시서 5-5 · 스키마 §6) — 2026-08-20 추가
+# -----------------------------------------------------------------------------
+#: 닉네임 후보를 다시 뽑아 보는 최대 횟수. 공간이 2천만 가지가 넘어서
+#: (`duel_rules.nickname_space_size()`) 실제로는 첫 시도에서 끝납니다 — 이 숫자는
+#: "무한 루프를 만들지 않는다"는 안전장치이지 성능 조절값이 아닙니다.
+NICKNAME_MAX_ATTEMPTS = 8
+
+
+def ensure_nickname(client, account_id):
+    """
+    이 계좌의 공개용 **무작위 닉네임**을 보장합니다(없으면 만들고, 있으면 그대로).
+    작업지시서 5-5 / 스키마 §6 참고.
+
+    ── 언제 부르는가 (호출 시점이 설계의 일부입니다) ─────────────────────────────
+    🔴 **2갈래(공개 순위표) 동의 화면에서, 첫 `save_consent()` 직전(또는 직후)에 한 번.**
+       `opt_in()`(1갈래 참여)에 끼워 넣지 **않았습니다.** 이유:
+         · 1갈래 "덤벼라 나 자신"은 혼자 쓰는 모의투자이고, 작업지시서도 "1갈래만 만들고
+           배포해도 된다"고 적고 있습니다. 그 사용자에게는 **공개용 별명이라는 물건 자체가
+           필요 없습니다.** 안 만들면 그 계좌는 공개 세계에 이름조차 존재하지 않습니다 —
+           기본값은 비공개(5-1)라는 원칙의 가장 구체적인 형태입니다(§0-3-8).
+         · 닉네임은 한 번 만들면 **바꿀 수 없습니다**(스키마 §9-6 에 update 정책이 없습니다).
+           쓰지도 않을 사람에게 미리 발급하면, 나중에 그 사람이 공개에 참여할 때 예전에
+           찍힌 이름을 그대로 써야 합니다.
+       ⚠️ 반대로 **발행 배치가 닉네임을 만들지는 않습니다.** 배치는 권한상 만들 수는
+          있지만, 그러면 "닉네임이 없는 참가자"를 배치가 조용히 메꾸게 되고 그 계좌가
+          정말 동의했는지의 판단이 두 곳으로 갈라집니다. 닉네임이 없는 계좌를 만나면
+          `utils/duel_publish.py` 는 **발행에서 빼고 그 사실을 로그에 남깁니다.**
+
+    ── 유일성은 DB 가 판정합니다 ─────────────────────────────────────────────────
+    "이미 쓰는 이름인가"를 앱이 먼저 조회해서 정하면, 조회와 삽입 사이에 다른 세션이 같은
+    이름을 넣는 경합을 막을 수 없습니다. 그래서 **그냥 넣어 보고, unique 충돌이면 새 후보로
+    다시 넣습니다**(스키마 §6 이 요구하는 "난수 → unique 충돌 시 재시도").
+
+    ── 두 탭에서 동시에 눌러도 안전합니다 ────────────────────────────────────────
+    `duel_nicknames.account_id` 가 기본키라, 두 번째 삽입은 충돌합니다. 그때 이 함수는
+    "내 이름이 이미 생겼나"를 다시 확인하고 **그 이름을 돌려줍니다.** 새 이름을 또 만들지
+    않습니다 — 한 계좌에 이름이 둘이면 과거 발행 행과 대응이 끊깁니다(5-5 "재계산·재사용 금지").
+
+    반환: `{"account_id": ..., "nickname": ..., ...}` dict.
+    """
+    _require_client(client)
+    account = _require_text(account_id, "계좌 ID")
+
+    existing = _fetch_nickname_row(client, account)
+    if existing:
+        return existing
+
+    last_error = None
+    for _attempt in range(NICKNAME_MAX_ATTEMPTS):
+        # 🔴 후보는 인자 없는 순수 난수 함수가 만듭니다 — user_id·이메일·시각에서 유도하지
+        #    않습니다(5-5). 여기서 account 를 섞어 넣고 싶은 유혹을 이기세요.
+        candidate = duel_rules.generate_nickname()
+        try:
+            rows = _execute(
+                client.table(NICKNAMES_TABLE).insert(
+                    {"account_id": account, "nickname": candidate}),
+                "닉네임 생성",
+            )
+        except DuelDbError as exc:
+            if not _is_duplicate_key_error(exc):
+                raise                       # 진짜 사고를 재시도로 덮지 않습니다(§0-1).
+            last_error = exc
+            # 충돌의 원인은 둘 중 하나입니다:
+            #   ① account_id 기본키 — 다른 탭/요청이 방금 내 이름을 만들었다 → 그걸 씁니다.
+            #   ② nickname unique — 남이 쓰는 이름을 뽑았다 → 새 후보로 다시.
+            already = _fetch_nickname_row(client, account)
+            if already:
+                return already
+            continue
+        if rows:
+            return _first_row(rows, "닉네임 생성")
+        # insert 가 0행을 돌려주는 경우(RLS 가 막은 남의 계좌 등)는 성공이 아닙니다.
+        raise DuelDbError(
+            "닉네임을 만들지 못했습니다(내 계좌가 아니거나 접근이 차단됐습니다)."
+        )
+
+    raise DuelDbError(
+        f"닉네임 후보를 {NICKNAME_MAX_ATTEMPTS}번 만들었는데 전부 이미 쓰이는 이름이었습니다."
+        " 임의의 이름을 억지로 붙이지 않고 중단합니다 —"
+        f" 후보 공간({duel_rules.nickname_space_size():,}가지)이 참가자 수에 비해 좁아졌는지"
+        f" 확인이 필요합니다. (마지막 오류: {last_error})"
+    )
+
+
+def _fetch_nickname_row(client, account_id):
+    """이 계좌의 닉네임 행(없으면 None). 사용자 세션·배치 클라이언트 양쪽에서 같은 모양입니다."""
+    rows = _execute(
+        client.table(NICKNAMES_TABLE).select("*").eq("account_id", account_id).limit(1),
+        "닉네임 조회",
+    )
+    return dict(rows[0]) if rows else None
 
 
 # #############################################################################
@@ -1677,27 +1927,439 @@ def write_daily_snapshots(service_client, snapshot_date, computed_rows):
     return None
 
 
+# -----------------------------------------------------------------------------
+# B-7. 🔴 공개 발행(5단계 · Branch 2) — **이 저장소에서 가장 민감한 함수들**
+#      2026-08-20 추가. 작업지시서 5-3 · 5-4 · 5-6 · 5-8 / 스키마 §8 · §8-3 · §9-8
+# -----------------------------------------------------------------------------
+#  아래 함수들이 쓰는 표는 **로그인한 모든 사용자가 읽을 수 있는 표**입니다. 즉 여기 들어간
+#  값은 곧 남에게 보이는 값입니다(§0-3-8 — 이 프로젝트의 최상위 무예외 원칙).
+#
+#  그래서 이 절은 다른 절보다 규율이 하나 더 있습니다:
+#    · **판단하지 않습니다.** "누가 발행 대상인가", "체급이 무엇인가", "순위가 몇 등인가"는
+#      전부 `utils/duel_rules.py`(순수 규칙)와 `utils/duel_publish.py`(오케스트레이션)가
+#      정합니다. 이 절의 함수는 **이미 결정된 행을 그대로 담아 보내거나, 지정된 것을 지울
+#      뿐**입니다. 여기에 "동의했으면 이 필드를 채우고..." 같은 조건문이 생기면, 게이팅
+#      규칙이 두 곳에 존재하게 되고 언젠가 둘이 갈라집니다.
+#    · 발행표에는 `user_id` 도 `account_id` 도 **넣지 않습니다**(스키마 §8). 닉네임 ↔ 계좌의
+#      연결고리는 비공개 `duel_nicknames` 와 이 배치 안에만 존재합니다.
+# -----------------------------------------------------------------------------
+def fetch_publishable_consents(service_client):
+    """
+    (배치 전용) **발행 대상 계좌의 동의 행**을 한 번의 질의로 전부 읽습니다. 5-4-1 참고.
+
+    거르는 조건은 둘입니다 — `final_confirmed = true` **그리고** `revoked_at is null`.
+      · 사실 DB CHECK(`duel_consent_revoked_not_confirmed`)가 이미 "철회 + 최종확인"을 동시에
+        설 수 없게 막고 있어서, 앞 조건 하나만으로도 결과는 같습니다.
+      · 그래도 **둘 다 겁니다.** 5-8-2 가 "애플리케이션과 배치 양쪽에서 확인하라"고 명시하고,
+        여기가 그 '배치' 쪽이기 때문입니다. 조건 하나를 아끼는 것보다, 나중에 CHECK 를 손대는
+        사람이 이 필터를 보고 "아, 여기도 같은 규칙이 있구나"를 아는 편이 낫습니다.
+
+    ⚠️ 항목별 동의 5개를 여기서 거르지 **않습니다.** `duel_consent_final_requires_all` CHECK
+       때문에 `final_confirmed=true` 인 행은 5개가 전부 true 임이 DB 수준에서 보장되지만,
+       그 보장을 **믿고 넘어가지 않고** `duel_publish.assert_full_consent()` 가 행마다 다시
+       확인합니다. 여기서 필터로 처리하면 "조건에 안 맞아서 빠진 사람"이 조용히 사라지는데,
+       그건 데이터가 이상하다는 신호를 삼키는 일입니다(§0-1).
+    """
+    _require_client(service_client, batch=True)
+    query = service_client.table(CONSENT_TABLE).select(
+        "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
+        "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
+    ).eq("final_confirmed", True)
+    query = _filter_is_null(query, "revoked_at")
+    rows = _execute(query, "발행 대상 동의 조회")
+    return [dict(row) for row in rows]
+
+
+def fetch_revoked_consent_accounts(service_client):
+    """
+    (배치 전용) **철회된 계좌의 account_id 목록**을 한 번의 질의로 읽습니다. 5-8-1 참고.
+
+    야간 배치가 "철회된 사람의 발행 기록을 전부 지우는" 청소 단계에서 씁니다. "지난 실행
+    이후 새로 철회된 것"만 고르지 않고 **철회된 것 전부**를 매번 봅니다:
+      · 배치가 하루 걸렀거나 중간에 실패해도 다음 실행이 스스로 따라잡습니다(자가 치유).
+      · "어디까지 처리했는지"를 기억하는 상태 파일이 필요 없습니다. 그런 파일이 손상되면
+        누군가의 공개 기록이 **영원히 안 지워진 채로 남습니다** — 이 모듈에서 가장 나쁜 실패.
+      · 삭제는 멱등이라 이미 지운 것을 다시 지워도 아무 일도 일어나지 않습니다.
+    """
+    _require_client(service_client, batch=True)
+    query = service_client.table(CONSENT_TABLE).select("account_id,revoked_at")
+    query = _filter_not_null(query, "revoked_at")
+    rows = _execute(query, "철회 계좌 조회")
+    return [dict(row) for row in rows]
+
+
+def fetch_nicknames_for_accounts(service_client, account_ids):
+    """
+    (배치 전용) 여러 계좌의 닉네임을 **한 번의 질의로** 읽습니다(§0-3-2).
+    반환: `{account_id: nickname}`.
+
+    ⚠️ `account_ids` 는 **필수**입니다(기본값 None 으로 "전부 읽기"를 만들지 않았습니다).
+       이 표는 닉네임 ↔ 계좌 대응표라, 통째로 읽는 편의 함수가 있으면 언젠가 누군가
+       "일단 다 읽어 놓고 필요한 것만 쓰지"라고 하게 됩니다. 필요한 계좌만 읽습니다.
+    """
+    _require_client(service_client, batch=True)
+    ids = [str(value) for value in (account_ids or [])]
+    if not ids:
+        return {}
+    mapping = {}
+    for start in range(0, len(ids), CHUNK_SIZE):
+        rows = _execute(
+            service_client.table(NICKNAMES_TABLE).select("account_id,nickname")
+            .in_("account_id", ids[start:start + CHUNK_SIZE]),
+            "닉네임 일괄 조회",
+        )
+        for row in rows:
+            nickname = str((row or {}).get("nickname") or "").strip()
+            if nickname:
+                mapping[row.get("account_id")] = nickname
+    return mapping
+
+
+def fetch_bracket_assignments(service_client, season_key):
+    """
+    (배치 전용) **이번 시즌의 체급 배정 기록 전부**를 한 번의 질의로 읽습니다(스키마 §8-3).
+    반환: `{account_id: {"season_key": ..., "bracket_key": ...}}`.
+
+    이 결과가 `duel_rules.resolve_bracket_for_season()` 의 첫 인자가 되고, 그 함수가
+    "시즌 중이면 그대로 유지"를 강제합니다(5-3). 배치가 체급을 스스로 정하지 않게 하려면
+    **먼저 읽어야** 합니다 — 이 질의를 빼먹으면 시즌 고정 규칙이 조용히 사라집니다.
+    """
+    _require_client(service_client, batch=True)
+    season = _require_text(season_key, "시즌 식별자")
+    rows = _execute(
+        service_client.table(BRACKET_ASSIGNMENTS_TABLE)
+        .select("account_id,season_key,bracket_key").eq("season_key", season),
+        "체급 배정 조회",
+    )
+    return {row["account_id"]: dict(row) for row in rows if (row or {}).get("account_id")}
+
+
+def insert_bracket_assignments(service_client, rows):
+    """
+    (배치 전용) **새로 배정된** 체급을 기록합니다(insert 만 — 스키마 §8-3). 반환: 넣은 행 수.
+
+    ⚠️ upsert 가 아니라 insert 인 것이 이 함수의 핵심입니다. 배치에도 update 권한이 없어서
+       (§9-9) 이미 배정된 체급은 **물리적으로 바꿀 수 없습니다.** "체급은 시즌 동안 고정"이
+       앱의 조심성이 아니라 DB 권한으로 강제되는 자리입니다.
+    ⚠️ 그래서 중복 키 충돌은 **사고가 아니라 정상**입니다(두 배치가 겹쳐 돌거나, 같은 날
+       두 번 실행). 조용히 흡수하고 0 을 돌려줍니다 — 이미 있는 값이 이깁니다.
+    """
+    _require_client(service_client, batch=True)
+    payload = []
+    for row in rows or []:
+        payload.append({
+            "account_id": _require_text((row or {}).get("account_id"), "계좌 ID"),
+            "season_key": _require_text((row or {}).get("season_key"), "시즌 식별자"),
+            "bracket_key": _require_text((row or {}).get("bracket_key"), "체급 식별자"),
+        })
+    if not payload:
+        return 0
+    _assert_unique_keys(payload, ("account_id", "season_key"), "체급 배정 요청")
+
+    inserted = 0
+    for start in range(0, len(payload), CHUNK_SIZE):
+        chunk = payload[start:start + CHUNK_SIZE]
+        try:
+            _execute(service_client.table(BRACKET_ASSIGNMENTS_TABLE).insert(chunk), "체급 배정 기록")
+        except DuelDbError as exc:
+            if not _is_duplicate_key_error(exc):
+                raise
+            continue        # 이미 배정된 시즌 — 기존 값이 이깁니다(위 주석 참고).
+        inserted += len(chunk)
+    return inserted
+
+
+def fetch_real_principal_holdings(service_client, user_ids):
+    """
+    (배치 전용) 🔴 **동의한 사용자의** "내 성적표" 실제 보유종목을 한 번의 질의로 읽습니다.
+    작업지시서 5-3 참고 — 체급(원금 구간) 산정에만 씁니다.
+
+    ── 이 함수가 이 파일에서 가장 조심스러운 자리인 이유 ─────────────────────────
+    이건 **가상 대결 데이터가 아니라 사용자의 진짜 자산 데이터**(`public.holdings`)입니다.
+    5-3 이 못 박습니다: *"이 값은 5-2 의 4번(독립 동의)이 있는 사용자에 대해서만 조회합니다.
+    동의 없는 사용자의 holdings 를 읽는 코드 경로가 **하나라도** 있으면 §0-3-8 위반입니다."*
+
+    그래서 이 함수는 이렇게 생겼습니다:
+      · `user_ids` 가 **필수 인자**입니다. 기본값이 없습니다. "안 주면 전부"라는 편의 경로를
+        만들지 않았습니다 — 그 한 줄이 곧 위 문장의 위반입니다.
+      · 빈 목록이면 **질의를 아예 보내지 않습니다.** 빈 `in` 필터가 실수로 전체 조회가 되는
+        일을 구조적으로 막습니다.
+      · ⚠️ `utils/report_db.py::fetch_all_holdings()` 를 **쓰지 않습니다.** 그 함수는 이름
+        그대로 **전체 사용자의 보유종목**을 읽습니다(리포트 스냅샷 배치는 전원이 대상이라
+        그게 맞습니다). 여기서 그걸 부르면 동의하지 않은 사람의 자산이 이 배치의 메모리에
+        올라오고, 그 순간 5-3 위반입니다. 필터가 다르므로 질의를 따로 씁니다.
+      · 읽기만 합니다. 이 파일 어디에도 `holdings` 를 쓰는 코드는 없습니다.
+
+    반환: 보유 행 목록(`user_id` 포함). 금액 계산은 이 파일이 하지 않고
+          `utils/duel_publish.py` 가 `utils/scorecard_db.py` 의 **진짜 평가 함수**로 합니다.
+    """
+    _require_client(service_client, batch=True)
+    ids = [str(value) for value in (user_ids or [])]
+    if not ids:
+        return []               # 🔴 동의자가 없으면 holdings 를 **한 번도 건드리지 않습니다.**
+
+    result = []
+    for start in range(0, len(ids), CHUNK_SIZE):
+        rows = _execute(
+            service_client.table(scorecard_db.HOLDINGS_TABLE).select(
+                "user_id,market,ticker,stock_name,quantity,avg_purchase_price,currency"
+            ).in_("user_id", ids[start:start + CHUNK_SIZE]),
+            "체급 산정용 보유종목 조회",
+        )
+        result.extend(dict(row) for row in rows)
+    return result
+
+
+# ── 발행표 쓰기·지우기 ─────────────────────────────────────────────────────────
+def delete_published_rows_for_date(service_client, published_date):
+    """
+    (배치 전용) **그날 발행분을 통째로 지웁니다**(두 표 각각 질의 1개). 5-4-4 참고.
+
+    작업지시서 5-4-4 가 "부분 갱신이 아니라 그날 발행분을 통째로 갈아끼우는 방식"을 확정한
+    이유는 안전입니다. 부분 갱신은 "어제는 있었는데 오늘은 자격을 잃은 행"을 **남깁니다** —
+    지워야 할 것을 지우는 코드는 항상 넣기 쉬운 코드가 아니고, 하나 빠뜨리면 그 행은 계속
+    공개된 채로 남습니다. 통째로 지우고 다시 쓰면 "남는" 경우가 구조적으로 없습니다.
+
+    ⚠️ 지우고 나서 넣기 전에 배치가 죽으면 그날 순위표가 잠깐 비어 있게 됩니다. 그 방향이
+       안전한 쪽입니다 — 반대(지워야 할 것이 남아 있는 상태)는 §0-3-8 사고입니다.
+    """
+    _require_client(service_client, batch=True)
+    day = _iso_date(published_date, "발행일")
+    # 표 이름을 반복문 변수로 감싸지 않고 **한 줄씩 그대로** 씁니다. §0-3-8 검토와
+    # `tests/test_duel_publish.py` 의 AST 검사가 "어느 함수가 어느 표에 쓰는가"를
+    # 코드에서 바로 읽을 수 있어야 하기 때문입니다(짧게 쓰는 것보다 보이는 게 중요).
+    _execute(service_client.table(PUBLIC_LEADERBOARD_TABLE).delete()
+             .eq("published_date", day), "순위표 당일 발행분 삭제")
+    _execute(service_client.table(PUBLIC_HOLDINGS_TABLE).delete()
+             .eq("published_date", day), "보유종목 당일 발행분 삭제")
+    return None
+
+
+def delete_published_rows_for_nicknames(service_client, nicknames):
+    """
+    (배치 전용) 🔴 지정한 닉네임의 발행 행을 **모든 날짜에서 영구 삭제**합니다. 5-8-1 참고.
+
+    5-8-1 원문: *"철회 즉시 그 계좌의 발행된 공개 기록을 **전부 영구 삭제**합니다 — 과거 순위,
+    과거 발행 수익률, 발행된 보유종목 행까지 **숨김이 아니라 삭제**입니다."*
+    그래서 `published_date` 필터를 **일부러 걸지 않습니다.** 오늘 것만 지우면 어제 것이
+    그대로 남고, 그건 "삭제했다"고 말할 수 없는 상태입니다.
+
+    ⚠️ 계좌가 아니라 **닉네임**으로 지웁니다. 발행표에는 `account_id` 가 아예 없기 때문이고
+       (스키마 §8), 그게 이 설계의 핵심입니다 — 공개표만 읽어서는 누구인지 알 수 없습니다.
+       닉네임 ↔ 계좌 대응은 비공개 `duel_nicknames` 와 이 배치 안에만 있습니다.
+    ⚠️ 닉네임은 한 번 만들면 바뀌지 않으므로(스키마 §9-6 에 update 정책 없음), 이 삭제가
+       과거 행을 놓칠 일이 없습니다.
+
+    반환: 실제로 지운 행 수(두 표 합계). PostgREST 가 지운 행을 돌려주지 않는 설정이면
+          0 이 나올 수 있어, 호출부는 이 값을 "성공 여부"로 쓰지 않습니다.
+    """
+    _require_client(service_client, batch=True)
+    names = sorted({str(value).strip() for value in (nicknames or []) if str(value).strip()})
+    if not names:
+        return 0
+
+    removed = 0
+    for start in range(0, len(names), CHUNK_SIZE):
+        chunk = names[start:start + CHUNK_SIZE]
+        # 표 이름을 한 줄씩 그대로(위 `delete_published_rows_for_date()` 와 같은 이유).
+        removed += len(_execute(
+            service_client.table(PUBLIC_LEADERBOARD_TABLE).delete().in_("nickname", chunk),
+            "철회 계좌의 발행 순위 삭제",
+        ))
+        removed += len(_execute(
+            service_client.table(PUBLIC_HOLDINGS_TABLE).delete().in_("nickname", chunk),
+            "철회 계좌의 발행 보유종목 삭제",
+        ))
+    return removed
+
+
+def leaderboard_has_any_rows(service_client):
+    """
+    (배치 전용) 순위표 발행표에 **행이 하나라도 있는가**(질의 1개, `limit(1)`).
+
+    최소 인원 미달 청소(5-6)를 시작하기 전의 값싼 사전 점검입니다. 청소는 "발행될 수 있는
+    모든 그룹"(3 창유형 × 9 체급 = 27개, 상수)을 훑는데, **아직 한 번도 발행된 적이 없는
+    초기 운영 기간에는 그 27번이 전부 헛걸음**입니다. 이 한 줄이 그걸 1번으로 줄입니다.
+
+    ⚠️ "없으면 건너뛴다"가 안전한 이유: 표가 비어 있으면 지울 것도 없습니다. 반대 방향의
+       실수(있는데 없다고 판단)는 이 질의가 `limit(1)` 조회 하나뿐이라 생기지 않습니다.
+    """
+    _require_client(service_client, batch=True)
+    rows = _execute(
+        service_client.table(PUBLIC_LEADERBOARD_TABLE).select("id").limit(1),
+        "발행표 존재 확인",
+    )
+    return bool(rows)
+
+
+def fetch_published_group_index(service_client, window_type, bracket_key):
+    """
+    (배치 전용) 한 그룹(창유형 × 체급)이 **과거에 발행된 적이 있는지**와, 있다면 어느 날짜에
+    누구(닉네임)로 실렸는지를 읽습니다. 최소 인원 미달 그룹을 청소할 때만 씁니다(5-6).
+
+    ⚠️ 인원이 임계값을 **넘는** 그룹에는 절대 부르지 마세요 — 그런 그룹은 정의상 500명
+       이상이라 결과가 큽니다. 호출부(`utils/duel_publish.py`)는 **미달 그룹에만** 부릅니다.
+       미달 그룹은 500명 미만이라 결과 크기가 구조적으로 작습니다.
+
+    반환: `{published_date: [nickname, ...]}`
+    """
+    _require_client(service_client, batch=True)
+    window = _require_text(window_type, "창 유형")
+    bracket = _require_text(bracket_key, "체급 식별자")
+    rows = _execute(
+        service_client.table(PUBLIC_LEADERBOARD_TABLE).select("published_date,nickname")
+        .eq("window_type", window).eq("bracket_key", bracket),
+        "발행 이력 조회",
+    )
+    index = {}
+    for row in rows:
+        day = (row or {}).get("published_date")
+        nickname = str((row or {}).get("nickname") or "").strip()
+        if day and nickname:
+            index.setdefault(str(day)[:10], []).append(nickname)
+    return index
+
+
+def delete_published_group(service_client, window_type, bracket_key, *, holdings_index=None):
+    """
+    (배치 전용) 최소 인원 미달 그룹의 발행 행을 **모든 날짜에서** 지웁니다. 5-6 참고.
+
+    5-6 원문: *"임계값 미만인 구간은 아예 발행하지 않습니다. **이미 발행돼 있던 행도
+    제거합니다.**"* 참가자가 501명이었다가 499명으로 줄어든 경우가 정확히 이 경우입니다.
+
+    ── 두 표를 다르게 지우는 이유 ────────────────────────────────────────────────
+    `duel_public_leaderboard` 에는 `bracket_key` 컬럼이 있어서 **질의 한 방**으로 끝납니다.
+    `duel_public_holdings` 에는 없습니다(스키마 §8-2 가 의도적으로 뺐습니다 — 체급은 순위표의
+    축이지 보유종목의 속성이 아니고, 중복 저장하면 두 표가 어긋날 여지가 생기기 때문).
+    그래서 보유종목 쪽은 **"그 그룹에 실렸던 날짜 × 그 날짜의 닉네임"** 으로 지웁니다.
+    날짜별로 나누는 이유: 시즌이 바뀌면 같은 닉네임이 다른 체급으로 옮겨갈 수 있어서,
+    날짜를 묶어서 지우면 **다른 시즌의 정상 행까지 지울 수 있습니다.** 날짜별로 그날 실제로
+    이 그룹에 있던 닉네임만 지우면 그 위험이 없습니다.
+
+    ⚠️ 질의 수는 (1 + 그 그룹이 발행된 날짜 수)입니다. 계좌 수·사용자 수에 비례하지 않으므로
+       §0-3-2 위반이 아니고, 대부분의 밤에는 발행된 날짜가 0 이라 질의 1개로 끝납니다.
+
+    인자
+        holdings_index : `fetch_published_group_index()` 결과. None 이면 여기서 읽습니다.
+    """
+    _require_client(service_client, batch=True)
+    window = _require_text(window_type, "창 유형")
+    bracket = _require_text(bracket_key, "체급 식별자")
+
+    index = (fetch_published_group_index(service_client, window, bracket)
+             if holdings_index is None else dict(holdings_index))
+    if not index:
+        return 0            # 발행된 적이 없는 그룹 — 지울 것도, 보낼 질의도 없습니다.
+
+    removed = len(_execute(
+        service_client.table(PUBLIC_LEADERBOARD_TABLE).delete()
+        .eq("window_type", window).eq("bracket_key", bracket),
+        "최소 인원 미달 그룹 순위 삭제",
+    ))
+    for day, nicknames in sorted(index.items()):
+        names = sorted({str(name).strip() for name in nicknames if str(name).strip()})
+        for start in range(0, len(names), CHUNK_SIZE):
+            removed += len(_execute(
+                service_client.table(PUBLIC_HOLDINGS_TABLE).delete()
+                .eq("published_date", day).in_("nickname", names[start:start + CHUNK_SIZE]),
+                "최소 인원 미달 그룹 보유종목 삭제",
+            ))
+    return removed
+
+
+def write_public_leaderboard(service_client, published_date, rows):
+    """
+    (배치 전용) 순위표 발행 행을 **한 번에** 넣습니다(청크 단위 insert). 반환: 넣은 행 수.
+
+    ⚠️ 이 함수는 **아무것도 판단하지 않습니다.** 어떤 계좌가 발행 대상인지, 수익률을 실을지
+       말지, 순위가 몇 등인지는 전부 호출부가 정해서 넘깁니다. 여기서 값을 채우거나
+       바꾸는 코드가 생기면, 동의 게이팅 규칙이 두 곳에 존재하게 됩니다(§0-3-8).
+
+    ⚠️ 그래도 **최소한의 자기 방어**는 합니다 — `account_id` / `user_id` 같은 키가 payload 에
+       섞여 있으면 **거절**합니다. 발행표에는 그 컬럼이 아예 없어서 PostgREST 가 어차피
+       거절하지만, 그때 나오는 메시지("column ... does not exist")로는 **무엇이 위험했는지**가
+       드러나지 않습니다. 여기서 잡아 "발행표에 식별자를 실으려 했다"고 말해 줍니다.
+    """
+    _require_client(service_client, batch=True)
+    day = _iso_date(published_date, "발행일")
+    payload = []
+    for row in rows or []:
+        item = dict(row)
+        _assert_no_identity_fields(item, PUBLIC_LEADERBOARD_TABLE)
+        item["published_date"] = day
+        payload.append(item)
+    if not payload:
+        return 0
+    _assert_unique_keys(payload, ("published_date", "window_type", "bracket_key", "nickname"),
+                        "순위표 발행 요청")
+
+    written = 0
+    for start in range(0, len(payload), CHUNK_SIZE):
+        chunk = payload[start:start + CHUNK_SIZE]
+        _execute(service_client.table(PUBLIC_LEADERBOARD_TABLE).insert(chunk), "순위표 발행")
+        written += len(chunk)
+    return written
+
+
+def write_public_holdings(service_client, published_date, rows):
+    """
+    (배치 전용) 공개 보유종목 발행 행을 **한 번에** 넣습니다. 반환: 넣은 행 수.
+    규약은 위 `write_public_leaderboard()` 와 같습니다(판단하지 않고, 식별자 혼입은 거절).
+    """
+    _require_client(service_client, batch=True)
+    day = _iso_date(published_date, "발행일")
+    payload = []
+    for row in rows or []:
+        item = dict(row)
+        _assert_no_identity_fields(item, PUBLIC_HOLDINGS_TABLE)
+        item["published_date"] = day
+        payload.append(item)
+    if not payload:
+        return 0
+    _assert_unique_keys(payload, ("published_date", "nickname", "ticker"), "보유종목 발행 요청")
+
+    written = 0
+    for start in range(0, len(payload), CHUNK_SIZE):
+        chunk = payload[start:start + CHUNK_SIZE]
+        _execute(service_client.table(PUBLIC_HOLDINGS_TABLE).insert(chunk), "보유종목 발행")
+        written += len(chunk)
+    return written
+
+
+#: 🔴 발행표에 **절대 실리면 안 되는** 키. 스키마 §8 이 이 컬럼들을 두지 않은 이유가
+#:    "이 표만 읽으면 안전하다"는 보장을 지키기 위해서라, 앱도 같은 목록을 들고 한 번 더
+#:    거릅니다(§0-3-9 — 두 겹이 같은 방향을 가리키게).
+FORBIDDEN_PUBLISH_FIELDS = ("account_id", "user_id", "email", "id", "auth_id", "owner_id")
+
+
+def _assert_no_identity_fields(payload, table_name):
+    """발행 payload 에 식별자가 섞였는지 검사합니다(위 상수 참고)."""
+    leaked = sorted(key for key in payload if key in FORBIDDEN_PUBLISH_FIELDS)
+    if leaked:
+        raise DuelDbError(
+            f"{table_name} 발행 payload 에 식별자가 들어 있습니다: {leaked}"
+            " — 발행표에는 user_id·account_id 를 절대 싣지 않습니다(스키마 §8 / §0-3-8)."
+            " 닉네임 ↔ 계좌의 연결고리는 비공개 duel_nicknames 에만 있어야 합니다."
+        )
+
+
 # #############################################################################
 #
-#  C 절 — 아직 만들지 않은 것 (5단계 · 공개 인프라)
+#  C 절 — 아직 만들지 않은 것 (5단계 이후)
 #
-#  🔴 여기에는 코드가 없습니다. 스텁조차 두지 않았습니다 — "절반 열린 문"이 §0-3-8 에서
+#  🔴 여기에는 코드가 없습니다. 스텁조차 두지 않습니다 — "절반 열린 문"이 §0-3-8 에서
 #     가장 위험한 모양이기 때문입니다. 아래는 **어디에 무엇이 들어올지**의 메모입니다.
 #
-#  TODO(작업지시서 5-5): 무작위 닉네임 생성·저장(`duel_nicknames`). user_id·이메일·가입시각
-#      에서 유도하지 않는 순수 난수 + unique 충돌 시 재시도. 해시도 금지(역조회 가능).
-#  TODO(작업지시서 5-3): 체급(원금 구간) 배정. `consent_real_principal_bracket` 이 true 인
-#      계좌에 대해서만 "내 성적표"의 매입원가합계를 읽습니다. false 인 계좌의 holdings 를
-#      읽는 코드 경로가 하나라도 생기면 §0-3-8 위반입니다. 체급은 시즌(1년) 단위로 고정.
-#  TODO(작업지시서 5-4): 발행 배치 — `duel_public_leaderboard` / `duel_public_holdings` 에
-#      **동의한 항목만** 채워 전량 재작성. 동의 없는 필드는 NULL(0·빈 문자열 금지).
-#      순위는 `rank() over (...)` 로 배치가 미리 계산해 저장(화면 로드 시 계산 금지 — §0-3-2).
-#  TODO(작업지시서 5-6): 최소 인원(500명) 미달 구간은 발행하지 않고, 이미 발행된 행도 제거.
-#  TODO(작업지시서 5-8): 동의 철회 — 발행 기록 영구 삭제 + 3개월 재동의 차단(앱·배치 양쪽).
-#
-#  그리고 이 파일 범위 밖:
-#  TODO(작업지시서 2-8 / 2-5): `web/pages/duel_page.py`(NiceGUI 화면, 기본 숨김 DUEL_ENABLED),
-#      `.github/workflows/duel_daily.yml`(야간 배치), `main.py` 배선.
+#  TODO(작업지시서 5-2 / 5-7): 공개 동의 UI 확장과 순위표 화면(`web/pages/`). 순위표 화면은
+#      `duel_public_leaderboard` / `duel_public_holdings` **두 표만** 읽어야 하고,
+#      `duel_positions` · `holdings` · `profiles` · `duel_cash_ledger` 를 **import 조차
+#      하지 않아야** 합니다(5-4-5).
+#  TODO(작업지시서 5-4): 발행 배치 워크플로우 yml(`.github/workflows/duel_publish.yml`).
+#      파이썬 쪽 로직은 `utils/duel_publish.py` 에 이미 있습니다 — yml 은 그걸 부르는 껍데기.
+#  TODO(작업지시서 5-8, 오너 결정 대기): 철회 즉시 공개 기록을 지우는 **앱 경로**가 필요한지.
+#      지금은 야간 배치가 지우므로 최대 하루의 간격이 있습니다. 즉시 삭제가 필요하다면
+#      `duel_opt_in()` 과 같은 종류의 SECURITY DEFINER 함수가 답이 되겠지만, 그건 발행표에
+#      쓰기(삭제) 권한을 가진 함수를 하나 더 만드는 일이라 오너 확인 없이 만들지 않습니다.
 #
 # #############################################################################
 

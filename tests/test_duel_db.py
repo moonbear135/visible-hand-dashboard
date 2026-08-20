@@ -108,6 +108,15 @@ class FakeQuery:
         self.filters.append(("in", column, list(values)))
         return self
 
+    def filter(self, column, operator, criteria):
+        """
+        PostgREST 의 범용 필터(`.filter(col, "is", "null")`). 2026-08-20 추가 —
+        `utils/duel_db.py::_filter_is_null()` / `_filter_not_null()` 이 이 형태를 씁니다
+        (NULL 여부를 `.is_()` 와 `.not_.is_()` 두 가지 문법으로 나눠 쓰지 않으려고).
+        """
+        self.filters.append((operator, column, criteria))
+        return self
+
     def limit(self, count):
         self.options["limit"] = count
         return self
@@ -787,13 +796,35 @@ def test_opt_in_does_not_reach_for_the_batch_key():
         "RPC 이름은 문자열을 흩뿌리지 않고 OPT_IN_RPC 상수 하나로 씁니다"
 
 
-def test_publish_tables_are_not_referenced_yet():
-    """5단계(공개 발행표)는 아직 범위 밖 — 상수도, 호출도 없어야 합니다(§0-3-8)."""
+def test_publish_tables_are_only_touched_by_the_batch_section():
+    """
+    🔴 5단계 착수(2026-08-20)로 **교체된** 테스트.
+
+    예전에는 "발행표를 아직 한 글자도 언급하지 않는다"를 고정하고 있었습니다. 이제 5단계를
+    실제로 만들었으므로 그 검사는 성립하지 않습니다 — 대신 **더 강한 것**을 고정합니다:
+    발행표 2개를 **읽든 쓰든** 건드리는 함수는 전부 B 절(배치)에 있어야 하고, A 절(사용자
+    세션)에는 그 표 이름이 **한 번도 나오지 않아야** 합니다.
+
+    이게 왜 더 강한가: 예전 검사는 "5단계 전"에만 유효했고 5단계가 오면 그냥 삭제됐을
+    검사입니다. 이 검사는 앞으로도 계속 유효합니다 — 나중에 누가 "화면에서 바로 순위표를
+    쓰면 편하지 않나"라고 A 절에 함수를 만드는 순간 실패합니다. 발행표에 쓰는 주체는
+    야간 배치뿐이고(스키마 §9-8 은 insert/update/delete 정책을 아무에게도 주지 않았습니다),
+    사용자 세션이 그 표를 쓰려고 하면 조용히 0행이 되거나 권한 오류가 납니다.
+    """
     _tree, source = _module_ast()
-    executable = "\n".join(line for line in source.splitlines()
-                           if not line.lstrip().startswith("#"))
-    assert "duel_public_leaderboard" not in executable
-    assert "duel_public_holdings" not in executable
+    a_start = source.index("#  A 절 —")
+    b_start = source.index("#  B 절 —")
+    a_section = source[a_start:b_start]
+
+    for table in ("duel_public_leaderboard", "duel_public_holdings",
+                  "duel_bracket_assignments", "PUBLIC_LEADERBOARD_TABLE",
+                  "PUBLIC_HOLDINGS_TABLE", "BRACKET_ASSIGNMENTS_TABLE"):
+        assert table not in a_section, f"A 절이 발행 인프라({table})를 건드립니다"
+
+    # 표 이름 문자열은 §0 의 상수 세 줄에만 있어야 합니다(문자열을 흩뿌리지 않기).
+    literals = [line for line in source.splitlines()
+                if '"duel_public_leaderboard"' in line or '"duel_public_holdings"' in line]
+    assert len(literals) == 2, f"발행표 이름 문자열이 상수 밖에도 있습니다: {literals}"
 
 
 # =============================================================================
@@ -823,7 +854,10 @@ def test_save_consent_final_confirm_records_time():
 def test_save_consent_unsetting_final_clears_the_timestamp():
     client = FakeClient()
     duel_db.save_consent(client, "acc-1", final_confirmed=False)
-    assert client.calls[0].payload["final_confirmed_at"] is None
+    # 2026-08-20 — save_consent 가 저장 직전에 철회 이력을 한 번 읽으므로(5-8-2 재동의
+    # 차단), `calls[0]` 가 아니라 **upsert 질의**를 집어 봅니다.
+    assert client.only_call(duel_db.CONSENT_TABLE,
+                            "upsert").payload["final_confirmed_at"] is None
 
 
 def test_real_principal_consent_is_independent_of_the_five():
@@ -833,7 +867,7 @@ def test_real_principal_consent_is_independent_of_the_five():
     """
     client = FakeClient()
     duel_db.save_consent(client, "acc-1", consent_real_principal_bracket=True)
-    payload = client.calls[0].payload
+    payload = client.only_call(duel_db.CONSENT_TABLE, "upsert").payload
     assert payload["consent_real_principal_bracket"] is True
     for flag in duel_db.CONSENT_ITEM_FLAGS:
         assert flag not in payload, "독립 동의가 다른 항목을 함께 켜면 안 됩니다"
@@ -842,7 +876,8 @@ def test_real_principal_consent_is_independent_of_the_five():
     duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
                          consent_holdings=True, consent_quantity=True,
                          consent_buy_amount=True, final_confirmed=True)
-    assert "consent_real_principal_bracket" not in client.calls[0].payload
+    assert "consent_real_principal_bracket" not in \
+        client.only_call(duel_db.CONSENT_TABLE, "upsert").payload
     assert duel_db.CONSENT_REAL_PRINCIPAL_FLAG not in duel_db.CONSENT_ITEM_FLAGS
 
 

@@ -53,6 +53,14 @@ DUEL_MODULE_WORK_ORDER.md 2단계의 파일 계획에 따라 만든 모듈입니
   · 2-4  가중평균 평단가 갱신        → `apply_buy_fill_to_position()`
   · 2-6  누적 TWR                  → `compute_twr()`
   · 2-9  크롤링 신선도 판정          → `check_crawl_freshness()`
+
+  ── 2026-08-20 추가: 5단계(Branch 2 "내 밑으로 눈 깔어" 공개 순위표) — 아래 §10 ──
+  · 5-3  원금 구간(체급) 8개 경계값    → `BRACKET_TIERS` / `assign_bracket()`
+  · 5-3  체급 시즌 고정(1년)          → `season_key_for_date()` / `resolve_bracket_for_season()`
+  · 5-5  무작위 닉네임                → `generate_nickname()`
+  · 5-4  순위 계산(동점 처리 포함)      → `rank_participants()`
+  · 5-6  최소 참가 인원(500명)         → `MIN_PARTICIPANTS_FOR_PUBLICATION`
+  · 5-8  철회 후 3개월 재동의 차단      → `resolve_reconsent_block()`
 """
 
 from __future__ import annotations
@@ -748,4 +756,448 @@ def compute_twr(snapshots):
         "period_count": len(parsed) - 1,
         "baseline_date": days[0],
         "end_date": days[-1],
+    }
+
+
+# #############################################################################
+#
+#  10. 🔴 5단계(Branch 2 "내 밑으로 눈 깔어") 공개 순위표 규칙 — 2026-08-20 추가
+#
+#  ⚠️ 이 절은 이 프로젝트에서 **가장 민감한 코드**입니다(§0-3-8 — 최상위 무예외 원칙).
+#     여기 함수들이 만드는 값은 곧 **다른 사람에게 보여지는 값**입니다. 그래서 아래 규칙을
+#     지킵니다:
+#       · 이 절의 함수는 여전히 **아무것도 읽지 않습니다.** 동의 여부·매입원가·닉네임 중복
+#         판정 같은 "실제 사실"은 전부 인자로 받습니다. 여기서 DB 를 보면 "동의 안 한 사람의
+#         데이터를 실수로 읽는" 경로가 이 파일에 생깁니다.
+#       · 값을 **지어내지 않습니다.** 체급을 못 정하면 아무 구간이나 찍지 않고 "구간 미적용"
+#         이라고 말하고, 수익률을 못 구하면 0% 가 아니라 **계산 불가**로 돌려줍니다(§0-1).
+#
+#  작업지시서 대응
+#    · 5-3  원금 구간(체급) 8개 경계값        → BRACKET_TIERS / assign_bracket()
+#    · 5-3  체급 시즌 고정(1년)               → resolve_bracket_for_season()
+#    · 5-5  무작위 닉네임                     → generate_nickname()
+#    · 5-4-3 순위 계산                        → rank_participants()
+#    · 5-6  최소 참가 인원(500명)             → MIN_PARTICIPANTS_FOR_PUBLICATION
+#    · 5-8-2 철회 후 3개월 재동의 차단        → resolve_reconsent_block()
+#
+# #############################################################################
+
+# =============================================================================
+# 10-1. 원금 구간(체급) — work order 5-3 · 경계값의 **단일 출처** (§0-3-10)
+# =============================================================================
+#  🔴 아래 8줄이 이 프로젝트에서 구간 경계 숫자가 적힌 **유일한 자리**입니다.
+#     SQL 에도, 화면에도, 배치에도 이 숫자를 다시 적지 마세요. 두 곳에 적으면 둘 중 하나만
+#     바뀌는 날이 오고, 그날 어떤 사용자는 자기가 속하지 않은 체급에서 겨루게 됩니다.
+#     (`sql/duel_schema.sql` §8 의 bracket_key 주석도 "앱 상수가 단일 출처"라고 못 박아
+#      뒀습니다 — DB 는 문자열을 그대로 받기만 합니다.)
+#
+#  경계 해석(오너 확정 원문 그대로): "1억원 **이상**" / "6천만원 **이상** ~ 1억원 **미만**" …
+#  즉 각 구간은 **[하한 이상, 상한 미만)** 입니다. 겹치는 구간도, 빈 구간도 없습니다.
+#
+#  key 를 한글이 아니라 ASCII 로 둔 이유: 이 값은 화면에 보이는 라벨이 아니라 **DB 컬럼 값 ·
+#  유니크 제약의 일부 · 나중에 순위표 탭/URL 파라미터로 쓰일 식별자**입니다. 식별자와 라벨을
+#  같은 문자열로 쓰면, 나중에 라벨 문구를 다듬는 순간(예: "6천~1억" → "6천만~1억원") 이미
+#  발행된 과거 행과 새 행이 **서로 다른 구간으로 갈라집니다.** 그래서 key(불변)와
+#  label(문구, 언제든 다듬어도 안전)을 한 줄 안에서 짝지어 둡니다.
+#: (bracket_key, 화면 라벨, 하한(이상), 상한(미만) — 상한 None 은 "위로 열려 있음")
+BRACKET_TIERS = (
+    ("krw_100m_plus",  "1억원 이상",              100_000_000, None),
+    ("krw_60m_100m",   "6천만원 이상 1억원 미만",  60_000_000, 100_000_000),
+    ("krw_30m_60m",    "3천만원 이상 6천만원 미만", 30_000_000, 60_000_000),
+    ("krw_10m_30m",    "1천만원 이상 3천만원 미만", 10_000_000, 30_000_000),
+    ("krw_5m_10m",     "500만원 이상 1천만원 미만",  5_000_000, 10_000_000),
+    ("krw_3m_5m",      "300만원 이상 500만원 미만",  3_000_000, 5_000_000),
+    ("krw_1m_3m",      "100만원 이상 300만원 미만",  1_000_000, 3_000_000),
+    ("krw_under_1m",   "100만원 미만",                        0, 1_000_000),
+)
+
+#: 체급을 **정할 수 없는** 참가자들의 그룹(5-2-4). 세 종류가 여기로 옵니다:
+#:   ① `consent_real_principal_bracket` 이 false — 실제 매입총합을 쓰지 말라고 한 사용자.
+#:      **이 사용자도 순위표에는 참여합니다.** 빠지는 것은 체급뿐입니다.
+#:   ② "내 성적표"에 등록된 보유종목이 하나도 없어서 매입원가합계라는 값 자체가 없는 경우.
+#:      0원으로 간주해 최하위 구간에 넣지 않습니다 — "0원어치 보유"와 "아직 아무것도 등록
+#:      하지 않음"은 다른 말이고, 후자를 전자로 바꾸면 §0-1 위반입니다.
+#:   ③ 원화·달러 종목을 함께 보유해 **하나의 원화 금액으로 합칠 수 없는** 경우.
+#:      이 앱에는 환율 시계열이 없습니다(`scorecard_db.NO_FX_CONVERSION_NOTICE`). 환율을
+#:      지어내면 §0-1 정면 위반이라, 합치지 않고 "구간 미적용"으로 둡니다.
+BRACKET_NONE_KEY = "no_bracket"
+BRACKET_NONE_LABEL = "구간 미적용"
+
+#: 발행표에 실제로 나타날 수 있는 bracket_key 전부(위 8개 + 구간 미적용).
+BRACKET_KEYS = tuple(tier[0] for tier in BRACKET_TIERS) + (BRACKET_NONE_KEY,)
+
+#: bracket_key → 화면 라벨. 화면(6단계)이 이 표만 보게 해서 라벨을 한 곳에서만 고치게 합니다.
+BRACKET_LABELS = dict(
+    [(key, label) for key, label, _low, _high in BRACKET_TIERS]
+    + [(BRACKET_NONE_KEY, BRACKET_NONE_LABEL)]
+)
+
+
+def assign_bracket(real_principal_krw):
+    """
+    실제 "내 성적표" 매입원가합계(원) → 체급(bracket_key). work order 5-3 참고.
+
+    경계는 전부 **[하한 이상, 상한 미만)** 입니다. 경계값 그 자체(예: 정확히 1억원)는
+    **위쪽 구간**에 들어갑니다 — "1억원 이상"이 오너가 준 원문이기 때문입니다.
+
+    ⚠️ `None` 을 넣으면 0 으로 간주하지 않고 예외입니다. "매입총합을 모른다"를 "0원"으로
+       바꾸면 그 사용자는 자기 것이 아닌 최하위 체급에서 겨루게 됩니다(§0-1). 값을 모르는
+       경우는 호출부가 `BRACKET_NONE_KEY`(구간 미적용)를 쓰세요.
+    ⚠️ 음수도 예외입니다. 매입원가합계가 음수인 상태는 데이터 손상이지 체급이 아닙니다.
+    """
+    amount = _require_number(real_principal_krw, "매입원가합계", allow_negative=False)
+    for key, _label, low, high in BRACKET_TIERS:
+        if amount >= low and (high is None or amount < high):
+            return key
+    # 여기 도달하면 위 표에 구멍이 있다는 뜻입니다(하한 0 짜리 구간이 있으므로 정상적으로는
+    # 불가능). 조용히 최하위로 떨어뜨리지 않고 시끄럽게 실패합니다.
+    raise DuelRuleError(
+        f"매입원가합계 {amount} 에 해당하는 체급이 없습니다 — BRACKET_TIERS 에 구멍이 있습니다."
+    )
+
+
+def bracket_label(bracket_key):
+    """bracket_key → 화면에 쓸 한국어 라벨. 모르는 키는 지어내지 않고 예외입니다."""
+    key = str(bracket_key or "").strip()
+    if key not in BRACKET_LABELS:
+        raise DuelRuleError(f"알 수 없는 체급 식별자입니다: {bracket_key!r}")
+    return BRACKET_LABELS[key]
+
+
+# =============================================================================
+# 10-2. 시즌 — 체급은 시즌 동안 **고정**됩니다 (work order 5-3 · 5차 확정)
+# =============================================================================
+#  왜 고정인가: 체급이 시즌 중에 계속 흔들리면 "체급을 맞춰 공정하게 겨룬다"는 취지가
+#  무너집니다(원금이 큰 사람이 유리한 체급으로 옮겨 다니는 것과 같아짐 — 오너 판단).
+#
+#  🔴 시즌 시작 기준일 = **매년 1월 1일**(고정 달력일)로 정했습니다.
+#     작업지시서 5-3 이 두 안(고정 달력일 vs 사용자별 가입 기념일)을 놓고 **전자를 추천**
+#     했고, 이유도 그대로입니다:
+#       · 전원을 **한 번에** 재산정하는 집합 연산이 됩니다(§0-3-2). 가입 기념일 방식이면
+#         배치가 매일 "오늘이 기념일인 사람"을 찾아 계좌별로 처리하게 되고, 그게 정확히
+#         2-7 이 금지한 모양입니다.
+#       · 순위표에 "지금은 2026 시즌"이라고 한 줄 쓰면 모든 참가자에게 같은 뜻이 됩니다.
+#         사람마다 시즌 경계가 다르면 "왜 저 사람만 체급이 바뀌었지"를 설명할 수 없습니다.
+#     ⚠️ 이건 코딩 에이전트의 판단이며 오너 최종 확인 대상입니다(작업 보고 (h) 참고).
+#        바꿀 곳은 아래 상수 두 줄뿐입니다.
+#: 시즌 길이(개월). 작업지시서 5-3 의 표기(`duel_season_length_months = 12`)를 그대로 씁니다.
+DUEL_SEASON_LENGTH_MONTHS = 12
+#: 시즌이 시작하는 달·일(매년 1월 1일).
+DUEL_SEASON_ANCHOR_MONTH = 1
+DUEL_SEASON_ANCHOR_DAY = 1
+
+
+def _add_months(base_date, months):
+    """달 단위 덧셈(표준 라이브러리만으로). 말일 보정 포함 — 1/31 + 1개월 = 2/28(29)."""
+    total = (base_date.year * 12 + (base_date.month - 1)) + int(months)
+    year, month = divmod(total, 12)
+    month += 1
+    # 그 달의 마지막 날을 넘지 않게 자릅니다(3/31 → 4/30).
+    if month == 12:
+        last_day = 31
+    else:
+        last_day = (date(year + (month // 12), (month % 12) + 1, 1) - timedelta(days=1)).day
+    return date(year, month, min(base_date.day, last_day))
+
+
+def season_start_for_date(on_date):
+    """
+    그 날짜가 속한 시즌의 **시작일**. 시즌 길이가 12개월이므로 결과는 해당 연도의 1월 1일
+    입니다(길이 상수를 바꾸면 여기 계산이 함께 따라갑니다 — 숫자를 두 곳에 적지 않기).
+    """
+    day = _to_date(on_date, "기준일")
+    anchor = date(day.year, DUEL_SEASON_ANCHOR_MONTH, DUEL_SEASON_ANCHOR_DAY)
+    if day < anchor:
+        # 앵커(1/1)보다 앞이면 직전 시즌 — 앵커가 1/1 이 아닌 값으로 바뀌었을 때를 위한 경로.
+        anchor = _add_months(anchor, -DUEL_SEASON_LENGTH_MONTHS)
+    while _add_months(anchor, DUEL_SEASON_LENGTH_MONTHS) <= day:
+        anchor = _add_months(anchor, DUEL_SEASON_LENGTH_MONTHS)
+    return anchor
+
+
+def season_key_for_date(on_date):
+    """
+    그 날짜가 속한 **시즌 식별자**(예: `'2026-01-01'`). 이 문자열이 체급 배정 기록의 키이고,
+    "같은 시즌인가"를 묻는 유일한 방법입니다.
+
+    시작일을 그대로 키로 쓰는 이유: 연도만 쓰면(`'2026'`) 나중에 시즌 길이나 앵커를 바꿨을 때
+    같은 연도 안에 시즌이 둘 생기면서 키가 충돌합니다. 시작일은 어떤 설정에서도 유일합니다.
+    """
+    return season_start_for_date(on_date).isoformat()
+
+
+def resolve_bracket_for_season(existing_assignment, fresh_bracket_key, on_date):
+    """
+    🔴 **"체급은 시즌 동안 고정"을 강제하는 단 하나의 자리입니다.** work order 5-3 참고.
+
+    배치는 매일 밤 돌고, 매일 밤 "지금 이 사람의 매입원가합계는 얼마지"를 다시 물을 수
+    있습니다. 그 값으로 매번 체급을 다시 매기면 시즌 고정 규칙이 **조용히 사라집니다.**
+    그래서 배치가 체급을 직접 정하지 못하게 하고, 반드시 이 함수를 통과하게 했습니다.
+
+    인자
+        existing_assignment : 이미 저장된 배정 기록 dict 또는 None.
+                              `{"season_key": ..., "bracket_key": ...}` 모양이면 됩니다.
+        fresh_bracket_key   : 오늘 값으로 새로 계산한 체급(`assign_bracket()` 결과 또는
+                              `BRACKET_NONE_KEY`). **시즌이 바뀌었을 때만** 쓰입니다.
+        on_date             : 오늘(발행일).
+
+    반환 dict
+        season_key   : 오늘이 속한 시즌
+        bracket_key  : 실제로 쓸 체급
+        source       : 'kept'(시즌 중 — 기존 배정 유지) / 'assigned'(새 시즌 또는 첫 배정)
+        needs_write  : 배정 기록을 새로 저장해야 하는가(= source == 'assigned')
+
+    ⚠️ 기존 배정이 **다른 시즌**의 것이면 그건 "지난 시즌 기록"이라 유지하지 않습니다.
+    ⚠️ 기존 배정이 같은 시즌이면 오늘 매입원가가 얼마로 바뀌었든 **그대로 유지**합니다 —
+       `fresh_bracket_key` 는 쳐다보지도 않습니다. 이게 이 함수의 존재 이유입니다.
+    """
+    season_key = season_key_for_date(on_date)
+
+    existing = existing_assignment or None
+    if existing:
+        if not isinstance(existing, dict):
+            raise DuelRuleError(f"체급 배정 기록이 dict 가 아닙니다: {existing!r}")
+        existing_season = str(existing.get("season_key") or "").strip()
+        existing_bracket = str(existing.get("bracket_key") or "").strip()
+        if existing_season == season_key:
+            if existing_bracket not in BRACKET_KEYS:
+                raise DuelRuleError(
+                    f"저장된 체급 식별자를 알 수 없습니다: {existing_bracket!r}"
+                    " — 임의의 체급으로 대체하지 않고 중단합니다(§0-1)."
+                )
+            return {"season_key": season_key, "bracket_key": existing_bracket,
+                    "source": "kept", "needs_write": False}
+
+    fresh = str(fresh_bracket_key or "").strip()
+    if fresh not in BRACKET_KEYS:
+        raise DuelRuleError(f"새로 계산한 체급 식별자를 알 수 없습니다: {fresh_bracket_key!r}")
+    return {"season_key": season_key, "bracket_key": fresh,
+            "source": "assigned", "needs_write": True}
+
+
+# =============================================================================
+# 10-3. 무작위 닉네임 — work order 5-5 · 스키마 §6
+# =============================================================================
+#  🔴 **이 파일에서 유일하게 결정적이지 않은(= 같은 입력에 같은 출력을 주지 않는) 함수**
+#     입니다. 그게 버그가 아니라 **요구사항**입니다.
+#
+#     닉네임을 `user_id`·이메일·가입시각 같은 값에서 유도하면(해시를 포함해서), 알고리즘이
+#     알려지는 순간 "이 닉네임은 누구인가"를 역계산할 수 있습니다. 소스 코드는 공개
+#     저장소에 있고, 알고리즘이 알려지는 것은 시간 문제입니다(§0-3-9 — 이미 알려진 기법에
+#     예외 없이 방어). 그래서 **입력 자체를 받지 않습니다.**
+#
+#     ⚠️ 이 함수의 안전성 근거는 "우리가 조심해서 user_id 를 안 넣는다"가 아니라
+#        **인자가 하나도 없다** 입니다. 남의 정체성에서 닉네임을 만들 문법 자체가 없습니다
+#        (`duel_db.opt_in()` 이 인자를 안 받는 것과 같은 종류의 구조적 방어).
+#        `tests/test_duel_publish.py` 가 시그니처를 검사해 이걸 고정합니다.
+#
+#  난수원: `secrets`(OS 의 암호학적 난수). `random` 모듈의 기본 난수는 시드를 알면 수열을
+#  재현할 수 있어서, "언제 만들어졌는지"를 아는 사람이 후보를 좁힐 여지가 남습니다. 닉네임은
+#  익명성의 마지막 껍질이라 여기서 아끼지 않습니다.
+import secrets  # noqa: E402  (이 절에서만 쓰는 표준 라이브러리 — 위 규율의 예외 아님)
+
+#: 형용사(관형어) 목록. 대결 모듈의 분위기에 맞춰 **사람·성별·지역·나이를 암시하지 않는**
+#: 단어만 골랐습니다 — 닉네임이 사람에 대한 힌트를 주면 익명성이 약해집니다.
+#: 🔴 단어의 실제 구성·어감은 오너 확인 대상입니다(작업 보고 (h)).
+NICKNAME_ADJECTIVES = (
+    "고요한", "날쌘", "느긋한", "단단한", "당당한", "듬직한", "따끈한", "또렷한",
+    "말끔한", "매서운", "묵직한", "바지런한", "발랄한", "번쩍이는", "보드라운", "부지런한",
+    "빛나는", "새침한", "서늘한", "선선한", "수줍은", "시원한", "싱그러운", "아득한",
+    "야무진", "얌전한", "엉뚱한", "여유로운", "올곧은", "우렁찬", "은은한", "잔잔한",
+    "재빠른", "정갈한", "짜릿한", "차분한", "촘촘한", "출렁이는", "커다란", "포근한",
+    "푸른", "한결같은", "홀가분한", "화사한", "환한", "훈훈한", "흐뭇한", "힘찬",
+)
+
+#: 명사 목록. 마찬가지로 **실명·지명·회사명·종목명을 연상시키지 않는** 일반명사만 씁니다
+#: (종목명을 쓰면 "이 사람이 그 종목을 산 사람인가" 하는 엉뚱한 추측이 생깁니다).
+NICKNAME_NOUNS = (
+    "가람", "고래", "구름", "그림자", "나루", "노을", "다람쥐", "달빛",
+    "도토리", "돌고래", "동백", "들판", "등대", "매화", "모래알", "무지개",
+    "물결", "미나리", "바람개비", "반딧불", "밤하늘", "별똥별", "보름달", "부엉이",
+    "북극성", "사슴", "산들바람", "새벽", "소나기", "소나무", "솔방울", "수달",
+    "수박씨", "숲길", "실개천", "썰물", "안개꽃", "여울", "연잎", "오솔길",
+    "은하수", "이슬", "잔디", "종달새", "지평선", "찻잔", "코끼리", "파도",
+)
+
+#: 뒤에 붙는 숫자의 자릿수. 두 낱말만으로는 충돌이 잦아서 자릿수로 공간을 넓힙니다.
+NICKNAME_NUMBER_DIGITS = 4
+
+
+def nickname_space_size():
+    """
+    만들 수 있는 닉네임의 총 가짓수. 충돌 확률을 눈으로 확인하려고 함수로 빼 뒀습니다
+    (테스트가 이 값이 조용히 줄어드는 것을 잡습니다 — 단어를 지우면 익명성이 얇아집니다).
+    """
+    return len(NICKNAME_ADJECTIVES) * len(NICKNAME_NOUNS) * (10 ** NICKNAME_NUMBER_DIGITS)
+
+
+def generate_nickname():
+    """
+    무작위 닉네임 **후보** 하나를 만듭니다(예: `'잔잔한물결0473'`). work order 5-5 참고.
+
+    ── 이 함수의 안전성 근거 ─────────────────────────────────────────────────────
+    **인자가 하나도 없습니다.** `user_id`·이메일·가입시각은 물론이고 그 어떤 값도 받지
+    않으므로, 닉네임을 사람에게 되돌려 계산할 **입력 자체가 존재하지 않습니다.** 해시도
+    쓰지 않습니다 — 해시는 되돌릴 수 없다고들 하지만, 입력 공간이 "우리 서비스의 사용자
+    id 목록"처럼 좁으면 전수 대입으로 즉시 역조회됩니다(§0-3-9).
+
+    ── 유일성은 여기서 보장하지 않습니다 ─────────────────────────────────────────
+    이 함수는 **후보만** 만듭니다. "이미 쓰는 닉네임인가"는 DB 의 `unique` 제약이 판정하고,
+    충돌하면 `duel_db.ensure_nickname()` 이 다시 부릅니다(스키마 §6: "생성은 난수 → unique
+    충돌 시 재시도"). 앱이 "이미 있는지 먼저 조회"하는 방식을 쓰지 않는 이유는, 조회와
+    삽입 사이에 다른 세션이 같은 이름을 넣는 경합을 앱이 막을 수 없기 때문입니다.
+
+    ── 충돌이 얼마나 드문가 ──────────────────────────────────────────────────────
+    현재 공간은 `nickname_space_size()` = 형용사 × 명사 × 10^4 ≈ 2,300만 가지입니다.
+    참가자 1만 명일 때 어딘가에서 한 번이라도 겹칠 확률은 대략 0.2% 수준이고, 겹쳐도 재시도
+    한 번이면 끝납니다. 즉 재시도는 **거의 돌지 않는 안전장치**이지 상시 경로가 아닙니다.
+    """
+    adjective = secrets.choice(NICKNAME_ADJECTIVES)
+    noun = secrets.choice(NICKNAME_NOUNS)
+    number = secrets.randbelow(10 ** NICKNAME_NUMBER_DIGITS)
+    return f"{adjective}{noun}{number:0{NICKNAME_NUMBER_DIGITS}d}"
+
+
+# =============================================================================
+# 10-4. 순위 계산 — work order 5-4-3 · 2-7
+# =============================================================================
+#  왜 SQL 의 `rank() over (...)` 가 아니라 파이썬인가 (선택의 근거를 남깁니다)
+#    · 2-7 이 진짜로 금지한 것은 **"화면 로드 시 순위를 계산하는 것"** 입니다. 순위를
+#      배치에서 미리 계산해 발행표에 저장하기만 하면 그 요구는 충족됩니다 — 계산을 어느
+#      언어로 하느냐는 그 요구와 무관합니다.
+#    · 이 저장소는 Supabase 를 **PostgREST(표 단위 REST)** 로만 씁니다. 윈도우 함수를 쓰려면
+#      DB 안에 새 함수나 뷰를 만들어 RPC 로 불러야 하고, 그건 §0-3-8 에서 가장 조심해야 할
+#      표(발행표)의 주변에 **검토해야 할 표면을 하나 더 늘리는 일**입니다.
+#    · 배치는 어차피 TWR 을 구하려고 스냅샷 전부를 이미 메모리에 갖고 있습니다. 정렬
+#      한 번(O(n log n))이 추가될 뿐이고, 이건 하루 한 번입니다. 방문자마다 도는 게 아닙니다.
+#    · 저장소 선례도 파이썬 정렬입니다(`scorecard_db.sort_holding_rows()`).
+#  → 결론: 순위는 여기(순수 함수)에서 계산하고, 발행표에는 **계산된 값만** 저장합니다.
+
+#: 🔴 최소 참가 인원(5-6, 오너 확정 500명). 이 인원을 못 채운 (창유형 × 체급) 그룹은 아예
+#:    발행하지 않습니다 — 3명짜리 구간에서 "1위 닉네임"은 사실상 실명이기 때문입니다.
+MIN_PARTICIPANTS_FOR_PUBLICATION = 500
+
+
+def group_meets_minimum(participant_count):
+    """그 그룹을 발행해도 되는 인원인가(5-6). 비교를 여기 한 곳에만 둡니다(§0-3-10)."""
+    count = _require_int(participant_count, "참가 인원", minimum=0)
+    return count >= MIN_PARTICIPANTS_FOR_PUBLICATION
+
+
+def rank_participants(entries):
+    """
+    한 그룹(창유형 × 체급) 안의 참가자들에게 **순위**를 매깁니다. work order 5-4-3 참고.
+
+    인자
+        entries : `[{"nickname": str, "twr_pct": float|None}, ...]`
+                  (다른 키가 함께 있어도 그대로 통과시켜 돌려줍니다 — 발행 배치가 종목
+                   목록 같은 걸 같이 들고 다닐 수 있게)
+
+    반환 `(ranked, unrankable)`
+        ranked     : 원본 dict 에 `rank` 를 더한 목록. **수익률 내림차순**(높을수록 1위).
+        unrankable : `twr_pct` 가 None 이라 순위를 매길 수 없는 참가자 목록(원본 그대로).
+
+    ── `twr_pct` 가 None 인 참가자를 왜 빼는가 (§0-1) ────────────────────────────
+    개설 첫날처럼 **구간 수익률이 아직 하나도 없는** 계좌는 `compute_twr()` 가
+    `status='INSUFFICIENT'`, `twr_pct=None` 을 돌려줍니다. "0%"가 아니라 "계산 불가"입니다.
+    이걸 0% 로 바꿔 순위에 끼우면 그 사람은 **실제로는 존재하지 않는 성적**으로 남들 위나
+    아래에 서게 됩니다. 그래서 순위를 매기지 않고 **발행 대상에서 빼고**, 호출부가 그
+    사실을 로그에 남깁니다. (5-6 의 최소 인원도 이렇게 **실제로 순위가 나온 사람 수**로
+    셉니다 — "자격은 있지만 성적이 없는" 사람을 인원수에 넣으면 그만큼 익명성이 얇아집니다.)
+
+    ── 동점 처리 ────────────────────────────────────────────────────────────────
+    같은 수익률이면 **같은 순위**를 주고, 다음 순위는 그만큼 건너뜁니다(1, 2, 2, 4 — 스포츠
+    중계에서 쓰는 그 방식). 동점자에게 억지로 다른 순위를 주려면 어딘가에서 순서를 지어내야
+    하고(닉네임 가나다순? 계좌 생성순?), 그건 사실이 아닌 정보를 발행하는 일입니다(§0-1).
+      ⚠️ 동점은 드문 일이 **아닙니다.** 아무것도 사지 않고 현금만 들고 있는 계좌의 TWR 은
+         정확히 0.000000% 라, 참가자가 500명쯤 되면 0% 동점자는 거의 확실히 생깁니다.
+         (`sql/duel_schema.sql` 의 유니크 제약이 이 때문에 2026-08-20 에 수정됐습니다 —
+          예전 제약은 `(published_date, window_type, bracket_key, rank)` 라 동점 두 행이
+          들어가는 순간 발행이 통째로 거절됐습니다.)
+
+    ── 표시 순서 ────────────────────────────────────────────────────────────────
+    반환 목록의 순서는 (수익률 내림차순, 닉네임 오름차순)입니다. 두 번째 키는 **순위를
+    가르는 데 쓰이지 않고**(동점은 여전히 같은 순위), 배치를 두 번 돌렸을 때 행 순서가
+    흔들리지 않게만 합니다.
+    """
+    rows = []
+    for entry in entries or []:
+        if not isinstance(entry, dict):
+            raise DuelRuleError(f"참가자 항목이 dict 가 아닙니다: {entry!r}")
+        nickname = str(entry.get("nickname") or "").strip()
+        if not nickname:
+            raise DuelRuleError("참가자 닉네임이 비어 있습니다(익명 식별자가 없는 행은 발행할 수 없습니다).")
+        rows.append((nickname, entry))
+
+    seen = set()
+    for nickname, _entry in rows:
+        if nickname in seen:
+            raise DuelRuleError(
+                f"같은 닉네임이 한 그룹에 두 번 있습니다: {nickname!r}"
+                " — 임의로 하나를 버리지 않고 중단합니다(원본 데이터를 확인하세요)."
+            )
+        seen.add(nickname)
+
+    unrankable = [entry for _nickname, entry in rows if entry.get("twr_pct") is None]
+    rankable = [(nickname, entry) for nickname, entry in rows if entry.get("twr_pct") is not None]
+
+    scored = []
+    for nickname, entry in rankable:
+        scored.append((_require_number(entry.get("twr_pct"), f"수익률({nickname})",
+                                       allow_negative=True), nickname, entry))
+    scored.sort(key=lambda item: (-item[0], item[1]))
+
+    ranked = []
+    previous_score = None
+    current_rank = 0
+    for index, (score, _nickname, entry) in enumerate(scored, start=1):
+        if previous_score is None or score != previous_score:
+            current_rank = index          # 동점이 끝나면 "몇 번째 줄인가"가 곧 순위입니다.
+            previous_score = score
+        row = dict(entry)
+        row["rank"] = current_rank
+        ranked.append(row)
+    return ranked, unrankable
+
+
+# =============================================================================
+# 10-5. 철회 후 재동의 차단 — work order 5-8-2
+# =============================================================================
+#: 철회 후 재동의가 막히는 기간(개월). 오너 확정 3개월(5-8-2).
+RECONSENT_BLOCK_MONTHS = 3
+
+
+def resolve_reconsent_block(revoked_at, now=None):
+    """
+    철회 이력으로 **지금 재동의가 가능한지** 판정합니다. work order 5-8-2 참고.
+
+    인자
+        revoked_at : 철회 시각(ISO 문자열 / datetime) 또는 None(철회한 적 없음).
+        now        : 판정 기준 시각(KST). 테스트·재현을 위해 인자로 받습니다.
+
+    반환 dict
+        blocked        : 지금 재동의가 막혀 있는가
+        unblocks_at    : 풀리는 시각(KST, aware datetime) 또는 None
+        unblocks_on    : 풀리는 **날짜**(사용자에게 보여줄 값) 또는 None
+        revoked_at     : 해석된 철회 시각 또는 None
+
+    ⚠️ 화면만 막으면 안 됩니다(5-8-2 명문). 이 판정은 앱 저장 경로(`duel_db.save_consent()`
+       / `revoke_consent()`)와 발행 배치 양쪽에서 씁니다 — 화면만 막으면 배치가 되살립니다.
+    ⚠️ 경계 처리: 정확히 3개월이 **되는 순간부터** 풀립니다(`now >= unblocks_at`).
+       "3개월이 지나야"를 하루 더 미루지 않습니다 — 사용자에게 알려 준 날짜에 실제로
+       풀려야 하기 때문입니다.
+    """
+    if revoked_at is None or (isinstance(revoked_at, str) and not revoked_at.strip()):
+        return {"blocked": False, "unblocks_at": None, "unblocks_on": None, "revoked_at": None}
+
+    revoked = _to_kst(revoked_at, "철회 시각")
+    moment = _to_kst(now, "현재 시각") if now is not None else datetime.now(KST)
+
+    unblock_date = _add_months(revoked.date(), RECONSENT_BLOCK_MONTHS)
+    unblocks_at = datetime.combine(unblock_date, revoked.timetz())
+    return {
+        "blocked": moment < unblocks_at,
+        "unblocks_at": unblocks_at,
+        "unblocks_on": unblock_date,
+        "revoked_at": revoked,
     }
