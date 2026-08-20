@@ -93,6 +93,14 @@
 --       도는 좁은 저장 프로시저**를 만들고, 사용자는 자기 로그인 세션으로 그것만 호출합니다.
 --       인자가 없고 대상은 `auth.uid()` 뿐이라 남을 대신해 부를 수 없습니다. 자세한 근거는
 --       §9-10 주석에 있습니다.
+--   (m) **2026-08-20 추가(USD 트랙 §5-11 도입)** — `duel_nicknames`(§6)의 기본키를
+--       `account_id`(계좌 단위) → `(user_id, window_type)`(사용자×창유형 단위)로 바꿨습니다.
+--       오너가 "같은 사용자면 원화·달러 트랙에서 같은 닉네임을 쓰자"(5-11-10)를 확정했는데,
+--       원화 계좌(duel_accounts)와 달러 계좌(duel_accounts_usd, §13)는 물리적으로 다른
+--       표의 서로 다른 id 라 계좌 단위 기본키로는 그 공유를 표현할 수 없었습니다. §9-6
+--       RLS 정책도 함께 바꿨습니다(auth.uid() = user_id 직접 비교). 예전 버전(계좌 단위)을
+--       이미 실행한 프로젝트를 위한 마이그레이션 브리지는 §12 에 있고, 새로 설치하는
+--       프로젝트에서는 §6 이 처음부터 새 구조로 만들어 §12 가 아무 일도 하지 않습니다.
 -- =============================================================================
 
 
@@ -676,21 +684,32 @@ comment on column public.duel_holding_snapshots.priced is
 --  · **완전 무작위 생성이며 user_id·이메일·가입시각 등 어떤 값에서도 유도하지 않습니다.**
 --    해시도 안 됩니다 — 알고리즘이 알려지면 역조회가 가능해집니다(§0-3-8, §0-3-9).
 --    생성은 난수 → unique 충돌 시 재시도입니다.
---  · 한 번 만든 닉네임은 그 계좌에 고정이고 다른 계좌가 물려받지 않습니다(5-5).
---    그래서 update 정책을 주지 않습니다(§9) — 바꿀 수 있으면 "과거 순위표의 그 사람"과
---    "지금의 그 사람"이 다른 문자열이 되어 철회 시 삭제 경로가 어긋납니다.
---  · **이 표는 비공개입니다.** 공개표에는 닉네임 문자열만 실리고 account_id 는 절대
---    실리지 않습니다(§8). 즉 닉네임 ↔ 계좌의 연결고리는 **이 표에만**, 그리고 그 표를 읽는
---    배치(service_role)에만 존재합니다.
+--  · **기본키는 (user_id, window_type) 입니다(계좌 단위가 아닙니다).** 📝 2026-08-20
+--    USD 트랙(§5-11) 도입 결정으로 바뀐 부분입니다(머리말 (m) 참고) — 오너가 "같은
+--    사용자면 같은 닉네임을 쓰자"(5-11-10)를 확정하면서, 같은 사용자의 원화 계좌와
+--    달러 계좌(같은 창유형)가 같은 닉네임을 공유해야 했습니다. 두 계좌는 물리적으로
+--    다른 표(duel_accounts / duel_accounts_usd, §13)에 있는 서로 다른 id 라 계좌 단위
+--    기본키로는 그 공유를 표현할 방법이 없어, 사용자 × 창유형 단위로 바꿨습니다.
+--    **창유형을 넘어선 공유(M1과 M3가 같은 닉네임)는 하지 않습니다** — 순위표 자체가
+--    창유형별로 나뉘어 있어 그 경계를 그대로 존중합니다.
+--  · 한 번 만든 닉네임은 그 (사용자, 창유형)에 고정이고 다른 창유형이 물려받지
+--    않습니다(5-5). 그래서 update 정책을 주지 않습니다(§9) — 바꿀 수 있으면 "과거
+--    순위표의 그 사람"과 "지금의 그 사람"이 다른 문자열이 되어 철회 시 삭제 경로가
+--    어긋납니다.
+--  · **이 표는 비공개입니다.** 공개표에는 닉네임 문자열만 실리고 user_id·account_id 는
+--    절대 실리지 않습니다(§8). 즉 닉네임 ↔ 사용자의 연결고리는 **이 표에만**, 그리고
+--    그 표를 읽는 배치(service_role)에만 존재합니다.
 -- -----------------------------------------------------------------------------
 create table if not exists public.duel_nicknames (
-    account_id uuid primary key references public.duel_accounts (id) on delete cascade,
-    nickname   text not null unique check (length(btrim(nickname)) > 0),
-    created_at timestamptz not null default now()
+    user_id     uuid not null references auth.users (id) on delete cascade,
+    window_type text not null check (window_type in ('M1', 'M3', 'M6')),
+    nickname    text not null unique check (length(btrim(nickname)) > 0),
+    created_at  timestamptz not null default now(),
+    primary key (user_id, window_type)
 );
 
 comment on table public.duel_nicknames is
-    '결투다! 계좌별 무작위 닉네임(비공개). user_id·이메일에서 유도하지 않은 순수 난수여야 하며, 해시조차 쓰지 않습니다(역조회 방지 — §0-3-8/§0-3-9). 닉네임 ↔ 계좌 연결고리는 이 표에만 있습니다.';
+    '결투다! 사용자 × 창유형별 무작위 닉네임(비공개). 계좌 단위가 아니라 (user_id, window_type) 단위입니다 — 같은 사용자의 원화·달러 계좌(같은 창유형)는 같은 닉네임을 공유합니다(5-11-10). user_id·이메일에서 유도하지 않은 순수 난수이며 해시조차 쓰지 않습니다(역조회 방지 — §0-3-8/§0-3-9).';
 
 
 -- =============================================================================
@@ -1134,17 +1153,21 @@ create policy duel_holding_snapshots_select_own on public.duel_holding_snapshots
 
 
 -- 9-6. duel_nicknames — 본인 것만 조회 + 옵트인 시 1회 생성 -------------------
---  update/delete 정책 없음: 닉네임은 한 번 만들면 그 계좌에 고정입니다(5-5). 바꿀 수 있으면
---  발행표에 남아 있는 과거 닉네임과 대응이 끊겨 철회 시 삭제가 새어 나갑니다.
+--  update/delete 정책 없음: 닉네임은 한 번 만들면 그 (사용자, 창유형)에 고정입니다(5-5).
+--  바꿀 수 있으면 발행표에 남아 있는 과거 닉네임과 대응이 끊겨 철회 시 삭제가 새어 나갑니다.
+--  🔴 2026-08-20 변경(머리말 (m)): 이 표는 이제 user_id 를 직접 갖고 있어(계좌 id 를
+--     거치지 않음), duel_account_is_mine() 을 쓰지 않고 auth.uid() = user_id 로 바로
+--     비교합니다 — 원화·달러 어느 계좌를 통해 왔는지와 무관하게 판정이 같아야 하기
+--     때문입니다(5-11-10, USD 트랙과의 닉네임 공유).
 drop policy if exists duel_nicknames_select_own on public.duel_nicknames;
 create policy duel_nicknames_select_own on public.duel_nicknames
     for select to authenticated
-    using (public.duel_account_is_mine(account_id));
+    using (auth.uid() = user_id);
 
 drop policy if exists duel_nicknames_insert_own on public.duel_nicknames;
 create policy duel_nicknames_insert_own on public.duel_nicknames
     for insert to authenticated
-    with check (public.duel_account_is_mine(account_id));
+    with check (auth.uid() = user_id);
 
 
 -- 9-7. duel_public_consent — 사용자가 실제로 쓰는 두 번째 표 ------------------
@@ -1529,4 +1552,788 @@ comment on function public.duel_opt_in() is
 --     ⚠️ 실제 동작(본인 계좌 3개만 생기는지, 두 번 눌러도 시드가 한 번만 들어가는지)은
 --        SQL Editor 가 아니라 **로그인한 앱에서** 확인해야 합니다 — SQL Editor 는 postgres
 --        권한이라 auth.uid() 가 NULL 이고, 이 함수는 그 경우 일부러 실패합니다.
+-- =============================================================================
+-- =============================================================================
+--  ⚔️ "결투다!" USD 트랙("달러 결투") 스키마 추가분 — DUEL_MODULE_WORK_ORDER.md §5-11
+--  이 블록은 sql/duel_schema.sql **끝에 그대로 이어 붙이는** 추가분입니다(같은 파일,
+--  같은 실행 방법 — SQL Editor 에 전체를 붙여넣고 Run). 기존 §1~11 은 한 글자도 건드리지
+--  않았고(원화 트랙 보호), 아래는 전부 새로 추가되는 내용입니다.
+--
+--  🔴 아키텍처 원칙(작업지시서 5-11-1 그대로): **데이터는 완전 분리, 순수 규칙은 공유.**
+--     · 데이터 표는 전부 새 표(_usd 접미사)로 물리적으로 분리합니다 — 원화 표를 절대
+--       건드리지 않고, 구분 컬럼으로 묶지도 않습니다(오너 확정 — WHERE 절 하나 빠뜨리면
+--       두 트랙이 섞이는 통로가 생기는 걸 원천 차단).
+--     · 트리거 함수(duel_set_updated_at · duel_positions_buy_only · duel_orders_guard ·
+--       duel_cash_ledger_append_only · duel_consent_guard)는 전부 NEW/OLD 로만 동작하고
+--       표 이름을 하드코딩하지 않으므로, **그대로 재사용**합니다 — 이 함수들을 복제하면
+--       "규칙을 고쳤는데 한쪽만 고쳤다"는 사고가 생깁니다(5-11-1 의 "순수 규칙 공유").
+--     · 소유자 판정 함수(duel_account_is_mine)만은 표 이름이 본문에 박혀 있어 복제가
+--       불가피합니다 — duel_account_is_mine_usd() 로 새로 만듭니다.
+--     · 닉네임(duel_nicknames)은 예외적으로 **공유 자원**입니다(5-11-10, 오너 확정) —
+--       원화 계좌와 달러 계좌가 같은 (user_id, window_type) 이면 같은 닉네임을 씁니다.
+--       그래서 새 _usd 표를 만들지 않고, sql/duel_schema.sql §6 의 정의 자체를 이미
+--       (user_id, window_type) 단위로 바꿨습니다(머리말 (m)) — 아래 §12 는 예전 버전을
+--       이미 설치한 프로젝트만을 위한 마이그레이션 브리지입니다(새 설치는 아무 일도 안 함).
+-- =============================================================================
+
+
+-- =============================================================================
+-- 12. duel_nicknames 마이그레이션 브리지 — 예전 버전(계좌 단위)을 이미 설치한 프로젝트 전용
+--      2026-08-20 추가 · USD 트랙 도입에 따른 마이그레이션
+-- =============================================================================
+--  🔴 **위 §6 의 duel_nicknames 정의 자체를 이미 (user_id, window_type) 단위로 바꿨습니다**
+--     (머리말 (m) 참고). 즉 **새로 설치하는 프로젝트는 이 블록이 통째로 아무 일도 하지
+--     않습니다** — §6 의 create table 이 처음부터 최종 구조를 만들기 때문입니다.
+--
+--  이 블록은 오직 "이 파일의 예전 버전(2026-08-20 이전, `account_id` 를 기본키로 쓰던
+--  버전)을 이미 실행해 계좌 단위 duel_nicknames 가 실제로 만들어져 있는 프로젝트"만을
+--  위한 것입니다. 컬럼 존재 여부로 스스로 판단해서, 이미 새 구조라면 그냥 넘어갑니다.
+--
+--  ⚠️ **정책을 컬럼 삭제보다 먼저 지웁니다.** 예전 정책(duel_nicknames_select_own/
+--     insert_own)이 account_id 컬럼을 참조하고 있어서, 정책을 먼저 지우지 않고 컬럼부터
+--     지우면 "다른 객체가 이 컬럼에 의존한다"는 오류가 납니다(실제로 로컬 PostgreSQL 16 에
+--     반대 순서로 실행해보고 걸린 문제라 지금 이 순서로 고쳐 둡니다 — 그리고 이 오류를
+--     아예 만나지 않도록, 전체를 `if exists` 로 감싸 새 설치에서는 실행조차 안 되게 합니다).
+-- -----------------------------------------------------------------------------
+do $$
+begin
+    if exists (
+        select 1 from information_schema.columns
+         where table_schema = 'public' and table_name = 'duel_nicknames'
+           and column_name = 'account_id'
+    ) then
+        execute 'drop policy if exists duel_nicknames_select_own on public.duel_nicknames';
+        execute 'drop policy if exists duel_nicknames_insert_own on public.duel_nicknames';
+
+        execute 'alter table public.duel_nicknames add column if not exists user_id uuid';
+        execute 'alter table public.duel_nicknames add column if not exists window_type text';
+
+        -- 기존 행(계좌 단위로 만들어진 것)을 duel_accounts 에서 역참조해 백필합니다.
+        execute '
+            update public.duel_nicknames n
+               set user_id     = a.user_id,
+                   window_type = a.window_type
+              from public.duel_accounts a
+             where n.account_id = a.id
+               and n.user_id is null';
+
+        execute 'alter table public.duel_nicknames alter column user_id set not null';
+        execute 'alter table public.duel_nicknames alter column window_type set not null';
+
+        execute '
+            alter table public.duel_nicknames
+                add constraint duel_nicknames_window_type_check
+                    check (window_type in (''M1'', ''M3'', ''M6''))';
+
+        execute 'alter table public.duel_nicknames drop constraint if exists duel_nicknames_pkey';
+        execute '
+            alter table public.duel_nicknames
+                add constraint duel_nicknames_pkey primary key (user_id, window_type)';
+
+        execute '
+            alter table public.duel_nicknames
+                add constraint duel_nicknames_user_fk
+                    foreign key (user_id) references auth.users (id) on delete cascade';
+
+        -- account_id 는 더 이상 이 표의 정체성이 아닙니다 — 위에서 정책을 먼저 지웠으므로
+        -- 이제 안전하게 지울 수 있습니다.
+        execute 'alter table public.duel_nicknames drop column account_id';
+
+        -- §9-6 의 최종 형태와 똑같은 새 정책을 다시 만듭니다.
+        execute '
+            create policy duel_nicknames_select_own on public.duel_nicknames
+                for select to authenticated
+                using (auth.uid() = user_id)';
+        execute '
+            create policy duel_nicknames_insert_own on public.duel_nicknames
+                for insert to authenticated
+                with check (auth.uid() = user_id)';
+
+        raise notice 'duel_nicknames: 예전 계좌 단위 구조를 (user_id, window_type) 단위로 마이그레이션했습니다.';
+    end if;
+end
+$$;
+
+
+-- =============================================================================
+-- 13. USD 트랙 전용 표 — 원화 표(§1~8-3)와 물리적으로 완전히 분리된 미러
+--      2026-08-20 추가 · DUEL_MODULE_WORK_ORDER.md §5-11
+-- =============================================================================
+--  아래 10개 표는 각각 §1(duel_accounts) ~ §8-3(duel_bracket_assignments) 의 원화 표와
+--  **컬럼·제약·트리거·인덱스가 전부 동일**하고, 차이는 딱 두 가지뿐입니다 — 표 이름 뒤에
+--  `_usd` 가 붙는다는 것과, duel_accounts_usd.currency 의 CHECK 값이 'USD' 라는 것.
+--  중복 설명은 생략하고 각 표 위 원화 표의 절 번호만 표시합니다 — 근거·트레이드오프는
+--  전부 그 절의 주석을 그대로 적용하면 됩니다.
+-- =============================================================================
+
+-- -----------------------------------------------------------------------------
+-- 13-1. duel_accounts_usd (§1 미러) — currency='USD' 고정, 시드 $7,500(앱 상수가 단일 출처)
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_accounts_usd (
+    id           uuid primary key default gen_random_uuid(),
+    user_id      uuid not null references auth.users (id) on delete cascade,
+    window_type  text not null check (window_type in ('M1', 'M3', 'M6')),
+    seed_amount  numeric(20, 6) not null check (seed_amount > 0),   -- default 없음(§1 과 같은 이유)
+    currency     text not null default 'USD' check (currency = 'USD'),
+    anchor_date  date not null,
+    status       text not null default 'active' check (status in ('active', 'closed')),
+    created_at   timestamptz not null default now(),
+    updated_at   timestamptz not null default now(),
+    constraint duel_accounts_usd_user_window_unique unique (user_id, window_type)
+);
+
+create index if not exists duel_accounts_usd_status_idx
+    on public.duel_accounts_usd (status);
+
+drop trigger if exists duel_accounts_usd_set_updated_at on public.duel_accounts_usd;
+create trigger duel_accounts_usd_set_updated_at
+    before update on public.duel_accounts_usd
+    for each row execute function public.duel_set_updated_at();   -- 원화와 같은 함수 재사용
+
+comment on table public.duel_accounts_usd is
+    '결투다! USD 트랙 가상계좌(§5-11). 사용자당 M1/M3/M6 정확히 3개, 시드 $7,500 고정, 달러 전용. duel_accounts(원화)와 물리적으로 완전히 분리된 별개 표 — 절대 조인·합산하지 않습니다.';
+comment on column public.duel_accounts_usd.seed_amount is
+    '개설 시점의 시드머니(달러). DB default 없음 — 금액의 단일 출처는 앱 상수 utils/duel_rules.py::SEED_AMOUNT_USD 입니다(§1 과 같은 이유).';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-2. duel_positions_usd (§2 미러) — 매수 전용, 트리거 함수는 원화와 공유
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_positions_usd (
+    id            uuid primary key default gen_random_uuid(),
+    account_id    uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    ticker        text not null check (length(ticker) between 1 and 20),
+    stock_name    text not null,
+    quantity      numeric(20, 6) not null check (quantity >= 0),
+    avg_cost      numeric(20, 6) not null check (avg_cost >= 0),
+    status        text not null default 'active' check (status in ('active', 'delisted')),
+    delisted_date date,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+    constraint duel_positions_usd_account_ticker_unique unique (account_id, ticker),
+    constraint duel_positions_usd_delisted_match check (
+        (status = 'delisted' and delisted_date is not null)
+        or (status <> 'delisted' and delisted_date is null)
+    )
+);
+
+drop trigger if exists duel_positions_usd_set_updated_at on public.duel_positions_usd;
+create trigger duel_positions_usd_set_updated_at
+    before update on public.duel_positions_usd
+    for each row execute function public.duel_set_updated_at();
+
+-- §2-1 의 매도 금지 트리거 함수(duel_positions_buy_only)는 NEW/OLD 로만 동작하고 표 이름을
+-- 하드코딩하지 않으므로 그대로 재사용합니다 — 함수를 복제하지 않습니다(5-11-1).
+drop trigger if exists duel_positions_usd_no_sell on public.duel_positions_usd;
+create trigger duel_positions_usd_no_sell
+    before update on public.duel_positions_usd
+    for each row execute function public.duel_positions_buy_only();
+
+comment on table public.duel_positions_usd is
+    '결투다! USD 트랙 가상 보유 포지션(§5-11). 매수 전용 — 매도 금지 트리거는 원화 표와 같은 함수(duel_positions_buy_only)를 공유합니다. 쓰기는 배치(service_role)만, 사용자는 읽기 전용.';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-3. duel_orders_usd (§3 미러) — 수량 기준, D일 접수 → D+1 미국 정규장 마감가 체결
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_orders_usd (
+    id                 uuid primary key default gen_random_uuid(),
+    account_id         uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    ticker             text not null check (length(ticker) between 1 and 20),
+    stock_name         text not null,
+    requested_quantity integer not null check (requested_quantity > 0),
+    side               text not null default 'buy' check (side = 'buy'),
+    status             text not null default 'pending'
+                       check (status in
+                           ('pending', 'filled', 'partially_filled', 'cancelled', 'expired')),
+    saved_at           timestamptz not null default now(),
+    last_edited_at     timestamptz,
+    target_date        date,
+    filled_date        date,
+    filled_price       numeric(20, 6) check (filled_price is null or filled_price > 0),
+    filled_quantity    integer        check (filled_quantity is null or filled_quantity >= 0),
+    filled_amount      numeric(20, 6) check (filled_amount is null or filled_amount >= 0),
+    fail_reason        text,
+
+    constraint duel_orders_usd_filled_within_request check (
+        filled_quantity is null or filled_quantity <= requested_quantity
+    ),
+    constraint duel_orders_usd_reason_required check (
+        status in ('pending', 'filled')
+        or (fail_reason is not null and length(btrim(fail_reason)) > 0)
+    ),
+    constraint duel_orders_usd_fill_fields_together check (
+        (filled_date is null and filled_price is null
+             and filled_quantity is null and filled_amount is null)
+        or (filled_date is not null and filled_price is not null
+             and filled_quantity is not null and filled_amount is not null)
+    ),
+    constraint duel_orders_usd_status_fill_match check (
+        (status in ('filled', 'partially_filled') and filled_quantity is not null
+             and filled_quantity > 0)
+        or (status = 'pending' and filled_quantity is null)
+        or status in ('cancelled', 'expired')
+    )
+);
+
+create index if not exists duel_orders_usd_pending_target_idx
+    on public.duel_orders_usd (target_date, saved_at)
+    where status = 'pending';
+
+create index if not exists duel_orders_usd_account_saved_idx
+    on public.duel_orders_usd (account_id, saved_at desc);
+
+-- §3-1 의 상태 전이 가드(duel_orders_guard)도 표 이름을 하드코딩하지 않으므로 재사용합니다.
+drop trigger if exists duel_orders_usd_transition_guard on public.duel_orders_usd;
+create trigger duel_orders_usd_transition_guard
+    before update on public.duel_orders_usd
+    for each row execute function public.duel_orders_guard();
+
+comment on table public.duel_orders_usd is
+    '결투다! USD 트랙 예약 주문(수량 기준). D일 KST 16:00~21:00 접수 → D+1 미국 정규장 마감가로 야간 배치가 체결합니다(5-11-6 — 이 시간대는 그날 미국 정규장 개장 전이라 국내 모델과 다른 메커니즘이지만 결과는 동일하게 선행매매 불가능합니다). 사용자는 pending 상태에서만 수량 수정·취소 가능.';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-4. duel_cash_ledger_usd (§4 미러) — append-only, 트리거 함수는 원화와 공유
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_cash_ledger_usd (
+    id         bigserial primary key,
+    account_id uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    event_type text not null
+               check (event_type in ('seed', 'monthly_deposit', 'buy', 'reversal')),
+    amount     numeric(20, 6) not null,
+    event_date date not null,
+    order_id   uuid references public.duel_orders_usd (id),   -- on delete no action(§4 와 같은 이유)
+    memo       text,
+    created_at timestamptz not null default now(),
+
+    constraint duel_cash_ledger_usd_sign_match check (
+        (event_type in ('seed', 'monthly_deposit') and amount > 0)
+        or (event_type = 'buy' and amount < 0)
+        or event_type = 'reversal'
+    ),
+    constraint duel_cash_ledger_usd_order_link check (
+        (event_type = 'buy' and order_id is not null)
+        or (event_type in ('seed', 'monthly_deposit') and order_id is null)
+        or event_type = 'reversal'
+    )
+);
+
+create index if not exists duel_cash_ledger_usd_account_date_idx
+    on public.duel_cash_ledger_usd (account_id, event_date);
+
+-- 멱등성(§4-1 미러) — 월 $500 입금은 계좌×해당월 1행, 시드는 계좌당 1행.
+create unique index if not exists duel_cash_ledger_usd_monthly_deposit_unique
+    on public.duel_cash_ledger_usd (account_id, event_date)
+    where event_type = 'monthly_deposit';
+
+create unique index if not exists duel_cash_ledger_usd_seed_unique
+    on public.duel_cash_ledger_usd (account_id)
+    where event_type = 'seed';
+
+-- §4-2 의 append-only 강제 함수(duel_cash_ledger_append_only)도 표 이름을 하드코딩하지
+-- 않으므로 재사용합니다.
+drop trigger if exists duel_cash_ledger_usd_no_update on public.duel_cash_ledger_usd;
+create trigger duel_cash_ledger_usd_no_update
+    before update on public.duel_cash_ledger_usd
+    for each row execute function public.duel_cash_ledger_append_only();
+
+comment on table public.duel_cash_ledger_usd is
+    '결투다! USD 트랙 현금 원장(append-only). 매월 $500 정기입금이 창 길이와 무관하게 누적됩니다(5-11-4 — 원화 트랙의 "창 길이에 비례해 깎지 않음" 규칙을 그대로 재사용). 정정은 반대 부호의 reversal 행으로만.';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-5. duel_daily_snapshots_usd / duel_holding_snapshots_usd (§5 미러)
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_daily_snapshots_usd (
+    id               uuid primary key default gen_random_uuid(),
+    account_id       uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    snapshot_date    date not null,
+    position_value   numeric(20, 6) not null check (position_value >= 0),
+    cash_balance     numeric(20, 6) not null,
+    total_value      numeric(20, 6) not null,
+    total_cost       numeric(20, 6) not null check (total_cost >= 0),
+    cash_flow_amount numeric(20, 6) not null default 0 check (cash_flow_amount >= 0),
+    cash_flow_kind   text check (
+                         cash_flow_kind is null
+                         or cash_flow_kind in ('seed', 'monthly_deposit', 'mixed')
+                     ),
+    priced_count     integer not null check (priced_count >= 0),
+    unpriced_count   integer not null check (unpriced_count >= 0),
+    price_as_of_kst  text,
+    created_at       timestamptz not null default now(),
+    updated_at       timestamptz not null default now(),
+
+    constraint duel_snapshots_usd_account_date_unique unique (account_id, snapshot_date),
+    constraint duel_snapshots_usd_priced check (priced_count > 0 or position_value = 0),
+    constraint duel_snapshots_usd_total_match check (total_value = position_value + cash_balance),
+    constraint duel_snapshots_usd_cash_flow_match check (
+        (cash_flow_amount = 0 and cash_flow_kind is null)
+        or (cash_flow_amount > 0 and cash_flow_kind is not null)
+    )
+);
+
+create index if not exists duel_snapshots_usd_account_date_desc_idx
+    on public.duel_daily_snapshots_usd (account_id, snapshot_date desc);
+create index if not exists duel_snapshots_usd_date_idx
+    on public.duel_daily_snapshots_usd (snapshot_date);
+
+drop trigger if exists duel_snapshots_usd_set_updated_at on public.duel_daily_snapshots_usd;
+create trigger duel_snapshots_usd_set_updated_at
+    before update on public.duel_daily_snapshots_usd
+    for each row execute function public.duel_set_updated_at();
+
+comment on table public.duel_daily_snapshots_usd is
+    '결투다! USD 트랙 계좌 × 거래일 = 1행 합계 스냅샷(§5-11). cash_flow_amount 는 TWR 계산의 필수 입력(원화 표와 같은 규칙). 쓰기는 배치(service_role)만.';
+
+
+create table if not exists public.duel_holding_snapshots_usd (
+    id            uuid primary key default gen_random_uuid(),
+    account_id    uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    ticker        text not null check (length(ticker) between 1 and 20),
+    snapshot_date date not null,
+    stock_name    text,
+    quantity      numeric(20, 6) not null check (quantity >= 0),
+    avg_cost      numeric(20, 6) not null check (avg_cost >= 0),
+    cost          numeric(20, 6) not null check (cost >= 0),
+    close_price   numeric(20, 6) check (close_price is null or close_price >= 0),
+    market_value  numeric(20, 6) check (market_value is null or market_value >= 0),
+    status        text not null default 'active' check (status in ('active', 'delisted')),
+    priced        boolean not null,
+    price_as_of_kst text,
+    created_at    timestamptz not null default now(),
+    updated_at    timestamptz not null default now(),
+
+    constraint duel_holding_snapshots_usd_account_ticker_date_unique
+        unique (account_id, ticker, snapshot_date),
+    constraint duel_holding_snapshots_usd_priced_match check (
+        (priced and close_price is not null and market_value is not null)
+        or (not priced and close_price is null and market_value is null)
+    )
+);
+
+create index if not exists duel_holding_snapshots_usd_account_date_idx
+    on public.duel_holding_snapshots_usd (account_id, snapshot_date);
+
+drop trigger if exists duel_holding_snapshots_usd_set_updated_at on public.duel_holding_snapshots_usd;
+create trigger duel_holding_snapshots_usd_set_updated_at
+    before update on public.duel_holding_snapshots_usd
+    for each row execute function public.duel_set_updated_at();
+
+comment on table public.duel_holding_snapshots_usd is
+    '결투다! USD 트랙 계좌 × 종목 × 거래일 = 1행 상세 스냅샷(§5-11). priced=false 인 종목은 close_price/market_value 가 NULL 입니다(가격 미확인을 0으로 치지 않음 — §0-1).';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-6. duel_public_consent_usd (§7 미러) — 트리거 함수는 원화와 공유
+-- -----------------------------------------------------------------------------
+--  ⚠️ 작업지시서 5-11-10 확정: **이 표는 duel_public_consent(원화)와 완전히 독립입니다.**
+--     한쪽만 동의하고 다른 쪽은 동의 안 해도 되고, 한쪽 철회가 다른 쪽에 영향을 주지
+--     않습니다. 공유되는 건 오직 duel_nicknames(§12)의 닉네임 문자열뿐입니다.
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_public_consent_usd (
+    account_id                     uuid primary key
+                                   references public.duel_accounts_usd (id) on delete cascade,
+    consent_rank                   boolean not null default false,
+    consent_return                 boolean not null default false,
+    consent_holdings               boolean not null default false,
+    consent_quantity                boolean not null default false,
+    consent_buy_amount             boolean not null default false,
+    final_confirmed                boolean not null default false,
+    final_confirmed_at             timestamptz,
+    consent_real_principal_bracket boolean not null default false,
+    revoked_at                     timestamptz,
+    created_at                     timestamptz not null default now(),
+    updated_at                     timestamptz not null default now(),
+
+    constraint duel_consent_usd_final_requires_all check (
+        not final_confirmed
+        or (consent_rank and consent_return and consent_holdings
+            and consent_quantity and consent_buy_amount)
+    ),
+    constraint duel_consent_usd_final_time check (
+        (final_confirmed and final_confirmed_at is not null)
+        or (not final_confirmed and final_confirmed_at is null)
+    ),
+    constraint duel_consent_usd_revoked_not_confirmed check (
+        revoked_at is null or not final_confirmed
+    )
+);
+
+drop trigger if exists duel_consent_usd_set_updated_at on public.duel_public_consent_usd;
+create trigger duel_consent_usd_set_updated_at
+    before update on public.duel_public_consent_usd
+    for each row execute function public.duel_set_updated_at();
+
+-- §7-1 의 철회 되돌리기 금지 함수(duel_consent_guard)도 표 이름을 하드코딩하지 않으므로
+-- 재사용합니다.
+drop trigger if exists duel_consent_usd_no_revoke_reset on public.duel_public_consent_usd;
+create trigger duel_consent_usd_no_revoke_reset
+    before update on public.duel_public_consent_usd
+    for each row execute function public.duel_consent_guard();
+
+comment on table public.duel_public_consent_usd is
+    '결투다! USD 트랙 공개 동의 상태(§5-11). duel_public_consent(원화)와 완전히 독립입니다 — 한쪽만 동의해도 되고, 철회도 서로 영향 없습니다. 공유되는 건 duel_nicknames 의 닉네임 문자열뿐입니다(5-11-10).';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-7. duel_bracket_assignments_usd (§8-3 미러) — 체급 8단계(달러), update/delete 권한 없음
+-- -----------------------------------------------------------------------------
+--  경계값은 여기 저장하지 않습니다(원화 표와 같은 이유 — §0-3-8). 단일 출처는
+--  utils/duel_rules.py::BRACKET_TIERS_USD 입니다.
+create table if not exists public.duel_bracket_assignments_usd (
+    account_id  uuid not null references public.duel_accounts_usd (id) on delete cascade,
+    season_key  text not null check (length(btrim(season_key)) > 0),
+    bracket_key text not null check (length(btrim(bracket_key)) > 0),
+    assigned_at timestamptz not null default now(),
+    primary key (account_id, season_key)
+);
+
+create index if not exists duel_bracket_assignments_usd_season_idx
+    on public.duel_bracket_assignments_usd (season_key, bracket_key);
+
+comment on table public.duel_bracket_assignments_usd is
+    '결투다! USD 트랙 체급(원금 구간) 배정 기록(비공개, §5-11). 계좌 × 시즌 = 1행, 한 번 쓰이면 그 시즌 동안 바뀌지 않습니다(update 권한을 아무에게도 주지 않음). 시즌은 원화 트랙과 공유합니다(5-11-8) — season_key 값 자체는 같은 함수(season_key_for_date)가 만듭니다.';
+
+
+-- -----------------------------------------------------------------------------
+-- 13-8. duel_public_leaderboard_usd / duel_public_holdings_usd (§8 미러) — 완전 별개 발행표
+-- -----------------------------------------------------------------------------
+--  🔴 작업지시서 5-11-9 확정: 한국장·미국장 순위표는 **절대 병합·비교하지 않습니다.**
+--     이 표들은 duel_public_leaderboard(원화)와 물리적으로 다른 표이고, 화면도 탭이나
+--     선택으로 완전히 분리해서 보여줍니다 — 같은 화면에 두 트랙의 순위를 나란히 놓고
+--     "누가 더 잘했는지" 비교하는 UI 는 만들지 않습니다(환율 없이는 그 비교 자체가
+--     의미가 없습니다 — §0-1).
+-- -----------------------------------------------------------------------------
+create table if not exists public.duel_public_leaderboard_usd (
+    id             bigserial primary key,
+    published_date date not null,
+    window_type    text not null check (window_type in ('M1', 'M3', 'M6')),
+    bracket_key    text not null check (length(btrim(bracket_key)) > 0),
+    rank           integer not null check (rank > 0),
+    nickname       text not null check (length(btrim(nickname)) > 0),
+    twr_pct        numeric(20, 6),
+    created_at     timestamptz not null default now(),
+
+    -- §8-1 과 같은 이유로 처음부터 nickname 을 유니크 키에 둡니다(동점자 다수 발생을
+    -- 이미 알고 있으므로, rank 를 키에 넣는 실수를 USD 트랙에서는 반복하지 않습니다).
+    constraint duel_public_leaderboard_usd_participant_unique
+        unique (published_date, window_type, bracket_key, nickname)
+);
+
+create index if not exists duel_public_leaderboard_usd_group_rank_idx
+    on public.duel_public_leaderboard_usd (published_date, window_type, bracket_key, rank);
+
+create index if not exists duel_public_leaderboard_usd_nickname_idx
+    on public.duel_public_leaderboard_usd (nickname);
+
+comment on table public.duel_public_leaderboard_usd is
+    '결투다! USD 트랙 발행 전용 공개 순위표(§5-11). duel_public_leaderboard(원화)와 물리적으로 완전히 분리 — 절대 병합·비교하지 않습니다(5-11-9). user_id/account_id 를 담지 않습니다. 배치(service_role)만 쓰고, 로그인 사용자 전체가 읽습니다.';
+
+
+create table if not exists public.duel_public_holdings_usd (
+    id             bigserial primary key,
+    published_date date not null,
+    window_type    text not null check (window_type in ('M1', 'M3', 'M6')),
+    nickname       text not null check (length(btrim(nickname)) > 0),
+    ticker         text not null check (length(ticker) between 1 and 20),
+    stock_name     text,
+    quantity       numeric(20, 6) check (quantity is null or quantity >= 0),
+    buy_amount     numeric(20, 6) check (buy_amount is null or buy_amount >= 0),
+    created_at     timestamptz not null default now(),
+    constraint duel_public_holdings_usd_unique
+        unique (published_date, nickname, ticker)
+);
+
+create index if not exists duel_public_holdings_usd_nickname_idx
+    on public.duel_public_holdings_usd (nickname);
+
+comment on table public.duel_public_holdings_usd is
+    '결투다! USD 트랙 발행 전용 공개 보유종목 상세(§5-11). user_id/account_id 를 담지 않습니다. 동의하지 않은 항목은 NULL 이며 화면은 "비공개"로 표시합니다.';
+
+
+-- =============================================================================
+-- 14. 🔐 USD 트랙 RLS + 권한 — §9 와 정확히 같은 원칙을 _usd 표에 적용
+-- =============================================================================
+
+-- 14-0. 소유자 판정 함수 — duel_account_is_mine() 의 USD 버전(표 이름이 본문에 박혀
+--       있어 재사용이 불가능한 유일한 함수입니다. §9-0 참고)
+create or replace function public.duel_account_is_mine_usd(target_account_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = public
+as $$
+    select exists (
+        select 1
+          from public.duel_accounts_usd a
+         where a.id = target_account_id
+           and a.user_id = auth.uid()
+    );
+$$;
+
+revoke all on function public.duel_account_is_mine_usd(uuid) from public;
+grant execute on function public.duel_account_is_mine_usd(uuid) to authenticated, service_role;
+
+
+alter table public.duel_accounts_usd            enable row level security;
+alter table public.duel_positions_usd           enable row level security;
+alter table public.duel_orders_usd              enable row level security;
+alter table public.duel_cash_ledger_usd         enable row level security;
+alter table public.duel_daily_snapshots_usd     enable row level security;
+alter table public.duel_holding_snapshots_usd   enable row level security;
+alter table public.duel_public_consent_usd      enable row level security;
+alter table public.duel_public_leaderboard_usd  enable row level security;
+alter table public.duel_public_holdings_usd     enable row level security;
+alter table public.duel_bracket_assignments_usd enable row level security;
+
+-- 14-1. duel_accounts_usd (§9-1 미러)
+drop policy if exists duel_accounts_usd_select_own on public.duel_accounts_usd;
+create policy duel_accounts_usd_select_own on public.duel_accounts_usd
+    for select to authenticated
+    using (auth.uid() = user_id);
+
+drop policy if exists duel_accounts_usd_insert_own on public.duel_accounts_usd;
+create policy duel_accounts_usd_insert_own on public.duel_accounts_usd
+    for insert to authenticated
+    with check (auth.uid() = user_id);
+
+-- 14-2. duel_positions_usd (§9-2 미러) — 읽기 전용
+drop policy if exists duel_positions_usd_select_own on public.duel_positions_usd;
+create policy duel_positions_usd_select_own on public.duel_positions_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+-- 14-3. duel_orders_usd (§9-3 미러)
+drop policy if exists duel_orders_usd_select_own on public.duel_orders_usd;
+create policy duel_orders_usd_select_own on public.duel_orders_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+drop policy if exists duel_orders_usd_insert_own on public.duel_orders_usd;
+create policy duel_orders_usd_insert_own on public.duel_orders_usd
+    for insert to authenticated
+    with check (public.duel_account_is_mine_usd(account_id));
+
+drop policy if exists duel_orders_usd_update_own on public.duel_orders_usd;
+create policy duel_orders_usd_update_own on public.duel_orders_usd
+    for update to authenticated
+    using (public.duel_account_is_mine_usd(account_id))
+    with check (public.duel_account_is_mine_usd(account_id));
+
+-- 14-4. duel_cash_ledger_usd (§9-4 미러) — 읽기 전용
+drop policy if exists duel_cash_ledger_usd_select_own on public.duel_cash_ledger_usd;
+create policy duel_cash_ledger_usd_select_own on public.duel_cash_ledger_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+-- 14-5. 스냅샷 2표 (§9-5 미러) — 읽기 전용
+drop policy if exists duel_snapshots_usd_select_own on public.duel_daily_snapshots_usd;
+create policy duel_snapshots_usd_select_own on public.duel_daily_snapshots_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+drop policy if exists duel_holding_snapshots_usd_select_own on public.duel_holding_snapshots_usd;
+create policy duel_holding_snapshots_usd_select_own on public.duel_holding_snapshots_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+-- 14-6. duel_public_consent_usd (§9-7 미러)
+drop policy if exists duel_consent_usd_select_own on public.duel_public_consent_usd;
+create policy duel_consent_usd_select_own on public.duel_public_consent_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+drop policy if exists duel_consent_usd_insert_own on public.duel_public_consent_usd;
+create policy duel_consent_usd_insert_own on public.duel_public_consent_usd
+    for insert to authenticated
+    with check (public.duel_account_is_mine_usd(account_id));
+
+drop policy if exists duel_consent_usd_update_own on public.duel_public_consent_usd;
+create policy duel_consent_usd_update_own on public.duel_public_consent_usd
+    for update to authenticated
+    using (public.duel_account_is_mine_usd(account_id))
+    with check (public.duel_account_is_mine_usd(account_id));
+
+-- 14-7. duel_bracket_assignments_usd (§9-7-1 미러) — 조회만
+drop policy if exists duel_bracket_assignments_usd_select_own on public.duel_bracket_assignments_usd;
+create policy duel_bracket_assignments_usd_select_own on public.duel_bracket_assignments_usd
+    for select to authenticated
+    using (public.duel_account_is_mine_usd(account_id));
+
+-- 14-8. 발행표 2개 (§9-8 미러) — 로그인 사용자 전체에게 select 만
+drop policy if exists duel_public_leaderboard_usd_select_all on public.duel_public_leaderboard_usd;
+create policy duel_public_leaderboard_usd_select_all on public.duel_public_leaderboard_usd
+    for select to authenticated
+    using (true);
+
+drop policy if exists duel_public_holdings_usd_select_all on public.duel_public_holdings_usd;
+create policy duel_public_holdings_usd_select_all on public.duel_public_holdings_usd
+    for select to authenticated
+    using (true);
+
+
+-- -----------------------------------------------------------------------------
+-- 14-9. 권한(GRANT) 정리 (§9-9 미러)
+-- -----------------------------------------------------------------------------
+revoke all on public.duel_accounts_usd            from anon;
+revoke all on public.duel_positions_usd           from anon;
+revoke all on public.duel_orders_usd              from anon;
+revoke all on public.duel_cash_ledger_usd         from anon;
+revoke all on public.duel_daily_snapshots_usd     from anon;
+revoke all on public.duel_holding_snapshots_usd   from anon;
+revoke all on public.duel_public_consent_usd      from anon;
+revoke all on public.duel_public_leaderboard_usd  from anon;
+revoke all on public.duel_public_holdings_usd     from anon;
+revoke all on public.duel_bracket_assignments_usd from anon;
+
+grant select, insert         on public.duel_accounts_usd            to authenticated;
+grant select                 on public.duel_positions_usd           to authenticated;
+grant select, insert, update on public.duel_orders_usd              to authenticated;
+grant select                 on public.duel_cash_ledger_usd         to authenticated;
+grant select                 on public.duel_daily_snapshots_usd     to authenticated;
+grant select                 on public.duel_holding_snapshots_usd   to authenticated;
+grant select, insert, update on public.duel_public_consent_usd      to authenticated;
+grant select                 on public.duel_public_leaderboard_usd  to authenticated;
+grant select                 on public.duel_public_holdings_usd     to authenticated;
+grant select                 on public.duel_bracket_assignments_usd to authenticated;
+
+-- bigserial 표의 시퀀스 권한(§9-9 의 "잊으면 insert 가 통째로 실패" 경고와 같은 이유)
+revoke all on sequence public.duel_cash_ledger_usd_id_seq        from anon, authenticated;
+revoke all on sequence public.duel_public_leaderboard_usd_id_seq from anon, authenticated;
+revoke all on sequence public.duel_public_holdings_usd_id_seq    from anon, authenticated;
+
+grant usage, select on sequence public.duel_cash_ledger_usd_id_seq        to service_role;
+grant usage, select on sequence public.duel_public_leaderboard_usd_id_seq to service_role;
+grant usage, select on sequence public.duel_public_holdings_usd_id_seq    to service_role;
+
+grant select, insert, update on public.duel_accounts_usd          to service_role;
+grant select, insert, update on public.duel_positions_usd         to service_role;
+grant select, insert, update on public.duel_orders_usd            to service_role;
+grant select, insert, update on public.duel_daily_snapshots_usd   to service_role;
+grant select, insert, update on public.duel_holding_snapshots_usd to service_role;
+grant select, insert, update on public.duel_public_consent_usd    to service_role;
+
+-- 체급 배정은 배치에게도 insert 와 select 만(§9-9 의 duel_bracket_assignments 와 같은 이유
+-- — 시즌 고정을 권한으로 강제).
+revoke update, delete on public.duel_bracket_assignments_usd from service_role;
+grant  select, insert on public.duel_bracket_assignments_usd to service_role;
+
+-- 현금 원장은 배치에게도 insert 와 select 만(append-only 를 권한으로도 강제).
+revoke update, delete on public.duel_cash_ledger_usd from service_role;
+grant  select, insert on public.duel_cash_ledger_usd to service_role;
+
+-- 포지션·주문·스냅샷·동의의 delete 도 거둡니다(§9-9 와 같은 이유 — 이 모듈에 "지워서
+-- 되돌리는" 경로는 없습니다).
+revoke delete on public.duel_accounts_usd          from service_role;
+revoke delete on public.duel_positions_usd         from service_role;
+revoke delete on public.duel_orders_usd            from service_role;
+revoke delete on public.duel_daily_snapshots_usd   from service_role;
+revoke delete on public.duel_holding_snapshots_usd from service_role;
+revoke delete on public.duel_public_consent_usd    from service_role;
+
+-- 발행표 2개만 예외로 delete 를 줍니다(§9-9 와 같은 이유 — 전량 재작성·철회 시 영구 삭제).
+grant select, insert, update, delete on public.duel_public_leaderboard_usd to service_role;
+grant select, insert, update, delete on public.duel_public_holdings_usd    to service_role;
+
+
+-- -----------------------------------------------------------------------------
+-- 14-10. 🔐 USD 옵트인 RPC — `public.duel_opt_in_usd()` (§9-10 미러)
+-- -----------------------------------------------------------------------------
+--  §9-10 과 같은 이유·같은 안전성 근거입니다(인자 없음, 대상은 auth.uid() 뿐, 금액은
+--  상수 함수, 멱등). 닉네임은 여기서 만들지 않습니다 — 닉네임은 5단계 공개 동의 시점에
+--  생성됩니다(5-5 확정 순서 그대로, USD 트랙도 동일).
+-- -----------------------------------------------------------------------------
+create or replace function public.duel_seed_amount_usd()
+returns numeric
+language sql
+immutable
+as $$
+    select 7500::numeric   -- ⚠️ utils/duel_rules.py::SEED_AMOUNT_USD 와 반드시 같아야 합니다
+$$;
+
+revoke all on function public.duel_seed_amount_usd() from public;
+grant execute on function public.duel_seed_amount_usd() to authenticated, service_role;
+
+comment on function public.duel_seed_amount_usd() is
+    '결투 USD 트랙 시드머니(달러)의 SQL 쪽 단일 출처. 앱 상수 utils/duel_rules.py::SEED_AMOUNT_USD 와 같아야 하며, tests/test_duel_db.py 가 두 값의 일치를 자동으로 검사합니다.';
+
+
+drop function if exists public.duel_opt_in_usd();
+
+create function public.duel_opt_in_usd()
+returns setof public.duel_accounts_usd
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    caller    uuid    := auth.uid();
+    seed      numeric := public.duel_seed_amount_usd();
+    today_kst date    := (now() at time zone 'Asia/Seoul')::date;
+begin
+    if caller is null then
+        raise exception
+            'duel_opt_in_usd: 로그인한 사용자만 결투 USD 트랙에 참여할 수 있습니다(요청에 로그인 세션이 없습니다).'
+            using errcode = '28000';
+    end if;
+
+    insert into public.duel_accounts_usd
+        (user_id, window_type, seed_amount, currency, anchor_date, status)
+    select caller, w.window_type, seed, 'USD', today_kst, 'active'
+      from unnest(array['M1', 'M3', 'M6']) as w(window_type)
+    on conflict (user_id, window_type) do nothing;
+
+    insert into public.duel_cash_ledger_usd
+        (account_id, event_type, amount, event_date, memo)
+    select a.id, 'seed', seed, a.anchor_date, '결투 USD 트랙 계좌 개설 시드머니'
+      from public.duel_accounts_usd a
+     where a.user_id = caller
+    on conflict (account_id) where event_type = 'seed' do nothing;
+
+    return query
+        select a.*
+          from public.duel_accounts_usd a
+         where a.user_id = caller
+         order by array_position(array['M1', 'M3', 'M6'], a.window_type);
+end;
+$$;
+
+revoke all on function public.duel_opt_in_usd() from public;
+grant execute on function public.duel_opt_in_usd() to authenticated;
+
+comment on function public.duel_opt_in_usd() is
+    '결투 USD 트랙 옵트인(계좌 3개 + 시드 원장 3행)을 사용자 본인 세션으로 처리하는 security definer RPC(§9-10 미러). 인자가 없고 대상은 auth.uid() 뿐이라 남을 대신해 부를 수 없으며, 금액은 duel_seed_amount_usd() 상수입니다. 닉네임은 여기서 만들지 않습니다(5단계 동의 시점에 생성, duel_nicknames 는 원화 트랙과 공유).';
+
+
+-- =============================================================================
+-- 15. USD 트랙 설치 후 자가 점검 (§11 확장)
+-- =============================================================================
+--  ① 표 10개 + 재구조화된 닉네임 표 전부 RLS 켜져 있는지
+--      select relname, relrowsecurity as rls_enabled
+--        from pg_class
+--       where relname like 'duel\_%usd' and relkind = 'r'
+--       order by relname;
+--
+--  ② 발행표 2개(USD)에 식별자가 새어 들어가지 않았는지 — 항상 0행이어야 정상.
+--      select table_name, column_name
+--        from information_schema.columns
+--       where table_schema = 'public'
+--         and table_name in ('duel_public_leaderboard_usd', 'duel_public_holdings_usd')
+--         and column_name in ('user_id', 'account_id', 'email');
+--
+--  ③ 닉네임 표가 더 이상 account_id 를 갖지 않고 (user_id, window_type) 기본키인지
+--      select column_name from information_schema.columns
+--       where table_schema='public' and table_name='duel_nicknames';
+--      -- account_id 가 나오면 마이그레이션이 실패한 것입니다.
+--
+--  ④ 시드 금액이 앱 상수와 같은지 (7500 이어야 정상)
+--      select public.duel_seed_amount_usd();
+--
+--  ⑤ 옵트인 RPC(USD)가 인자 0개 · security definer 인지
+--      select proname, prosecdef, pronargs
+--        from pg_proc
+--       where pronamespace = 'public'::regnamespace
+--         and proname in ('duel_opt_in_usd', 'duel_seed_amount_usd', 'duel_account_is_mine_usd');
 -- =============================================================================
