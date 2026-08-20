@@ -72,6 +72,13 @@
 --       근거는 §4 주석 참고(cascade / restrict 를 쓰면 안 되는 이유가 각각 있습니다).
 --   (h) `duel_daily_snapshots.cash_flow_kind` 에 `'mixed'` 를 추가했습니다. 근거는 §5 주석.
 --   (i) `duel_public_holdings` 에 `window_type` 을 넣어 순위표와 모양을 맞췄습니다(§8-2).
+--   (j) **2026-08-20 추가** — 옵트인 RPC `public.duel_opt_in()`(§9-10). 오너가 "참여 즉시
+--       시드머니 지급"(작업지시서 미결항목 2번 (B)안)을 확정했는데, 현금 원장은 사용자에게
+--       쓰기를 열어 줄 수 없는 표입니다(§4 · §9-4). 그렇다고 사용자 접속 앱 서버에 배치
+--       키를 넣으면 이 파일의 RLS 전체가 무력화됩니다(§0-3-8). 그래서 **표 소유자 권한으로
+--       도는 좁은 저장 프로시저**를 만들고, 사용자는 자기 로그인 세션으로 그것만 호출합니다.
+--       인자가 없고 대상은 `auth.uid()` 뿐이라 남을 대신해 부를 수 없습니다. 자세한 근거는
+--       §9-10 주석에 있습니다.
 -- =============================================================================
 
 
@@ -895,6 +902,9 @@ comment on table public.duel_public_holdings is
 --      (동의 저장) **둘뿐**입니다.
 --    · duel_accounts / duel_nicknames 는 옵트인 시점에 앱이 만들어야 하므로 insert 까지,
 --      그 뒤의 변경은 배치·관리 경로만.
+--      ⚠️ 2026-08-20 이후 **실제 옵트인 경로는 §9-10 의 `duel_opt_in()` RPC 하나**입니다.
+--         계좌만 만들고 시드(현금 원장)를 못 넣는 반쪽 상태를 남기지 않기 위해서입니다.
+--         아래 insert 정책은 그대로 두지만(과거 경로·관리 도구 호환), 화면은 쓰지 않습니다.
 --    · 나머지(포지션·원장·스냅샷)는 **select 하나뿐**입니다. 사용자가 자기 가상 현금과
 --      보유 주식을 스스로 써넣을 수 있으면 대결 자체가 성립하지 않습니다.
 --    · 발행표 2개는 로그인 사용자 전체에게 select 만. 쓰기 정책은 아무에게도 없습니다.
@@ -1132,6 +1142,148 @@ grant select, insert, update, delete on public.duel_public_leaderboard to servic
 grant select, insert, update, delete on public.duel_public_holdings    to service_role;
 
 
+-- -----------------------------------------------------------------------------
+-- 9-10. 🔐 옵트인 RPC — `public.duel_opt_in()` (2026-08-20 추가 · 작업지시서 2-1)
+-- -----------------------------------------------------------------------------
+--  **무엇을 푸는 함수인가.** 오너가 2026-08-20 에 "참여하기 버튼을 누르면 시드머니가 즉시
+--  들어와야 한다"((B)안)를 확정했습니다. 그런데 위 §9-4 · §9-9 에서 보듯 `duel_cash_ledger`
+--  는 **authenticated 에게 insert 정책도, 테이블 권한도, 시퀀스 usage 도 주지 않습니다.**
+--  일부러 그렇게 잠근 표입니다 — 사용자 세션(공개된 anon key)이 원장에 직접 쓸 수 있으면
+--  자기 계좌에 가상 현금을 무한히 찍을 수 있고, 그 값은 스냅샷 → 공개 순위표로 흘러갑니다.
+--
+--  그래서 남는 선택지는 둘뿐이었습니다.
+--    (가) 사용자 접속 앱 프로세스(Render)에 배치 키를 넣고 거기서 직접 원장에 쓴다.
+--         → **채택하지 않습니다.** 그 키는 이 모듈의 RLS 를 통째로 우회합니다. 항상 인터넷에
+--           떠 있는 앱 프로세스가 그 키를 들고 있으면, 앱이 한 번 털리는 순간 **모든 사용자의
+--           원장에 돈을 쓸 수 있는 키**가 함께 새어 나갑니다. 키를 GitHub Actions Secrets 에만
+--           두는 `utils/report_db.py` 이후의 격리 규율(§0-3-8)이 여기서 깨집니다.
+--    (나) **이 함수** — 표 소유자 권한으로 도는 `security definer` 저장 프로시저를 만들어,
+--         사용자의 **본인 세션(anon key + 로그인 JWT)** 으로 호출하게 합니다(PostgREST RPC).
+--         호출 경로 어디에도 배치 키가 없고, 앱 프로세스는 그 키를 알 필요조차 없습니다.
+--
+--  **왜 이게 안전한가 — 이 함수가 남에게 해줄 수 있는 일이 구조적으로 없습니다.**
+--    · **인자가 하나도 없습니다.** user_id 도, 금액도, 날짜도 받지 않습니다. 남의 계좌를
+--      만들어 달라고 부탁할 **문법 자체가 없습니다**(§0-3-9 — "조심하기"가 아니라 구조로 막기).
+--    · 대상 사용자는 오직 `auth.uid()`, 즉 **지금 이 요청에 실려온 JWT 의 주인**입니다.
+--      위 RLS 정책들이 쓰는 것과 **같은 함수, 같은 값**입니다. JWT 가 없으면(비로그인 anon
+--      요청) NULL 이라 아래에서 즉시 예외로 거절합니다.
+--    · 금액은 인자가 아니라 **`public.duel_seed_amount_krw()` 상수**입니다. 사용자가 금액을
+--      불러 주는 경로가 없으므로 "시드 1억으로 주세요"가 불가능합니다.
+--    · 하는 일이 계좌 3행 + 시드 원장 3행뿐입니다. 이 함수로 주문·포지션·스냅샷·발행표를
+--      건드릴 수 없습니다.
+--    · 여러 번 불러도 안전합니다(멱등). 이미 있는 계좌는 `unique (user_id, window_type)`,
+--      이미 지급된 시드는 §4-1 의 부분 유니크 인덱스(`duel_cash_ledger_seed_unique`)가
+--      흡수합니다 — **이 함수가 새 멱등성 규칙을 발명하지 않고, 이미 있는 것에 기댑니다.**
+--      따라서 버튼을 연타해도, 두 탭에서 동시에 눌러도 돈이 두 번 들어가지 않습니다.
+--
+--  ⚠️ 이 파일에 이미 있는 `duel_account_is_mine()`(§9-0)과 **같은 종류의 장치**입니다 —
+--     "권한은 높지만 하는 일이 좁고, 판정은 auth.uid() 로만" 하는 함수. 새 패러다임이
+--     아니라 이 스키마가 이미 쓰고 있는 패턴의 두 번째 사례입니다(§0-3-10).
+--
+--  ⚠️ `service_role` 에는 execute 를 주지 않았습니다. 배치는 `auth.uid()` 가 NULL 이라
+--     이 함수를 쓸 수 없고(그래서 즉시 예외), 쓸 필요도 없습니다 — 관리자·백필 경로는
+--     `utils/duel_db.py::create_duel_accounts_for_user()`(배치 키 경로)가 그대로 맡습니다.
+-- -----------------------------------------------------------------------------
+
+-- 🔴 금액의 **SQL 쪽 유일한 출처**입니다. 여기 말고 다른 SQL 어디에도 시드 금액을 적지 마세요.
+--
+--    이 파일은 원래 "금액 숫자는 DB 에 적지 않는다"(§1 의 seed_amount default 없음)를
+--    규율로 삼았습니다. 그 규율의 목적은 **두 곳에 적힌 숫자가 조용히 어긋나는 것**을 막는
+--    것이었고, 지금까지는 앱(`utils/duel_rules.py::SEED_AMOUNT_KRW`)이 항상 명시적으로
+--    금액을 넣었기 때문에 DB 가 숫자를 알 필요가 없었습니다.
+--
+--    옵트인 RPC 는 그 조건이 성립하지 않습니다. 금액을 앱에서 인자로 받으면 **사용자가
+--    금액을 고를 수 있게** 되고(= 스스로 돈을 찍는 경로), 그건 이 함수를 만든 이유 자체를
+--    없앱니다. 그래서 금액은 DB 안에 있어야만 하고, **여기 한 줄이 그 자리**입니다.
+--
+--    🔁 앱 상수와의 동기화는 사람의 기억에 맡기지 않습니다:
+--       `tests/test_duel_db.py::test_sql_seed_constant_matches_the_app_constant` 이 이 파일을
+--       읽어 아래 숫자와 `utils/duel_rules.py::SEED_AMOUNT_KRW` 가 다르면 **테스트를 실패**
+--       시킵니다. 한쪽만 고치면 배포 전에 잡힙니다.
+create or replace function public.duel_seed_amount_krw()
+returns numeric
+language sql
+immutable
+as $$
+    select 10000000::numeric   -- ⚠️ utils/duel_rules.py::SEED_AMOUNT_KRW 와 반드시 같아야 합니다
+$$;
+
+revoke all on function public.duel_seed_amount_krw() from public;
+grant execute on function public.duel_seed_amount_krw() to authenticated, service_role;
+
+comment on function public.duel_seed_amount_krw() is
+    '결투 시드머니(원)의 SQL 쪽 단일 출처. 앱 상수 utils/duel_rules.py::SEED_AMOUNT_KRW 와 같아야 하며, tests/test_duel_db.py 가 두 값의 일치를 자동으로 검사합니다.';
+
+
+-- 반환 타입이 나중에 바뀌어도 스크립트 재실행이 안전하도록 drop 후 create 합니다
+-- (create or replace 는 반환 타입 변경을 거부합니다). 함수가 없을 때도 조용히 넘어갑니다.
+drop function if exists public.duel_opt_in();
+
+create function public.duel_opt_in()
+returns setof public.duel_accounts
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+    -- 🔴 **대상 사용자는 여기서만 정해집니다.** 인자가 아니라 지금 요청의 JWT 입니다.
+    caller    uuid    := auth.uid();
+    -- 🔴 금액도 인자가 아닙니다(위 상수 함수).
+    seed      numeric := public.duel_seed_amount_krw();
+    -- 개설일도 인자가 아닙니다 — 사용자가 유리한 날짜를 고르는 경로를 만들지 않습니다.
+    -- DB 의 current_date 는 UTC 라 쓰지 않습니다(§4 event_date 주석과 같은 이유). 한국시간
+    -- 자정 직후에 참여한 사용자의 개설일이 하루 전으로 기록되면 안 됩니다.
+    today_kst date    := (now() at time zone 'Asia/Seoul')::date;
+begin
+    if caller is null then
+        -- 조용히 0행을 돌려주지 않습니다(§0-1). 비로그인 호출은 실패로 드러나야 합니다.
+        raise exception
+            'duel_opt_in: 로그인한 사용자만 결투 모듈에 참여할 수 있습니다(요청에 로그인 세션이 없습니다).'
+            using errcode = '28000';
+    end if;
+
+    -- ① 계좌 3개(M1/M3/M6) — **없는 창유형만** 한 번의 insert 로.
+    --    동시에 두 번 눌려도 unique (user_id, window_type) 가 두 번째를 흡수합니다.
+    insert into public.duel_accounts
+        (user_id, window_type, seed_amount, currency, anchor_date, status)
+    select caller, w.window_type, seed, 'KRW', today_kst, 'active'
+      from unnest(array['M1', 'M3', 'M6']) as w(window_type)
+    on conflict (user_id, window_type) do nothing;
+
+    -- ② 시드 원장 — **시드가 아직 없는 계좌에만** 한 번의 insert 로.
+    --    멱등성은 §4-1 의 duel_cash_ledger_seed_unique(계좌당 seed 1행) 부분 유니크 인덱스가
+    --    보장합니다. 새 규칙을 만들지 않고 이미 있는 방어에 기댑니다.
+    --    event_date 는 그 계좌의 anchor_date 입니다 — 오늘 날짜가 아니라 **계좌가 실제로
+    --    열린 날**이어야 시드가 개설일 현금흐름(TWR 의 F_0)으로 잡힙니다(2-6).
+    --    ⚠️ 금액은 a.seed_amount 가 아니라 위 상수를 씁니다. §9-1 이 사용자에게
+    --       duel_accounts insert 를 허용하므로, 계좌 행의 숫자는 사용자가 미리 적어 넣었을
+    --       수 있는 값입니다 — 원장 금액의 근거로 삼지 않습니다.
+    insert into public.duel_cash_ledger
+        (account_id, event_type, amount, event_date, memo)
+    select a.id, 'seed', seed, a.anchor_date, '결투 계좌 개설 시드머니'
+      from public.duel_accounts a
+     where a.user_id = caller
+    on conflict (account_id) where event_type = 'seed' do nothing;
+
+    -- ③ 앱이 두 번 왕복하지 않도록 계좌 3행을 그대로 돌려줍니다(창유형 순서 고정).
+    return query
+        select a.*
+          from public.duel_accounts a
+         where a.user_id = caller
+         order by array_position(array['M1', 'M3', 'M6'], a.window_type);
+end;
+$$;
+
+-- 🔴 execute 는 **로그인 사용자(authenticated)에게만**. anon(비로그인)에게 주지 않습니다 —
+--    auth.uid() 가 NULL 이라 어차피 예외로 끝나지만, "부를 수는 있는 함수"로 남겨 두지
+--    않습니다(§9-9 의 revoke ... from anon 과 같은 이중 방어).
+revoke all on function public.duel_opt_in() from public;
+grant execute on function public.duel_opt_in() to authenticated;
+
+comment on function public.duel_opt_in() is
+    '결투 모듈 옵트인(계좌 3개 + 시드 원장 3행)을 사용자 **본인 세션**으로 처리하는 security definer RPC. 인자가 없고 대상은 auth.uid() 뿐이라 남을 대신해 부를 수 없으며, 금액은 duel_seed_amount_krw() 상수입니다. 여러 번 불러도 안전합니다(계좌·시드 유니크 인덱스). 앱 서버에 배치 키를 두지 않고 즉시 지급을 구현하기 위한 장치입니다.';
+
+
 -- =============================================================================
 -- 10. ⚠️ 배치가 절대 하지 말아야 할 것 (코드 리뷰용 메모)
 -- =============================================================================
@@ -1212,4 +1364,30 @@ grant select, insert, update, delete on public.duel_public_holdings    to servic
 --  ⑧ 로그인 상태의 **앱에서** 다른 사람의 계좌·주문·현금이 안 보이는지. 대시보드 SQL Editor
 --     는 postgres 권한이라 RLS 를 우회하므로, 이 확인만은 반드시 앱에서 해야 합니다
 --     (그리고 서로 다른 브라우저 세션 두 개로 — §0-3-8 필수 절차).
+--
+--  ⑨ 옵트인 RPC(§9-10)가 제대로 설치됐는지 — 아래 3가지를 눈으로 확인하세요.
+--     (가) 함수가 security definer 이고 인자가 0개인지 (prosecdef=true, pronargs=0 이어야 정상)
+--      select proname, prosecdef, pronargs, pg_get_function_result(oid) as returns
+--        from pg_proc
+--       where pronamespace = 'public'::regnamespace
+--         and proname in ('duel_opt_in', 'duel_seed_amount_krw');
+--
+--     (나) execute 권한이 **authenticated 에게만** 있는지 (anon 이 나오면 잘못된 것입니다)
+--      select grantee, privilege_type
+--        from information_schema.routine_privileges
+--       where routine_schema = 'public' and routine_name = 'duel_opt_in';
+--
+--     (다) 시드 금액이 앱 상수와 같은지 (10000000 이어야 정상 —
+--          다르면 utils/duel_rules.py::SEED_AMOUNT_KRW 와 어긋난 것입니다)
+--      select public.duel_seed_amount_krw();
+--
+--     ⏱️ 함수를 새로 만든 직후에는 PostgREST(Supabase 의 REST 계층)의 **스키마 캐시**가
+--        아직 갱신되지 않아 앱에서 몇 초간 "함수를 찾을 수 없다"(PGRST202)가 날 수 있습니다.
+--        보통 저절로 반영되며, 급하면 대시보드에서 API 재시작(또는
+--        `notify pgrst, 'reload schema';`)으로 즉시 반영됩니다. 앱은 이 오류를 "아직
+--        설치되지 않았습니다"라는 한국어 문장으로 바꿔 보여줍니다(utils/duel_db.py).
+--
+--     ⚠️ 실제 동작(본인 계좌 3개만 생기는지, 두 번 눌러도 시드가 한 번만 들어가는지)은
+--        SQL Editor 가 아니라 **로그인한 앱에서** 확인해야 합니다 — SQL Editor 는 postgres
+--        권한이라 auth.uid() 가 NULL 이고, 이 함수는 그 경우 일부러 실패합니다.
 -- =============================================================================

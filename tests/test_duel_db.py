@@ -23,12 +23,20 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, **가짜 Supabase 클라이언트**
     ⑦ 배치 기록 함수들이 `duel_rules` 의 결과를 **그대로** 담아 보내는지(재계산 금지)
     ⑧ `try/except ImportError` 가드 — `supabase` 미설치 상태에서 import 가 깨지지 않고,
        그 상태로 함수를 부르면 `AttributeError` 가 아니라 **잡을 수 있는 명확한 오류**가 나는지
+    ⑨ (2026-08-20 추가) 옵트인 `opt_in()` — 사용자 본인 세션으로 `duel_opt_in()` RPC 를
+       **인자 하나 없이** 한 번만 부르는지, 응답을 어떻게 다루는지, 그리고 이 함수가 배치
+       키를 건드리지 않는지(AST 검사). SQL 쪽 조건(security definer · 인자 없음 · execute 는
+       authenticated 만 · 시드 금액이 앱 상수와 일치)도 파일을 읽어 함께 고정합니다.
+       ⚠️ 권한·격리·멱등성의 **실제 동작**은 가짜 클라이언트로 검증할 수 없어서 로컬
+          PostgreSQL 16 에 스키마를 올려 역할별로 직접 호출해 확인했습니다(작업 보고 참고).
+          여기서 "검증했다"고 말하는 범위를 넘기지 않습니다(§0-1).
 
 실행: pytest tests/test_duel_db.py -v
 """
 
 import ast
 import inspect
+import re
 import subprocess
 import sys
 from datetime import date, datetime
@@ -169,6 +177,14 @@ class FakeClient:
     def table(self, name):
         return FakeTable(self, name)
 
+    def rpc(self, function_name, params=None):
+        """
+        supabase-py 의 `client.rpc("함수이름", {인자})` 흉내. 저장 프로시저 호출은 표가 아니라
+        **함수 이름**으로 기록해 두고(`query.table` 자리에 함수 이름), 테스트가 "무슨 이름을,
+        어떤 인자로, 몇 번 불렀는지"를 그대로 들여다볼 수 있게 합니다.
+        """
+        return FakeQuery(self, function_name, "rpc", params)
+
     def resolve(self, query):
         key = (query.table, query.op)
         if key in self.responses:
@@ -213,6 +229,225 @@ def sequence(*values):
 INSIDE_WINDOW = datetime(2026, 8, 19, 19, 30, 0, tzinfo=KST)    # 접수 시간대 한가운데
 OUTSIDE_WINDOW = datetime(2026, 8, 19, 17, 59, 59, tzinfo=KST)  # 창이 열리기 2초 전
 TRADING_DAYS = [date(2026, 8, 19), date(2026, 8, 20), date(2026, 8, 21)]
+
+
+# =============================================================================
+# 0-A. A 절 — 모듈 참여(옵트인) RPC  (작업지시서 2-1 · 스키마 §9-10)
+# =============================================================================
+#  오너가 2026-08-20 에 "참여하기를 누르면 시드머니가 즉시 들어와야 한다"를 확정했습니다.
+#  시드머니는 현금 원장(`duel_cash_ledger`)에 쓰는 일인데, 그 표는 사용자 세션이 쓸 수 없게
+#  일부러 잠가 둔 표이고(스키마 §9-4), 그렇다고 사용자 접속 앱 서버에 배치 키를 두면 이
+#  모듈의 RLS 가 통째로 무력화됩니다(§0-3-8). 그래서 **DB 안의 좁은 저장 프로시저**
+#  (`duel_opt_in()`, 인자 없음 · auth.uid() 로만 동작)를 사용자 본인 세션으로 부릅니다.
+#
+#  ⚠️ 여기 테스트가 검증하는 것은 **파이썬 래퍼의 계약**입니다 — "무슨 이름을, 어떤 인자로,
+#     몇 번 부르고, 응답을 어떻게 다루는가". 실제 권한·격리·멱등성(다른 사용자의 계좌를
+#     만들 수 없는지, 두 번 불러도 시드가 두 번 안 들어가는지)은 오프라인에서 흉내낼 수
+#     없어서 **로컬 PostgreSQL 16 에 스키마를 실제로 올리고 역할별로 직접 호출해** 확인했고,
+#     그 결과는 작업 보고에 정리돼 있습니다(스키마 §11 ⑨ 자가 점검 쿼리도 참고).
+#     아래에는 오프라인에서 확실히 지킬 수 있는 것만 남깁니다 — 흉내낸 DB 로 "권한을
+#     검증했다"고 말하지 않기 위해서입니다(§0-1).
+# =============================================================================
+def _opt_in_rows(user_id="user-1", anchor="2026-08-20"):
+    """RPC 가 돌려주는 계좌 3행(실제 반환 모양 그대로: duel_accounts 행)."""
+    return [{"id": f"acc-{index}", "user_id": user_id, "window_type": window,
+             "seed_amount": duel_rules.SEED_AMOUNT_KRW, "currency": "KRW",
+             "anchor_date": anchor, "status": "active"}
+            for index, window in enumerate(("M1", "M3", "M6"), start=1)]
+
+
+def test_opt_in_calls_the_rpc_once_and_returns_three_accounts():
+    """
+    호출은 **RPC 한 번**이고, 계좌 3행을 그대로 돌려줍니다(화면이 다시 조회하지 않도록).
+    """
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): _opt_in_rows()})
+    accounts = duel_db.opt_in(client)
+
+    call = client.only_call(duel_db.OPT_IN_RPC, "rpc")
+    assert call.op == "rpc"
+    assert call.table == "duel_opt_in"
+    assert len(client.calls) == 1, "옵트인은 왕복 1회여야 합니다(두 번째 조회 금지)"
+    assert [row["window_type"] for row in accounts] == ["M1", "M3", "M6"]
+    assert all(row["seed_amount"] == duel_rules.SEED_AMOUNT_KRW for row in accounts)
+
+
+def test_opt_in_sends_no_arguments_at_all():
+    """
+    🔴 이 함수의 안전성 근거: **인자가 하나도 없습니다.**
+    누구를 참여시킬지(user_id)도, 얼마를 줄지(금액)도, 언제로 할지(날짜)도 보내지 않습니다.
+    보내는 순간 "남의 ID 를 넣으면?" "금액을 크게 넣으면?" 이라는 질문이 생깁니다.
+    """
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): _opt_in_rows()})
+    duel_db.opt_in(client)
+
+    payload = client.only_call(duel_db.OPT_IN_RPC, "rpc").payload
+    assert payload in ({}, None), f"RPC 에 인자를 보내고 있습니다: {payload}"
+
+    parameters = list(inspect.signature(duel_db.opt_in).parameters)
+    assert parameters == ["client"], f"opt_in 의 인자는 클라이언트 하나뿐이어야 합니다: {parameters}"
+
+
+def test_opt_in_never_writes_to_any_table_directly():
+    """사용자 세션은 계좌·원장 표에 **직접** 쓰지 않습니다 — 전부 RPC 안에서 일어납니다."""
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): _opt_in_rows()})
+    duel_db.opt_in(client)
+    for forbidden in (duel_db.LEDGER_TABLE, duel_db.ACCOUNTS_TABLE):
+        assert client.calls_for(forbidden) == [], f"{forbidden} 에 직접 질의했습니다"
+
+
+def test_opt_in_orders_the_rows_even_if_the_server_shuffles_them():
+    """화면이 M1 → M3 → M6 순서를 그대로 믿을 수 있어야 합니다."""
+    shuffled = list(reversed(_opt_in_rows()))
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): shuffled})
+    assert [row["window_type"] for row in duel_db.opt_in(client)] == ["M1", "M3", "M6"]
+
+
+def test_opt_in_empty_response_is_not_a_silent_success():
+    """
+    RPC 가 아무 행도 돌려주지 않았는데 "참여됐습니다"라고 말하면, 사용자는 돈이 들어온 줄
+    알고 주문 화면으로 갑니다. 조용한 성공을 만들지 않습니다(§0-1).
+    """
+    client = FakeClient()          # 응답 미지정 → 빈 목록
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.opt_in(client)
+    assert "M1" in str(excinfo.value) and "M3" in str(excinfo.value)
+
+
+def test_opt_in_partial_response_is_rejected():
+    """계좌가 3개 중 2개만 돌아온 반쪽 상태도 성공으로 처리하지 않습니다."""
+    client = FakeClient(responses={
+        (duel_db.OPT_IN_RPC, "rpc"): _opt_in_rows()[:2],   # M1, M3 만
+    })
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.opt_in(client)
+    assert "M6" in str(excinfo.value)
+    # 다시 눌러도 안전하다는 안내가 함께 나가야 합니다(사용자가 재시도를 겁내지 않도록).
+    assert "다시" in str(excinfo.value)
+
+
+def test_opt_in_without_a_login_session_gets_a_korean_message():
+    """
+    로그인 세션 없이 호출하면 DB 가 거절합니다(§9-10 의 auth.uid() 검사). 그 거절이
+    Postgres 원문 그대로 화면에 뜨지 않게 **사실은 유지하고 표현만** 바꿉니다(§0-3-4).
+    """
+    rejection = Exception(
+        "duel_opt_in: 로그인한 사용자만 결투 모듈에 참여할 수 있습니다"
+        "(요청에 로그인 세션이 없습니다). SQLSTATE 28000"
+    )
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): rejection})
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.opt_in(client)
+    message = str(excinfo.value)
+    assert "로그인" in message
+    assert "SQLSTATE" not in message and "duel_opt_in:" not in message
+
+
+def test_opt_in_tells_the_owner_when_the_function_is_not_installed_yet():
+    """
+    스키마 스크립트를 아직 실행하지 않은 상태(PostgREST 의 PGRST202)에서, "알 수 없는
+    오류"가 아니라 **무엇을 해야 하는지**가 보이는 문장이 나와야 합니다(§0-3-4).
+    """
+    missing = Exception(
+        "{'code': 'PGRST202', 'message': 'Could not find the function"
+        " public.duel_opt_in without parameters in the schema cache'}"
+    )
+    client = FakeClient(responses={(duel_db.OPT_IN_RPC, "rpc"): missing})
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.opt_in(client)
+    assert "duel_schema.sql" in str(excinfo.value)
+
+
+def test_opt_in_with_a_client_that_cannot_call_rpc_says_so_in_korean():
+    """
+    저장 프로시저를 부를 수 없는 클라이언트가 넘어와도 `'X' object has no attribute 'rpc'`
+    같은 메시지를 사용자에게 보여주지 않습니다(§0-3-4 — `_require_client` 와 같은 판단).
+    """
+    class ClientWithoutRpc:
+        def table(self, name):  # pragma: no cover - 호출되지 않아야 정상
+            raise AssertionError("표를 건드리면 안 됩니다")
+
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.opt_in(ClientWithoutRpc())
+    assert "attribute" not in str(excinfo.value).lower()
+
+
+def test_opt_in_rpc_name_matches_the_sql_function_name():
+    """
+    파이썬이 부르는 이름과 SQL 이 만드는 이름이 어긋나면 배포 후에야 알게 됩니다.
+    표 이름 상수들과 같은 규약으로, 여기서 글자 그대로 대조합니다.
+    """
+    assert duel_db.OPT_IN_RPC == "duel_opt_in"
+    schema = _duel_schema_sql()
+    assert f"create function public.{duel_db.OPT_IN_RPC}()" in schema
+
+
+def _duel_schema_sql():
+    return (REPO_ROOT / "sql" / "duel_schema.sql").read_text(encoding="utf-8")
+
+
+def _executable_sql():
+    """`--` 주석을 뺀, 실제로 실행되는 SQL 만."""
+    return "\n".join(line for line in _duel_schema_sql().splitlines()
+                     if not line.lstrip().startswith("--"))
+
+
+def test_sql_seed_constant_matches_the_app_constant():
+    """
+    🔴 금액이 두 곳에 적히게 된 지점 — 그래서 **자동으로** 대조합니다.
+
+    원래 이 프로젝트의 규율은 "금액 숫자는 DB 에 적지 않는다"였습니다(스키마 §1 의
+    seed_amount default 없음). 옵트인 RPC 는 그 규율이 성립하지 않는 유일한 경우입니다:
+    금액을 앱에서 인자로 받으면 **사용자가 금액을 고를 수 있게** 되어(스스로 돈을 찍는 경로)
+    함수를 만든 이유 자체가 사라지기 때문입니다. 그래서 금액은 DB 안
+    (`public.duel_seed_amount_krw()`)에 있어야 하고, **그 한 곳뿐이어야** 합니다.
+    한쪽만 고치는 사고는 사람의 기억이 아니라 이 테스트가 막습니다.
+    """
+    executable = _executable_sql()
+    match = re.search(r"create or replace function public\.duel_seed_amount_krw\(\)"
+                      r".*?select\s+(\d+)::numeric", executable, re.S)
+    assert match, "SQL 쪽 시드 상수 함수(duel_seed_amount_krw)를 찾지 못했습니다"
+    assert int(match.group(1)) == duel_rules.SEED_AMOUNT_KRW, (
+        "sql/duel_schema.sql 의 시드 금액이 utils/duel_rules.py::SEED_AMOUNT_KRW 와 다릅니다"
+    )
+    # SQL 안에서도 출처는 한 곳뿐이어야 합니다(다른 곳에 또 적히면 같은 사고가 재발합니다).
+    assert executable.count(str(duel_rules.SEED_AMOUNT_KRW)) == 1
+    # 그리고 그 값이 컬럼 default 로 새어 들어가지 않았는지(§1 의 원래 규율은 그대로).
+    assert f"default {duel_rules.SEED_AMOUNT_KRW}" not in executable
+
+
+def test_sql_opt_in_function_is_security_definer_and_argument_free():
+    """
+    이 함수가 안전한 이유 4가지가 SQL 에 실제로 적혀 있는지 확인합니다.
+    (실제 동작은 로컬 PostgreSQL 16 실검증에서 확인했고, 여기서는 그 조건들이 나중에
+     조용히 지워지지 않게 **회귀 고정**만 합니다.)
+    """
+    executable = _executable_sql()
+    start = executable.index("create function public.duel_opt_in()")
+    body = executable[start:executable.index("comment on function public.duel_opt_in()")]
+
+    assert "security definer" in body          # ① 표 소유자 권한으로 돈다
+    assert "set search_path = public" in body  # ② 함수 하이재킹 방지(§9-0 과 같은 관례)
+    assert "auth.uid()" in body                # ③ 대상은 지금 요청의 로그인 사용자뿐
+    assert "create function public.duel_opt_in()" in body   # ④ 인자 없음(빈 괄호)
+    # 사용자에게서 금액·대상·날짜를 받는 인자가 생기면 위 ③④가 무너집니다.
+    assert "duel_opt_in(p_" not in executable and "duel_opt_in(user" not in executable
+    # 멱등성은 이미 있는 유니크 인덱스에 기댑니다(새 규칙을 발명하지 않기).
+    assert "on conflict (user_id, window_type) do nothing" in body
+    assert "on conflict (account_id) where event_type = 'seed' do nothing" in body
+
+
+def test_sql_opt_in_execute_grant_is_authenticated_only():
+    """
+    🔴 execute 는 로그인 사용자에게만. `anon`(비로그인)에게 주면, auth.uid() 가 NULL 이라
+    실패하더라도 "부를 수는 있는 함수"가 하나 생깁니다 — §9-9 의 revoke ... from anon 과
+    같은 이중 방어를 함수에도 적용합니다.
+    """
+    executable = _executable_sql()
+    assert "revoke all on function public.duel_opt_in() from public;" in executable
+    assert "grant execute on function public.duel_opt_in() to authenticated;" in executable
+    for forbidden in ("duel_opt_in() to anon", "duel_opt_in() to public",
+                      "duel_opt_in() to authenticated, anon"):
+        assert forbidden not in executable, f"금지된 권한 부여: {forbidden}"
 
 
 # =============================================================================
@@ -450,8 +685,12 @@ def test_user_write_functions_do_not_accept_fill_or_balance_params():
     assert duel_db.user_write_signature_violations() == []
     # 금지 목록 자체가 조용히 비워지는 것도 막습니다.
     assert "filled_price" in duel_db.FORBIDDEN_USER_WRITE_PARAMS
+    # 🔴 `user_id` 도 금지입니다(2026-08-20 추가) — 사용자 경로의 쓰기 함수는 "누구의
+    #    것인지"를 인자로 받지 않습니다. 대상은 로그인 세션(auth.uid()) 아니면 소유권이
+    #    이미 확인된 계좌·주문 ID 뿐입니다.
+    assert "user_id" in duel_db.FORBIDDEN_USER_WRITE_PARAMS
     assert set(duel_db.USER_WRITE_FUNCTIONS) == {
-        "save_order", "edit_order", "cancel_order", "save_consent"}
+        "opt_in", "save_order", "edit_order", "cancel_order", "save_consent"}
 
 
 def _module_ast():
@@ -510,6 +749,42 @@ def test_user_facing_section_does_not_touch_service_role():
     section = source[start:end]
     for forbidden in ("service_role", "SERVICE_ROLE_KEY_ENV", "create_service_client"):
         assert forbidden not in section, f"A 절에 {forbidden} 이 있습니다"
+
+
+def test_opt_in_does_not_reach_for_the_batch_key():
+    """
+    🔴 `opt_in()` 전용 격리 회귀 고정 (2026-08-20 추가).
+
+    이 함수는 "사용자 세션으로 시드머니를 넣는" 함수라, 앞으로 누군가 "그냥 배치 키로
+    부르는 게 편하지 않나"라고 고칠 위험이 이 파일에서 가장 큰 자리입니다. 그 순간 사용자가
+    접속하는 앱 서버에 **모든 사용자의 원장에 돈을 쓸 수 있는 키**가 필요해지고, 이 모듈의
+    RLS 는 전부 장식이 됩니다(§0-3-8 / `utils/report_db.py` 이후의 격리 규율).
+
+    위 `test_user_facing_section_does_not_touch_service_role()` 이 A 절 전체를 문자열로 보는
+    것과 달리, 여기서는 **이 함수의 본문만** AST 로 떼어내 봅니다 — 절 구분 주석이 나중에
+    바뀌거나 함수가 다른 자리로 옮겨져도 검사가 함께 따라가도록.
+    """
+    tree, source = _module_ast()
+    functions = {node.name: node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)}
+    node = functions["opt_in"]
+    body = ast.get_source_segment(source, node)
+
+    for forbidden in ("service_role", "SERVICE_ROLE_KEY_ENV", "create_service_client",
+                      "_read_service_env", "os.environ", "getenv"):
+        assert forbidden not in body, f"opt_in 이 {forbidden} 을(를) 건드립니다"
+
+    # 표에 직접 쓰지도 않습니다(원장·계좌 쓰기는 전부 DB 안의 RPC 가 합니다).
+    assert _write_targets(node) == set(), "opt_in 이 표에 직접 씁니다"
+
+    # 부르는 것은 RPC 하나뿐인지(이름 상수를 그대로 쓰는지).
+    rpc_calls = [child for child in ast.walk(node)
+                 if isinstance(child, ast.Call) and isinstance(child.func, ast.Attribute)
+                 and child.func.attr == "rpc"]
+    assert len(rpc_calls) == 1, "opt_in 의 RPC 호출은 정확히 1회여야 합니다"
+    assert isinstance(rpc_calls[0].args[0], ast.Name) \
+        and rpc_calls[0].args[0].id == "OPT_IN_RPC", \
+        "RPC 이름은 문자열을 흩뿌리지 않고 OPT_IN_RPC 상수 하나로 씁니다"
 
 
 def test_publish_tables_are_not_referenced_yet():
@@ -1226,6 +1501,7 @@ def test_calling_service_client_without_package_raises_catchable_error(monkeypat
 
 
 @pytest.mark.parametrize("call", [
+    lambda: duel_db.opt_in(None),
     lambda: duel_db.fetch_my_accounts(None, "user-1"),
     lambda: duel_db.fetch_my_positions(None, "acc-1"),
     lambda: duel_db.fetch_my_orders(None, "acc-1"),
