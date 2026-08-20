@@ -488,7 +488,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ---
 
-## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (✅ 사실상 완료 — 백엔드·화면 2종·발행 워크플로우 전부 작성·검증 완료, `main.py` 배선 2줄 + 워크플로우 파일 저장소 반영만 남음)
+## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (✅ 완료 — 백엔드·화면 2종·발행 워크플로우·`main.py` 배선까지 전부 작성·검증·반영 완료)
 
 ✅ **2026-08-20 오너 정정 — 이 경고문의 의미를 명확히 함.** "착수하지 말라"는 **코딩을 미루라는 뜻이 아니라, 실제로 순위표가 화면에 발행/노출되는 시점을 사람이 충분히 쌓이기 전까지 미루라는 뜻**입니다("착수하지 말라고 보다는 일정 사람이 쌓이기 전까지 공개를 하지 않는 방향으로 가자, 만들 수 있을 때는 만들어만 두는 건 좋을 거 같아"). 코드는 지금 만들어도 됩니다 — 어차피 5-1(기본 비공개)·5-6(최소 인원 미달 시 미발행)·2-8/7단계의 3단계 공개 전환 패턴이 이미 "실제로 아무도 안 쌓였는데 순위표가 뜨는 사고"를 구조적으로 막고 있습니다. 그리고 §0-3-8은 이 프로젝트의 **최상위 무예외 원칙**입니다 — 이 단계의 모든 코드는 "버그가 나도 새어나갈 수 없는가"를 기준으로 리뷰해야 합니다.
 
@@ -613,11 +613,11 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 - 신규 `tests/test_duel_public_ui.py`(956줄, 44개) — 새 화면 2종의 핵심 규칙(전부-아니면-전무, 최종확인 분리, 철회 확인, 5-3 문구 원문 대조, 신원 미노출) + 렌더 스모크(가짜 nicegui/web.auth로 감싸 실제 실행까지 확인) + 신규 DB 함수 4개(빈 결과·페이지네이션·필터).
 - `tests/test_duel_db.py` 기존 테스트 1건 재조정("A절에 발행표 이름이 아예 안 나온다" → "A절은 발행표에 **쓰지는** 않는다"로 — 스키마가 이미 `authenticated`에게 발행표 select를 허용하므로 조회 자체는 정상이고, 쓰기만 막으면 되는 게 맞는 검증입니다. 약화가 아니라 잘못된 검증을 바로잡은 것).
 - **검증**: `python3 -m py_compile`(신규·수정 파일 전부) 클린 — **제가 직접 재실행해 확인**. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **405개 전부 통과**(361 + 신규 44, 회귀 0) — **제가 직접 재실행해 확인, 에이전트 보고 수치와 일치**. `.github/workflows/duel_publish_daily.yml` YAML 파싱도 직접 재확인 완료. `select("*")` 미사용도 직접 grep으로 재확인.
-- **🆕 main.py 배선 필요 (2줄로 늘어남)** — `main.py`가 이 스냅샷에 없어서 직접 못 고쳤습니다. `from web.pages import duel_page` 옆에 `from web.pages import duel_consent_page`와 `from web.pages import duel_leaderboard_page` 두 줄을 추가해야 `/duel/consent`·`/duel/leaderboard` 주소가 실제로 열립니다.
-- **🆕 오너가 확인해주실 것들**:
-  - **급함**: (1) 새 플래그 이름 4개(`DUEL_CONSENT_ENABLED` 등, 위 참고) — 이름 자체나 "화면마다 따로 둔 방식"에 이견 있으면 지금 고치는 게 쌉니다. (2) `duel_publish_daily.yml`의 cron 시각(UTC 08:40) — 여유가 부족하다 싶으면 늘리거나, `workflow_run`(선행 워크플로우 완료 조건) 방식으로 바꿀 수 있습니다(파일 안에 대안 코드 주석으로 이미 적혀 있음). (3) 이 워크플로우 파일은 아직 저장소에 없습니다 — 아래 안내대로 device_bash로 넣어야 합니다.
-  - **안 급함**: 동의는 계좌(M1/M3/M6) 단위라 "3계좌 한 번에" 편의 버튼은 일부러 안 만듦(5-2-2의 명시성 취지 유지) — 원하시면 나중에 추가 가능. "1층만 저장하고 최종확인은 안 한" 상태를 되돌릴 UI가 없음(발행 안 되니 안전 문제는 아니고 불편함 문제). supabase-py의 `.order()` 2회 호출·`.range()` 양끝 포함 여부는 이 샌드박스에 실제 `supabase` 패키지가 없어 라이브러리 동작까지는 확인 못 했음 — 6단계 실검증에서 확인 권장(틀려도 데이터 유출이 아니라 "표시 순서" 문제).
-- **범위 밖(다음에)**: `main.py` 2줄 배선(오너), `duel_publish_daily.yml` 저장소 반영(device_bash 필요), `PROJECT_STATUS.md`의 service_role 파일 목록에 `run_duel_publish_batch.py` 추가(제가 이미 반영함, 아래 git 안내에 포함).
+- **✅ main.py 배선 완료(2026-08-20)** — 오너 컴퓨터에서 device_bash로 직접 편집(`duel_page`·`duel_consent_page`·`duel_leaderboard_page` 3줄 전부 추가 — 기존에 `duel_page` 한 줄도 실은 아직 안 들어가 있었던 걸 이번에 확인해서 같이 넣었습니다). `python3 -m py_compile main.py` 클린. `/duel`·`/duel/consent`·`/duel/leaderboard` 세 주소 모두 이제 `main.py`가 import합니다.
+- **✅ 오너 확인 완료 — 2건**:
+  1. **새 플래그 이름 4개(`DUEL_CONSENT_ENABLED` 등)** — 확인 과정에서 오해가 있었습니다: 이 4개는 **Python 코드 안의 상수/환경변수 이름일 뿐**, 화면에는 절대 안 뜹니다(Render 서버 설정과 소스 코드에만 존재). 사용자가 실제로 보는 문구는 이미 전부 한글로 따로 있습니다(메뉴: "⚔️ 결투다!" → "⚔️ 참전하기" / "🔓 공개 동의 관리" / "🏆 공개 순위표 (내 밑으로 눈 깔어)") — 오너가 지금까지 써온 톤 그대로입니다. 그래서 내부 이름 4개는 그대로 두고, 실제로 사용자에게 보이는 한글 라벨들을 다음에 오너가 화면으로 직접 보면서 검토하는 쪽으로 정리했습니다.
+  2. **발행 배치 실행 시각 → 30분 여유로 확정(10분에서 늘림).** cron을 UTC 08:40(KST 17:40) → UTC 09:00(KST 18:00)으로 늦췄습니다. 이 결정의 트레이드오프: 예전엔 "저녁 주문 접수 시작(18:00:01) 전에 순위표가 반드시 갱신돼 있다"가 보장됐는데, 30분 버퍼를 넉넉히 두면서 그 보장이 없어집니다(최악의 경우 KST 18:20에 끝날 수 있음). 순위표 화면과 주문 접수는 서로 다른 기능이라 순서가 안 맞아도 실질적 문제는 없다고 판단해, "두 배치가 서로 부딪힐 여지를 줄이는 것"을 우선했습니다. `tests/test_duel_public_ui.py::test_publish_workflow_runs_after_the_fill_batch`가 정확한 숫자가 아니라 "발행 배치가 체결 배치의 타임아웃 상한 이후에 시작하는가"만 검증하므로 재검증 없이도 통과 확인(직접 재실행해서 405개 그대로 통과 확인).
+- **범위 밖(다음에)**: 없음 — 이번 라운드의 급한 확인 사항은 전부 처리됐습니다.
 
 ---
 
@@ -726,7 +726,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ 사실상 완료(`main.py` 배선 1줄만 남음) + 5단계(Branch 2, 공개 순위표) ✅ 사실상 완료 — 백엔드(스키마·규칙·DB계층·발행배치)에 이어 화면 2종(동의 관리·순위표 열람)·발행 워크플로우까지 전부 작성·검증 완료. 남은 건 `main.py` 배선(2줄 추가)과 `duel_publish_daily.yml` 저장소 반영(device_bash)뿐입니다.**
+**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐입니다.
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -776,14 +776,14 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 **2026-08-20, 6번째 코딩 작업 — 5단계(Branch 2) 백엔드 완료 + 오너 확인 사항 4건 전부 확정.** `sql/duel_schema.sql`(예외적 스키마 보강 2건)·`utils/duel_rules.py`(+444줄)·`utils/duel_db.py`(+662줄)·신규 `utils/duel_publish.py`(718줄)·신규 `tests/test_duel_publish.py`(120개)·`tests/test_duel_db.py` 확장까지 작성. 이어서 오너 확인을 거쳐 시즌 시작일(3월 1일)과 닉네임 형식(숫자 제거, 형용사 2개+명사 재설계)까지 반영. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py` → **361개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-5·5-9절 참고.
 
-**2026-08-20, 7번째 코딩 작업 — 5단계(Branch 2) 화면 2종 + 발행 워크플로우 완료.** `web/pages/duel_consent_page.py`(740줄)·`web/pages/duel_leaderboard_page.py`(492줄) 신규, `utils/duel_db.py`에 발행표 읽기 전용 함수 4개 추가, `web/layout.py`에 2갈래 전용 공개 플래그 4개 추가, `run_duel_publish_batch.py`(130줄)·`.github/workflows/duel_publish_daily.yml`(138줄) 신규, `tests/test_duel_public_ui.py`(956줄, 44개) 신규. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **405개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-10절 참고. **이걸로 5단계가 사실상 완료됐습니다.**
+**2026-08-20, 7번째 코딩 작업 — 5단계(Branch 2) 화면 2종 + 발행 워크플로우 완료.** `web/pages/duel_consent_page.py`(740줄)·`web/pages/duel_leaderboard_page.py`(492줄) 신규, `utils/duel_db.py`에 발행표 읽기 전용 함수 4개 추가, `web/layout.py`에 2갈래 전용 공개 플래그 4개 추가, `run_duel_publish_batch.py`(130줄)·`.github/workflows/duel_publish_daily.yml`(138줄) 신규, `tests/test_duel_public_ui.py`(956줄, 44개) 신규. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **405개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-10절 참고.
+
+**이어서 오너 확인 2건 처리 + main.py 배선까지 완료 — 이걸로 5단계가 완전히 끝났습니다.** (1) 발행 배치 cron을 10분 → 30분 여유로 조정(위 5-10절 끝부분 참고). (2) 플래그 이름 관련 오해 해소(내부 코드 이름일 뿐, 화면엔 이미 한글 라벨이 따로 있음). (3) `main.py`에 결투 화면 3개(`duel_page`·`duel_consent_page`·`duel_leaderboard_page`) import를 device_bash로 직접 추가 — 오너 저장소 접근 없이 오너 컴퓨터에서 바로 편집했습니다.
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 이번 7번째 코딩 작업 결과물(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`PROJECT_STATUS.md`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
-2. `.github/workflows/duel_publish_daily.yml`은 이번엔 device_bash로 직접 반영해야 합니다(`.github/workflows/`는 일반 파일 전달 경로가 막혀 있음) — 별도로 안내드립니다.
-3. `main.py`에 이제 **3줄**을 추가해야 합니다: `from web.pages import duel_page`, `from web.pages import duel_consent_page`, `from web.pages import duel_leaderboard_page`(저장소 재접근 후).
-4. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
-5. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
+1. 이번 7번째 코딩 작업 결과물 + 이어진 수정분(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`.github/workflows/duel_publish_daily.yml`·`main.py`·`PROJECT_STATUS.md`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
+2. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
+3. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 

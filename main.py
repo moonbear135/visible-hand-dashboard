@@ -24,12 +24,21 @@ import web.theme
 #                                    scorecard 와 같은 로그인 세션을 공유합니다)
 #   macro_page     → '/admin/macro' (관리자 전용 · 오너 지시로 개발 중단 상태)
 #   admin_page     → '/admin'       (관리자 게이트)
+#   duel_page             → '/duel'             (로그인 필요 · "결투다!" 1갈래,
+#                                                 DUEL_ENABLED 로 단계적 공개, 2026-08-20 추가)
+#   duel_consent_page     → '/duel/consent'      (로그인 필요 · 2갈래 공개 동의 관리,
+#                                                 DUEL_CONSENT_ENABLED, 2026-08-20 추가)
+#   duel_leaderboard_page → '/duel/leaderboard'  (로그인 필요 · 2갈래 공개 순위표 열람,
+#                                                 DUEL_LEADERBOARD_ENABLED, 2026-08-20 추가)
 #
 # (2026-08-17 삭제) `demo_page → '/demo'` — 0단계 모바일 반응형·저장소 지속성 검증 전용
 #   화면이었습니다. 8단계와 컷오버가 모두 끝나 역할이 사라져 파일째 지웠습니다
 #   (`web/auth.py` 의 데모 카운터 두 함수도 함께 — ENGINEERING_SPEC.md §0-3-10).
 from web.pages import (  # noqa: F401
     admin_page,
+    duel_consent_page,
+    duel_leaderboard_page,
+    duel_page,
     macro_page,
     pegy_page,
     report_page,
