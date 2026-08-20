@@ -434,6 +434,24 @@ def test_sql_seed_constant_matches_the_app_constant():
     assert f"default {duel_rules.SEED_AMOUNT_KRW}" not in executable
 
 
+def test_sql_seed_constant_usd_matches_the_app_constant():
+    """
+    USD 트랙의 `public.duel_seed_amount_usd()` 도 `utils/duel_rules.py::SEED_AMOUNT_USD` 와
+    같은 값이어야 합니다 — KRW 와 같은 이유(§13-1 주석이 이미 이 대조를 요구합니다).
+    2026-08-20: 이 스키마는 이미 오너의 프로덕션 Supabase 에 적용·확인(21개 표, seed=7500)
+    됐습니다 — 이 테스트는 그 값이 앱 상수와 계속 같은 값을 유지하는지 지키는 회귀 고정입니다.
+    """
+    executable = _executable_sql()
+    match = re.search(r"create or replace function public\.duel_seed_amount_usd\(\)"
+                      r".*?select\s+(\d+)::numeric", executable, re.S)
+    assert match, "SQL 쪽 시드 상수 함수(duel_seed_amount_usd)를 찾지 못했습니다"
+    assert int(match.group(1)) == duel_rules.SEED_AMOUNT_USD, (
+        "sql/duel_schema.sql 의 USD 시드 금액이 utils/duel_rules.py::SEED_AMOUNT_USD 와 다릅니다"
+    )
+    assert executable.count(str(duel_rules.SEED_AMOUNT_USD)) == 1
+    assert f"default {duel_rules.SEED_AMOUNT_USD}" not in executable
+
+
 def test_sql_opt_in_function_is_security_definer_and_argument_free():
     """
     이 함수가 안전한 이유 4가지가 SQL 에 실제로 적혀 있는지 확인합니다.

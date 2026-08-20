@@ -567,6 +567,12 @@ def run_publish_batch(service_client, published_date, *, dry_run=False):
         "principal_status_counts": {},
     }
 
+    # `duel_nicknames` 가 (user_id, window_type) 키로 바뀌면서(2026-08-20) 닉네임을
+    # 계좌 id 만으로는 찾을 수 없게 됐습니다 — 계좌 행(user_id/window_type 포함)이
+    # 있어야 하므로, 철회 청소보다 먼저 전체 계좌 목록을 읽어 둡니다.
+    accounts = duel_db.fetch_all_active_accounts(service_client)
+    accounts_by_id = {row["id"]: row for row in accounts if row.get("id")}
+
     # ── 0. 철회 청소 (5-8-1) — **다른 무엇보다 먼저** ─────────────────────────────
     #    발행 대상을 고르는 것보다 먼저 지웁니다. 순서를 뒤집으면, 오늘 발행이 어떤 이유로
     #    중간에 실패했을 때 "철회한 사람의 과거 기록이 그대로 남은 채 하루가 더 가는" 상태가
@@ -574,8 +580,10 @@ def run_publish_batch(service_client, published_date, *, dry_run=False):
     revoked = duel_db.fetch_revoked_consent_accounts(service_client)
     summary["revoked_accounts"] = len(revoked)
     if revoked and not dry_run:
+        revoked_accounts = [accounts_by_id[row["account_id"]] for row in revoked
+                             if row.get("account_id") and row["account_id"] in accounts_by_id]
         revoked_nicknames = duel_db.fetch_nicknames_for_accounts(
-            service_client, [row["account_id"] for row in revoked if row.get("account_id")])
+            service_client, revoked_accounts)
         summary["revoked_rows_deleted"] = duel_db.delete_published_rows_for_nicknames(
             service_client, list(revoked_nicknames.values()))
 
@@ -583,8 +591,6 @@ def run_publish_batch(service_client, published_date, *, dry_run=False):
     consents = duel_db.fetch_publishable_consents(service_client)
     summary["consent_count"] = len(consents)
 
-    accounts = duel_db.fetch_all_active_accounts(service_client)
-    accounts_by_id = {row["id"]: row for row in accounts if row.get("id")}
     consent_account_ids = [row["account_id"] for row in consents if row.get("account_id")]
 
     # ── 2. 체급 (5-3) ────────────────────────────────────────────────────────────
@@ -632,8 +638,10 @@ def run_publish_batch(service_client, published_date, *, dry_run=False):
     positions = duel_db.fetch_positions_for_accounts(service_client, consent_account_ids)
     positions_by_account = duel_db.group_rows_by_account(positions)
 
+    consent_accounts = [accounts_by_id[aid] for aid in consent_account_ids
+                        if aid in accounts_by_id]
     nicknames_by_account = duel_db.fetch_nicknames_for_accounts(
-        service_client, consent_account_ids)
+        service_client, consent_accounts)
 
     # ── 4. 조립 + 순위 (5-4-2 · 5-4-3) ───────────────────────────────────────────
     built = build_publish_rows(consents, accounts_by_id, nicknames_by_account,

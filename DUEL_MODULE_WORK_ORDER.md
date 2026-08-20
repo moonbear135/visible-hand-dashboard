@@ -677,7 +677,42 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 3. 표 21개(원화 11 + USD 10) 전부 RLS 켜짐 확인. 발행표 2개(USD)에 `user_id`/`account_id`/`email` 컬럼이 새어 들어가지 않았는지 확인(0행).
 4. **역할별 실동작 시나리오** — `anon`으로 `duel_opt_in_usd()` 호출 → 권한 거부. 사용자 A로 호출 → USD 계좌 3개 + 시드 원장 3행 생성, **3번 연달아 호출해도 계좌·시드 각 3개로 고정**(멱등). 사용자 B가 옵트인해도 A의 USD 계좌가 안 보임(교차 격리). 같은 사용자 A가 원화 옵트인도 실행한 뒤 `duel_nicknames`에 `(user_id=A, window_type='M1')`로 닉네임을 넣어보고, 이 한 행이 원화·달러 양쪽 M1 계좌 어디서 조회해도 같은 닉네임으로 해석될 수 있는 구조인지 확인. `duel_cash_ledger_usd` update 시도 → 권한 거부(append-only). `duel_positions_usd` 수량 감소 시도 → 트리거가 거부, `set local duel.allow_quantity_decrease='on'` 관리 경로는 통과. `duel_bracket_assignments_usd` update 시도 → 권한 거부(시즌 고정 강제). `duel_public_leaderboard_usd`는 service_role이 insert 후 delete까지 가능(전량 재작성·철회 삭제에 필요).
 
-**아직 안 된 것(다음 라운드)**: `utils/duel_rules.py`(SEED_AMOUNT_USD=7500·DEPOSIT_AMOUNT_USD=500·BRACKET_TIERS_USD 8단계·주문 접수 시간대 16:00~21:00 등 상수), `utils/duel_db.py`(닉네임 함수를 새 (user_id, window_type) 구조에 맞게 수정 — 이건 원화 트랙의 기존 코드도 함께 고쳐야 하는 부분입니다) + 신규 `utils/duel_db_usd.py`, 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우), 발행 배치, 화면, 테스트. **스키마의 SQL 쪽 반영(Supabase에 실제로 실행)도 아직 오너가 안 하셨습니다** — 아래 다음 세션 안내 참고.
+**아직 안 된 것(다음 라운드)**: `utils/duel_rules.py`(SEED_AMOUNT_USD=7500·DEPOSIT_AMOUNT_USD=500·BRACKET_TIERS_USD 8단계·주문 접수 시간대 16:00~21:00 등 상수), `utils/duel_db.py`(닉네임 함수를 새 (user_id, window_type) 구조에 맞게 수정 — 이건 원화 트랙의 기존 코드도 함께 고쳐야 하는 부분입니다) + 신규 `utils/duel_db_usd.py`, 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우), 발행 배치, 화면, 테스트.
+
+**✅ 2026-08-20, 오너가 위 스키마를 실제 프로덕션 Supabase 프로젝트의 SQL Editor에 붙여넣고 직접 실행 완료.** "Success. No rows returned" 확인 + 검증 질의 2건 모두 정상(`select count(*) from pg_class where relname like 'duel\_%'` → 21, `select public.duel_seed_amount_usd()` → 7500) + 쿼리를 "duel_schema"라는 이름으로 저장까지 마쳤습니다. 이 스키마는 이제 문서상의 계획이 아니라 **실제로 돌아가는 프로덕션 구조**입니다.
+
+---
+
+### 5-13. 🆕 USD 트랙 2차 코딩 — `utils/duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정 (2026-08-20, 9번째 코딩 작업)
+
+**배경**: §5-12에서 `duel_nicknames`의 기본키를 `account_id` → `(user_id, window_type)`로 바꾼 것은 스키마만의 변경이 아니었습니다 — **원화 트랙의 기존 파이썬 코드가 이미 옛 구조(`account_id` 컬럼)를 전제로 짜여 있었기 때문에, 스키마가 바뀐 순간 그 코드들이 프로덕션에서 실제로 깨지는 상태**가 됐습니다. 이번 라운드는 그 파급을 원인부터 고치는 라운드입니다 — 스키마를 되돌리지 않고(§5-11-10 확정을 유지) 코드 쪽을 새 구조에 맞춥니다.
+
+**무엇을 고쳤는지 (`utils/duel_db.py`):**
+
+- **`ensure_nickname(client, account_id)` → `ensure_nickname(client, user_id, window_type)`.** 닉네임이 이제 계좌가 아니라 (사용자, 창유형) 단위로 존재하므로, "이 계좌의 닉네임을 만들어줘"가 아니라 "이 사용자의 이 창유형 닉네임을 만들어줘"로 질문 자체가 바뀌었습니다. 멱등성(있으면 그대로 반환)·재시도(unique 충돌 시 새 후보)·경합 처리(다른 탭이 먼저 만들면 그 값을 그대로 씀) 로직은 전부 그대로입니다 — 바뀐 건 "무엇을 키로 조회하는가"뿐입니다.
+- **`fetch_my_nickname(client, account_id)` → `fetch_my_nickname(client, user_id, window_type)`.** 같은 이유.
+- **`_fetch_nickname_row(client, account_id)` → `_fetch_nickname_row(client, user_id, window_type)`.** 위 두 함수가 공유하는 내부 조회 헬퍼.
+- **`fetch_nicknames_for_accounts(service_client, account_ids)` → `fetch_nicknames_for_accounts(service_client, accounts)`.** 배치 전용 일괄 조회 함수라 가장 손을 많이 댄 곳입니다. 예전에는 "계좌 id 목록"만 있으면 됐는데, 이제는 각 계좌의 `user_id`/`window_type`을 알아야 어떤 닉네임과 짝인지 알 수 있습니다. 그래서 인자를 **계좌 id 문자열 목록이 아니라 계좌 행(딕셔너리) 목록**으로 바꿨습니다 — 호출부가 이미 `fetch_all_active_accounts()` 등으로 읽어 둔 계좌 행을 그대로 넘기면 됩니다. 내부적으로는 `user_id`로 청크 단위 조회한 뒤 `(user_id, window_type) → nickname` 대응표를 만들고, 그걸로 각 계좌 행의 `id`에 닉네임을 매핑해 돌려줍니다(반환 모양 `{account_id: nickname}` 자체는 호출부 호환을 위해 그대로 유지).
+
+**무엇을 고쳤는지 (`web/pages/duel_consent_page.py`):**
+
+동의 관리 화면이 저장 성공 뒤 `ensure_nickname()`을 부르는 경로 전체(`_render_consent_form` → `_render_real_principal_form` → `_save`)가 그동안 계좌 id만 들고 다녔는데, 이제 `user_id`/`window_type`도 함께 필요해져서 **계좌 id 문자열 대신 계좌 행 전체(dict)를 들고 다니도록** 함수 시그니처를 바꿨습니다. `save_consent()` 호출(여전히 계좌 id 하나만 필요) 자리에서는 `account.get("id")`로 꺼내 쓰고, `ensure_nickname()` 호출 자리에서는 `account.get("user_id")`/`account.get("window_type")`을 함께 넘깁니다.
+
+**무엇을 고쳤는지 (`utils/duel_publish.py`):**
+
+`fetch_nicknames_for_accounts()`의 새 시그니처에 맞춰 발행 배치의 두 호출 지점(철회 계좌 정리, 발행 대상 조립)을 계좌 행을 넘기도록 고쳤습니다. 이 과정에서 **호출 순서도 함께 바꿨습니다** — 원래는 "철회 청소 → 계좌 전체 조회" 순서였는데, 철회 청소 단계에서도 이제 계좌 행(user_id 포함)이 있어야 닉네임을 찾을 수 있으므로 **계좌 전체 조회를 배치의 가장 앞으로 옮겼습니다.** ("철회 청소가 다른 무엇보다 먼저"라는 §5-8-1 원칙은 그대로입니다 — 계좌 조회는 철회 대상을 고르는 것과 무관한, 순수하게 "닉네임을 찾기 위한 참조표 준비"일 뿐입니다.)
+
+**무엇을 새로 만들었는지 (`utils/duel_rules.py` §11 "USD 트랙"):**
+
+- `SEED_AMOUNT_USD = 7500`, `MONTHLY_DEPOSIT_USD = 500` — 스키마의 `duel_seed_amount_usd()`·`duel_cash_ledger_usd` 코멘트와 값이 반드시 같아야 하는 단일 출처(§0-3-10). 정기 입금일(`MONTHLY_DEPOSIT_DAY`, 매월 10일)은 통화와 무관한 달력 개념이라 원화와 **공유**하고 USD 전용 상수를 새로 만들지 않았습니다.
+- **🟡 `ORDER_WINDOW_OPEN_TIME_USD = time(16, 0, 1)` / `ORDER_WINDOW_CLOSE_TIME_USD = time(21, 0, 0)` — 오너 확인이 아직 필요한 제안값입니다.** 스키마 코멘트(§13-3)는 "D일 KST 16:00~21:00 접수"라고만 적혀 있어 초 단위가 명시돼 있지 않습니다. 원화 트랙이 정각에서 1초 뒤(18:00:01)에 여는 관례를 그대로 따라 16:00:01로 제안해 뒀지만, 미국 시장 특성상 정각(16:00:00)을 그대로 써야 할 이유가 있다면 이 두 상수만 고치면 됩니다 — `resolve_order_window_usd()`를 통해서만 참조되므로 다른 곳을 찾아다닐 필요가 없습니다.
+- `resolve_order_window_usd(now_kst)` — `resolve_order_window()`와 판정 로직이 완전히 동일하고 상수만 다른 함수입니다. 함수를 공유(상수를 인자로 받게 시그니처 변경)하지 않고 **의도적으로 복제**했습니다 — 원화 쪽 기존 호출부·테스트를 전부 건드리지 않기 위해서입니다. 대신 "둘 중 하나를 고치면 반드시 다른 쪽도 고치라"는 메모를 양쪽 docstring에 남겨 뒀습니다.
+- `BRACKET_TIERS_USD` 8단계 — 오너가 이전 대화에서 확정한 경계값 $750 / $2,250 / $3,750 / $7,500 / $22,500 / $45,000 / $75,000. 우연이 아니라 **원화 8구간과 정확히 같은 배율**(기준 단위의 100/60/30/10/5/3/1배)입니다 — 이 사실을 `test_bracket_tiers_krw_and_usd_use_the_same_ratio` 테스트로 회귀 고정해 뒀습니다.
+- `BRACKET_KEYS_USD`, `BRACKET_LABELS_USD`, `assign_bracket_usd()`, `bracket_label_usd()` — 원화 쪽과 완전히 같은 모양의 미러 함수. **"구간 미적용"(`BRACKET_NONE_KEY`/`BRACKET_NONE_LABEL`)은 새로 만들지 않고 원화와 공유**합니다 — "구간을 못 정하는 이유"(동의 안 함/보유 없음/통화 혼재)는 통화와 무관한 개념이기 때문입니다.
+
+**검증**: `python3 -m py_compile`로 수정된 5개 파일(`utils/duel_db.py`, `utils/duel_publish.py`, `utils/duel_rules.py`, `web/pages/duel_consent_page.py` + 테스트 4개 파일) 전부 문법 확인 완료. 기존 회귀 테스트(`ensure_nickname` 5개, 소스 검사 2개, `fetch_my_nickname` 스텁 1개, 발행 배치 픽스처)를 새 시그니처에 맞게 고치고, USD 전용 신규 테스트(체급 8단계 경계값·구멍/겹침 없음·미지의 값 거절·"구간 미적용" 공유·KRW와 같은 배율·주문 접수 시간대 경계 4종·SQL 시드 상수 대조)를 추가해 `tests/test_duel.py`·`tests/test_duel_db.py`·`tests/test_duel_publish.py`·`tests/test_duel_public_ui.py` 전체를 실행 → **431개 전부 통과**(회귀 0건).
+
+**아직 안 된 것(다음 라운드)**: 신규 `utils/duel_db_usd.py`(USD 표를 바라보는 DB 접근 계층 — `_usd` 표 CRUD·`fetch_nicknames_for_accounts`가 KRW/USD 계좌를 함께 받을 수 있는지 재검토), 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우), 발행 배치의 USD 지원, 화면("내 성적표" 스타일의 KRW/USD 계좌 병기 또는 USD 전용 화면), 위 각각의 테스트.
 
 ---
 
@@ -786,7 +821,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료**(§5-12 — `sql/duel_schema.sql`에 표 10개·마이그레이션 브리지 추가, 실제 로컬 PostgreSQL로 신규 설치·재실행·구버전 마이그레이션·역할별 권한 시나리오까지 전부 검증 완료). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 스키마 다음 라운드(규칙·DB 계층 → 배치 → 화면 → 테스트)가 남아 있습니다.
+**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료**(§5-13 — `utils/duel_db.py`·`utils/duel_publish.py`·`web/pages/duel_consent_page.py` 수정 + 테스트 4개 갱신·확장, 431개 전부 통과). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 다음 라운드로 신규 `utils/duel_db_usd.py`·배치·화면·테스트가 남아 있습니다.
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -841,10 +876,10 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 **이어서 오너 확인 2건 처리 + main.py 배선까지 완료 — 이걸로 5단계가 완전히 끝났습니다.** (1) 발행 배치 cron을 10분 → 30분 여유로 조정(위 5-10절 끝부분 참고). (2) 플래그 이름 관련 오해 해소(내부 코드 이름일 뿐, 화면엔 이미 한글 라벨이 따로 있음). (3) `main.py`에 결투 화면 3개(`duel_page`·`duel_consent_page`·`duel_leaderboard_page`) import를 device_bash로 직접 추가 — 오너 저장소 접근 없이 오너 컴퓨터에서 바로 편집했습니다.
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 이번 7번째 코딩 작업 결과물 + 이어진 수정분(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`.github/workflows/duel_publish_daily.yml`·`main.py`·`PROJECT_STATUS.md`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
+1. 이번 7번째 코딩 작업 결과물 + 이어진 수정분(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`.github/workflows/duel_publish_daily.yml`·`main.py`·`PROJECT_STATUS.md`·`sql/duel_schema.sql`(USD 트랙 §13~15 추가분)·`utils/duel_publish.py`·`tests/test_duel.py`·`tests/test_duel_publish.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
 2. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
 3. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
-4. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 완료, 다음은 규칙/DB 계층 (§5-11·§5-12 참고).** `sql/duel_schema.sql`에 USD 표 10개 + 닉네임 재구조화 + 마이그레이션 브리지까지 작성·검증 완료(로컬 PostgreSQL 16으로 신규 설치·재실행·구버전 마이그레이션·역할별 권한 시나리오 전부 통과). **⚠️ 오너가 아직 이 새 SQL을 실제 Supabase 프로젝트에 반영(SQL Editor에 붙여넣고 Run)하지 않았습니다** — 파일을 받으면 실행부터 해주세요. 다음 코딩 라운드는 `utils/duel_rules.py`(USD 상수)와 `utils/duel_db.py`/신규 `utils/duel_db_usd.py`(DB 접근 계층)입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
+4. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ 완료 + 오너가 실제 Supabase 프로젝트에 적용·확인까지 완료, `duel_rules.py` USD 상수 + 닉네임 파급 수정 ✅ 완료 (§5-11·§5-12·§5-13 참고).** 스키마(표 10개 + 닉네임 재구조화 + 마이그레이션 브리지)는 이미 로컬 PostgreSQL 16 검증 + **오너의 실제 프로덕션 Supabase SQL Editor 실행(2026-08-20, 21개 표·seed 7500 확인)까지 끝났습니다.** 이어서 `utils/duel_rules.py`(USD 상수 6종 + `resolve_order_window_usd()`/`assign_bracket_usd()` 등)와, 닉네임 스키마 변경 때문에 깨졌던 원화 트랙 코드(`utils/duel_db.py`의 `ensure_nickname`/`fetch_my_nickname`/`fetch_nicknames_for_accounts` 등, `web/pages/duel_consent_page.py`, `utils/duel_publish.py`)까지 전부 새 `(user_id, window_type)` 구조에 맞게 고쳤고, 테스트 431개 전부 통과했습니다. **다음 코딩 라운드는 신규 `utils/duel_db_usd.py`(USD 표 DB 접근 계층)**이고, 그 다음이 배치 오케스트레이션(`utils/duel_batch_usd.py` 등)·화면·테스트입니다. **⚠️ 오너 확인이 아직 필요한 것 하나**: `ORDER_WINDOW_OPEN_TIME_USD`/`CLOSE_TIME_USD`를 16:00:01~21:00:00으로 제안해 뒀는데(원화 트랙의 "정각+1초" 관례를 따른 것), 스키마 코멘트엔 "16:00~21:00"이라고만 돼 있어 초 단위가 오너 확정 사항인지 재확인이 필요합니다 — 급하지 않고, 코딩을 막지도 않습니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 

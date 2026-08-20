@@ -1032,10 +1032,19 @@ def revoke_consent(client, account_id, *, now_kst=None):
 NICKNAME_MAX_ATTEMPTS = 8
 
 
-def ensure_nickname(client, account_id):
+def ensure_nickname(client, user_id, window_type):
     """
-    이 계좌의 공개용 **무작위 닉네임**을 보장합니다(없으면 만들고, 있으면 그대로).
+    이 (사용자, 창유형)의 공개용 **무작위 닉네임**을 보장합니다(없으면 만들고, 있으면 그대로).
     작업지시서 5-5 / 스키마 §6 참고.
+
+    🔴 2026-08-20 USD 트랙(§5-11) 도입으로 인자가 `account_id` 하나에서 `(user_id,
+       window_type)` 둘로 바뀌었습니다. 오너가 "같은 사용자면 원화·달러 트랙에서 같은
+       닉네임을 쓰자"(5-11-10)를 확정하면서, 닉네임 표(§6)의 기본키 자체가 계좌 단위에서
+       사용자×창유형 단위로 재구조화됐기 때문입니다 — 원화 계좌(duel_accounts)와 달러
+       계좌(duel_accounts_usd)는 물리적으로 다른 표의 서로 다른 id 라, 계좌 id 하나만으로는
+       "이 사용자의 이 창유형" 을 특정할 수 없습니다. **이 함수는 원화·USD 양쪽 동의 화면이
+       그대로 공유해서 씁니다** — 어느 트랙에서 부르든 같은 (user_id, window_type) 이면
+       같은 닉네임 행을 반환합니다.
 
     ── 언제 부르는가 (호출 시점이 설계의 일부입니다) ─────────────────────────────
     🔴 **2갈래(공개 순위표) 동의 화면에서, 첫 `save_consent()` 직전(또는 직후)에 한 번.**
@@ -1058,28 +1067,29 @@ def ensure_nickname(client, account_id):
     다시 넣습니다**(스키마 §6 이 요구하는 "난수 → unique 충돌 시 재시도").
 
     ── 두 탭에서 동시에 눌러도 안전합니다 ────────────────────────────────────────
-    `duel_nicknames.account_id` 가 기본키라, 두 번째 삽입은 충돌합니다. 그때 이 함수는
-    "내 이름이 이미 생겼나"를 다시 확인하고 **그 이름을 돌려줍니다.** 새 이름을 또 만들지
-    않습니다 — 한 계좌에 이름이 둘이면 과거 발행 행과 대응이 끊깁니다(5-5 "재계산·재사용 금지").
+    `duel_nicknames` 의 기본키가 `(user_id, window_type)` 라, 두 번째 삽입은 충돌합니다.
+    그때 이 함수는 "내 이름이 이미 생겼나"를 다시 확인하고 **그 이름을 돌려줍니다.** 새
+    이름을 또 만들지 않습니다 — 이름이 둘이면 과거 발행 행과 대응이 끊깁니다(5-5 "재계산·재사용 금지").
 
-    반환: `{"account_id": ..., "nickname": ..., ...}` dict.
+    반환: `{"user_id": ..., "window_type": ..., "nickname": ..., ...}` dict.
     """
     _require_client(client)
-    account = _require_text(account_id, "계좌 ID")
+    user = _require_text(user_id, "사용자 ID")
+    window = _require_text(window_type, "창유형")
 
-    existing = _fetch_nickname_row(client, account)
+    existing = _fetch_nickname_row(client, user, window)
     if existing:
         return existing
 
     last_error = None
     for _attempt in range(NICKNAME_MAX_ATTEMPTS):
         # 🔴 후보는 인자 없는 순수 난수 함수가 만듭니다 — user_id·이메일·시각에서 유도하지
-        #    않습니다(5-5). 여기서 account 를 섞어 넣고 싶은 유혹을 이기세요.
+        #    않습니다(5-5). 여기서 user/window 를 섞어 넣고 싶은 유혹을 이기세요.
         candidate = duel_rules.generate_nickname()
         try:
             rows = _execute(
                 client.table(NICKNAMES_TABLE).insert(
-                    {"account_id": account, "nickname": candidate}),
+                    {"user_id": user, "window_type": window, "nickname": candidate}),
                 "닉네임 생성",
             )
         except DuelDbError as exc:
@@ -1087,9 +1097,10 @@ def ensure_nickname(client, account_id):
                 raise                       # 진짜 사고를 재시도로 덮지 않습니다(§0-1).
             last_error = exc
             # 충돌의 원인은 둘 중 하나입니다:
-            #   ① account_id 기본키 — 다른 탭/요청이 방금 내 이름을 만들었다 → 그걸 씁니다.
+            #   ① (user_id, window_type) 기본키 — 다른 탭/요청·다른 통화 트랙이 방금
+            #      내 이름을 만들었다 → 그걸 씁니다.
             #   ② nickname unique — 남이 쓰는 이름을 뽑았다 → 새 후보로 다시.
-            already = _fetch_nickname_row(client, account)
+            already = _fetch_nickname_row(client, user, window)
             if already:
                 return already
             continue
@@ -1108,10 +1119,11 @@ def ensure_nickname(client, account_id):
     )
 
 
-def fetch_my_nickname(client, account_id):
+def fetch_my_nickname(client, user_id, window_type):
     """
-    이 계좌의 공개용 닉네임 행(없으면 None) — **만들지 않고 읽기만** 합니다.
-    2026-08-20 추가(동의 관리 화면용).
+    이 (사용자, 창유형)의 공개용 닉네임 행(없으면 None) — **만들지 않고 읽기만** 합니다.
+    2026-08-20 추가(동의 관리 화면용). 인자는 `ensure_nickname()` 과 같은 이유로
+    `(user_id, window_type)` 입니다(위 함수 docstring 참고 — §5-11-10).
 
     왜 `ensure_nickname()` 을 그대로 쓰지 않는가: 그 함수는 없으면 **만듭니다.** 화면을
     그리는 것만으로 닉네임이 발급되면, 동의 화면을 열어 보기만 하고 나간 사용자에게도
@@ -1120,13 +1132,16 @@ def fetch_my_nickname(client, account_id):
     update 정책이 없습니다). **화면을 그리는 행위는 아무것도 만들지 않아야 합니다.**
     """
     _require_client(client)
-    return _fetch_nickname_row(client, _require_text(account_id, "계좌 ID"))
+    user = _require_text(user_id, "사용자 ID")
+    window = _require_text(window_type, "창유형")
+    return _fetch_nickname_row(client, user, window)
 
 
-def _fetch_nickname_row(client, account_id):
-    """이 계좌의 닉네임 행(없으면 None). 사용자 세션·배치 클라이언트 양쪽에서 같은 모양입니다."""
+def _fetch_nickname_row(client, user_id, window_type):
+    """이 (사용자, 창유형)의 닉네임 행(없으면 None). 사용자 세션·배치 클라이언트 양쪽에서 같은 모양입니다."""
     rows = _execute(
-        client.table(NICKNAMES_TABLE).select("*").eq("account_id", account_id).limit(1),
+        client.table(NICKNAMES_TABLE).select("*")
+        .eq("user_id", user_id).eq("window_type", window_type).limit(1),
         "닉네임 조회",
     )
     return dict(rows[0]) if rows else None
@@ -2184,30 +2199,48 @@ def fetch_revoked_consent_accounts(service_client):
     return [dict(row) for row in rows]
 
 
-def fetch_nicknames_for_accounts(service_client, account_ids):
+def fetch_nicknames_for_accounts(service_client, accounts):
     """
     (배치 전용) 여러 계좌의 닉네임을 **한 번의 질의로** 읽습니다(§0-3-2).
     반환: `{account_id: nickname}`.
 
-    ⚠️ `account_ids` 는 **필수**입니다(기본값 None 으로 "전부 읽기"를 만들지 않았습니다).
-       이 표는 닉네임 ↔ 계좌 대응표라, 통째로 읽는 편의 함수가 있으면 언젠가 누군가
+    ⚠️ `duel_nicknames` 가 `(user_id, window_type)` 키로 바뀌면서(2026-08-20, USD 트랙
+       작업) 계좌 id 만으로는 닉네임을 찾을 수 없게 됐습니다 — 같은 사용자의 KRW/USD
+       계좌가 창유형이 같으면 닉네임을 공유하기 때문입니다(5-11-10). 그래서 이 함수는
+       이제 **계좌 id 문자열이 아니라 계좌 행(딕셔너리, `id`/`user_id`/`window_type`
+       포함)** 을 받습니다 — 호출부는 `fetch_all_active_accounts()` 등으로 이미 읽어
+       둔 계좌 행을 그대로 넘기면 됩니다.
+
+    ⚠️ `accounts` 는 **필수**입니다(기본값 None 으로 "전부 읽기"를 만들지 않았습니다).
+       이 표는 닉네임 ↔ 사용자 대응표라, 통째로 읽는 편의 함수가 있으면 언젠가 누군가
        "일단 다 읽어 놓고 필요한 것만 쓰지"라고 하게 됩니다. 필요한 계좌만 읽습니다.
     """
     _require_client(service_client, batch=True)
-    ids = [str(value) for value in (account_ids or [])]
-    if not ids:
+    rows_in = [dict(row) for row in (accounts or []) if row and row.get("id")]
+    if not rows_in:
         return {}
-    mapping = {}
-    for start in range(0, len(ids), CHUNK_SIZE):
+    user_ids = sorted({str(row["user_id"]) for row in rows_in if row.get("user_id")})
+    if not user_ids:
+        return {}
+    lookup = {}
+    for start in range(0, len(user_ids), CHUNK_SIZE):
         rows = _execute(
-            service_client.table(NICKNAMES_TABLE).select("account_id,nickname")
-            .in_("account_id", ids[start:start + CHUNK_SIZE]),
+            service_client.table(NICKNAMES_TABLE).select("user_id,window_type,nickname")
+            .in_("user_id", user_ids[start:start + CHUNK_SIZE]),
             "닉네임 일괄 조회",
         )
         for row in rows:
             nickname = str((row or {}).get("nickname") or "").strip()
-            if nickname:
-                mapping[row.get("account_id")] = nickname
+            if not nickname:
+                continue
+            key = (str(row.get("user_id")), str(row.get("window_type")))
+            lookup[key] = nickname
+    mapping = {}
+    for row in rows_in:
+        key = (str(row.get("user_id")), str(row.get("window_type")))
+        nickname = lookup.get(key)
+        if nickname:
+            mapping[row["id"]] = nickname
     return mapping
 
 

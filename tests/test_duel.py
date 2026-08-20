@@ -282,6 +282,50 @@ def test_order_window_converts_an_aware_utc_timestamp_into_kst():
 
 
 # =============================================================================
+# ⑤-USD USD 트랙 주문 접수 시간대 (work order 5-11-6) — KRW 경계 검증의 통화만 다른 미러
+#  KRW 는 18:00:01~22:00:00, USD 는 16:00:01~21:00:00 입니다(제안값 — 오너 확인 필요,
+#  `utils/duel_rules.py` §11 주석 참고). 여기서는 "그 경계가 코드에서 실제로 그렇게
+#  동작하는지"만 고정하고, 시각 자체이 맞는지는 오너 확인 대상입니다.
+# =============================================================================
+def test_order_window_usd_is_closed_just_before_it_opens():
+    """15:59:59 · 16:00:00 은 아직 닫혀 있습니다(창은 16:00:01 부터)."""
+    for moment in (_kst(2026, 8, 19, 15, 59, 59), _kst(2026, 8, 19, 16, 0, 0)):
+        window = rules.resolve_order_window_usd(moment)
+        assert window["is_open"] is False, moment
+        assert window["submission_date"] == date(2026, 8, 19)
+        assert window["window_opens_at"] == _kst(2026, 8, 19, 16, 0, 1)
+
+
+def test_order_window_usd_is_open_at_both_ends():
+    """16:00:01 과 21:00:00 은 **양끝 포함**으로 열려 있어야 합니다."""
+    for moment in (_kst(2026, 8, 19, 16, 0, 1),
+                   _kst(2026, 8, 19, 18, 30, 0),
+                   _kst(2026, 8, 19, 21, 0, 0)):
+        window = rules.resolve_order_window_usd(moment)
+        assert window["is_open"] is True, moment
+        assert window["submission_date"] == date(2026, 8, 19)
+
+
+def test_order_window_usd_rolls_to_the_next_day_after_it_closes():
+    """21:00:01 부터는 닫히고, 다음 창(다음 날 16:00:01)으로 안내해야 합니다."""
+    window = rules.resolve_order_window_usd(_kst(2026, 8, 19, 21, 0, 1))
+    assert window["is_open"] is False
+    assert window["submission_date"] == date(2026, 8, 20)
+    assert window["window_opens_at"] == _kst(2026, 8, 20, 16, 0, 1)
+    assert window["window_closes_at"] == _kst(2026, 8, 20, 21, 0, 0)
+
+
+def test_order_window_usd_does_not_share_state_with_the_krw_window():
+    """
+    🔴 같은 순간이 KRW 창은 닫혀 있고 USD 창은 열려 있을 수 있어야 합니다(두 상수 세트가
+    실제로 분리돼 있는지 — 전역 변수를 헷갈려 뒤섞어 쓰면 이 테스트가 잡습니다).
+    """
+    moment = _kst(2026, 8, 19, 17, 0, 0)          # KRW: 18:00:01 전 → 닫힘 / USD: 창 안 → 열림
+    assert resolve_order_window(moment)["is_open"] is False
+    assert rules.resolve_order_window_usd(moment)["is_open"] is True
+
+
+# =============================================================================
 # ⑥ 체결 거래일(D+1) 확정 (work order 2-4)
 # =============================================================================
 def test_fill_trading_day_is_the_next_confirmed_trading_day_not_the_next_calendar_day():

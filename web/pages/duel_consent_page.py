@@ -492,7 +492,10 @@ def _render_account_consent(client, user_id: str, account: dict, on_changed) -> 
             # 이유가 없습니다. (조회 자체는 만들지 않는 함수라 안전하지만, 안 부르는 편이
             # 더 좋습니다 — §0-3-8 은 "필요할 때만 만진다"도 포함합니다.)
             try:
-                nickname_row = fetch_my_nickname(client, account_id)
+                # 🔴 2026-08-20 USD 트랙(§5-11) 도입으로 닉네임 표가 (user_id, window_type)
+                #    단위로 바뀌었습니다(스키마 §6 재구조화, 5-11-10 — 같은 사용자의 원화·
+                #    달러 계좌가 같은 닉네임을 공유). 더 이상 account_id 로 조회하지 않습니다.
+                nickname_row = fetch_my_nickname(client, account["user_id"], account["window_type"])
             except Exception as exc:               # noqa: BLE001
                 error_banner(f'🚫 {_fail(exc, "닉네임을 불러오지 못했습니다.")}')
 
@@ -510,9 +513,9 @@ def _render_account_consent(client, user_id: str, account: dict, on_changed) -> 
             _render_revoke(client, account_id, on_changed)
             ui.separator()
 
-        _render_consent_form(client, account_id, state, on_changed)
+        _render_consent_form(client, account, state, on_changed)
         ui.separator()
-        _render_real_principal_form(client, account_id, state, on_changed)
+        _render_real_principal_form(client, account, state, on_changed)
 
 
 def _render_current_state(state: dict, nickname_row) -> None:
@@ -553,12 +556,17 @@ def _render_current_state(state: dict, nickname_row) -> None:
 # =============================================================================
 # 4. 1층(항목별 5개) + 2층(최종 확인) — 5-2-1 · 5-2-2 · 5-2-3
 # =============================================================================
-def _render_consent_form(client, account_id, state: dict, on_changed) -> None:
+def _render_consent_form(client, account: dict, state: dict, on_changed) -> None:
     """항목별 체크박스 5개 → (5개 전부 체크 시) 별도의 최종 확인.
 
     ⚠️ 두 단계는 **저장 요청도 따로** 나갑니다(`item_save_payload()` / `final_confirm_payload()`).
        한 번에 보내면 "최종 확인이 분리된 단계"라는 5-2-3 의 요구가 화면 장식이 됩니다.
+
+    🔴 2026-08-20 — 인자가 `account_id`(문자열)에서 `account`(딕셔너리)로 바뀌었습니다.
+       `_save()`가 저장 성공 뒤 `ensure_nickname()`을 부를 때 이제 `user_id`·`window_type`도
+       필요하기 때문입니다(USD 트랙과 닉네임을 공유하는 재구조화 — §5-11-10).
     """
+    account_id = account.get("id")
     already = state["state"] == "confirmed"
     ui.markdown('#### 1단계 — 무엇을 공개할지 한 문장씩 확인')
     warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **첫 번째**
@@ -588,7 +596,7 @@ def _render_consent_form(client, account_id, state: dict, on_changed) -> None:
                 + '\n(부분 공개 조합은 제공하지 않습니다.)'
             )
             return
-        _save(client, account_id, item_save_payload(_values()), message, on_changed,
+        _save(client, account, item_save_payload(_values()), message, on_changed,
               '✅ 공개 항목 5개를 저장했습니다. 아래 2단계(최종 확인)까지 마쳐야 발행 대상이 됩니다.')
 
     ui.button('1단계 저장 (아직 공개되지 않습니다)', on_click=_save_items) \
@@ -623,13 +631,13 @@ def _render_consent_form(client, account_id, state: dict, on_changed) -> None:
         except DuelRuleError as exc:
             final_message.text = f'🚫 {exc}'
             return
-        _save(client, account_id, payload, final_message, on_changed,
+        _save(client, account, payload, final_message, on_changed,
               '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 공개 순위표 대상이 됩니다.')
 
     ui.button('🔓 최종 확인하고 공개 신청', on_click=_save_final).props('no-caps color=primary')
 
 
-def _render_real_principal_form(client, account_id, state: dict, on_changed) -> None:
+def _render_real_principal_form(client, account: dict, state: dict, on_changed) -> None:
     """완전히 별개인 독립 동의(5-2-4). **위 5개와 같은 카드 묶음처럼 보이지 않게** 그립니다."""
     ui.markdown('#### 별개 항목 — 실제 매입총합을 체급 산정에 사용')
     ui.label(NOTICE_REAL_PRINCIPAL).classes('vh-muted')
@@ -643,7 +651,7 @@ def _render_real_principal_form(client, account_id, state: dict, on_changed) -> 
     def _save_flag() -> None:
         message.text = ''
         enabled = bool(box.value)
-        _save(client, account_id, real_principal_payload(enabled), message, on_changed,
+        _save(client, account, real_principal_payload(enabled), message, on_changed,
               '✅ 실제 매입총합 사용 동의를 켰습니다(체급이 배정됩니다).' if enabled
               else '✅ 실제 매입총합 사용 동의를 껐습니다(다음 시즌부터 구간 미적용 그룹).')
 
@@ -696,7 +704,7 @@ def _render_revoke(client, account_id, on_changed) -> None:
 # =============================================================================
 # 6. 저장 공통 — 저장 성공 시에만 닉네임을 발급합니다 (5-5)
 # =============================================================================
-def _save(client, account_id, payload: dict, message, on_changed, success_text: str) -> None:
+def _save(client, account: dict, payload: dict, message, on_changed, success_text: str) -> None:
     """
     `save_consent()` 호출 + 오류 표시 + (성공 시) 닉네임 발급.
 
@@ -710,7 +718,13 @@ def _save(client, account_id, payload: dict, message, on_changed, success_text: 
        "동의는 저장됐지만 닉네임 발급에 실패했다"고 정확히 알립니다(§0-1). 닉네임이 없는
        계좌는 발행 배치가 발행에서 빼고 로그에 남깁니다(`utils/duel_publish.py`) — 즉
        이 실패로 잘못된 공개가 일어나지는 않습니다.
+
+    🔴 2026-08-20 — 인자가 `account_id`(문자열)에서 `account`(딕셔너리)로 바뀌었습니다.
+       `save_consent()`는 여전히 계좌 id 하나만 필요하지만, `ensure_nickname()`은
+       이제 `(user_id, window_type)`로 조회합니다(USD 트랙과 닉네임을 공유하는 재구조화
+       — 스키마 §6, §5-11-10). 계좌 id 하나로는 그 두 값을 알 수 없어 dict 전체를 받습니다.
     """
+    account_id = account.get("id")
     try:
         save_consent(client, account_id, **payload)
     except (DuelDbError, DuelRuleError) as exc:
@@ -727,7 +741,7 @@ def _save(client, account_id, payload: dict, message, on_changed, success_text: 
 
     nickname_warning = ''
     try:
-        ensure_nickname(client, account_id)
+        ensure_nickname(client, account.get("user_id"), account.get("window_type"))
     except Exception as exc:                       # noqa: BLE001
         nickname_warning = (
             '\n⚠️ 다만 공개 닉네임 발급에 실패했습니다: '

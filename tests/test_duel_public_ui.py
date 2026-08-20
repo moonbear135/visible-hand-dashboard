@@ -529,7 +529,8 @@ def test_consent_page_never_issues_a_nickname_while_merely_rendering():
                 assert sub.func.id != "ensure_nickname", \
                     f"{node.name} 이 화면을 그리면서 닉네임을 발급합니다(5-5 위반)"
     # 저장 경로에는 있어야 합니다(있는지도 함께 고정 — 없으면 아무도 순위표에 못 실립니다).
-    assert "ensure_nickname(client, account_id)" in source
+    # 2026-08-20: `duel_nicknames` 가 (user_id, window_type) 키로 바뀌면서 인자도 함께 바뀌었습니다.
+    assert 'ensure_nickname(client, account.get("user_id"), account.get("window_type"))' in source
 
 
 # =============================================================================
@@ -857,7 +858,7 @@ def test_consent_body_renders_all_three_account_states():
         consent_page,
         fetch_my_accounts=lambda client, user_id: [dict(a) for a in SYNTHETIC_ACCOUNTS],
         fetch_my_consent=lambda client, account_id: SYNTHETIC_CONSENTS[account_id],
-        fetch_my_nickname=lambda client, account_id: {"nickname": "굳센날쌘범"},
+        fetch_my_nickname=lambda client, user_id, window_type: {"nickname": "굳센날쌘범"},
     )
     try:
         consent_page._render_body(object(), "uid-1")

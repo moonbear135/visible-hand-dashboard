@@ -1306,3 +1306,131 @@ def leaderboard_page_count(section_cap=None, *, page_size=None):
     cap = _require_int(section_cap if section_cap is not None else LEADERBOARD_TOP_COUNT,
                        "구간 상한", minimum=0)
     return (cap + size - 1) // size
+
+
+# =============================================================================
+# 11. USD 트랙 — 5-11 (2026-08-20, USD 트랙 2차 코딩 · 스키마는 이미 오너 확인 완료)
+# =============================================================================
+#  이 절 전체가 지키는 원칙(작업지시서 5-11, 오너가 이전 대화에서 확정): **KRW·USD 는
+#  물리적으로 완전히 분리된 트랙**입니다 — 표도, 배치도, 워크플로도 따로입니다
+#  (`sql/duel_schema.sql` §13 의 `_usd` 표들 및 이 파일의 header 참고). 그러나 "숫자만
+#  다르고 로직은 같은" 순수 계산 함수들(체결·FIFO 배정·평단가 갱신·TWR·시즌 판정·순위
+#  계산·닉네임 생성·재동의 차단·페이지네이션)은 **통화와 무관하게 이미 재사용 가능**해서
+#  새로 만들지 않습니다 — 이 절에는 오직 "숫자 자체가 통화마다 다른" 것들만 옵니다.
+#
+#  ⚠️ 아래 상수도 위 0절과 같은 이유로 **다른 파일에 다시 적지 마세요**(§0-3-10).
+#     `sql/duel_schema.sql` §14-10 의 `duel_seed_amount_usd()` 는 이 파일의
+#     `SEED_AMOUNT_USD` 와 반드시 같은 값이어야 하고, 스키마 자체가 그 코멘트로
+#     못박아 뒀습니다(§13-1 주석 참고) — 값을 바꿀 때는 **두 곳을 함께** 고치세요.
+
+#: 계좌 개설 시 지급하는 가상 시드머니(달러). 오너 확정 $7,500 — `sql/duel_schema.sql`
+#: `duel_seed_amount_usd()` 가 돌려주는 값과 반드시 같습니다(이미 프로덕션에 적용·확인됨).
+SEED_AMOUNT_USD = 7500
+
+#: 매월 정기 입금액(달러). KRW 와 같은 이유로 창 길이에 비례해 깎지 않습니다(5-11-4 —
+#: "원화 트랙의 규칙을 그대로 재사용"이 `duel_cash_ledger_usd` 테이블 코멘트에 명시돼 있음).
+MONTHLY_DEPOSIT_USD = 500
+
+#: 정기 입금일은 원화 트랙과 **같은 날짜를 그대로 씁니다**(`MONTHLY_DEPOSIT_DAY`, 매월
+#: 10일) — 통화가 달라도 "이번 달 몇 번째 날인가"는 달력 개념이지 금액 개념이 아니라서,
+#: 따로 상수를 만들지 않았습니다. USD 전용 배치를 짤 때도 이 상수를 그대로 참조하세요.
+
+#: 🟡 USD 주문 접수 시간대(5-11-6) — **D일 KST 16:00~21:00**. `sql/duel_schema.sql` 의
+#: `duel_orders_usd` 테이블 코멘트에 이 범위가 이미 문서화돼 있습니다(§13-3).
+#: 초 단위(16:00:01 시작 / 21:00:00 종료)는 KRW 트랙(`ORDER_WINDOW_OPEN_TIME`)의
+#: "정각에서 1초 뒤에 열어 경계 판정을 단순하게 만드는" 관례를 그대로 따른 **제안값**
+#: 입니다 — 원화 트랙의 18:00:01 이 왜 :01 인지는 이 상수의 위 주석(§0)에 이유가 없고
+#: 구두로 정해진 관례라, USD 도 같은 관례를 따르는 것이 안전하다고 판단해 이렇게 뒀습니다.
+#: ⚠️ **오너 확인 필요**: 미국 시장 상황상 16:00:00 정각을 그대로 써야 할 이유가 있다면
+#: (예: 다른 시스템과 시각을 맞춰야 함) 이 두 상수만 고치면 됩니다 — 호출부는 전부
+#: `resolve_order_window_usd()` 를 통해서만 이 값을 씁니다.
+ORDER_WINDOW_OPEN_TIME_USD = time(16, 0, 1)
+ORDER_WINDOW_CLOSE_TIME_USD = time(21, 0, 0)
+
+
+def resolve_order_window_usd(now_kst):
+    """
+    USD 트랙의 주문 접수 시간대 판정. `resolve_order_window()` 와 **완전히 같은 로직**이고
+    상수만 다릅니다(5-11-6) — 로직을 복제하면 나중에 한쪽만 고치는 사고가 나므로, 이 함수는
+    `resolve_order_window()` 본체를 그대로 부르지 않고 **같은 판정을 상수만 바꿔 다시
+    구현**했습니다. 이유: `resolve_order_window()` 는 전역 상수(`ORDER_WINDOW_OPEN_TIME` 등)를
+    직접 참조하는 순수 함수라 상수를 인자로 받도록 시그니처를 바꾸면 KRW 쪽의 기존 호출부·
+    테스트를 전부 건드리게 됩니다. 대신 판정 로직 자체(경계 포함 여부, D/D+1 계산)는 아래에서
+    한 글자도 다르지 않게 맞춰 뒀습니다 — 둘 중 하나를 고치면 반드시 다른 쪽도 함께 고치세요
+    (이 사실이 두 함수의 docstring 양쪽에 다 적혀 있습니다).
+
+    돌려주는 dict 모양은 `resolve_order_window()` 와 동일합니다(`is_open` / `now_kst` /
+    `submission_date` / `window_opens_at` / `window_closes_at`).
+    """
+    moment = _to_kst(now_kst, "현재 시각")
+    today = moment.date()
+    clock = moment.timetz().replace(tzinfo=None)
+
+    if clock < ORDER_WINDOW_OPEN_TIME_USD:
+        is_open, submission_date = False, today
+    elif clock <= ORDER_WINDOW_CLOSE_TIME_USD:
+        is_open, submission_date = True, today
+    else:
+        is_open, submission_date = False, today + timedelta(days=1)
+
+    return {
+        "is_open": is_open,
+        "now_kst": moment,
+        "submission_date": submission_date,
+        "window_opens_at": datetime.combine(submission_date, ORDER_WINDOW_OPEN_TIME_USD, tzinfo=KST),
+        "window_closes_at": datetime.combine(submission_date, ORDER_WINDOW_CLOSE_TIME_USD, tzinfo=KST),
+    }
+
+
+# ── 11-2. 체급(달러) — work order 5-11-9, KRW `BRACKET_TIERS`(10절)의 통화만 다른 미러 ──
+#  경계값은 오너가 이전 대화에서 확정한 값입니다: $750 / $2,250 / $3,750 / $7,500 /
+#  $22,500 / $45,000 / $75,000. 우연이 아니라 **KRW 구간과 정확히 같은 배율**입니다 —
+#  KRW 는 100만원을 기준 단위로 100/60/30/10/5/3/1 배, USD 는 $750 을 기준 단위로 똑같이
+#  100/60/30/10/5/3/1 배입니다(75000/750=100, 45000/750=60, 22500/750=30, 7500/750=10,
+#  3750/750=5, 2250/750=3, 750/750=1) — 시드머니 비율($7,500 / 1,000만원 ≈ 1,333배)과는
+#  무관하게, "체급 구간의 촘촘한 정도"를 KRW 와 같은 모양으로 맞춘 결과입니다.
+#  ⚠️ KRW 표와 마찬가지로 **[하한 이상, 상한 미만)** 이고, key 는 화면 라벨이 아니라
+#     DB 컬럼 값·유니크 제약의 일부이므로 ASCII 로 고정합니다.
+BRACKET_TIERS_USD = (
+    ("usd_75000_plus",   "$75,000 이상",                  75_000, None),
+    ("usd_45000_75000",  "$45,000 이상 $75,000 미만",     45_000, 75_000),
+    ("usd_22500_45000",  "$22,500 이상 $45,000 미만",     22_500, 45_000),
+    ("usd_7500_22500",   "$7,500 이상 $22,500 미만",       7_500, 22_500),
+    ("usd_3750_7500",    "$3,750 이상 $7,500 미만",        3_750, 7_500),
+    ("usd_2250_3750",    "$2,250 이상 $3,750 미만",        2_250, 3_750),
+    ("usd_750_2250",     "$750 이상 $2,250 미만",             750, 2_250),
+    ("usd_under_750",    "$750 미만",                          0, 750),
+)
+
+#: USD 발행표에 실제로 나타날 수 있는 bracket_key 전부(위 8개 + 구간 미적용).
+#: 구간 미적용 사유는 KRW 와 같습니다(`BRACKET_NONE_KEY`/`BRACKET_NONE_LABEL` 을 그대로
+#: 공유합니다 — "구간을 못 정하는 이유"는 통화와 무관한 개념이라 새로 만들지 않았습니다).
+BRACKET_KEYS_USD = tuple(tier[0] for tier in BRACKET_TIERS_USD) + (BRACKET_NONE_KEY,)
+
+#: bracket_key(USD) → 화면 라벨.
+BRACKET_LABELS_USD = dict(
+    [(key, label) for key, label, _low, _high in BRACKET_TIERS_USD]
+    + [(BRACKET_NONE_KEY, BRACKET_NONE_LABEL)]
+)
+
+
+def assign_bracket_usd(real_principal_usd):
+    """
+    실제 "내 성적표" 매입원가합계(달러) → 체급(bracket_key). `assign_bracket()` 의 통화만
+    다른 미러입니다(5-11-9) — 검증 규칙(None·음수 거절)도 동일합니다.
+    """
+    amount = _require_number(real_principal_usd, "매입원가합계(USD)", allow_negative=False)
+    for key, _label, low, high in BRACKET_TIERS_USD:
+        if amount >= low and (high is None or amount < high):
+            return key
+    raise DuelRuleError(
+        f"매입원가합계(USD) {amount} 에 해당하는 체급이 없습니다 — BRACKET_TIERS_USD 에 구멍이 있습니다."
+    )
+
+
+def bracket_label_usd(bracket_key):
+    """bracket_key(USD) → 화면에 쓸 라벨. 모르는 키는 지어내지 않고 예외입니다."""
+    key = str(bracket_key or "").strip()
+    if key not in BRACKET_LABELS_USD:
+        raise DuelRuleError(f"알 수 없는 체급 식별자(USD)입니다: {bracket_key!r}")
+    return BRACKET_LABELS_USD[key]

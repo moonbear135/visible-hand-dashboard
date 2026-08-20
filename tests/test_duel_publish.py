@@ -132,6 +132,80 @@ def test_bracket_none_key_is_not_one_of_the_eight():
 
 
 # =============================================================================
+# 1-USD. 체급 경계(달러) — work order 5-11-9, KRW 8구간의 통화만 다른 미러
+# =============================================================================
+#  경계값은 오너가 이전 대화에서 확정한 값입니다: $750 / $2,250 / $3,750 / $7,500 /
+#  $22,500 / $45,000 / $75,000. KRW 구간과 **정확히 같은 배율**(100/60/30/10/5/3/1)입니다.
+@pytest.mark.parametrize("amount,expected", [
+    # 1구간 — $75,000 이상
+    (75_000, "usd_75000_plus"),
+    (999_999, "usd_75000_plus"),
+    (75_000_001, "usd_75000_plus"),
+    # 2구간 — $45,000 이상 ~ $75,000 미만
+    (74_999, "usd_45000_75000"),
+    (45_000, "usd_45000_75000"),
+    # 3구간 — $22,500 이상 ~ $45,000 미만
+    (44_999, "usd_22500_45000"),
+    (22_500, "usd_22500_45000"),
+    # 4구간 — $7,500 이상 ~ $22,500 미만
+    (22_499, "usd_7500_22500"),
+    (7_500, "usd_7500_22500"),
+    # 5구간 — $3,750 이상 ~ $7,500 미만
+    (7_499, "usd_3750_7500"),
+    (3_750, "usd_3750_7500"),
+    # 6구간 — $2,250 이상 ~ $3,750 미만
+    (3_749, "usd_2250_3750"),
+    (2_250, "usd_2250_3750"),
+    # 7구간 — $750 이상 ~ $2,250 미만
+    (2_249, "usd_750_2250"),
+    (750, "usd_750_2250"),
+    # 8구간 — $750 미만
+    (749, "usd_under_750"),
+    (0, "usd_under_750"),
+])
+def test_bracket_boundaries_usd_match_the_owners_eight_tiers(amount, expected):
+    assert duel_rules.assign_bracket_usd(amount) == expected
+
+
+def test_bracket_tiers_usd_have_no_gaps_and_no_overlaps():
+    """USD 8구간도 KRW 와 같은 방식으로 빈틈·겹침이 없는지 확인합니다."""
+    tiers = duel_rules.BRACKET_TIERS_USD
+    assert len(tiers) == 8, "오너가 확정한 구간 수는 KRW 와 마찬가지로 8개입니다(5-11-9)"
+    assert tiers[-1][2] == 0, "가장 낮은 구간의 하한은 0 이어야 합니다"
+    assert tiers[0][3] is None, "가장 높은 구간은 위로 열려 있어야 합니다"
+    for upper, lower in zip(tiers, tiers[1:]):
+        assert upper[2] == lower[3], f"{upper[0]} 과 {lower[0]} 사이에 구멍/겹침이 있습니다"
+
+
+def test_bracket_refuses_unknown_amounts_usd_instead_of_guessing():
+    """모르는 값을 최하위 구간으로 떨어뜨리지 않습니다(§0-1) — USD 도 KRW 와 동일."""
+    for bad in (None, -1, "많이", float("nan")):
+        with pytest.raises(DuelRuleError):
+            duel_rules.assign_bracket_usd(bad)
+
+
+def test_bracket_none_key_usd_is_not_one_of_the_eight():
+    """'구간 미적용'은 KRW·USD 가 **같은 상수를 공유**합니다(통화와 무관한 개념이므로)."""
+    assert duel_rules.BRACKET_NONE_KEY not in [tier[0] for tier in duel_rules.BRACKET_TIERS_USD]
+    assert duel_rules.BRACKET_NONE_KEY in duel_rules.BRACKET_KEYS_USD
+    assert len(duel_rules.BRACKET_KEYS_USD) == 9
+    assert duel_rules.bracket_label_usd(duel_rules.BRACKET_NONE_KEY) == "구간 미적용"
+
+
+def test_bracket_tiers_krw_and_usd_use_the_same_ratio():
+    """
+    🔴 KRW 배율(100/60/30/10/5/3/1)과 USD 배율이 **정확히 같은지** 회귀 고정합니다.
+    이 비율이 우연히 같은 게 아니라 오너가 의도한 것이라, 둘 중 한 표만 나중에 고치면
+    이 테스트가 잡습니다.
+    """
+    krw_ratios = [low / duel_rules.BRACKET_TIERS[-1][3] if duel_rules.BRACKET_TIERS[-1][3]
+                  else None for _key, _label, low, _high in duel_rules.BRACKET_TIERS]
+    usd_ratios = [low / duel_rules.BRACKET_TIERS_USD[-1][3] if duel_rules.BRACKET_TIERS_USD[-1][3]
+                  else None for _key, _label, low, _high in duel_rules.BRACKET_TIERS_USD]
+    assert krw_ratios == usd_ratios
+
+
+# =============================================================================
 # 2. 시즌 고정 — work order 5-3 (4·5차 확정: "체급은 시즌 동안 고정", 시즌 = 1년)
 # =============================================================================
 def test_season_length_constant_is_twelve_months():
@@ -361,23 +435,28 @@ def test_nickname_uses_a_cryptographic_random_source():
 
 
 def test_ensure_nickname_returns_the_existing_one_without_writing():
-    """이미 있으면 새로 만들지 않습니다 — 닉네임은 계좌에 고정입니다(5-5 재계산 금지)."""
+    """
+    이미 있으면 새로 만들지 않습니다 — 닉네임은 (사용자, 창유형)에 고정입니다(5-5 재계산 금지).
+    2026-08-20: `duel_nicknames` 가 (user_id, window_type) 키로 바뀌어 인자도 함께 바뀌었습니다.
+    """
     client = FakeClient(responses={
-        (duel_db.NICKNAMES_TABLE, "select"): [{"account_id": "acc-1", "nickname": "잔잔한물결0001"}],
+        (duel_db.NICKNAMES_TABLE, "select"): [
+            {"user_id": "user-1", "window_type": "M1", "nickname": "잔잔한물결0001"}],
     })
-    row = duel_db.ensure_nickname(client, "acc-1")
+    row = duel_db.ensure_nickname(client, "user-1", "M1")
     assert row["nickname"] == "잔잔한물결0001"
     assert client.calls_for(duel_db.NICKNAMES_TABLE, "insert") == []
 
 
 def test_ensure_nickname_creates_one_when_missing():
     client = FakeClient(responses={(duel_db.NICKNAMES_TABLE, "select"): []})
-    row = duel_db.ensure_nickname(client, "acc-1")
+    row = duel_db.ensure_nickname(client, "user-1", "M1")
     call = client.only_call(duel_db.NICKNAMES_TABLE, "insert")
-    assert call.payload["account_id"] == "acc-1"
+    assert call.payload["user_id"] == "user-1"
+    assert call.payload["window_type"] == "M1"
     assert call.payload["nickname"] == row["nickname"]
-    # 🔴 계좌 id 가 닉네임 문자열에 섞이지 않았는지 (유도 금지 — 5-5).
-    assert "acc-1" not in row["nickname"]
+    # 🔴 사용자 id 가 닉네임 문자열에 섞이지 않았는지 (유도 금지 — 5-5).
+    assert "user-1" not in row["nickname"]
 
 
 def test_ensure_nickname_retries_on_unique_conflict():
@@ -392,10 +471,10 @@ def test_ensure_nickname_retries_on_unique_conflict():
         (duel_db.NICKNAMES_TABLE, "select"): sequence([], [], []),
         (duel_db.NICKNAMES_TABLE, "insert"): sequence(
             Exception("duplicate key value violates unique constraint \"duel_nicknames_nickname_key\""),
-            [{"account_id": "acc-1", "nickname": "두번째후보0002"}],
+            [{"user_id": "user-1", "window_type": "M1", "nickname": "두번째후보0002"}],
         ),
     })
-    row = duel_db.ensure_nickname(client, "acc-1")
+    row = duel_db.ensure_nickname(client, "user-1", "M1")
     assert row["nickname"] == "두번째후보0002"
     inserts = client.calls_for(duel_db.NICKNAMES_TABLE, "insert")
     assert len(inserts) == 2
@@ -405,17 +484,18 @@ def test_ensure_nickname_retries_on_unique_conflict():
 
 def test_ensure_nickname_yields_to_the_other_tab_on_a_race():
     """
-    두 탭에서 동시에 눌렀을 때(= account_id 기본키 충돌) **먼저 만들어진 이름을 씁니다.**
-    한 계좌에 이름이 둘이면 과거 발행 행과의 대응이 끊깁니다(철회 삭제가 새어 나갑니다).
+    두 탭에서 동시에 눌렀을 때(= (user_id, window_type) 기본키 충돌) **먼저 만들어진 이름을
+    씁니다.** 한 사용자·창유형에 이름이 둘이면 과거 발행 행과의 대응이 끊깁니다
+    (철회 삭제가 새어 나갑니다).
     """
     from test_duel_db import sequence
     client = FakeClient(responses={
         (duel_db.NICKNAMES_TABLE, "select"): sequence(
-            [], [{"account_id": "acc-1", "nickname": "먼저만들어진0007"}]),
+            [], [{"user_id": "user-1", "window_type": "M1", "nickname": "먼저만들어진0007"}]),
         (duel_db.NICKNAMES_TABLE, "insert"):
             Exception("duplicate key value violates unique constraint \"duel_nicknames_pkey\""),
     })
-    row = duel_db.ensure_nickname(client, "acc-1")
+    row = duel_db.ensure_nickname(client, "user-1", "M1")
     assert row["nickname"] == "먼저만들어진0007"
     assert len(client.calls_for(duel_db.NICKNAMES_TABLE, "insert")) == 1
 
@@ -426,7 +506,7 @@ def test_ensure_nickname_does_not_swallow_real_errors():
         (duel_db.NICKNAMES_TABLE, "insert"): Exception("connection reset by peer"),
     })
     with pytest.raises(DuelDbError):
-        duel_db.ensure_nickname(client, "acc-1")
+        duel_db.ensure_nickname(client, "user-1", "M1")
 
 
 # =============================================================================
@@ -570,7 +650,10 @@ def test_publish_batch_purges_revoked_accounts_before_anything_else():
     """
     client = _publish_client(account_count=0, revoked=[{"account_id": "acc-9",
                                                         "revoked_at": "2026-08-01T00:00:00+09:00"}],
-                             nicknames=[{"account_id": "acc-9", "nickname": "떠난사람0009"}])
+                             extra_accounts=[{"id": "acc-9", "user_id": "user-9",
+                                             "window_type": "M1", "status": "active"}],
+                             nicknames=[{"user_id": "user-9", "window_type": "M1",
+                                        "nickname": "떠난사람0009"}])
     duel_publish.run_publish_batch(client, TODAY)
 
     ops = [(call.table, call.op) for call in client.calls]
@@ -938,14 +1021,20 @@ def _in_filtered(rows, column):
 
 def _publish_client(account_count, *, consented_principal=True, revoked=None,
                     nicknames=None, leaderboard_probe=None, positions=None,
-                    twr_pct_offset=0.0, existing_assignments=None):
+                    twr_pct_offset=0.0, existing_assignments=None, extra_accounts=None):
     """
     발행 배치용 가짜 클라이언트. `duel_public_consent` 표를 두 가지 목적(발행 대상 / 철회
     목록)으로 조회하므로, 필터를 보고 갈라 주는 callable 로 응답을 지정합니다.
+
+    ⚠️ `extra_accounts`: 2026-08-20, `duel_nicknames` 가 (user_id, window_type) 키로
+       바뀌면서 닉네임 조회에도 계좌 행(user_id 포함)이 필요해졌습니다. `revoked` 로
+       넘기는 계좌가 기본 `account_count` 범위 밖(예: 철회 전용 시나리오)이면, 그 계좌
+       행을 여기로 함께 넘겨야 `fetch_nicknames_for_accounts()` 가 찾을 수 있습니다.
     """
     accounts = [{"id": f"acc-{i}", "user_id": f"user-{i}", "window_type": "M1",
                  "status": "active", "seed_amount": 10_000_000, "currency": "KRW",
                  "anchor_date": "2026-01-02"} for i in range(account_count)]
+    accounts.extend(list(extra_accounts or []))
     consents = [_consent_row(account_id=f"acc-{i}",
                              consent_real_principal_bracket=consented_principal)
                 for i in range(account_count)]
@@ -985,8 +1074,8 @@ def _publish_client(account_count, *, consented_principal=True, revoked=None,
             for i in range(account_count)]),
         (duel_db.NICKNAMES_TABLE, "select"): _in_filtered(
             list(nicknames if nicknames is not None else [
-                {"account_id": f"acc-{i}", "nickname": f"닉네임{i:04d}"}
-                for i in range(account_count)]), "account_id"),
+                {"user_id": f"user-{i}", "window_type": "M1", "nickname": f"닉네임{i:04d}"}
+                for i in range(account_count)]), "user_id"),
         (duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): leaderboard_select,
     })
 
@@ -1049,7 +1138,8 @@ def test_publish_batch_skips_accounts_without_a_nickname_and_says_so():
     닉네임이 없는 계좌는 발행하지 않고, **그 사실을 요약에 남깁니다**(§0-1 — 조용히 빠지는
     계좌를 만들지 않기). 배치가 닉네임을 대신 만들어 주지도 않습니다.
     """
-    nicknames = [{"account_id": f"acc-{i}", "nickname": f"닉네임{i:04d}"} for i in range(499)]
+    nicknames = [{"user_id": f"user-{i}", "window_type": "M1", "nickname": f"닉네임{i:04d}"}
+                 for i in range(499)]
     client = _publish_client(account_count=500, nicknames=nicknames)
     summary = duel_publish.run_publish_batch(client, TODAY)
     assert summary["leaderboard_rows"] == 0, "499명이 되어 최소 인원 미달"
