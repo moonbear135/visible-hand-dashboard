@@ -227,7 +227,7 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `AUDIT_REPORT.md` | 2026-08-05 오푸스 코드베이스 감사 보고서 (13개 파일, 50여 건) |
 | `MACRO_REDESIGN_PROPOSAL.md` | (2026-08-09 신설, TASK_HISTORY #66) 매크로 14개 위험 지표의 실측 소스 조사 결과와 재설계 제안. 지표별 A/B/C 판정 · 소스/필드/지연(T+n)/난이도 · 가중치 재분배안 · 구현 순서. **§5 구현순서 1번(#68, 실측 2지표)·2번(#69, C 6개 제외+가중치 재분배)·3·4번(#70, VKOSPI·선물 베이시스, 실서버 검증 완료)·6번(#72, 공매도 2종을 실측 불가로 재분류 — 오너 결정 옵션②)까지 반영됨. 남은 건 5번(SMBS 스왑포인트)과 `Put_OTM_OI`. §4-3 가중치 재설계는 미적용(활성 6개 전부 실측 전환 후)** |
 | `collector_us_indices.py` | (2026-08-12 신설, #95 / 파싱 버그 수정 #96) 📈 리포트용 **미국 벤치마크 일별 종가** 수집기. stockanalysis.com 의 ETF 프록시(SPY=S&P500, ONEQ=나스닥종합) 과거주가 엔드포인트를 요청 1회씩 불러 `data/us_index_history.json` 에 누적(요청 1회당 125행 확인). ⚠️ 지수 포인트가 아니라 **ETF 종가**(키 이름에 PROXY 명시). devalue 디코더·HTTP 헬퍼는 `collector_us_stocks.py` 에서 import 재사용. 행 탐색은 **깊이 우선 재귀 + 날짜(`t`) 필수** — 최상위만 훑던 #95 버전은 실응답에서 0행이었음 |
-| `utils/report_db.py` | (2026-08-12 신설, #95) 📈 리포트 데이터 계층. 기간(일/주/월/분기/반기/연) 경계 계산 · 스냅샷 행 생성 · 기간 집계와 데이터 부족 판정 · 벤치마크 기간 수익률 · Supabase 접근. **⚠️ 2026-08-19부터 더 이상 유일하지 않음 — `utils/duel_db.py`도 같은 `service_role` 격리 패턴으로 씀(아래 결투 모듈 항목 참고)**(환경변수에서만 읽고 streamlit 미import) |
+| `utils/report_db.py` | (2026-08-12 신설, #95) 📈 리포트 데이터 계층. 기간(일/주/월/분기/반기/연) 경계 계산 · 스냅샷 행 생성 · 기간 집계와 데이터 부족 판정 · 벤치마크 기간 수익률 · Supabase 접근. **⚠️ 2026-08-19부터 더 이상 유일하지 않음 — `utils/duel_db.py`·`run_duel_daily_batch.py`(2026-08-20 신설)도 같은 `service_role` 격리 패턴으로 씀(아래 결투 모듈 항목 참고)**(환경변수에서만 읽고 streamlit 미import) |
 | `views/report_view.py` | (2026-08-12 신설, #95) 📈 리포트 화면. **사용자에게 보이는 이름은 "📈 사장님 보고서"**(2026-08-13 #107 개명 — 파일명·함수명·플래그는 그대로 `report_*`). 기본 숨김 `REPORT_ENABLED`, `visiblehand.py` 에서 "📊 내 성적표"의 하위 메뉴로 배선됨(#102·#105) |
 | `sql/report_schema.sql` | (2026-08-12 신설, #95) `portfolio_daily_snapshots` 테이블 + **RLS select 정책 1개**(사용자는 읽기만, 쓰기는 배치 전용). 오너가 Supabase SQL Editor 에서 1회 실행 |
 | `.github/workflows/scrape_report_snapshots.yml` | (2026-08-12 신설, #95) 평일 23:20 UTC — 미국 벤치마크 수집 → 사용자별 스냅샷 적재(Supabase) → `data/us_index_history.json` 커밋 |
@@ -627,7 +627,7 @@ Streamlit 프레임워크 한계 확인으로 이어져 **§0의 NiceGUI 전면 
 |---|---|
 | `sql/report_schema.sql` | **표 2개** — `portfolio_daily_snapshots`(사용자 × 시장 × 거래일 = 1행, 합계) + `portfolio_holding_snapshots`(§8, 2026-08-13 추가 — 사용자 × 시장 × **종목** × 거래일 = 1행, 상세) + 각각의 RLS. **정책이 select 하나뿐**인 게 `holdings` 와 다른 점 — 쓰기는 배치(service_role)만 하고 사용자는 자기 과거 기록을 못 고칩니다. `priced_count > 0` CHECK 로 "그날 가격을 하나도 모르면 행 자체가 안 생기게" DB 레벨에서도 강제 |
 | `collector_us_indices.py` | 미국 벤치마크(S&P500·나스닥) 일별 종가 수집기 — 아래 §10-3 소스 조사 결과 참고 |
-| `utils/report_db.py` | 기간 경계 계산 · 스냅샷 행 생성 · 기간 집계/데이터 부족 판정 · 벤치마크 수익률 · Supabase 접근. **⚠️ 2026-08-19부터 더 이상 유일하지 않음 — `utils/duel_db.py`도 같은 service_role 격리 패턴으로 씀(§ 결투 모듈 항목 참고)** |
+| `utils/report_db.py` | 기간 경계 계산 · 스냅샷 행 생성 · 기간 집계/데이터 부족 판정 · 벤치마크 수익률 · Supabase 접근. **⚠️ 2026-08-19부터 더 이상 유일하지 않음 — `utils/duel_db.py`·`run_duel_daily_batch.py`도 같은 service_role 격리 패턴으로 씀(§ 결투 모듈 항목 참고)** |
 | `views/report_view.py` | 리포트 화면(기간 선택·이전/다음 기간·시장별 블록·벤치마크 비교·데이터 부족 안내). 기본 숨김 |
 | `.github/workflows/scrape_report_snapshots.yml` | 평일 23:20 UTC 실행(코스피·미국 수집이 끝난 뒤) |
 | `tests/test_report.py` | 오프라인 **547체크** (네트워크·Supabase 불필요. 2026-08-16 #117 기준 — #112 +41, #113 +113, #114 +47, #115 +23, #116 +21, #117 +24). #96 부터 파싱 검증은 **실제 응답 원문 픽스처**(`tests/fixtures/us_index_history_{spy,oneq}_data_json_head.json`, 2026-08-12 캡처)로 합니다 |

@@ -1054,6 +1054,8 @@ visible_hand/
 │   ├── scrape.yml                  코스피 자동 수집 (평일 KST 16:05)
 │   ├── scrape_us.yml               🇺🇸 미국주식 자동 수집
 │   ├── scrape_report_snapshots.yml 📈 벤치마크 종가 + 사용자별 평가금액 스냅샷 적재
+│   ├── duel_daily.yml              ⚔️ (2026-08-20 신설, 초안) 결투 모듈 야간 배치 — 크롤링 신선도 판정 →
+│   │                               주문 체결/취소 → 정기입금 → 스냅샷 적재. 관리자 전용 공개 전까지는 숨김 상태
 │   ├── render_keep_awake.yml       🚀 Render 무료 인스턴스 슬립 방지 (10분 간격)
 │   └── keep_awake.yml              🕰️ Streamlit 슬립 방지 (유예 종료 시 streamlit_wake job 삭제 대상)
 │

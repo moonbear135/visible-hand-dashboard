@@ -1,0 +1,146 @@
+# .github/workflows/duel_daily.yml
+# =============================================================================
+# ⚔️ "결투다!" 야간 배치 — DUEL_MODULE_WORK_ORDER.md 2-5
+#
+#   하는 일 (순서가 곧 작업지시서 2-5 의 순서입니다):
+#     ① 그날 확정 종가가 실제로 확보됐는지 판정 (2-9, 51개 점검 — 아래 주석 참고)
+#     ② 그날이 10일이면 정기 입금 (2-2)
+#     ③ pending 주문 체결 → 포지션 갱신 → 현금 원장 기록 (2-4-6)
+#     ④ 일별 스냅샷 적재 (1-5)
+#     ⑤ 내일 비교용 기준값 파일을 저장소에 커밋
+#
+#   실제 로직은 전부 파이썬에 있습니다(`run_duel_daily_batch.py` → `utils/duel_batch.py`).
+#   이 워크플로우는 **언제·어떤 권한으로 그걸 부르는가**만 정합니다.
+# -----------------------------------------------------------------------------
+# ✅ 2026-08-20 — 아래 cron 시각을 실제 `scrape.yml`(사용자 device_bash로 직접 확인)과
+#    대조했습니다. 실제 `scrape.yml`: name="Daily Market Scraper", cron '5 7 * * 1-5'
+#    (= UTC 07:05 = KST 16:05 시작), 실측 소요 20~30분 → 늦어도 UTC 07:40(KST 16:40) 종료.
+#    이 파일의 cron(UTC 08:10 = KST 17:10)은 그 뒤 약 30분 여유를 두고, 주문 접수 시작
+#    (18:00:01 KST)보다 50분 앞서 끝나도록 잡은 것이었는데, 실제 파일과 대조해보니
+#    **그대로 맞았습니다.** 별도 수정 필요 없음.
+#
+#    남은 확인 사항 2가지:
+#    1) 더 안전한 대안 — 작업지시서 2-5 는 **별도 cron 보다 `workflow_run`**
+#       (= `scrape.yml` 완료를 조건으로 실행)을 권합니다. 실제 `scrape.yml`의 name 값
+#       ("Daily Market Scraper")을 위에서 이미 확인했으니, 아래 주석 처리된 대안으로
+#       바꾸고 싶으면 그 값을 그대로 쓰면 됩니다.
+#    2) 커밋 되돌림 충돌. `scrape.yml`이 같은 `data/` 폴더를 커밋하므로, 두 워크플로우가
+#       겹치면 push가 거절될 수 있습니다. 아래 push 단계는 기존 워크플로우들과 같은
+#       "fetch + rebase 재시도" 패턴을 씁니다(실제 `scrape.yml`에서 그대로 확인한 패턴).
+# =============================================================================
+
+name: Duel Daily Batch
+
+on:
+  schedule:
+    # 평일 08:10 UTC = KST 17:10 (코스피 수집 16:05 완료 후, 주문 접수 18:00:01 시작 전).
+    # ✅ 실제 scrape.yml(cron '5 7 * * 1-5' = KST 16:05, 실측 20~30분 소요)과 대조 완료.
+    - cron: "10 8 * * 1-5"
+  # 수동 실행. needs_review 로 보류된 날을 관리자가 확인한 뒤 결론 내릴 때도 씁니다.
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "처리할 거래일 (YYYY-MM-DD, KST). 비우면 오늘"
+        required: false
+        default: ""
+      override:
+        description: "관리자 확인 후 판정 덮어쓰기 (fill = 정상이었다 / cancel = 실패였다)"
+        required: false
+        default: ""
+        type: choice
+        options: ["", "fill", "cancel"]
+      dry_run:
+        description: "저장하지 않고 계산만"
+        required: false
+        default: false
+        type: boolean
+
+# ⚠️ 더 안전한 대안(작업지시서 2-5 권장) — 실제 scrape.yml 의 name 을 확인한 뒤 바꾸세요.
+#   on:
+#     workflow_run:
+#       workflows: ["<scrape.yml 의 name 값>"]
+#       types: [completed]
+#   그리고 job 에 `if: github.event.workflow_run.conclusion == 'success'` 를 붙입니다.
+
+# 기준값 파일(data/duel_freshness_probe_previous.json)을 저장소에 되커밋하므로 쓰기 권한이
+# 필요합니다. 그 외 권한은 주지 않습니다(최소 권한).
+permissions:
+  contents: write
+
+# 같은 워크플로우가 겹쳐 돌면 같은 거래일을 두 번 처리하려다 서로의 커밋을 밀어냅니다.
+# (배치 자체는 멱등이라 데이터가 깨지지는 않지만, push 충돌로 시끄러워집니다.)
+concurrency:
+  group: duel-daily-batch
+  cancel-in-progress: false
+
+jobs:
+  duel-batch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        with:
+          # 기준값 파일을 커밋해 되돌려 보내야 하므로 얕은 클론이어도 push 가 가능하도록
+          # 기본 토큰을 그대로 씁니다(추가 시크릿 없음).
+          fetch-depth: 0
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 결투 야간 배치 실행
+        env:
+          # 🔴 배치 전용 키. 사용자가 접속하는 앱 서버(Render)에는 **절대** 넣지 않습니다
+          #    (§0-3-8 · utils/duel_db.py 머리말). 변수 이름은 duel_db.py 가 읽는 것과
+          #    글자 그대로 같아야 합니다: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.target_date }}" ]; then
+            ARGS="$ARGS --target-date ${{ github.event.inputs.target_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.override }}" ]; then
+            ARGS="$ARGS --override ${{ github.event.inputs.override }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "실행: python run_duel_daily_batch.py $ARGS"
+          python run_duel_daily_batch.py $ARGS
+
+      - name: 신선도 기준값 파일 커밋
+        # 배치가 실패하면(비정상 종료) 여기까지 오지 않습니다 — 실패한 실행의 기준값을
+        # 커밋해 다음 날 판정을 오염시키지 않기 위해서입니다.
+        # `scrape_report_snapshots.yml` 이 data/us_index_history.json 을 커밋하는 것과
+        # 같은 방식입니다(변경이 없으면 아무것도 하지 않고 정상 종료).
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/duel_freshness_probe_previous.json
+          if git diff --cached --quiet; then
+            echo "기준값 변경 없음 — 커밋하지 않습니다."
+            exit 0
+          fi
+          git commit -m "chore(duel): 신선도 점검 기준값 갱신 [skip ci]"
+          # 같은 data/ 폴더를 코스피 수집 워크플로우도 커밋하므로 push 가 거절될 수 있습니다.
+          # 기존 워크플로우들과 같은 fetch+rebase 재시도 패턴(최대 3회).
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "push 성공 (시도 $attempt)"
+              exit 0
+            fi
+            echo "push 거절 — fetch 후 rebase 재시도 ($attempt/3)"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || exit 1
+          done
+          echo "❌ 3회 시도 후에도 push 하지 못했습니다."
+          exit 1

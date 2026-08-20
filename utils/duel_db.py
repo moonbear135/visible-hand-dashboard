@@ -972,6 +972,72 @@ def cash_balances_by_account(ledger_rows):
 
 
 # -----------------------------------------------------------------------------
+#  ⬇️ 2026-08-20 추가 — 야간 배치(`utils/duel_batch.py`)가 필요로 하는 **일괄 조회 2개**
+#
+#  왜 새로 만들었는가: A 절에는 `fetch_my_positions()` · `fetch_my_snapshots()` 가 이미
+#  있지만 둘 다 **계좌 1개씩** 읽는 화면용 함수입니다. 배치가 그걸 계좌마다 부르면 그게
+#  정확히 §0-3-2(작업지시서 2-7)가 금지한 "사용자 수 × 쿼리" 모양이 됩니다. 그렇다고
+#  배치가 Supabase 를 직접 부르면 이 파일이 "유일한 접착제"라는 계층 규약이 깨집니다.
+#  그래서 위 `fetch_cash_ledger_for_accounts()` 와 **완전히 같은 모양**(in 필터 1회,
+#  대상이 비면 질의 자체를 보내지 않음)으로 B 절에 둡니다.
+# -----------------------------------------------------------------------------
+def fetch_positions_for_accounts(service_client, account_ids=None):
+    """
+    (배치 전용) 여러 계좌의 보유 포지션을 **한 번의 질의로** 읽습니다(§0-3-2).
+
+    `account_ids` 를 주면 `in` 필터로 좁히고, 안 주면 전체를 읽습니다. 정렬은 (계좌, 종목)
+    이라 `group_rows_by_account()` 로 묶으면 계좌 안에서 종목 순서가 항상 같습니다 —
+    배치를 두 번 돌렸을 때 스냅샷 행 순서가 흔들리지 않게 하려는 것입니다.
+
+    ⚠️ 수량·평단가를 여기서 고치지 않습니다(읽기 전용). 갱신은 `upsert_positions()` 가
+       `duel_rules.apply_buy_fill_to_position()` 의 결과를 담아서만 합니다.
+    """
+    _require_client(service_client, batch=True)
+    query = service_client.table(POSITIONS_TABLE).select(
+        "account_id,ticker,stock_name,quantity,avg_cost,status,delisted_date")
+    if account_ids is not None:
+        ids = [str(value) for value in account_ids]
+        if not ids:
+            return []          # 대상이 없으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
+        query = query.in_("account_id", ids)
+    rows = _execute(query.order("account_id").order("ticker"), "보유 포지션 일괄 조회")
+    return [dict(row) for row in rows]
+
+
+def fetch_daily_snapshots_for_accounts(service_client, account_ids=None,
+                                       start_date=None, end_date=None):
+    """
+    (배치 전용) 여러 계좌의 일별 스냅샷을 **한 번의 질의로**, 오래된 순으로 읽습니다(§0-3-2).
+
+    배치가 이걸 왜 읽는가 — 두 가지 때문입니다(둘 다 계좌별로 다시 조회하면 안 됩니다):
+      ① **누적 TWR**(2-6). `duel_rules.compute_twr()` 는 개설일부터의 스냅샷 전부를 받아야
+         구간 곱을 만들 수 있습니다. 그래서 기본값은 기간을 자르지 않습니다 —
+         자르면 첫 구간의 분모(V_{t−1})가 사라져 수익률이 조용히 달라집니다.
+      ② **직전 스냅샷 날짜.** 수집 실패·휴장으로 스냅샷을 건너뛴 날의 외부 현금흐름(시드·
+         정기입금)이 어느 날 행에도 안 적히면, 다음 스냅샷에서 입금이 **수익으로 둔갑**합니다.
+         배치는 "직전 스냅샷 다음날 ~ 오늘"의 현금흐름을 오늘 행에 합산해 그걸 막습니다
+         (자세한 근거는 `utils/duel_batch.py` 의 현금흐름 이월 주석).
+
+    ⚠️ `start_date` 를 함부로 주지 마세요(위 ① 이유). 인자를 열어 둔 것은 나중에 계좌가
+       아주 많아졌을 때 오너가 의도적으로 자를 수 있게 하려는 것뿐입니다.
+    """
+    _require_client(service_client, batch=True)
+    query = service_client.table(DAILY_SNAPSHOTS_TABLE).select(
+        "account_id,snapshot_date,total_value,cash_flow_amount")
+    if account_ids is not None:
+        ids = [str(value) for value in account_ids]
+        if not ids:
+            return []
+        query = query.in_("account_id", ids)
+    if start_date is not None:
+        query = query.gte("snapshot_date", _iso_date(start_date, "조회 시작일"))
+    if end_date is not None:
+        query = query.lte("snapshot_date", _iso_date(end_date, "조회 종료일"))
+    rows = _execute(query.order("account_id").order("snapshot_date"), "일별 스냅샷 일괄 조회")
+    return [dict(row) for row in rows]
+
+
+# -----------------------------------------------------------------------------
 # B-2. 옵트인 — 계좌 3개 + 시드 원장 3행 (2-1)
 # -----------------------------------------------------------------------------
 def create_duel_accounts_for_user(service_client, user_id, *, anchor_date=None):
