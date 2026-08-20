@@ -1247,3 +1247,62 @@ def resolve_reconsent_block(revoked_at, now=None):
         "unblocks_on": unblock_date,
         "revoked_at": revoked,
     }
+
+
+# =============================================================================
+# 10-6. 순위표 **표시** 상수 — work order 5-7 (2026-08-20 · 화면 2종 작업에서 추가)
+# =============================================================================
+#  5-7 원문: *"**상위 500 + 하위 500**, 페이지네이션. 미국주식 화면(30개 페이지네이션)의
+#  기존 패턴을 참고하세요(§0-3-10)."*
+#
+#  ⚠️ 여기 있는 세 숫자는 **표시 규칙**이지 발행 규칙이 아닙니다. 발행 여부를 가르는
+#     `MIN_PARTICIPANTS_FOR_PUBLICATION`(500) 과 아래 `LEADERBOARD_TOP_COUNT`(500) 는
+#     **숫자가 우연히 같을 뿐 완전히 다른 개념**입니다 — 하나는 "몇 명부터 공개해도
+#     익명성이 지켜지는가"(5-6), 다른 하나는 "공개된 순위표에서 몇 등까지 보여줄
+#     것인가"(5-7)입니다. 한쪽을 바꾼다고 다른 쪽이 따라 바뀌면 안 되므로 상수를 따로
+#     둡니다(같은 값을 참조하게 묶으면 나중에 그 사실을 잊고 한쪽만 바꿉니다).
+#  ⚠️ 화면 파일에 이 숫자를 다시 적지 마세요(§0-3-10). 화면은 이 상수만 봅니다.
+
+#: 순위표 위쪽에서 보여줄 최대 인원(5-7 "상위 500").
+LEADERBOARD_TOP_COUNT = 500
+
+#: 순위표 아래쪽에서 보여줄 최대 인원(5-7 "하위 500").
+LEADERBOARD_BOTTOM_COUNT = 500
+
+#: 한 페이지에 보여줄 행 수. 5-7 이 지목한 미국주식 화면의 기존 값과 같은 30 입니다
+#: (`PROJECT_STATUS.md` §7 파일 지도 — `views/us_stocks_view.py` "30개 페이지네이션").
+#: 이 저장소 안에서 확인한 값이라 새로 정한 숫자가 아닙니다(§0-1).
+LEADERBOARD_PAGE_SIZE = 30
+
+
+def leaderboard_page_bounds(page_index, *, page_size=None, section_cap=None):
+    """
+    페이지 번호(0부터) → 그 페이지가 읽어야 할 `(offset, limit)`. work order 5-7 참고.
+
+    "상위 500"·"하위 500" 두 구간 **각각의 안에서만** 페이지가 넘어갑니다. 마지막 페이지가
+    구간 상한(500)에 걸리면 `limit` 이 그만큼 줄어듭니다 — 501번째 행을 읽어 오는 경로
+    자체를 만들지 않으려는 것입니다(화면에서 잘라내면 이미 읽어 온 뒤라 의미가 없습니다).
+
+    반환 `(offset, limit)`. 그 페이지가 구간 밖이면 `limit` 이 0 입니다(질의를 보내지 말라는 뜻).
+
+    ⚠️ 순위 자체는 여기서 계산하지 않습니다 — 배치가 이미 계산해 발행표에 저장한 `rank`
+       컬럼을 읽기만 합니다(§0-3-2 / 5-7).
+    """
+    index = _require_int(page_index, "페이지 번호", minimum=0)
+    size = _require_int(page_size if page_size is not None else LEADERBOARD_PAGE_SIZE,
+                        "페이지 크기", minimum=1)
+    cap = _require_int(section_cap if section_cap is not None else LEADERBOARD_TOP_COUNT,
+                       "구간 상한", minimum=0)
+    offset = index * size
+    if offset >= cap:
+        return offset, 0
+    return offset, min(size, cap - offset)
+
+
+def leaderboard_page_count(section_cap=None, *, page_size=None):
+    """한 구간(상위/하위)이 최대 몇 페이지인가. 화면의 '다음' 버튼 한계 판정용."""
+    size = _require_int(page_size if page_size is not None else LEADERBOARD_PAGE_SIZE,
+                        "페이지 크기", minimum=1)
+    cap = _require_int(section_cap if section_cap is not None else LEADERBOARD_TOP_COUNT,
+                       "구간 상한", minimum=0)
+    return (cap + size - 1) // size

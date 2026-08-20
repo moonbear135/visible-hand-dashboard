@@ -117,6 +117,16 @@ class FakeQuery:
         self.filters.append((operator, column, criteria))
         return self
 
+    def range(self, start, end):
+        """
+        PostgREST 의 페이지네이션(`.range(start, end)` — **양끝을 포함**하는 구간).
+        2026-08-20 추가 — `utils/duel_db.py::fetch_public_leaderboard()` 가 순위표 한
+        페이지를 읽는 방법입니다(`.limit()` + `.offset()` 두 갈래로 나누지 않고 한 가지
+        형태로만 씁니다 — `.filter()` 를 추가할 때와 같은 판단).
+        """
+        self.options["range"] = (start, end)
+        return self
+
     def limit(self, count):
         self.options["limit"] = count
         return self
@@ -796,32 +806,56 @@ def test_opt_in_does_not_reach_for_the_batch_key():
         "RPC 이름은 문자열을 흩뿌리지 않고 OPT_IN_RPC 상수 하나로 씁니다"
 
 
-def test_publish_tables_are_only_touched_by_the_batch_section():
+def test_publish_tables_are_only_written_by_the_batch_section():
     """
-    🔴 5단계 착수(2026-08-20)로 **교체된** 테스트.
+    🔴 2026-08-20 (순위표 화면 라운드) **의도적으로 다시 조정한** 테스트 — 그 이력을 남깁니다.
 
-    예전에는 "발행표를 아직 한 글자도 언급하지 않는다"를 고정하고 있었습니다. 이제 5단계를
-    실제로 만들었으므로 그 검사는 성립하지 않습니다 — 대신 **더 강한 것**을 고정합니다:
-    발행표 2개를 **읽든 쓰든** 건드리는 함수는 전부 B 절(배치)에 있어야 하고, A 절(사용자
-    세션)에는 그 표 이름이 **한 번도 나오지 않아야** 합니다.
+    · 5단계 백엔드 이전: "A 절이 발행표를 한 글자도 언급하지 않는다".
+    · 5단계 백엔드 라운드: 위와 같되 "읽든 쓰든" 전부 B 절이어야 한다로 교체.
+    · **지금(화면 라운드)**: 순위표 화면은 로그인한 **일반 사용자**가 보는 화면이고, 스키마
+      §9-7 은 그 두 표에 `authenticated` 의 **select 를 이미 허용**하고 있습니다. 그 조회를
+      B 절(배치)에 두면 화면이 배치 함수를 부르게 되고, 그 순간 앱 서버에 service_role 키가
+      필요해집니다 — §0-3-8 이 막으려는 바로 그 사고입니다. 그래서 **읽기만** A 절로
+      내려왔습니다(`fetch_public_leaderboard*` / `fetch_public_holdings_for_nickname`).
 
-    이게 왜 더 강한가: 예전 검사는 "5단계 전"에만 유효했고 5단계가 오면 그냥 삭제됐을
-    검사입니다. 이 검사는 앞으로도 계속 유효합니다 — 나중에 누가 "화면에서 바로 순위표를
-    쓰면 편하지 않나"라고 A 절에 함수를 만드는 순간 실패합니다. 발행표에 쓰는 주체는
-    야간 배치뿐이고(스키마 §9-8 은 insert/update/delete 정책을 아무에게도 주지 않았습니다),
-    사용자 세션이 그 표를 쓰려고 하면 조용히 0행이 되거나 권한 오류가 납니다.
+    지금 고정하는 불변식(약해진 것이 아니라 **더 정확해진 것**):
+      ① A 절은 발행표에 **쓰지 않습니다** — insert/update/upsert/delete 가 한 번도 없어야
+         합니다. (스키마 §9-8 은 그 정책을 아무에게도 주지 않았으므로, 앱에 그런 코드가
+         있다면 그건 "권한 오류를 만드는 코드"이거나 누군가 RLS 를 열려는 신호입니다.)
+      ② A 절은 **체급 배정표(`duel_bracket_assignments`)를 아예 건드리지 않습니다** —
+         이 표는 읽기도 배치 몫입니다(§8-3 은 service_role 에도 update/delete 를 안 줬고,
+         화면이 체급을 알아야 할 이유가 없습니다. 체급은 발행표 행에 이미 들어 있습니다).
+      ③ 발행표 이름 **문자열**은 여전히 §0 의 상수 두 줄에만 있습니다.
     """
-    _tree, source = _module_ast()
+    tree, source = _module_ast()
     a_start = source.index("#  A 절 —")
     b_start = source.index("#  B 절 —")
     a_section = source[a_start:b_start]
 
-    for table in ("duel_public_leaderboard", "duel_public_holdings",
-                  "duel_bracket_assignments", "PUBLIC_LEADERBOARD_TABLE",
-                  "PUBLIC_HOLDINGS_TABLE", "BRACKET_ASSIGNMENTS_TABLE"):
+    # ② 체급 배정표는 A 절에서 읽지도 않습니다.
+    for table in ("duel_bracket_assignments", "BRACKET_ASSIGNMENTS_TABLE"):
         assert table not in a_section, f"A 절이 발행 인프라({table})를 건드립니다"
 
-    # 표 이름 문자열은 §0 의 상수 세 줄에만 있어야 합니다(문자열을 흩뿌리지 않기).
+    # ① A 절 함수 중 발행표에 **쓰는** 함수가 하나도 없어야 합니다.
+    functions = {node.name: node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)}
+    for name, node in functions.items():
+        marker = f"def {name}("
+        if not (a_start <= source.index(marker) < b_start):
+            continue
+        targets = _write_targets(node)
+        assert not ({"PUBLIC_LEADERBOARD_TABLE", "PUBLIC_HOLDINGS_TABLE",
+                     "BRACKET_ASSIGNMENTS_TABLE"} & targets), \
+            f"A 절 함수 {name} 이 발행표에 씁니다: {targets}"
+
+    # A 절이 발행표를 만지는 방법은 select 하나뿐이라는 것을 문자열로도 한 번 더 고정합니다.
+    for forbidden in (".insert(", ".update(", ".upsert(", ".delete()"):
+        publish_writes = [line for line in a_section.splitlines()
+                          if forbidden in line and ("PUBLIC_LEADERBOARD_TABLE" in line
+                                                    or "PUBLIC_HOLDINGS_TABLE" in line)]
+        assert not publish_writes, f"A 절이 발행표에 {forbidden} 를 씁니다: {publish_writes}"
+
+    # ③ 표 이름 문자열은 §0 의 상수 두 줄에만 있어야 합니다(문자열을 흩뿌리지 않기).
     literals = [line for line in source.splitlines()
                 if '"duel_public_leaderboard"' in line or '"duel_public_holdings"' in line]
     assert len(literals) == 2, f"발행표 이름 문자열이 상수 밖에도 있습니다: {literals}"

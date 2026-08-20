@@ -283,6 +283,27 @@ def _require_positive_int(value, label):
     return number
 
 
+def _require_offset(value, label):
+    """
+    페이지네이션의 `offset` 검증(0 이상 정수). `_require_positive_int()` 와 짝이지만 **0 을
+    허용**한다는 점만 다릅니다 — 첫 페이지의 offset 은 0 이라 위 함수를 쓸 수 없습니다.
+
+    ⚠️ 음수·소수를 0 으로 조용히 보정하지 않습니다. 보정하면 "2페이지를 눌렀는데 1페이지가
+       나오는" 조용한 오작동이 되고, 사용자는 그 사실을 알 수 없습니다(§0-1).
+    """
+    if value is None or isinstance(value, bool):
+        raise DuelDbError(f"{label}가 올바르지 않습니다: {value!r}")
+    try:
+        number = int(value)
+    except (TypeError, ValueError) as exc:
+        raise DuelDbError(f"{label}는 정수여야 합니다: {value!r}") from exc
+    if isinstance(value, float) and number != value:
+        raise DuelDbError(f"{label}는 정수여야 합니다(소수 불가): {value!r}")
+    if number < 0:
+        raise DuelDbError(f"{label}는 0 이상이어야 합니다: {value!r}")
+    return number
+
+
 def _require_amount(value, label, *, allow_zero=False):
     if value is None:
         raise DuelDbError(f"{label}가 없습니다.")
@@ -1087,6 +1108,21 @@ def ensure_nickname(client, account_id):
     )
 
 
+def fetch_my_nickname(client, account_id):
+    """
+    이 계좌의 공개용 닉네임 행(없으면 None) — **만들지 않고 읽기만** 합니다.
+    2026-08-20 추가(동의 관리 화면용).
+
+    왜 `ensure_nickname()` 을 그대로 쓰지 않는가: 그 함수는 없으면 **만듭니다.** 화면을
+    그리는 것만으로 닉네임이 발급되면, 동의 화면을 열어 보기만 하고 나간 사용자에게도
+    공개용 별명이 생깁니다 — 5-5 가 발급 시점을 "옵트인 시가 아니라 5단계 동의 시"로 못
+    박은 이유가 정확히 그것이고, 한 번 만든 닉네임은 바꿀 수 없습니다(스키마 §9-6 에
+    update 정책이 없습니다). **화면을 그리는 행위는 아무것도 만들지 않아야 합니다.**
+    """
+    _require_client(client)
+    return _fetch_nickname_row(client, _require_text(account_id, "계좌 ID"))
+
+
 def _fetch_nickname_row(client, account_id):
     """이 계좌의 닉네임 행(없으면 None). 사용자 세션·배치 클라이언트 양쪽에서 같은 모양입니다."""
     rows = _execute(
@@ -1094,6 +1130,166 @@ def _fetch_nickname_row(client, account_id):
         "닉네임 조회",
     )
     return dict(rows[0]) if rows else None
+
+
+# -----------------------------------------------------------------------------
+# A-6. 발행표 **읽기 전용** 조회 (작업지시서 5-7 · 5-2) — 2026-08-20 추가
+# -----------------------------------------------------------------------------
+#  🔴 이 절에서 발행표(`duel_public_leaderboard` / `duel_public_holdings`)를 만지는
+#     유일한 자리입니다. 그리고 **select 밖으로는 한 발짝도 나가지 않습니다.**
+#
+#     왜 A 절에 두는가: 순위표 화면은 로그인한 **일반 사용자**가 보는 화면이고, 이 두 표는
+#     스키마 §9-7 에서 로그인 사용자(`authenticated`)에게 **select 만** 준 표입니다(insert/update/delete
+#     정책은 아무에게도 없습니다). 즉 사용자 세션 클라이언트로 읽는 것이 정상 경로이고,
+#     여기에 배치 키가 끼어들 이유가 하나도 없습니다. 반대로 이 조회를 B 절에 두면 화면이
+#     B 절 함수를 부르게 되고, 그러면 앱 서버가 **RLS 를 우회하는 배치 키**를 갖게 됩니다
+#     (§0-3-8). ⚠️ 그 키의 이름을 이 절에는 **주석에도** 적지 않습니다 — A 절 전체를
+#     문자열로 훑는 `tests/test_duel_db.py` 의 격리 회귀 검사가 그것까지 실패로 잡습니다.
+#     그 검사를 느슨하게 만들지 마세요(§0-3-9 — 조심이 아니라 구조로).
+#
+#     🔒 이 세 함수가 지키는 것(버그가 나도 새어나갈 수 없게 — 5-4-5 / §0-3-8):
+#       ① **`select("*")` 를 쓰지 않습니다.** 읽는 컬럼을 하나하나 적습니다. 나중에 누가
+#          발행표에 컬럼을 하나 더 붙여도, 이 함수가 그것을 화면으로 날라 주는 일은
+#          없습니다. (발행표에는 애초에 식별자 컬럼이 없지만 — 스키마 §8 — 두 겹으로
+#          막아 둡니다. §0-3-9 "조심이 아니라 구조로".)
+#       ② 원본 표(`duel_positions` · `holdings` · `profiles` · `duel_cash_ledger`)를
+#          **부르지 않습니다.** 이 두 함수의 호출부(순위표 화면)는 그 표의 이름조차 몰라도
+#          됩니다(5-4-5).
+#       ③ 순위를 **계산하지 않습니다.** 배치가 미리 계산해 넣은 `rank` 컬럼으로 정렬만
+#          합니다(§0-3-2 / 5-7 — 방문자 수만큼 전체 스캔이 돌지 않게).
+#
+#     ⚠️ 이 표는 **날짜별 발행 이력이 쌓이는 표**입니다(5-4-4 는 "그날 발행분"을 통째로
+#        갈아끼우지, 과거 날짜를 지우지 않습니다). 그래서 날짜를 지정하지 않고 읽으면
+#        여러 날짜가 섞입니다. 화면은 `fetch_public_leaderboard_latest_date()` 로 **그
+#        그룹의 최신 발행일을 한 번 확정한 뒤**, 그 날짜를 아래 두 함수에 명시적으로
+#        넘깁니다(페이지를 넘기는 도중에 발행일이 바뀌어 목록이 뒤섞이는 것도 막습니다).
+# -----------------------------------------------------------------------------
+#: 순위표 화면에 실어 보내는 컬럼(위 ①). 이 목록에 `id` 를 넣지 마세요 — 화면에 쓸모가
+#: 없고, 발행 순서(= 계좌 생성 순서와 상관관계가 생길 수 있는 값)를 노출합니다.
+PUBLIC_LEADERBOARD_COLUMNS = "published_date,window_type,bracket_key,rank,nickname,twr_pct"
+
+#: 공개 보유종목 화면에 실어 보내는 컬럼(위 ①).
+PUBLIC_HOLDINGS_COLUMNS = "published_date,window_type,nickname,ticker,stock_name,quantity,buy_amount"
+
+
+def fetch_public_leaderboard_latest_date(client, *, window_type, bracket_key):
+    """
+    이 그룹(창유형 × 체급)이 **가장 최근에 발행된 날짜**(`YYYY-MM-DD`) 또는 None.
+
+    None 은 오류가 아니라 정상 상태입니다 — ① 아직 아무도 이 그룹에 없거나,
+    ② 최소 인원(5-6)을 못 채워 발행되지 않았거나, ③ 발행됐다가 인원이 줄어
+    5-6 청소로 지워진 경우입니다. 화면은 이 셋을 "아직 공개할 만큼 사람이 모이지
+    않았습니다"로 **똑같이** 안내합니다 — 셋을 구분해 보여주면 그 자체가 "이 구간에 몇
+    명쯤 있는지"에 대한 정보가 되고, 그건 소수 N 역추적의 재료입니다(5-6).
+
+    질의 1개(`limit(1)`)입니다.
+    """
+    _require_client(client)
+    window = _require_text(window_type, "창 유형")
+    bracket = _require_text(bracket_key, "체급 식별자")
+    rows = _execute(
+        client.table(PUBLIC_LEADERBOARD_TABLE).select("published_date")
+        .eq("window_type", window).eq("bracket_key", bracket)
+        .order("published_date", desc=True).limit(1),
+        "공개 순위표 발행일 조회",
+    )
+    value = (rows[0] or {}).get("published_date") if rows else None
+    return str(value)[:10] if value else None
+
+
+def fetch_public_leaderboard(client, *, window_type, bracket_key, published_date=None,
+                             limit=duel_rules.LEADERBOARD_PAGE_SIZE, offset=0,
+                             order_desc=False):
+    """
+    발행된 공개 순위표 한 페이지를 읽습니다(작업지시서 5-7). 반환: 행 dict 목록.
+
+    인자
+        window_type    : "M1" / "M3" / "M6"
+        bracket_key    : `duel_rules.BRACKET_KEYS` 중 하나(구간 미적용 포함)
+        published_date : 발행일. **화면은 반드시 넘깁니다**
+                         (`fetch_public_leaderboard_latest_date()` 로 먼저 확정).
+                         None 이면 날짜를 가리지 않습니다 — 과거 이력을 통째로 훑어야 하는
+                         관리 목적에만 쓰세요.
+        limit / offset : 페이지네이션(기본 한 페이지 = `duel_rules.LEADERBOARD_PAGE_SIZE`).
+                         "상위 500 / 하위 500"이라는 **구간 상한**은 화면이 아니라
+                         `duel_rules.leaderboard_page_bounds()` 가 계산해 여기로 넘깁니다.
+        order_desc     : False 면 1위부터(= 상위 500), True 면 꼴찌부터(= 하위 500).
+
+    ── 왜 `order_desc` 가 필요한가 ───────────────────────────────────────────────
+    "하위 500"을 얻으려면 전체 인원을 알아야 `offset` 을 계산할 수 있는데, 인원을 세는
+    질의를 화면 로드마다 돌리는 것은 §0-3-2 가 막는 바로 그 모양입니다. 정렬 방향만
+    뒤집으면 인원을 몰라도 꼴찌부터 500명을 정확히 읽을 수 있습니다(화면이 그 페이지를
+    다시 뒤집어 보여줍니다).
+
+    ── 동순위(같은 rank)와 페이지 경계 ──────────────────────────────────────────
+    순위는 동점자가 **같은 값을 공유**합니다(`duel_rules.rank_participants()`). 정렬 키가
+    `rank` 하나뿐이면 같은 rank 안의 순서가 질의마다 달라질 수 있고, 그러면 페이지를 넘길
+    때 같은 사람이 두 번 나오거나 한 명이 통째로 건너뛰어집니다. 그래서 `nickname` 을
+    **2차 정렬 키**로 함께 씁니다.
+    ⚠️ 이건 순위를 다시 매기는 것이 **아닙니다.** 화면에 보이는 등수는 발행표의 `rank`
+       그대로이고(동점자는 같은 등수로 보입니다), 닉네임 정렬은 "같은 등수 안에서 목록에
+       찍히는 차례"를 고정하는 용도일 뿐입니다. 여기서 등수를 새로 만들면 그건 사실이
+       아닌 정보를 발행하는 일입니다(§0-1).
+
+    ── 🔴 스테이징에서 눈으로 확인할 것 두 가지 (작업지시서 6단계) ─────────────────
+    이 샌드박스에는 `supabase` 패키지가 설치돼 있지 않아 **클라이언트 라이브러리의 실제
+    동작**은 확인하지 못했습니다(§0-1 — 확인한 것만 확인했다고 적습니다). 스테이징에서
+    두 가지만 눈으로 보세요:
+      ① `.order()` 를 두 번 부르면 정렬 키가 **둘 다** 걸리는가(덮어쓰지 않는가).
+         만약 덮어쓴다면 목록이 닉네임 순으로만 나옵니다 — 데이터가 새는 문제는 아니고
+         "보이는 차례가 이상한" 문제라 화면만 보면 바로 압니다.
+      ② `.range(start, end)` 가 **양끝을 포함하는** 구간인가(0-based). 2페이지의 첫 줄이
+         1페이지의 마지막 줄과 겹치거나 한 줄 건너뛰면 여기가 원인입니다.
+    """
+    _require_client(client)
+    window = _require_text(window_type, "창 유형")
+    bracket = _require_text(bracket_key, "체급 식별자")
+    count = _require_positive_int(limit, "조회 개수")
+    start = _require_offset(offset, "건너뛸 개수")
+
+    query = (client.table(PUBLIC_LEADERBOARD_TABLE).select(PUBLIC_LEADERBOARD_COLUMNS)
+             .eq("window_type", window).eq("bracket_key", bracket))
+    if published_date is not None:
+        query = query.eq("published_date", _iso_date(published_date, "발행일"))
+    query = (query.order("rank", desc=bool(order_desc))
+                  .order("nickname", desc=bool(order_desc)))
+    rows = _execute(query.range(start, start + count - 1), "공개 순위표 조회")
+    return [dict(row) for row in rows]
+
+
+def fetch_public_holdings_for_nickname(client, nickname, *, published_date=None,
+                                       window_type=None):
+    """
+    한 참가자(닉네임)의 **발행된** 보유종목을 읽습니다 — 5-2 의 "보유종목이 순위표에서
+    다른 사람에게 **개별 열람** 가능하게 공개됩니다"가 실제로 일어나는 자리입니다.
+
+    인자
+        nickname       : 순위표 행에서 사용자가 고른 닉네임(이 표에는 이 값 말고 사람을
+                         가리키는 것이 아무것도 없습니다 — 스키마 §8).
+        published_date : 그 순위표 행의 발행일. 화면은 반드시 넘깁니다(날짜를 안 걸면
+                         과거 발행분까지 같이 나와 같은 종목이 여러 번 보입니다).
+        window_type    : 그 순위표 행의 창유형(M1/M3/M6). 한 사람이 계좌 3개를 각각
+                         공개했다면 닉네임은 계좌마다 다르지만(5-5 "계좌별로 저장"),
+                         그래도 화면이 보고 있는 축을 그대로 걸어 둡니다.
+
+    ── 동의하지 않은 항목은 여기서 거르지 않습니다(그럴 필요가 없습니다) ────────────
+    `quantity` · `buy_amount` 는 동의가 없으면 **발행 배치가 애초에 null 로 넣습니다**
+    (5-4-2 — 0 이나 빈 문자열로 채우지 않습니다). 그리고 `consent_holdings` 자체가 없으면
+    이 표에 **행이 만들어지지 않습니다.** 즉 여기서 다시 걸러야 할 것이 없고, 화면은
+    null 을 "비공개"로 그리기만 하면 됩니다. 필터를 여기에 또 만들면 "동의 판정"이 두 곳에
+    존재하게 되고, 그게 §0-3-8 이 가장 싫어하는 모양입니다.
+    """
+    _require_client(client)
+    name = _require_text(nickname, "닉네임")
+
+    query = (client.table(PUBLIC_HOLDINGS_TABLE).select(PUBLIC_HOLDINGS_COLUMNS)
+             .eq("nickname", name))
+    if published_date is not None:
+        query = query.eq("published_date", _iso_date(published_date, "발행일"))
+    if window_type is not None:
+        query = query.eq("window_type", _require_text(window_type, "창 유형"))
+    rows = _execute(query.order("ticker"), "공개 보유종목 조회")
+    return [dict(row) for row in rows]
 
 
 # #############################################################################

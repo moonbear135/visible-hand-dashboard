@@ -1,0 +1,138 @@
+# .github/workflows/duel_publish_daily.yml
+# =============================================================================
+# ⚔️ "결투다!" 2갈래 공개 순위표 **발행 배치** — DUEL_MODULE_WORK_ORDER.md 5-4
+#
+#   하는 일 (순서가 곧 작업지시서 5-4 의 순서입니다):
+#     ⓪ 철회한 계좌의 발행 기록을 **모든 날짜에서** 삭제 (5-8-1)
+#     ① 발행 대상 고르기 — final_confirmed=true 이고 revoked_at 이 없는 계좌 (5-4-1)
+#     ② 체급 배정 — 독립 동의자만 실제 매입원가합계 조회, 시즌 고정 규칙 적용 (5-3)
+#     ③ 누적 TWR → (창유형 × 체급) 그룹별 순위 (5-4-3)
+#     ④ 최소 인원(500명) 미달 그룹은 발행 안 함 + 과거 행도 삭제 (5-6)
+#     ⑤ 그날 발행분 전량 삭제 후 재작성 (5-4-4)
+#
+#   실제 로직은 전부 파이썬에 있습니다(`run_duel_publish_batch.py` → `utils/duel_publish.py`).
+#   이 워크플로우는 **언제·어떤 권한으로 그걸 부르는가**만 정합니다
+#   (`duel_daily.yml` 과 같은 분업).
+# -----------------------------------------------------------------------------
+# 🕘 왜 이 시각인가 — **체결 배치보다 뒤여야 합니다**
+# -----------------------------------------------------------------------------
+#   발행 배치는 순위를 매기려고 **그날의 일별 스냅샷(→ 누적 TWR)** 을 읽습니다. 그 스냅샷을
+#   만드는 것이 `duel_daily.yml`(야간 체결 배치)입니다. 순서가 뒤집히면 그날 체결·스냅샷이
+#   반영되지 않은 **하루 낡은 성적**으로 순위표가 나갑니다.
+#
+#   같은 저장소의 실제 값으로 계산한 시간표(전부 이 저장소 파일에서 확인한 값입니다):
+#     · `scrape.yml`        cron '5 7 * * 1-5'   = UTC 07:05 = KST 16:05  (코스피 종가 수집,
+#                                                   실측 20~30분 → 늦어도 UTC 07:40 종료)
+#     · `duel_daily.yml`    cron '10 8 * * 1-5'  = UTC 08:10 = KST 17:10  (체결·스냅샷,
+#                                                   `timeout-minutes: 20` → 늦어도 UTC 08:30 종료)
+#     · **이 파일**         cron '40 8 * * 1-5'  = UTC 08:40 = KST 17:40
+#       → 체결 배치의 타임아웃 상한(UTC 08:30)보다 **10분 뒤**에 시작합니다. 그리고 주문
+#         접수 시작(KST 18:00:01)보다 앞서 끝나므로, 사용자가 저녁에 주문을 넣기 시작할 때
+#         순위표는 이미 그날치로 갱신돼 있습니다.
+#
+#   ⚠️ 10분이 짧다고 느껴지면 늦추세요 — 늦어서 손해 보는 것은 "순위표가 몇 시간 늦게
+#      갱신된다"뿐이고, 일러서 생기는 손해는 "틀린 값이 남에게 공개된다"입니다. 두 위험의
+#      크기가 다릅니다(§0-3-8).
+#
+#   ⚠️ 더 안전한 대안(작업지시서 2-5 가 체결 배치에 권한 것과 같은 방식) — 시각이 아니라
+#      **선행 워크플로우 완료**를 조건으로 걸 수 있습니다. `duel_daily.yml` 의 name 은
+#      "Duel Daily Batch" 입니다(그 파일에서 확인). 바꾸려면 아래 `on:` 을 이렇게:
+#        on:
+#          workflow_run:
+#            workflows: ["Duel Daily Batch"]
+#            types: [completed]
+#      그리고 job 에 `if: github.event.workflow_run.conclusion == 'success'` 를 붙입니다.
+#      (지금은 체결 배치와 **같은 방식**(별도 cron)으로 맞춰 두었습니다 — 두 배치의 실행
+#       방식이 달라지면 장애가 났을 때 원인 추적이 어려워집니다. 바꾸려면 둘 다 바꾸세요.)
+# -----------------------------------------------------------------------------
+# 🔴 이 배치가 만드는 표는 **로그인한 모든 사용자가 읽습니다** (§0-3-8)
+# -----------------------------------------------------------------------------
+#   그래서 실패했을 때 기본 동작은 "조용히 넘어가기"가 아니라 **시끄럽게 멈추기**입니다.
+#   파이썬 쪽이 비정상 종료하면 이 job 이 실패로 남고, 아래 `if: failure()` 단계가 무엇을
+#   확인해야 하는지 로그에 남깁니다. 실패한 날의 순위표는 **어제 발행분이 그대로 남습니다**
+#   (화면은 그 그룹의 가장 최근 발행일을 읽습니다) — 잘못된 값을 새로 올리는 것보다 낫습니다.
+# =============================================================================
+
+name: Duel Publish Daily
+
+on:
+  schedule:
+    # 평일 08:40 UTC = KST 17:40 (체결 배치 KST 17:10 시작 + 최대 20분 → 그 뒤 10분 여유).
+    - cron: "40 8 * * 1-5"
+  # 수동 실행. 처음 며칠은 dry-run 으로 "무엇이 발행될 뻔했는지"부터 확인하는 것을 권합니다.
+  workflow_dispatch:
+    inputs:
+      published_date:
+        description: "발행일 (YYYY-MM-DD, KST). 비우면 오늘"
+        required: false
+        default: ""
+      dry_run:
+        description: "저장하지 않고 계산만 (발행표를 건드리지 않음)"
+        required: false
+        default: false
+        type: boolean
+
+# 이 배치는 저장소에 **아무것도 커밋하지 않습니다**(결과는 전부 Supabase 로 갑니다).
+# 그래서 체결 배치와 달리 쓰기 권한을 주지 않습니다 — 최소 권한(§0-3-9).
+permissions:
+  contents: read
+
+# 같은 발행일을 두 번 처리하려는 실행이 겹치면, 한쪽이 "그날 발행분 전량 삭제"를 하는 사이
+# 다른 쪽이 삽입하는 상태가 생길 수 있습니다. 배치 자체는 다시 돌리면 스스로 따라잡지만,
+# 그 사이 화면에 절반만 실린 순위표가 보일 수 있으므로 겹쳐 돌지 않게 막습니다.
+concurrency:
+  group: duel-publish-batch
+  cancel-in-progress: false
+
+jobs:
+  duel-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        # 커밋해 되돌릴 것이 없으므로 전체 이력을 받지 않습니다(기본 얕은 클론).
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 결투 발행 배치 실행
+        env:
+          # 🔴 배치 전용 키. 사용자가 접속하는 앱 서버(Render)에는 **절대** 넣지 않습니다
+          #    (§0-3-8 · utils/duel_db.py 머리말). 변수 이름은 duel_db.py 가 읽는 것과
+          #    글자 그대로 같아야 합니다: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.published_date }}" ]; then
+            ARGS="$ARGS --published-date ${{ github.event.inputs.published_date }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "실행: python run_duel_publish_batch.py $ARGS"
+          python run_duel_publish_batch.py $ARGS
+
+      - name: 실패했을 때 확인할 것
+        if: failure()
+        run: |
+          echo "❌ 발행 배치가 실패했습니다. 순위표는 **이전 발행분이 그대로 남아 있습니다**"
+          echo "   (화면은 각 그룹의 가장 최근 발행일을 읽습니다). 확인 순서:"
+          echo "   1) 위 로그의 마지막 '❌ 결투 발행 배치 실패:' 줄 — 원인이 한국어로 적혀 있습니다."
+          echo "   2) Secrets 에 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 가 있는지."
+          echo "   3) 선행 배치(Duel Daily Batch)가 오늘 성공했는지 — 스냅샷이 없으면 순위를"
+          echo "      매길 수 없습니다(그 경우 이 배치는 '순위가 매겨진 그룹이 없습니다'로"
+          echo "      정상 종료하지, 실패하지는 않습니다)."
+          echo "   4) 삭제 후 삽입 도중에 끊긴 경우, 그날 발행분이 일부만 남아 있을 수 있습니다."
+          echo "      → workflow_dispatch 로 같은 --published-date 를 다시 실행하면 그날치를"
+          echo "        통째로 지우고 다시 씁니다(5-4-4 의 전량 재작성이 그 복구 경로입니다)."
+          exit 1

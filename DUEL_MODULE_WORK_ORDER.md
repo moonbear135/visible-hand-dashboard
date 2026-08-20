@@ -488,7 +488,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ---
 
-## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (🔶 진행 중 — 백엔드(스키마/규칙/DB계층/발행배치) 완료, 화면 2종·발행 워크플로우 미착수)
+## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (✅ 사실상 완료 — 백엔드·화면 2종·발행 워크플로우 전부 작성·검증 완료, `main.py` 배선 2줄 + 워크플로우 파일 저장소 반영만 남음)
 
 ✅ **2026-08-20 오너 정정 — 이 경고문의 의미를 명확히 함.** "착수하지 말라"는 **코딩을 미루라는 뜻이 아니라, 실제로 순위표가 화면에 발행/노출되는 시점을 사람이 충분히 쌓이기 전까지 미루라는 뜻**입니다("착수하지 말라고 보다는 일정 사람이 쌓이기 전까지 공개를 하지 않는 방향으로 가자, 만들 수 있을 때는 만들어만 두는 건 좋을 거 같아"). 코드는 지금 만들어도 됩니다 — 어차피 5-1(기본 비공개)·5-6(최소 인원 미달 시 미발행)·2-8/7단계의 3단계 공개 전환 패턴이 이미 "실제로 아무도 안 쌓였는데 순위표가 뜨는 사고"를 구조적으로 막고 있습니다. 그리고 §0-3-8은 이 프로젝트의 **최상위 무예외 원칙**입니다 — 이 단계의 모든 코드는 "버그가 나도 새어나갈 수 없는가"를 기준으로 리뷰해야 합니다.
 
@@ -597,7 +597,27 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
   3. **닉네임 형식 → 숫자 접미사 완전 제거, 형용사 2개(서로 다름)+명사 1개로 재설계.** "어느 정도를 말하는거야"라는 되물음에 실제 목록 일부를 보여드렸더니, "숫자가 붙으면 너무 기계적으로 느껴진다"는 답을 주셔서 숫자를 아예 없앴습니다. 그 대신 단어 목록을 형용사 48→130개, 명사 48→128개로 크게 늘려서 안전 여유분을 확보했습니다(상세 계산은 5-5절 참고 — "재시도를 유발하는 실제 확률"과 "생일 문제 확률"을 구분해서 다시 계산했고, 후자를 전자로 착각하면 안 된다는 점도 정리했습니다). `generate_nickname()`·`nickname_space_size()` 재작성, 관련 테스트도 새 형식에 맞게 다시 씀(디코딩 헬퍼 `_decompose_nickname()` 추가, 두 형용사가 실제로 다른지 검증하는 테스트 신설).
   4. `bracket_key`는 코드에서 쓰는 ASCII 식별자이고, 화면에 보여줄 한글 라벨(`bracket_label()`)은 별도 함수로 분리해뒀습니다 — 이름 자체에 이견 없으면 그대로 갑니다.
   - **재검증**: `python3 -m py_compile utils/duel_rules.py utils/duel_db.py tests/test_duel_publish.py` 클린. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py` → **361개 전부 통과**(닉네임 테스트 1개 신설로 360→361, 회귀 0). 5만 개 무작위 생성 스트레스 테스트(직접 실행)로 공간 크기(2,146,560)와 실제 충돌 개수가 계산과 일치하는 것도 확인했습니다.
-- **미착수** — 5단계의 나머지: 동의 관리 화면(닉네임 발급·5개 체크박스·최종 확인·철회 UI), 공개 순위표 열람 화면(7-2 고정 문구 포함), 발행 배치를 매일 돌릴 GitHub Actions 워크플로우(`duel_daily.yml`처럼). 이번 라운드는 명시적으로 **백엔드만** 범위로 잡았습니다.
+- **미착수였던 것 → 이번 라운드(§5-10)에서 완료.**
+
+### 5-10. 화면 2종 + 발행 워크플로우 완료 (2026-08-20, 오푸스 — 7번째 코딩 작업)
+
+**무엇을 만들었는지:**
+
+- 신규 `web/pages/duel_consent_page.py`(740줄, `/duel/consent`) — 동의 관리 화면. 5-2의 구조 그대로: 1층(체크박스 5개, 문장 하나씩) → 2층(별도 최종 확인) → 완전히 별개인 독립 동의(실제 매입총합 사용) → 책임 고지 문구(체크박스 영역·최종확인 영역 **두 곳**). 이미 동의한 계좌는 현재 상태(닉네임·항목별 on/off·동의 시각)를 보여주고 철회 버튼 제공, 철회 전 확인 단계(되돌릴 수 없고 3개월 재동의 차단이 걸린다는 안내)를 거치게 했습니다. 닉네임은 최초 동의 저장 시점에 `ensure_nickname()`으로 발급(5-5 확정 순서: 옵트인 시가 아니라 5단계 동의 시).
+- 신규 `web/pages/duel_leaderboard_page.py`(492줄, `/duel/leaderboard`) — 공개 순위표 화면. 5-3 고정 문구 2문단을 **글자 그대로**(맞춤법·띄어쓰기까지) 화면 최상단에 고정 — 테스트가 이 문서 원문과 직접 대조합니다(수정하면 테스트가 실패하도록 걸어뒀습니다). 창유형×체급 선택 → 순위표(상위 500+하위 500, 5-7의 배치 계산값만 읽음, 화면에서 재계산 안 함) → 행 클릭 시 그 닉네임의 보유종목 개별 열람(5-2). 참가자 미달로 그 그룹이 아직 발행 안 됐으면 "아직 공개할 만큼 사람이 안 모였습니다"로 정상 상태 안내(에러 아님).
+- `utils/duel_db.py`에 **읽기 전용** 신규 함수 4개: `fetch_public_leaderboard_latest_date()`, `fetch_public_leaderboard(client, *, window_type, bracket_key, published_date=None, limit=, offset=, order_desc=)`, `fetch_public_holdings_for_nickname()`, `fetch_my_nickname()`(만들지 않고 읽기만 — 화면을 그리는 것만으로 닉네임이 발급되면 안 됨). 전부 `select("*")` 대신 컬럼을 하나하나 나열(`PUBLIC_LEADERBOARD_COLUMNS`/`PUBLIC_HOLDINGS_COLUMNS`) — 나중에 발행표에 컬럼이 늘어도 화면으로 새어나가지 않게 하는 구조적 방어(§0-3-8). `order_desc`로 정렬만 뒤집어서 인원수를 몰라도 "하위 500"을 정확히 읽습니다(방문마다 count 질의 도는 것을 피함, §0-3-2).
+- `utils/duel_rules.py`에 §10-6(순위표 표시 상수·순수함수) 신설.
+- `web/layout.py`에 신규 플래그 4개 — `DUEL_CONSENT_ENABLED`/`DUEL_CONSENT_MENU_ADMIN_ONLY`(동의 화면용), `DUEL_LEADERBOARD_ENABLED`/`DUEL_LEADERBOARD_MENU_ADMIN_ONLY`(순위표 화면용). 1갈래 스위치(`DUEL_ENABLED`)를 재사용하지 않고 화면마다 따로 둔 이유: 7-3이 "1갈래 먼저 공개 → 모집 → 2갈래 공개"를 요구하는데 스위치가 하나면 이 순서 자체가 불가능하기 때문. 두 2갈래 화면도 `DUEL_ENABLED`가 켜져 있을 때만 존재하도록 중첩 확인합니다(1갈래 없이 2갈래만 켜지는 경우를 막음).
+- 신규 `run_duel_publish_batch.py`(130줄, 저장소 루트) — `run_duel_daily_batch.py`와 같은 분업(I/O·환경변수만 담당, 판단은 전부 `utils/duel_publish.py`).
+- 신규 `.github/workflows/duel_publish_daily.yml`(138줄) — 발행 배치 워크플로우. **cron을 체결 배치(`duel_daily.yml`)보다 반드시 뒤에 오도록** 잡았습니다(UTC 08:40 = KST 17:40, 체결 배치의 타임아웃 상한 UTC 08:30보다 10분 뒤) — 순서가 뒤집히면 그날 체결이 반영 안 된 하루 낡은 성적으로 순위표가 나갑니다. 늦게 갱신되는 것과 틀린 값이 공개되는 것 중 후자가 훨씬 위험하다는 판단(§0-3-8)으로 여유를 둔 쪽을 택했습니다. **이 파일은 `.github/workflows/`라 이번 세션에서 저장소에 바로 못 넣습니다 — 아래 안내대로 device_bash로 반영해야 합니다.**
+- 신규 `tests/test_duel_public_ui.py`(956줄, 44개) — 새 화면 2종의 핵심 규칙(전부-아니면-전무, 최종확인 분리, 철회 확인, 5-3 문구 원문 대조, 신원 미노출) + 렌더 스모크(가짜 nicegui/web.auth로 감싸 실제 실행까지 확인) + 신규 DB 함수 4개(빈 결과·페이지네이션·필터).
+- `tests/test_duel_db.py` 기존 테스트 1건 재조정("A절에 발행표 이름이 아예 안 나온다" → "A절은 발행표에 **쓰지는** 않는다"로 — 스키마가 이미 `authenticated`에게 발행표 select를 허용하므로 조회 자체는 정상이고, 쓰기만 막으면 되는 게 맞는 검증입니다. 약화가 아니라 잘못된 검증을 바로잡은 것).
+- **검증**: `python3 -m py_compile`(신규·수정 파일 전부) 클린 — **제가 직접 재실행해 확인**. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **405개 전부 통과**(361 + 신규 44, 회귀 0) — **제가 직접 재실행해 확인, 에이전트 보고 수치와 일치**. `.github/workflows/duel_publish_daily.yml` YAML 파싱도 직접 재확인 완료. `select("*")` 미사용도 직접 grep으로 재확인.
+- **🆕 main.py 배선 필요 (2줄로 늘어남)** — `main.py`가 이 스냅샷에 없어서 직접 못 고쳤습니다. `from web.pages import duel_page` 옆에 `from web.pages import duel_consent_page`와 `from web.pages import duel_leaderboard_page` 두 줄을 추가해야 `/duel/consent`·`/duel/leaderboard` 주소가 실제로 열립니다.
+- **🆕 오너가 확인해주실 것들**:
+  - **급함**: (1) 새 플래그 이름 4개(`DUEL_CONSENT_ENABLED` 등, 위 참고) — 이름 자체나 "화면마다 따로 둔 방식"에 이견 있으면 지금 고치는 게 쌉니다. (2) `duel_publish_daily.yml`의 cron 시각(UTC 08:40) — 여유가 부족하다 싶으면 늘리거나, `workflow_run`(선행 워크플로우 완료 조건) 방식으로 바꿀 수 있습니다(파일 안에 대안 코드 주석으로 이미 적혀 있음). (3) 이 워크플로우 파일은 아직 저장소에 없습니다 — 아래 안내대로 device_bash로 넣어야 합니다.
+  - **안 급함**: 동의는 계좌(M1/M3/M6) 단위라 "3계좌 한 번에" 편의 버튼은 일부러 안 만듦(5-2-2의 명시성 취지 유지) — 원하시면 나중에 추가 가능. "1층만 저장하고 최종확인은 안 한" 상태를 되돌릴 UI가 없음(발행 안 되니 안전 문제는 아니고 불편함 문제). supabase-py의 `.order()` 2회 호출·`.range()` 양끝 포함 여부는 이 샌드박스에 실제 `supabase` 패키지가 없어 라이브러리 동작까지는 확인 못 했음 — 6단계 실검증에서 확인 권장(틀려도 데이터 유출이 아니라 "표시 순서" 문제).
+- **범위 밖(다음에)**: `main.py` 2줄 배선(오너), `duel_publish_daily.yml` 저장소 반영(device_bash 필요), `PROJECT_STATUS.md`의 service_role 파일 목록에 `run_duel_publish_batch.py` 추가(제가 이미 반영함, 아래 git 안내에 포함).
 
 ---
 
@@ -706,7 +726,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-20 기준 진행 상황: 0단계(설계, 1~5차 라운드) ✅ 완료 + 1단계(스키마 승인) ✅ 완료 + 2단계(Branch 1) ✅ 사실상 완료 — 스키마/규칙/DB계층/즉시옵트인/야간배치/화면까지 전부 작성·검증(`main.py` 배선 한 줄만 남음). 5단계(Branch 2, 공개 순위표)는 **백엔드(스키마 보강·규칙·DB계층·발행배치·테스트 360개) 완료** — 화면 2종(동의 관리·순위표 열람)과 발행 워크플로우 yml은 아직 착수 전입니다.**
+**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ 사실상 완료(`main.py` 배선 1줄만 남음) + 5단계(Branch 2, 공개 순위표) ✅ 사실상 완료 — 백엔드(스키마·규칙·DB계층·발행배치)에 이어 화면 2종(동의 관리·순위표 열람)·발행 워크플로우까지 전부 작성·검증 완료. 남은 건 `main.py` 배선(2줄 추가)과 `duel_publish_daily.yml` 저장소 반영(device_bash)뿐입니다.**
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -754,13 +774,16 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 **2단계 사실상 완료.** 남은 건 `main.py` 한 줄 배선(위 참고)과 위에 나열한 사소한 확인 사항들뿐입니다.
 
-**2026-08-20, 6번째 코딩 작업 — 5단계(Branch 2) 백엔드 완료 + 오너 확인 사항 4건 전부 확정.** `sql/duel_schema.sql`(예외적 스키마 보강 2건)·`utils/duel_rules.py`(+444줄)·`utils/duel_db.py`(+662줄)·신규 `utils/duel_publish.py`(718줄)·신규 `tests/test_duel_publish.py`(120개)·`tests/test_duel_db.py` 확장까지 작성. 이어서 오너 확인을 거쳐 시즌 시작일(3월 1일)과 닉네임 형식(숫자 제거, 형용사 2개+명사 재설계)까지 반영. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py` → **361개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-5·5-9절 참고. **화면 2종(동의 관리·순위표 열람)과 발행 워크플로우 yml은 이번 라운드 범위 밖 — 다음 라운드로 넘김.**
+**2026-08-20, 6번째 코딩 작업 — 5단계(Branch 2) 백엔드 완료 + 오너 확인 사항 4건 전부 확정.** `sql/duel_schema.sql`(예외적 스키마 보강 2건)·`utils/duel_rules.py`(+444줄)·`utils/duel_db.py`(+662줄)·신규 `utils/duel_publish.py`(718줄)·신규 `tests/test_duel_publish.py`(120개)·`tests/test_duel_db.py` 확장까지 작성. 이어서 오너 확인을 거쳐 시즌 시작일(3월 1일)과 닉네임 형식(숫자 제거, 형용사 2개+명사 재설계)까지 반영. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py` → **361개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-5·5-9절 참고.
+
+**2026-08-20, 7번째 코딩 작업 — 5단계(Branch 2) 화면 2종 + 발행 워크플로우 완료.** `web/pages/duel_consent_page.py`(740줄)·`web/pages/duel_leaderboard_page.py`(492줄) 신규, `utils/duel_db.py`에 발행표 읽기 전용 함수 4개 추가, `web/layout.py`에 2갈래 전용 공개 플래그 4개 추가, `run_duel_publish_batch.py`(130줄)·`.github/workflows/duel_publish_daily.yml`(138줄) 신규, `tests/test_duel_public_ui.py`(956줄, 44개) 신규. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **405개 전부 통과, 회귀 0**(제가 직접 재실행해서 확인). 상세 내역은 위 5-10절 참고. **이걸로 5단계가 사실상 완료됐습니다.**
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 이번 6번째 코딩 작업 결과물(`sql/duel_schema.sql`·`utils/duel_rules.py`·`utils/duel_db.py`·`utils/duel_publish.py`·`tests/test_duel_publish.py`·`tests/test_duel_db.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
-2. `main.py`에 `from web.pages import duel_page` 한 줄 추가(저장소 재접근 후) — 여전히 남아있는 항목.
-3. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다 — 나머지 🔴 항목(배치 실행 시각)은 이미 확인 완료했습니다.
-4. 그 다음은 5단계의 남은 두 화면(동의 관리 UI·공개 순위표 열람 화면)과 발행 배치용 GitHub Actions 워크플로우 — 착수 전입니다.
+1. 이번 7번째 코딩 작업 결과물(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`PROJECT_STATUS.md`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
+2. `.github/workflows/duel_publish_daily.yml`은 이번엔 device_bash로 직접 반영해야 합니다(`.github/workflows/`는 일반 파일 전달 경로가 막혀 있음) — 별도로 안내드립니다.
+3. `main.py`에 이제 **3줄**을 추가해야 합니다: `from web.pages import duel_page`, `from web.pages import duel_consent_page`, `from web.pages import duel_leaderboard_page`(저장소 재접근 후).
+4. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
+5. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 
