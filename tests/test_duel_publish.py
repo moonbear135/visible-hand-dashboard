@@ -277,11 +277,7 @@ def test_nickname_is_not_derived_from_identity_by_any_hash_or_encoding():
     for sample in samples:
         assert sample not in forbidden
         # 식별자 조각이 닉네임 안에 섞여 들어가지도 않아야 합니다.
-        #  (4자리 무작위 숫자 접미사와 **우연히** 겹치는 것까지 실패로 세지 않도록,
-        #   글자가 섞인 조각과 8자 이상 조각만 봅니다 — 유도 여부를 가리는 데는 충분합니다.)
         for chunk in identity.split("-"):
-            if chunk.isdigit() and len(chunk) <= duel_rules.NICKNAME_NUMBER_DIGITS:
-                continue
             assert chunk not in sample
         assert identity.replace("-", "") not in sample
         for digest in forbidden:
@@ -290,20 +286,63 @@ def test_nickname_is_not_derived_from_identity_by_any_hash_or_encoding():
 
 def test_nickname_shape_and_entropy():
     """
-    닉네임은 (형용사 + 명사 + 숫자) 이고, 후보 공간이 **조용히 좁아지지 않는지** 고정합니다.
-    단어 목록을 지우면 익명성이 그만큼 얇아집니다(같은 이름을 쓰는 사람이 늘어납니다).
+    닉네임은 (서로 다른 형용사 2개 + 명사 1개, 숫자 없음)이고, 후보 공간이 **조용히
+    좁아지지 않는지** 고정합니다. 단어 목록을 지우면 익명성이 그만큼 얇아집니다
+    (같은 이름을 쓰는 사람이 늘어납니다).
+
+    ✅ 2026-08-20 — 숫자 접미사(4자리)를 없애고 대신 단어 목록을 48개 → 130개/128개로
+    늘렸습니다(오너: "숫자가 붙으니 닉네임이 기계적으로 느껴진다"). 아래 최소 개수
+    기준(>=120/>=110)은 이 변경 이후에도 공간이 충분히 넓게 유지되는지 잡는 하한선이지,
+    지금의 정확한 개수(130/128)를 요구하는 건 아닙니다.
     """
-    assert duel_rules.NICKNAME_NUMBER_DIGITS >= 4
-    assert len(duel_rules.NICKNAME_ADJECTIVES) >= 40
-    assert len(duel_rules.NICKNAME_NOUNS) >= 40
+    assert len(duel_rules.NICKNAME_ADJECTIVES) >= 120
+    assert len(duel_rules.NICKNAME_NOUNS) >= 110
     assert len(set(duel_rules.NICKNAME_ADJECTIVES)) == len(duel_rules.NICKNAME_ADJECTIVES)
     assert len(set(duel_rules.NICKNAME_NOUNS)) == len(duel_rules.NICKNAME_NOUNS)
-    # 참가자 1만 명에서 충돌 확률이 1% 를 넘지 않을 만큼은 넓어야 합니다.
-    assert duel_rules.nickname_space_size() >= 5_000_000
+    # 형용사 목록과 명사 목록 사이에도 겹치는 단어가 없어야 합니다(둘 다 앞/뒤 자리에서
+    # 쓰이므로, 겹치는 단어가 있으면 "형용사인지 명사인지" 눈으로 헷갈릴 수 있습니다).
+    assert not (set(duel_rules.NICKNAME_ADJECTIVES) & set(duel_rules.NICKNAME_NOUNS))
+    # 참가자 1만 명 시점에 "방금 만든 후보 하나가 기존 참가자와 겹칠" 확률이 1%를
+    # 넘지 않을 만큼은 넓어야 합니다(= 공간이 최소 100만은 되어야 함, 10000/1,000,000=1%).
+    assert duel_rules.nickname_space_size() >= 1_000_000
 
     sample = duel_rules.generate_nickname()
-    assert sample[-duel_rules.NICKNAME_NUMBER_DIGITS:].isdigit()
-    assert any(sample.startswith(word) for word in duel_rules.NICKNAME_ADJECTIVES)
+    assert not any(ch.isdigit() for ch in sample), "숫자 접미사를 없앤 뒤에도 숫자가 섞이면 안 됩니다"
+    decomposition = _decompose_nickname(sample)
+    assert decomposition is not None, f"닉네임을 (형용사+형용사+명사)로 되돌려 나눌 수 없습니다: {sample!r}"
+    adjective_1, adjective_2, noun = decomposition
+    assert adjective_1 != adjective_2, f"같은 형용사가 두 번 쓰였습니다: {sample!r}"
+
+
+def _decompose_nickname(sample):
+    """
+    닉네임 문자열을 (형용사1, 형용사2, 명사)로 되돌려 나눕니다. 구분자 없이 이어 붙인
+    문자열이라 접두사 겹침이 있을 수 있으므로, **가능한 조합을 전부 찾아보고** 그 중
+    하나라도 성립하면 그걸로 인정합니다(길이가 가장 긴 것부터 그리디하게 고르면, 실제로는
+    더 짧은 조합이 맞는 경우를 놓칠 수 있어서 이 방식을 씁니다).
+    반환: 성공하면 `(adjective_1, adjective_2, noun)`, 못 찾으면 `None`.
+    """
+    for adjective_1 in duel_rules.NICKNAME_ADJECTIVES:
+        if not sample.startswith(adjective_1):
+            continue
+        rest_1 = sample[len(adjective_1):]
+        for adjective_2 in duel_rules.NICKNAME_ADJECTIVES:
+            if not rest_1.startswith(adjective_2):
+                continue
+            noun_part = rest_1[len(adjective_2):]
+            if noun_part in duel_rules.NICKNAME_NOUNS:
+                return (adjective_1, adjective_2, noun_part)
+    return None
+
+
+def test_nickname_never_repeats_the_same_adjective_twice():
+    """두 형용사 자리는 **서로 달라야** 합니다(예: '씩씩한씩씩한파도' 같은 건 안 나옵니다)."""
+    for _ in range(300):
+        sample = duel_rules.generate_nickname()
+        decomposition = _decompose_nickname(sample)
+        assert decomposition is not None, f"닉네임을 되돌려 나눌 수 없습니다: {sample!r}"
+        adjective_1, adjective_2, _noun = decomposition
+        assert adjective_1 != adjective_2, f"같은 형용사가 두 번 붙었습니다: {sample!r}"
 
 
 def test_nickname_uses_a_cryptographic_random_source():
