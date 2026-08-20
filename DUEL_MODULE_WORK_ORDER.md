@@ -738,6 +738,39 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ---
 
+### 5-15. 🆕 USD 트랙 4차 코딩 — 야간 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우) + 전용 테스트 (2026-08-20, 11번째 코딩 작업)
+
+**배경**: §5-14에서 예고한 "다음 코딩 라운드"입니다. `utils/duel_batch.py`(원화, 1,217줄)·`run_duel_daily_batch.py`(222줄)·`.github/workflows/duel_daily.yml`(147줄)을 전부 처음부터 끝까지 다시 읽고, 이번엔 **이 세션의 저장소 미러에 없는 파일들**(`data/` 전체, `collector_us_stocks.py`, `.github/workflows/*.yml` 여러 개)을 오너 컴퓨터에서 `device_bash`로 직접 열어서(§0-1 "지어내지 않는다" 규율 — 실제 파일과 대조 없이 타이밍을 추정하지 않았습니다) 확인하며 작성했습니다.
+
+**재사용 vs 신규 정의 — 이번에도 같은 원칙**: `select_probe_stocks`·`build_freshness_probe`·`load_probe_state`·`save_probe_state`·`judge_crawl_freshness`·`resolve_action`·`plan_order_fills`·`last_snapshot_dates`·`collect_external_cash_flows`·`build_snapshot_rows`·`compute_twr_by_account`·`is_monthly_deposit_date`·`default_state_dir`·`_to_date`·`_positive_price`·`_round6` — 이 14개는 표 이름도 통화 리터럴도 안 담고 있어서 그대로 import 해서 씁니다. `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS`·`US_HISTORY_FIELDS`가 둘 다 순위 필드 이름으로 `"rank"`("시가총액 순위")를 쓴다는 것까지 직접 확인해서, `select_probe_stocks()`가 시장 무관하게 안전히 재사용되는 걸 근거로 확정했습니다.
+
+- **새로 정의한 것 1 — `run_nightly_batch_usd()`(오케스트레이터 본체)**: `duel_db_usd.*` 호출로 교체한 것 외에, 원화에는 없는 **날짜 파라미터 2개**(`target_date`, `today_kst`)로 분리한 것이 이번 라운드의 핵심 설계 변경입니다 — 아래 🔴 항목에 상세 설명.
+- **새로 정의한 것 2 — `format_summary_lines_usd()`**: 코드 리뷰(원화 `duel_batch.py`에서 "원" 리터럴 grep) 중 원화 함수의 실행 라인 하나(`"...체결에 쓴 현금 합계: {...}원"`)에 원화 기호가 그대로 박혀 있는 걸 발견 — 그대로 재사용했다면 달러 금액에 "원"이 찍히는 사고가 났을 것입니다. 그래서 이 함수는 통째로 새로 정의해 `"${...:,.2f}"`로 고쳤습니다(`_translate_order_guard_error_usd()`에 이은, 이 트랙의 두 번째 "공유 로직이지만 통화 리터럴 때문에 신규 정의" 사례).
+
+**🔴 이번 라운드에서 제가 직접 도출한 설계 결정 — 오너 확인 필요**:
+
+USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본값을 **"어제"**로 정했습니다(원화 배치는 항상 "오늘"입니다). 이유: 미국 정규장은 한국 시각으로 다음 날 새벽에 마감하고, 그 확정 종가를 모으는 실제 수집 워크플로우(`.github/workflows/scrape_us.yml` — 2026-08-20 `device_bash`로 오너 컴퓨터의 실제 파일을 직접 읽어 확인)는 서머타임엔 완료가 06:30~07:05 KST, 표준시엔 07:30~08:05 KST(둘 다 **다음 날** 새벽)입니다. 즉 "미국 거래일 X"의 확정 종가는 한국 날짜로 X+1일 아침에야 저장소에 들어오므로, 이 배치가 한국 날짜 Y에 돌 때 처리할 수 있는 것은 언제나 Y의 하루 전(X = Y-1) 거래일뿐입니다. 이 사실을 근거로 `.github/workflows/duel_daily_us.yml`의 cron을 **매일 03:00 UTC(= KST 정오 12:00)**로 잡았습니다 — 최악의 수집 완료 시각(08:05 KST)에서 거의 4시간 여유, 다음 주문 접수 시작(16:00:01 KST, 같은 한국 날짜)보다 4시간 앞서 끝납니다.
+
+이와 별개로, **정기 입금($500, 매월 10일)만은 "확정하려는 거래일"이 아니라 배치가 실제로 도는 한국 날짜**(`today_kst`, 신규 파라미터, 생략 시 `datetime.now(KST).date()`)로 판정합니다 — 시장 이벤트가 아니라 현금 이벤트라는 기존 2-2-4 원칙을 그대로 지키려면, "어제로 하루 밀린" 거래일 기준으로 입금일을 판정하면 안 되기 때문입니다. 이 두 날짜가 실제로 다르게 동작하는지(`test_deposit_uses_today_kst_not_target_date` 등)와 `today_kst`를 생략하면 진짜 오늘 날짜로 떨어지는지까지 테스트로 고정했습니다.
+
+**⚠️ 이 두 결정(target_date=어제 기본값 / today_kst 분리) 모두 오너가 명시적으로 확정한 것이 아니라, 이번 라운드에 실제 수집 스케줄(scrape_us.yml)로부터 제가 도출한 값입니다.** 코딩을 막는 항목은 아니라 이대로 커밋하지만, 저장소를 다시 열면 꼭 한 번 확인해주세요 — 아래 "🔴 미결정 항목 모아보기"에도 항목을 추가했습니다.
+
+**새 파일 4개**:
+- `utils/duel_batch_usd.py`(약 340줄) — `PROBE_STATE_FILENAME_USD`·`PROBE_INDEX_KEYS_SPEC_USD`(`SP500_PROXY_SPY`·`NASDAQ_PROXY_ONEQ`)·`default_state_path_usd()`·`run_nightly_batch_usd()`·`format_summary_lines_usd()`.
+- `run_duel_daily_batch_us.py`(약 205줄) — 실행 스크립트. `--target-date`(생략 시 어제)·`--today-date`(신규, 생략 시 오늘)·`--dry-run`·`--override`·`--data-dir`·`--state-path`. `report_db.load_us_index_closes()`로 지수 2종 최신 종가, `scorecard_db.load_universe_index(MARKET_US)`로 상위 종목, `report_db.build_price_lookup()`으로 종가 조회 — 전부 "내 성적표"·"리포트"와 같은 로더 재사용(§0-3-10).
+- `.github/workflows/duel_daily_us.yml`(148줄) — cron `"0 3 * * *"`(매일, 원화는 평일만 — 이유는 위 🔴 참고), `workflow_dispatch` 입력에 `today_date` 추가, 기준값 파일(`data/duel_freshness_probe_previous_usd.json`) 커밋에 원화와 같은 fetch+rebase 재시도(최대 3회) 패턴.
+- `tests/test_duel_batch_usd.py`(약 340줄, 37개) — §0 재사용-정체성 검사(14개 함수 `is` 동일성), `format_summary_lines_usd`가 원화 함수와 다른 객체인지·달러 기호를 쓰는지, 기준값 파일명이 원화와 안 겹치는지, `PROBE_INDEX_KEYS_SPEC_USD`가 `report_db`의 벤치마크 키와 실제로 일치하는지, 위 날짜 분리 동작, 표 배선 격리, §0-3-2 쿼리 수 회귀([3,50,900]), dry-run, None 클라이언트 에러 처리, docstring 완비.
+
+**검증**:
+1. `python3 -m py_compile` 4개 파일 전부 — 클린.
+2. `tests/test_duel_batch_usd.py` 37개 신규 작성 — 처음엔 3개 실패(테스트 계좌에 시드 원장이 없어 매수 주문이 "체결"이 아니라 예수금 부족으로 "만료" 처리됨) → `_seed_ledger()` 헬퍼(시드 $7,500) 추가해 수정 → 재실행 37개 전부 통과.
+3. **전체 결투 스위트 재실행**: `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_db_usd.py tests/test_duel_batch.py tests/test_duel_batch_usd.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **602개 전부 통과**(기존 565 + 신규 37, 회귀 0).
+4. `.github/workflows/duel_daily_us.yml`은 `device_commit_files`가 `.github/workflows/` 경로를 막고 있어 `device_bash` 헤어독으로 오너 컴퓨터에 직접 작성 후 `md5sum`으로 클라우드 사본과 대조 — 일치 확인.
+
+**아직 안 된 것(다음 라운드)**: 발행 배치의 USD 지원(`utils/duel_publish.py` 확장 또는 신규 `utils/duel_publish_usd.py`), 화면(`duel_page.py` 확장 또는 USD 전용 화면), 위 각각의 테스트. KRW v1의 6단계(실검증)·7단계(공개 전환)도 여전히 미착수입니다.
+
+---
+
 ## 6단계 — 실검증 (미착수)
 
 오프라인 테스트로 대체할 수 없는 것들만. 이전 작업지시서들과 마찬가지로 **오너가 실기기로 직접 확인**해야 하는 항목입니다.
@@ -825,6 +858,12 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
    - ~~무작위 닉네임 단어 목록(형용사+명사)의 톤·수위~~ → **숫자 접미사를 아예 없애고 형용사 2개+명사 1개 구조로 재설계, 단어 목록도 대폭 확충**(5-5절 참고). "숫자가 기계적으로 느껴진다"는 지적을 그대로 반영했습니다.
    - `bracket_key`(코드용 ASCII 식별자)와 `bracket_label()`(화면용 한글 라벨)을 분리한 것 — 이름 자체에 이견 없으면 그대로 갑니다.
 
+6. **🆕 2026-08-20 USD 트랙 4차 코딩(배치 오케스트레이션) 중 제가 직접 도출한 설계 — 오너 확인 필요** (상세 근거는 위 5-15절 참고):
+   - USD 야간 배치의 `--target-date` 기본값을 **"어제"(한국 날짜)**로 정했습니다(원화는 "오늘"). 근거: 미국 정규장 확정 종가 수집(`scrape_us.yml`, 오너 컴퓨터 실제 파일 확인)이 한국 시각 다음 날 새벽(최악 08:05)에야 끝나기 때문입니다.
+   - 정기 입금($500, 매월 10일) 판정만은 `target_date`가 아니라 **배치가 실제로 도는 한국 날짜**(`--today-date`, 신규 파라미터)를 씁니다 — 현금 이벤트는 시장 이벤트와 분리해야 한다는 기존 원칙(2-2-4)을 지키기 위해서입니다.
+   - `.github/workflows/duel_daily_us.yml`의 cron을 **매일(평일 아님) 03:00 UTC(= KST 정오)**로 정했습니다.
+   - **이 세 가지 모두 오너가 명시적으로 확정한 값이 아닙니다** — 실제 수집 스케줄 사실로부터 이번 라운드에 제가 도출한 것이니, 저장소를 다시 여시면 한 번 확인해주세요. 급하지 않고, 코딩을 막는 항목도 아닙니다.
+
 ---
 
 ## 참고 — 이번엔 명시적으로 범위 밖
@@ -843,7 +882,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13) + **3차 코딩(신규 `utils/duel_db_usd.py` — USD 표 DB 접근 계층 + 전용 테스트 133개) 완료**(§5-14 — 결투 스위트 565개 전부 통과, 회귀 0). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 다음 라운드로 배치 오케스트레이션(`utils/duel_batch_usd.py` 등)·발행 배치·화면·테스트가 남아 있습니다.
+**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13) + **3차 코딩(신규 `utils/duel_db_usd.py` — USD 표 DB 접근 계층 + 전용 테스트 133개) 완료**(§5-14) + **4차 코딩(야간 배치 오케스트레이션 — `utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 + 전용 테스트 37개) 완료**(§5-15 — 결투 스위트 602개 전부 통과, 회귀 0). **🔴 이번 라운드에 target_date=어제 기본값·정기입금 판정용 today_kst 분리·cron 시각을 제가 직접 도출했고, 오너 확인이 아직 안 끝났습니다**(§5-15, 미결정 항목 6번). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 다음 라운드로 발행 배치의 USD 지원·화면·테스트가 남아 있습니다.
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -898,10 +937,11 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 **이어서 오너 확인 2건 처리 + main.py 배선까지 완료 — 이걸로 5단계가 완전히 끝났습니다.** (1) 발행 배치 cron을 10분 → 30분 여유로 조정(위 5-10절 끝부분 참고). (2) 플래그 이름 관련 오해 해소(내부 코드 이름일 뿐, 화면엔 이미 한글 라벨이 따로 있음). (3) `main.py`에 결투 화면 3개(`duel_page`·`duel_consent_page`·`duel_leaderboard_page`) import를 device_bash로 직접 추가 — 오너 저장소 접근 없이 오너 컴퓨터에서 바로 편집했습니다.
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 이번 라운드 전부(§5-11~§5-14의 모든 결과물 — `sql/duel_schema.sql`(USD §13~15)·`utils/duel_rules.py`·`utils/duel_db.py`·`utils/duel_publish.py`·`web/pages/duel_consent_page.py`·신규 `utils/duel_db_usd.py`·신규 `tests/test_duel_db_usd.py`·`tests/test_duel.py`·`tests/test_duel_db.py`·`tests/test_duel_publish.py`·`tests/test_duel_public_ui.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
+1. 이번 라운드 전부(§5-15의 모든 결과물 — 신규 `utils/duel_batch_usd.py`·신규 `run_duel_daily_batch_us.py`·신규 `.github/workflows/duel_daily_us.yml`·신규 `tests/test_duel_batch_usd.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
 2. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
 3. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
-4. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ · `duel_rules.py` USD 상수·닉네임 파급 수정 ✅ · 신규 `utils/duel_db_usd.py`(DB 접근 계층) ✅ 전부 완료 (§5-11·§5-12·§5-13·§5-14 참고).** 표 10개 + 닉네임 재구조화는 로컬 PostgreSQL 16 검증 + **오너의 실제 프로덕션 Supabase SQL Editor 실행까지 끝났고**, `utils/duel_rules.py` USD 상수(시드 $7,500·정기입금 $500·접수시간대 16:00:01~21:00:00·체급 8단계)와 그 파급으로 깨졌던 원화 트랙 코드까지 전부 새 `(user_id, window_type)` 구조에 맞게 고쳤습니다. 이번 라운드에서 **신규 `utils/duel_db_usd.py`(USD 표를 바라보는 A/B 절 전체, 원화 파일의 1:1 미러 — 재사용 vs 신규 정의 원칙 적용)** + **신규 `tests/test_duel_db_usd.py`(133개)** 까지 작성해, 결투 스위트 전체가 **565개 전부 통과**(회귀 0)합니다. **다음 코딩 라운드는 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 파일)**이고, 그 다음이 발행 배치의 USD 지원·화면·테스트입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
+4. **🔴 USD 야간 배치 날짜 설계 오너 확인 필요(§5-15, 미결정 항목 6번)** — `--target-date` 기본값 "어제"·정기입금 판정용 `--today-date` 분리·cron `03:00 UTC`(매일) 전부 제가 실제 수집 스케줄(scrape_us.yml)로부터 이번 라운드에 도출한 값이지 오너가 확정한 값이 아닙니다. 급하지 않지만 다음에 꼭 한 번 훑어봐 주세요.
+5. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ · `duel_rules.py` USD 상수·닉네임 파급 수정 ✅ · `utils/duel_db_usd.py`(DB 접근 계층) ✅ · 야간 배치 오케스트레이션 ✅ 전부 완료 (§5-11~§5-15 참고).** 결투 스위트 전체가 **602개 전부 통과**(회귀 0)합니다. **다음 코딩 라운드는 발행 배치의 USD 지원(순위표에 달러 트랙 반영)·화면(달러 결투 참여/조회 UI)·그 테스트**입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 

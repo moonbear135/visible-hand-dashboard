@@ -1,0 +1,147 @@
+# .github/workflows/duel_daily_us.yml
+# =============================================================================
+# ⚔️ "결투다!" USD 트랙 야간 배치 — `.github/workflows/duel_daily.yml`(원화)의 미러
+#
+#   하는 일 (순서는 원화와 같습니다 — DUEL_MODULE_WORK_ORDER.md 2-5):
+#     ① 그날(어제, 아래 참고) 확정 미국 정규장 마감가가 실제로 확보됐는지 판정
+#     ② 오늘(한국 날짜)이 10일이면 정기 입금
+#     ③ pending 주문 체결 → 포지션 갱신 → 현금 원장 기록
+#     ④ 일별 스냅샷 적재
+#     ⑤ 다음 비교용 기준값 파일(USD 전용)을 저장소에 커밋
+#
+#   실제 로직은 전부 파이썬에 있습니다
+#   (`run_duel_daily_batch_us.py` → `utils/duel_batch_usd.py`).
+#   이 워크플로우는 **언제·어떤 권한으로 그걸 부르는가**만 정합니다.
+# -----------------------------------------------------------------------------
+# 🔴 cron 시각을 왜 이렇게 잡았는가 — `utils/duel_batch_usd.py` 머리말과 같은 근거
+# -----------------------------------------------------------------------------
+#   미국 정규장 마감 확정 종가는 `.github/workflows/scrape_us.yml`(2026-08-20 device_bash 로
+#   원문 직접 확인)이 수집합니다. 그 워크플로우의 cron 은 서머타임 20:35 UTC / 표준시
+#   21:35 UTC 이고, 실측 소요 55.5분, 최악의 경우(타임아웃) 90분까지 걸립니다:
+#
+#     · 서머타임(EDT) — 완료 21:30~22:05 UTC = 06:30~07:05 KST(다음 날)
+#     · 표준시(EST)   — 완료 22:30~23:05 UTC = 07:30~08:05 KST(다음 날)
+#
+#   즉 늦어도 KST 08:05 에는 그날 수집이 끝나 있습니다. 이 배치는 그 뒤 **충분한 여유**를 두고
+#   03:00 UTC(= KST 12:00, 정오)에 돌립니다 — 최악의 수집 완료 시각(08:05 KST)에서도 거의
+#   4시간 여유이고, 다음 주문 접수 시작(16:00:01 KST, 같은 한국 날짜)보다 4시간 앞서
+#   끝납니다. 원화 배치(코스피 수집 16:40 종료 → 배치 17:10, 30분 여유)보다 훨씬 넉넉한
+#   이유는, 미국 수집이 실측 소요 시간이 더 길고(20~30분 vs 55~90분) 실패 시 재시도까지
+#   감안해야 하기 때문입니다 — 여유를 좁게 잡았다가 나중에 넓히는 대신(발행 배치에서 실제로
+#   있었던 일 — 10분→30분), 처음부터 넉넉하게 잡았습니다.
+#
+#   ⚠️ 이 cron 값은 오너가 명시적으로 확정한 것이 아니라 이번 라운드에 실제 수집 스케줄로부터
+#      도출한 값입니다 — 저장소를 다시 열면 오너 확인 항목으로 다시 짚어 주세요
+#      (`DUEL_MODULE_WORK_ORDER.md` 참고).
+# =============================================================================
+
+name: Duel Daily Batch (USD)
+
+on:
+  schedule:
+    # 매일 03:00 UTC = KST 12:00(정오). 미국 수집 최악의 경우(08:05 KST)에서도 4시간 여유,
+    # 다음 주문 접수 시작(16:00:01 KST)보다 4시간 앞서 끝납니다.
+    - cron: "0 3 * * *"
+  # 수동 실행. needs_review 로 보류된 날을 관리자가 확인한 뒤 결론 내릴 때도 씁니다.
+  workflow_dispatch:
+    inputs:
+      target_date:
+        description: "확정하려는 미국 거래일 (YYYY-MM-DD). 비우면 어제(한국 날짜)"
+        required: false
+        default: ""
+      today_date:
+        description: "정기입금 판정 기준 한국 날짜 (YYYY-MM-DD). 비우면 오늘"
+        required: false
+        default: ""
+      override:
+        description: "관리자 확인 후 판정 덮어쓰기 (fill = 정상이었다 / cancel = 실패였다)"
+        required: false
+        default: ""
+        type: choice
+        options: ["", "fill", "cancel"]
+      dry_run:
+        description: "저장하지 않고 계산만"
+        required: false
+        default: false
+        type: boolean
+
+# 기준값 파일(data/duel_freshness_probe_previous_usd.json)을 저장소에 되커밋하므로 쓰기 권한이
+# 필요합니다. 그 외 권한은 주지 않습니다(최소 권한 — 원화 워크플로우와 같은 규율).
+permissions:
+  contents: write
+
+# 같은 워크플로우가 겹쳐 돌면 같은 거래일을 두 번 처리하려다 서로의 커밋을 밀어냅니다.
+concurrency:
+  group: duel-daily-batch-usd
+  cancel-in-progress: false
+
+jobs:
+  duel-batch-usd:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 결투 USD 야간 배치 실행
+        env:
+          # 🔴 배치 전용 키. 원화 배치와 **같은 Supabase 프로젝트, 같은 service_role 키**를
+          #    씁니다(두 번째 키를 만들지 않습니다 — utils/duel_db_usd.py 머리말 참고).
+          #    사용자가 접속하는 앱 서버(Render)에는 절대 넣지 않습니다(§0-3-8).
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.target_date }}" ]; then
+            ARGS="$ARGS --target-date ${{ github.event.inputs.target_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.today_date }}" ]; then
+            ARGS="$ARGS --today-date ${{ github.event.inputs.today_date }}"
+          fi
+          if [ -n "${{ github.event.inputs.override }}" ]; then
+            ARGS="$ARGS --override ${{ github.event.inputs.override }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "실행: python run_duel_daily_batch_us.py $ARGS"
+          python run_duel_daily_batch_us.py $ARGS
+
+      - name: 신선도 기준값 파일(USD) 커밋
+        # 배치가 실패하면(비정상 종료) 여기까지 오지 않습니다 — 실패한 실행의 기준값을
+        # 커밋해 다음 날 판정을 오염시키지 않기 위해서입니다.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/duel_freshness_probe_previous_usd.json
+          if git diff --cached --quiet; then
+            echo "기준값 변경 없음 — 커밋하지 않습니다."
+            exit 0
+          fi
+          git commit -m "chore(duel): USD 신선도 점검 기준값 갱신 [skip ci]"
+          # 같은 data/ 폴더를 다른 수집 워크플로우도 커밋하므로 push 가 거절될 수 있습니다.
+          # 기존 워크플로우들과 같은 fetch+rebase 재시도 패턴(최대 3회).
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "push 성공 (시도 $attempt)"
+              exit 0
+            fi
+            echo "push 거절 — fetch 후 rebase 재시도 ($attempt/3)"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || exit 1
+          done
+          echo "❌ 3회 시도 후에도 push 하지 못했습니다."
+          exit 1
