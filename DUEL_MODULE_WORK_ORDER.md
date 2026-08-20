@@ -716,6 +716,28 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ---
 
+### 5-14. 🆕 USD 트랙 3차 코딩 — 신규 `utils/duel_db_usd.py`(USD 표 DB 접근 계층) + 전용 테스트 (2026-08-20, 10번째 코딩 작업)
+
+**배경**: §5-13에서 예고한 "다음 코딩 라운드"입니다. `utils/duel_db.py`(원화)의 전체 2,654줄을 처음부터 끝까지 다시 읽고, `sql/duel_schema.sql` §13(USD 표 10개)·§14-10(`duel_opt_in_usd()` RPC)을 대조하며 **1:1 미러 파일**을 새로 작성했습니다.
+
+**설계 원칙 — "완전 분리, 그러나 순수 로직은 공유"**: 스키마(§13-14)가 이미 세운 원칙을 코드에도 그대로 옮겼습니다. **표 이름이 함수 본문에 박혀 있는 함수만 복제**하고, 표 이름을 몰라도 되는 순수 로직·순수 인프라는 **재사용**합니다.
+
+- **`utils.duel_db`에서 그대로 import 해서 씁니다(재구현 안 함)**: 공통 검증·변환 헬퍼(`_execute`·`_require_client`·`_iso_date`·`_now_kst`·`_require_text`·`_require_positive_int`·`_require_offset`·`_require_amount`·`_first_row`·`_is_duplicate_key_error`·`_assert_unique_keys`·`_filter_is_null`·`_filter_not_null`·`_assert_no_identity_fields`·`_validate_fill_payload`·`_validate_daily_snapshot`·`_validate_holding_snapshot`), 순수 집계 함수(`group_rows_by_account`·`sum_cash_balance`·`cash_balances_by_account`), 서비스 클라이언트 생성(`create_service_client`·`service_config_present`) — **원화·달러가 같은 Supabase 프로젝트, 같은 service_role 키를 씁니다**(두 번째 클라이언트 생성 경로를 만들지 않았습니다). 그리고 무엇보다 **닉네임 3종**(`ensure_nickname`·`fetch_my_nickname`·`fetch_nicknames_for_accounts`) — 5-11-10 확정대로 `duel_nicknames`는 처음부터 원화·달러가 공유하는 표이고, USD 전용 닉네임 함수를 만드는 것 자체가 "닉네임이 계좌별로 갈라진다"는 잘못된 모델을 코드에 새기는 일이라 **만들지 않았습니다**. `fetch_real_principal_holdings`("내 성적표" 실보유 조회)도 통화 컬럼을 이미 갖고 있는 트랙 무관 함수라 그대로 재사용합니다.
+- **새로 정의합니다(표 이름 또는 통화별 규칙이 본문에 박힌 것들)**: §0의 `_usd` 표 이름 상수 10개 + RPC 이름(`duel_opt_in_usd`), A 절 전체(`opt_in_usd`·`save_order_usd`·`edit_order_usd`·`cancel_order_usd`·조회 5종·`save_consent_usd`·`fetch_my_consent_usd`·`revoke_consent_usd`·순위표 읽기 3종), B 절 전체(배치 전용 CRUD — 활성계좌·원장·포지션·스냅샷 일괄조회, 옵트인 백필, 정기입금, 체결 기록, 발행표 쓰기/지우기 등 약 30개 함수).
+- **주문 접수 시간대**는 `duel_rules.resolve_order_window_usd()`(16:00:01~21:00:00, §5-13에서 오너가 최종 확정한 값)를 씁니다 — `resolve_order_window()`(원화, 18:00:01~22:00:00)를 실수로 쓰면 시간대가 두 시간 어긋납니다.
+- **`_translate_order_guard_error_usd()`** — 이 파일에서 "재사용하지 않기로" 한 유일한 예외 케이스입니다. 원화용 `_translate_order_guard_error()`는 트리거 자체는 원화·달러가 공유하지만, **오류 문장 안에 "18:00~22:00"이 하드코딩**돼 있어 그대로 재사용하면 USD 사용자에게 원화 시간대를 보여주는 사고가 납니다. 그래서 이 함수만 새로 정의해 "16:00~21:00"을 담습니다(트리거는 공유, 사람이 읽는 번역 문구만 트랙별로 분리).
+
+**검증**:
+1. `python3 -m py_compile utils/duel_db_usd.py`(및 관련 파일 전부) — 클린.
+2. import 및 정체성 점검 — `duel_db_usd.fetch_nicknames_for_accounts is duel_db.fetch_nicknames_for_accounts` 등 공유 함수 9종이 실제로 **같은 객체**인지(재정의가 아닌지) 직접 대조, `user_write_signature_violations_usd()`(빈 목록 = 통과), 트리거 오류 번역문에 "16:00~21:00"만 있고 "18:00~22:00"이 새어 들어오지 않는지 — 전부 통과.
+3. **신규 `tests/test_duel_db_usd.py`(133개, `tests/test_duel_db.py`의 `FakeClient`/`sequence`를 재사용 — 가짜 클라이언트도 단일 출처로, `tests/test_duel_publish.py`·`tests/test_duel_batch.py`와 같은 관례) 작성**. 이 파일이 특히 확인하는 것: ① 머리말이 선언한 "재사용 vs 신규 정의" 경계가 실제 코드와 일치하는지(공유 함수 `is` 동일성 + AST 로 재정의 여부 검사), ② 접수 시간대가 정확히 16:00:01~21:00:00 경계로 판정되는지, ③ 트리거 거절 번역문이 KRW 문구를 새지 않는지, ④ 표/RPC 이름이 KRW 것과 겹치지 않고 `_usd` 접미사가 실제로 붙어 있는지, ⑤ 시드($7,500)·정기입금($500) 금액과 §0-3-2(집합 연산) 회귀가 USD 배치 함수에도 적용되는지, ⑥ 사용자 쓰기 함수 자가 점검, ⑦ KRW 표에는 요청이 전혀 가지 않는지(트랙 격리), ⑧ None 클라이언트 에러 처리, ⑨ 공개 함수 전부 docstring 보유.
+4. **전체 결투 스위트 재실행**: `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_db_usd.py tests/test_duel_batch.py tests/test_duel_publish.py tests/test_duel_public_ui.py` → **565개 전부 통과**(기존 432 + 신규 133, 회귀 0). 저장소 전체 `py_compile`도 클린.
+   - ⚠️ 이 세션에는 저장소 전체가 다 올라와 있지 않아(`web/auth.py`·`web/state.py` 미존재), `python3 -m pytest`(전체 스위트)를 돌리면 그 두 모듈이 없어서 나는 실패 18건이 함께 뜹니다 — 전부 이번 작업과 무관한 **기존 파일 부재**이고(`duel_db_usd.py`를 전혀 참조하지 않는 실패들), 결투 스위트만 따로 돌리면 문제 없이 전부 통과합니다. 저장소를 다시 열면 그 두 파일이 있으니 재발하지 않을 실패입니다.
+
+**아직 안 된 것(다음 라운드)**: 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 파일), 발행 배치의 USD 지원(`utils/duel_publish.py` 확장 또는 신규 `utils/duel_publish_usd.py`), 화면(`duel_page.py` 확장 또는 USD 전용 화면), 위 각각의 테스트. KRW v1의 6단계(실검증)·7단계(공개 전환)도 여전히 미착수입니다.
+
+---
+
 ## 6단계 — 실검증 (미착수)
 
 오프라인 테스트로 대체할 수 없는 것들만. 이전 작업지시서들과 마찬가지로 **오너가 실기기로 직접 확인**해야 하는 항목입니다.
@@ -821,7 +843,7 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13 — `utils/duel_db.py`·`utils/duel_publish.py`·`web/pages/duel_consent_page.py` 수정 + 테스트 4개 갱신·확장, 432개 전부 통과). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 다음 라운드로 신규 `utils/duel_db_usd.py`·배치·화면·테스트가 남아 있습니다.
+**2026-08-20 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13) + **3차 코딩(신규 `utils/duel_db_usd.py` — USD 표 DB 접근 계층 + 전용 테스트 133개) 완료**(§5-14 — 결투 스위트 565개 전부 통과, 회귀 0). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, USD 트랙은 다음 라운드로 배치 오케스트레이션(`utils/duel_batch_usd.py` 등)·발행 배치·화면·테스트가 남아 있습니다.
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -876,10 +898,10 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 **이어서 오너 확인 2건 처리 + main.py 배선까지 완료 — 이걸로 5단계가 완전히 끝났습니다.** (1) 발행 배치 cron을 10분 → 30분 여유로 조정(위 5-10절 끝부분 참고). (2) 플래그 이름 관련 오해 해소(내부 코드 이름일 뿐, 화면엔 이미 한글 라벨이 따로 있음). (3) `main.py`에 결투 화면 3개(`duel_page`·`duel_consent_page`·`duel_leaderboard_page`) import를 device_bash로 직접 추가 — 오너 저장소 접근 없이 오너 컴퓨터에서 바로 편집했습니다.
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 이번 7번째 코딩 작업 결과물 + 이어진 수정분(`web/pages/duel_consent_page.py`·`web/pages/duel_leaderboard_page.py`·`utils/duel_db.py`·`utils/duel_rules.py`·`web/layout.py`·`run_duel_publish_batch.py`·`tests/test_duel_public_ui.py`·`tests/test_duel_db.py`·`.github/workflows/duel_publish_daily.yml`·`main.py`·`PROJECT_STATUS.md`·`sql/duel_schema.sql`(USD 트랙 §13~15 추가분)·`utils/duel_publish.py`·`tests/test_duel.py`·`tests/test_duel_publish.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
+1. 이번 라운드 전부(§5-11~§5-14의 모든 결과물 — `sql/duel_schema.sql`(USD §13~15)·`utils/duel_rules.py`·`utils/duel_db.py`·`utils/duel_publish.py`·`web/pages/duel_consent_page.py`·신규 `utils/duel_db_usd.py`·신규 `tests/test_duel_db_usd.py`·`tests/test_duel.py`·`tests/test_duel_db.py`·`tests/test_duel_publish.py`·`tests/test_duel_public_ui.py`·이 문서)을 GitHub에 푸시 (아래 안내 참고).
 2. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
 3. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다.
-4. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ 완료 + 오너가 실제 Supabase 프로젝트에 적용·확인까지 완료, `duel_rules.py` USD 상수 + 닉네임 파급 수정 ✅ 완료, 주문 접수 시간대 초 단위도 ✅ 오너 확정 완료 (§5-11·§5-12·§5-13 참고).** 스키마(표 10개 + 닉네임 재구조화 + 마이그레이션 브리지)는 이미 로컬 PostgreSQL 16 검증 + **오너의 실제 프로덕션 Supabase SQL Editor 실행(2026-08-20, 21개 표·seed 7500 확인)까지 끝났습니다.** 이어서 `utils/duel_rules.py`(USD 상수 6종 + `resolve_order_window_usd()`/`assign_bracket_usd()` 등)와, 닉네임 스키마 변경 때문에 깨졌던 원화 트랙 코드(`utils/duel_db.py`의 `ensure_nickname`/`fetch_my_nickname`/`fetch_nicknames_for_accounts` 등, `web/pages/duel_consent_page.py`, `utils/duel_publish.py`)까지 전부 새 `(user_id, window_type)` 구조에 맞게 고쳤고, 주문 접수 시간대(16:00:01~21:00:00 — KRW 와 같은 "정각+1초" 관례로 오너가 최종 확정)까지 반영해 테스트 432개 전부 통과했습니다. **다음 코딩 라운드는 신규 `utils/duel_db_usd.py`(USD 표 DB 접근 계층)**이고, 그 다음이 배치 오케스트레이션(`utils/duel_batch_usd.py` 등)·화면·테스트입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
+4. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ · `duel_rules.py` USD 상수·닉네임 파급 수정 ✅ · 신규 `utils/duel_db_usd.py`(DB 접근 계층) ✅ 전부 완료 (§5-11·§5-12·§5-13·§5-14 참고).** 표 10개 + 닉네임 재구조화는 로컬 PostgreSQL 16 검증 + **오너의 실제 프로덕션 Supabase SQL Editor 실행까지 끝났고**, `utils/duel_rules.py` USD 상수(시드 $7,500·정기입금 $500·접수시간대 16:00:01~21:00:00·체급 8단계)와 그 파급으로 깨졌던 원화 트랙 코드까지 전부 새 `(user_id, window_type)` 구조에 맞게 고쳤습니다. 이번 라운드에서 **신규 `utils/duel_db_usd.py`(USD 표를 바라보는 A/B 절 전체, 원화 파일의 1:1 미러 — 재사용 vs 신규 정의 원칙 적용)** + **신규 `tests/test_duel_db_usd.py`(133개)** 까지 작성해, 결투 스위트 전체가 **565개 전부 통과**(회귀 0)합니다. **다음 코딩 라운드는 배치 오케스트레이션(`utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 파일)**이고, 그 다음이 발행 배치의 USD 지원·화면·테스트입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 
