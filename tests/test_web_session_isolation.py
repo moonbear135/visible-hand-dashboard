@@ -186,6 +186,11 @@ ALLOWED_MUTABLE_GLOBALS = {
         "점수에서 뺀 지표들의 '공부용' 설명 텍스트(고정 문자열). 어떤 값도 계산·저장하지 않음.",
     ("web/pages/macro_page.py", "DROPPED_AS_DUPLICATE"):
         "개념 중복으로 완전 제외한 지표 2개의 사유 문구(고정 문자열 튜플).",
+    # ── ⚔️ 결투다!(4번째 모듈) 화면 — 2026-08-20 추가 ───────────────────────
+    ("web/pages/duel_page.py", "WINDOW_TITLES"):
+        "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 값이 대입되는 코드가 없고, "
+        "사용자별 계좌·주문·현금은 전부 @ui.page 함수 안의 지역 변수이거나 함수 인자로만 "
+        "흐릅니다(아래 [9] 가 매번 확인).",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
@@ -1359,6 +1364,324 @@ def test_macro_render_smoke():
 
 
 # =============================================================================
+# [9] ⚔️ 결투다! (`web/pages/duel_page.py`) — 2026-08-20 추가 (작업지시서 2단계 화면)
+#
+#     이 화면은 '내 성적표'·'사장님 보고서'에 이은 **세 번째 로그인 필요 화면**이고,
+#     여기서 처음으로 앱이 사용자 대신 상태를 바꿉니다(주문 저장·수정·취소). 그래서
+#     [3]/[5] 와 같은 기준(client·user_id 를 인자로, 전역 추측 금지, esc, 예외 원문 금지)에
+#     더해 이 모듈 고유의 두 가지를 함께 고정합니다.
+#       ① **3단계 공개 게이트**(작업지시서 2-8) — 플래그가 꺼져 있으면 URL 로 들어와도
+#          본문이 그려지지 않고, 관리자 전용 단계에서는 관리자에게만 그려집니다.
+#       ② **규칙을 화면에서 다시 구현하지 않았는지** — 체결·시간대·수익률은 전부
+#          `utils/duel_rules.py` / `utils/duel_db.py` 호출이어야 합니다(§0-3-10).
+# =============================================================================
+def test_duel_page_wiring():
+    print("\n[9] web/pages/duel_page.py 배선 (⚔️ 결투다! · 로그인 필요 · 3단계 공개)")
+    path = REPO_ROOT / "web" / "pages" / "duel_page.py"
+    check(path.exists(), "web/pages/duel_page.py 존재")
+    if not path.exists():
+        return
+    src = path.read_text(encoding="utf-8")
+    tree = ast.parse(src)
+    # "이 낱말이 코드에 없는지"를 볼 때는 **주석·독스트링을 걷어낸** 문자열로 확인합니다
+    # ([5] 와 같은 이유 — 이 파일도 왜 그렇게 했는지를 주석으로 길게 설명합니다).
+    code = python_code_only(src)
+
+    # ── (a) DB를 만지는 함수는 client·user_id 를 **인자로** 받는다 (§0-3-8 함수 설계 원칙) ──
+    funcs = {n.name: n for n in ast.walk(tree)
+             if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))}
+    for name in ("_render_body", "_render_duel_section", "_render_opt_in", "_render_accounts",
+                 "_render_account_card", "_render_order_form", "_render_orders_section",
+                 "_render_account_orders"):
+        node = funcs.get(name)
+        args = [a.arg for a in node.args.args] if node else []
+        check(node is not None and "client" in args and "user_id" in args,
+              f"`{name}()` 이 client·user_id 를 인자로 받음", f"실제 인자: {args}")
+
+    # ── (b) DB 호출에 client 가 첫 인자로 들어가는지 (전역에서 추측하지 않는지) ──
+    for call_name in ("fetch_my_accounts", "fetch_my_positions", "fetch_my_cash_ledger",
+                      "fetch_my_orders", "fetch_my_snapshots",
+                      "save_order", "edit_order", "cancel_order", "opt_in"):
+        calls = [n for n in ast.walk(tree)
+                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                 and n.func.id == call_name]
+        check(calls and all(c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "client"
+                            for c in calls),
+              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김",
+              f"호출 {len(calls)}건")
+
+    # ── (c) 🔴 opt_in() 은 **인자가 클라이언트 하나뿐**이어야 합니다 ──
+    #    대상자는 앱이 정하지 않고 DB 안에서 auth.uid() 로만 정해집니다(스키마 §9-10).
+    #    화면이 user_id 를 끼워 넣으려는 시도 자체가 생기지 않도록 여기서 고정합니다.
+    opt_in_calls = [n for n in ast.walk(tree)
+                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                    and n.func.id == "opt_in"]
+    check(opt_in_calls and all(len(c.args) == 1 and not c.keywords for c in opt_in_calls),
+          "`opt_in(client)` — 사용자 id·금액·날짜를 넘기는 경로가 없음 (auth.uid() 로만 결정)")
+
+    # ── (d) 🔒 소유자 이중 확인 — RLS 가 지워져도 남의 행을 그리지 않음 ──
+    check('account.get("user_id") != user_id' in code,
+          "계좌를 그리기 전에 account['user_id'] == user_id 를 한 번 더 확인 (§0-3-8 이중 방어)")
+
+    # ── (e) 저장소 직접 접근 금지 · Streamlit 잔재 없음 ──
+    check(bool(re.search(r'from nicegui import[^\n]*\bui\b', src)) and "app.storage" not in code,
+          "화면 파일은 app.storage 를 직접 만지지 않음 (web/auth.py 경유)")
+    check("import streamlit" not in code and "st.session_state" not in code,
+          "Streamlit 코드가 섞여 있지 않음")
+
+    # ── (f) 로그인 경로 공유 — 다른 두 화면과 **같은 세션·같은 폼** ──
+    check("has_supabase_session" in code and "from web.auth import" in code,
+          "로그인 여부를 web/auth.py 로 판단 (scorecard·report 와 같은 세션)")
+    check("from web.auth_ui import" in code and "render_auth()" in code,
+          "로그인 폼을 web/auth_ui.py 공용 함수로 그림 (§0-3-10)")
+    for forbidden in ("sign_in(", "sign_up(", "SESSION_USER_KEY", "set_session("):
+        check(forbidden not in code,
+              f"자체 로그인 처리(`{forbidden}`)를 따로 만들지 않음 — 인증 경로는 web/auth.py 하나")
+
+    # ── (g) 🚧 3단계 공개 게이트 (작업지시서 2-8 · 7단계) ──
+    check("@ui.page('/duel')" in code, "경로가 /duel")
+    check("if not DUEL_ENABLED:" in code,
+          "플래그가 꺼져 있으면 URL 로 직접 들어와도 본문을 그리지 않음 (§0-3-6 기본 숨김)")
+    check("DUEL_MENU_ADMIN_ONLY and not is_admin()" in code,
+          "관리자 전용 단계에서는 관리자가 아닌 접속에 본문을 그리지 않음 (메뉴 숨김만으로는 부족)")
+    check("from web.layout import" in code and "DUEL_ENABLED" in code,
+          "공개 스위치를 화면이 따로 만들지 않고 web/layout.py 의 상수 하나를 같이 봄 (§0-3-10)")
+
+    # ── (h) 규칙을 화면에서 다시 구현하지 않았는지 (§0-3-10) ──
+    check("duel_rules.resolve_order_window(" in code,
+          "주문 접수 시간대 판정을 duel_rules 에 위임 (화면이 두 번째 정의를 만들지 않음)")
+    check("duel_rules.compute_twr(" in code,
+          "누적 수익률(TWR)을 duel_rules.compute_twr() 으로 계산 (화면에 계산식 없음)")
+    check("ORDER_WINDOW_OPEN_TIME" in code and '"18:00' not in code and "'18:00" not in code,
+          "접수 시각을 화면에 직접 적지 않고 규칙 상수에서 만들어 씀")
+    check("resolve_stock_query" in code and "build_universe_index" in code,
+          "종목 검색·유니버스 목록을 기존 함수로 재사용 (두 번째 로더를 만들지 않음)")
+    for forbidden in ('"sell"', "'sell'"):
+        check(forbidden not in code,
+              f"매도 경로({forbidden})가 화면 어디에도 없음 — 이 모듈에 매도는 없습니다")
+
+    # ── (i) 상시 노출 고지 3종 (작업지시서 2-8) ──
+    check("배당금은 반영되지 않습니다" in src, "고지 ① 배당 미반영")
+    check("주문은 저장 즉시 체결되지 않습니다" in src, "고지 ② 즉시 체결 아님")
+    check("매수만 가능합니다" in src and "매도는 지원하지 않습니다" in src, "고지 ③ 매수 전용")
+    check("MANDATORY_NOTICES" in code and "for notice in MANDATORY_NOTICES" in code,
+          "세 고지를 한 곳에 모아 화면 상단에 **항상** 그림 (조건 분기 뒤에 숨지 않음)")
+
+    # ── (j) 🔴 체결 시점 문구가 확정된 시간 모델(2-4)과 일치하는지 ──
+    #    작업지시서 2-8 초안에는 "그날 밤에 체결"이라고 적혀 있지만, 나중에 나온 2-4 가
+    #    "체결은 D+1 종가"로 **전면 확정**했습니다. 초안 문구를 그대로 복사하면 화면이
+    #    사실과 다른 말을 하게 되므로(§0-1), 그 문장이 되살아나지 않게 고정합니다.
+    # ⚠️ 여기서만 `src` 가 아니라 `code`(주석·독스트링 제거본)를 봅니다 — 이 화면 파일은
+    #    "초안 문구를 왜 안 쓰는지"를 주석으로 설명하고 있어서, 원문으로 검사하면 그 설명
+    #    자체에 걸려 항상 실패합니다([5] 의 같은 이유).
+    check("그날 밤에 체결" not in code,
+          "폐기된 초안 문구('그날 밤에 체결')가 사용자에게 보이는 문자열에 없음 "
+          "— 확정 모델은 D+1 종가 체결 (2-4)")
+    check("다음 거래일" in src, "체결 시점을 '다음 거래일 종가'로 안내")
+
+    # ── (k) 사전 고지 — 수집 실패 시 주문 취소 (2-4-5: 사후 통보로 끝내지 않기) ──
+    check("NOTICE_CRAWL_FAILURE" in code and "ui.checkbox(" in code,
+          "주문 전에 '수집 실패 시 취소' 안내 + 확인 체크 영역이 있음 (2-4-5)")
+
+    # ── (l) §0-1 — 계산 불가를 0% 로 채우지 않는지 ──
+    check("TWR_INSUFFICIENT" in code and "아직 계산할 수 없음" in src,
+          "TWR 이 계산 불가일 때 0% 가 아니라 '아직 계산할 수 없음'으로 표시 (§0-1)")
+    check("가격 확인 중" in src,
+          "가격을 못 구한 보유 종목을 0원으로 처리하지 않고 '가격 확인 중'으로 표시 (3-2)")
+
+    # ── (m) XSS · 예외 원문 노출 (§0-3-9 / §0-3-4) ──
+    check("esc(" in src, "HTML 출력에 esc() 사용")
+    check("_fail(" in src and "traceback" not in src,
+          "예상 못 한 예외는 화면에 원문을 흘리지 않고 로그로만 보냄 (§0-3-4)")
+
+    # ── (n) 메뉴 배선 — 기본은 숨김, 켜면 관리자 전용부터 ──
+    import web.layout as layout_module
+    check(all(item[0] != "/duel" for item in layout_module._MENU),
+          "DUEL_ENABLED 가 꺼진 기본 상태에서는 메뉴에 /duel 항목이 아예 없음 (1단계 전체 숨김)",
+          f"실제 메뉴: {[i[0] for i in layout_module._MENU]}")
+    menu_when_on, admin_only_flag = _menu_with_duel_enabled()
+    entries = [item for item in menu_when_on if item[0] == "/duel"]
+    check(len(entries) == 1,
+          "DUEL_ENABLED=true 면 메뉴에 /duel 항목이 정확히 하나 생김 (2단계)",
+          f"실제: {entries}")
+    check(bool(entries) and entries[0][2] is admin_only_flag,
+          "그 항목의 관리자전용 플래그가 DUEL_MENU_ADMIN_ONLY 와 같은 값 "
+          "(3단계 전환 = 이 불리언 하나만 False 로)",
+          f"실제: {entries}")
+    check(admin_only_flag is True,
+          "지금은 2단계(관리자 전용) 설정 — 오너가 직접 써 본 뒤 3단계로 넘깁니다",
+          f"실제 DUEL_MENU_ADMIN_ONLY={admin_only_flag}")
+
+    # ── (o) main.py 등록 ──
+    main_path = REPO_ROOT / "main.py"
+    if main_path.exists():
+        check("duel_page" in main_path.read_text(encoding="utf-8"),
+              "main.py 가 duel_page 를 import (@ui.page 등록)")
+    else:                                          # pragma: no cover - 저장소에는 항상 있음
+        check(False, "main.py 존재", "← 이 스냅샷에는 main.py 가 없습니다")
+
+
+def _menu_with_duel_enabled():
+    """`DUEL_ENABLED=true` 로 `web/layout.py` 를 다시 읽어 그때의 메뉴를 돌려줍니다.
+
+    플래그는 import 시점에 환경변수로 한 번 판정되므로, "켰을 때 어떤 모양인가"를 확인하려면
+    모듈을 다시 읽는 수밖에 없습니다. 끝나면 **반드시 원래 상태로 되돌립니다** — 이 뒤의
+    검사들이 "기본값(꺼짐)" 을 전제로 하기 때문입니다.
+    """
+    import importlib
+    import web.layout as layout_module
+
+    saved = os.environ.get("DUEL_ENABLED")
+    os.environ["DUEL_ENABLED"] = "true"
+    try:
+        reloaded = importlib.reload(layout_module)
+        return list(reloaded._MENU), reloaded.DUEL_MENU_ADMIN_ONLY
+    finally:
+        if saved is None:
+            os.environ.pop("DUEL_ENABLED", None)
+        else:
+            os.environ["DUEL_ENABLED"] = saved
+        importlib.reload(layout_module)
+
+
+# =============================================================================
+# [9-b] ⚔️ 결투 화면 렌더 스모크 — 로그인 후 본문을 **실제로 실행**해봅니다
+# =============================================================================
+#  [4]/[6] 과 같은 방식입니다. 위젯은 스텁이라 화면이 그려지진 않지만, 금액 서식·HTML
+#  이스케이프·TWR 계산·부분체결 문구·통화 표기는 전부 진짜로 실행됩니다.
+#  ⚠️ 계좌·주문·현금은 **합성 데이터**이고 DB 호출은 전부 대체합니다(§0-1 — 실제 Supabase 에
+#     접속하지 않고, 실데이터를 지어내지도 않습니다). 시세만 저장소의 실제 스냅샷을 읽습니다.
+# =============================================================================
+DUEL_SYNTHETIC_ACCOUNTS = [
+    {"id": "acc-m1", "user_id": "uid-duel", "window_type": "M1", "seed_amount": 10000000,
+     "currency": "KRW", "anchor_date": "2026-08-03", "status": "active"},
+    {"id": "acc-m3", "user_id": "uid-duel", "window_type": "M3", "seed_amount": 10000000,
+     "currency": "KRW", "anchor_date": "2026-08-03", "status": "active"},
+    {"id": "acc-m6", "user_id": "uid-duel", "window_type": "M6", "seed_amount": 10000000,
+     "currency": "KRW", "anchor_date": "2026-08-03", "status": "active"},
+]
+
+DUEL_SYNTHETIC_LEDGER = [
+    {"id": 1, "account_id": "acc-m1", "event_type": "seed", "amount": 10000000,
+     "event_date": "2026-08-03"},
+    {"id": 2, "account_id": "acc-m1", "event_type": "monthly_deposit", "amount": 800000,
+     "event_date": "2026-08-10"},
+    {"id": 3, "account_id": "acc-m1", "event_type": "buy", "amount": -700000,
+     "event_date": "2026-08-11"},
+]
+
+DUEL_SYNTHETIC_POSITIONS = [
+    {"id": "pos-1", "account_id": "acc-m1", "ticker": "005930", "stock_name": "삼성전자",
+     "quantity": 10, "avg_cost": 70000, "status": "active", "delisted_date": None},
+    # 🔐 종목명에 스크립트를 심어 둔 행 — 화면에 **글자 그대로** 나와야 합니다 (§0-3-9).
+    #    (유니버스 밖 코드라 가격도 못 구합니다 → "가격 확인 중" 경로도 같이 탑니다.)
+    {"id": "pos-2", "account_id": "acc-m1", "ticker": "999999",
+     "stock_name": "<img src=x onerror=alert(1)>", "quantity": 3, "avg_cost": 1000,
+     "status": "active", "delisted_date": None},
+]
+
+DUEL_SYNTHETIC_ORDERS = [
+    {"id": "ord-1", "account_id": "acc-m1", "ticker": "005930", "stock_name": "삼성전자",
+     "requested_quantity": 10, "status": "pending", "saved_at": "2026-08-19T19:00:00+09:00",
+     "target_date": "2026-08-20"},
+    {"id": "ord-2", "account_id": "acc-m1", "ticker": "000660", "stock_name": "SK하이닉스",
+     "requested_quantity": 10, "status": "partially_filled", "filled_quantity": 7,
+     "filled_price": 100000, "filled_amount": 700000, "filled_date": "2026-08-11",
+     "saved_at": "2026-08-10T19:00:00+09:00", "target_date": "2026-08-11",
+     "fail_reason": "요청 10주 중 7주만 예수금 부족으로 체결"},
+]
+
+DUEL_SYNTHETIC_SNAPSHOTS = [
+    {"snapshot_date": "2026-08-03", "account_id": "acc-m1", "position_value": 0,
+     "cash_balance": 10000000, "total_value": 10000000, "total_cost": 0,
+     "cash_flow_amount": 10000000, "cash_flow_kind": "seed", "priced_count": 0,
+     "unpriced_count": 0},
+    {"snapshot_date": "2026-08-10", "account_id": "acc-m1", "position_value": 0,
+     "cash_balance": 10800000, "total_value": 10800000, "total_cost": 0,
+     "cash_flow_amount": 800000, "cash_flow_kind": "monthly_deposit", "priced_count": 0,
+     "unpriced_count": 0},
+    {"snapshot_date": "2026-08-11", "account_id": "acc-m1", "position_value": 740000,
+     "cash_balance": 10100000, "total_value": 10840000, "total_cost": 700000,
+     "cash_flow_amount": 0, "cash_flow_kind": None, "priced_count": 1, "unpriced_count": 0},
+]
+
+
+def test_duel_render_smoke():
+    print("\n[9-b] 결투 화면 렌더 스모크 (합성 계좌·주문·현금)")
+    _install_nicegui_stub()
+    import web.pages.duel_page as page
+
+    captured_html = []
+    import web.components.widgets as widgets
+    from nicegui import ui
+
+    original = (page.fetch_my_accounts, page.fetch_my_cash_ledger, page.fetch_my_positions,
+                page.fetch_my_orders, page.fetch_my_snapshots)
+    original_html = ui.html
+
+    def _for_account(rows):
+        return lambda client, account_id: [
+            dict(r) for r in rows if r.get("account_id") == account_id
+        ]
+
+    page.fetch_my_accounts = lambda client, user_id: [dict(a) for a in DUEL_SYNTHETIC_ACCOUNTS]
+    page.fetch_my_cash_ledger = _for_account(DUEL_SYNTHETIC_LEDGER)
+    page.fetch_my_positions = _for_account(DUEL_SYNTHETIC_POSITIONS)
+    page.fetch_my_orders = _for_account(DUEL_SYNTHETIC_ORDERS)
+    page.fetch_my_snapshots = (
+        lambda client, account_id, start_date=None, end_date=None:
+        [dict(r) for r in DUEL_SYNTHETIC_SNAPSHOTS if r.get("account_id") == account_id]
+    )
+
+    def _capture_html(content='', *a, **k):
+        captured_html.append(str(content))
+        return original_html(content, *a, **k)
+
+    ui.html = _capture_html
+    widgets.ui.html = _capture_html
+    try:
+        page._render_body(object(), "uid-duel", "duel@example.com")
+        check(True, "_render_body() 가 예외 없이 끝까지 실행됨")
+    except Exception as exc:                       # noqa: BLE001
+        check(False, "_render_body() 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
+    finally:
+        (page.fetch_my_accounts, page.fetch_my_cash_ledger, page.fetch_my_positions,
+         page.fetch_my_orders, page.fetch_my_snapshots) = original
+        ui.html = original_html
+        widgets.ui.html = original_html
+
+    blob = "\n".join(captured_html)
+    check(bool(blob), "렌더 중 HTML 이 실제로 만들어짐", f"(조각 {len(captured_html)}개)")
+    check("<img src=x onerror=" not in blob,
+          "🔐 종목명에 심어둔 <img onerror=...> 가 HTML 로 살아나오지 않음 (§0-3-9 XSS)")
+    check("&lt;img src=x onerror=alert(1)&gt;" in blob,
+          "🔐 그 문자열이 이스케이프되어 '글자 그대로' 출력됨")
+    check("가격 확인 중" in blob,
+          "가격을 못 구한 종목은 0원이 아니라 '가격 확인 중' 으로 표시 (§0-1 / 3-2)")
+    check("요청 10주 중 7주만" in blob,
+          "부분체결은 요청 수량과 실제 체결 수량을 둘 다 보여줌 (1-3 / 2-4-6)")
+
+    # 🔴 §0-1 회귀 — 남의 계좌가 섞여 오면 **아무것도 그리지 않아야** 합니다.
+    drawn = []
+    saved_banner = page.error_banner
+    page.error_banner = lambda text: drawn.append(text)
+    page.fetch_my_accounts = lambda client, user_id: [
+        dict(DUEL_SYNTHETIC_ACCOUNTS[0], user_id="uid-someone-else"),
+    ]
+    try:
+        page._render_duel_section(object(), "uid-duel", page._load_kospi_universe(),
+                                  page._order_window_state(), lambda: None)
+        blob2 = "\n".join(str(d) for d in drawn)
+        check(bool(drawn) and "본인 것이 아닌" in blob2,
+              "🔒 남의 user_id 가 섞인 계좌 목록은 그리지 않고 오류로 알림 (§0-3-8)")
+    except Exception as exc:                       # noqa: BLE001
+        check(False, "🔒 남의 계좌 혼입 방어 경로 실행", f"({type(exc).__name__}: {exc})")
+    finally:
+        page.error_banner = saved_banner
+        page.fetch_my_accounts = original[0]
+
+
+# =============================================================================
 # [0] 🌐 데이터 원격 로드가 **꺼져 있는 상태**임을 못 박습니다 (2026-08-17 추가)
 # =============================================================================
 #  `utils/data_source.py`(계획서 §8-5 B안)가 들어오면서 `web/state.py` 의 내부 구현이
@@ -1406,7 +1729,8 @@ def test_pages_import_cleanly():
     _install_nicegui_stub()
     for module_name in ("web.auth", "web.auth_ui", "web.layout",
                         "web.pages.admin_page", "web.pages.macro_page",
-                        "web.pages.scorecard_page", "web.pages.report_page"):
+                        "web.pages.scorecard_page", "web.pages.report_page",
+                        "web.pages.duel_page"):
         try:
             __import__(module_name)
         except Exception as exc:                   # noqa: BLE001
@@ -1435,6 +1759,8 @@ def main():
     test_login_is_shared_between_scorecard_and_report()
     test_macro_page_wiring()
     test_macro_render_smoke()
+    test_duel_page_wiring()
+    test_duel_render_smoke()
     test_pages_import_cleanly()
 
     print("\n" + "=" * 74)

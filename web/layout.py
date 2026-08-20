@@ -14,6 +14,7 @@
 한 줄씩 채웁니다 (NICEGUI_MIGRATION_PLAN.md §3-2 라우팅 표).
 """
 
+import os
 from contextlib import contextmanager
 
 from nicegui import ui
@@ -21,6 +22,35 @@ from nicegui import ui
 from utils import data_source
 from web.auth import is_admin
 from web.components.widgets import error_banner
+
+# =============================================================================
+# ⚔️ "결투다!"(4번째 모듈) 공개 스위치 — DUEL_MODULE_WORK_ORDER.md 2-8 · 7단계
+# =============================================================================
+#  오너가 확정한 **3단계 공개 절차**가 아래 두 값으로 전부 표현됩니다. 단계를 넘길 때
+#  고치는 것은 매번 **이 두 줄 중 하나뿐**입니다.
+#
+#    1단계 (전체 숨김)     : DUEL_ENABLED=false  ← 기본값. 메뉴에 항목이 아예 안 생기고,
+#                            URL 로 /duel 을 직접 쳐도 화면이 "준비중" 안내만 그립니다
+#                            (`web/pages/duel_page.py` 가 같은 값을 보고 판단 — 이중 방어).
+#    2단계 (관리자 전용)   : 서버 환경변수 DUEL_ENABLED=true + 아래 DUEL_MENU_ADMIN_ONLY=True
+#                            → `/admin/macro` 와 **똑같은 방식**으로 관리자 계정에게만
+#                            메뉴가 보입니다(§0-3-10 — 기존 패턴 재사용, 새 구조 발명 금지).
+#    3단계 (전체 공개)     : 아래 DUEL_MENU_ADMIN_ONLY 를 **False 로 한 글자만** 바꿉니다.
+#                            그 순간 메뉴가 모든 로그인 사용자에게 보이고, 화면의 관리자
+#                            제한도 함께 풀립니다(같은 값을 화면도 보기 때문입니다).
+#
+#  ⚠️ 환경변수 판정은 `web/pages/scorecard_page.py::SCORECARD_OCR_ENABLED` 와
+#     `utils/data_source.py::is_remote_enabled()` 가 이미 쓰는 관례 그대로입니다 —
+#     **값이 정확히 "true"(대소문자 무관)일 때만** 켜집니다. "값이 있으면 켜짐"으로
+#     판정하면 환경변수를 실수로 아무 값이나 넣어도 켜지는 사고가 납니다(§0-3-6 기본 숨김).
+#  ⚠️ 이 플래그를 화면 파일이 아니라 여기 둔 이유: `web/pages/duel_page.py` 는 이미 이
+#     파일(`layout`)을 import 하므로 여기서 가져다 쓰면 순환 import 가 없지만, 반대 방향
+#     (layout → duel_page)은 순환이 됩니다. 값의 출처는 한 곳이어야 하므로(§0-3-10)
+#     메뉴와 화면이 **같은 상수 하나**를 봅니다.
+DUEL_ENABLED = (os.environ.get("DUEL_ENABLED") or "").strip().lower() == "true"
+
+#: 2단계(관리자 전용) ↔ 3단계(전체 공개)를 가르는 **단 하나의 불리언**. 위 설명 참고.
+DUEL_MENU_ADMIN_ONLY = True
 
 # (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
 # 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.
@@ -52,6 +82,15 @@ _MENU_GROUPS = [
         ('/admin', '⚙️ 관리자 콘솔', True),
     ]),
 ]
+
+# ⚔️ 결투다! — 기능 영역마다 그룹을 하나씩 두는 위 구조를 그대로 따릅니다. `DUEL_ENABLED`
+#    가 꺼져 있으면(기본값) **항목 자체를 만들지 않습니다** — 숨긴 링크를 그려두고 CSS 로
+#    가리는 방식이 아니라, 메뉴 데이터에 존재하지 않게 합니다.
+#    `insert(-1)` = 마지막 '⚙️ 관리자' 그룹 **바로 앞**에 넣기(관리자 그룹은 항상 맨 끝).
+if DUEL_ENABLED:
+    _MENU_GROUPS.insert(-1, ('⚔️ 결투다!', [
+        ('/duel', '⚔️ 참전하기', DUEL_MENU_ADMIN_ONLY),
+    ]))
 
 # 하위호환용 평평한 목록 — `_MENU_GROUPS` 를 펼친 것뿐이라 항목(경로·라벨·관리자전용) 값은
 # 그룹으로 나누기 전과 완전히 동일합니다(§0-3-10 — 값의 출처를 하나로 유지). 기존에
