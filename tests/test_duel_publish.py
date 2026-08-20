@@ -50,7 +50,7 @@ from utils.duel_publish import DuelPublishError  # noqa: E402
 from utils.duel_rules import KST, DuelRuleError  # noqa: E402
 
 TODAY = date(2026, 8, 20)
-SEASON = "2026-01-01"
+SEASON = "2026-03-01"
 
 
 # =============================================================================
@@ -140,11 +140,11 @@ def test_season_length_constant_is_twelve_months():
 
 
 @pytest.mark.parametrize("day,expected", [
-    (date(2026, 1, 1), "2026-01-01"),      # 시즌 첫날
-    (date(2026, 8, 20), "2026-01-01"),
-    (date(2026, 12, 31), "2026-01-01"),    # 시즌 마지막 날
-    (date(2027, 1, 1), "2027-01-01"),      # 다음 시즌 첫날
-    (date(2025, 6, 30), "2025-01-01"),
+    (date(2026, 3, 1), "2026-03-01"),      # 시즌 첫날
+    (date(2026, 8, 20), "2026-03-01"),
+    (date(2027, 2, 28), "2026-03-01"),     # 시즌 마지막 날 (2027 은 평년 — 2/28 까지)
+    (date(2027, 3, 1), "2027-03-01"),      # 다음 시즌 첫날
+    (date(2026, 1, 1), "2025-03-01"),      # 앵커(3/1) 이전 → 직전 시즌
 ])
 def test_season_key_is_the_calendar_year_start(day, expected):
     assert duel_rules.season_key_for_date(day) == expected
@@ -155,12 +155,12 @@ def test_bracket_stays_fixed_mid_season_even_if_real_principal_changes():
     🔴 5-3 의 핵심 규칙. 시즌 도중에 실제 매입원가합계가 **크게 늘어도** 체급은 그대로입니다.
     이 배치는 매일 밤 돌기 때문에, 이 규칙이 조용히 사라지기 가장 쉬운 자리입니다.
     """
-    existing = {"season_key": "2026-01-01", "bracket_key": "krw_1m_3m"}   # 100만~300만
+    existing = {"season_key": "2026-03-01", "bracket_key": "krw_1m_3m"}   # 100만~300만
     # 오늘 계산해 보면 1억 이상(= 훨씬 무거운 체급)이 나오는 상황.
     fresh = duel_rules.assign_bracket(150_000_000)
     assert fresh == "krw_100m_plus"
 
-    resolved = duel_rules.resolve_bracket_for_season(existing, fresh, date(2026, 12, 31))
+    resolved = duel_rules.resolve_bracket_for_season(existing, fresh, date(2027, 2, 28))
     assert resolved["bracket_key"] == "krw_1m_3m", "시즌 중에는 기존 체급이 이겨야 합니다"
     assert resolved["source"] == "kept"
     assert resolved["needs_write"] is False, "유지되는 배정은 다시 쓰지 않습니다"
@@ -168,11 +168,11 @@ def test_bracket_stays_fixed_mid_season_even_if_real_principal_changes():
 
 def test_bracket_is_recomputed_when_the_season_rolls_over():
     """해가 바뀌면(새 시즌) 그 시점의 매입원가합계로 **다시** 매깁니다(5-3, 5차 확정)."""
-    existing = {"season_key": "2026-01-01", "bracket_key": "krw_1m_3m"}
+    existing = {"season_key": "2026-03-01", "bracket_key": "krw_1m_3m"}
     fresh = duel_rules.assign_bracket(150_000_000)
 
-    resolved = duel_rules.resolve_bracket_for_season(existing, fresh, date(2027, 1, 1))
-    assert resolved["season_key"] == "2027-01-01"
+    resolved = duel_rules.resolve_bracket_for_season(existing, fresh, date(2027, 3, 1))
+    assert resolved["season_key"] == "2027-03-01"
     assert resolved["bracket_key"] == "krw_100m_plus"
     assert resolved["source"] == "assigned"
     assert resolved["needs_write"] is True

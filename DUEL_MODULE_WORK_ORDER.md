@@ -582,15 +582,15 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 - `sql/duel_schema.sql`에 **예외적으로** 2군데 손을 댔습니다(사전에 "진짜 버그를 발견했을 때만"이라고 못박아 둔 조건에 해당한다고 판단한 경우입니다):
   1. `duel_public_leaderboard`의 유니크 제약을 `(published_date, window_type, bracket_key, rank)`에서 **`(published_date, window_type, bracket_key, nickname)`**으로 바꿨습니다(제약 이름: `duel_public_leaderboard_participant_unique`). 원래대로였다면 **동순위가 하나라도 생기는 순간 발행 배치가 그 자리에서 죽습니다** — 그런데 현금만 들고 아무것도 안 산 계좌는 TWR이 정확히 0.0%로 전부 동일해서, 500명 규모에서는 동순위가 사실상 반드시 생깁니다. 첫 실발행 때 배치가 터졌을 사안이라 예외 조치로 지금 고쳤습니다. 조회 성능용 비유니크 인덱스(`duel_public_leaderboard_group_rank_idx`)도 같이 추가했고, 마이그레이션은 `drop constraint if exists` → `add constraint` 3줄로 멱등하게 짰습니다.
   2. 새 표 `public.duel_bracket_assignments`(§8-3, `account_id`+`season_key` 복합 기본키, `bracket_key`, `assigned_at`) 신설. **왜 필요했는지**: "체급은 시즌 동안 고정"(5-3) 규칙을 지킬 유일한 저장소가 없었습니다 — 발행표(`duel_public_leaderboard`)는 매일 통째로 지웠다 다시 쓰는 표라 여기서 체급을 읽으면 그날그날 달라질 수 있어서 규칙을 코드로 강제할 수가 없었습니다. 이 표는 RLS로 본인 것만 조회 가능하고, **`service_role`에도 update/delete 권한을 안 줬습니다**(insert만 가능) — "한 번 배정되면 그 시즌엔 절대 안 바뀐다"를 앱 로직이 아니라 **DB 권한 자체**로 강제한 것입니다. 표 개수 10 → 11로 갱신.
-- `utils/duel_rules.py` (+444줄, 신설 §10): `BRACKET_TIERS`(8구간 경계값, 유일한 출처), `assign_bracket()`, `BRACKET_NONE_KEY`(원화·달러 혼합 보유 또는 무보유 동의자용 — "구간 미적용", 절대 환율을 지어내지 않음), `DUEL_SEASON_LENGTH_MONTHS=12`, `season_key_for_date()`/`resolve_bracket_for_season()`(시즌 시작일=매년 1월 1일, 집합 연산으로 한 번에 재산정하기 쉬워서 5-3에서 이미 추천된 방식 그대로 채택), `generate_nickname()`(인자 없음, `random`이 아니라 `secrets` 사용, 형용사+명사+숫자4자리 조합으로 약 2,300만 개, 어떤 신원 값에서도 유도하지 않음), `rank_participants()`(동순위는 같은 순위를 공유, TWR이 `None`인 계좌는 순위·최소인원 집계 모두에서 제외), `MIN_PARTICIPANTS_FOR_PUBLICATION=500`(5-6의 옛 🔴 표시가 이미 고쳐졌던 값과 동일 — 재확인), `RECONSENT_BLOCK_MONTHS=3`, `resolve_reconsent_block()`.
+- `utils/duel_rules.py` (+444줄, 신설 §10): `BRACKET_TIERS`(8구간 경계값, 유일한 출처), `assign_bracket()`, `BRACKET_NONE_KEY`(원화·달러 혼합 보유 또는 무보유 동의자용 — "구간 미적용", 절대 환율을 지어내지 않음), `DUEL_SEASON_LENGTH_MONTHS=12`, `season_key_for_date()`/`resolve_bracket_for_season()`(시즌 시작일=**매년 3월 1일, 2026-08-20 오너 확정** — 처음엔 1월 1일을 추천했었으나 오너가 3월 1일로 확정, 아래 참고), `generate_nickname()`(인자 없음, `random`이 아니라 `secrets` 사용, 형용사+명사+숫자4자리 조합으로 약 2,300만 개, 어떤 신원 값에서도 유도하지 않음), `rank_participants()`(동순위는 같은 순위를 공유, TWR이 `None`인 계좌는 순위·최소인원 집계 모두에서 제외), `MIN_PARTICIPANTS_FOR_PUBLICATION=500`(5-6의 옛 🔴 표시가 이미 고쳐졌던 값과 동일 — 재확인), `RECONSENT_BLOCK_MONTHS=3`, `resolve_reconsent_block()`.
 - `utils/duel_db.py` (+662줄): (A) 사용자 세션용 — `fetch_my_consent()`, `revoke_consent()`(`revoked_at` 설정 + 동의 boolean 7개 전부 초기화, **행 자체는 삭제 안 함**, 중복 클릭에도 안전), `ensure_nickname()`(**옵트인 시점이 아니라 5단계 동의 시점에 생성** — 1갈래만 참여하고 공개엔 동의 안 한 사용자에게 괜히 공개용 닉네임을 만들어주지 않기 위함), `save_consent()`에 3개월 재동의 차단 검사 추가. (B) 배치 전용(§B-7 신설) — `fetch_publishable_consents`, `fetch_revoked_consent_accounts`, `fetch_nicknames_for_accounts`, `fetch_bracket_assignments`, **`fetch_real_principal_holdings(service_client, user_ids)`**(`user_ids`를 필수 인자로 만들어 청크 단위 `in` 필터만 허용 — 동의 안 한 사용자의 보유종목을 실수로라도 전체 조회하는 코드 경로 자체를 차단, §0-3-8), `fetch_published_group_index`, `leaderboard_has_any_rows`, `insert_bracket_assignments`, `delete_published_rows_for_date`, `delete_published_rows_for_nicknames`, `delete_published_group`, `write_public_leaderboard`, `write_public_holdings`, `_assert_no_identity_fields()`(발행 직전 마지막 방어선 — 신원 유추 가능 필드가 섞여 들어가면 여기서 막힘).
 - 신규 `utils/duel_publish.py`(718줄) — 발행 배치 오케스트레이션. `duel_batch.py`(야간 체결 배치)와 **의도적으로 분리**했습니다(서로 다른 배치 주기·권한 범위이기 때문). 순서: 철회 정리 → 발행 대상 동의자 조회 → 체급 배정(고정 규칙 적용) → TWR 계산 → 순위 산정 → 최소 인원 게이팅 → 그날 발행분 **전량 삭제 후 재작성**(5-4의 확정 방식 그대로). `dry_run=True` 지원.
 - 신규 `tests/test_duel_publish.py`(1,327줄, 120개), `tests/test_duel_db.py` 확장(가짜 쿼리 객체에 `.filter()` 추가, 기존 단언 2곳 수정, "발행표를 안 건드린다"는 약한 검증 하나를 더 강한 불변식 검증으로 교체).
 - **검증**: `python3 -m py_compile utils/duel_rules.py utils/duel_db.py utils/duel_publish.py tests/test_duel_publish.py tests/test_duel_db.py` 클린. `python3 -m pytest tests/test_duel.py tests/test_duel_db.py tests/test_duel_batch.py tests/test_duel_publish.py` → **360개 전부 통과**(55+111+74+120, 회귀 0) — **제가 직접 재실행해서 확인한 결과입니다**(에이전트 보고 수치와 일치). 실제 로컬 PostgreSQL 검증(동의 전체-아니면-전무 강제, 철회 후 재동의 차단, 동순위 처리, 발행 두 표 RLS, `duel_bracket_assignments` 사용자 간 격리, 철회 시 과거 기록 완전 삭제, 최소 인원 미달 시 삭제 등 23개 시나리오)은 에이전트 보고 기준이며 제가 SQL 자체를 재실행해 재검증하지는 않았습니다 — 다음에 실제 Supabase 스테이징에 반영할 때 6단계 실검증에서 한 번 더 확인하는 걸 권합니다.
-- **🆕 오너가 확인해주실 것들** (전부 급하지 않음, 코딩을 막지 않습니다):
-  1. **동의 철회 시 발행표 삭제 시점** — 지금은 다음 야간 발행 배치가 돌 때까지 최대 하루 지연이 있습니다(즉시 삭제하는 별도 RPC는 안 만들었습니다). 개인정보 민감도를 생각하면 "즉시 삭제"가 더 안전해 보이지만, §0-3-2(배치 우선 원칙)와 구현 복잡도를 감안해 일단 배치 처리로 남겨뒀습니다 — 즉시성이 꼭 필요하면 다음 라운드에 RPC로 뺄 수 있습니다.
-  2. **시즌 시작일 = 매년 1월 1일** 확정해도 되는지(5-3에서 이미 추천된 방식을 그대로 채택했을 뿐 별도 확인은 없었습니다).
-  3. **닉네임 단어 목록(형용사+명사)의 톤·수위** — 직접 목록을 하나씩 검토해보고 싶으시면 말씀 주세요.
+- **✅ 2026-08-20 오너 확인 완료 — 3건 중 2건 확정, 1건은 아래에서 다시 여쭤봄**:
+  1. **동의 철회 시 발행표 삭제 시점 → "다음 야간 발행 배치 때 지우는 지금 방식 그대로" 확정.** 즉시 삭제 RPC는 만들지 않습니다. 코드 변경 없음(이미 그렇게 짜여 있었습니다).
+  2. **시즌 시작일 → 매년 3월 1일로 확정(1월 1일에서 변경).** `utils/duel_rules.py`의 `DUEL_SEASON_ANCHOR_MONTH`를 1 → 3으로 바꿨고, 관련 주석·테스트(`tests/test_duel_publish.py`의 시즌 경계 테스트 5개)도 3월 1일 기준으로 다시 계산해 갱신했습니다. `python3 -m pytest` 재실행 → **360개 그대로 전부 통과**(회귀 0).
+  3. **닉네임 단어 목록의 톤** — "어느 정도를 말하는거야"라는 되물음이 있어 아래에서 실제 목록 일부를 보여드리고 다시 여쭤봤습니다. 답변 오면 이 항목도 확정 처리합니다.
   4. `bracket_key`는 코드에서 쓰는 ASCII 식별자이고, 화면에 보여줄 한글 라벨(`bracket_label()`)은 별도 함수로 분리해뒀습니다 — 이름 자체에 이견 없으면 그대로 갑니다.
 - **미착수** — 5단계의 나머지: 동의 관리 화면(닉네임 발급·5개 체크박스·최종 확인·철회 UI), 공개 순위표 열람 화면(7-2 고정 문구 포함), 발행 배치를 매일 돌릴 GitHub Actions 워크플로우(`duel_daily.yml`처럼). 이번 라운드는 명시적으로 **백엔드만** 범위로 잡았습니다.
 
@@ -677,10 +677,10 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 4. **🆕 2026-08-20 같은 라운드에서 발견 — "상위 50 종목" 순위 기준과 야간 배치 정확한 실행 시각.** 코딩 에이전트가 이 세션에는 없는 실제 데이터 파일(`data/kospi200_pegy_latest.json` 등)과 크롤링 워크플로우(`scrape.yml`)를 직접 보지 못해서 추정으로 채운 두 가지입니다 — 저장소에 다시 접근하시면 실제 파일과 대조해서 확정이 필요합니다(위 2단계 진행 로그의 "오너가 저장소를 다시 열면 꼭 확인해야 하는 것들" 참고). 코딩을 막는 항목은 아니라 지금 이대로 커밋해도 되고, 나중에 값만 바꾸면 됩니다.
 
-5. **🆕 2026-08-20 5단계 백엔드 구현 중 새로 생긴 것 4가지** (전부 급하지 않고, 코딩을 막지 않습니다 — 상세 배경은 5-9절 참고):
-   - **동의 철회 시 발행표 삭제를 즉시로 할지, 지금처럼 다음 야간 발행 배치 때까지(최대 하루) 둘지.**
-   - **시즌 시작일 = 매년 1월 1일**로 그대로 확정해도 되는지(5-3에서 이미 나온 추천을 그대로 채택한 것뿐, 별도 재확인은 없었습니다).
-   - **무작위 닉네임 단어 목록(형용사+명사)의 톤·수위** — 원하시면 목록을 같이 검토할 수 있습니다.
+5. **🆕 2026-08-20 5단계 백엔드 구현 중 새로 생긴 것 4가지 — 2가지 확정, 1가지 재질문 중** (상세 배경은 5-9절 참고):
+   - ~~동의 철회 시 발행표 삭제를 즉시로 할지, 지금처럼 다음 야간 발행 배치 때까지(최대 하루) 둘지~~ → **"다음 배치 때 지우는 지금 방식 그대로"로 확정.**
+   - ~~시즌 시작일~~ → **매년 3월 1일로 확정**(1월 1일에서 변경, 코드·테스트 반영 완료).
+   - **무작위 닉네임 단어 목록(형용사+명사)의 톤·수위** — "어느 정도를 말하는거야"라는 되물음에 답하며 다시 여쭤봄(아래 대화 참고). 아직 미확정.
    - `bracket_key`(코드용 ASCII 식별자)와 `bracket_label()`(화면용 한글 라벨)을 분리한 것 — 이름 자체에 이견 없으면 그대로 갑니다.
 
 ---
