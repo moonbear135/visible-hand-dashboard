@@ -283,22 +283,22 @@ def test_order_window_converts_an_aware_utc_timestamp_into_kst():
 
 # =============================================================================
 # ⑤-USD USD 트랙 주문 접수 시간대 (work order 5-11-6) — KRW 경계 검증의 통화만 다른 미러
-#  ✅ 2026-08-20 오너 확정: "00시 정각이 더 나을 듯" — KRW(18:00:01~22:00:00, 정각+1초로
-#  열림)와 달리 USD 는 **16:00:00~21:00:00, 양끝 정각**입니다. 두 트랙이 서로 다른 관례를
-#  쓰는 것은 실수가 아니라 오너가 트랙별로 따로 확정한 값입니다(`utils/duel_rules.py` §11
-#  주석 참고) — 나중에 한쪽을 다른 쪽에 맞춰 고치지 마세요.
+#  ✅ 2026-08-20 오너 최종 확정: USD 는 **16:00:01~21:00:00** — KRW(18:00:01~22:00:00)와
+#  **같은 관례(정각에서 1초 뒤에 열림)**입니다. 중간에 정각(16:00:00)으로 잠깐 바꿨다가,
+#  다시 KRW 와 같은 :01 관례로 확정했습니다(`utils/duel_rules.py` §11 주석 참고).
 # =============================================================================
 def test_order_window_usd_is_closed_just_before_it_opens():
-    """15:59:59 는 아직 닫혀 있습니다(창은 16:00:00 정각부터)."""
-    window = rules.resolve_order_window_usd(_kst(2026, 8, 19, 15, 59, 59))
-    assert window["is_open"] is False
-    assert window["submission_date"] == date(2026, 8, 19)
-    assert window["window_opens_at"] == _kst(2026, 8, 19, 16, 0, 0)
+    """15:59:59 · 16:00:00 은 아직 닫혀 있습니다(창은 16:00:01 부터)."""
+    for moment in (_kst(2026, 8, 19, 15, 59, 59), _kst(2026, 8, 19, 16, 0, 0)):
+        window = rules.resolve_order_window_usd(moment)
+        assert window["is_open"] is False, moment
+        assert window["submission_date"] == date(2026, 8, 19)
+        assert window["window_opens_at"] == _kst(2026, 8, 19, 16, 0, 1)
 
 
 def test_order_window_usd_is_open_at_both_ends():
-    """16:00:00 과 21:00:00 은 **양끝 포함**으로 열려 있어야 합니다."""
-    for moment in (_kst(2026, 8, 19, 16, 0, 0),
+    """16:00:01 과 21:00:00 은 **양끝 포함**으로 열려 있어야 합니다."""
+    for moment in (_kst(2026, 8, 19, 16, 0, 1),
                    _kst(2026, 8, 19, 18, 30, 0),
                    _kst(2026, 8, 19, 21, 0, 0)):
         window = rules.resolve_order_window_usd(moment)
@@ -307,11 +307,11 @@ def test_order_window_usd_is_open_at_both_ends():
 
 
 def test_order_window_usd_rolls_to_the_next_day_after_it_closes():
-    """21:00:01 부터는 닫히고, 다음 창(다음 날 16:00:00 정각)으로 안내해야 합니다."""
+    """21:00:01 부터는 닫히고, 다음 창(다음 날 16:00:01)으로 안내해야 합니다."""
     window = rules.resolve_order_window_usd(_kst(2026, 8, 19, 21, 0, 1))
     assert window["is_open"] is False
     assert window["submission_date"] == date(2026, 8, 20)
-    assert window["window_opens_at"] == _kst(2026, 8, 20, 16, 0, 0)
+    assert window["window_opens_at"] == _kst(2026, 8, 20, 16, 0, 1)
     assert window["window_closes_at"] == _kst(2026, 8, 20, 21, 0, 0)
 
 
@@ -325,14 +325,13 @@ def test_order_window_usd_does_not_share_state_with_the_krw_window():
     assert rules.resolve_order_window_usd(moment)["is_open"] is True
 
 
-def test_order_window_usd_opens_exactly_on_the_hour_unlike_krw():
+def test_order_window_usd_and_krw_share_the_same_one_second_offset_convention():
     """
-    🔴 KRW 는 정각에서 1초 뒤(18:00:01)에 열리지만, USD 는 **정각(16:00:00) 그 자체**부터
-    열립니다(오너 확정 — 트랙마다 다른 관례). 16:00:00 이 "아직 닫힘"으로 잘못 처리되는
-    회귀를 막습니다(KRW 관례를 실수로 복사해 넣으면 이 테스트가 잡습니다).
+    🔴 KRW·USD 둘 다 **정각에서 1초 뒤**에 열립니다(오너 최종 확정) — 우연이 아니라 같은
+    관례를 공유하기로 한 것이라, 두 상수의 "초" 값이 우연히도 아니라 항상 1로 같은지
+    회귀 고정합니다. 나중에 누가 둘 중 하나만 고치면 이 테스트가 잡습니다.
     """
-    window = rules.resolve_order_window_usd(_kst(2026, 8, 19, 16, 0, 0))
-    assert window["is_open"] is True
+    assert rules.ORDER_WINDOW_OPEN_TIME_USD.second == rules.ORDER_WINDOW_OPEN_TIME.second == 1
 
 
 # =============================================================================
