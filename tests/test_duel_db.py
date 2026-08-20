@@ -1,0 +1,1322 @@
+# tests/test_duel_db.py
+"""
+⚔️ "결투다!" — Supabase 접근 계층(`utils/duel_db.py`) 오프라인 검증
+   (네트워크 불필요 · Supabase 접속 불필요 · `supabase` 패키지 설치 여부와 무관)
+
+DUEL_MODULE_WORK_ORDER.md 4단계에 따라, **가짜 Supabase 클라이언트**로만 검증합니다.
+`tests/test_scorecard_ocr.py` 가 Gemini 클라이언트를 스텁으로 대체한 것과 같은 방식이고,
+`tests/test_duel.py`(순수 규칙 검증)와 짝을 이룹니다 — 저쪽은 "계산이 맞는가", 이쪽은
+"맞는 계산 결과를 **맞는 표에, 맞는 조건으로, 몇 번에** 보내는가"를 봅니다.
+
+가짜 클라이언트가 필요한 이유: supabase-py 는 `.table(x).select(y).eq(a, b).execute()` 처럼
+**메서드 체이닝**으로 질의를 조립합니다. 그래서 스텁도 체이닝을 지원해야 하고, 마지막에
+"결국 무엇을 요청/기록했는지"를 테스트가 들여다볼 수 있어야 합니다(아래 `FakeClient`).
+
+검증 대상
+    ① A 절(사용자용)이 **맞는 표에 맞는 필터**로 가는지
+    ② A 절이 RLS 상 쓸 수 없는 값(체결 결과 등)을 **인자로도 받지 않는지** — 코드 경로 자체가
+       없다는 것을 시그니처·AST 검사로 고정(스키마 §9 의 권한 배치와 같은 결론)
+    ③ `save_order` 가 접수 시간대 밖이면 **명확한 한국어 오류**로 거절하고, 안이면 저장하는지
+    ④ `create_duel_accounts_for_user` 멱등성 — 두 번 불러도 오류 없이 계좌가 늘지 않는지
+    ⑤ `apply_monthly_deposits` 가 계좌 수와 무관하게 **집합 연산 1회**인지 (§0-3-2 회귀 고정)
+    ⑥ `expire_or_cancel_all_pending_for_date` 도 update 질의 **1개**인지
+    ⑦ 배치 기록 함수들이 `duel_rules` 의 결과를 **그대로** 담아 보내는지(재계산 금지)
+    ⑧ `try/except ImportError` 가드 — `supabase` 미설치 상태에서 import 가 깨지지 않고,
+       그 상태로 함수를 부르면 `AttributeError` 가 아니라 **잡을 수 있는 명확한 오류**가 나는지
+
+실행: pytest tests/test_duel_db.py -v
+"""
+
+import ast
+import inspect
+import subprocess
+import sys
+from datetime import date, datetime
+from pathlib import Path
+
+import pytest
+
+REPO_ROOT = Path(__file__).parent.parent
+sys.path.append(str(REPO_ROOT))
+
+from utils import duel_db  # noqa: E402
+from utils import duel_rules  # noqa: E402
+from utils.duel_db import DuelDbError  # noqa: E402
+from utils.duel_rules import KST, DuelRuleError  # noqa: E402
+
+
+# =============================================================================
+# 0. 가짜 Supabase 클라이언트 — 체이닝을 흉내내고, 요청된 내용을 전부 기록합니다
+# =============================================================================
+class FakeResponse:
+    """supabase-py 의 응답 객체는 `.data` 하나만 보면 됩니다(우리 `_execute` 규약)."""
+
+    def __init__(self, data):
+        self.data = data
+
+
+class FakeQuery:
+    """
+    `.select()/.insert()/.update()/.upsert()` 로 시작해 `.eq()/.gte()/...` 를 체이닝하고
+    `.execute()` 로 끝나는 질의 하나.
+
+    테스트가 들여다보는 것:
+        table    : 어느 표인지
+        op       : select / insert / update / upsert / delete
+        payload  : 실제로 보낸 값(단건이면 dict, 여러 건이면 list)
+        filters  : [("eq", "status", "pending"), ...]
+        orders   : [("saved_at", False), ...]   (False = 오름차순)
+        options  : upsert 의 on_conflict 등
+    """
+
+    def __init__(self, client, table, op, payload=None, **options):
+        self.client = client
+        self.table = table
+        self.op = op
+        self.payload = payload
+        self.options = options
+        self.filters = []
+        self.orders = []
+        self.executed = False
+
+    # ── 필터 ──────────────────────────────────────────────────────────────────
+    def eq(self, column, value):
+        self.filters.append(("eq", column, value))
+        return self
+
+    def neq(self, column, value):
+        self.filters.append(("neq", column, value))
+        return self
+
+    def gte(self, column, value):
+        self.filters.append(("gte", column, value))
+        return self
+
+    def lte(self, column, value):
+        self.filters.append(("lte", column, value))
+        return self
+
+    def in_(self, column, values):
+        self.filters.append(("in", column, list(values)))
+        return self
+
+    def limit(self, count):
+        self.options["limit"] = count
+        return self
+
+    def order(self, column, desc=False):
+        self.orders.append((column, desc))
+        return self
+
+    # ── 실행 ──────────────────────────────────────────────────────────────────
+    def execute(self):
+        self.executed = True
+        self.client.calls.append(self)
+        return FakeResponse(self.client.resolve(self))
+
+    # ── 테스트 편의 ───────────────────────────────────────────────────────────
+    @property
+    def filter_map(self):
+        return {column: value for _op, column, value in self.filters}
+
+    @property
+    def rows(self):
+        """payload 를 항상 목록으로(단건 insert 와 다건 insert 를 같은 방식으로 검사)."""
+        if self.payload is None:
+            return []
+        return list(self.payload) if isinstance(self.payload, list) else [self.payload]
+
+    def __repr__(self):  # pragma: no cover - 실패 메시지 가독성용
+        return f"<FakeQuery {self.op} {self.table} filters={self.filters}>"
+
+
+class FakeTable:
+    def __init__(self, client, name):
+        self.client = client
+        self.name = name
+
+    def select(self, columns="*"):
+        return FakeQuery(self.client, self.name, "select", columns=columns)
+
+    def insert(self, payload):
+        return FakeQuery(self.client, self.name, "insert", payload)
+
+    def update(self, payload):
+        return FakeQuery(self.client, self.name, "update", payload)
+
+    def upsert(self, payload, on_conflict=None, **kwargs):
+        return FakeQuery(self.client, self.name, "upsert", payload,
+                         on_conflict=on_conflict, **kwargs)
+
+    def delete(self):
+        return FakeQuery(self.client, self.name, "delete")
+
+
+class FakeClient:
+    """
+    `responses` 로 "이 표의 이 동작은 이런 데이터를 돌려준다"를 지정합니다.
+      · 값이 Exception 이면 `.execute()` 가 그걸 raise 합니다(트리거 거절·유니크 충돌 모사).
+      · 값이 목록이면 **호출될 때마다 앞에서 하나씩** 꺼내 씁니다(같은 질의의 1차/2차 응답).
+      · 값이 callable 이면 질의를 받아 데이터를 돌려줍니다.
+    지정이 없으면 insert/update/upsert 는 **보낸 payload 를 그대로** 돌려줍니다(PostgREST 의
+    기본 동작과 같습니다 — 저장된 행을 반환). select 는 빈 목록입니다.
+    """
+
+    def __init__(self, responses=None):
+        self.calls = []
+        self.responses = dict(responses or {})
+
+    def table(self, name):
+        return FakeTable(self, name)
+
+    def resolve(self, query):
+        key = (query.table, query.op)
+        if key in self.responses:
+            value = self.responses[key]
+            if isinstance(value, list) and value and isinstance(value[0], _Sequenced):
+                value = value.pop(0).value
+            if isinstance(value, _Sequenced):  # pragma: no cover - 방어
+                value = value.value
+            if callable(value):
+                value = value(query)
+            if isinstance(value, Exception):
+                raise value
+            return value
+        if query.op in ("insert", "update", "upsert"):
+            return [dict(row) for row in query.rows]
+        return []
+
+    # ── 테스트 편의 ───────────────────────────────────────────────────────────
+    def calls_for(self, table=None, op=None):
+        return [call for call in self.calls
+                if (table is None or call.table == table) and (op is None or call.op == op)]
+
+    def only_call(self, table=None, op=None):
+        found = self.calls_for(table, op)
+        assert len(found) == 1, f"질의가 정확히 1개여야 합니다: {found}"
+        return found[0]
+
+
+class _Sequenced:
+    """`responses` 값으로 여러 응답을 순서대로 주고 싶을 때 감싸는 표식."""
+
+    def __init__(self, value):
+        self.value = value
+
+
+def sequence(*values):
+    """같은 (표, 동작)에 대해 1차·2차 응답을 다르게 주는 헬퍼."""
+    return [_Sequenced(value) for value in values]
+
+
+# ── 시각 고정값 ────────────────────────────────────────────────────────────────
+INSIDE_WINDOW = datetime(2026, 8, 19, 19, 30, 0, tzinfo=KST)    # 접수 시간대 한가운데
+OUTSIDE_WINDOW = datetime(2026, 8, 19, 17, 59, 59, tzinfo=KST)  # 창이 열리기 2초 전
+TRADING_DAYS = [date(2026, 8, 19), date(2026, 8, 20), date(2026, 8, 21)]
+
+
+# =============================================================================
+# 1. A 절 — 주문 저장 (2-4)
+# =============================================================================
+def test_save_order_inside_window_writes_pending_order():
+    """접수 시간대 안이면 pending 주문 1행이 duel_orders 로 들어갑니다."""
+    client = FakeClient()
+    order = duel_db.save_order(
+        client, "acc-1", "005930", "삼성전자", 10,
+        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW,
+    )
+
+    call = client.only_call(duel_db.ORDERS_TABLE, "insert")
+    payload = call.rows[0]
+    assert payload["account_id"] == "acc-1"
+    assert payload["ticker"] == "005930"
+    assert payload["requested_quantity"] == 10
+    assert payload["side"] == "buy"
+    assert payload["status"] == "pending"
+    # 체결가는 D 종가가 아니라 **D+1 종가**입니다 — 귀속 거래일이 다음 거래일이어야 합니다.
+    assert payload["target_date"] == "2026-08-20"
+    # 접수 시간대 판정에 쓴 바로 그 시각이 기록됩니다(판정 시각 ≠ 기록 시각 방지).
+    assert payload["saved_at"].startswith("2026-08-19T19:30:00")
+    assert order["ticker"] == "005930"
+
+
+def test_save_order_never_writes_fill_result_fields():
+    """저장 시점에는 체결 결과도, 현금 차감도 없습니다(2-4-4)."""
+    client = FakeClient()
+    duel_db.save_order(client, "acc-1", "005930", "삼성전자", 3,
+                       trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    payload = client.only_call(duel_db.ORDERS_TABLE, "insert").rows[0]
+    for forbidden in ("filled_price", "filled_quantity", "filled_amount", "filled_date"):
+        assert forbidden not in payload
+    # 원장·포지션은 손도 대지 않습니다(현금은 체결 시점에만 움직입니다).
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+    assert client.calls_for(duel_db.POSITIONS_TABLE) == []
+
+
+def test_save_order_outside_window_is_rejected_with_korean_message():
+    """
+    접수 시간대 밖이면 **조용히 실패하지 않고** 이유를 말합니다(§0-1).
+    그리고 DB 로는 아무 요청도 나가지 않아야 합니다.
+    """
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_order(client, "acc-1", "005930", "삼성전자", 10,
+                           trading_days=TRADING_DAYS, now_kst=OUTSIDE_WINDOW)
+    message = str(excinfo.value)
+    assert "주문 접수 시간" in message
+    assert "18:00:01" in message and "22:00:00" in message
+    assert client.calls == [], "거절된 주문이 DB 까지 가면 안 됩니다"
+
+
+def test_save_order_window_boundaries_match_rules():
+    """경계(18:00:00 닫힘 / 18:00:01 열림 / 22:00:00 열림 / 22:00:01 닫힘)."""
+    cases = {
+        datetime(2026, 8, 19, 18, 0, 0, tzinfo=KST): False,
+        datetime(2026, 8, 19, 18, 0, 1, tzinfo=KST): True,
+        datetime(2026, 8, 19, 22, 0, 0, tzinfo=KST): True,
+        datetime(2026, 8, 19, 22, 0, 1, tzinfo=KST): False,
+    }
+    for moment, should_pass in cases.items():
+        client = FakeClient()
+        if should_pass:
+            duel_db.save_order(client, "acc-1", "005930", "삼성전자", 1,
+                               trading_days=TRADING_DAYS, now_kst=moment)
+            assert len(client.calls) == 1, moment
+        else:
+            with pytest.raises(DuelDbError):
+                duel_db.save_order(client, "acc-1", "005930", "삼성전자", 1,
+                                   trading_days=TRADING_DAYS, now_kst=moment)
+            assert client.calls == [], moment
+
+
+def test_save_order_requires_confirmed_trading_days():
+    """거래일 목록이 없으면 다음 날짜를 지어내지 않고 규칙 계층이 거절합니다(§0-1)."""
+    client = FakeClient()
+    with pytest.raises((DuelDbError, DuelRuleError)):
+        duel_db.save_order(client, "acc-1", "005930", "삼성전자", 1,
+                           trading_days=None, now_kst=INSIDE_WINDOW)
+    assert client.calls == []
+
+
+def test_save_order_rejects_ticker_outside_universe_when_universe_given():
+    """유니버스를 넘겨주면 한 겹 더 막습니다(넘기지 않으면 검사하지 않는다고 명시)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_order(client, "acc-1", "999999", "없는종목", 1,
+                           trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW,
+                           universe_tickers={"005930", "000660"})
+    assert "코스피 상위" in str(excinfo.value)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("bad_quantity", [0, -1, 2.5, "세 주", None, True])
+def test_save_order_rejects_bad_quantity(bad_quantity):
+    """수량은 1주 이상의 정수. 2.5주를 2주로 조용히 깎지 않습니다."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.save_order(client, "acc-1", "005930", "삼성전자", bad_quantity,
+                           trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert client.calls == []
+
+
+# =============================================================================
+# 2. A 절 — 주문 수정·취소 (2-4-7)
+# =============================================================================
+def test_edit_order_updates_quantity_only():
+    client = FakeClient()
+    duel_db.edit_order(client, "order-1", 7, now_kst=INSIDE_WINDOW)
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.filter_map == {"id": "order-1"}
+    assert set(call.payload) == {"requested_quantity", "last_edited_at"}
+    assert call.payload["requested_quantity"] == 7
+
+
+def test_edit_order_translates_db_trigger_rejection():
+    """
+    이미 배치가 집어간 주문은 DB 트리거가 거절합니다. 그 거절을 삼키지 않고,
+    Postgres 원문 대신 **사람이 읽을 한국어**로 바꿔 올립니다(§0-1 + §0-3-4).
+    """
+    trigger_error = Exception(
+        'duel_orders: 이미 filled(으)로 종결된 주문은 수정할 수 없습니다(배치 처리 이후 변경 금지)'
+    )
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): trigger_error})
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.edit_order(client, "order-1", 7, now_kst=INSIDE_WINDOW)
+    message = str(excinfo.value)
+    assert "이미 처리가 끝난 주문" in message
+    assert "duel_orders:" not in message, "DB 내부 표식을 화면 문구에 그대로 싣지 않습니다"
+
+
+def test_edit_order_missing_row_is_not_a_silent_success():
+    """0행 갱신(없는 주문 / 남의 주문)을 성공으로 넘기지 않습니다."""
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): []})
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.edit_order(client, "order-x", 7, now_kst=INSIDE_WINDOW)
+    assert "찾지 못했" in str(excinfo.value)
+
+
+def test_edit_and_cancel_are_blocked_outside_window():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.edit_order(client, "order-1", 7, now_kst=OUTSIDE_WINDOW)
+    with pytest.raises(DuelDbError):
+        duel_db.cancel_order(client, "order-1", now_kst=OUTSIDE_WINDOW)
+    assert client.calls == []
+
+
+def test_cancel_order_keeps_the_row_with_a_reason():
+    """
+    취소는 **삭제가 아니라 상태 기록**입니다. 사유 문장이 반드시 남습니다
+    (스키마에 delete 정책이 없는 것과 같은 이유 — 조용히 사라지는 주문 금지).
+    """
+    client = FakeClient()
+    assert duel_db.cancel_order(client, "order-1", now_kst=INSIDE_WINDOW) is None
+    assert client.calls_for(duel_db.ORDERS_TABLE, "delete") == []
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.payload["status"] == "cancelled"
+    assert call.payload["fail_reason"].strip()
+
+
+def test_cancel_order_accepts_custom_reason():
+    client = FakeClient()
+    duel_db.cancel_order(client, "order-1", reason="종목을 잘못 골랐습니다",
+                         now_kst=INSIDE_WINDOW)
+    assert client.calls[0].payload["fail_reason"] == "종목을 잘못 골랐습니다"
+
+
+# =============================================================================
+# 3. A 절 — 조회가 맞는 표·맞는 필터로 가는지
+# =============================================================================
+def test_fetch_my_accounts_filters_by_user():
+    client = FakeClient(responses={(duel_db.ACCOUNTS_TABLE, "select"): [{"id": "acc-1"}]})
+    rows = duel_db.fetch_my_accounts(client, "user-1")
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "select")
+    assert call.filter_map == {"user_id": "user-1"}
+    assert rows == [{"id": "acc-1"}]
+
+
+def test_fetch_my_positions_and_orders_filter_by_account():
+    client = FakeClient()
+    duel_db.fetch_my_positions(client, "acc-1")
+    duel_db.fetch_my_orders(client, "acc-1")
+    positions = client.only_call(duel_db.POSITIONS_TABLE, "select")
+    orders = client.only_call(duel_db.ORDERS_TABLE, "select")
+    assert positions.filter_map == {"account_id": "acc-1"}
+    assert orders.filter_map == {"account_id": "acc-1"}
+    assert orders.orders == [("saved_at", True)], "주문 내역은 최신순"
+
+
+def test_fetch_my_snapshots_applies_date_range():
+    client = FakeClient()
+    duel_db.fetch_my_snapshots(client, "acc-1",
+                               start_date=date(2026, 8, 1), end_date="2026-08-19")
+    call = client.only_call(duel_db.DAILY_SNAPSHOTS_TABLE, "select")
+    assert ("gte", "snapshot_date", "2026-08-01") in call.filters
+    assert ("lte", "snapshot_date", "2026-08-19") in call.filters
+    assert call.filter_map["account_id"] == "acc-1"
+    assert call.orders == [("snapshot_date", False)], "TWR 입력은 오래된 순이어야 합니다"
+
+
+def test_fetch_my_snapshots_output_feeds_compute_twr_directly():
+    """조회 결과를 그대로 규칙 함수에 넘길 수 있어야 합니다(이 파일은 수익률을 계산하지 않음)."""
+    rows = [
+        {"snapshot_date": "2026-08-17", "total_value": 10_000_000, "cash_flow_amount": 0},
+        {"snapshot_date": "2026-08-18", "total_value": 10_100_000, "cash_flow_amount": 0},
+    ]
+    client = FakeClient(responses={(duel_db.DAILY_SNAPSHOTS_TABLE, "select"): rows})
+    fetched = duel_db.fetch_my_snapshots(client, "acc-1")
+    result = duel_rules.compute_twr(fetched)
+    assert result["status"] == "OK"
+    assert result["twr_pct"] == pytest.approx(1.0, abs=1e-9)
+
+
+def test_sum_cash_balance_refuses_broken_amounts():
+    """'잔고를 모르는 상태'를 '잔고 0'으로 바꿔 보여주지 않습니다."""
+    assert duel_db.sum_cash_balance([{"amount": 10_000_000}, {"amount": -1_500_000}]) == 8_500_000
+    with pytest.raises(DuelDbError):
+        duel_db.sum_cash_balance([{"amount": None}])
+
+
+# =============================================================================
+# 4. A 절 — 사용자가 할 수 **없는** 일은 코드 경로 자체가 없어야 합니다
+#    (스키마 §9: 포지션·원장·스냅샷은 사용자에게 select 하나뿐)
+# =============================================================================
+def test_user_write_functions_do_not_accept_fill_or_balance_params():
+    """
+    사용자 경로의 쓰기 함수가 체결 결과·잔고·귀속 거래일을 **인자로 받지 않는지**.
+    금지 목록은 `utils/duel_db.py` 안에 단일 출처로 있고, 여기서는 그 자기 점검을 돌립니다.
+    나중에 누가 `save_order(..., filled_price=...)` 를 추가하면 이 테스트가 먼저 실패합니다.
+    """
+    assert duel_db.user_write_signature_violations() == []
+    # 금지 목록 자체가 조용히 비워지는 것도 막습니다.
+    assert "filled_price" in duel_db.FORBIDDEN_USER_WRITE_PARAMS
+    assert set(duel_db.USER_WRITE_FUNCTIONS) == {
+        "save_order", "edit_order", "cancel_order", "save_consent"}
+
+
+def _module_ast():
+    source = (REPO_ROOT / "utils" / "duel_db.py").read_text(encoding="utf-8")
+    return ast.parse(source), source
+
+
+def _write_targets(function_node):
+    """
+    함수 안에서 `<...>.table(X).insert/update/upsert/delete(...)` 로 쓰는 표 X 를 모읍니다.
+    (체이닝의 어느 위치에 있든 `.table(...)` 까지 거슬러 올라갑니다.)
+    """
+    targets = set()
+    for node in ast.walk(function_node):
+        if not (isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)):
+            continue
+        if node.func.attr not in ("insert", "update", "upsert", "delete"):
+            continue
+        cursor = node.func.value
+        while isinstance(cursor, ast.Call) and isinstance(cursor.func, ast.Attribute):
+            if cursor.func.attr == "table" and cursor.args:
+                argument = cursor.args[0]
+                targets.add(argument.id if isinstance(argument, ast.Name)
+                            else ast.dump(argument))
+                break
+            cursor = cursor.func.value
+    return targets
+
+
+def test_user_facing_functions_only_write_orders_and_consent():
+    """
+    A 절 쓰기 함수가 **duel_orders / duel_public_consent 이외의 표에 쓰지 않는지**.
+
+    스키마 §9 가 사용자에게 insert/update 를 준 표는 이 둘뿐입니다. 여기에 원장이나 포지션
+    쓰기가 생기면 그건 곧 "anon key 로 가상 현금을 찍을 수 있다"는 뜻이고, 그 값은 스냅샷 →
+    공개 순위표로 흘러갑니다(§0-3-9).
+    """
+    tree, _source = _module_ast()
+    functions = {node.name: node for node in ast.walk(tree)
+                 if isinstance(node, ast.FunctionDef)}
+    for name in duel_db.USER_WRITE_FUNCTIONS:
+        targets = _write_targets(functions[name])
+        assert targets <= {"ORDERS_TABLE", "CONSENT_TABLE"}, \
+            f"{name} 이 사용자 권한 밖의 표에 씁니다: {targets}"
+
+
+def test_user_facing_section_does_not_touch_service_role():
+    """
+    A 절 본문에 service_role 관련 이름이 등장하지 않는지(격리 회귀 고정).
+    화면 코드가 부르는 함수들이 배치 키를 필요로 하기 시작하면, 앱 서버에 그 키를 넣게 되고
+    그 순간 이 모듈의 RLS 는 전부 장식이 됩니다(§0-3-8).
+    """
+    _tree, source = _module_ast()
+    start = source.index("#  A 절 —")
+    end = source.index("#  B 절 —")
+    section = source[start:end]
+    for forbidden in ("service_role", "SERVICE_ROLE_KEY_ENV", "create_service_client"):
+        assert forbidden not in section, f"A 절에 {forbidden} 이 있습니다"
+
+
+def test_publish_tables_are_not_referenced_yet():
+    """5단계(공개 발행표)는 아직 범위 밖 — 상수도, 호출도 없어야 합니다(§0-3-8)."""
+    _tree, source = _module_ast()
+    executable = "\n".join(line for line in source.splitlines()
+                           if not line.lstrip().startswith("#"))
+    assert "duel_public_leaderboard" not in executable
+    assert "duel_public_holdings" not in executable
+
+
+# =============================================================================
+# 5. A 절 — 공개 동의 (5-2)
+# =============================================================================
+def test_save_consent_rejects_final_confirm_without_all_five():
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
+                             consent_holdings=True, consent_quantity=True,
+                             consent_buy_amount=False, final_confirmed=True)
+    assert "consent_buy_amount" in str(excinfo.value)
+    assert client.calls == []
+
+
+def test_save_consent_final_confirm_records_time():
+    client = FakeClient()
+    duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
+                         consent_holdings=True, consent_quantity=True,
+                         consent_buy_amount=True, final_confirmed=True)
+    call = client.only_call(duel_db.CONSENT_TABLE, "upsert")
+    assert call.options["on_conflict"] == "account_id"
+    assert call.payload["final_confirmed"] is True
+    assert call.payload["final_confirmed_at"], "최종확인 시각이 없는 최종확인은 만들지 않습니다"
+
+
+def test_save_consent_unsetting_final_clears_the_timestamp():
+    client = FakeClient()
+    duel_db.save_consent(client, "acc-1", final_confirmed=False)
+    assert client.calls[0].payload["final_confirmed_at"] is None
+
+
+def test_real_principal_consent_is_independent_of_the_five():
+    """
+    실제 '내 성적표' 매입총합 사용 동의는 5개와 **완전히 별개**입니다(5-2-4).
+    5개가 전부 꺼져 있어도 이것만 켤 수 있어야 하고, 그 반대도 마찬가지입니다.
+    """
+    client = FakeClient()
+    duel_db.save_consent(client, "acc-1", consent_real_principal_bracket=True)
+    payload = client.calls[0].payload
+    assert payload["consent_real_principal_bracket"] is True
+    for flag in duel_db.CONSENT_ITEM_FLAGS:
+        assert flag not in payload, "독립 동의가 다른 항목을 함께 켜면 안 됩니다"
+
+    client = FakeClient()
+    duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
+                         consent_holdings=True, consent_quantity=True,
+                         consent_buy_amount=True, final_confirmed=True)
+    assert "consent_real_principal_bracket" not in client.calls[0].payload
+    assert duel_db.CONSENT_REAL_PRINCIPAL_FLAG not in duel_db.CONSENT_ITEM_FLAGS
+
+
+def test_save_consent_rejects_unknown_flag():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.save_consent(client, "acc-1", consent_rankk=True)   # 오타
+    with pytest.raises(DuelDbError):
+        duel_db.save_consent(client, "acc-1", consent_rank="yes")   # bool 아님
+    assert client.calls == []
+
+
+# =============================================================================
+# 6. B 절 — 옵트인(계좌 3개 + 시드) 멱등성 (2-1)
+# =============================================================================
+def _accounts(user_id="user-1"):
+    return [{"id": f"acc-{index}", "user_id": user_id, "window_type": window}
+            for index, window in enumerate(("M1", "M3", "M6"), start=1)]
+
+
+def test_create_duel_accounts_creates_three_accounts_and_three_seed_rows():
+    client = FakeClient(responses={
+        # ① 기존 계좌 조회 → 없음, ② 개설 후 조회 → 3개
+        (duel_db.ACCOUNTS_TABLE, "select"): sequence([], _accounts()),
+        (duel_db.LEDGER_TABLE, "select"): [],   # 시드 없음
+    })
+    accounts = duel_db.create_duel_accounts_for_user(client, "user-1",
+                                                     anchor_date=date(2026, 8, 19))
+    assert [row["window_type"] for row in accounts] == ["M1", "M3", "M6"]
+
+    account_insert = client.only_call(duel_db.ACCOUNTS_TABLE, "insert")
+    assert len(account_insert.rows) == 3, "계좌 3개는 한 번의 insert 로"
+    assert {row["window_type"] for row in account_insert.rows} == {"M1", "M3", "M6"}
+    # 금액의 단일 출처는 앱 상수입니다(DB default 를 두지 않은 이유 — 스키마 §1).
+    assert all(row["seed_amount"] == duel_rules.SEED_AMOUNT_KRW for row in account_insert.rows)
+
+    seed_insert = client.only_call(duel_db.LEDGER_TABLE, "insert")
+    assert len(seed_insert.rows) == 3, "시드 3행도 한 번의 insert 로"
+    assert all(row["event_type"] == "seed" for row in seed_insert.rows)
+    assert all(row["amount"] == duel_rules.SEED_AMOUNT_KRW for row in seed_insert.rows)
+    assert all(row["event_date"] == "2026-08-19" for row in seed_insert.rows)
+
+
+def test_create_duel_accounts_is_idempotent_on_second_call():
+    """두 번째 호출은 **아무것도 만들지 않고** 조용히 기존 계좌를 돌려줍니다."""
+    existing = _accounts()
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): existing,
+        (duel_db.LEDGER_TABLE, "select"): [{"account_id": row["id"]} for row in existing],
+    })
+    accounts = duel_db.create_duel_accounts_for_user(client, "user-1",
+                                                     anchor_date=date(2026, 8, 19))
+    assert len(accounts) == 3
+    assert client.calls_for(duel_db.ACCOUNTS_TABLE, "insert") == [], "계좌를 또 만들면 안 됩니다"
+    assert client.calls_for(duel_db.LEDGER_TABLE, "insert") == [], "시드를 두 번 주면 안 됩니다"
+
+
+def test_create_duel_accounts_survives_unique_conflict():
+    """
+    동시 실행으로 유니크 제약에 걸려도 예외를 터뜨리지 않습니다 — 인덱스가 제 일을 한 것이고
+    (중복 계좌·중복 시드는 만들어지지 않았습니다), 다시 읽어 정상 상태를 돌려줍니다.
+    """
+    conflict = Exception(
+        'duplicate key value violates unique constraint "duel_accounts_user_window_unique"')
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): sequence([], _accounts()),
+        (duel_db.ACCOUNTS_TABLE, "insert"): conflict,
+        (duel_db.LEDGER_TABLE, "select"): [{"account_id": "acc-1"},
+                                           {"account_id": "acc-2"},
+                                           {"account_id": "acc-3"}],
+    })
+    accounts = duel_db.create_duel_accounts_for_user(client, "user-1",
+                                                     anchor_date=date(2026, 8, 19))
+    assert len(accounts) == 3
+    assert client.calls_for(duel_db.LEDGER_TABLE, "insert") == []
+
+
+def test_create_duel_accounts_reraises_unrelated_errors():
+    """중복 키가 아닌 오류까지 삼키면 진짜 사고가 조용히 묻힙니다(§0-1)."""
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): sequence([], []),
+        (duel_db.ACCOUNTS_TABLE, "insert"): Exception("connection reset by peer"),
+    })
+    with pytest.raises(DuelDbError):
+        duel_db.create_duel_accounts_for_user(client, "user-1", anchor_date=date(2026, 8, 19))
+
+
+def test_create_duel_accounts_fills_only_missing_window_types():
+    """M1 만 있는 계정에는 M3·M6 만 새로 만듭니다(있는 걸 다시 만들지 않음)."""
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): sequence(_accounts()[:1], _accounts()),
+        (duel_db.LEDGER_TABLE, "select"): [{"account_id": "acc-1"}],
+    })
+    duel_db.create_duel_accounts_for_user(client, "user-1", anchor_date=date(2026, 8, 19))
+    created = client.only_call(duel_db.ACCOUNTS_TABLE, "insert").rows
+    assert {row["window_type"] for row in created} == {"M3", "M6"}
+    seeded = client.only_call(duel_db.LEDGER_TABLE, "insert").rows
+    assert {row["account_id"] for row in seeded} == {"acc-2", "acc-3"}
+
+
+# =============================================================================
+# 7. B 절 — 정기 입금 (2-2) · §0-3-2 집합 연산 회귀 고정
+# =============================================================================
+def _active_accounts(count):
+    return [{"id": f"acc-{index}", "user_id": f"user-{index}", "window_type": "M1",
+             "status": "active"} for index in range(count)]
+
+
+@pytest.mark.parametrize("account_count", [3, 50, 900])
+def test_apply_monthly_deposits_is_one_insert_regardless_of_account_count(account_count):
+    """
+    🔴 §0-3-2 회귀 테스트(작업지시서 2-7 이 명시적으로 요구한 것).
+
+    계좌가 3개든 900개든 **질의 수는 그대로**여야 합니다: 활성 계좌 조회 1 + 중복 조회 1 +
+    insert 1. 사용자별 루프를 돌면 사용자가 10명일 때는 잘 돌아가고, 늘어난 뒤에 터집니다.
+    (900행은 CHUNK_SIZE(200)로 잘려 insert 가 5번이 됩니다 — 그건 요청 크기를 자르는 것이지
+     계좌마다 부르는 것이 아니므로, insert 호출 수가 **계좌 수가 아니라 청크 수**인지를 봅니다.)
+    """
+    accounts = _active_accounts(account_count)
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): accounts,
+        (duel_db.LEDGER_TABLE, "select"): [],
+    })
+    inserted = duel_db.apply_monthly_deposits(client, date(2026, 9, 10))
+
+    assert inserted == account_count
+    assert len(client.calls_for(duel_db.ACCOUNTS_TABLE, "select")) == 1
+    assert len(client.calls_for(duel_db.LEDGER_TABLE, "select")) == 1
+    expected_chunks = -(-account_count // duel_db.CHUNK_SIZE)
+    inserts = client.calls_for(duel_db.LEDGER_TABLE, "insert")
+    assert len(inserts) == expected_chunks
+    assert sum(len(call.rows) for call in inserts) == account_count
+    assert len(client.calls) == 2 + expected_chunks
+
+
+def test_apply_monthly_deposits_payload_matches_the_rules_constant():
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): _active_accounts(3),
+        (duel_db.LEDGER_TABLE, "select"): [],
+    })
+    duel_db.apply_monthly_deposits(client, "2026-09-10")
+    rows = client.only_call(duel_db.LEDGER_TABLE, "insert").rows
+    assert all(row["amount"] == duel_rules.MONTHLY_DEPOSIT_KRW for row in rows)
+    assert all(row["event_type"] == "monthly_deposit" for row in rows)
+    # 10일이 주말·공휴일이어도 그대로 10일자입니다(시장 이벤트가 아니라 현금 이벤트 — 2-2-4).
+    assert all(row["event_date"] == "2026-09-10" for row in rows)
+
+
+def test_apply_monthly_deposits_second_run_inserts_nothing():
+    """멱등성: 배치가 두 번 돌아도 같은 달 입금이 두 번 들어가지 않습니다(2-2-6)."""
+    accounts = _active_accounts(3)
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): accounts,
+        (duel_db.LEDGER_TABLE, "select"): [{"account_id": row["id"]} for row in accounts],
+    })
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 0
+    assert client.calls_for(duel_db.LEDGER_TABLE, "insert") == []
+
+
+def test_apply_monthly_deposits_fills_only_the_accounts_that_missed_it():
+    accounts = _active_accounts(3)
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): accounts,
+        (duel_db.LEDGER_TABLE, "select"): [{"account_id": "acc-0"}],
+    })
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 2
+    rows = client.only_call(duel_db.LEDGER_TABLE, "insert").rows
+    assert {row["account_id"] for row in rows} == {"acc-1", "acc-2"}
+
+
+def test_apply_monthly_deposits_with_no_accounts_sends_no_write():
+    client = FakeClient(responses={(duel_db.ACCOUNTS_TABLE, "select"): []})
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 0
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+
+
+# =============================================================================
+# 8. B 절 — 체결 (2-4-6)
+# =============================================================================
+def test_fetch_pending_orders_for_fill_is_one_query_ordered_by_saved_at():
+    """
+    FIFO 예수금 배정(`duel_rules.allocate_pending_orders`)의 전제가 저장 순서라,
+    조회 자체가 `saved_at` 오름차순이어야 합니다. 전체 계좌를 **한 번에** 읽습니다.
+    """
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "select"): [{"id": "o1"}]})
+    duel_db.fetch_pending_orders_for_fill(client, date(2026, 8, 20))
+    call = client.only_call(duel_db.ORDERS_TABLE, "select")
+    assert call.filter_map == {"status": "pending", "target_date": "2026-08-20"}
+    assert call.orders == [("saved_at", False)]
+    assert len(client.calls) == 1
+
+
+def test_record_order_fill_persists_exactly_what_the_rules_computed():
+    """
+    체결 계산은 `duel_rules.calculate_fill()` 이 하고, 이 파일은 그 결과를 그대로 적습니다.
+    (여기서 floor 나눗셈을 다시 하면 규칙이 두 곳에 생깁니다.)
+    """
+    outcome = duel_rules.calculate_fill(10, 70_000, 500_000)   # 7주만 체결되는 부분체결
+    assert outcome["status"] == "partially_filled" and outcome["filled_quantity"] == 7
+
+    client = FakeClient()
+    duel_db.record_order_fill(
+        client, "order-1", outcome["status"], outcome["filled_quantity"],
+        70_000, outcome["filled_amount"], outcome["fail_reason"],
+        filled_date=date(2026, 8, 20),
+    )
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.payload["status"] == "partially_filled"
+    assert call.payload["filled_quantity"] == 7
+    assert call.payload["filled_amount"] == outcome["filled_amount"]
+    assert call.payload["filled_date"] == "2026-08-20"
+    assert "7주" in call.payload["fail_reason"] and "10주" in call.payload["fail_reason"]
+    # 배치도 pending 행만 집습니다(재실행 안전 + 종결된 주문 덮어쓰기 방지).
+    assert call.filter_map == {"id": "order-1", "status": "pending"}
+
+
+def test_record_order_fill_requires_the_trading_day():
+    """체결일을 모르면 오늘 날짜를 지어 넣지 않고 거절합니다(§0-1)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.record_order_fill(client, "order-1", "filled", 3, 70_000, 210_000)
+    assert "함께" in str(excinfo.value)
+    assert client.calls == []
+
+
+def test_record_order_fill_requires_reason_for_non_filled_status():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.record_order_fill(client, "order-1", "expired", 0, None, None, None)
+    with pytest.raises(DuelDbError):
+        duel_db.record_order_fill(client, "order-1", "pending", None, None, None, None)
+    assert client.calls == []
+
+
+def test_record_order_fill_writes_empty_fill_fields_for_expired_orders():
+    """0주 체결은 '0원에 체결'이 아니라 '체결 없음'입니다 — 네 필드 모두 NULL."""
+    client = FakeClient()
+    duel_db.record_order_fill(client, "order-1", "expired", 0, 70_000, 0,
+                              "예수금이 부족해 1주도 체결되지 않았습니다.",
+                              filled_date=date(2026, 8, 20))
+    payload = client.only_call(duel_db.ORDERS_TABLE, "update").payload
+    assert payload["filled_quantity"] is None
+    assert payload["filled_price"] is None
+    assert payload["filled_amount"] is None
+    assert payload["filled_date"] is None
+    assert payload["fail_reason"]
+
+
+def test_record_buy_ledger_entry_flips_the_sign_once():
+    """매수 원장은 음수. 부호를 뒤집는 자리는 이 파일 한 군데뿐이어야 합니다."""
+    client = FakeClient()
+    duel_db.record_buy_ledger_entry(client, "acc-1", "order-1", 490_000, date(2026, 8, 20))
+    row = client.only_call(duel_db.LEDGER_TABLE, "insert").rows[0]
+    assert row["amount"] == -490_000
+    assert row["event_type"] == "buy"
+    assert row["order_id"] == "order-1"      # buy 행에는 주문 링크가 반드시 필요(CHECK)
+    assert row["event_date"] == "2026-08-20"
+
+
+def test_record_buy_ledger_entries_is_a_single_insert():
+    client = FakeClient()
+    entries = [{"account_id": f"acc-{i}", "order_id": f"o-{i}",
+                "filled_amount": 1000 * (i + 1), "event_date": date(2026, 8, 20)}
+               for i in range(25)]
+    assert duel_db.record_buy_ledger_entries(client, entries) == 25
+    assert len(client.calls_for(duel_db.LEDGER_TABLE, "insert")) == 1
+
+
+def test_record_buy_ledger_entry_rejects_zero_amount():
+    """체결금액 0원짜리 원장 행은 만들지 않습니다(현금이 움직이지 않았으므로)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.record_buy_ledger_entry(client, "acc-1", "order-1", 0, date(2026, 8, 20))
+    assert client.calls == []
+
+
+def test_upsert_position_weighted_average_uses_the_rules_function():
+    """평단가는 `duel_rules.apply_buy_fill_to_position()` 이 계산합니다(재구현 금지)."""
+    existing = {"quantity": 10, "avg_cost": 1000}
+    expected = duel_rules.apply_buy_fill_to_position(10, 1000, 5, 2000)
+
+    client = FakeClient()
+    duel_db.upsert_position_weighted_average(
+        client, "acc-1", "005930", "삼성전자", existing, 5, 2000)
+    call = client.only_call(duel_db.POSITIONS_TABLE, "upsert")
+    assert call.options["on_conflict"] == "account_id,ticker"
+    row = call.rows[0]
+    assert row["quantity"] == expected["quantity"] == 15
+    assert row["avg_cost"] == expected["avg_cost"]
+    assert row["avg_cost"] == pytest.approx(1333.333333, abs=1e-6)
+
+
+def test_upsert_position_weighted_average_handles_new_position():
+    client = FakeClient()
+    duel_db.upsert_position_weighted_average(
+        client, "acc-1", "005930", "삼성전자", None, 3, 70_000)
+    row = client.only_call(duel_db.POSITIONS_TABLE, "upsert").rows[0]
+    assert row["quantity"] == 3 and row["avg_cost"] == 70_000
+
+
+def test_upsert_positions_rejects_duplicate_conflict_keys():
+    """
+    같은 (계좌, 종목)이 한 요청에 두 번 들어오면 PostgREST 가 요청 전체를 거절합니다.
+    미리 잡아 어느 키가 겹쳤는지 알립니다(report_db 의 같은 방어와 짝).
+    """
+    client = FakeClient()
+    rows = [{"account_id": "acc-1", "ticker": "005930", "quantity": 1, "avg_cost": 1},
+            {"account_id": "acc-1", "ticker": "005930", "quantity": 2, "avg_cost": 2}]
+    with pytest.raises(DuelDbError):
+        duel_db.upsert_positions(client, rows)
+    assert client.calls == []
+
+
+def test_upsert_positions_is_one_call_for_many_rows():
+    client = FakeClient()
+    rows = [{"account_id": f"acc-{i}", "ticker": "005930", "quantity": 1, "avg_cost": 1}
+            for i in range(30)]
+    duel_db.upsert_positions(client, rows)
+    assert len(client.calls_for(duel_db.POSITIONS_TABLE, "upsert")) == 1
+
+
+# =============================================================================
+# 9. B 절 — 크롤링 실패일 일괄 정리 (2-4-5)
+# =============================================================================
+def test_expire_or_cancel_all_pending_is_one_set_based_update():
+    """
+    🔴 §0-3-2 회귀 테스트 — 주문이 몇 건이든 update 질의는 **1개**입니다.
+    (`duel_rules.check_crawl_freshness()` 가 'ok' 를 주지 않은 날의 처리)
+    """
+    affected = [{"id": f"o-{i}"} for i in range(37)]
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): affected})
+    reason = "그 거래일의 확정 종가 수집이 실패해 체결하지 않고 취소했습니다."
+
+    count = duel_db.expire_or_cancel_all_pending_for_date(client, date(2026, 8, 20), reason)
+
+    assert count == 37
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.filter_map == {"status": "pending", "target_date": "2026-08-20"}
+    assert call.payload == {"status": "cancelled", "fail_reason": reason}
+    assert len(client.calls) == 1
+
+
+def test_expire_or_cancel_all_pending_requires_a_reason():
+    """사유 없는 실패 처리는 '조용히 사라지는 주문'입니다(§0-1, DB CHECK 와 같은 규칙)."""
+    client = FakeClient()
+    for bad_reason in ("", "   ", None):
+        with pytest.raises(DuelDbError):
+            duel_db.expire_or_cancel_all_pending_for_date(client, date(2026, 8, 20), bad_reason)
+    assert client.calls == []
+
+
+def test_expire_or_cancel_all_pending_rejects_wrong_status():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.expire_or_cancel_all_pending_for_date(
+            client, date(2026, 8, 20), "사유", status="filled")
+    assert client.calls == []
+
+
+def test_crawl_failure_path_wires_rules_to_db():
+    """
+    2-5 의 1번 단계 통합: 신선도가 'ok' 가 아니면 체결을 건너뛰고 일괄 정리로 갑니다.
+    (판정은 규칙 함수가, 처리 여부 결정은 `crawl_status_allows_fill()` 이 합니다.)
+    """
+    today = {"KOSPI": 2500.0, "KOSDAQ": 800.0}
+    yesterday = {"KOSPI": 2500.0, "KOSDAQ": 800.0}
+    for index in range(50):
+        today[f"S{index}"] = 1000.0
+        yesterday[f"S{index}"] = 1000.0
+    status = duel_rules.check_crawl_freshness(today, yesterday)
+    assert duel_rules.crawl_status_allows_fill(status) is False
+
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): [{"id": "o-1"}]})
+    duel_db.expire_or_cancel_all_pending_for_date(
+        client, date(2026, 8, 20), f"수집 신선도 판정 결과 '{status}' 로 체결하지 않았습니다.")
+    assert client.only_call(duel_db.ORDERS_TABLE, "update").payload["status"] == "cancelled"
+
+
+# =============================================================================
+# 10. B 절 — 일별 스냅샷 적재 (1-5 / 2-5-4)
+# =============================================================================
+def _snapshot_row(account_id="acc-1", **overrides):
+    row = {
+        "account_id": account_id,
+        "position_value": 3_000_000.0,
+        "cash_balance": 7_000_000.0,
+        "total_value": 10_000_000.0,
+        "total_cost": 2_800_000.0,
+        "cash_flow_amount": 0.0,
+        "cash_flow_kind": None,
+        "priced_count": 1,
+        "unpriced_count": 0,
+        "price_as_of_kst": "2026-08-20 16:05",
+        "holdings": [{
+            "ticker": "005930", "stock_name": "삼성전자", "quantity": 40, "avg_cost": 70_000,
+            "cost": 2_800_000.0, "close_price": 75_000, "market_value": 3_000_000.0,
+            "status": "active", "priced": True, "price_as_of_kst": "2026-08-20 16:05",
+        }],
+    }
+    row.update(overrides)
+    return row
+
+
+def test_write_daily_snapshots_upserts_both_tables_once():
+    client = FakeClient()
+    duel_db.write_daily_snapshots(client, date(2026, 8, 20),
+                                  [_snapshot_row("acc-1"), _snapshot_row("acc-2")])
+
+    daily = client.only_call(duel_db.DAILY_SNAPSHOTS_TABLE, "upsert")
+    holdings = client.only_call(duel_db.HOLDING_SNAPSHOTS_TABLE, "upsert")
+    assert daily.options["on_conflict"] == "account_id,snapshot_date"
+    assert holdings.options["on_conflict"] == "account_id,ticker,snapshot_date"
+    assert len(daily.rows) == 2 and len(holdings.rows) == 2
+    # 날짜의 단일 출처는 인자 하나 — 모든 행에 같은 날짜가 찍힙니다.
+    assert all(row["snapshot_date"] == "2026-08-20" for row in daily.rows + holdings.rows)
+    # 종목별 행에는 계좌가 실려야 합니다(합계 표와 짝이 맞아야 하므로).
+    assert {row["account_id"] for row in holdings.rows} == {"acc-1", "acc-2"}
+    # 합계 표에 holdings 목록이 그대로 실려 나가면 PostgREST 가 거절합니다.
+    assert all("holdings" not in row for row in daily.rows)
+
+
+def test_write_daily_snapshots_rejects_total_value_mismatch():
+    """총자산은 파생값이 아니라 두 관측값의 합입니다(DB CHECK 와 같은 규칙)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.write_daily_snapshots(client, date(2026, 8, 20),
+                                      [_snapshot_row(total_value=9_999_999.0)])
+    assert "총자산" in str(excinfo.value)
+    assert client.calls == []
+
+
+def test_write_daily_snapshots_rejects_cash_flow_without_kind():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.write_daily_snapshots(client, date(2026, 8, 20), [_snapshot_row(
+            cash_flow_amount=800_000.0, cash_flow_kind=None,
+            cash_balance=7_800_000.0, total_value=10_800_000.0)])
+    assert client.calls == []
+
+
+def test_write_daily_snapshots_rejects_unpriced_holding_with_a_price():
+    """'가격 모름'은 NULL 로만 표현합니다 — 0 이나 추정치로 채우지 않습니다(§0-1)."""
+    row = _snapshot_row()
+    row["holdings"][0]["priced"] = False      # 가격을 모른다면서 값은 남아 있음
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.write_daily_snapshots(client, date(2026, 8, 20), [row])
+    assert "priced" in str(excinfo.value)
+
+
+def test_write_daily_snapshots_rejects_row_dated_differently():
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.write_daily_snapshots(client, date(2026, 8, 20),
+                                      [_snapshot_row(snapshot_date="2026-08-19")])
+
+
+def test_write_daily_snapshots_allows_cash_only_account():
+    """보유 종목이 0개이고 현금만 있는 계좌는 정상입니다(신규 계좌 — 스키마 §5 의 CHECK 완화)."""
+    client = FakeClient()
+    duel_db.write_daily_snapshots(client, date(2026, 8, 20), [_snapshot_row(
+        position_value=0.0, cash_balance=10_000_000.0, total_value=10_000_000.0,
+        total_cost=0.0, priced_count=0, holdings=[])])
+    assert len(client.only_call(duel_db.DAILY_SNAPSHOTS_TABLE, "upsert").rows) == 1
+    assert client.calls_for(duel_db.HOLDING_SNAPSHOTS_TABLE) == []
+
+
+def test_write_daily_snapshots_with_no_rows_writes_nothing():
+    client = FakeClient()
+    assert duel_db.write_daily_snapshots(client, date(2026, 8, 20), []) is None
+    assert client.calls == []
+
+
+# =============================================================================
+# 11. B 절 — "모든 사용자를 한 번에" 진입점
+# =============================================================================
+def test_fetch_all_active_accounts_is_one_query():
+    client = FakeClient(responses={(duel_db.ACCOUNTS_TABLE, "select"): _active_accounts(4)})
+    rows = duel_db.fetch_all_active_accounts(client)
+    assert len(rows) == 4
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "select")
+    assert call.filter_map == {"status": "active"}
+    assert len(client.calls) == 1
+
+
+def test_fetch_cash_ledger_for_accounts_uses_one_in_filter():
+    client = FakeClient(responses={(duel_db.LEDGER_TABLE, "select"): [
+        {"account_id": "acc-1", "amount": 10_000_000},
+        {"account_id": "acc-1", "amount": -1_000_000},
+        {"account_id": "acc-2", "amount": 10_000_000},
+    ]})
+    rows = duel_db.fetch_cash_ledger_for_accounts(client, ["acc-1", "acc-2"],
+                                                  as_of_date=date(2026, 8, 20))
+    call = client.only_call(duel_db.LEDGER_TABLE, "select")
+    assert ("in", "account_id", ["acc-1", "acc-2"]) in call.filters
+    assert ("lte", "event_date", "2026-08-20") in call.filters
+    assert duel_db.cash_balances_by_account(rows) == {"acc-1": 9_000_000.0,
+                                                      "acc-2": 10_000_000.0}
+
+
+def test_fetch_cash_ledger_with_empty_account_list_sends_no_query():
+    """빈 in 필터를 보내면 PostgREST 가 전체를 돌려줄 수 있어 아예 부르지 않습니다."""
+    client = FakeClient()
+    assert duel_db.fetch_cash_ledger_for_accounts(client, []) == []
+    assert client.calls == []
+
+
+# =============================================================================
+# 12. service_role 격리 · 선택적 의존성 가드
+# =============================================================================
+def test_service_env_names_match_report_db_convention():
+    """
+    `utils/report_db.py` 와 **같은 환경변수 이름**을 씁니다. 이름이 갈라지면 오너가 배치
+    시크릿을 두 벌 관리하게 되고, 한쪽만 등록된 날 조용히 절반만 동작합니다(§0-3-10).
+    """
+    assert duel_db.SERVICE_URL_ENV == "SUPABASE_URL"
+    assert duel_db.SERVICE_ROLE_KEY_ENV == "SUPABASE_SERVICE_ROLE_KEY"
+
+
+def test_service_env_is_read_from_environment_only(monkeypatch):
+    """
+    `st.secrets` 경로를 만들지 않습니다 — streamlit 을 import 조차 하지 않습니다.
+
+    ⚠️ **실행되는 코드만** 봅니다. 주석·docstring 에 "streamlit 을 import 하지 않는다"는
+       설명이 나오는 건 의존이 아닙니다(`tests/test_duel.py` 가 SQL 주석을 같은 방식으로
+       구분한 것과 같은 판단).
+    """
+    tree, source = _module_ast()
+    imported = set()
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported.update(alias.name.split(".")[0] for alias in node.names)
+        elif isinstance(node, ast.ImportFrom) and node.module:
+            imported.add(node.module.split(".")[0])
+    assert "streamlit" not in imported
+    # 실행 코드에 `st.` 접근이 아예 없어야 합니다(설명 문장에 나오는 건 의존이 아닙니다).
+    assert not any(isinstance(node, ast.Name) and node.id == "st" for node in ast.walk(tree))
+    assert source.count("os.environ") >= 1, "키는 환경변수에서만 읽습니다"
+
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    assert duel_db.service_config_present() is False
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "secret-value")
+    assert duel_db.service_config_present() is True
+
+
+def test_create_service_client_without_config_raises_clear_error(monkeypatch):
+    """배치는 조용히 아무 일도 안 하면 안 됩니다 — 설정이 없으면 실패해야 사람이 알아챕니다."""
+    monkeypatch.delenv("SUPABASE_URL", raising=False)
+    monkeypatch.delenv("SUPABASE_SERVICE_ROLE_KEY", raising=False)
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.create_service_client()
+    message = str(excinfo.value)
+    assert "SUPABASE_URL" in message and "SUPABASE_SERVICE_ROLE_KEY" in message
+
+
+def test_create_service_client_does_not_leak_the_key(monkeypatch):
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "super-secret-key")
+    monkeypatch.setattr(duel_db, "SUPABASE_PACKAGE_AVAILABLE", True)
+
+    def _boom(url, key):
+        raise RuntimeError(f"bad url {url} key {key}")
+
+    monkeypatch.setattr(duel_db, "_supabase_create_client", _boom)
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.create_service_client()
+    assert "super-secret-key" not in str(excinfo.value)
+
+
+#: `supabase` 미설치 상태를 **별도 프로세스**에서 재현하는 스크립트.
+#  왜 subprocess 인가: 같은 프로세스에서 `importlib.reload()` 를 하면 모듈의 클래스 객체가
+#  통째로 새로 만들어져, 이 파일 맨 위에서 import 해 둔 `DuelDbError` 와 **다른 클래스**가
+#  됩니다. 그러면 뒤따르는 테스트의 `pytest.raises(DuelDbError)` 가 엉뚱하게 실패하고,
+#  원인을 찾기 어려운 순서 의존 버그가 됩니다. 프로세스를 분리하면 그 오염이 아예 없습니다.
+_NO_SUPABASE_SCRIPT = """
+import sys
+sys.path.insert(0, {repo!r})
+sys.modules["supabase"] = None          # from supabase import ... → ImportError
+from utils import duel_db
+assert duel_db.SUPABASE_PACKAGE_AVAILABLE is False
+assert duel_db._supabase_create_client is None
+
+# 클라이언트를 **인자로 받는** 함수들은 패키지 없이도 그대로 동작해야 합니다.
+class R:
+    def __init__(self, data): self.data = data
+class Q:
+    def __init__(self, sink, payload): self.sink, self.payload = sink, payload
+    def execute(self):
+        self.sink.append(self.payload)
+        return R([dict(self.payload)])
+class T:
+    def __init__(self, sink): self.sink = sink
+    def insert(self, payload): return Q(self.sink, payload)
+class C:
+    def __init__(self): self.sink = []
+    def table(self, name): return T(self.sink)
+
+import datetime
+from utils.duel_rules import KST
+client = C()
+duel_db.save_order(client, "acc-1", "005930", "삼성전자", 1,
+                   trading_days=[datetime.date(2026, 8, 20)],
+                   now_kst=datetime.datetime(2026, 8, 19, 19, 30, tzinfo=KST))
+assert len(client.sink) == 1, client.sink
+
+# 배치 클라이언트만 패키지가 필요합니다 — 없으면 AttributeError/TypeError 가 아니라
+# 잡을 수 있는 DuelDbError 여야 합니다.
+import os
+os.environ["SUPABASE_URL"] = "https://example.supabase.co"
+os.environ["SUPABASE_SERVICE_ROLE_KEY"] = "secret-value"
+try:
+    duel_db.create_service_client()
+except duel_db.DuelDbError as exc:
+    assert "supabase" in str(exc)
+else:
+    raise AssertionError("패키지가 없는데 클라이언트가 만들어졌습니다")
+print("OK")
+"""
+
+
+def test_module_imports_and_works_without_supabase_package():
+    """
+    🔴 선택적 의존성 가드 — `supabase` 가 없어도 **import 가 깨지지 않아야** 합니다.
+    (`utils/scorecard_db.py` 와 같은 규율: 이 패키지가 없다고 기존 모듈이 죽으면 안 됩니다.)
+
+    같은 스크립트 안에서 세 가지를 함께 확인합니다:
+      ① import 자체가 성공하고 `SUPABASE_PACKAGE_AVAILABLE` 이 False 인지
+      ② 클라이언트를 인자로 받는 함수는 패키지 없이도 그대로 동작하는지
+      ③ 배치 클라이언트 생성만 실패하되, `None` 을 부르다 나는 AttributeError/TypeError 가
+         아니라 **잡을 수 있는 DuelDbError** 인지
+    """
+    result = subprocess.run(
+        [sys.executable, "-c", _NO_SUPABASE_SCRIPT.format(repo=str(REPO_ROOT))],
+        capture_output=True, text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert result.stdout.strip().endswith("OK")
+
+
+def test_calling_service_client_without_package_raises_catchable_error(monkeypatch):
+    """
+    패키지가 없는 상태에서 배치 클라이언트를 만들면 `None(url, key)` 로 죽는 게 아니라
+    **무엇을 해야 하는지 적힌 DuelDbError** 가 나야 합니다(§0-3-4 — 사용자·오너에게 코드가
+    아니라 문장이 보이도록).
+    """
+    monkeypatch.setenv("SUPABASE_URL", "https://example.supabase.co")
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "secret-value")
+    monkeypatch.setattr(duel_db, "SUPABASE_PACKAGE_AVAILABLE", False)
+    monkeypatch.setattr(duel_db, "_supabase_create_client", None)
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.create_service_client()
+    assert "supabase" in str(excinfo.value)
+    assert not isinstance(excinfo.value, AttributeError)
+
+
+@pytest.mark.parametrize("call", [
+    lambda: duel_db.fetch_my_accounts(None, "user-1"),
+    lambda: duel_db.fetch_my_positions(None, "acc-1"),
+    lambda: duel_db.fetch_my_orders(None, "acc-1"),
+    lambda: duel_db.fetch_my_snapshots(None, "acc-1"),
+    lambda: duel_db.save_order(None, "acc-1", "005930", "삼성전자", 1,
+                               trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW),
+    lambda: duel_db.edit_order(None, "order-1", 3, now_kst=INSIDE_WINDOW),
+    lambda: duel_db.cancel_order(None, "order-1", now_kst=INSIDE_WINDOW),
+    lambda: duel_db.save_consent(None, "acc-1", consent_rank=True),
+    lambda: duel_db.fetch_all_active_accounts(None),
+    lambda: duel_db.apply_monthly_deposits(None, date(2026, 9, 10)),
+    lambda: duel_db.create_duel_accounts_for_user(None, "user-1"),
+    lambda: duel_db.fetch_pending_orders_for_fill(None, date(2026, 8, 20)),
+    lambda: duel_db.expire_or_cancel_all_pending_for_date(None, date(2026, 8, 20), "사유"),
+    lambda: duel_db.write_daily_snapshots(None, date(2026, 8, 20), [_snapshot_row()]),
+    lambda: duel_db.record_order_fill(None, "o-1", "filled", 1, 100, 100,
+                                      filled_date=date(2026, 8, 20)),
+    lambda: duel_db.record_buy_ledger_entry(None, "acc-1", "o-1", 100, date(2026, 8, 20)),
+    lambda: duel_db.upsert_position_weighted_average(None, "acc-1", "005930", "삼성전자",
+                                                     None, 1, 100),
+])
+def test_none_client_raises_duel_db_error_not_attribute_error(call):
+    """
+    클라이언트가 없을 때 `'NoneType' object has no attribute 'table'` 로 죽지 않습니다 —
+    사용자에게도 오너에게도 아무 도움이 안 되는 메시지이기 때문입니다(§0-3-4).
+    """
+    with pytest.raises(DuelDbError):
+        call()
+
+
+# =============================================================================
+# 13. 계층 분리 — 계산을 이 파일에서 다시 구현하지 않았는지
+# =============================================================================
+def test_duel_db_calls_the_rules_module_and_does_not_reimplement_it():
+    """
+    체결·평단가·창 판정·TWR 의 단일 출처는 `utils/duel_rules.py` 입니다.
+    이 파일에 그 계산이 복사돼 들어오면(예: floor 나눗셈, 가중평균 식) 언젠가 둘 중 하나만
+    고쳐지고, 화면 숫자와 DB 값이 갈라집니다(§0-3-10).
+    """
+    tree, source = _module_ast()
+    assert "from utils import duel_rules" in source
+
+    # 실행되는 코드만 봅니다(docstring 에서 규칙 함수 이름을 **설명하는** 건 재구현이 아니라
+    # 오히려 권장되는 안내입니다 — tests/test_duel.py 가 SQL 주석을 다룬 방식과 같습니다).
+    executable_lines = []
+    docstring_nodes = set()
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Module, ast.FunctionDef, ast.ClassDef)):
+            body = getattr(node, "body", None)
+            if body and isinstance(body[0], ast.Expr) and isinstance(body[0].value, ast.Constant) \
+                    and isinstance(body[0].value.value, str):
+                docstring_nodes.add((body[0].lineno, body[0].end_lineno))
+    skip = set()
+    for start, end in docstring_nodes:
+        skip.update(range(start, (end or start) + 1))
+    for number, line in enumerate(source.splitlines(), start=1):
+        if number in skip or line.lstrip().startswith("#"):
+            continue
+        executable_lines.append(line)
+    executable = "\n".join(executable_lines)
+
+    for reimplementation in ("math.floor", "// price", "chain *=", "Decimal("):
+        assert reimplementation not in executable, f"{reimplementation} 를 여기서 다시 짜지 마세요"
+    # 금액 상수도 다시 적지 않습니다(단일 출처는 duel_rules — 스키마에도 안 적은 이유와 같음).
+    assert "10_000_000" not in executable and "10000000" not in executable
+    assert "800_000" not in executable and "800000" not in executable
+
+
+def test_rules_module_was_not_modified_by_this_layer():
+    """
+    이 작업은 `utils/duel_rules.py` 를 고치지 않는 것이 전제입니다(승인된 파일).
+    여기서는 이 계층이 기대하는 공개 함수·상수가 **그대로 있는지**만 확인합니다 —
+    없어졌다면 규칙 파일이 손을 탄 것입니다.
+    """
+    for name in ("resolve_order_window", "resolve_fill_trading_day", "calculate_fill",
+                 "allocate_pending_orders", "apply_buy_fill_to_position",
+                 "check_crawl_freshness", "crawl_status_allows_fill", "compute_twr",
+                 "is_buy_window_open"):
+        assert callable(getattr(duel_rules, name)), name
+    assert duel_rules.SEED_AMOUNT_KRW == 10_000_000
+    assert duel_rules.MONTHLY_DEPOSIT_KRW == 800_000
+    assert duel_rules.ACCOUNT_WINDOW_TYPES == ("M1", "M3", "M6")
+
+
+def test_every_public_function_has_a_docstring():
+    """
+    이 저장소의 관례(§0-1 — 코드가 왜 그런지 남기기). 공개 함수는 전부 설명을 답니다.
+    """
+    missing = [name for name, function in vars(duel_db).items()
+               if inspect.isfunction(function)
+               and function.__module__ == duel_db.__name__
+               and not name.startswith("_")
+               and not (function.__doc__ or "").strip()]
+    assert missing == [], f"docstring 없는 공개 함수: {missing}"
