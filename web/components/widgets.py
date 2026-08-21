@@ -14,7 +14,7 @@ Streamlit 에는 있었지만 NiceGUI 에는 동등 위젯이 없는 것들(`st.
 
 from typing import Callable, Optional, Union
 
-from nicegui import ui
+from nicegui import run, ui
 
 from web.components.html import FOOTER_NOTICE_HTML, compact, esc, fmt_num
 
@@ -196,15 +196,39 @@ def download_button(label: str,
     ⚠️ 완료기준 ⑤ — 파일 내용은 기존과 **바이트 단위로 동일**해야 하므로, 데이터를 만드는
     로직은 반드시 기존 함수(`utils/stock_export.py` 등)를 그대로 재사용하세요.
     여기서 새로 포맷을 짜지 않습니다.
+
+    🔴 2026-08-21 — 클릭 처리기를 `async def` 로 바꾸고, **파일을 만드는 일만**
+       `run.io_bound` 로 별도 스레드에 넘깁니다 (`web/auth.py::login()` 과 같은 처방).
+       그 전에는 클릭 한 번이 이벤트 루프를 통째로 붙잡았습니다:
+         · `web/state.read_download_bytes()` 는 원격 모드에서 `requests.get()` 왕복을 합니다.
+         · 관리자용 CSV 변환은 4MB 스냅샷을 pandas 로 통째로 돌립니다.
+       NiceGUI 는 한 프로세스·한 루프가 모든 접속자를 처리하므로, 그 몇 초 동안 **다른
+       접속자들의 WebSocket 하트비트까지** 멈춰 "연결이 끊겼습니다" 토스트가 떴습니다.
+
+    ⚠️ `run.io_bound` 안에서 도는 것은 `data()`/`filename()` **두 콜러블뿐**입니다.
+       이 둘은 파일을 읽어 바이트를 만드는 순수 계산이라 NiceGUI 의 접속 컨텍스트를
+       쓰지 않습니다. 반대로 `ui.notify`/`ui.download.content` 는 그 컨텍스트가 필요하므로
+       **스레드에 넘기지 않고** 원래 이벤트 루프에서 그대로 실행합니다.
     """
-    def _click() -> None:
+    def _build():
+        """별도 스레드에서 도는 부분 — 파일 내용과 파일명을 만들기만 합니다."""
+        payload = data() if callable(data) else data
+        name = filename() if callable(filename) else filename
+        return payload, name
+
+    async def _click() -> None:
         try:
-            payload = data() if callable(data) else data
-            name = filename() if callable(filename) else filename
+            built = await run.io_bound(_build)
         except Exception as exc:                      # noqa: BLE001 — 사용자에겐 문장만, 상세는 로그로
             print(f'⚠️ 다운로드 파일 생성 실패: {exc}')
             ui.notify(failure_text, type='negative')
             return
+        if built is None:
+            # 요청이 취소됐거나 서버가 내려가는 중(NiceGUI 3.x 의 잠정 규약). 만들지 못한 건
+            # 만들지 못한 것이므로 예전 실패 경로와 똑같이 알립니다 (§0-1).
+            ui.notify(failure_text, type='negative')
+            return
+        payload, name = built
         if payload is None:
             ui.notify(failure_text, type='negative')
             return

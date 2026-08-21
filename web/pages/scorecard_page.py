@@ -97,7 +97,11 @@ from web.components import (
     metric_card, pct_html, pct_text, warning_banner,
 )
 from web.layout import layout
-from web.state import data_path, load_json_file
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+)
 
 # 원형차트는 plotly 로 그립니다(요구사항에 이미 있고 매크로 화면에서도 사용 중).
 # 그래도 없을 때 화면 전체가 죽지 않도록 감싸두고, 없으면 표로 대체합니다(원본과 동일 정책).
@@ -347,30 +351,35 @@ def _ocr_value_text(value) -> str:
 #     비용만 사라집니다 (§0-3-10 자원 낭비 금지).
 # =============================================================================
 
-def _load_index(filename: str, market: str):
-    """(인덱스, 메타데이터). 파일이 없거나 깨졌으면 ({}, None) — 화면은 그대로 동작합니다."""
-    payload, _load_error = load_json_file(data_path(filename))
+async def _load_index(filename: str, market: str):
+    """(인덱스, 메타데이터). 파일이 없거나 깨졌으면 ({}, None) — 화면은 그대로 동작합니다.
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
+       이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
+       이 화면은 스냅샷을 **6개** 읽으므로 원격 모드에서 가장 오래 루프를 막던 화면이었습니다.
+    """
+    payload, _load_error = await load_json_file_async(data_path(filename))
     if payload is None:
         return {}, None
     return build_universe_index(payload, market), (payload or {}).get("metadata")
 
 
-def _load_market_data() -> dict:
+async def _load_market_data() -> dict:
     """이 화면이 쓰는 스냅샷 5종을 한 번에 읽어 하나의 dict 로 돌려줍니다.
 
     ⚠️ 반환값에는 **사용자 데이터가 한 조각도 들어있지 않습니다** — 시세/종목명뿐입니다.
        그래서 이 dict 는 함수 사이로 자유롭게 넘겨도 §0-3-8 위반이 아닙니다.
     """
-    kr_index, kr_meta = _load_index(SNAPSHOT_FILENAMES[MARKET_KR], MARKET_KR)
-    us_index, us_meta = _load_index(SNAPSHOT_FILENAMES[MARKET_US], MARKET_US)
+    kr_index, kr_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_KR], MARKET_KR)
+    us_index, us_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_US], MARKET_US)
 
     # 상위 200/550 유니버스 **밖** 종목을 위한 보조 목록들. 밸류에이션은 없고 이름/가격만
     # 있습니다 — `indexes` 와 절대 섞지 않습니다(섞으면 "밸류에이션 정보 없음"이라는 정직한
     # 메시지 대신 빈 값투성이 카드가 "찾음"으로 표시됩니다. scorecard_db 주석 참고).
-    kr_master, _ = _load_index(KR_TICKER_MASTER_FILENAME, MARKET_KR)
-    kr_all_prices, _ = _load_index(KR_ALL_MARKET_PRICES_FILENAME, MARKET_KR)
-    us_all_prices, _ = _load_index(US_ALL_MARKET_PRICES_FILENAME, MARKET_US)
-    us_etf_prices, _ = _load_index(US_ALL_ETF_PRICES_FILENAME, MARKET_US)
+    kr_master, _ = await _load_index(KR_TICKER_MASTER_FILENAME, MARKET_KR)
+    kr_all_prices, _ = await _load_index(KR_ALL_MARKET_PRICES_FILENAME, MARKET_KR)
+    us_all_prices, _ = await _load_index(US_ALL_MARKET_PRICES_FILENAME, MARKET_US)
+    us_etf_prices, _ = await _load_index(US_ALL_ETF_PRICES_FILENAME, MARKET_US)
     if us_etf_prices:
         # 수집기가 주식/ETF 파일을 나눠 저장하므로(한쪽 실패가 다른 쪽을 지우지 않도록)
         # 합치는 일은 읽는 쪽에서 합니다. 티커 공간이 겹치지 않지만 겹치면 보통주 우선.
@@ -395,8 +404,8 @@ def _load_market_data() -> dict:
 # =============================================================================
 # 3. 페이지 (로그인 게이트)
 # =============================================================================
-@ui.page('/scorecard')
-def scorecard_page() -> None:
+@ui.page('/scorecard', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def scorecard_page() -> None:
     with layout('📊 내 성적표'):
         _render_header()
 
@@ -434,7 +443,7 @@ def scorecard_page() -> None:
 
         email = getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else None)
         try:
-            _render_body(client, user_id, email)
+            await _render_body(client, user_id, email)
         except Exception as exc:                   # noqa: BLE001 — 트레이스백을 화면에 흘리지 않습니다
             error_banner(f'🚫 {_fail(exc, "화면을 그리는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.")}')
 
@@ -470,7 +479,7 @@ def _render_not_ready(status) -> None:
 # =============================================================================
 # 5. 로그인 후 본문
 # =============================================================================
-def _render_body(client, user_id: str, email) -> None:
+async def _render_body(client, user_id: str, email) -> None:
     """로그인 후 화면 전체.
 
     ⚠️ `client` 와 `user_id` 는 **반드시 인자로 받습니다.** 이 아래 어떤 함수도 "지금 누가
@@ -485,7 +494,7 @@ def _render_body(client, user_id: str, email) -> None:
         ui.label(f'로그인: {email or user_id}').classes('flex-1 min-w-0 truncate vh-muted')
         ui.button('로그아웃', on_click=_logout_click).props('flat dense no-caps').classes('shrink-0')
 
-    market = _load_market_data()                   # 읽기 전용 시세 (사용자 데이터 아님)
+    market = await _load_market_data()             # 읽기 전용 시세 (사용자 데이터 아님)
     indexes = market["indexes"]
     if not indexes[MARKET_KR] and not indexes[MARKET_US]:
         error_banner(

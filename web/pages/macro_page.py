@@ -78,7 +78,11 @@ from web.components import (
 )
 from web.layout import layout
 from web.pages.admin_page import render_admin_login
-from web.state import data_path, load_json_file
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+)
 
 # 차트는 plotly 로 그립니다(원본과 동일 — altair 버그 회피용으로 이미 교체돼 있었습니다).
 # 없을 때 화면 전체가 죽지 않도록 감싸둡니다(`web/pages/scorecard_page.py` 와 같은 방식).
@@ -1206,8 +1210,13 @@ def _render_indicator_table(details) -> None:
             """)
 
 
-def _render_ai_commentary(details, score) -> None:
-    """🤖 지표별 AI 코멘트 + 종합 코멘트 (원본과 동일 — 값을 계산하지 않고 파일을 읽어 표시만)."""
+async def _render_ai_commentary(details, score) -> None:
+    """🤖 지표별 AI 코멘트 + 종합 코멘트 (원본과 동일 — 값을 계산하지 않고 파일을 읽어 표시만).
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 그리는 내용은 그대로이고, 코멘트 파일을
+       읽는 동안 이벤트 루프를 붙잡지 않습니다
+       (이유는 `web/state.load_json_file_async` 주석 참고).
+    """
     if not details:
         return
 
@@ -1217,7 +1226,7 @@ def _render_ai_commentary(details, score) -> None:
     ai_comment_dates = {}
     ai_commentary_file = data_path('macro_commentary.json')
     if os.path.exists(ai_commentary_file):
-        payload, load_error = load_json_file(ai_commentary_file)
+        payload, load_error = await load_json_file_async(ai_commentary_file)
         if load_error:
             # 🔴 원본은 `st.warning(f"...: {e}")` 로 **예외 원문을 화면에 그대로** 노출했습니다
             #    (§0-3-4 위반). 상세는 `load_json_file` 이 서버 로그로만 보냅니다.
@@ -1466,18 +1475,18 @@ def _render_audit_trail() -> None:
 # =============================================================================
 # 3. 페이지
 # =============================================================================
-@ui.page('/admin/macro')
-def macro_page() -> None:
+@ui.page('/admin/macro', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def macro_page() -> None:
     with layout('🏢 매크로 방공망', width_class='max-w-5xl'):
         # 🔒 관리자가 아니면 **본문을 한 글자도 그리지 않고** 게이트 폼만 그립니다.
         #    (`/admin` 과 완전히 같은 폼 — §0-3-10)
         if not is_admin():
             render_admin_login()
             return
-        _render_dashboard()
+        await _render_dashboard()
 
 
-def _render_dashboard() -> None:
+async def _render_dashboard() -> None:
     """'🏢 잘 보면 보이는 손' 메인 방공망 대시보드 화면 전체 렌더링
     (원본 `views/macro_view.py::render_macro_page` 이식본 — 순서·문구 동일)."""
     _html(
@@ -1673,7 +1682,7 @@ def _render_dashboard() -> None:
     _html(building_html)
 
     _render_indicator_table(details)
-    _render_ai_commentary(details, score)
+    await _render_ai_commentary(details, score)
 
     # =========================================================================
     # 📚 공부용 참고 — 지금 다루지 않는 지표 (2026-08-10 #69)

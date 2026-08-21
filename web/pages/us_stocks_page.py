@@ -65,7 +65,12 @@ from web.components import (
     warning_banner,
 )
 from web.layout import layout
-from web.state import data_path, load_json_file, read_download_bytes
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+    read_download_bytes,
+)
 
 # 페이지당 카드 수는 여기서 새로 정하지 않고 수집기와 같은 상수를 씁니다(단일 출처).
 ITEMS_PER_PAGE = US_PAGE_SIZE
@@ -96,7 +101,7 @@ _REIT_BADGE_STYLE = (
 # =============================================================================
 # 1. 데이터 로드 / USD 포맷 (읽기 전용 — 렌더링 중에 수집기를 절대 실행하지 않습니다)
 # =============================================================================
-def load_us_snapshot():
+async def load_us_snapshot():
     """
     data/us_stocks_latest.json 스냅샷 로드 및 메타데이터 반환.
 
@@ -104,8 +109,11 @@ def load_us_snapshot():
     ⚠️ 실패 사유는 사람이 읽는 한국어 한 문장입니다 — 원본 예외 문구를 화면에 흘리지
        않습니다(§0-3-4). (Streamlit 원본은 `f"...읽지 못했습니다: {e}"` 로 예외 원문을
        그대로 화면에 노출하고 있었습니다 — 이식하면서 고쳤습니다.)
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
+       이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
     """
-    payload, load_error = load_json_file(data_path(US_SNAPSHOT_FILENAME))
+    payload, load_error = await load_json_file_async(data_path(US_SNAPSHOT_FILENAME))
     if payload is None:
         return {"status": "LOAD_FAILED", "load_error": load_error}, []
 
@@ -117,12 +125,12 @@ def load_us_snapshot():
     return meta, stocks
 
 
-def load_us_summary_history():
+async def load_us_summary_history():
     """data/us_summary_history.json 누적 요약 이력. 없으면 빈 목록."""
     path = data_path(US_SUMMARY_HISTORY_FILENAME)
     if not os.path.exists(path):
         return []
-    payload, load_error = load_json_file(path)
+    payload, load_error = await load_json_file_async(path)
     if payload is None:
         warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
         return []
@@ -694,17 +702,17 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
 # =============================================================================
 # 4. 페이지
 # =============================================================================
-@ui.page('/us')
-def us_stocks_index_page() -> None:
+@ui.page('/us', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def us_stocks_index_page() -> None:
     """공개 화면. 로그인 불필요 — 사용자별 데이터가 전혀 없습니다(§0-3-8)."""
     with layout('🇺🇸 미국 주식은 이가격', width_class='max-w-6xl'):
-        _render_body()
+        await _render_body()
 
 
-def _render_body() -> None:                        # noqa: C901 — 원본 화면 순서를 그대로 유지
+async def _render_body() -> None:                  # noqa: C901 — 원본 화면 순서를 그대로 유지
     admin = is_admin()
 
-    metadata, all_stocks = load_us_snapshot()
+    metadata, all_stocks = await load_us_snapshot()
     # 버퍼 구간(추적은 하되 화면에는 안 띄우는 종목)은 제외합니다.
     # is_visible 필드가 없는 구버전 스냅샷은 전부 노출(True)로 간주해 하위 호환을 유지합니다.
     all_stocks = [s for s in all_stocks if s.get("is_visible", True)]
@@ -760,7 +768,7 @@ def _render_body() -> None:                        # noqa: C901 — 원본 화�
     """)).classes('w-full')
 
     _render_raw_downloads()
-    render_summary_metrics(all_stocks, load_us_summary_history(), (
+    render_summary_metrics(all_stocks, await load_us_summary_history(), (
         "미국 상위 종목 중앙 Forward PER",
         "중앙 3년 EPS 성장 전망 (컨센서스)",
         "시장 적정 밸류에이션 (PEGY)",

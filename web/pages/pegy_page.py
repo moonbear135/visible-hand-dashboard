@@ -62,7 +62,13 @@ from web.components import (
     warning_banner,
 )
 from web.layout import layout
-from web.state import data_path, load_json_file, read_download_bytes
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file,
+    load_json_file_async,
+    read_download_bytes,
+)
 
 SNAPSHOT_FILENAME = "kospi200_pegy_latest.json"
 SUMMARY_HISTORY_FILENAME = "pegy_summary_history.json"
@@ -104,15 +110,18 @@ def load_latest_kospi_usd():
         return None
 
 
-def load_kospi200_snapshot():
+async def load_kospi200_snapshot():
     """
     data/kospi200_pegy_latest.json 스냅샷 로드 및 메타데이터 반환.
 
     ⚠️ 렌더링 도중에 수집기(collector_kospi200.py)를 절대 실행하지 않습니다.
        스냅샷이 없거나 깨졌으면 '현재 시각'을 마지막 동기화 시각인 것처럼 꾸미지 않고
        last_updated_at=None / status="LOAD_FAILED" 를 그대로 반환합니다 (§0-1).
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
+       이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
     """
-    payload, load_error = load_json_file(data_path(SNAPSHOT_FILENAME))
+    payload, load_error = await load_json_file_async(data_path(SNAPSHOT_FILENAME))
     if payload is None:
         return {"last_updated_at": None, "status": "LOAD_FAILED", "load_error": load_error}, []
 
@@ -124,12 +133,12 @@ def load_kospi200_snapshot():
     return meta, stocks
 
 
-def load_pegy_summary_history():
+async def load_pegy_summary_history():
     """data/pegy_summary_history.json 누적 수치 이력을 로드합니다. 없으면 빈 목록."""
     path = data_path(SUMMARY_HISTORY_FILENAME)
     if not os.path.exists(path):
         return []
-    payload, load_error = load_json_file(path)
+    payload, load_error = await load_json_file_async(path)
     if payload is None:
         warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
         return []
@@ -626,17 +635,17 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
 # =============================================================================
 # 3. 페이지
 # =============================================================================
-@ui.page('/')
-def pegy_index_page() -> None:
+@ui.page('/', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def pegy_index_page() -> None:
     """공개 기본 화면. 로그인 불필요 — 사용자별 데이터가 전혀 없습니다(§0-3-8)."""
     with layout('💡 사실 이 가격이에요', width_class='max-w-6xl'):
-        _render_body()
+        await _render_body()
 
 
-def _render_body() -> None:                        # noqa: C901 — 원본 화면 순서를 그대로 유지
+async def _render_body() -> None:                  # noqa: C901 — 원본 화면 순서를 그대로 유지
     admin = is_admin()
 
-    metadata, all_stocks = load_kospi200_snapshot()
+    metadata, all_stocks = await load_kospi200_snapshot()
     # 히스테리시스 버퍼(2026-08-06 도입) 적용 시 JSON에는 201~230위 버퍼 구간 종목도 함께
     # 저장되지만(요약 이력이 끊기지 않게 하기 위함), 화면 노출은 항상 정확히 200위 이내만입니다.
     # is_visible 필드가 없는 구버전 스냅샷은 전부 노출(True)로 간주해 하위 호환을 유지합니다.
@@ -658,7 +667,7 @@ def _render_body() -> None:                        # noqa: C901 — 원본 화�
         )
         return
 
-    summary_history = load_pegy_summary_history()
+    summary_history = await load_pegy_summary_history()
 
     # 스냅샷이 언제 것인지, 수집 품질이 어땠는지 화면에 그대로 노출.
     # last_updated_at 은 KST 벽시계 값으로 저장되므로(collector_kospi200.py) 비교 기준도 KST 로 맞춥니다.
@@ -976,7 +985,13 @@ def _render_raw_downloads(admin: bool) -> None:
 
 
 def _snapshot_csv_bytes(latest_path: str):
-    """관리자용 스냅샷 CSV (기존 로직 그대로 — DataFrame → utf-8-sig)."""
+    """관리자용 스냅샷 CSV (기존 로직 그대로 — DataFrame → utf-8-sig).
+
+    ⚠️ 여기만 **동기판** `load_json_file()` 을 씁니다. 이 함수는 화면을 그릴 때가 아니라
+       다운로드 버튼을 눌렀을 때 `web/components/widgets.download_button()` 이
+       `run.io_bound` 로 **이미 별도 스레드에서** 돌려 주기 때문입니다. 여기서 또
+       `await` 를 걸 필요가 없고(걸 수도 없고), 이벤트 루프도 막지 않습니다.
+    """
     payload, _error = load_json_file(latest_path)
     if payload is None:
         return None

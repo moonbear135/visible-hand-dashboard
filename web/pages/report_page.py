@@ -98,7 +98,11 @@ from web.components import (
     pct_html, pct_text, warning_banner,
 )
 from web.layout import layout
-from web.state import data_path, load_json_file
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+)
 
 # 🇺🇸 미국 종목명 한글 표기 — 원본(`views/report_view.py`)이 `views/scorecard_view.py` 의
 #    `_display_name()` 을 그대로 가져다 쓴 것과 **완전히 같은 구조**입니다. 같은 로직을 여기에
@@ -165,7 +169,7 @@ def _muted(text: str) -> None:
 #     이스케이프까지 끝내서** 넘깁니다 (§0-3-9).
 
 
-def _display_indexes(market):
+async def _display_indexes(market):
     """미국 종목 한글명을 '내 성적표'와 **완전히 같은 값**으로 만들기 위한 유니버스 인덱스.
 
     · 상위 550 유니버스 **안** 종목은 이 파일에 수집 시점 계산해 넣어 둔 `name_kr` 이 들어 있어
@@ -178,10 +182,17 @@ def _display_indexes(market):
     ⚠️ 원본은 `load_universe_index()`(매번 파일 열기)를 썼지만 여기서는 `web/state.py` 의
        mtime 캐시를 거칩니다 — **읽기 전용 시세 데이터**라 전역 캐시가 정답이고(§0-3-8 구분선),
        계산은 기존 `build_universe_index()` 를 그대로 써서 결과값이 원본과 동일합니다.
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
+       이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
+       이 함수 하나 때문에 `_render_holding_history` → `_render_market_block` →
+       `_render_report_body` → `body()` → `_render_signed_in` → `report_page()` 까지
+       호출 사슬 전체가 `async def` 가 되었습니다. 중간에 한 군데라도 동기로 남겨 두면
+       그 지점에서 다시 이벤트 루프가 막히므로, 사슬을 끊지 말고 그대로 유지하세요.
     """
     if market != MARKET_US:
         return {}
-    payload, _load_error = load_json_file(data_path(SNAPSHOT_FILENAMES[MARKET_US]))
+    payload, _load_error = await load_json_file_async(data_path(SNAPSHOT_FILENAMES[MARKET_US]))
     if payload is None:
         return {}
     return {MARKET_US: build_universe_index(payload, MARKET_US) or {}}
@@ -213,8 +224,8 @@ def _holding_label_html(row, market=None, indexes=None) -> str:
 # =============================================================================
 # 2. 페이지 (로그인 게이트)
 # =============================================================================
-@ui.page('/report')
-def report_page() -> None:
+@ui.page('/report', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def report_page() -> None:
     with layout('📈 사장님 보고서'):
         _render_header()
 
@@ -250,7 +261,7 @@ def report_page() -> None:
 
         email = getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else None)
         try:
-            _render_signed_in(client, user_id, email)
+            await _render_signed_in(client, user_id, email)
         except Exception as exc:                   # noqa: BLE001 — 트레이스백을 화면에 흘리지 않습니다
             error_banner(f'🚫 {_fail(exc, "화면을 그리는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.")}')
 
@@ -288,7 +299,7 @@ def _render_not_ready(status) -> None:
 # =============================================================================
 # 3. 기간 선택 (Streamlit 위젯 키 우회 코드가 통째로 사라진 자리)
 # =============================================================================
-def _render_signed_in(client, user_id: str, email) -> None:
+async def _render_signed_in(client, user_id: str, email) -> None:
     """로그인 후 화면 전체.
 
     ⚠️ `client` 와 `user_id` 는 **반드시 인자로 받습니다.** 이 아래 어떤 함수도 "지금 누가
@@ -308,13 +319,18 @@ def _render_signed_in(client, user_id: str, email) -> None:
 
     view = {'period': DEFAULT_PERIOD, 'ref_date': date.today()}
 
+    # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+    #    · 여기서처럼 **직접 부를 때는 반드시 `await`** 해야 화면이 그려집니다.
+    #    · 버튼/달력 콜백이 부르는 `body.refresh()` 는 동기 함수에서 불러도 됩니다 —
+    #      NiceGUI 가 알아서 배경 작업으로 돌려 주므로 `_render_period_controls()` 쪽은
+    #      한 줄도 바꿀 필요가 없습니다.
     @ui.refreshable
-    def body() -> None:
-        _render_report_body(client, user_id, view['period'], view['ref_date'])
+    async def body() -> None:
+        await _render_report_body(client, user_id, view['period'], view['ref_date'])
 
     _render_period_controls(view, body)
     ui.separator()
-    body()
+    await body()
 
 
 def _render_period_controls(view: dict, body) -> None:
@@ -407,7 +423,7 @@ def _on_date_typed(view: dict, raw, date_input, body) -> None:
 # =============================================================================
 # 4. 리포트 본문
 # =============================================================================
-def _render_report_body(client, user_id: str, period: str, ref_date) -> None:
+async def _render_report_body(client, user_id: str, period: str, ref_date) -> None:
     """고른 기간의 리포트 전체(시장별 블록). 계산은 전부 `utils/report_db.py` 가 합니다."""
     window_start, window_end = period_bounds(period, ref_date)
 
@@ -458,14 +474,14 @@ def _render_report_body(client, user_id: str, period: str, ref_date) -> None:
         rows = by_market.get(market)
         if not rows:
             continue
-        _render_market_block(market, rows, period, ref_date,
-                             holding_rows=holding_by_market.get(market, []),
-                             holding_error=holding_error)
+        await _render_market_block(market, rows, period, ref_date,
+                                   holding_rows=holding_by_market.get(market, []),
+                                   holding_error=holding_error)
         ui.separator()
 
 
-def _render_market_block(market, snapshots, period, ref_date,
-                         holding_rows=None, holding_error=None) -> None:
+async def _render_market_block(market, snapshots, period, ref_date,
+                               holding_rows=None, holding_error=None) -> None:
     ui.markdown(f'### {MARKET_TITLES.get(market, market)}')
 
     # 📅 '일간'에서 기준일이 거래일이 아니면 그 이전 가장 최근 기록일로 대체합니다(#117).
@@ -498,8 +514,8 @@ def _render_market_block(market, snapshots, period, ref_date,
         # ⚠️ 기간 리포트는 "데이터 부족"이지만, **그 기간에 실제로 저장된 종목별 기록**은
         #    계산이 아니라 사실 그대로의 기록이라 숨길 이유가 없습니다(숨기면 기능을 켠 첫 달
         #    내내 이 표가 안 보입니다 — 기준점이 없어 거의 항상 INSUFFICIENT 이기 때문).
-        _render_holding_history(market, holding_rows, in_window,
-                                window_start, window_end, currency, error=holding_error)
+        await _render_holding_history(market, holding_rows, in_window,
+                                      window_start, window_end, currency, error=holding_error)
         return
 
     if report["status"] == STATUS_IN_PROGRESS:
@@ -507,8 +523,8 @@ def _render_market_block(market, snapshots, period, ref_date,
 
     _render_numbers(report, currency)
     _render_benchmarks(report, market)
-    _render_holding_history(market, holding_rows, in_window,
-                            window_start, window_end, currency, error=holding_error)
+    await _render_holding_history(market, holding_rows, in_window,
+                                  window_start, window_end, currency, error=holding_error)
     _render_snapshot_table(in_window, currency)
 
 
@@ -683,8 +699,8 @@ def _render_benchmarks(report, market) -> None:
 # =============================================================================
 # 6. 종목별 상세 · 비중 변화 · 스냅샷 원본
 # =============================================================================
-def _render_holding_history(market, holding_rows, snapshots_in_window,
-                            window_start, window_end, currency, error=None) -> None:
+async def _render_holding_history(market, holding_rows, snapshots_in_window,
+                                  window_start, window_end, currency, error=None) -> None:
     """🧾 종목별 상세 — 기간 안 **마지막 기록일 하루**의 종목별 상태를 한 표에 담습니다.
 
     · **한 장** — 기간 안의 모든 날짜 × 모든 종목을 늘어놓지 않습니다(합계 한 줄 포함).
@@ -734,7 +750,7 @@ def _render_holding_history(market, holding_rows, snapshots_in_window,
 
     # 🇺🇸 미국 블록일 때만 유니버스 스냅샷을 한 번 읽어 아래 모든 라벨에 같은 값을 씁니다
     #    (한 섹션 안에서 표마다 다시 읽으면 표마다 이름이 달라질 수 있습니다).
-    indexes = _display_indexes(market)
+    indexes = await _display_indexes(market)
 
     _muted(f'{base_date.isoformat()} 하루 기준 '
            f'(이 기간 기록 {len(dates)}일: {dates[0].isoformat()} ~ {dates[-1].isoformat()})')

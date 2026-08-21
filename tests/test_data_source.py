@@ -799,6 +799,197 @@ def test_bypass_files_go_through_data_source():
 
 
 # =============================================================================
+# [9] 🔴 화면이 데이터를 읽는 동안 **이벤트 루프가 멈추지 않는가** (2026-08-21 추가)
+#
+#     무슨 사고를 막는 검사인가
+#     ─────────────────────────────────────────────────────────────────────────
+#     운영에서 "연결이 끊겼습니다. 다시 연결 중…" 토스트가 모든 기기에서 반복됐습니다.
+#     원인은 `@ui.page` 본문이 `web/state.load_json_file()` 을 **그대로(동기로)** 부른
+#     것이었습니다. 원격 모드(`DATA_SOURCE_BASE_URL` 설정)에서 캐시 TTL 이 지나면 그 안에서
+#     `requests.get()` 이 도는데, NiceGUI 는 한 프로세스·한 이벤트 루프가 모든 접속자를
+#     처리하므로 그 몇 초 동안 **접속자 전원의 WebSocket 하트비트**가 함께 멈춥니다.
+#
+#     그래서 "고쳤다"의 내용은 딱 하나입니다 — 그 블로킹 호출이 **이벤트 루프가 아닌 곳**
+#     에서 돌아야 합니다. 아래 검사는 그 사실 자체를 못 박습니다(사람이 한 번 확인하고
+#     끝내면 다음 사람이 조용히 되돌릴 수 있는 종류의 수정이라, 반드시 테스트로 고정합니다).
+# =============================================================================
+#
+# 동기판 `load_json_file()` 을 그대로 써도 되는 예외 자리 — **사유를 함께 적으세요.**
+# (여기 없는데 화면 파일이 동기판을 부르면 아래 검사가 실패합니다.)
+SYNC_LOAD_ALLOWED = {
+    ("web/pages/pegy_page.py", "_snapshot_csv_bytes"):
+        "화면을 그릴 때가 아니라 다운로드 버튼을 눌렀을 때 실행되고, 그 클릭 처리기"
+        "(`web/components/widgets.download_button`)가 이미 `run.io_bound` 로 별도 스레드에서 "
+        "돌려 줍니다. 즉 이 함수는 애초에 이벤트 루프 위에서 실행되지 않습니다.",
+}
+
+PAGE_FILES = ("pegy_page.py", "us_stocks_page.py", "scorecard_page.py",
+              "report_page.py", "macro_page.py", "duel_page.py")
+
+
+def test_pages_never_block_the_event_loop():
+    print("\n[9] 화면 데이터 로드가 이벤트 루프를 막지 않음 (2026-08-21 '연결 끊김' 회귀 방지)")
+    import ast
+    import asyncio
+    import inspect
+    import threading
+    import time as real_time
+
+    stubbed = _install_stub()
+    state = _reload_state()
+    from nicegui import run as nicegui_run                              # noqa: PLC0415
+
+    # ── ① 비동기 판이 존재하고, 동기 판도 그대로 남아 있는가 ──────────────────
+    #    (동기 판은 배치 스크립트·테스트가 계속 쓰고, 비동기 판의 알맹이이기도 합니다.)
+    check(inspect.iscoroutinefunction(state.load_json_file_async),
+          "① web/state.load_json_file_async() 가 코루틴 함수")
+    check(callable(state.load_json_file) and not inspect.iscoroutinefunction(state.load_json_file),
+          "   동기판 load_json_file() 은 그대로 남아 있음(다른 호출자·배치용)")
+    check([p.name for p in inspect.signature(state.load_json_file_async).parameters.values()]
+          == ["path"],
+          "   두 함수의 인자가 같음(path 하나) — 호출부는 await 만 붙이면 됨")
+
+    # ── ② 정말 `run.io_bound` 에 넘기는가 (직접 부르지 않는가) ────────────────
+    #    이 검사가 이번 수정의 핵심입니다. 감시자를 끼워 넣어 "무엇을 넘겼는지"까지 봅니다.
+    handed_over = []
+    saved_io_bound = nicegui_run.io_bound
+
+    async def _spy_io_bound(fn, *args, **kwargs):
+        handed_over.append((fn, args, kwargs))
+        return fn(*args, **kwargs)
+
+    nicegui_run.io_bound = _spy_io_bound
+    try:
+        with Sandbox() as box:                       # 원격 미설정 = 로컬 파일만 (네트워크 0회)
+            saved_dir = state.DATA_DIR
+            state.DATA_DIR = box.dir
+            state._JSON_CACHE.clear()
+            box.write_local("io_bound_probe.json", json.dumps({"probe": 1}))
+            probe_path = state.data_path("io_bound_probe.json")
+            payload, error = asyncio.run(state.load_json_file_async(probe_path))
+            state.DATA_DIR = saved_dir
+            state._JSON_CACHE.clear()
+    finally:
+        nicegui_run.io_bound = saved_io_bound
+
+    check(len(handed_over) == 1,
+          "② load_json_file_async() 가 run.io_bound 를 정확히 한 번 씀",
+          f"실제 호출 {len(handed_over)}회 ← 0회면 블로킹 호출이 이벤트 루프로 되돌아온 것입니다.")
+    if handed_over:
+        fn, args, kwargs = handed_over[0]
+        check(fn is state.load_json_file and args == (probe_path,) and not kwargs,
+              "   넘긴 것이 동기판 load_json_file(path) 그대로",
+              f"실제: {getattr(fn, '__name__', fn)} args={args} kwargs={kwargs}")
+    check(payload == {"probe": 1} and error is None,
+          "   반환값은 동기판과 글자 그대로 같음 (성공/실패 규약 불변)",
+          f"실제: {payload!r} / {error!r}")
+
+    # ── ③ 취소·종료 중(run.io_bound → None)에도 화면에 값을 지어내지 않는가 ──
+    async def _cancelled_io_bound(_fn, *_a, **_k):
+        return None                                  # NiceGUI 3.x 의 취소/종료 시 규약
+
+    nicegui_run.io_bound = _cancelled_io_bound
+    try:
+        payload_none, error_none = asyncio.run(state.load_json_file_async("아무경로.json"))
+    finally:
+        nicegui_run.io_bound = saved_io_bound
+    check(payload_none is None and isinstance(error_none, str) and error_none,
+          "③ run.io_bound 가 None 을 돌려줘도 (None, 사람이 읽는 사유) 로 정직하게 실패 (§0-1)",
+          f"실제: {payload_none!r} / {error_none!r}")
+    check("Traceback" not in (error_none or "") and "None" not in (error_none or ""),
+          "   그 문구에 파이썬 내부 사정이 새지 않음 (§0-3-4)", f"실제: {error_none!r}")
+
+    # ── ④ 실제로 **다른 스레드**에서 돌고, 그 동안 루프가 계속 돌아가는가 ─────
+    #    (진짜 nicegui 가 있을 때만 — 오프라인 스텁의 io_bound 는 그냥 동기 호출입니다.)
+    if stubbed:
+        print("   ⏭️ 실제 nicegui 가 없어 스레드 분리 검증은 건너뜁니다(스텁 io_bound 는 동기 호출).")
+    else:
+        worker_threads = []
+        saved_sync_loader = state.load_json_file
+
+        def _slow_loader(_path):
+            worker_threads.append(threading.current_thread())
+            real_time.sleep(0.20)                    # 원격 왕복 흉내 (블로킹)
+            return {"slow": True}, None
+
+        async def _scenario():
+            ticks = [0]
+
+            async def _heartbeat():
+                while True:                          # WebSocket 하트비트 흉내
+                    await asyncio.sleep(0.01)
+                    ticks[0] += 1
+
+            beat = asyncio.create_task(_heartbeat())
+            try:
+                result = await state.load_json_file_async("무시되는 경로.json")
+            finally:
+                beat.cancel()
+            return result, ticks[0], threading.current_thread()
+
+        state.load_json_file = _slow_loader
+        try:
+            (slow_payload, slow_error), ticks, loop_thread = asyncio.run(_scenario())
+        finally:
+            state.load_json_file = saved_sync_loader
+
+        check(slow_payload == {"slow": True} and slow_error is None,
+              "④ 느린 로더의 결과가 그대로 돌아옴")
+        check(len(worker_threads) == 1 and worker_threads[0] is not loop_thread,
+              "   블로킹 구간이 **이벤트 루프 스레드가 아닌 곳**에서 실행됨",
+              f"실제: 작업 스레드={[t.name for t in worker_threads]} / 루프 스레드={loop_thread.name}")
+        check(ticks >= 5,
+              "   그 0.2초 동안 이벤트 루프가 계속 돌았음(= 다른 접속자 하트비트가 살아 있음)",
+              f"실제 진행 횟수: {ticks} ← 0 이면 루프가 통째로 멈춘 것입니다(사고 재발).")
+
+    # ── ⑤ 소스 수준 회귀 방지 — 화면 6개가 다시 동기 호출로 돌아가지 않도록 ──
+    for filename in PAGE_FILES:
+        path = REPO_ROOT / "web" / "pages" / filename
+        rel_name = f"web/pages/{filename}"
+        if not path.exists():
+            check(False, f"⑤ {rel_name} 존재")
+            continue
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+
+        owner = {}
+        for func in [n for n in ast.walk(tree)
+                     if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))]:
+            for sub in ast.walk(func):
+                owner[id(sub)] = func
+
+        # (a) `@ui.page` 함수는 전부 `async def` 여야 합니다. 동기로 되돌리는 순간
+        #     그 안의 모든 로드가 다시 이벤트 루프 위에서 돌게 됩니다.
+        pages = [n for n in ast.walk(tree)
+                 if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef))
+                 and any(isinstance(d, ast.Call) and getattr(d.func, "attr", None) == "page"
+                         for d in n.decorator_list)]
+        check(bool(pages), f"⑤ {rel_name} 에 @ui.page 함수가 있음")
+        for node in pages:
+            check(isinstance(node, ast.AsyncFunctionDef),
+                  f"   {rel_name}::{node.name}() 이 async def",
+                  "← 동기로 되돌리면 데이터 로드가 다시 이벤트 루프를 막습니다.")
+
+        # (b) 동기판 `load_json_file(` 호출은 위 화이트리스트에 적힌 자리에만 있어야 합니다.
+        for call in [n for n in ast.walk(tree)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "load_json_file"]:
+            holder = owner.get(id(call))
+            holder_name = holder.name if holder else "<모듈 최상위>"
+            check((rel_name, holder_name) in SYNC_LOAD_ALLOWED,
+                  f"   {rel_name}::{holder_name}() 의 동기 load_json_file() 호출이 허용 목록에 있음",
+                  "← 화면 코드는 load_json_file_async() 를 await 하세요. 정말 예외라면 "
+                  "SYNC_LOAD_ALLOWED 에 **사유와 함께** 추가하세요.")
+
+    # ── ⑥ 다운로드 버튼도 같은 처방을 받았는가 ────────────────────────────────
+    widgets_src = (REPO_ROOT / "web" / "components" / "widgets.py").read_text(encoding="utf-8")
+    check("from nicegui import run" in widgets_src and "await run.io_bound(" in widgets_src
+          and "async def _click" in widgets_src,
+          "⑥ download_button 의 클릭 처리기도 run.io_bound 로 파일을 만듦",
+          "← 원격 모드에서 read_download_bytes() 가 requests.get() 을 타고, "
+          "관리자 CSV 변환은 4MB 를 pandas 로 돌립니다. 둘 다 이벤트 루프 밖이어야 합니다.")
+
+
+# =============================================================================
 def main():
     print("=" * 74)
     print("🌐 데이터 원격 로드 검증 (NICEGUI_MIGRATION_PLAN.md §8-5 · ENGINEERING_SPEC §0-1)")
@@ -818,6 +1009,7 @@ def main():
     test_layout_global_banner()
     test_response_size_and_type_guards()
     test_bypass_files_go_through_data_source()
+    test_pages_never_block_the_event_loop()
 
     print("\n" + "=" * 74)
     if FAILURES:

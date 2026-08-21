@@ -191,6 +191,16 @@ ALLOWED_MUTABLE_GLOBALS = {
         "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 값이 대입되는 코드가 없고, "
         "사용자별 계좌·주문·현금은 전부 @ui.page 함수 안의 지역 변수이거나 함수 인자로만 "
         "흐릅니다(아래 [9] 가 매번 확인).",
+    # ── ⚔️ 2갈래(공개 인프라) 화면 2종 — 2026-08-20 추가 ─────────────────────
+    ("web/pages/duel_consent_page.py", "WINDOW_TITLES"):
+        "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 위 duel_page.py 와 같은 값·같은 사유.",
+    ("web/pages/duel_consent_page.py", "CONSENT_ITEM_SENTENCES"):
+        "동의 항목 5개의 **고정 문구**(작업지시서 5-2-1 에서 글자 그대로 옮긴 문자열 튜플). "
+        "키는 duel_db.CONSENT_ITEM_FLAGS 와 같아야 하며(그 사실을 consent_item_rows() 가 "
+        "매번 확인), 값이 대입되는 코드가 없습니다. 사용자별 동의 상태는 전부 함수 인자로만 "
+        "흐릅니다(client·account_id 를 인자로 받는 함수들).",
+    ("web/pages/duel_leaderboard_page.py", "WINDOW_TITLES"):
+        "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 위와 같은 사유.",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
@@ -800,7 +810,9 @@ def test_render_smoke():
     ui.html = _capture_html
     widgets.ui.html = _capture_html                # widgets 모듈이 참조하는 것도 같은 스텁
     try:
-        page._render_body(object(), "uid-test", "a@example.com")
+        # 2026-08-21 — `_render_body()` 가 `async def` 입니다(스냅샷 6개를 `run.io_bound` 로
+        # 읽어 이벤트 루프를 막지 않게 한 수정). 검사 내용은 그대로이고 부르는 방법만 바뀝니다.
+        asyncio.run(page._render_body(object(), "uid-test", "a@example.com"))
         check(True, "_render_body() 가 예외 없이 끝까지 실행됨")
     except Exception as exc:                       # noqa: BLE001
         check(False, "_render_body() 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
@@ -991,7 +1003,9 @@ def _capture_report_render(period, ref_date,
     ui.html = _capture
     widgets.ui.html = _capture
     try:
-        page._render_report_body(object(), "uid-test", period, ref_date)
+        # 2026-08-21 — `_render_report_body()` 가 `async def` 입니다(미국 유니버스 스냅샷을
+        # `run.io_bound` 로 읽게 한 수정). 부르는 방법만 바뀌고 검사 내용은 그대로입니다.
+        asyncio.run(page._render_report_body(object(), "uid-test", period, ref_date))
         error = None
     except Exception as exc:                       # noqa: BLE001
         error = exc
@@ -1183,7 +1197,10 @@ def test_macro_page_wiring():
     code = python_code_only(src)
 
     # ── (a) 관리자 게이트 ────────────────────────────────────────────────
-    check("@ui.page('/admin/macro')" in code, "경로가 /admin/macro (관리자 전용 네임스페이스)")
+    # 2026-08-21 — 데코레이터에 `response_timeout=` 이 붙어서(비동기 페이지의 기본 3초 제한이
+    # 영어 500 페이지를 띄우는 것을 막기 위함) 닫는 괄호까지 문자로 맞추지 않습니다.
+    # 이 검사가 보려는 것은 **경로**이지 데코레이터 인자 구성이 아닙니다.
+    check("@ui.page('/admin/macro'" in code, "경로가 /admin/macro (관리자 전용 네임스페이스)")
     check("if not is_admin():" in code and "render_admin_login()" in code,
           "페이지 첫 부분에서 is_admin() 확인 후 게이트 폼만 그림")
     check("def render_admin_login" not in code,
@@ -1290,15 +1307,22 @@ def test_macro_render_smoke():
     # (1) 비관리자는 본문이 **한 글자도** 그려지지 않아야 합니다.
     seen = []
     original = (macro._render_dashboard, macro.render_admin_login)
-    macro._render_dashboard = lambda: seen.append("body")
+
+    # 2026-08-21 — `macro_page()`/`_render_dashboard()` 가 `async def` 가 되었습니다
+    # (AI 코멘트 파일을 `run.io_bound` 로 읽게 한 수정). 그래서 가짜 본문도 **코루틴을
+    # 돌려주는 함수**여야 `await _render_dashboard()` 가 성립합니다.
+    async def _fake_dashboard():
+        seen.append("body")
+
+    macro._render_dashboard = _fake_dashboard
     macro.render_admin_login = lambda: seen.append("login")
     try:
         app.storage.user.clear()
-        macro.macro_page()
+        asyncio.run(macro.macro_page())
         check(seen == ["login"], "🔒 비관리자 접속 → 게이트 폼만, 본문 렌더 0회")
         seen.clear()
         app.storage.user["admin"] = True
-        macro.macro_page()
+        asyncio.run(macro.macro_page())
         check(seen == ["body"], "🔓 관리자 접속 → 본문 렌더")
     finally:
         (macro._render_dashboard, macro.render_admin_login) = original
@@ -1307,7 +1331,7 @@ def test_macro_render_smoke():
     # (2) 본문 전체를 실제로 실행 — f-string·이스케이프·분기가 전부 진짜로 돕니다.
     app.storage.user["admin"] = True
     try:
-        macro._render_dashboard()
+        asyncio.run(macro._render_dashboard())
         check(True, "본문 전체 렌더 (탭 7개·표·차트·다운로드 버튼 포함) 예외 0건")
     except Exception as exc:                       # noqa: BLE001
         check(False, "본문 전체 렌더", f"({type(exc).__name__}: {exc})")
@@ -1324,7 +1348,7 @@ def test_macro_render_smoke():
     macro.banner = lambda kind, body: drawn.append(body)
     macro.HISTORY_FILE = str(REPO_ROOT / "__no_such_market_history__.csv")
     try:
-        macro._render_dashboard()
+        asyncio.run(macro._render_dashboard())
         blob = "\n".join(str(d) for d in drawn)
         check(any(isinstance(d, tuple) and d[0] == "error" for d in drawn),
               "🚨 이력 파일이 없으면 빨간 실패 배너가 뜸 (§0-1)")
@@ -1352,7 +1376,7 @@ def test_macro_render_smoke():
     macro.warning_banner = lambda text: captured.append(text)
     try:
         result = macro.fetch_verified_market_data()
-        macro._render_ai_commentary(result[4], result[3])
+        asyncio.run(macro._render_ai_commentary(result[4], result[3]))
         blob = "\n".join(captured)
         check("<img src=x onerror" not in blob, "🔐 AI 코멘트의 <img onerror=...> 가 그대로 나가지 않음")
         check("&lt;img src=x onerror" in blob, "   → 이스케이프된 문자열로 표시됨 (글자 그대로 보임)")
@@ -1439,7 +1463,8 @@ def test_duel_page_wiring():
               f"자체 로그인 처리(`{forbidden}`)를 따로 만들지 않음 — 인증 경로는 web/auth.py 하나")
 
     # ── (g) 🚧 3단계 공개 게이트 (작업지시서 2-8 · 7단계) ──
-    check("@ui.page('/duel')" in code, "경로가 /duel")
+    # 2026-08-21 — `@ui.page('/admin/macro'` 와 같은 이유로 닫는 괄호를 뺐습니다(response_timeout).
+    check("@ui.page('/duel'" in code, "경로가 /duel")
     check("if not DUEL_ENABLED:" in code,
           "플래그가 꺼져 있으면 URL 로 직접 들어와도 본문을 그리지 않음 (§0-3-6 기본 숨김)")
     check("DUEL_MENU_ADMIN_ONLY and not is_admin()" in code,
@@ -1640,7 +1665,9 @@ def test_duel_render_smoke():
     ui.html = _capture_html
     widgets.ui.html = _capture_html
     try:
-        page._render_body(object(), "uid-duel", "duel@example.com")
+        # 2026-08-21 — `_render_body()` 가 `async def` 입니다(코스피 유니버스 스냅샷을
+        # `run.io_bound` 로 읽게 한 수정). 부르는 방법만 바뀌고 검사 내용은 그대로입니다.
+        asyncio.run(page._render_body(object(), "uid-duel", "duel@example.com"))
         check(True, "_render_body() 가 예외 없이 끝까지 실행됨")
     except Exception as exc:                       # noqa: BLE001
         check(False, "_render_body() 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
@@ -1669,7 +1696,8 @@ def test_duel_render_smoke():
         dict(DUEL_SYNTHETIC_ACCOUNTS[0], user_id="uid-someone-else"),
     ]
     try:
-        page._render_duel_section(object(), "uid-duel", page._load_kospi_universe(),
+        page._render_duel_section(object(), "uid-duel",
+                                  asyncio.run(page._load_kospi_universe()),
                                   page._order_window_state(), lambda: None)
         blob2 = "\n".join(str(d) for d in drawn)
         check(bool(drawn) and "본인 것이 아닌" in blob2,

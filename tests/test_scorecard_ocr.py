@@ -29,6 +29,7 @@
 """
 
 import ast
+import asyncio
 import importlib
 import json
 import os
@@ -457,7 +458,10 @@ def test_upload_widget_is_really_not_rendered_when_flag_is_off():
         page.ui.upload = _spy
         page.fetch_holdings = lambda client, user_id: [dict(h) for h in synthetic]
         try:
-            page._render_body(object(), "uid-test", "a@example.com")
+            # 2026-08-21 — `_render_body()` 가 `async def` 가 되었습니다(스냅샷 6개를
+            # `run.io_bound` 로 읽어 이벤트 루프를 막지 않게 한 수정). 검사 내용은 그대로이고
+            # **부르는 방법만** 바뀝니다.
+            asyncio.run(page._render_body(object(), "uid-test", "a@example.com"))
         finally:
             page.ui.upload = original_upload
             page.fetch_holdings = original_fetch

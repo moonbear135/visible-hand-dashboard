@@ -78,7 +78,11 @@ from web.components import (
     error_banner, esc, holdings_table_html, info_banner, metric_card, pct_text, warning_banner,
 )
 from web.layout import DUEL_ENABLED, DUEL_MENU_ADMIN_ONLY, layout
-from web.state import data_path, load_json_file
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+)
 
 # 이 모듈의 통화는 원화 하나뿐입니다(스키마 `currency = 'KRW'` CHECK). 미국주식·환율은
 # v1 범위 밖이고, 환율 시계열이 이 저장소 어디에도 없어 만들 수도 없습니다(작업지시서 1-1).
@@ -261,13 +265,16 @@ def _window_message(window: dict) -> str:
 #     `scorecard_db.build_universe_index()` 를 **그대로** 씁니다(§0-3-10 — 코스피 상위 200
 #     목록을 읽는 두 번째 경로를 만들지 않습니다).
 # =============================================================================
-def _load_kospi_universe() -> dict:
+async def _load_kospi_universe() -> dict:
     """코스피 상위 200 유니버스 인덱스 + 메타데이터. 파일이 없으면 인덱스가 빈 dict 입니다.
 
     반환 dict 에는 **사용자 데이터가 한 조각도 없습니다** — 종목명·종가뿐이라 함수 사이로
     자유롭게 넘겨도 §0-3-8 위반이 아닙니다.
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
+       이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
     """
-    payload, _load_error = load_json_file(data_path(SNAPSHOT_FILENAMES[MARKET_KR]))
+    payload, _load_error = await load_json_file_async(data_path(SNAPSHOT_FILENAMES[MARKET_KR]))
     index = build_universe_index(payload, MARKET_KR) if payload is not None else {}
     metadata = (payload or {}).get("metadata") if isinstance(payload, dict) else None
     return {
@@ -299,8 +306,8 @@ def _universe_options(index: dict) -> dict:
 # =============================================================================
 # 3. 페이지 (공개 플래그 게이트 → 로그인 게이트)
 # =============================================================================
-@ui.page('/duel')
-def duel_page() -> None:
+@ui.page('/duel', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def duel_page() -> None:
     with layout('⚔️ 결투다!'):
         ui.markdown('## ⚔️ 결투다! — 덤벼라 나 자신')
 
@@ -351,7 +358,7 @@ def duel_page() -> None:
 
         email = getattr(user, "email", None) or (user.get("email") if isinstance(user, dict) else None)
         try:
-            _render_body(client, user_id, email)
+            await _render_body(client, user_id, email)
         except Exception as exc:                   # noqa: BLE001 — 트레이스백을 화면에 흘리지 않습니다
             error_banner(f'🚫 {_fail(exc, "화면을 그리는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.")}')
 
@@ -438,7 +445,7 @@ def _render_rules_expansion() -> None:
 # =============================================================================
 # 4. 로그인 후 본문
 # =============================================================================
-def _render_body(client, user_id: str, email) -> None:
+async def _render_body(client, user_id: str, email) -> None:
     """로그인 후 화면 전체.
 
     ⚠️ `client` 와 `user_id` 는 **반드시 인자로 받습니다.** 이 아래 어떤 함수도 "지금 누가
@@ -454,7 +461,7 @@ def _render_body(client, user_id: str, email) -> None:
 
     _render_rules_expansion()
 
-    market = _load_kospi_universe()                # 읽기 전용 시세 (사용자 데이터 아님)
+    market = await _load_kospi_universe()          # 읽기 전용 시세 (사용자 데이터 아님)
     if not market["index"]:
         error_banner(
             '🚫 코스피 상위 200 종목 스냅샷(data/kospi200_pegy_latest.json)을 읽지 못했습니다. '
