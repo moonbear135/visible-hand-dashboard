@@ -36,8 +36,9 @@
       `currency` 컬럼을 갖고 있어 트랙과 무관한 사용자 단위 조회입니다(5-3). 체급
       산정 시 원화/달러 어느 금액을 쓸지 가르는 것은 `utils/duel_publish.py`(다음
       라운드)의 일이지, 조회 함수를 복제할 이유가 아닙니다.
-    - `duel_rules.apply_buy_fill_to_position` · `compute_twr` · `resolve_fill_trading_day`
-      등 순수 계산 — 이 파일은 여전히 "계산하지 않고 담아 보내기만" 합니다.
+    - `duel_rules.apply_buy_fill_to_position` · `compute_twr` 등 순수 계산 — 이 파일은
+      여전히 "계산하지 않고 담아 보내기만" 합니다. (⚠️ 체결 거래일 확정은 여기서
+      빠졌습니다 — 2026-08-21 아래 세 번째 예외 사례로 옮겼습니다.)
 
   · **새로 정의합니다**(표 이름 또는 통화별 규칙 상수가 함수 본문에 박혀 있는 것들):
     - §0 의 `_usd` 표 이름 상수 10개 + RPC 이름.
@@ -56,6 +57,17 @@
       사용자에게 원화 시간대를 보여주는 사고가 납니다. 그래서 이 함수만 예외적으로
       새로 정의합니다(트리거 자체는 원화와 공유하지만, 사람이 읽는 번역 문구는
       트랙마다 다른 시간대를 담아야 하므로).
+    - `duel_rules.resolve_fill_trading_day_usd()` — 이 트랙의 **세 번째** "공유 로직
+      이지만 통화별 전제가 본문에 박혀 있어 신규 정의" 사례입니다(위 번역 함수,
+      `duel_batch_usd.format_summary_lines_usd()` 에 이어). 이 함수만은 `duel_rules`
+      쪽에 새로 만들었고 여기서는 부르기만 합니다 — 판정 자체가 순수 계산이라 이
+      파일이 가질 이유는 없기 때문입니다. 원화용 `resolve_fill_trading_day()` 는
+      "주문을 저장한 그날 자신을 무조건 후보에서 제외"하는데, 그건 **원화 접수 시간대
+      (18:00:01~22:00:00 KST)가 그날 종가가 이미 확정된 뒤**라서 맞는 규칙입니다.
+      USD 접수 시간대(16:00:01~21:00:00 KST = 03:00~08:00 ET)는 반대로 **그날 미국장이
+      열리기도 전**이라 그날 마감가가 아직 존재하지 않으므로, 그날 자신을 후보에
+      포함해야 맞습니다. 원화 함수를 그대로 쓰면 체결이 조용히 하루 늦어집니다
+      (work order §5-16 — 오너가 직접 발견한 실제 버그).
 
 -------------------------------------------------------------------------------
 🔴 이 파일도 두 절로 나뉘고, 절대 섞이면 안 됩니다(`utils/duel_db.py` 머리말과 동일)
@@ -289,15 +301,21 @@ def save_order_usd(client, account_id, ticker, stock_name, requested_quantity,
                    *, trading_days, now_kst=None, universe_tickers=None):
     """
     새 예약 주문 1건을 저장합니다(`status='pending'`). `utils.duel_db.save_order()` 의
-    USD 미러 — 로직은 완전히 같고 다음 세 가지만 다릅니다:
+    USD 미러 — 로직은 완전히 같고 다음 네 가지만 다릅니다:
       ① 접수 시간대 판정에 `duel_rules.resolve_order_window_usd()`(16:00:01~21:00:00)를
          씁니다 — `resolve_order_window()`(원화)를 쓰면 시간대가 두 시간 어긋납니다.
-      ② insert 대상 표가 `duel_orders_usd` 입니다.
-      ③ 유니버스 검사 실패 문구가 "미국 주식"을 가리킵니다(코스피가 아닙니다).
+      ② 체결 거래일(`target_date`) 확정에 `duel_rules.resolve_fill_trading_day_usd()` 를
+         씁니다. 이 트랙의 접수 시간대는 **그날 미국 정규장이 열리기도 전**(03:00~08:00 ET)
+         이라 그날 마감가가 아직 존재하지 않으므로, **저장한 그날 자신이 확정 거래일이면
+         그날로 체결**됩니다. 원화용 `resolve_fill_trading_day()`(그날 자신을 무조건 제외 —
+         원화는 접수 시각이 이미 그날 종가가 확정된 뒤라서 빼는 게 맞습니다)를 쓰면
+         체결이 조용히 하루 늦어집니다(work order §5-16 — 실제로 있었던 버그).
+      ③ insert 대상 표가 `duel_orders_usd` 입니다.
+      ④ 유니버스 검사 실패 문구가 "미국 주식"을 가리킵니다(코스피가 아닙니다).
 
-    나머지 판단(거래일 D+1 확정은 `duel_rules.resolve_fill_trading_day()`, 예수금 초과
-    여부는 저장 시점에 판정하지 않음 등)은 원화 쪽과 완전히 같은 근거이므로 반복하지
-    않습니다 — `utils.duel_db.save_order()` docstring 참고.
+    나머지 판단(예수금 초과 여부는 체결가를 모르는 저장 시점에 판정하지 않음 등)은 원화
+    쪽과 완전히 같은 근거이므로 반복하지 않습니다 — `utils.duel_db.save_order()` docstring
+    참고.
 
     인자
         trading_days : 확정된 미국 정규장 거래일 목록/집합. **필수**입니다.
@@ -330,7 +348,7 @@ def save_order_usd(client, account_id, ticker, stock_name, requested_quantity,
             " 미국 정규장 마감가로 이루어집니다."
         )
 
-    target_date = duel_rules.resolve_fill_trading_day(moment, trading_days)
+    target_date = duel_rules.resolve_fill_trading_day_usd(moment, trading_days)
 
     payload = {
         "account_id": account,

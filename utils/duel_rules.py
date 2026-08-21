@@ -1316,7 +1316,11 @@ def leaderboard_page_count(section_cap=None, *, page_size=None):
 #  (`sql/duel_schema.sql` §13 의 `_usd` 표들 및 이 파일의 header 참고). 그러나 "숫자만
 #  다르고 로직은 같은" 순수 계산 함수들(체결·FIFO 배정·평단가 갱신·TWR·시즌 판정·순위
 #  계산·닉네임 생성·재동의 차단·페이지네이션)은 **통화와 무관하게 이미 재사용 가능**해서
-#  새로 만들지 않습니다 — 이 절에는 오직 "숫자 자체가 통화마다 다른" 것들만 옵니다.
+#  새로 만들지 않습니다 — 이 절에는 원칙적으로 "숫자 자체가 통화마다 다른" 것들만 옵니다.
+#
+#  ⚠️ 2026-08-21 추가된 예외 하나: `resolve_fill_trading_day_usd()` 는 상수가 아니라
+#     **규칙의 전제 자체**(주문 접수 시간대가 그날 장의 앞이냐 뒤냐)가 통화마다 달라서
+#     갈라진 함수입니다. 자세한 이유는 그 함수 docstring 참고(work order §5-16).
 #
 #  ⚠️ 아래 상수도 위 0절과 같은 이유로 **다른 파일에 다시 적지 마세요**(§0-3-10).
 #     `sql/duel_schema.sql` §14-10 의 `duel_seed_amount_usd()` 는 이 파일의
@@ -1378,6 +1382,64 @@ def resolve_order_window_usd(now_kst):
         "window_opens_at": datetime.combine(submission_date, ORDER_WINDOW_OPEN_TIME_USD, tzinfo=KST),
         "window_closes_at": datetime.combine(submission_date, ORDER_WINDOW_CLOSE_TIME_USD, tzinfo=KST),
     }
+
+
+def resolve_fill_trading_day_usd(saved_at_kst, trading_days):
+    """
+    USD 트랙에서 접수된 주문이 **어느 거래일 마감가로 체결되는지** 돌려줍니다.
+    `resolve_fill_trading_day()`(원화)와 **판정 방향이 정반대인 함수**입니다 — 이 트랙에서
+    "공유하지 않고 새로 정의한" 세 번째 예외 사례입니다(`_translate_order_guard_error_usd()`
+    는 오류 문구에 원화 시간대가, `format_summary_lines_usd()` 는 로그 문구에 "원" 이
+    박혀 있어서 갈라졌고, 이 함수는 **규칙의 전제 자체가 통화별로 다르기 때문**에 갈라집니다).
+
+    🔴 원화 함수와 유일하게 다른 한 줄: **주문을 저장한 그날 자신을 후보에서 빼지 않습니다.**
+       (원화: `day > saved_date` / USD: `day >= saved_date`)
+
+    왜 반대인가 — 두 트랙의 주문 접수 시간대가 그날 시장의 **반대편**에 있기 때문입니다.
+      · 원화(`ORDER_WINDOW_*`, 18:00:01~22:00:00 KST): 그날 KRX 정규장이 이미 끝나고
+        코스피 크롤링(16:05~16:40 KST)까지 마친 **뒤**입니다. 즉 접수 시점에 **그날(D) 종가는
+        이미 세상에 확정돼 있고 사용자도 이미 아는 값**이라, 그 값으로 체결하면 "이미 알려진
+        정보로 매매"가 됩니다(§0-3-1). 그래서 D 자신을 반드시 빼야 공정합니다.
+      · USD(`ORDER_WINDOW_*_USD`, 16:00:01~21:00:00 KST = 03:00~08:00 ET, §5-13 오너 확정):
+        그날 미국 정규장 개장(09:30 ET)보다 **한참 전**입니다. 즉 접수 시점에 **그날 마감가는
+        아직 존재조차 하지 않는 완전히 미확정된 값**입니다 — 뺄 이유가 없습니다. 오히려
+        빼면 사용자가 "오늘 밤 열릴 장"에 걸었는데 그 다음 장으로 밀리는 셈이 됩니다.
+
+    ⚠️ **원화 함수를 이 트랙에서 실수로 그대로 쓰면 체결이 불필요하게 하루 늦어집니다.**
+       (실제로 그렇게 짜여 있던 것을 2026-08-21 오너가 미국장 개장/마감 시간대를 직접
+       짚어보며 발견했습니다 — work order §5-16.) 조용히 하루가 밀리는 종류의 버그라
+       화면·로그 어디에도 오류로 나타나지 않으니, 이 함수와 원화 함수를 절대 바꿔 쓰지
+       마세요. `utils/duel_db_usd.py::save_order_usd()` 가 이 함수의 유일한 호출부입니다.
+
+    인자
+        saved_at_kst : 주문 저장 시각(또는 날짜). KST 기준.
+        trading_days : **호출부가 확정한** 미국 정규장 거래일 목록/집합
+                       (date 또는 'YYYY-MM-DD').
+
+    ⚠️ 거래일 캘린더를 이 함수가 갖지 않는 것은 원화와 완전히 같습니다. 미국 휴장일
+       (추수감사절 등)을 코드에 박으면 매년 틀리고, 이 저장소에 이미 있는 "실제로 수집이
+       성공한 날" 기록과 **두 번째 캘린더**가 생깁니다(§0-1 / §0-3-10). 그래서 확정
+       거래일을 인자로 받고, 목록에 근거가 없으면 **날짜를 만들어내지 않고 예외**를 던집니다.
+
+    반환: **저장일 자신을 포함해** 가장 이른 확정 거래일(date). 저장일이 확정 거래일 목록에
+          있으면 저장일 그 자신이고, 없으면(그날이 미국 휴장일이라 목록에 없는 경우 등)
+          그 이후 가장 이른 확정 거래일입니다.
+    """
+    saved_date = _to_date(saved_at_kst, "주문 저장 시각")
+
+    if trading_days is None:
+        raise DuelRuleError("확정 거래일 목록이 없습니다(거래일을 지어내지 않습니다).")
+    days = {_to_date(day, "거래일") for day in trading_days}
+    if not days:
+        raise DuelRuleError("확정 거래일 목록이 비어 있어 체결 거래일을 정할 수 없습니다.")
+
+    eligible = [day for day in days if day >= saved_date]
+    if not eligible:
+        raise DuelRuleError(
+            f"{saved_date.isoformat()} 이후의 확정 거래일이 목록에 없어 체결 거래일을 정할 수 없습니다"
+            " — 다음 거래일이 확정될 때까지 기다려야 하며, 임의로 다음 날짜를 만들지 않습니다(§0-1)."
+        )
+    return min(eligible)
 
 
 # ── 11-2. 체급(달러) — work order 5-11-9, KRW `BRACKET_TIERS`(10절)의 통화만 다른 미러 ──

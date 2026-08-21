@@ -17,6 +17,8 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, `utils/duel_rules.py` 의 **순수 
     ④ 매수 창 개폐 — 예수금 경계(0원)
     ⑤ 주문 접수 시간대 — 18:00:01 / 22:00:00 앞뒤 경계
     ⑥ 체결 거래일(D+1) — 확정 거래일 목록을 인자로 받고, 근거가 없으면 날짜를 만들지 않는지
+       (+ ⑥-USD: USD 트랙은 접수 시간대가 그날 미국장 **개장 전**이라 **당일 자신을 포함**
+        한다는, 원화와 정반대 판정을 회귀 고정 — work order §5-16)
     ⑦ 크롤링 신선도 — 2-9 판정의 6가지 분기 전부 + 무변동 10개/11개 경계
     ⑧ TWR — 손으로 계산한 예시와 일치하는지, **입금이 있는 기간에 단순 수익률과 다른 값**이
        나오는지(둘이 같으면 TWR 이 안 걸린 것), 현금만 들고 있는 계좌가 0% 인지,
@@ -63,6 +65,7 @@ from utils.duel_rules import (  # noqa: E402
     crawl_status_allows_fill,
     is_buy_window_open,
     resolve_fill_trading_day,
+    resolve_fill_trading_day_usd,
     resolve_order_window,
 )
 
@@ -357,6 +360,110 @@ def test_fill_trading_day_refuses_to_invent_a_date():
         resolve_fill_trading_day(date(2026, 8, 19), set())
     with pytest.raises(DuelRuleError):
         resolve_fill_trading_day(date(2026, 8, 19), None)
+
+
+# =============================================================================
+# ⑥-USD 체결 거래일 확정 — USD 트랙 (work order 5-11-6 / 5-13 / 5-16)
+#  🔴 원화와 **판정 방향이 정반대**인, 이 트랙에서 유일하게 "규칙 자체가 갈라진" 함수입니다.
+#     원화 접수 시간대(18:00:01~22:00:00 KST)는 그날 종가가 **이미 확정된 뒤**라 그날 자신을
+#     빼야 공정하지만, USD 접수 시간대(16:00:01~21:00:00 KST = 03:00~08:00 ET)는 그날 미국장이
+#     **열리기도 전**이라 그날 마감가가 아직 존재하지 않습니다 — 뺄 이유가 없습니다.
+#     (2026-08-21 오너가 미국장 개장/마감 시간대를 직접 짚어보다 발견한 실제 버그의 회귀 고정.)
+# =============================================================================
+def test_fill_trading_day_usd_is_the_saved_day_itself_when_it_is_a_confirmed_trading_day():
+    """
+    (a) 저장일 자신이 확정 거래일 목록에 있으면 **그날 자신**이 체결 거래일입니다.
+        원화 함수처럼 하루 건너뛰면 체결이 근거 없이 하루 늦어집니다(§5-16).
+    """
+    trading_days = {date(2026, 8, 19), date(2026, 8, 20), date(2026, 8, 21)}
+    assert resolve_fill_trading_day_usd(date(2026, 8, 19), trading_days) == date(2026, 8, 19)
+    # 시각이 붙어 있어도(접수 시간대 한가운데) 판정은 날짜 단위로 같아야 합니다.
+    assert resolve_fill_trading_day_usd(
+        "2026-08-19T18:30:00+09:00", trading_days) == date(2026, 8, 19)
+    # 접수 시간대의 양끝(16:00:01 · 21:00:00)에서도 마찬가지입니다.
+    assert resolve_fill_trading_day_usd(
+        _kst(2026, 8, 19, 16, 0, 1), trading_days) == date(2026, 8, 19)
+    assert resolve_fill_trading_day_usd(
+        _kst(2026, 8, 19, 21, 0, 0), trading_days) == date(2026, 8, 19)
+
+
+def test_fill_trading_day_usd_skips_to_the_next_day_when_the_saved_day_is_not_a_trading_day():
+    """
+    (b) 저장일이 후보 목록에 없으면(미국 휴장일 등) **그 이후 가장 이른 확정 거래일**입니다.
+        "그날 자신을 포함한다"가 "무조건 그날을 돌려준다"는 뜻이 아님을 고정합니다.
+    """
+    # 2026-08-22(토)·23(일)은 목록에 없습니다 → 다음 확정 거래일 8/24(월).
+    trading_days = {date(2026, 8, 20), date(2026, 8, 21), date(2026, 8, 24)}
+    assert resolve_fill_trading_day_usd(date(2026, 8, 22), trading_days) == date(2026, 8, 24)
+    # 추수감사절처럼 평일이 통째로 빠진 경우도 같은 방식으로 흡수됩니다.
+    holiday_calendar = {date(2026, 11, 25), date(2026, 11, 27)}   # 11/26(목) 휴장
+    assert resolve_fill_trading_day_usd(
+        date(2026, 11, 26), holiday_calendar) == date(2026, 11, 27)
+
+
+def test_fill_trading_day_usd_refuses_to_invent_a_date():
+    """
+    (c) 근거가 없으면 '아마 오늘'로 넘기지 않고 실패해야 합니다(§0-1) — 원화 함수와
+        **완전히 같은** 예외 처리입니다. 당일 포함 규칙이 "목록이 없어도 오늘을 쓴다"는
+        뜻으로 잘못 구현되면 이 테스트가 잡습니다.
+    """
+    with pytest.raises(DuelRuleError):
+        resolve_fill_trading_day_usd(date(2026, 8, 19), None)
+    with pytest.raises(DuelRuleError):
+        resolve_fill_trading_day_usd(date(2026, 8, 19), set())
+    with pytest.raises(DuelRuleError):
+        resolve_fill_trading_day_usd(date(2026, 8, 19), [])
+    # 목록에 저장일 이후가 하나도 없으면(전부 과거) 역시 날짜를 만들지 않습니다.
+    with pytest.raises(DuelRuleError):
+        resolve_fill_trading_day_usd(date(2026, 8, 25), {date(2026, 8, 19), date(2026, 8, 24)})
+
+
+def test_fill_trading_day_usd_and_krw_deliberately_disagree_on_the_saved_day():
+    """
+    (d) 🔴 **두 함수가 다르다는 것을 고정하는 회귀 테스트.**
+        `test_order_window_usd_and_krw_share_the_same_one_second_offset_convention`
+        (두 트랙이 **같음**을 고정)과 정반대 성격입니다 — 여기서는 **정확히 같은 입력**에
+        두 함수가 **다른 답**을 내야 한다는 것이 요구사항입니다.
+
+        누군가 USD 호출부를 원화 함수로 되돌리거나, USD 함수 본문을 원화처럼
+        `day > saved_date` 로 고치면 이 테스트가 즉시 잡습니다.
+    """
+    saved_date = date(2026, 8, 19)
+    trading_days = {date(2026, 8, 19), date(2026, 8, 20), date(2026, 8, 21)}
+
+    krw_answer = resolve_fill_trading_day(saved_date, trading_days)
+    usd_answer = resolve_fill_trading_day_usd(saved_date, trading_days)
+
+    assert krw_answer == date(2026, 8, 20), "원화는 그날 자신을 제외합니다(그날 종가는 이미 알려진 값)"
+    assert usd_answer == date(2026, 8, 19), "USD 는 그날 자신을 포함합니다(그날 미국장은 아직 열리지도 않음)"
+    assert usd_answer != krw_answer, "두 트랙의 판정이 같아졌습니다 — 한쪽이 잘못 고쳐졌습니다"
+    assert usd_answer < krw_answer, "USD 가 원화보다 하루 이르게 체결돼야 합니다"
+
+    # 두 함수는 물리적으로도 다른 객체여야 합니다(별칭으로 묶어두면 위 차이가 사라집니다).
+    assert rules.resolve_fill_trading_day_usd is not rules.resolve_fill_trading_day
+
+    # 반대로, 저장일이 거래일이 **아닌** 날에는 두 함수의 답이 자연히 같아집니다
+    # (제외할 당일 자체가 후보에 없으므로) — 차이는 오직 "당일 포함 여부" 하나뿐임을 고정.
+    off_day = date(2026, 8, 22)
+    assert resolve_fill_trading_day_usd(off_day, {date(2026, 8, 21), date(2026, 8, 24)}) \
+        == resolve_fill_trading_day(off_day, {date(2026, 8, 21), date(2026, 8, 24)}) \
+        == date(2026, 8, 24)
+
+
+def test_usd_track_call_site_uses_the_usd_fill_day_function_not_the_krw_one():
+    """
+    🔴 함수를 새로 만들어놓고 **호출부를 안 바꾸면** 버그는 그대로 남습니다. USD 주문
+    저장 경로(`utils/duel_db_usd.py::save_order_usd()`)가 실제로 `_usd` 함수를 부르는지
+    소스로 직접 대조합니다(원화 파일 `utils/duel_db.py` 는 반대로 원화 함수를 그대로
+    유지해야 합니다 — 이번 수정은 원화 트랙을 건드리지 않습니다).
+    """
+    usd_source = (REPO_ROOT / "utils" / "duel_db_usd.py").read_text(encoding="utf-8")
+    assert "duel_rules.resolve_fill_trading_day_usd(moment, trading_days)" in usd_source
+    assert "duel_rules.resolve_fill_trading_day(moment, trading_days)" not in usd_source
+
+    krw_source = (REPO_ROOT / "utils" / "duel_db.py").read_text(encoding="utf-8")
+    assert "duel_rules.resolve_fill_trading_day(moment, trading_days)" in krw_source
+    assert "resolve_fill_trading_day_usd" not in krw_source
 
 
 # =============================================================================

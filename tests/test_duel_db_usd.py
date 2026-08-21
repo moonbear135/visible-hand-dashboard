@@ -232,7 +232,12 @@ def test_save_order_usd_inside_window_writes_pending_order_to_the_usd_table():
     payload = call.rows[0]
     assert payload["ticker"] == "AAPL"
     assert payload["status"] == "pending"
-    assert payload["target_date"] == "2026-08-20"
+    # 🔴 저장일(8/19) 자신이 확정 거래일 목록에 있으므로 **그날 자신**이 체결 거래일입니다.
+    #    USD 접수 시간대(16:00:01~21:00:00 KST = 03:00~08:00 ET)는 그날 미국장이 열리기도
+    #    전이라 그날 마감가가 아직 존재하지 않기 때문입니다. 원화용
+    #    `resolve_fill_trading_day()`(그날 자신을 무조건 제외)를 쓰면 여기가 "2026-08-20"
+    #    으로 하루 밀립니다 — 실제로 있었던 버그입니다(work order §5-16).
+    assert payload["target_date"] == "2026-08-19"
     assert order["ticker"] == "AAPL"
     # KRW 표에는 아무 것도 가지 않습니다(트랙이 완전히 분리돼 있습니다).
     assert client.calls_for(duel_db.ORDERS_TABLE) == []
