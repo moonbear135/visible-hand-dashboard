@@ -69,6 +69,29 @@ sys.path.append(str(REPO_ROOT))
 
 FAILURES = []
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _assert_no_check_failures():
+    """
+    🔴 2026-08-21 발견 — `check()`는 실패를 `FAILURES`에 기록만 하고, 그 목록을 실제로
+    검사해서 죽는 코드는 파일 맨 아래 `if __name__ == "__main__": main()` 안에만 있었습니다.
+    이 파일의 모든 검증은 pytest로 돌려왔는데, pytest는 `main()`을 절대 부르지 않으므로
+    `check()` 실패가 있어도 각 `test_*` 함수는 스스로 실패하지 않았습니다 — 이 파일의
+    배선·렌더 스모크 검사가 그동안 pytest 상에서는 항상 초록불이었다는 뜻입니다
+    (2026-08-21, 결투다! USD 화면 작업 중 발견).
+
+    그래서 매 테스트 앞뒤로 `FAILURES`의 증가분을 직접 확인해 pytest에서도 똑같이
+    실패하게 만듭니다. 기존 `test_*` 함수는 한 줄도 안 고쳤습니다 — 이 fixture 하나가
+    파일 안의 모든 테스트에 자동 적용됩니다(pytest의 `autouse` 규약).
+    """
+    start = len(FAILURES)
+    yield
+    new_failures = FAILURES[start:]
+    assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
+
+
 
 def check(condition, label, detail=""):
     if condition:
@@ -105,6 +128,31 @@ def python_code_only(src):
     without_docstrings = re.sub(r'("""|\'\'\')(?:.|\n)*?\1', "", src)
     return "\n".join(line for line in without_docstrings.splitlines()
                      if not line.strip().startswith("#"))
+
+
+def _calls_with_client_first_arg(tree, call_name):
+    """`call_name(client, …)` 를 찾되, **직접 호출**과 `run_blocking(call_name, client, …)`
+    로 감싼 호출을 **둘 다** 인정합니다.
+
+    🔴 2026-08-21 발견 — 이 검사들은 전부 `web/blocking.py::run_blocking()` 리팩터
+    (이벤트 루프가 막히지 않게 동기 DB 호출을 스레드로 넘기는 수정, 같은 날 적용) **이전**에
+    쓰여서, "client 를 명시적으로 넘기는가"라는 검사 목적은 그대로인데 호출 모양만
+    `call_name(client, …)` → `run_blocking(call_name, client, …)` 로 바뀐 걸 못 잡고
+    있었습니다. pytest 가 그동안 이 실패를 실제로 죽이지 않았던 `check()`/`FAILURES` 버그
+    (2026-08-21 발견) 뒤에 숨어 있다가, 그 버그를 고치고 나서야 드러났습니다 — 화면 코드가
+    잘못된 게 아니라 이 검사가 낡았던 것입니다.
+    """
+    direct = [n for n in ast.walk(tree)
+              if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+              and n.func.id == call_name
+              and n.args and isinstance(n.args[0], ast.Name) and n.args[0].id == "client"]
+    wrapped = [n for n in ast.walk(tree)
+               if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+               and n.func.id == "run_blocking"
+               and len(n.args) >= 2
+               and isinstance(n.args[0], ast.Name) and n.args[0].id == call_name
+               and isinstance(n.args[1], ast.Name) and n.args[1].id == "client"]
+    return direct + wrapped
 
 
 def module_level_statements(tree):
@@ -699,6 +747,10 @@ def test_scorecard_page_wiring():
         return
     src = path.read_text(encoding="utf-8")
     tree = ast.parse(src)
+    # ⚠️ "이 낱말이 코드에 없는지"를 볼 때는 **주석·독스트링을 걷어낸** 문자열로 확인합니다
+    # ([5]/[9] 와 같은 이유 — 2026-08-21 이벤트 루프 수정 설명 주석이 "app.storage" 라는
+    #  낱말 자체를 언급하고 있어서, 원문(src)으로 검사하면 그 설명에 걸려 항상 실패합니다).
+    code = python_code_only(src)
 
     # (a) DB를 만지는 함수는 client·user_id 를 **인자로** 받아야 합니다 (§0-3-8 함수 설계 원칙)
     funcs = {n.name: n for n in ast.walk(tree)
@@ -712,11 +764,9 @@ def test_scorecard_page_wiring():
 
     # (b) DB 호출에 client 가 첫 인자로 들어가는지 (전역에서 추측하지 않는지)
     for call_name in ("fetch_holdings", "add_lot", "update_holding", "delete_holding"):
-        calls = [n for n in ast.walk(tree)
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == call_name]
-        check(calls and all(c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "client"
-                            for c in calls),
-              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김",
+        calls = _calls_with_client_first_arg(tree, call_name)
+        check(bool(calls),
+              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김 (직접 또는 run_blocking 경유)",
               f"호출 {len(calls)}건")
 
     # (c) 저장소 직접 접근 금지 (web/auth.py 를 통해서만)
@@ -725,7 +775,7 @@ def test_scorecard_page_wiring():
     #    같은 줄에서 다른 이름과 같이 임포트해도 이 검사가 오탐(false positive)으로
     #    실패하면 안 됩니다 — 이 검사의 목적은 "app.storage 직접 접근 여부"이지 임포트
     #    문구 형태가 아닙니다.
-    check(bool(re.search(r'from nicegui import[^\n]*\bui\b', src)) and "app.storage" not in src,
+    check(bool(re.search(r'from nicegui import[^\n]*\bui\b', src)) and "app.storage" not in code,
           "화면 파일은 app.storage 를 직접 만지지 않음 (web/auth.py 경유)")
 
     # (d) XSS — 사용자/DB 문자열이 HTML 로 나가는 곳은 esc() 통과 (§0-3-9)
@@ -861,11 +911,9 @@ def test_report_page_wiring():
 
     # (b) DB 호출에 client 가 첫 인자로 들어가는지 (전역에서 추측하지 않는지)
     for call_name in ("fetch_user_snapshots", "fetch_user_holding_snapshots"):
-        calls = [n for n in ast.walk(tree)
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name) and n.func.id == call_name]
-        check(calls and all(c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "client"
-                            for c in calls),
-              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김",
+        calls = _calls_with_client_first_arg(tree, call_name)
+        check(bool(calls),
+              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김 (직접 또는 run_blocking 경유)",
               f"호출 {len(calls)}건")
 
     # (c) 저장소 직접 접근 금지 (web/auth.py 를 통해서만)
@@ -1426,22 +1474,30 @@ def test_duel_page_wiring():
     for call_name in ("fetch_my_accounts", "fetch_my_positions", "fetch_my_cash_ledger",
                       "fetch_my_orders", "fetch_my_snapshots",
                       "save_order", "edit_order", "cancel_order", "opt_in"):
-        calls = [n for n in ast.walk(tree)
-                 if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                 and n.func.id == call_name]
-        check(calls and all(c.args and isinstance(c.args[0], ast.Name) and c.args[0].id == "client"
-                            for c in calls),
-              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김",
+        calls = _calls_with_client_first_arg(tree, call_name)
+        check(bool(calls),
+              f"`{call_name}(client, …)` — 클라이언트를 명시적으로 넘김 (직접 또는 run_blocking 경유)",
               f"호출 {len(calls)}건")
 
     # ── (c) 🔴 opt_in() 은 **인자가 클라이언트 하나뿐**이어야 합니다 ──
     #    대상자는 앱이 정하지 않고 DB 안에서 auth.uid() 로만 정해집니다(스키마 §9-10).
     #    화면이 user_id 를 끼워 넣으려는 시도 자체가 생기지 않도록 여기서 고정합니다.
-    opt_in_calls = [n for n in ast.walk(tree)
-                    if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                    and n.func.id == "opt_in"]
-    check(opt_in_calls and all(len(c.args) == 1 and not c.keywords for c in opt_in_calls),
-          "`opt_in(client)` — 사용자 id·금액·날짜를 넘기는 경로가 없음 (auth.uid() 로만 결정)")
+    #    🔴 2026-08-21 — `run_blocking(opt_in, client)` 로 감싼 호출도 인정합니다(위 (b)와
+    #    같은 이유). 다만 "인자가 client 하나뿐"이라는 조건은 감싼 형태에서도 그대로
+    #    지켜야 하므로 `run_blocking(opt_in, client)`(길이 2, 키워드 없음)만 인정합니다.
+    opt_in_direct = [n for n in ast.walk(tree)
+                     if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                     and n.func.id == "opt_in"
+                     and len(n.args) == 1 and not n.keywords]
+    opt_in_wrapped = [n for n in ast.walk(tree)
+                      if isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                      and n.func.id == "run_blocking"
+                      and len(n.args) == 2 and not n.keywords
+                      and isinstance(n.args[0], ast.Name) and n.args[0].id == "opt_in"
+                      and isinstance(n.args[1], ast.Name) and n.args[1].id == "client"]
+    check(bool(opt_in_direct or opt_in_wrapped),
+          "`opt_in(client)` — 사용자 id·금액·날짜를 넘기는 경로가 없음 (auth.uid() 로만 결정, "
+          "직접 또는 run_blocking 경유)")
 
     # ── (d) 🔒 소유자 이중 확인 — RLS 가 지워져도 남의 행을 그리지 않음 ──
     check('account.get("user_id") != user_id' in code,
@@ -1696,9 +1752,14 @@ def test_duel_render_smoke():
         dict(DUEL_SYNTHETIC_ACCOUNTS[0], user_id="uid-someone-else"),
     ]
     try:
-        page._render_duel_section(object(), "uid-duel",
+        # 🔴 2026-08-21 발견 — `_render_duel_section()` 이 (달러 트랙 추가로) `async def` 가
+        # 되면서 이 줄이 그동안 코루틴 객체만 만들고 **한 번도 실행하지 않았습니다**
+        # (pytest 가 "코루틴이 await 되지 않았다" 경고만 내고 조용히 넘어감 — 그래서 아래
+        # check() 가 항상 실패였는데도 이 파일의 check()/FAILURES 버그 뒤에 숨어 있었습니다).
+        # 직접 `asyncio.run()`으로 실행해 실제 §0-3-8 이중 방어 코드를 진짜로 태웁니다.
+        asyncio.run(page._render_duel_section(object(), "uid-duel",
                                   asyncio.run(page._load_kospi_universe()),
-                                  page._order_window_state(), lambda: None)
+                                  page._order_window_state(), lambda: None))
         blob2 = "\n".join(str(d) for d in drawn)
         check(bool(drawn) and "본인 것이 아닌" in blob2,
               "🔒 남의 user_id 가 섞인 계좌 목록은 그리지 않고 오류로 알림 (§0-3-8)")
