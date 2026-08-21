@@ -7,7 +7,38 @@
     utils/duel_rules.py   3개월 재동의 차단 기간 · 최소 인원 같은 숫자의 단일 출처
     utils/duel_db.py      save_consent() / fetch_my_consent() / revoke_consent() /
                           ensure_nickname() / fetch_my_nickname()
+    utils/duel_db_usd.py  save_consent_usd() / fetch_my_consent_usd() /
+                          revoke_consent_usd() / fetch_my_accounts_usd()  ← 💵 2026-08-21
     ← 이 파일        화면 구조와 문구. **동의 규칙을 여기서 다시 구현하지 않습니다**(§0-3-10).
+
+-------------------------------------------------------------------------------
+💵 2026-08-21 — USD 트랙("달러 결투")이 이 화면에 함께 들어왔습니다 (§5-19)
+-------------------------------------------------------------------------------
+① **원화 무수정 원칙이 최우선.** 달러 계좌가 하나도 없는 사용자(= 오늘 실제 사용자 전원)는
+   2026-08-21 이전과 **글자 그대로 같은 렌더 경로**를 탑니다(`_render_body()` 의 첫 분기).
+   달러 계좌가 있을 때만 창유형마다 원화 카드 아래에 달러 카드가 한 장 더 붙습니다
+   (§5-11-2 의 "위쪽 원화 / 아래쪽 달러" 를 `/duel` 화면(§5-18)과 같은 방식으로).
+② **동의는 트랙별로 완전히 독립입니다**(5-11-10 오너 확정). 표부터 다릅니다
+   (`duel_public_consent` ↔ `duel_public_consent_usd`) — 한쪽 동의·철회가 다른 쪽에 아무
+   영향이 없고, 3개월 재동의 차단도 트랙별로 따로 셉니다. 네 가지 경우가 **전부 정상**
+   입니다: ① 원화만 참여 ② 달러만 참여 ③ 둘 다 ④ 둘 다 미참여.
+③ **닉네임만은 공유합니다**(5-11-10 · 스키마 §6). `duel_nicknames` 는 처음부터
+   `(user_id, window_type)` 키라 같은 사용자의 같은 창유형이면 원화·달러가 **같은 닉네임
+   문자열**을 씁니다. 그래서 이 화면은 `ensure_nickname()`/`fetch_my_nickname()` 을
+   **접미사 없는 원본 그대로** 두 트랙에서 함께 부릅니다(`duel_nicknames_usd` 표는
+   존재하지 않습니다 — USD 전용 닉네임 함수를 만드는 것 자체가 잘못된 모델입니다).
+   🔴 그 결과 **두 트랙에 모두 공개 동의하면 두 순위표에 같은 닉네임이 실립니다** — 보는
+   사람이 "이 두 줄은 같은 사람"이라고 알 수 있다는 뜻입니다. 오너가 확정한 설계이지만
+   사용자가 모르고 동의하면 안 되는 사실이라 화면에 그대로 밝힙니다(§0-1 · 아래
+   `NOTICE_SHARED_NICKNAME`).
+④ **체급 기준 통화가 다릅니다.** 독립 동의(실제 매입총합 사용)를 켰을 때 원화 트랙은
+   "내 성적표"의 **원화분** 매입원가합계로, 달러 트랙은 **달러분** 매입원가합계로 체급을
+   정합니다(`duel_publish.summarize_real_principal()` ↔
+   `duel_publish_usd.summarize_real_principal_usd()` — 서로 정확히 반대). 그래서 독립 동의
+   설명 문구만은 원화 것을 재사용하지 않고 `NOTICE_REAL_PRINCIPAL_USD` 를 따로 뒀습니다.
+⑤ **합산 숫자는 만들지 않습니다.** 이 화면에는 금액이 아예 없지만, 원칙은 같습니다 —
+   원화 동의 상태와 달러 동의 상태를 하나로 뭉친 "전체 공개 여부" 같은 값을 만들지
+   않습니다(만들면 한쪽만 철회한 사용자의 상태가 화면에서 사라집니다).
 
 -------------------------------------------------------------------------------
 🧱 왜 `duel_page.py` 에 이어 붙이지 않고 새 파일인가 (판단 근거를 남깁니다)
@@ -67,6 +98,12 @@ from utils.duel_db import (
     fetch_my_nickname,
     revoke_consent,
     save_consent,
+)
+from utils.duel_db_usd import (
+    fetch_my_accounts_usd,
+    fetch_my_consent_usd,
+    revoke_consent_usd,
+    save_consent_usd,
 )
 from utils.duel_rules import DuelRuleError
 from utils.scorecard_db import supabase_status, user_id_of
@@ -158,6 +195,41 @@ NOTICE_REAL_PRINCIPAL = (
     "정해져 비슷한 규모끼리 겨루게 되고, 끄면 체급 없이 '구간 미적용' 그룹에서 겨룹니다 — "
     "끈다고 순위표에서 빠지지는 않습니다. 실제 매입총합 **금액 자체는 공개되지 않고**, "
     "어느 구간에 속하는지만 쓰입니다."
+)
+
+#: 💵 독립 동의 설명 — **달러 트랙 전용**(§5-19). 위 `NOTICE_REAL_PRINCIPAL` 을 그대로
+#: 재사용하면 달러 사용자에게 "원화 매입총합으로 체급이 정해진다"고 읽힐 수 있는데,
+#: 실제로는 정반대입니다 — `duel_publish_usd.summarize_real_principal_usd()` 는 "내 성적표"에
+#: **달러가 아닌 통화가 하나라도 있으면** 합치지 않고 `FX_MIXED`(→ 구간 미적용)로 떨어뜨리고,
+#: 달러분 매입원가합계로만 체급($750/$2,250/…)을 정합니다. 이 앱에는 환율 시계열이 없어
+#: 두 통화를 더할 수 없기 때문입니다(§0-1 — 없는 값을 지어내지 않습니다).
+NOTICE_REAL_PRINCIPAL_USD = (
+    "이 동의만 **다른 모듈('내 성적표')의 실제 보유 데이터**를 사용합니다. 위 5개 항목과는 "
+    "완전히 별개이고, 따로 켜고 끌 수 있습니다. 달러 순위표의 체급은 '내 성적표'의 "
+    "**달러 보유분 매입원가합계**로만 정해집니다($750 · $2,250 · $3,750 · $7,500 · $22,500 · "
+    "$45,000 · $75,000 경계). 원화 종목을 하나라도 함께 갖고 계시면 **두 통화를 더하지 않고** "
+    "'구간 미적용' 그룹으로 갑니다 — 이 앱에는 환율 시계열이 없어서 합칠 수가 없습니다. "
+    "끈다고 순위표에서 빠지지는 않고, 실제 매입총합 **금액 자체는 공개되지 않습니다**."
+)
+
+#: 💵 트랙 독립(5-11-10) — 원화·달러 동의는 서로 아무 관계가 없다는 사실.
+NOTICE_TRACKS_INDEPENDENT = (
+    "※ 원화 결투와 달러 결투의 공개 동의는 **완전히 별개**입니다. 저장되는 표부터 다르고, "
+    "한쪽만 공개하셔도 되며, 한쪽을 철회해도 다른 쪽은 그대로입니다(철회 후 3개월 재동의 "
+    "차단도 트랙마다 따로 셉니다). 순위표도 원화·달러가 서로 완전히 다른 표입니다 — "
+    "두 통화의 성적을 섞거나 비교하지 않습니다."
+)
+
+#: 🔴 💵 닉네임 공유(5-11-10) — 사용자가 **모르고 동의하면 안 되는** 사실이라 명시합니다.
+#:    같은 창유형이면 원화·달러가 같은 닉네임을 쓰므로, 두 트랙에 모두 공개하면 두 순위표의
+#:    그 두 줄이 같은 사람이라는 것이 드러납니다. (교차 *사용자* 유출은 아닙니다 — 남의
+#:    데이터는 어느 경로로도 흐르지 않습니다 — 하지만 공개 범위에 대한 정보이므로 §0-1.)
+NOTICE_SHARED_NICKNAME = (
+    "※ 닉네임은 **같은 창유형이면 원화·달러가 같은 이름**을 씁니다(한 사람에게 이름을 두 개 "
+    "만들지 않습니다). 그래서 같은 창유형의 원화와 달러를 **둘 다** 공개하시면, 두 순위표에 "
+    "같은 닉네임이 실려서 보는 사람이 '이 두 줄은 같은 사람'이라고 알 수 있습니다. 한쪽만 "
+    "공개하시면 그런 연결은 생기지 않습니다. 닉네임 말고 사람을 특정할 수 있는 값(이메일· "
+    "아이디·가입일)은 어느 순위표에도 **저장조차 되지 않습니다**."
 )
 
 #: 체급 고정 규칙(5-3, 4·5차 확정). 숫자는 전부 `duel_rules` 상수에서 만듭니다(§0-3-10).
@@ -445,6 +517,10 @@ async def _render_body(client, user_id: str) -> None:
        계좌 목록 1회 + 계좌 3개 × (동의 상태·닉네임) = 최대 7회의 **동기 HTTP 왕복**이
        한 번 그릴 때마다 일어나고, 그동안 이벤트 루프가 멈추면 **다른 화면을 보던
        접속자까지** 함께 끊깁니다(`web/blocking.py` 모듈 독스트링).
+
+    💵 2026-08-21(§5-19) — 원화 계좌와 달러 계좌를 **각각 따로** 조회하고 **각각 따로**
+       소유자 이중 확인을 합니다. 달러 조회가 실패해도 원화 화면은 그대로 그립니다
+       (한쪽 장애가 다른 쪽을 삼키지 않게 — `/duel` 화면 §5-18 과 같은 규약).
     """
     try:
         accounts = await run_blocking(fetch_my_accounts, client, user_id)
@@ -461,13 +537,43 @@ async def _render_body(client, user_id: str) -> None:
         )
         return
 
-    if not mine:
+    # ── 💵 달러 계좌를 **완전히 따로** 조회합니다 (다른 표·다른 함수) ────────────
+    mine_usd = []
+    try:
+        accounts_usd = await run_blocking(fetch_my_accounts_usd, client, user_id)
+    except Exception as exc:                       # noqa: BLE001
+        accounts_usd = None
+        error_banner(
+            f'🚫 {_fail(exc, "달러 가상계좌를 불러오지 못했습니다. 원화 계좌는 아래에 그대로 표시됩니다.")}'
+        )
+    if accounts_usd is not None:
+        # 🔒 원화와 **같은 이중 방어** — RLS 가 이미 막지만 한 번 더 확인합니다(§0-3-8).
+        owned_usd = [a for a in accounts_usd if a.get("user_id") == user_id]
+        if len(owned_usd) != len(accounts_usd):
+            error_banner(
+                '🚫 달러 계좌 목록에 본인 것이 아닌 행이 섞여 있어 달러 블록을 그리지 '
+                '않았습니다. 관리자에게 알려 주세요.'
+            )
+        else:
+            mine_usd = owned_usd
+
+    if not mine and not mine_usd:
+        # 🔴 §5-19 — 예전에는 `mine`(원화)만 보고 이 안내를 띄웠습니다. 그대로 두면 달러에만
+        #    참여한 사용자가 "참여하지 않으셨습니다"를 보게 됩니다(§5-11-10 의 ② 경우).
         info_banner(
             'ℹ️ 아직 결투에 참여하지 않으셨습니다. 먼저 "⚔️ 참전하기" 화면에서 참여하시면 '
             '가상계좌 3개가 만들어지고, 그 뒤에 계좌별로 공개 여부를 정하실 수 있습니다.'
         )
         return
 
+    usd_by_window = {a.get("window_type"): a for a in mine_usd}
+    if usd_by_window:
+        await _render_both_tracks(client, user_id, mine, usd_by_window)
+        return
+
+    # ── 원화 전용 — 2026-08-21 이전과 **완전히 동일한 렌더 경로** ────────────────
+    #    (원화만 쓰는 사용자의 화면을 한 글자도 바꾸지 않기 위한 의도적인 두 경로 —
+    #     `/duel` 화면의 `_render_accounts()` 가 같은 이유로 쓰는 방식입니다, §5-18.)
     ui.markdown(
         '#### 계좌마다 따로 정합니다\n'
         '공개 동의는 **계좌 단위**입니다. 예를 들어 6개월 계좌만 공개하고 나머지 둘은 '
@@ -489,6 +595,83 @@ async def _render_body(client, user_id: str) -> None:
             await _render_account_consent(client, user_id, account, account_section.refresh)
 
         await account_section()
+
+
+# =============================================================================
+# 3-b. 💵 원화 + 달러 병기 (§5-19 — §5-11-2 "위쪽 원화 / 아래쪽 달러")
+# =============================================================================
+def _consent_section(render_fn, client, user_id: str, account: dict):
+    """동의 카드 하나를 감싼 `@ui.refreshable` 을 **팩토리로** 만들어 돌려줍니다.
+
+    ⚠️ 왜 팩토리인가: `for` 루프 안에서 `@ui.refreshable` 을 바로 정의하면, 나중에
+       `.refresh()` 로 다시 그릴 때 본문이 참조하는 이름이 **마지막 반복의 객체**로 풀립니다
+       (파이썬의 늦은 이름 결정). 팩토리 안에서는 `section` 이 그 호출만의 지역 이름이라
+       그 문제가 아예 생기지 않습니다. (원화 전용 경로의 기존 루프는 `/duel` 화면과 같은
+       예전 모양 그대로 두었습니다 — 원화 무수정 원칙, §5-19.)
+    """
+    @ui.refreshable
+    async def section() -> None:
+        await render_fn(client, user_id, account, section.refresh)
+
+    return section
+
+
+async def _render_both_tracks(client, user_id: str, mine, usd_by_window: dict) -> None:
+    """창유형(M1/M3/M6)마다 **위쪽에 원화 동의 카드, 아래쪽에 달러 동의 카드**.
+
+    🔴 §5-11-10 — 네 경우가 전부 정상입니다. 이 함수가 그리는 것은 그중 ②(달러만)·③(둘 다)
+       이고, 어느 창유형에서든 한쪽 계좌가 없는 상태(예: 원화 M1 만 있고 달러 M1 은 없음)도
+       정상이라 **조용히 빼지 않고** "아직 없습니다"라고 적습니다(§0-1).
+    🔴 원화 카드는 기존 `_render_account_consent()` 를 **그대로** 부릅니다(내용·문구 무수정).
+       새로 생긴 것은 그 카드를 감싸는 칸과, 그 아래의 달러 카드뿐입니다.
+    """
+    krw_by_window = {a.get("window_type"): a for a in (mine or [])}
+
+    ui.markdown(
+        '#### 계좌마다 따로 정합니다 (원화·달러도 따로)\n'
+        '공개 동의는 **계좌 단위**입니다. 예를 들어 6개월 계좌만 공개하고 나머지는 비공개로 '
+        '둘 수 있습니다. 창유형(1·3·6개월)마다 원화 계좌와 달러 계좌가 **각각 별도 계좌**라, '
+        '같은 칸의 위쪽이 원화 동의, 아래쪽이 달러 동의입니다.'
+    )
+    ui.label(NOTICE_TRACKS_INDEPENDENT).classes('vh-muted vh-keep-all')
+    ui.label(NOTICE_SHARED_NICKNAME).classes('vh-muted vh-keep-all')
+    ui.label(
+        f'※ 순위표는 참가자가 충분히 모인 그룹만 공개됩니다(같은 창유형·같은 체급에 '
+        f'{duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION}명 이상). 인원이 적은 그룹은 '
+        '동의하셔도 순위표가 만들어지지 않습니다 — 사람이 적으면 닉네임만으로 누구인지 '
+        '추측될 수 있기 때문입니다. 원화 순위표와 달러 순위표는 인원도 따로 셉니다.'
+    ).classes('vh-muted')
+
+    # 창유형 순서는 규칙 계층의 `ACCOUNT_WINDOW_TYPES`(M1→M3→M6). 목록에 없는 창유형이
+    # 내려와도 **조용히 빼지 않고** 뒤에 이어 그립니다(§0-1 — `/duel` 화면과 같은 규약).
+    known = list(duel_rules.ACCOUNT_WINDOW_TYPES)
+    extra = [w for w in list(krw_by_window) + list(usd_by_window)
+             if w not in known and w is not None]
+    ordered = known + sorted(set(extra), key=str)
+
+    for window_type in ordered:
+        krw_account = krw_by_window.get(window_type)
+        usd_account = usd_by_window.get(window_type)
+        if krw_account is None and usd_account is None:
+            continue
+        title = WINDOW_TITLES.get(window_type, str(window_type))
+        with ui.element('div').classes('w-full').style(
+                'display: grid; gap: 12px; align-content: start;'):
+            if krw_account is not None:
+                await _consent_section(_render_account_consent, client, user_id, krw_account)()
+            else:
+                ui.label(
+                    f'{title} — 원화 계좌는 아직 없습니다("⚔️ 참전하기" 화면에서 원화 결투에 '
+                    '참여하시면 이 자리에 원화 동의 카드가 생깁니다).'
+                ).classes('vh-muted vh-keep-all')
+            if usd_account is not None:
+                await _consent_section(_render_account_consent_usd, client, user_id,
+                                       usd_account)()
+            else:
+                ui.label(
+                    f'{title} — 달러 계좌는 아직 없습니다("⚔️ 참전하기" 화면에서 달러 결투에 '
+                    '참여하시면 이 자리에 달러 동의 카드가 생깁니다).'
+                ).classes('vh-muted vh-keep-all')
 
 
 async def _render_account_consent(client, user_id: str, account: dict, on_changed) -> None:
@@ -541,6 +724,60 @@ async def _render_account_consent(client, user_id: str, account: dict, on_change
         _render_consent_form(client, account, state, on_changed)
         ui.separator()
         _render_real_principal_form(client, account, state, on_changed)
+
+
+async def _render_account_consent_usd(client, user_id: str, account: dict, on_changed) -> None:
+    """💵 달러 계좌 1개의 동의 카드 — `_render_account_consent()` 의 통화 미러(§5-19).
+
+    🔴 위 원화 함수와 **다른 것은 네 가지뿐**입니다: ① 카드 제목 ② `fetch_my_consent_usd()`
+       ③ 아래에서 부르는 세 함수가 전부 `_usd` 판 ④ 독립 동의 설명 문구
+       (`NOTICE_REAL_PRINCIPAL_USD` — 체급 기준 통화가 다릅니다).
+    🔴 **닉네임 조회만은 접미사 없는 원본**(`fetch_my_nickname`)입니다 — 원화·달러가 같은
+       `duel_nicknames` 표를 공유하기 때문입니다(5-11-10 · 스키마 §6). `duel_nicknames_usd`
+       라는 표는 존재하지 않고, 여기서 `_usd` 판을 찾아 만들면 "닉네임이 트랙마다 갈린다"는
+       **틀린 모델**을 코드에 새기게 됩니다.
+    """
+    if account.get("user_id") != user_id:          # 🔒 카드를 그리기 전에 한 번 더(§0-3-8)
+        error_banner('🚫 소유자가 확인되지 않는 계좌라 표시하지 않았습니다.')
+        return
+
+    account_id = account.get("id")
+    title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
+
+    with ui.card().classes('vh-card w-full'):
+        ui.markdown(f'##### 💵 {esc(title)} (달러 결투)')
+
+        try:
+            consent_row = await run_blocking(fetch_my_consent_usd, client, account_id)
+        except Exception as exc:                   # noqa: BLE001
+            error_banner(f'🚫 {_fail(exc, "공개 동의 상태를 불러오지 못했습니다.")}')
+            return
+
+        state = consent_state(consent_row)
+        nickname_row = None
+        if state["state"] in ("in_progress", "confirmed"):
+            try:
+                nickname_row = await run_blocking(
+                    fetch_my_nickname, client, account["user_id"], account["window_type"])
+            except Exception as exc:               # noqa: BLE001
+                error_banner(f'🚫 {_fail(exc, "닉네임을 불러오지 못했습니다.")}')
+
+        _render_current_state(state, nickname_row)
+
+        blocked_text = reconsent_notice(consent_row)
+        if blocked_text:
+            # 재동의 차단은 **트랙별로 따로** 셉니다 — 이 안내는 달러 동의 기록의
+            # `revoked_at` 만 보고 나옵니다(원화 철회는 여기에 영향이 없습니다, 5-11-10).
+            warning_banner(blocked_text)
+            return
+
+        if state["state"] == "confirmed":
+            _render_revoke_usd(client, account_id, on_changed)
+            ui.separator()
+
+        _render_consent_form_usd(client, account, state, on_changed)
+        ui.separator()
+        _render_real_principal_form_usd(client, account, state, on_changed)
 
 
 def _render_current_state(state: dict, nickname_row) -> None:
@@ -687,6 +924,124 @@ def _render_real_principal_form(client, account: dict, state: dict, on_changed) 
 
 
 # =============================================================================
+# 4-b. 💵 달러 트랙의 1층 + 2층 + 독립 동의 (§5-19 — 위 두 함수의 통화 미러)
+# =============================================================================
+#  🔴 왜 인자 하나(`save_fn=`)를 붙여 원화 함수에 태우지 않고 복제했는가:
+#     `utils/duel_publish_usd.py` 머리말이 적어 둔 이유가 그대로 적용됩니다 — 인자 하나를
+#     빠뜨리면 **달러 동의가 원화 동의 표에 저장되는** 통로가 생기지만, 함수를 나누면 그
+#     통로가 **존재하지 않습니다**(5-11-1 "완전 분리"). 이 트랙이 다섯 라운드에 걸쳐 쓴
+#     같은 판단 기준이고, 원화 함수를 한 글자도 건드리지 않는다는 이번 라운드의 최우선
+#     제약과도 맞습니다. 공유하는 것은 **순수 함수와 문구 상수**뿐입니다
+#     (`consent_item_rows()`·`item_save_payload()`·`final_confirm_payload()`·
+#      `real_principal_payload()`·`all_items_checked()`·`missing_item_labels()` ·
+#      `NOTICE_*` — 전부 통화 리터럴이 본문에 없어서 그대로 재사용합니다).
+def _render_consent_form_usd(client, account: dict, state: dict, on_changed) -> None:
+    """💵 달러 트랙 항목별 체크박스 5개 → (전부 체크 시) 별도의 최종 확인.
+
+    문구·규칙은 원화와 **완전히 같습니다**(5-2 는 통화와 무관한 요구사항입니다). 다른 것은
+    저장이 `save_consent_usd()`(→ `duel_public_consent_usd` 표)로 나간다는 것뿐입니다.
+    """
+    already = state["state"] == "confirmed"
+    ui.markdown('#### 1단계 — 무엇을 공개할지 한 문장씩 확인 (달러)')
+    warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **첫 번째**
+    ui.label(NOTICE_ALL_OR_NOTHING).classes('vh-muted')
+
+    boxes = {}
+    for flag, name, sentence in consent_item_rows():
+        boxes[flag] = ui.checkbox(
+            f'{name} — {sentence}',
+            value=bool(state["items"].get(flag)),
+        ).props('dense').classes('w-full vh-keep-all')
+
+    message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+    def _values():
+        return {flag: bool(box.value) for flag, box in boxes.items()}
+
+    async def _save_items() -> None:
+        message.text = ''
+        if not all_items_checked(_values()):
+            message.text = (
+                '🚫 5개 항목을 모두 체크해 주세요. 아직 체크되지 않음: '
+                + ', '.join(missing_item_labels(_values()))
+                + '\n(부분 공개 조합은 제공하지 않습니다.)'
+            )
+            return
+        await _save_usd(client, account, item_save_payload(_values()), message, on_changed,
+                        '✅ 달러 결투의 공개 항목 5개를 저장했습니다. 아래 2단계(최종 확인)까지 '
+                        '마쳐야 발행 대상이 됩니다.')
+
+    ui.button('1단계 저장 (아직 공개되지 않습니다)', on_click=_save_items) \
+        .props('no-caps outline')
+
+    # ── 2층 — 별도의 최종 확인 (5-2-3) ────────────────────────────────────────
+    ui.separator()
+    ui.markdown('#### 2단계 — 최종 확인 (달러)')
+    ui.label(NOTICE_FINAL_CONFIRM).classes('vh-muted')
+    warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **두 번째**
+
+    if already:
+        info_banner(
+            '✅ 이 달러 계좌는 최종 확인까지 마친 상태입니다. 다음 발행 배치부터 **달러 '
+            '순위표**에 나타납니다(같은 그룹에 사람이 충분히 모였다면). 원화 순위표와는 '
+            '아무 관계가 없습니다.'
+        )
+        return
+
+    final_box = ui.checkbox(
+        '위 5개 항목 전부를 읽고 이해했으며, 내 **달러 결투** 성적을 공개 순위표에 공개하는 '
+        '데 최종적으로 동의합니다.'
+    ).props('dense').classes('w-full vh-keep-all')
+    final_message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+    async def _save_final() -> None:
+        final_message.text = ''
+        if not final_box.value:
+            final_message.text = '🚫 최종 확인란을 체크해 주세요 — 1단계와는 별개의 확인 절차입니다.'
+            return
+        try:
+            payload = final_confirm_payload(_values())
+        except DuelRuleError as exc:
+            final_message.text = f'🚫 {exc}'
+            return
+        await _save_usd(client, account, payload, final_message, on_changed,
+                        '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 **달러** 공개 순위표 '
+                        '대상이 됩니다.')
+
+    ui.button('🔓 최종 확인하고 달러 순위표 공개 신청', on_click=_save_final) \
+        .props('no-caps color=primary')
+
+
+def _render_real_principal_form_usd(client, account: dict, state: dict, on_changed) -> None:
+    """💵 달러 트랙의 독립 동의(5-2-4).
+
+    🔴 설명 문구만 원화와 다릅니다(`NOTICE_REAL_PRINCIPAL_USD`) — 체급 기준이 "내 성적표"의
+       **달러 보유분** 매입원가합계이고, 원화 종목이 섞여 있으면 합치지 않고 '구간 미적용'
+       으로 갑니다. 원화 문구를 그대로 쓰면 사실과 다른 안내가 됩니다(§0-1).
+    """
+    ui.markdown('#### 별개 항목 — 실제 **달러** 매입총합을 체급 산정에 사용')
+    ui.label(NOTICE_REAL_PRINCIPAL_USD).classes('vh-muted vh-keep-all')
+    ui.label(NOTICE_BRACKET_FIXED).classes('vh-muted')
+
+    box = ui.checkbox(
+        CONSENT_REAL_PRINCIPAL_SENTENCE, value=bool(state["real_principal"]),
+    ).props('dense').classes('w-full vh-keep-all')
+    message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+    async def _save_flag() -> None:
+        message.text = ''
+        enabled = bool(box.value)
+        await _save_usd(client, account, real_principal_payload(enabled), message, on_changed,
+                        '✅ 실제 매입총합 사용 동의를 켰습니다(달러 체급이 배정됩니다).' if enabled
+                        else '✅ 실제 매입총합 사용 동의를 껐습니다(다음 시즌부터 구간 미적용 그룹).')
+
+    ui.button('이 항목만 저장', on_click=_save_flag).props('no-caps outline')
+    ui.label(
+        '※ 이 항목은 위 5개와 따로 저장됩니다. 켜지 않아도 달러 순위표에는 참여할 수 있습니다.'
+    ).classes('vh-muted')
+
+
+# =============================================================================
 # 5. 철회 (5-8) — 확인 단계 필수
 # =============================================================================
 def _render_revoke(client, account_id, on_changed) -> None:
@@ -726,6 +1081,55 @@ def _render_revoke(client, account_id, on_changed) -> None:
         ui.button('철회합니다', on_click=_revoke).props('no-caps color=negative')
 
 
+def _render_revoke_usd(client, account_id, on_changed) -> None:
+    """💵 달러 트랙 철회 — `_render_revoke()` 의 통화 미러(§5-19).
+
+    🔴 `revoke_consent_usd()` 는 `duel_public_consent_usd` 만 건드립니다. **원화 동의는
+       그대로 남습니다**(5-11-10) — 그 사실을 화면에도 한 줄로 밝힙니다(§0-1: 한쪽만
+       철회한 사용자가 "다 지워졌겠지" 하고 오해하면 안 됩니다).
+    """
+    with ui.expansion('🚫 달러 결투 공개 동의 철회하기').classes('w-full'):
+        warning_banner(NOTICE_REVOKE)
+        ui.label(NOTICE_REVOKE_TIMING).classes('vh-muted')
+        ui.label(
+            '※ 이 철회는 **달러 순위표에만** 적용됩니다. 원화 결투의 공개 동의는 그대로 '
+            '남고, 원화 순위표 기록도 지워지지 않습니다(원화도 그만두시려면 위쪽 원화 '
+            '카드에서 따로 철회하셔야 합니다).'
+        ).classes('vh-muted vh-keep-all')
+        confirm = ui.checkbox(REVOKE_CONFIRM_LABEL).props('dense').classes('w-full vh-keep-all')
+        message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+        async def _revoke() -> None:
+            message.text = ''
+            guard = revoke_guard(bool(confirm.value))
+            if guard:
+                message.text = guard
+                return
+            try:
+                await run_blocking(revoke_consent_usd, client, account_id)
+            except (DuelDbError, DuelRuleError) as exc:
+                message.text = f'🚫 {exc}'
+                ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
+                          classes='whitespace-pre-line')
+                return
+            except Exception as exc:               # noqa: BLE001
+                text = _fail(exc, '철회를 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+                message.text = f'🚫 {text}'
+                ui.notify(f'🚫 {text}', type='negative', multi_line=True, close_button='닫기')
+                return
+            ui.notify(
+                '✅ 달러 결투의 공개 동의를 철회했습니다(원화 동의는 그대로입니다).\n'
+                f'{NOTICE_REVOKE_TIMING}\n'
+                f'{duel_rules.RECONSENT_BLOCK_MONTHS}개월 동안은 달러 트랙에 다시 동의하실 수 '
+                '없습니다.',
+                type='positive', multi_line=True, close_button='닫기', timeout=0,
+                classes='text-lg whitespace-pre-line',
+            )
+            on_changed()
+
+        ui.button('달러 동의를 철회합니다', on_click=_revoke).props('no-caps color=negative')
+
+
 # =============================================================================
 # 6. 저장 공통 — 저장 성공 시에만 닉네임을 발급합니다 (5-5)
 # =============================================================================
@@ -756,6 +1160,54 @@ async def _save(client, account: dict, payload: dict, message, on_changed, succe
         await run_blocking(save_consent, client, account_id, **payload)
     except (DuelDbError, DuelRuleError) as exc:
         # 이미 "사람이 읽을 한국어 한 문장"입니다(3개월 차단 안내 등) — 그대로 보여줍니다.
+        message.text = f'🚫 {exc}'
+        ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
+                  timeout=0, classes='whitespace-pre-line')
+        return
+    except Exception as exc:                       # noqa: BLE001
+        text = _fail(exc, '동의를 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+        message.text = f'🚫 {text}'
+        ui.notify(f'🚫 {text}', type='negative', multi_line=True, close_button='닫기')
+        return
+
+    nickname_warning = ''
+    try:
+        await run_blocking(
+            ensure_nickname, client, account.get("user_id"), account.get("window_type"))
+    except Exception as exc:                       # noqa: BLE001
+        nickname_warning = (
+            '\n⚠️ 다만 공개 닉네임 발급에 실패했습니다: '
+            f'{_fail(exc, "잠시 후 이 화면에서 다시 저장해 주세요.")}'
+            '\n닉네임이 없으면 순위표에 실리지 않습니다 — 다시 저장하면 재시도합니다.'
+        )
+
+    ui.notify(success_text + nickname_warning, type='positive', multi_line=True,
+              close_button='닫기', classes='text-lg whitespace-pre-line')
+    on_changed()
+
+
+# =============================================================================
+# 6-b. 💵 달러 트랙 저장 공통 (§5-19 — `_save()` 의 통화 미러)
+# =============================================================================
+async def _save_usd(client, account: dict, payload: dict, message, on_changed,
+                    success_text: str) -> None:
+    """
+    `save_consent_usd()` 호출 + 오류 표시 + (성공 시) 닉네임 발급.
+
+    🔴 원화 `_save()` 와 **다른 것은 저장 함수 한 개뿐**입니다
+       (`save_consent` → `save_consent_usd`, 즉 `duel_public_consent_usd` 표).
+       순서(저장 성공 뒤에만 닉네임 발급 — 5-5), 실패 처리, "동의는 저장됐지만 닉네임
+       발급에 실패했다"는 정직한 안내(§0-1)는 전부 같습니다.
+
+    🔴 **닉네임 발급은 접미사 없는 `ensure_nickname()` 그대로**입니다 — `duel_nicknames` 는
+       원화·달러가 공유하는 유일한 표이고(5-11-10 · 스키마 §6), 인자도 계좌 id 가 아니라
+       `(user_id, window_type)` 입니다. 그래서 같은 사용자의 같은 창유형이면 원화에서 이미
+       발급받은 이름을 **그대로 다시 받습니다**(멱등) — 달러라고 새 이름이 생기지 않습니다.
+    """
+    account_id = account.get("id")
+    try:
+        await run_blocking(save_consent_usd, client, account_id, **payload)
+    except (DuelDbError, DuelRuleError) as exc:
         message.text = f'🚫 {exc}'
         ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
                   timeout=0, classes='whitespace-pre-line')

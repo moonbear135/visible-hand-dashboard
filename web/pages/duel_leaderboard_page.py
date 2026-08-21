@@ -20,6 +20,26 @@
 수익률도 계산하지 않습니다(§0-3-2 / 5-7 — 방문자 수만큼 전체 스캔이 돌면 안 됩니다).
 
 -------------------------------------------------------------------------------
+💵 2026-08-21 — 통화 선택(원화 / 달러)이 들어왔습니다 (§5-19)
+-------------------------------------------------------------------------------
+🔴 **원화 순위표와 달러 순위표는 절대 병합·비교하지 않습니다**(5-11-9 오너 확정). 표부터
+   물리적으로 다릅니다(`duel_public_leaderboard` ↔ `duel_public_leaderboard_usd`,
+   `duel_public_holdings` ↔ `duel_public_holdings_usd`). 이 화면은 통화를 고른 **한쪽만**
+   읽습니다 — 같은 요청에 두 통화가 섞이는 자리가 하나도 없습니다. 이유는 두 가지입니다:
+   ① 환율 시계열이 없어 두 통화의 성적을 한 줄에 세울 수 없고(§0-1), ② 두 트랙은 배치
+   시각·휴장일 캘린더가 달라 한쪽만 갱신된 상태가 상시로 생깁니다(5-11-9-b).
+
+무엇이 통화마다 다른가 — **딱 다섯 가지**입니다. 이 다섯 가지가 `track_readers()` 한 곳에
+모여 있어서, §0-3-8 검토가 "이 함수만 보면 된다"가 됩니다:
+    ① 발행일 조회 함수  ② 순위표 조회 함수  ③ 보유종목 조회 함수
+    ④ 체급 목록·라벨(`BRACKET_KEYS`/`bracket_label()` ↔ `..._USD`)
+    ⑤ **금액 서식 통화** — 놓치면 달러 매입금액에 "원"이 찍힙니다(§0-1).
+
+통화와 **무관한 것**(그래서 그대로 재사용하는 것): 창유형 목록(`ACCOUNT_WINDOW_TYPES`),
+"구간 미적용"(`BRACKET_NONE_KEY`), 최소 인원(500명), 상위/하위 500·페이지 크기,
+순위 표기, "비공개" 표기, 그리고 아래 5-3 고정 문구 두 문단(**화면 전체에 딱 한 번**).
+
+-------------------------------------------------------------------------------
 🚧 공개 게이트 — `duel_page.py` 와 **똑같은 3단계 패턴**, 스위치만 다릅니다
 -------------------------------------------------------------------------------
     DUEL_ENABLED                     … 1갈래 전체 스위치(꺼져 있으면 2갈래도 없습니다)
@@ -47,10 +67,17 @@ from utils.duel_db import (
     fetch_public_leaderboard,
     fetch_public_leaderboard_latest_date,
 )
+from utils.duel_db_usd import (
+    fetch_public_holdings_for_nickname_usd,
+    fetch_public_leaderboard_usd,
+    fetch_public_leaderboard_latest_date_usd,
+)
 from utils.duel_rules import DuelRuleError
-# ⚠️ `utils/scorecard_db.py` 에서 가져오는 것은 **로그인 확인과 금액 서식 4개뿐**입니다.
-#    실제 보유종목(`holdings`)을 읽는 함수는 이름조차 가져오지 않습니다(5-4-5 위 머리말).
-from utils.scorecard_db import format_amount, supabase_status, user_id_of
+# ⚠️ `utils/scorecard_db.py` 에서 가져오는 것은 **로그인 확인과 금액 서식뿐**입니다.
+#    실제 보유 자산을 읽는 함수는 이름조차 가져오지 않습니다(5-4-5 위 머리말).
+from utils.scorecard_db import (
+    CURRENCY_KRW, CURRENCY_USD, format_amount, supabase_status, user_id_of,
+)
 from web.auth import (
     current_user_async,
     get_client_async,
@@ -132,6 +159,36 @@ NOTICE_EMPTY_GROUP = (
 SECTION_TOP = "top"
 SECTION_BOTTOM = "bottom"
 
+# =============================================================================
+# 💵 통화(트랙) — 2026-08-21 §5-19
+# =============================================================================
+#: 통화 코드 → 선택기에 보일 이름. 코드 자체는 `scorecard_db.CURRENCY_KRW/USD` 가 단일
+#: 출처입니다(§0-3-10 — 이 화면이 "KRW"/"USD" 문자열을 새로 정의하지 않습니다).
+#: 순서가 곧 기본값입니다 — 첫 항목(원화)이 화면을 열었을 때 선택돼 있습니다.
+CURRENCY_TITLES = {
+    CURRENCY_KRW: "🇰🇷 원화 결투 (코스피 상위 200)",
+    CURRENCY_USD: "🇺🇸 달러 결투 (미국주식)",
+}
+
+#: 🔴 두 순위표가 왜 별개인지. 사용자가 "왜 달러 1등이 원화 1등보다 수익률이 높은데 위에
+#:    없지?" 라고 묻기 전에 먼저 밝힙니다(§0-1 — 없는 것은 없다고 말합니다).
+NOTICE_TRACKS_NEVER_MERGED = (
+    "원화 순위표와 달러 순위표는 **완전히 다른 표**입니다. 두 통화의 성적을 합치거나 서로 "
+    "비교하지 않습니다 — 이 앱에는 환율 시계열이 없어서 두 통화를 한 줄에 세울 방법이 "
+    "없고(없는 값을 지어내지 않습니다), 두 시장은 마감 시각과 휴장일도 달라 갱신 주기 "
+    "자체가 다르기 때문입니다. 통화를 바꾸면 그 통화의 발행표만 새로 읽습니다."
+)
+
+#: 💵 달러 트랙의 체급 기준 통화. 원화 안내(`NOTICE_HOW_RANKING_WORKS`)는 "매입원가합계"
+#:    까지만 말하고 통화를 밝히지 않는데, 달러 트랙에서는 그 통화가 무엇인지가 실제로
+#:    결과를 가릅니다 — `duel_publish_usd.summarize_real_principal_usd()` 는 "내 성적표"에
+#:    달러가 아닌 통화가 하나라도 있으면 **합치지 않고** '구간 미적용'으로 보냅니다.
+NOTICE_BRACKET_CURRENCY_USD = (
+    "달러 순위표의 체급은 '내 성적표'의 **달러 보유분** 매입원가합계로만 나뉩니다. 원화 "
+    "종목을 함께 갖고 있는 분은 두 통화를 더하지 않고 "
+    f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹에서 겨룹니다."
+)
+
 
 # =============================================================================
 # 1. 순수 함수 (위젯 없이 검증할 수 있게 따로 뺐습니다)
@@ -155,6 +212,67 @@ def bracket_options():
     두 곳에 존재하게 되고, 언젠가 한쪽만 바뀝니다(§0-3-10).
     """
     return {key: duel_rules.bracket_label(key) for key in duel_rules.BRACKET_KEYS}
+
+
+def bracket_options_usd():
+    """
+    💵 달러 체급 선택지 {bracket_key: 라벨} — 8구간 + "구간 미적용"(§5-19).
+
+    위 `bracket_options()` 와 **같은 모양**이고 출처만 다릅니다
+    (`BRACKET_KEYS`/`bracket_label()` → `BRACKET_KEYS_USD`/`bracket_label_usd()`).
+
+    🔴 원화 `bracket_label()` 에 달러 체급 키를 넘기면 라벨이 조용히 틀리는 게 아니라
+       `DuelRuleError` 로 **화면이 통째로 안 그려집니다**(모르는 키를 지어내지 않으므로).
+       그게 맞는 동작이고, 그래서 목록과 라벨을 반드시 짝지어 씁니다 — 짝짓는 자리는
+       아래 `track_readers()` 한 곳뿐입니다.
+    """
+    return {key: duel_rules.bracket_label_usd(key) for key in duel_rules.BRACKET_KEYS_USD}
+
+
+def currency_options():
+    """통화 선택지 {통화코드: 라벨}. 첫 항목(원화)이 기본 선택값입니다."""
+    return dict(CURRENCY_TITLES)
+
+
+def track_readers(currency):
+    """
+    🔴 **통화마다 다른 것이 전부 모여 있는 단 하나의 자리**(§5-19 · 5-11-9).
+
+    돌려주는 dict
+        latest_date   : 발행일 조회 함수
+        page_rows     : 순위표 한 페이지 조회 함수
+        detail_rows   : 한 참가자의 발행된 보유종목 조회 함수
+        bracket_label : bracket_key → 라벨 함수
+        brackets      : 체급 선택지 {key: 라벨}
+        amount        : `format_amount()` 에 넘길 통화 코드
+        title         : 화면에 쓸 트랙 이름
+
+    ⚠️ 이 함수가 하는 일은 **고르기뿐**입니다 — 두 통화의 값을 섞거나 합치는 계산은
+       하나도 없고, 호출부는 고른 쪽 함수만 씁니다. 모르는 통화는 기본값으로 때우지 않고
+       예외입니다(§0-1 — 잘못 고른 통화로 남의 트랙 표를 읽는 것보다 안 그리는 게 낫습니다).
+    """
+    code = str(currency or "").strip()
+    if code == CURRENCY_KRW:
+        return {
+            "latest_date": fetch_public_leaderboard_latest_date,
+            "page_rows": fetch_public_leaderboard,
+            "detail_rows": fetch_public_holdings_for_nickname,
+            "bracket_label": duel_rules.bracket_label,
+            "brackets": bracket_options(),
+            "amount": CURRENCY_KRW,
+            "title": CURRENCY_TITLES[CURRENCY_KRW],
+        }
+    if code == CURRENCY_USD:
+        return {
+            "latest_date": fetch_public_leaderboard_latest_date_usd,
+            "page_rows": fetch_public_leaderboard_usd,
+            "detail_rows": fetch_public_holdings_for_nickname_usd,
+            "bracket_label": duel_rules.bracket_label_usd,
+            "brackets": bracket_options_usd(),
+            "amount": CURRENCY_USD,
+            "title": CURRENCY_TITLES[CURRENCY_USD],
+        }
+    raise DuelRuleError(f"알 수 없는 통화입니다: {currency!r}")
 
 
 def section_cap(section):
@@ -190,11 +308,21 @@ def rank_text(row):
     return f'{value}위'
 
 
-def holding_row_cells(row):
+def holding_row_cells(row, currency=CURRENCY_KRW):
     """
-    공개 보유종목 한 행 → 표 셀 5개. 동의하지 않은 항목(null)은 **"비공개"** 로 그립니다.
+    공개 보유종목 한 행 → 표 셀 3개. 동의하지 않은 항목(null)은 **"비공개"** 로 그립니다.
 
     🔐 §0-3-9 — 종목명은 배치가 넣은 값이지만 예외 없이 `esc()` 를 거칩니다.
+
+    💵 2026-08-21(§5-19) — `currency` 가 붙었습니다(**생략하면 예전과 똑같이 원화**).
+       예전에는 `format_amount(buy_amount, "KRW")` 로 통화가 본문에 박혀 있어서, 달러
+       보유종목의 매입금액이 그대로 **"1,234원"** 으로 찍혔을 자리입니다(§0-1 정면 위반 —
+       예외도 로그도 없이 사용자에게만 틀린 값이 보이는 종류).
+       🔴 그런데도 `holding_row_cells_usd()` 를 따로 만들지 **않은** 이유: 이 함수에서
+       통화에 걸린 것은 `format_amount()` 의 인자 하나뿐이고, 나머지는 전부 **XSS 이스케이프
+       (§0-3-9)와 "비공개 ≠ 0"(§0-1) 판정**입니다. 그 둘을 복제하면 이스케이프 경로가 두 개가
+       되어, 한쪽만 고치는 순간 조용히 뚫립니다 — 이 트랙이 지금까지 함수를 복제해 온 기준
+       ("표 이름·시간대가 본문에 박힌 것")과 정반대의 상황이라 여기서는 인자로 갈랐습니다.
     """
     data = dict(row or {})
     ticker = str(data.get("ticker") or "")
@@ -205,13 +333,17 @@ def holding_row_cells(row):
         (f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">'
          f'{esc(str(name))}<br>({esc(ticker)})</div>'),
         esc(f'{float(quantity):,.6g}주' if quantity is not None else NOT_PUBLISHED_TEXT),
-        esc(format_amount(buy_amount, "KRW") if buy_amount is not None else NOT_PUBLISHED_TEXT),
+        esc(format_amount(buy_amount, currency) if buy_amount is not None
+            else NOT_PUBLISHED_TEXT),
     ]
 
 
-def holdings_table(rows):
-    """공개 보유종목 표 HTML. 행이 없으면 None(호출부가 안내 문구를 대신 그립니다)."""
-    body = [holding_row_cells(row) for row in rows or []]
+def holdings_table(rows, currency=CURRENCY_KRW):
+    """공개 보유종목 표 HTML. 행이 없으면 None(호출부가 안내 문구를 대신 그립니다).
+
+    💵 `currency` 는 위 `holding_row_cells()` 로 그대로 넘어갑니다(생략하면 원화).
+    """
+    body = [holding_row_cells(row, currency) for row in rows or []]
     if not body:
         return None
     return holdings_table_html(['종목', '수량', '매입금액'], body)
@@ -313,11 +445,16 @@ async def _render_body(client) -> None:
     ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted')
     ui.label(NOTICE_MIN_PARTICIPANTS).classes('vh-muted')
     ui.label(NOTICE_DAILY).classes('vh-muted')
+    # 💵 2026-08-21(§5-19) — 통화 선택이 생겼으므로 "두 표는 절대 안 합친다"를 먼저 밝힙니다.
+    ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all')
 
     windows = window_options()
-    brackets = bracket_options()
+    currencies = currency_options()
+    default_currency = next(iter(currencies))
+    brackets = track_readers(default_currency)["brackets"]
     # 지역 상태(접속마다 별개). 값은 "지금 무엇을 보고 있는가"뿐이고 사용자 데이터가 아닙니다.
     view = {
+        "currency": default_currency,
         "window_type": next(iter(windows)),
         "bracket_key": next(iter(brackets)),
         SECTION_TOP: 0,
@@ -331,9 +468,28 @@ async def _render_body(client) -> None:
         view[SECTION_BOTTOM] = 0
         group_section.refresh()
 
+    def _currency_changed(_event=None) -> None:
+        """🔴 통화가 바뀌면 **체급 목록 자체가 통째로 바뀝니다**(§5-19).
+
+        원화 체급 키(`krw_…`)와 달러 체급 키(`usd_…`)는 겹치는 것이 하나도 없어서, 옛 값을
+        그대로 들고 가면 `bracket_label_usd()` 가 모르는 키로 예외를 냅니다. 그래서 목록을
+        새로 깔고 **그 목록의 첫 항목**으로 선택을 리셋합니다(임의로 비슷한 구간을 골라
+        주지 않습니다 — 그건 사용자가 안 고른 값을 지어내는 일입니다, §0-1).
+        """
+        view["currency"] = currency_select.value
+        new_brackets = track_readers(view["currency"])["brackets"]
+        view["bracket_key"] = next(iter(new_brackets))
+        view[SECTION_TOP] = 0
+        view[SECTION_BOTTOM] = 0
+        bracket_select.set_options(new_brackets, value=view["bracket_key"])
+        group_section.refresh()
+
     with ui.row().classes('w-full gap-4 items-end'):
         # `on_change=` 생성자 인자는 `duel_page.py::_render_order_form()` 이 이미 쓰는
         # 방식 그대로입니다(§0-3-10 — 화면마다 다른 이벤트 배선 관례를 만들지 않습니다).
+        # 통화를 **맨 앞**에 둔 이유: 통화가 바로 아래 체급 목록을 결정하기 때문입니다.
+        currency_select = ui.select(currencies, value=view["currency"], label='통화(트랙)',
+                                    on_change=_currency_changed).style('flex: 1 1 240px;')
         window_select = ui.select(windows, value=view["window_type"], label='계좌 유형',
                                   on_change=_changed).style('flex: 1 1 200px;')
         bracket_select = ui.select(brackets, value=view["bracket_key"],
@@ -350,12 +506,22 @@ async def _render_body(client) -> None:
 
 
 async def _render_group(client, view: dict, on_changed) -> None:
-    """한 그룹(창유형 × 체급)의 순위표. 발행일을 **먼저 한 번** 확정하고 시작합니다."""
+    """한 그룹(통화 × 창유형 × 체급)의 순위표. 발행일을 **먼저 한 번** 확정하고 시작합니다.
+
+    💵 §5-19 — 고른 통화의 함수만 씁니다. `readers` 를 여기서 한 번 고른 뒤 아래 두 단계
+       (`_render_section` → `_render_holdings`)에 **그대로 넘겨**, 한 화면 안에서 통화가
+       중간에 갈릴 수 있는 자리를 없앴습니다.
+    """
     window_type = view["window_type"]
     bracket_key = view["bracket_key"]
     try:
+        readers = track_readers(view["currency"])
+    except DuelRuleError as exc:
+        error_banner(f'🚫 {exc}')
+        return
+    try:
         published_date = await run_blocking(
-            fetch_public_leaderboard_latest_date,
+            readers["latest_date"],
             client, window_type=window_type, bracket_key=bracket_key)
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
@@ -364,10 +530,15 @@ async def _render_group(client, view: dict, on_changed) -> None:
         error_banner(f'🚫 {_fail(exc, "순위표를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
         return
 
+    # 🔴 제목에 **통화를 먼저** 적습니다. 원화 표와 달러 표는 절대 섞이지 않지만, 보는
+    #    사람이 어느 쪽을 보고 있는지 헷갈리면 그것만으로도 잘못된 비교를 하게 됩니다.
     ui.markdown(
-        f'#### {esc(WINDOW_TITLES.get(window_type, str(window_type)))} · '
-        f'{esc(duel_rules.bracket_label(bracket_key))}'
+        f'#### {esc(readers["title"])} · '
+        f'{esc(WINDOW_TITLES.get(window_type, str(window_type)))} · '
+        f'{esc(readers["bracket_label"](bracket_key))}'
     )
+    if view["currency"] == CURRENCY_USD:
+        ui.label(NOTICE_BRACKET_CURRENCY_USD).classes('vh-muted vh-keep-all')
 
     if not published_date:
         # 🔴 정상 상태입니다(오류 아님). 참가자가 없거나, 최소 인원 미달이라 발행되지
@@ -379,12 +550,13 @@ async def _render_group(client, view: dict, on_changed) -> None:
     ui.label(f'📅 {published_date} 발행분').classes('vh-muted')
     ui.label(NOTICE_OVERLAP).classes('vh-muted')
 
-    await _render_section(client, view, published_date, SECTION_TOP, on_changed)
+    await _render_section(client, view, published_date, SECTION_TOP, on_changed, readers)
     ui.separator()
-    await _render_section(client, view, published_date, SECTION_BOTTOM, on_changed)
+    await _render_section(client, view, published_date, SECTION_BOTTOM, on_changed, readers)
 
 
-async def _render_section(client, view: dict, published_date: str, section: str, on_changed) -> None:
+async def _render_section(client, view: dict, published_date: str, section: str, on_changed,
+                          readers: dict) -> None:
     """
     위쪽(1위부터) 또는 아래쪽(꼴찌부터) 한 페이지.
 
@@ -408,7 +580,7 @@ async def _render_section(client, view: dict, published_date: str, section: str,
 
     try:
         rows = await run_blocking(
-            fetch_public_leaderboard,
+            readers["page_rows"],
             client, window_type=view["window_type"], bracket_key=view["bracket_key"],
             published_date=published_date, limit=limit, offset=offset,
             order_desc=(section == SECTION_BOTTOM),
@@ -429,13 +601,14 @@ async def _render_section(client, view: dict, published_date: str, section: str,
     # 보여줍니다(읽는 사람에게는 "…998위, 999위, 1000위" 가 자연스럽습니다).
     display_rows = list(rows) if section == SECTION_TOP else list(reversed(rows))
     for row in display_rows:
-        _render_participant(client, published_date, view["window_type"], row)
+        _render_participant(client, published_date, view["window_type"], row, readers)
 
     _render_pager(view, section, page_index, has_next=len(rows) >= limit,
                   on_changed=on_changed)
 
 
-def _render_participant(client, published_date: str, window_type: str, row: dict) -> None:
+def _render_participant(client, published_date: str, window_type: str, row: dict,
+                        readers: dict) -> None:
     # (이 함수 자체는 위젯만 만듭니다 — 조회는 아래 `_open()` 을 눌렀을 때만 일어납니다.)
     """
     순위표 한 줄. 펼치면 그 닉네임의 **공개된** 보유종목을 개별 열람합니다(5-2).
@@ -458,7 +631,7 @@ def _render_participant(client, published_date: str, window_type: str, row: dict
                 return
             slot["loaded"] = True                  # 두 번 눌러도 두 번 읽지 않습니다
             with slot["body"]:
-                await _render_holdings(client, published_date, window_type, nickname)
+                await _render_holdings(client, published_date, window_type, nickname, readers)
 
         with ui.row().classes('no-wrap items-center gap-2 w-full'):
             ui.label(header).classes('flex-1 min-w-0 vh-keep-all')
@@ -467,14 +640,20 @@ def _render_participant(client, published_date: str, window_type: str, row: dict
         slot["body"] = ui.column().classes('w-full gap-1')
 
 
-async def _render_holdings(client, published_date: str, window_type: str, nickname: str) -> None:
-    """한 참가자의 공개 보유종목 표(없으면 그 사실을 그대로 알립니다)."""
+async def _render_holdings(client, published_date: str, window_type: str, nickname: str,
+                           readers: dict) -> None:
+    """한 참가자의 공개 보유종목 표(없으면 그 사실을 그대로 알립니다).
+
+    💵 §5-19 — 조회 함수도, 금액 서식 통화도 `readers` 에서 옵니다. 둘이 어긋나면(예: 달러
+       표를 읽고 원화로 서식) 화면이 조용히 "1,234원"이라고 말하게 됩니다 — 그래서 **한
+       dict 에서 함께 꺼냅니다**(두 곳에서 따로 고르지 않습니다).
+    """
     if not nickname:
         error_banner('🚫 닉네임을 확인하지 못해 보유종목을 불러오지 않았습니다.')
         return
     try:
         rows = await run_blocking(
-            fetch_public_holdings_for_nickname,
+            readers["detail_rows"],
             client, nickname, published_date=published_date, window_type=window_type)
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
@@ -483,7 +662,7 @@ async def _render_holdings(client, published_date: str, window_type: str, nickna
         error_banner(f'🚫 {_fail(exc, "보유종목을 불러오지 못했습니다.")}')
         return
 
-    table = holdings_table(rows)
+    table = holdings_table(rows, readers["amount"])
     if table is None:
         # 행이 아예 없는 것은 "보유종목을 공개하지 않았다" 또는 "아직 아무것도 사지 않았다"
         # 입니다. 둘 중 무엇인지 이 표만 보고는 알 수 없으므로 **단정하지 않습니다**(§0-1).

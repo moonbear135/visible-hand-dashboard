@@ -936,6 +936,113 @@ USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본�
 
 ---
 
+### 5-19. 🆕 USD 트랙 8차 코딩 — **남은 화면 2개**(`duel_consent_page.py` 공개 동의 관리 + `duel_leaderboard_page.py` 공개 순위표) 확장 + 신규 테스트 2종 (2026-08-21, 15번째 코딩 작업)
+
+**배경**: §5-18이 "다음 라운드"로 남겨 둔 마지막 두 화면입니다. 이것으로 **USD 트랙의 코드는 전부 끝났습니다** — 스키마(§5-12) · 규칙 상수(§5-13) · DB 접근 계층(§5-14) · 야간 배치(§5-15) · 체결 거래일 버그 수정(§5-16) · 발행 배치(§5-17) · `/duel` 화면(§5-18) · **동의 화면 + 순위표 화면(이번)**.
+
+§5-18과 성격이 같습니다 — 두 파일 모두 **이미 배포된 화면**이라, 최우선 제약은 "USD를 잘 만드는 것"이 아니라 **"원화 트랙이 지금 하는 동작을 한 글자도 바꾸지 않는 것"** 이었습니다.
+
+**오너가 코딩 착수 전에 확정해 준 설계 결정 4가지(그대로 따랐습니다)**:
+1. **새 파일도, 새 URL도, 새 플래그도 만들지 않습니다.** `/duel/consent`·`/duel/leaderboard`를 그대로 확장하고, `DUEL_CONSENT_ENABLED`/`DUEL_CONSENT_MENU_ADMIN_ONLY`/`DUEL_LEADERBOARD_ENABLED`/`DUEL_LEADERBOARD_MENU_ADMIN_ONLY` 4개를 **원화·달러 공통으로 재사용**(§5-18에서 `/duel` 화면을 `DUEL_ENABLED` 하나로 게이팅한 것과 같은 정신 — 통화는 화면 존재 여부가 아니라 화면 **안**의 분기).
+2. **동의 화면**은 `/duel` 화면(§5-18)이 이미 검증한 패턴 그대로 — USD 계좌가 하나도 없으면 예전과 **완전히 동일한 렌더 경로**, 있으면 창유형(M1/M3/M6)마다 위쪽 원화 카드 / 아래쪽 달러 카드. "아직 참여하지 않으셨습니다"는 **`mine`과 `mine_usd`가 둘 다 빌 때만**.
+3. **순위표 화면**은 **세 번째 드롭다운(통화: 원화/달러)** 추가. 고른 통화의 발행표만 읽고 **절대 병합·비교하지 않습니다**(5-11-9).
+4. **닉네임은 통화 공통**(`ensure_nickname`/`fetch_my_nickname`을 접미사 없이 재사용 — 5-11-10, `duel_nicknames_usd` 표는 존재하지 않음).
+
+---
+
+#### 🔴 이번 라운드에서 발견한 함정 — **이 트랙의 다섯·여섯 번째 "통화 리터럴이 박혀 있던 함수"**
+
+이전 라운드들에서 "통화 무관인 줄 알았는데 실제로는 리터럴이 박혀 있던" 사례가 넷 있었습니다(`_translate_order_guard_error`(§5-14) · `format_summary_lines`(§5-15) · `resolve_fill_trading_day`(§5-16) · `resolve_bracket_for_season`(§5-17)). 이번에 둘 더 나왔습니다.
+
+**⑤ `holding_row_cells()` — `format_amount(buy_amount, "KRW")` 로 통화가 본문에 박혀 있었습니다.**
+그대로 재사용했다면 **달러 참가자의 매입금액이 "612원"으로 표시**됩니다($612.50이 아니라). 예외도 로그도 나지 않고, 사용자에게만 틀린 값이 보이는 종류입니다(§0-1 정면 위반). 오너가 착수 전에 이 자리를 미리 짚어 주셨고, 실제로 확인해 보니 그대로였습니다.
+- **그런데 `holding_row_cells_usd()`를 새로 만들지는 않았습니다** — 이 함수에서 통화에 걸린 것은 `format_amount()`의 인자 **하나뿐**이고, 나머지 본문은 전부 **XSS 이스케이프(§0-3-9)** 와 **"비공개 ≠ 0"(§0-1)** 판정입니다. 복제하면 **이스케이프 경로가 두 개**가 되어 한쪽만 고치는 순간 조용히 뚫립니다. 지금까지의 복제 기준("표 이름·시간대·통화 문구가 본문에 박힌 것")과 정반대 상황이라, 여기서는 **인자로 갈랐습니다**(`currency=CURRENCY_KRW` 기본값 — 생략하면 예전과 글자 그대로 같은 원화 표기). 이 판단 자체를 회귀 테스트로 고정해 뒀습니다(`test_holdings_table_was_not_duplicated_per_currency`).
+
+**⑥ `NOTICE_REAL_PRINCIPAL`(독립 동의 설명 문구) — 통화가 안 적혀 있어서 오히려 위험했습니다.**
+문구에 "원"도 "$"도 없어서 통화 무관처럼 보이지만, 실제 판정은 **정반대**입니다:
+- 원화 트랙: `duel_publish.summarize_real_principal()` → "내 성적표"에 **원화가 아닌 통화가 하나라도** 있으면 `FX_MIXED`(→ 구간 미적용), 원화 매입원가합계로 체급.
+- 달러 트랙: `duel_publish_usd.summarize_real_principal_usd()` → **달러가 아닌 통화가 하나라도** 있으면 `FX_MIXED`, 달러 매입원가합계($750/$2,250/…)로 체급.
+
+즉 원화 문구를 달러 카드에 그대로 붙이면, 국내주식만 가진 사용자가 "내 매입총합으로 체급이 정해지겠구나" 하고 동의했는데 실제로는 **전원 '구간 미적용'** 으로 떨어집니다. 그래서 `NOTICE_REAL_PRINCIPAL_USD`를 따로 뒀고(달러 경계값·"원화 종목이 섞이면 합치지 않고 구간 미적용"·"환율 시계열이 없어서 합칠 수 없음"을 전부 명시), 화면에 적은 경계값이 `BRACKET_TIERS_USD`와 실제로 같은지도 테스트로 대조합니다.
+
+**🔵 그 밖에 발견한 것 (오너 확인 필요)**
+
+- **🔴 닉네임 공유의 부작용 — 두 트랙에 모두 공개하면 "이 두 줄은 같은 사람"이 드러납니다.** 5-11-10은 "같은 사용자면 같은 닉네임"을 확정했고 스키마 §6이 `(user_id, window_type)` 키로 그것을 구현합니다. 그 결과 **같은 창유형의 원화 순위표와 달러 순위표에 같은 닉네임 문자열이 실립니다.** 교차 *사용자* 유출은 아닙니다(§0-3-8은 그대로 지켜집니다 — 남의 데이터는 어느 경로로도 안 흐르고, 발행표에는 `user_id`·`account_id` 컬럼 자체가 없습니다). 다만 **공개 범위에 대한 사실**이라 사용자가 모르고 동의하면 안 된다고 판단해, 동의 화면에 `NOTICE_SHARED_NICKNAME`으로 그대로 밝혔습니다("한쪽만 공개하시면 그런 연결은 생기지 않습니다"까지 함께). **문구와 방침 모두 오너 확인을 부탁드립니다** — 만약 "두 트랙의 닉네임을 갈라야 한다"고 판단하신다면 그건 5-11-10을 뒤집는 스키마 변경이라 별도 라운드가 됩니다.
+- **🔵 원화 전용 사용자의 안내문 한 줄이 이제 부정확해질 수 있습니다.** 원화 전용 경로의 *"계좌마다 서로 다른 무작위 닉네임이 발급되며"* 는 원화만 쓰는 동안에는 참이지만, 달러에도 참여하면 같은 창유형끼리 이름을 공유합니다. **원화 무수정 원칙 때문에 이 문장을 손대지 않았고**, 달러 병기 화면에서는 정확한 문장(`NOTICE_SHARED_NICKNAME`)으로 대체됩니다. 원화 문장도 미리 고쳐 둘지는 오너 판단입니다.
+- **🔵 둘 다 미참여일 때의 안내문("가상계좌 3개가 만들어지고")** 도 이제 최대 6개(원화 3 + 달러 3)입니다. 역시 원화 무수정을 우선해 **글자 그대로 두었습니다**(틀린 말은 아니고 불완전할 뿐). 고칠지 오너 확인 부탁드립니다.
+- **✅ §5-18이 1순위 후보로 남겼던 문제(`tests/test_web_session_isolation.py`의 `check()`가 pytest를 실패시키지 않음)는 이미 해결돼 있었습니다.** 그 파일에 `_assert_no_check_failures` autouse fixture가 들어와, 이제 `check()` 실패가 pytest에서도 빨간불이 됩니다. 이번 라운드는 그 덕을 봤습니다 — 새 전역 `CURRENCY_TITLES`를 허용 목록에 등록하지 않았을 때 **곧바로 실패**해서 잡혔습니다.
+- **🔵 원화 전용 경로의 `@ui.refreshable` 루프에 잠재적 늦은-바인딩 문제가 있습니다.** `for account in mine:` 안에서 `@ui.refreshable`을 바로 정의하면, 나중에 `.refresh()`로 다시 그릴 때 본문이 참조하는 이름이 **마지막 반복의 객체**로 풀립니다(첫 렌더는 정상, 재렌더만 어긋남). 예전부터 있던 모양이라 **원화 무수정 원칙에 따라 그대로 뒀고**, 새로 만든 달러 병기 경로는 팩토리(`_consent_section()`)로 그 문제가 생기지 않게 짰습니다. 고칠지 오너 판단(급하지 않음 — `.refresh()`가 잘못된 카드를 다시 그려도 데이터는 서버가 다시 읽으므로 값이 틀리지는 않고, "저장했는데 다른 카드가 새로고침되는" 표시 문제입니다).
+
+---
+
+#### 재사용 vs 신규 정의 — 이번 라운드의 판단표
+
+**`web/pages/duel_consent_page.py` (783줄 → 1,234줄)**
+
+| 함수·상수 | 판단 | 근거 |
+|---|---|---|
+| `consent_item_rows` · `missing_item_labels` · `all_items_checked` | **재사용** | 5-2-1의 다섯 문장은 통화 무관. 본문(독스트링 제외)에 통화 리터럴 0건 — 테스트로 고정 |
+| `item_save_payload` · `final_confirm_payload` · `real_principal_payload` · `_assert_no_real_principal` | **재사용** | `save_consent_usd()`가 받는 키 집합이 원화와 **완전히 동일**(`CONSENT_ITEM_FLAGS` + `final_confirmed` + 독립 동의). FakeClient로 실제 저장 계약까지 확인 |
+| `consent_state` · `reconsent_notice` · `revoke_guard` · `_render_current_state` | **재사용** | USD 동의 표가 원화와 컬럼이 같고, 3개월 판정도 같은 `duel_rules.resolve_reconsent_block()` |
+| `CONSENT_ITEM_FLAGS` · `CONSENT_REAL_PRINCIPAL_FLAG` · `CONSENT_ITEM_SENTENCES` | **재사용** | `duel_db_usd`가 `duel_db`에서 그대로 import — `is` 항등성 테스트로 증명 |
+| **`ensure_nickname` · `fetch_my_nickname`** | **재사용(접미사 없음)** | 🔴 5-11-10 — `duel_nicknames`는 원화·달러 공유 표. `duel_db_usd.ensure_nickname is duel_db.ensure_nickname` 확인. `*_usd` 판이 **존재하지 않는지**도 테스트로 고정 |
+| `NOTICE_RESPONSIBILITY` · `NOTICE_ALL_OR_NOTHING` · `NOTICE_FINAL_CONFIRM` · `NOTICE_BRACKET_FIXED` · `NOTICE_REVOKE` · `NOTICE_REVOKE_TIMING` · `REVOKE_CONFIRM_LABEL` | **재사용** | 책임 고지·전부아니면전무·최종확인·시즌 고정·철회 결과는 통화 무관 요구사항(5-2/5-8). 시즌 경계도 공유(5-11-8) |
+| `_render_account_consent_usd` | **신규** | `fetch_my_consent_usd`(표 이름) + 카드 제목 |
+| `_render_consent_form_usd` | **신규** | 저장이 `_save_usd`(→ 다른 표)로 나감. 인자 하나(`save_fn=`)로 태우지 않은 이유는 `duel_publish_usd.py` 머리말과 동일 — 인자를 빠뜨리면 **달러 동의가 원화 표에 저장되는** 통로가 생김 |
+| `_render_real_principal_form_usd` | **신규** | 위 함정 ⑥ — 체급 기준 통화가 정반대 |
+| `_render_revoke_usd` | **신규** | `revoke_consent_usd`(표 이름) + "원화는 그대로 남습니다" 고지 |
+| `_save_usd` | **신규** | `save_consent_usd`(표 이름). 닉네임 발급은 **접미사 없는 원본 그대로** |
+| `_render_both_tracks` · `_consent_section` | **신규** | 창유형별 원화/달러 병기 컨테이너(§5-11-2). 원화 카드는 기존 함수를 **그대로** 호출 |
+| `NOTICE_REAL_PRINCIPAL_USD` · `NOTICE_TRACKS_INDEPENDENT` · `NOTICE_SHARED_NICKNAME` | **신규 문구** | 위 함정 ⑥ + 트랙 독립(5-11-10) + 닉네임 공유 사실 고지(§0-1) |
+
+**`web/pages/duel_leaderboard_page.py` (524줄 → 702줄)**
+
+| 함수·상수 | 판단 | 근거 |
+|---|---|---|
+| `window_options` | **재사용** | `ACCOUNT_WINDOW_TYPES`가 통화 공통. 본문 통화 리터럴 0건(테스트 고정) |
+| `section_cap` · `twr_display` · `rank_text` | **재사용** | 상위/하위 500·%·등수는 통화 무관. `LEADERBOARD_*`·`MIN_PARTICIPANTS_FOR_PUBLICATION`의 `_USD` 판이 **없는지**도 테스트로 고정 |
+| `FIXED_NOTICE_PARAGRAPHS` · `_render_fixed_notice` | **재사용, 화면 전체에 딱 한 번** | 5-3 오너 확정 문구. 통화 선택보다 **위**(로그인 게이트보다도 위)에서 한 번만 그림 — 통화를 바꿔도 안 사라지고 안 두 번 그려짐(테스트 고정) |
+| `NOTICE_HOW_RANKING_WORKS` · `NOTICE_MIN_PARTICIPANTS` · `NOTICE_DAILY` · `NOTICE_OVERLAP` · `NOTICE_EMPTY_GROUP` · `NOT_PUBLISHED_TEXT` | **재사용** | 통화 무관. 달러에만 필요한 보충(`NOTICE_BRACKET_CURRENCY_USD`)은 달러를 골랐을 때만 한 줄 더 붙임 |
+| **`holding_row_cells` · `holdings_table`** | **재사용 + 통화 인자** | 🔴 함정 ⑤. 복제하면 **XSS 이스케이프 경로가 둘**이 되므로 인자로 가름. 생략 시 예전과 동일한 원화 |
+| `bracket_options` | **재사용(원화 전용으로 유지)** | 그대로 |
+| `bracket_options_usd` | **신규** | `BRACKET_KEYS_USD`/`bracket_label_usd()` — 오너 지시대로 화면 로컬 함수 |
+| `currency_options` · `CURRENCY_TITLES` | **신규** | 통화 선택기. 통화 코드 자체는 `scorecard_db.CURRENCY_KRW/USD`가 단일 출처(`is` 확인) |
+| `track_readers` | **신규** | 🔴 **통화마다 다른 것 5가지가 모여 있는 단 하나의 자리**(발행일·순위표·보유종목 조회 함수 + 체급 라벨/목록 + 금액 서식 통화). §0-3-8 검토가 "이 함수만 보면 된다"가 되게 하려는 구조. 두 번들이 **콜러블을 하나도 공유하지 않는다**는 것을 `is` 검사로 고정 |
+| `_currency_changed` | **신규** | 통화가 바뀌면 체급 목록을 통째로 갈고 선택을 새 목록 첫 항목으로 리셋(원화/달러 체급 키는 '구간 미적용' 말고는 하나도 안 겹침 — 비슷한 구간을 골라 주지 않습니다, §0-1) |
+| `_render_group`/`_render_section`/`_render_participant`/`_render_holdings` | **확장(인자 추가)** | `readers`를 **한 번 골라 넘깁니다** — 여러 곳에서 따로 고르면 "달러 표를 읽고 원화로 서식"이 가능해짐 |
+
+---
+
+#### 검증 (전부 직접 실행)
+
+1. `python3 -m py_compile` — 수정·신규 파일 전부 클린. `pyflakes` — 신규 코드 0건(원화 쪽에 예전부터 있던 미사용 지역변수 1건은 그대로, 손대지 않음).
+2. **원화 회귀 0건 — 되돌려서 대조하는 방식(§5-18과 같은 방법)**
+   - 두 화면 파일의 **원본을 백업**해 두고, 수정본과 번갈아 넣어 가며 같은 명령을 돌렸습니다(md5 대조로 원상복구 확인).
+   - `tests/test_web_session_isolation.py`의 **❌ 목록 자체를 캡처해 `diff`** — pytest 모드 21건, 스크립트 모드 16건이 **수정 전/후 완전히 동일**(byte-identical). 실패·오류 테스트 이름 목록도 동일(`test_macro_render_smoke` 1건 실패 + 렌더 스모크 3건 오류 — 전부 이번 라운드 이전부터 있던 것).
+   - `tests/test_duel_public_ui.py`(원화 2갈래 화면의 기존 검증) **44개 그대로 통과**.
+   - 저장소 **전체 스위트**를 되돌린 상태와 수정한 상태로 각각 실행: **942 통과 → 1,033 통과**(+91), 실패·오류 목록은 **완전히 동일**.
+3. **결투 스위트 전체** `python3 -m pytest tests/test_duel*.py -q` → **847개 전부 통과**(기존 756 + 신규 91, **회귀 0건**).
+   - 신규 `tests/test_duel_consent_page_usd.py` **45개**(706줄, 9개 절), 신규 `tests/test_duel_leaderboard_page_usd.py` **46개**(638줄, 9개 절).
+4. **되돌리기 검증(revert-and-confirm) 8회** — 새 테스트가 실제로 이 라운드가 막으려는 사고를 잡는지 하나씩 심어 보고 전부 복구했습니다.
+   ① `_save_usd`가 `save_consent()`(원화 표)를 부르게 되돌림 → **3개 실패**
+   ② `holding_row_cells`의 `"KRW"` 하드코딩 복원 → **3개 실패**
+   ③ "참여하지 않으셨습니다"를 `mine`(원화)만 보고 띄우게 되돌림 → **1개 실패**(달러만 참여한 사용자가 화면을 못 쓰는 상태)
+   ④ USD 번들이 원화 발행일 함수를 쓰게 함 → **3개 실패**
+   ⑤ 달러 카드의 소유자 이중 확인 제거 → **1개 실패**(§0-3-8)
+   ⑥ 달러 독립 동의 설명에 원화 문구 재사용 → **2개 실패**
+   ⑦ `_render_holdings`가 통화를 **다시** 고르게 함 → **2개 실패**
+   ⑧ 5-3 고정 문구를 통화 그룹 안에서 한 번 더 그림 → **1개 실패**
+5. **`main.py`·`web/layout.py` — 확인해 봤는데 변경 불필요.** `main.py`는 이미 `duel_consent_page`·`duel_leaderboard_page`를 import하고 있고(§5-10에서 배선 완료), `web/layout.py`의 4개 플래그와 메뉴 라벨("🔓 공개 동의 관리" / "🏆 공개 순위표 (내 밑으로 눈 깔어)")은 **통화를 언급하지 않는 문구**라 그대로 두면 원화·달러 양쪽을 덮습니다. 오너의 설계 결정 1번이 그대로 맞았습니다. 두 화면 파일 모두 "경로가 정확히 하나"임을 테스트로 고정해 뒀습니다.
+6. **테스트 파일 2건을 최소 수정**했습니다(약화 아님, 근거 기록):
+   - `tests/test_duel_public_ui.py` — `_render_holdings(..., readers)` / `holdings_table(rows, currency)` 시그니처 변경에 맞춰 **호출 한 곳**만 갱신. `readers`에 기본값을 두지 **않은** 것은 의도적입니다(호출부가 빠뜨리면 조용히 원화 표를 읽는 대신 `TypeError`로 시끄럽게 실패). 검증 내용은 한 글자도 안 약해졌습니다.
+   - `tests/test_web_session_isolation.py` — 신규 전역 `CURRENCY_TITLES`를 `ALLOWED_MUTABLE_GLOBALS`에 **사유와 함께 등록**(§0-3-8 절차 그대로. 등록 전에는 실제로 빨간불이 떴습니다).
+
+**⚠️ 이번에도 검증하지 못한 것(§0-1 — 할 수 있는 것만 했다고 말합니다)**: 실제 브라우저에서 통화 드롭다운을 바꿔 보는 것. 처리기(`_currency_changed`)는 페이지 함수 안의 지역 클로저라 테스트에서 직접 부를 수 없어, **그 처리기가 의지하는 위젯 API**(`ui.select.set_options(options, value=…)`)가 이 NiceGUI 판에서 실제로 도는지만 실물로 확인했습니다. 실제 Supabase RLS 동작은 6단계(실검증)의 몫입니다.
+
+**아직 안 된 것**: **USD 트랙은 이것으로 코드가 전부 끝났습니다.** 남은 것은 원화·달러 공통으로 **6단계(실검증)** 와 **7단계(문구 최종 검토 → 3단계 공개 전환)**, 그리고 위 🔵 오너 확인 항목들입니다.
+
+---
+
 ## 6단계 — 실검증 (미착수)
 
 오프라인 테스트로 대체할 수 없는 것들만. 이전 작업지시서들과 마찬가지로 **오너가 실기기로 직접 확인**해야 하는 항목입니다.
@@ -1052,7 +1159,7 @@ USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본�
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-21 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13) + **3차 코딩(신규 `utils/duel_db_usd.py` — USD 표 DB 접근 계층 + 전용 테스트 133개) 완료**(§5-14) + **4차 코딩(야간 배치 오케스트레이션 — `utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 + 전용 테스트 37개) 완료**(§5-15 — 결투 스위트 602개 전부 통과, 회귀 0) + **✅ 5차 코딩(2026-08-21) — 오너가 직접 발견한 "USD 체결 거래일이 하루 늦게 잡히던 버그" 수정 완료**(§5-16 — 신규 `resolve_fill_trading_day_usd()`, 결투 스위트 **607개 전부 통과**, 회귀 0) + **✅ 6차 코딩(2026-08-21) — USD 발행 배치 완료**(§5-17 — 신규 `utils/duel_publish_usd.py`·`run_duel_publish_batch_us.py`·`.github/workflows/duel_publish_daily_us.yml`·`tests/test_duel_publish_usd.py`(108개) + `duel_rules.py`에 신규 `resolve_bracket_for_season_usd()`, 결투 스위트 **715개 전부 통과**, 회귀 0). **🔴 §5-15의 target_date=어제 기본값·정기입금 판정용 today_kst 분리·cron 시각은 여전히 오너 확인 대기입니다**(미결정 항목 6번 — §5-16의 수정은 이 스케줄링 구조를 **바꾸지 않았습니다**, 배치가 처리하는 날짜의 절대값만 하루 당겨졌을 뿐입니다). **🔴 §5-17의 USD 발행 배치 cron `50 3 * * *`(03:50 UTC = KST 12:50)도 같은 성격의 오너 확인 항목입니다** — 선행 USD 체결 배치의 종료 상한(03:20 UTC)에 원화 트랙이 쓰는 여유 30분을 더해 제가 계산한 값이고, 선행 배치 시각이 바뀌면 이 값도 함께 바뀌어야 합니다. + **✅ 7차 코딩(2026-08-21) — `/duel` 화면에 달러 결투 블록 추가 완료**(§5-18 — `web/pages/duel_page.py` 1,112줄 → 2,093줄, 같은 창유형 카드에 위쪽 KRW / 아래쪽 USD 병기, **합산 숫자 없음**(§5-11-2), 신규 `tests/test_duel_page_usd.py` 41개, 결투 스위트 **756개 전부 통과**, **원화 회귀 0건** — 원본 파일로 되돌려 ❌ 목록까지 바이트 단위 대조). KRW v1 기준 남은 건 **6단계(실검증)**와 **7단계(문구 최종 검토 → 공개 전환)**뿐이고, **USD 트랙에 남은 것은 화면 2개뿐입니다 — USD 동의 관리 화면과 USD 순위표 화면**(백엔드·배치·발행·`/duel` 화면은 전부 끝났습니다).
+**2026-08-21 기준 진행 상황: 0단계(설계) ✅ + 1단계(스키마 승인) ✅ + 2단계(Branch 1) ✅ + 5단계(Branch 2, 공개 순위표) ✅ 전부 완료** — 백엔드·화면 2종(동의 관리·순위표 열람)·발행 워크플로우·`main.py` 배선(결투 화면 3개 전부)까지 코드 쪽은 다 끝났습니다. 여기에 더해 **신규 USD 트랙("달러 결투") 설계 확정**(§5-11) + **1차 코딩(스키마) 완료 + 오너가 실제 프로덕션 Supabase에 적용·확인까지 완료**(§5-12) + **2차 코딩(`duel_rules.py` USD 상수 + 닉네임 스키마 변경의 파급 수정) 완료, 주문 접수 시간대 초 단위도 오너 확정 완료**(§5-13) + **3차 코딩(신규 `utils/duel_db_usd.py` — USD 표 DB 접근 계층 + 전용 테스트 133개) 완료**(§5-14) + **4차 코딩(야간 배치 오케스트레이션 — `utils/duel_batch_usd.py`·`run_duel_daily_batch_us.py`·워크플로우 + 전용 테스트 37개) 완료**(§5-15 — 결투 스위트 602개 전부 통과, 회귀 0) + **✅ 5차 코딩(2026-08-21) — 오너가 직접 발견한 "USD 체결 거래일이 하루 늦게 잡히던 버그" 수정 완료**(§5-16 — 신규 `resolve_fill_trading_day_usd()`, 결투 스위트 **607개 전부 통과**, 회귀 0) + **✅ 6차 코딩(2026-08-21) — USD 발행 배치 완료**(§5-17 — 신규 `utils/duel_publish_usd.py`·`run_duel_publish_batch_us.py`·`.github/workflows/duel_publish_daily_us.yml`·`tests/test_duel_publish_usd.py`(108개) + `duel_rules.py`에 신규 `resolve_bracket_for_season_usd()`, 결투 스위트 **715개 전부 통과**, 회귀 0). **🔴 §5-15의 target_date=어제 기본값·정기입금 판정용 today_kst 분리·cron 시각은 여전히 오너 확인 대기입니다**(미결정 항목 6번 — §5-16의 수정은 이 스케줄링 구조를 **바꾸지 않았습니다**, 배치가 처리하는 날짜의 절대값만 하루 당겨졌을 뿐입니다). **🔴 §5-17의 USD 발행 배치 cron `50 3 * * *`(03:50 UTC = KST 12:50)도 같은 성격의 오너 확인 항목입니다** — 선행 USD 체결 배치의 종료 상한(03:20 UTC)에 원화 트랙이 쓰는 여유 30분을 더해 제가 계산한 값이고, 선행 배치 시각이 바뀌면 이 값도 함께 바뀌어야 합니다. + **✅ 7차 코딩(2026-08-21) — `/duel` 화면에 달러 결투 블록 추가 완료**(§5-18 — `web/pages/duel_page.py` 1,112줄 → 2,093줄, 같은 창유형 카드에 위쪽 KRW / 아래쪽 USD 병기, **합산 숫자 없음**(§5-11-2), 신규 `tests/test_duel_page_usd.py` 41개, 결투 스위트 **756개 전부 통과**, **원화 회귀 0건** — 원본 파일로 되돌려 ❌ 목록까지 바이트 단위 대조). + **✅ 8차 코딩(2026-08-21) — 남은 화면 2개 완료**(§5-19 — `web/pages/duel_consent_page.py` 783줄 → 1,234줄(창유형마다 위쪽 원화 / 아래쪽 달러 동의 카드, 동의는 트랙별 완전 독립, 닉네임만 공유), `web/pages/duel_leaderboard_page.py` 524줄 → 702줄(**통화 드롭다운 추가**, 고른 통화의 발행표만 읽음 — 절대 병합 안 함), 신규 `tests/test_duel_consent_page_usd.py` 45개 · `tests/test_duel_leaderboard_page_usd.py` 46개, 결투 스위트 **847개 전부 통과**, **원화 회귀 0건**, `main.py`·`web/layout.py` **변경 불필요**로 확인). **🎉 이것으로 USD 트랙의 코드는 전부 끝났습니다.** 원화·달러 공통으로 남은 것은 **6단계(실검증)**와 **7단계(문구 최종 검토 → 3단계 공개 전환)**뿐입니다.
 
 - **1단계 ✅ 완료 (2026-08-19)** — 스키마 8종 개념(계좌/포지션/예약주문/현금원장/스냅샷/닉네임/동의/발행표) 오너 확인 완료. "여기까지는 될 것 같아" 확인 후 코딩 착수 승인.
 - **2단계 진행 중 (2026-08-19, 오푸스 높음으로 2회 코딩 작업)**:
@@ -1107,15 +1214,16 @@ USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본�
 **이어서 오너 확인 2건 처리 + main.py 배선까지 완료 — 이걸로 5단계가 완전히 끝났습니다.** (1) 발행 배치 cron을 10분 → 30분 여유로 조정(위 5-10절 끝부분 참고). (2) 플래그 이름 관련 오해 해소(내부 코드 이름일 뿐, 화면엔 이미 한글 라벨이 따로 있음). (3) `main.py`에 결투 화면 3개(`duel_page`·`duel_consent_page`·`duel_leaderboard_page`) import를 device_bash로 직접 추가 — 오너 저장소 접근 없이 오너 컴퓨터에서 바로 편집했습니다.
 
 **다음 세션에서 제일 먼저 할 일**:
-1. 아직 안 올라간 것 전부를 GitHub에 푸시 (아래 안내 참고) — §5-15의 결과물(신규 `utils/duel_batch_usd.py`·신규 `run_duel_daily_batch_us.py`·신규 `.github/workflows/duel_daily_us.yml`·신규 `tests/test_duel_batch_usd.py`)과 **§5-16의 결과물**(`utils/duel_rules.py`의 신규 `resolve_fill_trading_day_usd()`, `utils/duel_db_usd.py` 호출부·머리말 수정, `utils/duel_batch_usd.py` 머리말 문구 수정, `tests/test_duel.py` 신규 테스트 5개, `tests/test_duel_db_usd.py` 기대값 1건 수정), 그리고 **§5-17의 결과물**(신규 `utils/duel_publish_usd.py`·신규 `run_duel_publish_batch_us.py`·신규 `tests/test_duel_publish_usd.py`·`utils/duel_rules.py`의 신규 `resolve_bracket_for_season_usd()` + §11 절 머리말 갱신), 그리고 **§5-18의 결과물**(`web/pages/duel_page.py` 확장 — 달러 결투 블록 추가, 원화 부분 무수정 · 신규 `tests/test_duel_page_usd.py` 41개), 그리고 이 문서.
+1. 아직 안 올라간 것 전부를 GitHub에 푸시 (아래 안내 참고) — §5-15의 결과물(신규 `utils/duel_batch_usd.py`·신규 `run_duel_daily_batch_us.py`·신규 `.github/workflows/duel_daily_us.yml`·신규 `tests/test_duel_batch_usd.py`)과 **§5-16의 결과물**(`utils/duel_rules.py`의 신규 `resolve_fill_trading_day_usd()`, `utils/duel_db_usd.py` 호출부·머리말 수정, `utils/duel_batch_usd.py` 머리말 문구 수정, `tests/test_duel.py` 신규 테스트 5개, `tests/test_duel_db_usd.py` 기대값 1건 수정), 그리고 **§5-17의 결과물**(신규 `utils/duel_publish_usd.py`·신규 `run_duel_publish_batch_us.py`·신규 `tests/test_duel_publish_usd.py`·`utils/duel_rules.py`의 신규 `resolve_bracket_for_season_usd()` + §11 절 머리말 갱신), 그리고 **§5-18의 결과물**(`web/pages/duel_page.py` 확장 — 달러 결투 블록 추가, 원화 부분 무수정 · 신규 `tests/test_duel_page_usd.py` 41개), 그리고 **§5-19의 결과물**(`web/pages/duel_consent_page.py` 확장 · `web/pages/duel_leaderboard_page.py` 확장(통화 드롭다운) · 신규 `tests/test_duel_consent_page_usd.py` 45개 · 신규 `tests/test_duel_leaderboard_page_usd.py` 46개 · `tests/test_duel_public_ui.py` 호출 한 곳 갱신 · `tests/test_web_session_isolation.py` 허용 목록 1건 추가), 그리고 이 문서.
    - ⚠️ **`.github/workflows/duel_publish_daily_us.yml`(신규)은 §5-15의 `duel_daily_us.yml`과 같은 방식으로 따로 반영해야 합니다** — `device_commit_files`가 `.github/workflows/` 경로를 막으므로 `device_bash` 히어독으로 오너 컴퓨터에 직접 쓴 뒤 `md5sum`으로 대조하세요. 파일 내용 자체는 이번 세션 샌드박스에 완성돼 있고 YAML 파싱까지 확인했습니다.
 2. 위 "상위 50 선정 필드가 실제로 `rank`(시가총액 순위)가 맞는지"만 아직 실제 파일 대조가 안 끝났습니다.
 3. 그 다음은 **6단계(실검증)** — 스테이징에서 실제로 확인해야 하는 것들(아래 6단계 참고), 그리고 **7단계(오너 승인 → 공개 전환)**의 문구 최종 검토가 남아 있습니다. ⚠️ 6단계에서 USD 주문을 실제로 넣어볼 때는 **§5-16이 고친 동작**(한국 날짜 X일 저녁에 넣은 주문의 `target_date`가 X+1이 아니라 **X**로 찍히고, 그 주문은 **X+1일 낮 배치**가 X일자 미국 마감가로 체결)이 실제로 그렇게 도는지 육안으로 한 번 확인해 주세요.
 4. **🔴 USD 배치 시각 설계 오너 확인 필요(§5-15 · §5-17, 미결정 항목 6번)** — ① 체결 배치의 `--target-date` 기본값 "어제"·정기입금 판정용 `--today-date` 분리·cron `03:00 UTC`(매일)는 §5-15에서 제가 실제 수집 스케줄(scrape_us.yml)로부터 도출한 값이고, ② **발행 배치 cron `03:50 UTC`(= KST 12:50)는 §5-17에서 제가 "①의 종료 상한 03:20 UTC + 원화 트랙이 쓰는 여유 30분"으로 계산한 값**입니다 — 둘 다 오너가 확정한 값이 아닙니다. **①을 바꾸면 ②도 반드시 함께 다시 계산해야 합니다**(테스트가 그 관계를 고정하고 있어서, 한쪽만 바꾸면 `test_usd_publish_workflow_keeps_the_same_buffer_the_owner_confirmed_for_krw`가 실패합니다). 급하지 않지만 다음에 꼭 한 번 훑어봐 주세요.
 5. **🔴 §5-17에서 발견한 것 — 지시서에 "통화 무관"이라고 적혀 있던 `duel_rules.resolve_bracket_for_season()`이 실제로는 원화 전용이었습니다.** 함수 본문이 유효한 체급 목록으로 `BRACKET_KEYS`(원화 9개)를 하드코딩하고 있어서, 그대로 재사용했다면 **USD 발행 배치가 첫 실행에서 `DuelRuleError`로 죽었을** 자리입니다. 신규 `resolve_bracket_for_season_usd()`로 갈랐고(이 트랙의 네 번째 예외 사례), 시즌 경계 자체는 5-11-8 확정대로 여전히 공유합니다. 코드 변경은 이미 끝났으니 **확인만** 해주시면 됩니다.
-6. **🆕 USD 트랙("달러 결투") 코딩 — 스키마 ✅ · `duel_rules.py` USD 상수·닉네임 파급 수정 ✅ · `utils/duel_db_usd.py`(DB 접근 계층) ✅ · 야간 배치 오케스트레이션 ✅ · 체결 거래일 하루 지연 버그 수정 ✅(§5-16, 오너가 직접 발견) · 발행 배치 오케스트레이션 ✅(§5-17) · **`/duel` 화면(KRW/USD 병기) ✅**(§5-18 — `web/pages/duel_page.py` 확장 + `tests/test_duel_page_usd.py` 41개) — 여기까지 전부 완료 (§5-11~§5-18 참고).** 결투 스위트 전체가 **756개 전부 통과**(회귀 0)합니다. **다음 코딩 라운드에 남은 것은 화면 2개뿐입니다** — ① **USD 공개 동의 관리 화면**(`duel_consent_page.py` 확장 또는 신규. `save_consent_usd`·`fetch_my_consent_usd`·`revoke_consent_usd` 는 §5-14에서 이미 완성돼 있고 호출부만 없습니다. 동의는 트랙별 완전 독립 — 5-11-10), ② **USD 순위표 화면**(`duel_leaderboard_page.py` 확장 또는 신규. 원화와 **완전히 별개 표**를 읽어야 합니다 — 5-11-9. 읽기 함수 `fetch_public_leaderboard*_usd` 3종도 §5-14에서 이미 완성). 그 두 화면의 `web/layout.py` 플래그·메뉴 배선·`main.py` 배선과 테스트까지가 이 트랙의 마지막입니다. KRW v1의 6/7단계와는 독립적으로 진행 가능합니다.
-7. **🔴 §5-18에서 발견한 것 — `tests/test_web_session_isolation.py` 의 `check()` 가 pytest 를 실패시키지 않습니다.** 실패를 목록에 담기만 하고 그 목록은 `main()` 에서만 검사하기 때문에, **pytest 로 돌리면 내부 검사 실패가 초록불에 묻힙니다.** 지금 결투 두 테스트 안에서만 11건이 조용히 ❌ 상태이고(대부분 2026-08-21 `run_blocking` 도입으로 검사 패턴이 낡은 것), 이번 라운드 전후로 그 목록은 **완전히 동일**합니다(즉 회귀는 아닙니다). 같은 파일의 `test_duel_render_smoke` 에는 `await` 를 빠뜨린 줄도 하나 있습니다. 원화 테스트를 고치는 일이라 §5-18 범위 밖으로 뒀습니다 — **다음 라운드 후보 1순위**입니다.
+6. **🆕 USD 트랙("달러 결투") 코딩 — ✅ 전부 완료 (§5-11~§5-19).** 스키마 ✅ · `duel_rules.py` USD 상수·닉네임 파급 수정 ✅ · `utils/duel_db_usd.py` ✅ · 야간 배치 ✅ · 체결 거래일 하루 지연 버그 수정 ✅(§5-16, 오너가 직접 발견) · 발행 배치 ✅(§5-17) · `/duel` 화면(KRW/USD 병기) ✅(§5-18) · **공개 동의 관리 화면 + 공개 순위표 화면 ✅(§5-19)**. 결투 스위트 전체가 **847개 전부 통과**(회귀 0), 저장소 전체 스위트는 **1,033개 통과**(수정 전 942 + 신규 91, 실패·오류 목록 동일). **이 트랙에 더 만들 코드는 없습니다** — 다음은 6단계(실검증)·7단계(공개 전환)입니다.
+7. **✅ §5-18의 1순위 후보였던 것 — 이미 해결됐습니다.** `tests/test_web_session_isolation.py` 에 `_assert_no_check_failures` autouse fixture 가 들어와, 이제 `check()` 실패가 **pytest 에서도 빨간불**입니다. §5-19 는 실제로 그 덕을 봤습니다(새 전역을 허용 목록에 등록 안 했을 때 곧바로 잡힘). 같은 파일 `test_duel_render_smoke` 의 `await` 누락은 아직 남아 있습니다 — 그 시나리오는 §5-18·§5-19 의 신규 테스트가 달러 기준으로 제대로 검증하고 있어 급하지 않습니다.
 8. **🔴 §5-18의 화면 문구 오너 검토 3건** — `NOTICE_FILL_TIMING_USD`("주문을 넣은 바로 그날의 미국 정규장 마감가")·`NOTICE_WHY_SAME_DAY_USD`(원화와 이유가 정반대라는 설명)·달러 카드 지표명 "총자산 (달러)". 그리고 상시 노출 배너가 원화 3종 + 달러 4종 = 7개로 늘었습니다(§5-18 의 10번 항목). 자세한 내용은 §5-18 끝부분 참고.
+9. **🔴 §5-19 오너 확인 3건** — ① **닉네임 공유의 부작용**: 같은 창유형의 원화·달러에 **둘 다** 공개 동의하면 두 순위표에 같은 닉네임이 실려 "이 두 줄은 같은 사람"이 드러납니다(5-11-10 확정의 자연스러운 귀결이고 교차 *사용자* 유출은 아니지만, 사용자가 모르면 안 되는 사실이라 동의 화면에 `NOTICE_SHARED_NICKNAME` 으로 밝혀 뒀습니다 — 문구와 방침 확인 부탁드립니다). ② 원화 전용 화면에 그대로 남겨 둔 문장 두 개("계좌마다 서로 다른 무작위 닉네임", "가상계좌 3개가 만들어지고")가 달러까지 참여하면 불완전해집니다 — 원화 무수정 원칙 때문에 손대지 않았는데, 미리 고칠지 판단 부탁드립니다. ③ 순위표 통화 선택기 라벨("🇰🇷 원화 결투 (코스피 상위 200)" / "🇺🇸 달러 결투 (미국주식)")과 달러 순위표 제목에 통화를 앞에 붙인 것이 실제로 보기에 괜찮은지. 자세한 내용은 §5-19 끝부분 참고.
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 

@@ -1008,19 +1008,28 @@ def test_leaderboard_body_handles_an_unpublished_group_as_a_normal_state():
 
 
 def test_leaderboard_holdings_panel_renders_escaped_and_marks_private_fields():
-    """펼쳤을 때의 경로 — XSS 이스케이프(§0-3-9)와 '비공개' 표기(§0-1)를 함께 확인합니다."""
+    """펼쳤을 때의 경로 — XSS 이스케이프(§0-3-9)와 '비공개' 표기(§0-1)를 함께 확인합니다.
+
+    🔴 2026-08-21(§5-19) — 통화(원화/달러)가 들어오면서 두 함수의 시그니처가 바뀌었습니다.
+       · `_render_holdings(..., readers)` — 어느 트랙의 발행표를 읽고 어느 통화로 금액을
+         쓸지를 **인자로 받습니다**. 기본값을 두지 않은 것은 의도적입니다 — 호출부가
+         빠뜨리면 조용히 원화 표를 읽는 대신 `TypeError` 로 시끄럽게 실패합니다.
+       · `holdings_table(rows, currency)` — 금액 서식 통화(생략하면 예전과 같은 원화).
+       검증 내용 자체는 한 글자도 약해지지 않았습니다(같은 원화 경로를 그대로 확인).
+    """
     captured = []
     client = _leaderboard_client()
     real_table = board_page.holdings_table
 
-    def _spy(rows):
-        result = real_table(rows)
+    def _spy(rows, currency=board_page.CURRENCY_KRW):
+        result = real_table(rows, currency)
         captured.append(result)
         return result
 
     saved = _patch(board_page, holdings_table=_spy)
     try:
-        _run(board_page._render_holdings(client, "2026-08-20", "M1", "닉네임1"))
+        _run(board_page._render_holdings(client, "2026-08-20", "M1", "닉네임1",
+                                         board_page.track_readers(board_page.CURRENCY_KRW)))
     finally:
         _restore(board_page, saved)
 

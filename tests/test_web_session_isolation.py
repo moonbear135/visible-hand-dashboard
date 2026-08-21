@@ -249,6 +249,13 @@ ALLOWED_MUTABLE_GLOBALS = {
         "흐릅니다(client·account_id 를 인자로 받는 함수들).",
     ("web/pages/duel_leaderboard_page.py", "WINDOW_TITLES"):
         "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 위와 같은 사유.",
+    # ── 💵 달러 결투(USD 트랙) 순위표의 통화 선택 — 2026-08-21 추가 (§5-19) ──────
+    ("web/pages/duel_leaderboard_page.py", "CURRENCY_TITLES"):
+        "통화 코드(KRW/USD) → 화면 표기명(고정 문자열). `web/pages/scorecard_page.py` 의 "
+        "같은 이름 상수와 성격이 같고, 값이 대입되는 코드가 없습니다. 통화 코드 자체는 "
+        "`utils/scorecard_db.py` 의 CURRENCY_KRW/CURRENCY_USD 가 단일 출처이며, '지금 어느 "
+        "통화를 보고 있는가'는 전부 `_render_body()` 안의 지역 dict(`view`)로만 흐릅니다 "
+        "(§0-3-8 — 접속자끼리 선택 상태가 섞이지 않습니다).",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}
