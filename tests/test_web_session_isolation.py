@@ -1176,8 +1176,12 @@ def test_login_is_shared_between_scorecard_and_report():
 
     check(report.has_supabase_session is scorecard.has_supabase_session is auth.has_supabase_session,
           "두 화면이 **같은** has_supabase_session() 을 봄 (로그인 판정 단일 출처)")
-    check(report.get_client is scorecard.get_client is auth.get_client,
-          "두 화면이 **같은** get_client() 를 씀 (접속 전용 Supabase 클라이언트 1개)")
+    # 🔴 2026-08-21 — 두 화면 모두 `get_client()` 대신 `get_client_async()` 로 옮겨갔습니다
+    # (이벤트 루프 안 막힘 수정, `web/auth.py` 독스트링). 두 화면이 **같은** 접속 전용
+    # Supabase 클라이언트 접근 경로를 쓰는지가 이 검사의 목적이므로, 지금 실제로 쓰는
+    # 이름(get_client_async)을 봅니다 — `get_client` 는 이제 화면 모듈에 아예 없습니다.
+    check(report.get_client_async is scorecard.get_client_async is auth.get_client_async,
+          "두 화면이 **같은** get_client_async() 를 씀 (접속 전용 Supabase 클라이언트 1개)")
     check(report.render_auth is scorecard.render_auth is auth_ui.render_auth,
           "두 화면이 **같은** 로그인 폼을 그림 (web/auth_ui.py 하나 — §0-3-10)")
 
