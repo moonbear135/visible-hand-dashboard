@@ -69,9 +69,16 @@ from utils.duel_db import (
     save_consent,
 )
 from utils.duel_rules import DuelRuleError
-from utils.scorecard_db import current_user, supabase_status, user_id_of
-from web.auth import get_client, has_supabase_session, is_admin, logout
+from utils.scorecard_db import supabase_status, user_id_of
+from web.auth import (
+    current_user_async,
+    get_client_async,
+    has_supabase_session,
+    is_admin,
+    logout_async,
+)
 from web.auth_ui import fail_message, render_auth
+from web.blocking import run_blocking
 from web.components import error_banner, esc, info_banner, warning_banner
 from web.layout import (
     DUEL_CONSENT_ENABLED,
@@ -79,6 +86,7 @@ from web.layout import (
     DUEL_ENABLED,
     layout,
 )
+from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS
 
 # 계좌 유형 → 화면 이름. `duel_page.py::WINDOW_TITLES` 와 같은 값이지만 저 파일을 import
 # 하지 않습니다 — 1갈래 화면 모듈에 걸린 의존(시세 파일 로딩 등)을 이 화면이 물려받지
@@ -346,8 +354,13 @@ def reconsent_notice(consent_row, now=None):
 # =============================================================================
 # 2. 페이지 (공개 플래그 게이트 → 로그인 게이트)
 # =============================================================================
-@ui.page('/duel/consent')
-def duel_consent_page() -> None:
+# 🔴 2026-08-21 — `async def` + `response_timeout` 이 붙었습니다.
+#    NiceGUI 는 **비동기 페이지 함수에만** `response_timeout`(기본 3초)을 겁니다. 이 화면은
+#    계좌 3개 × (동의 상태·닉네임) 조회를 하므로 느린 날에는 3초를 넘길 수 있고, 그러면
+#    화면 대신 **영어 500 오류 페이지**가 나갑니다(§0-3-4 위반). 값의 근거는
+#    `web/state.PAGE_RESPONSE_TIMEOUT_SECONDS` 주석에 적어 뒀습니다.
+@ui.page('/duel/consent', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def duel_consent_page() -> None:
     with layout('⚔️ 결투다! — 공개 동의'):
         ui.markdown('## 🔓 공개 동의 관리 — "내 밑으로 눈 깔어"')
 
@@ -375,25 +388,28 @@ def duel_consent_page() -> None:
             render_auth()
             return
 
+        # 🔴 2026-08-21 — 세션 확인 두 단계를 **한 try 안**으로 모았습니다. 둘 다 Supabase
+        #    왕복이라 "요청이 중단됨"으로 실패할 수 있는데, 그 실패를 "로그인 만료"로
+        #    오해해 멀쩡한 토큰을 지워버리면 안 되기 때문입니다(§0-1).
         try:
-            client = get_client()
+            client = await get_client_async()
+            if client is None:
+                warning_banner('🚧 공개 동의 화면은 아직 준비중입니다(로그인 연결이 준비되지 않았습니다).')
+                return
+            user = await current_user_async(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
             return
-        if client is None:
-            warning_banner('🚧 공개 동의 화면은 아직 준비중입니다(로그인 연결이 준비되지 않았습니다).')
-            return
 
-        user = current_user(client)
         user_id = user_id_of(user)
         if not user_id:
-            logout()
+            await logout_async()
             warning_banner('⚠️ 로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
             render_auth()
             return
 
         try:
-            _render_body(client, user_id)
+            await _render_body(client, user_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "화면을 그리는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.")}')
 
@@ -422,10 +438,16 @@ def _render_header() -> None:
 # =============================================================================
 # 3. 로그인 후 본문
 # =============================================================================
-def _render_body(client, user_id: str) -> None:
-    """계좌별 동의 카드. `client`·`user_id` 는 **반드시 인자로** 받습니다(§0-3-8)."""
+async def _render_body(client, user_id: str) -> None:
+    """계좌별 동의 카드. `client`·`user_id` 는 **반드시 인자로** 받습니다(§0-3-8).
+
+    🔴 2026-08-21 — Supabase 조회를 전부 `run_blocking()` 으로 별도 스레드에 넘깁니다.
+       계좌 목록 1회 + 계좌 3개 × (동의 상태·닉네임) = 최대 7회의 **동기 HTTP 왕복**이
+       한 번 그릴 때마다 일어나고, 그동안 이벤트 루프가 멈추면 **다른 화면을 보던
+       접속자까지** 함께 끊깁니다(`web/blocking.py` 모듈 독스트링).
+    """
     try:
-        accounts = fetch_my_accounts(client, user_id)
+        accounts = await run_blocking(fetch_my_accounts, client, user_id)
     except Exception as exc:                       # noqa: BLE001
         error_banner(f'🚫 {_fail(exc, "가상계좌를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
         return
@@ -460,14 +482,16 @@ def _render_body(client, user_id: str) -> None:
     ).classes('vh-muted')
 
     for account in mine:
+        # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+        #    직접 부를 때는 `await`, 처리기 쪽 `.refresh()` 는 동기 호출 그대로입니다.
         @ui.refreshable
-        def account_section(account=account) -> None:
-            _render_account_consent(client, user_id, account, account_section.refresh)
+        async def account_section(account=account) -> None:
+            await _render_account_consent(client, user_id, account, account_section.refresh)
 
-        account_section()
+        await account_section()
 
 
-def _render_account_consent(client, user_id: str, account: dict, on_changed) -> None:
+async def _render_account_consent(client, user_id: str, account: dict, on_changed) -> None:
     """계좌 1개의 동의 카드 — 현재 상태 → 1층 → 2층 → 독립 동의 → 철회."""
     if account.get("user_id") != user_id:          # 🔒 카드를 그리기 전에 한 번 더(§0-3-8)
         error_banner('🚫 소유자가 확인되지 않는 계좌라 표시하지 않았습니다.')
@@ -480,7 +504,7 @@ def _render_account_consent(client, user_id: str, account: dict, on_changed) -> 
         ui.markdown(f'##### ⚔️ {esc(title)}')
 
         try:
-            consent_row = fetch_my_consent(client, account_id)
+            consent_row = await run_blocking(fetch_my_consent, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "공개 동의 상태를 불러오지 못했습니다.")}')
             return
@@ -495,7 +519,8 @@ def _render_account_consent(client, user_id: str, account: dict, on_changed) -> 
                 # 🔴 2026-08-20 USD 트랙(§5-11) 도입으로 닉네임 표가 (user_id, window_type)
                 #    단위로 바뀌었습니다(스키마 §6 재구조화, 5-11-10 — 같은 사용자의 원화·
                 #    달러 계좌가 같은 닉네임을 공유). 더 이상 account_id 로 조회하지 않습니다.
-                nickname_row = fetch_my_nickname(client, account["user_id"], account["window_type"])
+                nickname_row = await run_blocking(
+                    fetch_my_nickname, client, account["user_id"], account["window_type"])
             except Exception as exc:               # noqa: BLE001
                 error_banner(f'🚫 {_fail(exc, "닉네임을 불러오지 못했습니다.")}')
 
@@ -584,7 +609,7 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
     def _values():
         return {flag: bool(box.value) for flag, box in boxes.items()}
 
-    def _save_items() -> None:
+    async def _save_items() -> None:
         message.text = ''
         if not all_items_checked(_values()):
             # 부분 저장을 막습니다. `duel_db.save_consent()` 는 중간 상태 저장 자체를
@@ -596,8 +621,8 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
                 + '\n(부분 공개 조합은 제공하지 않습니다.)'
             )
             return
-        _save(client, account, item_save_payload(_values()), message, on_changed,
-              '✅ 공개 항목 5개를 저장했습니다. 아래 2단계(최종 확인)까지 마쳐야 발행 대상이 됩니다.')
+        await _save(client, account, item_save_payload(_values()), message, on_changed,
+                    '✅ 공개 항목 5개를 저장했습니다. 아래 2단계(최종 확인)까지 마쳐야 발행 대상이 됩니다.')
 
     ui.button('1단계 저장 (아직 공개되지 않습니다)', on_click=_save_items) \
         .props('no-caps outline')
@@ -621,7 +646,7 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
     ).props('dense').classes('w-full vh-keep-all')
     final_message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
-    def _save_final() -> None:
+    async def _save_final() -> None:
         final_message.text = ''
         if not final_box.value:
             final_message.text = '🚫 최종 확인란을 체크해 주세요 — 1단계와는 별개의 확인 절차입니다.'
@@ -631,8 +656,8 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
         except DuelRuleError as exc:
             final_message.text = f'🚫 {exc}'
             return
-        _save(client, account, payload, final_message, on_changed,
-              '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 공개 순위표 대상이 됩니다.')
+        await _save(client, account, payload, final_message, on_changed,
+                    '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 공개 순위표 대상이 됩니다.')
 
     ui.button('🔓 최종 확인하고 공개 신청', on_click=_save_final).props('no-caps color=primary')
 
@@ -648,12 +673,12 @@ def _render_real_principal_form(client, account: dict, state: dict, on_changed) 
     ).props('dense').classes('w-full vh-keep-all')
     message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
-    def _save_flag() -> None:
+    async def _save_flag() -> None:
         message.text = ''
         enabled = bool(box.value)
-        _save(client, account, real_principal_payload(enabled), message, on_changed,
-              '✅ 실제 매입총합 사용 동의를 켰습니다(체급이 배정됩니다).' if enabled
-              else '✅ 실제 매입총합 사용 동의를 껐습니다(다음 시즌부터 구간 미적용 그룹).')
+        await _save(client, account, real_principal_payload(enabled), message, on_changed,
+                    '✅ 실제 매입총합 사용 동의를 켰습니다(체급이 배정됩니다).' if enabled
+                    else '✅ 실제 매입총합 사용 동의를 껐습니다(다음 시즌부터 구간 미적용 그룹).')
 
     ui.button('이 항목만 저장', on_click=_save_flag).props('no-caps outline')
     ui.label(
@@ -671,14 +696,14 @@ def _render_revoke(client, account_id, on_changed) -> None:
         confirm = ui.checkbox(REVOKE_CONFIRM_LABEL).props('dense').classes('w-full vh-keep-all')
         message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
-        def _revoke() -> None:
+        async def _revoke() -> None:
             message.text = ''
             guard = revoke_guard(bool(confirm.value))
             if guard:
                 message.text = guard
                 return
             try:
-                revoke_consent(client, account_id)
+                await run_blocking(revoke_consent, client, account_id)
             except (DuelDbError, DuelRuleError) as exc:
                 message.text = f'🚫 {exc}'
                 ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
@@ -704,7 +729,7 @@ def _render_revoke(client, account_id, on_changed) -> None:
 # =============================================================================
 # 6. 저장 공통 — 저장 성공 시에만 닉네임을 발급합니다 (5-5)
 # =============================================================================
-def _save(client, account: dict, payload: dict, message, on_changed, success_text: str) -> None:
+async def _save(client, account: dict, payload: dict, message, on_changed, success_text: str) -> None:
     """
     `save_consent()` 호출 + 오류 표시 + (성공 시) 닉네임 발급.
 
@@ -726,7 +751,9 @@ def _save(client, account: dict, payload: dict, message, on_changed, success_tex
     """
     account_id = account.get("id")
     try:
-        save_consent(client, account_id, **payload)
+        # 🔴 2026-08-21 — 저장·닉네임 발급 둘 다 Supabase 왕복입니다. **순서는 그대로**
+        #    (저장 성공 뒤에만 닉네임 발급)이고, 각 왕복이 이벤트 루프 밖에서 돌 뿐입니다.
+        await run_blocking(save_consent, client, account_id, **payload)
     except (DuelDbError, DuelRuleError) as exc:
         # 이미 "사람이 읽을 한국어 한 문장"입니다(3개월 차단 안내 등) — 그대로 보여줍니다.
         message.text = f'🚫 {exc}'
@@ -741,7 +768,8 @@ def _save(client, account: dict, payload: dict, message, on_changed, success_tex
 
     nickname_warning = ''
     try:
-        ensure_nickname(client, account.get("user_id"), account.get("window_type"))
+        await run_blocking(
+            ensure_nickname, client, account.get("user_id"), account.get("window_type"))
     except Exception as exc:                       # noqa: BLE001
         nickname_warning = (
             '\n⚠️ 다만 공개 닉네임 발급에 실패했습니다: '

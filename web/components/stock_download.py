@@ -28,11 +28,12 @@ from utils.stock_export import (
 )
 from utils.stock_history import load_stock_history, stock_history_path
 
+from web.blocking import run_blocking
 from web.components.html import compact, esc
 from web.components.widgets import download_button, info_banner, warning_banner
 
 
-def render_stock_download_tool(
+async def render_stock_download_tool(
     stocks: List[dict],
     *,
     fields: list,
@@ -50,10 +51,22 @@ def render_stock_download_tool(
     price_label: str,
     caption: str,
 ) -> None:
-    """검색 → 종목 선택 → CSV/JSON 다운로드. 페이지 함수 안에서 호출하세요.
+    """검색 → 종목 선택 → CSV/JSON 다운로드. 페이지 함수 안에서 **`await` 로** 호출하세요.
 
     상태(검색어·선택 종목)는 **이 함수의 지역 변수**에만 둡니다 — 모듈 전역에 두면
     한 사람의 검색어가 다른 접속자에게 보입니다 (ENGINEERING_SPEC.md §0-3-8 / 계획서 §3-3).
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다 (오너가 홈 화면에서 "연결이 끊겼습니다"를
+       다시 겪은 자리가 **바로 여기**입니다).
+       검색창에 글자를 하나 칠 때마다 `_results()` 가 다시 그려지고, 그 안의
+       `load_stock_history()` 가 `utils/data_source.read_text()` 를 탑니다. 원격 모드
+       (`DATA_SOURCE_BASE_URL`)에서 그건 **동기 `requests.get()`** 이고, 종목별 이력 CSV 는
+       전 종목 × 며칠치라 파일 중에서도 큰 축입니다. 그 몇 초 동안 한 프로세스뿐인
+       NiceGUI 이벤트 루프가 통째로 멈춰 **접속자 전원**의 연결이 끊깁니다
+       (자세한 사고 경위는 `web/blocking.py` 모듈 독스트링).
+       → 파일을 읽는 한 줄만 `run_blocking()` 으로 별도 스레드에 넘기고, 화면을 그리는
+         나머지는 예전 그대로 이벤트 루프에서 실행합니다. 보이는 결과는 한 글자도
+         달라지지 않습니다.
     """
     state = {'query': '', 'picked': 0}
 
@@ -72,8 +85,13 @@ def render_stock_download_tool(
             .classes('w-full') \
             .style('max-width: 28rem;')
 
+        # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+        #    · 여기서처럼 **직접 부를 때는 반드시 `await`** 해야 화면이 그려집니다.
+        #    · 검색창 `on_change` 가 부르는 `_results.refresh()` 는 **동기 함수에서 불러도**
+        #      됩니다 — NiceGUI 가 알아서 배경 작업으로 돌려 주므로 `_on_query()` 는 한 줄도
+        #      바꿀 필요가 없습니다(`web/pages/report_page.py::_render_signed_in()` 과 동일).
         @ui.refreshable
-        def _results() -> None:
+        async def _results() -> None:
             query = state['query']
             if not query:
                 info_banner(empty_hint)
@@ -100,13 +118,29 @@ def render_stock_download_tool(
             else:
                 target = found[0]
 
-            _render_target(target)
+            await _render_target(target)
 
-        def _render_target(target: dict) -> None:
+        async def _render_target(target: dict) -> None:
             code = key_of(target)
             name = name_of(target)
 
-            history_rows = load_stock_history(stock_history_path(history_filename), key_field, code)
+            try:
+                # 🔴 이 한 줄이 이번 수정의 전부입니다 — 파일/네트워크 왕복만 스레드로.
+                #    `load_stock_history()` 는 `client`/저장소를 전혀 만지지 않고 경로와
+                #    문자열만 받으므로 스레드로 넘겨도 안전합니다(`web/blocking.py` 규칙).
+                history_rows = await run_blocking(
+                    load_stock_history, stock_history_path(history_filename), key_field, code)
+            except Exception as exc:               # noqa: BLE001 — 상세는 서버 로그로만 (§0-3-4)
+                # `load_stock_history()` 자체는 실패해도 빈 목록을 돌려주므로, 여기 오는 건
+                # 사실상 "요청이 중단됨"(`BlockingCallAborted`) 뿐입니다. 그래도 §0-1 —
+                # 실패를 "이력이 없음"으로 위장하지 않고 그대로 알립니다.
+                print(f'⚠️ 종목별 이력 조회 중단 ({code}): {type(exc).__name__}: {exc}')
+                warning_banner(
+                    f"⏳ '{name}({code})'의 날짜별 이력을 불러오지 못했습니다. "
+                    '잠시 후 다시 검색해 주세요. (이력이 없다는 뜻이 아닙니다.)'
+                )
+                return
+
             if not history_rows:
                 warning_banner(
                     f"📭 '{name}({code})'의 날짜별 이력이 아직 없습니다.\n\n"
@@ -157,4 +191,4 @@ def render_stock_download_tool(
                 '이력은 이 기능 도입 이후부터 쌓이므로, 시작 초기에는 줄 수가 적은 게 정상입니다.'
             ).classes('vh-muted')
 
-        _results()
+        await _results()

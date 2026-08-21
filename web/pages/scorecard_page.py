@@ -65,7 +65,6 @@ from utils.scorecard_db import (
     build_portfolio,
     build_universe_index,
     consume_ocr_quota,
-    current_user,
     delete_holding,
     fetch_holdings,
     format_amount,
@@ -87,11 +86,12 @@ from utils.scorecard_ocr import (
     extract_holdings_from_image,
 )
 
-from web.auth import get_client, has_supabase_session, logout
+from web.auth import current_user_async, get_client_async, has_supabase_session, logout_async
 # 🔐 로그인/회원가입/비밀번호 찾기 폼은 '사장님 보고서'(/report)와 **완전히 같은 화면**이라
 #    `web/auth_ui.py` 한 곳에 두고 두 화면이 같이 씁니다 (§0-3-10 중복 금지).
 #    2026-08-17(5단계) 이전까지는 이 파일 안에 있던 코드이며, 옮기면서 동작은 바꾸지 않았습니다.
 from web.auth_ui import fail_message, render_auth
+from web.blocking import run_blocking
 from web.components import (
     chart_layout, compact, error_banner, esc, holdings_table_html, info_banner,
     metric_card, pct_html, pct_text, warning_banner,
@@ -421,22 +421,26 @@ async def scorecard_page() -> None:
             render_auth()
             return
 
+        # 🔴 2026-08-21 — 세션 확인 두 단계(`get_client_async` / `current_user_async`)를
+        #    **한 try 안**으로 모았습니다. 둘 다 Supabase 왕복을 하는 비동기 호출이 되면서
+        #    "요청이 중단됨"으로 실패할 수 있게 됐는데(§0-1 — 빈 값으로 위장 금지), 그 실패를
+        #    "로그인 만료"로 오해해 **멀쩡한 토큰을 지워버리면** 안 되기 때문입니다.
         try:
-            client = get_client()
+            client = await get_client_async()
+            if client is None:
+                _render_not_ready(supabase_status())
+                return
+            # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다.**
+            # 저장소에 캐시해둔 이메일/사용자 id 를 믿지 않는 이유: 저장된 값과 실제 토큰이
+            # 어긋나면 남의 데이터를 본인 것으로 착각해 그릴 수 있기 때문입니다(§0-3-8).
+            user = await current_user_async(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
             return
-        if client is None:
-            _render_not_ready(supabase_status())
-            return
 
-        # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다.**
-        # 저장소에 캐시해둔 이메일/사용자 id 를 믿지 않는 이유: 저장된 값과 실제 토큰이
-        # 어긋나면 남의 데이터를 본인 것으로 착각해 그릴 수 있기 때문입니다(§0-3-8).
-        user = current_user(client)
         user_id = user_id_of(user)
         if not user_id:
-            logout()                                # 끊어진 세션을 남겨두지 않습니다
+            await logout_async()                    # 끊어진 세션을 남겨두지 않습니다
             warning_banner('⚠️ 로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
             render_auth()
             return
@@ -485,8 +489,11 @@ async def _render_body(client, user_id: str, email) -> None:
     ⚠️ `client` 와 `user_id` 는 **반드시 인자로 받습니다.** 이 아래 어떤 함수도 "지금 누가
        로그인했는지"를 전역이나 저장소에서 다시 추측하지 않습니다 (§0-3-8 함수 설계 원칙).
     """
-    def _logout_click() -> None:
-        logout()
+    # 🔴 2026-08-21 — `async def` 입니다. `sign_out()` 도 Supabase 왕복(동기 HTTP)이라,
+    #    로그아웃 버튼 하나가 접속자 전원의 이벤트 루프를 붙잡고 있었습니다.
+    #    (NiceGUI 는 `on_click` 에 코루틴 함수를 그대로 받아 줍니다.)
+    async def _logout_click() -> None:
+        await logout_async()
         ui.navigate.reload()
 
     # 로그인 정보 + 로그아웃 — #127~#130 의 그 "항상 한 줄" 패턴 (no-wrap flex).
@@ -503,18 +510,30 @@ async def _render_body(client, user_id: str, email) -> None:
 
     # 보유종목 목록은 **이 refreshable 안에서 매번 새로 조회**합니다. 추가/수정/삭제 후
     # `.refresh()` 만 부르면 이 블록만 다시 그려집니다(전체 페이지 리렌더 없음 — 계획서 §3-3).
+    # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+    #    · 여기서처럼 **직접 부를 때는 반드시 `await`** 해야 화면이 그려집니다.
+    #    · 추가·수정·삭제 처리기가 부르는 `portfolio_section.refresh` 는 동기 함수에서
+    #      불러도 됩니다 — NiceGUI 가 알아서 배경 작업으로 돌려 줍니다.
     @ui.refreshable
-    def portfolio_section() -> None:
-        _render_portfolio(client, user_id, market, portfolio_section.refresh)
+    async def portfolio_section() -> None:
+        await _render_portfolio(client, user_id, market, portfolio_section.refresh)
 
     _render_input_form(client, user_id, market, portfolio_section.refresh)
     ui.separator()
-    portfolio_section()
+    await portfolio_section()
 
 
-def _render_portfolio(client, user_id: str, market: dict, on_changed) -> None:
+async def _render_portfolio(client, user_id: str, market: dict, on_changed) -> None:
+    """보유 종목 조회 → 통화별 블록.
+
+    🔴 2026-08-21 — `async def`. `fetch_holdings()` 는 Supabase 로 **동기 HTTP 왕복**을
+       하는데, 이 화면은 종목을 추가·수정·삭제할 때마다 다시 부릅니다. 그 동안 이벤트
+       루프가 멈추면 **다른 화면을 보던 접속자까지** 끊깁니다(`web/blocking.py` 독스트링).
+       ⚠️ `client`·`user_id` 는 이미 `@ui.page` 함수가 이벤트 루프 위에서 확정해 인자로
+          내려보낸 값입니다 — 스레드 안에서는 `app.storage` 를 한 번도 만지지 않습니다.
+    """
     try:
-        holdings = fetch_holdings(client, user_id)
+        holdings = await run_blocking(fetch_holdings, client, user_id)
     except Exception as exc:                       # noqa: BLE001
         error_banner(f'🚫 {_fail(exc, "보유 종목을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
         return
@@ -877,7 +896,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 type='info',
             )
 
-        def _bulk_add_all_ocr_items() -> None:
+        async def _bulk_add_all_ocr_items() -> None:
             """인식된 목록 전체를 한 번에 등록합니다(종목마다 "채우기 → 추가"를
             반복하지 않아도 되게 함, 2026-08-18 오너 요청).
 
@@ -928,7 +947,11 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                     continue
 
                 try:
-                    action, merged = add_lot(
+                    # 종목 수만큼 반복되는 저장 호출 — 한 건 한 건이 Supabase 왕복입니다.
+                    # 10종목이면 왕복 10회이므로, 여기가 막히면 그 시간만큼 서버 전체가
+                    # 멈춥니다(2026-08-21 수정, `web/blocking.py`).
+                    action, merged = await run_blocking(
+                        add_lot,
                         client, user_id, market_code, resolved_ticker, quantity, avg_price,
                         stock_name=resolved_name,
                     )
@@ -959,7 +982,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             if added or merged_list:
                 on_changed()
 
-        def _confirm_delete_all_holdings() -> None:
+        async def _confirm_delete_all_holdings() -> None:
             """현재 선택된 시장(원화/달러)의 보유 종목을 전부 지웁니다.
 
             2026-08-18 오너 요청 — 스크린샷 한 장이 "그 계좌의 전체 잔고"를 보여주는
@@ -970,7 +993,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             (§0-1 — 되돌릴 수 없는 동작을 확인 없이 하지 않음).
             """
             try:
-                current_holdings = fetch_holdings(client, user_id)
+                current_holdings = await run_blocking(fetch_holdings, client, user_id)
             except Exception as exc:                       # noqa: BLE001
                 ui.notify(
                     f'🚫 {_fail(exc, "보유 종목을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}',
@@ -983,14 +1006,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 ui.notify(f'{MARKET_LABELS[market_code]}에 삭제할 종목이 없습니다.', type='info')
                 return
 
-            def _do_delete_all() -> None:
+            async def _do_delete_all() -> None:
                 failed = []
                 for holding in targets:
                     holding_id = holding.get('id')
                     if not holding_id:
                         continue
                     try:
-                        delete_holding(client, user_id, holding_id)
+                        await run_blocking(delete_holding, client, user_id, holding_id)
                     except Exception as exc:               # noqa: BLE001
                         failed.append(
                             f'{holding.get("stock_name") or holding.get("ticker")}: '
@@ -1179,7 +1202,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         price_input = ui.input('매입가 (1주당)', placeholder='예: 70,000').style('flex: 1 1 160px;') \
             .tooltip('총 매입금액이 아니라 1주당 매입 단가입니다. 콤마(,)를 넣어 입력해도 됩니다.')
 
-    def _submit() -> None:
+    async def _submit() -> None:
         message.text = ''
         market_code = form['market']
         resolved_ticker, resolved_name, resolve_error = resolve_stock_query(
@@ -1214,7 +1237,8 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         try:
             # holdings 를 넘기지 않으면 add_lot 이 **그 자리에서 다시 조회**합니다 —
             # 화면에 오래 떠 있던 목록을 근거로 평균단가를 계산하는 사고를 막습니다.
-            action, merged = add_lot(
+            action, merged = await run_blocking(
+                add_lot,
                 client, user_id, market_code, resolved_ticker, quantity, price,
                 stock_name=resolved_name,
             )
@@ -1409,13 +1433,19 @@ def _toggle_edit(view: dict, row_id, redraw) -> None:
     redraw()
 
 
-def _delete(client, user_id: str, row, indexes, on_changed) -> None:
+async def _delete(client, user_id: str, row, indexes, on_changed) -> None:
+    """🗑️ 한 종목 삭제.
+
+    🔴 2026-08-21 — `async def`. 아래 `_render_row_manager()` 는 이 함수를 `on_click` 의
+       람다 안에서 부르는데, NiceGUI 는 처리기가 돌려준 코루틴을 알아서 await 해 줍니다
+       (`nicegui.events.handle_event`). 람다 쪽은 한 글자도 바꿀 필요가 없습니다.
+    """
     row_id = row.get("id")
     if not row_id:
         ui.notify('🚫 삭제할 행의 id 를 알 수 없습니다.', type='negative')
         return
     try:
-        delete_holding(client, user_id, row_id)
+        await run_blocking(delete_holding, client, user_id, row_id)
     except Exception as exc:                       # noqa: BLE001
         ui.notify(f'🚫 {_fail(exc, "삭제하지 못했습니다. 잠시 후 다시 시도해 주세요.")}',
                   type='negative', multi_line=True, close_button='닫기')
@@ -1437,7 +1467,7 @@ def _render_edit_card(client, user_id: str, row, indexes, view: dict, redraw, on
             price_input = ui.input('매입가 (1주당)', value=f'{row["avg_purchase_price"]:g}') \
                 .style('flex: 1 1 140px;')
 
-        def _save() -> None:
+        async def _save() -> None:
             message.text = ''
             try:
                 quantity = _parse_positive_number(qty_input.value, '수량')
@@ -1446,7 +1476,7 @@ def _render_edit_card(client, user_id: str, row, indexes, view: dict, redraw, on
                 _notify_fail(message, f'🚫 {exc}')
                 return
             try:
-                update_holding(client, user_id, row.get("id"), quantity, price)
+                await run_blocking(update_holding, client, user_id, row.get("id"), quantity, price)
             except Exception as exc:               # noqa: BLE001
                 _notify_fail(message, f'🚫 {_fail(exc, "수정하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
                 return

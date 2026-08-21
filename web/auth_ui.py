@@ -25,7 +25,7 @@ from utils.scorecard_db import (
     send_password_reset_code,
     sign_up,
 )
-from web.auth import get_client, login, new_auth_client
+from web.auth import get_client_async, login, new_auth_client
 from web.components import info_banner
 
 
@@ -149,7 +149,11 @@ def _render_signup_form() -> None:
             return
         with busy(signup_btn):
             try:
-                client = get_client()
+                # 🔴 2026-08-21 — `get_client()` → `await get_client_async()`. 그 안의 세션
+                #    복원(`set_session`)이 만료된 토큰을 만나면 refresh 왕복(HTTP)을 하는데,
+                #    그것도 이벤트 루프를 붙잡던 자리였습니다. 저장소 접근은 여전히 전부
+                #    이벤트 루프에서 일어납니다(`web/auth.py::get_client_async()` 독스트링).
+                client = await get_client_async()
                 if client is None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 가입할 수 없습니다.'
                     return
@@ -212,7 +216,7 @@ def _render_reset_form() -> None:
         address = (request_email.value or '').strip()
         with busy(send_code_btn):
             try:
-                client = get_client()
+                client = await get_client_async()      # 이유는 위 회원가입 폼과 동일
                 if client is None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 코드를 보낼 수 없습니다.'
                     return

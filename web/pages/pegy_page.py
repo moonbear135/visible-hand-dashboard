@@ -38,6 +38,7 @@ from utils.stock_history import (
 )
 
 from web.auth import is_admin
+from web.blocking import run_blocking
 from web.components import (
     LEARNING_NOTICE_HTML,
     compact,
@@ -90,6 +91,15 @@ def load_latest_kospi_usd():
     """
     market_history.csv에서 가장 최근 코스피 지수·원/달러 환율만 가볍게 읽어옵니다.
     실패해도 절대 지어내지 않고 None을 반환합니다.
+
+    ⚠️ **동기 함수입니다 — 화면에서 직접 부르지 마세요.** 부르는 자리
+       (`_render_market_snapshot()`)가 `run_blocking()` 으로 별도 스레드에서 실행합니다.
+       로컬 디스크 읽기라 보통은 밀리초 단위지만, `pandas.read_csv()` 는 이력이 쌓일수록
+       느려지고 무엇보다 **이 화면('/')이 이번 사고가 실제로 신고된 화면**입니다. 한
+       프로세스뿐인 이벤트 루프 위에서 도는 블로킹 호출은 예외 없이 밖으로 내보냅니다
+       (`web/blocking.py` 모듈 독스트링).
+       동기판을 남겨 두는 이유는 `web/state.load_json_file` 과 같습니다 — 읽기 규칙이
+       한 곳에만 있어야 하고, 이벤트 루프 밖의 호출자도 그대로 쓸 수 있어야 합니다.
     """
     try:
         if not os.path.exists(HISTORY_FILE):
@@ -654,7 +664,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     snapshot_status = metadata.get("status", "UNKNOWN")
 
     _render_title()
-    _render_market_snapshot()
+    await _render_market_snapshot()
 
     # ── §0-1 회귀 검사 지점 (완료기준 ⑦) ────────────────────────────────
     # 스냅샷이 없으면 **숫자를 하나도 그리지 않고** 빨간 배너만 띄우고 끝냅니다.
@@ -822,7 +832,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     _render_guide_box()
 
     # 종목별 데이터 다운로드 도구 — 아래 카드 목록/페이지네이션과 완전히 분리된 섹션입니다.
-    render_stock_download_tool(
+    await render_stock_download_tool(
         processed_stocks,
         fields=KOSPI_HISTORY_FIELDS,
         history_filename=KOSPI_HISTORY_FILENAME,
@@ -926,9 +936,19 @@ def _render_title() -> None:
     ui.html(compact(_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL)).classes('w-full')
 
 
-def _render_market_snapshot() -> None:
-    """코스피 지수 / 원·달러 환율 요약 카드. 못 읽으면 아무것도 그리지 않습니다(§0-1)."""
-    snapshot = load_latest_kospi_usd()
+async def _render_market_snapshot() -> None:
+    """코스피 지수 / 원·달러 환율 요약 카드. 못 읽으면 아무것도 그리지 않습니다(§0-1).
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. CSV 를 읽는 한 줄만 별도 스레드로 넘기고
+       (`web/blocking.py`), 카드를 그리는 나머지는 예전 그대로입니다.
+    """
+    try:
+        snapshot = await run_blocking(load_latest_kospi_usd)
+    except Exception as exc:                       # noqa: BLE001 — 취소(BlockingCallAborted) 등
+        # `load_latest_kospi_usd()` 는 실패해도 None 을 돌려주므로 여기 오는 건 사실상
+        # "요청 중단"뿐입니다. 원래 실패 정책(카드를 아예 그리지 않음)을 그대로 따릅니다.
+        print(f'⚠️ 코스피/환율 요약 로드 중단: {type(exc).__name__}: {exc}')
+        return
     if not snapshot:
         return
     date_label = f" ({esc(snapshot['date'])} 장마감 기준)" if snapshot.get('date') else ""

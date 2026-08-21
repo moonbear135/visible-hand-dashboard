@@ -50,9 +50,16 @@ from utils.duel_db import (
 from utils.duel_rules import DuelRuleError
 # ⚠️ `utils/scorecard_db.py` 에서 가져오는 것은 **로그인 확인과 금액 서식 4개뿐**입니다.
 #    실제 보유종목(`holdings`)을 읽는 함수는 이름조차 가져오지 않습니다(5-4-5 위 머리말).
-from utils.scorecard_db import current_user, format_amount, supabase_status, user_id_of
-from web.auth import get_client, has_supabase_session, is_admin, logout
+from utils.scorecard_db import format_amount, supabase_status, user_id_of
+from web.auth import (
+    current_user_async,
+    get_client_async,
+    has_supabase_session,
+    is_admin,
+    logout_async,
+)
 from web.auth_ui import fail_message, render_auth
+from web.blocking import run_blocking
 from web.components import (
     error_banner, esc, holdings_table_html, info_banner, pct_text, warning_banner,
 )
@@ -62,6 +69,7 @@ from web.layout import (
     DUEL_LEADERBOARD_MENU_ADMIN_ONLY,
     layout,
 )
+from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS
 
 # =============================================================================
 # 🔴 순위표 최상단 고정 문구 — 작업지시서 5-3, **오너 확정 · 글자 그대로**
@@ -212,8 +220,13 @@ def holdings_table(rows):
 # =============================================================================
 # 2. 페이지 (공개 플래그 게이트 → 고정 문구 → 로그인 게이트)
 # =============================================================================
-@ui.page('/duel/leaderboard')
-def duel_leaderboard_page() -> None:
+# 🔴 2026-08-21 — `async def` + `response_timeout` 이 붙었습니다.
+#    NiceGUI 는 **비동기 페이지 함수에만** `response_timeout`(기본 3초)을 겁니다. 발행일
+#    조회 + 위/아래 두 구간 조회가 순서대로 일어나므로 느린 날에는 3초를 넘길 수 있고,
+#    그러면 화면 대신 **영어 500 오류 페이지**가 나갑니다(§0-3-4 위반). 값의 근거는
+#    `web/state.PAGE_RESPONSE_TIMEOUT_SECONDS` 주석에 적어 뒀습니다.
+@ui.page('/duel/leaderboard', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def duel_leaderboard_page() -> None:
     with layout('⚔️ 결투다! — 공개 순위표', width_class='max-w-6xl'):
         ui.markdown('## 🏆 내 밑으로 눈 깔어 — 공개 순위표')
 
@@ -241,24 +254,27 @@ def duel_leaderboard_page() -> None:
             render_auth()
             return
 
+        # 🔴 2026-08-21 — 세션 확인 두 단계를 **한 try 안**으로 모았습니다. 둘 다 Supabase
+        #    왕복이라 "요청이 중단됨"으로 실패할 수 있는데, 그 실패를 "로그인 만료"로
+        #    오해해 멀쩡한 토큰을 지워버리면 안 되기 때문입니다(§0-1).
         try:
-            client = get_client()
+            client = await get_client_async()
+            if client is None:
+                warning_banner('🚧 공개 순위표는 아직 준비중입니다(로그인 연결이 준비되지 않았습니다).')
+                return
+            user = await current_user_async(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
             return
-        if client is None:
-            warning_banner('🚧 공개 순위표는 아직 준비중입니다(로그인 연결이 준비되지 않았습니다).')
-            return
 
-        user = current_user(client)
         if not user_id_of(user):
-            logout()
+            await logout_async()
             warning_banner('⚠️ 로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
             render_auth()
             return
 
         try:
-            _render_body(client)
+            await _render_body(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "순위표를 그리는 중 문제가 발생했습니다. 잠시 후 다시 시도해 주세요.")}')
 
@@ -280,9 +296,15 @@ def _render_fixed_notice() -> None:
 # =============================================================================
 # 3. 로그인 후 본문 — 그룹 고르기 → 순위표
 # =============================================================================
-def _render_body(client) -> None:
+async def _render_body(client) -> None:
     """
     창유형 · 체급을 고르면 그 그룹의 순위표를 그립니다.
+
+    🔴 2026-08-21 — 공개 순위표 조회 3종(`fetch_public_leaderboard_latest_date` /
+       `fetch_public_leaderboard` / `fetch_public_holdings_for_nickname`)을
+       `run_blocking()` 으로 별도 스레드에 넘깁니다. 전부 Supabase 로 **동기 HTTP 왕복**을
+       하고, 그룹을 바꾸거나 페이지를 넘길 때마다 다시 불립니다. 그동안 이벤트 루프가
+       멈추면 **다른 화면을 보던 접속자까지** 함께 끊깁니다(`web/blocking.py` 독스트링).
 
     ⚠️ 선택 값과 페이지 번호는 **이 함수 안의 지역 변수**입니다. 모듈 전역에 두면 접속자
        끼리 화면 상태가 섞입니다(§0-3-8 — 순위표는 사용자 데이터가 아니지만, "다른 사람이
@@ -318,19 +340,22 @@ def _render_body(client) -> None:
                                    label='체급(원금 구간)',
                                    on_change=_changed).style('flex: 1 1 260px;')
 
+    # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+    #    직접 부를 때는 `await`, 위 `_changed()` 안의 `.refresh()` 는 동기 호출 그대로입니다.
     @ui.refreshable
-    def group_section() -> None:
-        _render_group(client, view, group_section.refresh)
+    async def group_section() -> None:
+        await _render_group(client, view, group_section.refresh)
 
-    group_section()
+    await group_section()
 
 
-def _render_group(client, view: dict, on_changed) -> None:
+async def _render_group(client, view: dict, on_changed) -> None:
     """한 그룹(창유형 × 체급)의 순위표. 발행일을 **먼저 한 번** 확정하고 시작합니다."""
     window_type = view["window_type"]
     bracket_key = view["bracket_key"]
     try:
-        published_date = fetch_public_leaderboard_latest_date(
+        published_date = await run_blocking(
+            fetch_public_leaderboard_latest_date,
             client, window_type=window_type, bracket_key=bracket_key)
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
@@ -354,12 +379,12 @@ def _render_group(client, view: dict, on_changed) -> None:
     ui.label(f'📅 {published_date} 발행분').classes('vh-muted')
     ui.label(NOTICE_OVERLAP).classes('vh-muted')
 
-    _render_section(client, view, published_date, SECTION_TOP, on_changed)
+    await _render_section(client, view, published_date, SECTION_TOP, on_changed)
     ui.separator()
-    _render_section(client, view, published_date, SECTION_BOTTOM, on_changed)
+    await _render_section(client, view, published_date, SECTION_BOTTOM, on_changed)
 
 
-def _render_section(client, view: dict, published_date: str, section: str, on_changed) -> None:
+async def _render_section(client, view: dict, published_date: str, section: str, on_changed) -> None:
     """
     위쪽(1위부터) 또는 아래쪽(꼴찌부터) 한 페이지.
 
@@ -382,7 +407,8 @@ def _render_section(client, view: dict, published_date: str, section: str, on_ch
         return
 
     try:
-        rows = fetch_public_leaderboard(
+        rows = await run_blocking(
+            fetch_public_leaderboard,
             client, window_type=view["window_type"], bracket_key=view["bracket_key"],
             published_date=published_date, limit=limit, offset=offset,
             order_desc=(section == SECTION_BOTTOM),
@@ -410,6 +436,7 @@ def _render_section(client, view: dict, published_date: str, section: str, on_ch
 
 
 def _render_participant(client, published_date: str, window_type: str, row: dict) -> None:
+    # (이 함수 자체는 위젯만 만듭니다 — 조회는 아래 `_open()` 을 눌렀을 때만 일어납니다.)
     """
     순위표 한 줄. 펼치면 그 닉네임의 **공개된** 보유종목을 개별 열람합니다(5-2).
 
@@ -423,12 +450,15 @@ def _render_participant(client, published_date: str, window_type: str, row: dict
         # 이 행 하나만의 지역 상태(접속마다·행마다 별개 — 모듈 전역에 두지 않습니다).
         slot = {"body": None, "loaded": False}
 
-        def _open(_event=None) -> None:
+        async def _open(_event=None) -> None:
+            # 🔴 2026-08-21 — `async def`. 펼칠 때 Supabase 왕복이 일어나므로 이 처리기도
+            #    이벤트 루프를 붙잡으면 안 됩니다. NiceGUI 는 `on_click` 에 코루틴 함수를
+            #    그대로 받아 줍니다.
             if slot["loaded"] or slot["body"] is None:
                 return
             slot["loaded"] = True                  # 두 번 눌러도 두 번 읽지 않습니다
             with slot["body"]:
-                _render_holdings(client, published_date, window_type, nickname)
+                await _render_holdings(client, published_date, window_type, nickname)
 
         with ui.row().classes('no-wrap items-center gap-2 w-full'):
             ui.label(header).classes('flex-1 min-w-0 vh-keep-all')
@@ -437,13 +467,14 @@ def _render_participant(client, published_date: str, window_type: str, row: dict
         slot["body"] = ui.column().classes('w-full gap-1')
 
 
-def _render_holdings(client, published_date: str, window_type: str, nickname: str) -> None:
+async def _render_holdings(client, published_date: str, window_type: str, nickname: str) -> None:
     """한 참가자의 공개 보유종목 표(없으면 그 사실을 그대로 알립니다)."""
     if not nickname:
         error_banner('🚫 닉네임을 확인하지 못해 보유종목을 불러오지 않았습니다.')
         return
     try:
-        rows = fetch_public_holdings_for_nickname(
+        rows = await run_blocking(
+            fetch_public_holdings_for_nickname,
             client, nickname, published_date=published_date, window_type=window_type)
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')

@@ -875,7 +875,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     _render_guide_box()
 
     # 종목별 데이터 다운로드 도구 — 아래 카드 목록/페이지네이션과 완전히 분리된 섹션입니다.
-    render_stock_download_tool(
+    await render_stock_download_tool(
         all_stocks,
         fields=US_HISTORY_FIELDS,
         history_filename=US_HISTORY_FILENAME,

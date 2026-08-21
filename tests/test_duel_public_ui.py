@@ -32,6 +32,7 @@
 """
 
 import ast
+import asyncio
 import importlib
 import os
 import re
@@ -106,21 +107,46 @@ def _install_stubs():
             def __getattr__(self, _name):
                 return element
 
+        class _Run(types.ModuleType):
+            """`nicegui.run` 흉내 — `await run.io_bound(fn, *a, **kw)` 를 그냥 동기 호출로
+            대체합니다(2026-08-21, `web/blocking.run_blocking()` 이 이걸 씁니다).
+            오프라인 테스트에는 진짜 스레드풀이 없고, 여기서 확인하려는 것은 "화면 코드가
+            끝까지 실행되는가"이지 스레드 분리 자체가 아닙니다 — 스레드 분리는
+            `tests/test_event_loop_blocking.py` 가 따로 못 박습니다."""
+
+            @staticmethod
+            async def io_bound(fn, *args, **kwargs):
+                return fn(*args, **kwargs)
+
         nicegui = types.ModuleType("nicegui")
         nicegui.ui = _UI("nicegui.ui")
         nicegui.app = element
+        nicegui.run = _Run("nicegui.run")
         sys.modules["nicegui"] = nicegui
         sys.modules["nicegui.ui"] = nicegui.ui
+        sys.modules["nicegui.run"] = nicegui.run
 
     if "web.auth" not in sys.modules:
         try:
             import web.auth                                               # noqa: F401
         except ImportError:
+            async def _no_client():
+                return None
+
+            async def _noop_logout():
+                return None
+
+            async def _no_user(_client):
+                return None
+
             auth = types.ModuleType("web.auth")
             auth.get_client = lambda: None
+            auth.get_client_async = _no_client                # 2026-08-21 비동기 판
+            auth.current_user_async = _no_user                # 2026-08-21 비동기 판
             auth.has_supabase_session = lambda: False
             auth.is_admin = lambda: False
             auth.logout = lambda: None
+            auth.logout_async = _noop_logout                  # 2026-08-21 비동기 판
             sys.modules["web.auth"] = auth
 
     if "web.auth_ui" not in sys.modules:
@@ -206,6 +232,47 @@ def _code_strings(name):
     return {node.value for node in ast.walk(tree)
             if isinstance(node, ast.Constant) and isinstance(node.value, str)
             and node.value not in docstrings}
+
+
+
+# =============================================================================
+# 0-c. 비동기 화면 함수를 테스트에서 돌리는 방법 (2026-08-21 추가)
+# =============================================================================
+#  화면 함수들이 `async def` 로 바뀌었습니다(Supabase 왕복을 이벤트 루프 밖으로 내보낸
+#  수정 — `web/blocking.py` 모듈 독스트링). 그래서 여기서도 코루틴을 실제로 끝까지 돌려야
+#  하는데, 그냥 `asyncio.run(...)` 을 쓰면 **진짜 nicegui 가 설치된 환경에서** 이렇게
+#  깨집니다:
+#
+#    RuntimeError: The current slot cannot be determined because the slot stack
+#                  for this task is empty.
+#
+#  NiceGUI 는 "위젯이 그려질 자리(슬롯)"를 **asyncio 태스크별로** 들고 있습니다
+#  (`nicegui.slot.Slot.stacks` — 키가 `id(current_task())`). `asyncio.run()` 은 새 태스크를
+#  만드니 그 안에서는 슬롯 스택이 비어 있고, `ui.markdown(...)` 한 줄에서 바로 터집니다.
+#  운영에서는 NiceGUI 가 페이지 태스크에 슬롯을 깔아 주기 때문에 생기지 않는 문제이고,
+#  **테스트에서 코루틴을 직접 돌릴 때만** 나타납니다.
+#
+#  그래서 바깥 컨텍스트의 슬롯 스택을 새 태스크에 그대로 복사해 준 뒤 코루틴을 돌립니다.
+#  (스텁 환경 = nicegui 미설치에서는 복사할 것이 없으므로 그냥 `asyncio.run` 입니다.)
+def _run(coro):
+    """비동기 화면 함수를 끝까지 실행합니다 (NiceGUI 슬롯 컨텍스트를 함께 넘겨서)."""
+    try:
+        # `nicegui.context` 는 모듈이 아니라 **Context 인스턴스**입니다(공개 API).
+        from nicegui import context as nicegui_context
+        from nicegui.slot import Slot, get_task_id
+    except ImportError:                            # 스텁 환경(nicegui 미설치)
+        return asyncio.run(coro)
+
+    outer = list(nicegui_context.slot_stack)       # 비어 있으면 NiceGUI 가 만들어 줍니다
+
+    async def _main():
+        Slot.stacks[get_task_id()] = list(outer)
+        try:
+            return await coro
+        finally:
+            Slot.stacks.pop(get_task_id(), None)
+
+    return asyncio.run(_main())
 
 
 _install_stubs()
@@ -521,8 +588,12 @@ def test_consent_page_never_issues_a_nickname_while_merely_rendering():
     """
     source = (REPO_ROOT / "web" / "pages" / "duel_consent_page.py").read_text(encoding="utf-8")
     tree = ast.parse(source)
+    # ⚠️ 2026-08-21 — `AsyncFunctionDef` 도 함께 봅니다. 화면 함수들이 `async def` 로
+    #    바뀌었는데(이벤트 루프 차단 수정) `FunctionDef` 만 보면 이 검사가 **조용히
+    #    아무것도 검사하지 않게** 됩니다 — 검사가 통과하는 게 아니라 사라지는 쪽입니다.
     for node in ast.walk(tree):
-        if not isinstance(node, ast.FunctionDef) or not node.name.startswith("_render"):
+        if not isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) \
+                or not node.name.startswith("_render"):
             continue
         for sub in ast.walk(node):
             if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Name):
@@ -530,7 +601,9 @@ def test_consent_page_never_issues_a_nickname_while_merely_rendering():
                     f"{node.name} 이 화면을 그리면서 닉네임을 발급합니다(5-5 위반)"
     # 저장 경로에는 있어야 합니다(있는지도 함께 고정 — 없으면 아무도 순위표에 못 실립니다).
     # 2026-08-20: `duel_nicknames` 가 (user_id, window_type) 키로 바뀌면서 인자도 함께 바뀌었습니다.
-    assert 'ensure_nickname(client, account.get("user_id"), account.get("window_type"))' in source
+    # 2026-08-21: 저장 경로가 `run_blocking()` 을 거칩니다(이벤트 루프 차단 수정). 넘기는
+    #             인자는 그대로이므로, 그 인자 조합이 코드에 살아 있는지를 확인합니다.
+    assert 'ensure_nickname, client, account.get("user_id"), account.get("window_type")' in source
 
 
 # =============================================================================
@@ -732,8 +805,10 @@ def test_each_public_screen_checks_its_own_flags_and_login(module_name, flag_nam
     for flag in flag_names:
         assert flag in names, f"{module_name} 이 {flag} 를 보지 않습니다"
     assert "is_admin" in names, "관리자 전용 단계를 화면에서도 확인해야 합니다"
+    # 2026-08-21 — 세 함수가 비동기 판(`*_async`)으로 바뀌었습니다. 게이트의 **순서와
+    #               구성**은 그대로이고, 이름만 따라갑니다.
     for gate in ("supabase_status", "has_supabase_session", "render_auth",
-                 "get_client", "current_user", "user_id_of", "logout"):
+                 "get_client_async", "current_user_async", "user_id_of", "logout_async"):
         assert gate in names, f"{module_name} 에 로그인 게이트({gate})가 없습니다"
 
 
@@ -861,7 +936,9 @@ def test_consent_body_renders_all_three_account_states():
         fetch_my_nickname=lambda client, user_id, window_type: {"nickname": "굳센날쌘범"},
     )
     try:
-        consent_page._render_body(object(), "uid-1")
+        # 2026-08-21 — `_render_body()` 가 `async def` 입니다(Supabase 조회를 이벤트 루프
+        # 밖으로 내보낸 수정). 부르는 방법만 바뀌고 검사 내용은 그대로입니다.
+        _run(consent_page._render_body(object(), "uid-1"))
     finally:
         _restore(consent_page, saved)
 
@@ -876,7 +953,7 @@ def test_consent_body_refuses_to_draw_someone_elses_account():
         error_banner=lambda text: drawn.append(text),
     )
     try:
-        consent_page._render_body(object(), "uid-1")
+        _run(consent_page._render_body(object(), "uid-1"))
     finally:
         _restore(consent_page, saved)
     assert drawn and "본인 것이 아닌" in drawn[0]
@@ -906,7 +983,7 @@ def test_leaderboard_body_renders_and_does_not_preload_holdings():
     질의는 발행일 1 + 위쪽 1 + 아래쪽 1 = 3개뿐이어야 합니다.
     """
     client = _leaderboard_client()
-    board_page._render_body(client)
+    _run(board_page._render_body(client))
 
     assert {call.table for call in client.calls} == {duel_db.PUBLIC_LEADERBOARD_TABLE}, \
         "보유종목은 펼치기 전에는 읽지 않습니다"
@@ -922,7 +999,7 @@ def test_leaderboard_body_handles_an_unpublished_group_as_a_normal_state():
     client = FakeClient()                                    # 모든 select 가 빈 목록
     saved = _patch(board_page, info_banner=lambda text: notices.append(text))
     try:
-        board_page._render_body(client)
+        _run(board_page._render_body(client))
     finally:
         _restore(board_page, saved)
 
@@ -943,7 +1020,7 @@ def test_leaderboard_holdings_panel_renders_escaped_and_marks_private_fields():
 
     saved = _patch(board_page, holdings_table=_spy)
     try:
-        board_page._render_holdings(client, "2026-08-20", "M1", "닉네임1")
+        _run(board_page._render_holdings(client, "2026-08-20", "M1", "닉네임1"))
     finally:
         _restore(board_page, saved)
 

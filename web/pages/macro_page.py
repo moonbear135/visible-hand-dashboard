@@ -72,6 +72,7 @@ from utils.macro_scoring import (
 )
 
 from web.auth import is_admin
+from web.blocking import run_blocking
 from web.components import (
     banner, chart_layout, compact, download_button, error_banner, esc,
     info_banner, success_banner, warning_banner,
@@ -1018,7 +1019,7 @@ def _render_study_only_section() -> None:
         ).classes('vh-muted')
 
 
-def _render_admin_console() -> None:
+async def _render_admin_console() -> None:
     """관리자 전용 데이터 수동 제어실 (`views/admin_view.py::render_admin_console` 이식본).
 
     원본에서도 이 콘솔은 **매크로 화면 안에서** 그려졌으므로(`render_macro_page` 가
@@ -1077,7 +1078,7 @@ def _render_admin_console() -> None:
                 except (TypeError, ValueError):
                     return default
 
-            def _submit() -> None:
+            async def _submit() -> None:
                 result_box.clear()
 
                 m_kospi_val = _number(m_kospi)
@@ -1095,20 +1096,31 @@ def _render_admin_console() -> None:
                         error_banner('🚫 영업일을 YYYY-MM-DD 형식으로 선택해 주세요.')
                     return
 
+                # 🔴 2026-08-21 — 이 저장 경로는 `market_history.csv` 를 **읽고 다시 쓰는**
+                #    작업이라 명백한 블로킹 I/O 입니다. `run_blocking()` 으로 별도 스레드에
+                #    넘기는데, 그 스레드에서는 `ui.*` 위젯을 만들 수 없습니다(슬롯 컨텍스트가
+                #    따라가지 않습니다 — `web/blocking.py` 모듈 독스트링의 금지사항 ②).
+                #    그래서 원래 배너를 바로 그리던 콜백 3개를 **메시지를 모으기만 하는
+                #    수집기**로 바꾸고, 스레드가 끝난 뒤 이벤트 루프에서 **같은 순서로**
+                #    같은 배너를 그립니다. 사용자가 보는 결과는 한 글자도 달라지지 않습니다
+                #    (§0-1 — 경고·실패 메시지를 하나도 잃지 않는 것이 핵심입니다).
+                notes = []
+
                 def _note(message):
-                    with result_box:
-                        info_banner(message)
+                    notes.append(('info', message))
 
                 def _warn(message):
-                    with result_box:
-                        warning_banner(message)
+                    notes.append(('warning', message))
 
                 def _err(message):
-                    with result_box:
-                        error_banner(message)
+                    notes.append(('error', message))
+
+                _banner_of = {'info': info_banner, 'warning': warning_banner,
+                              'error': error_banner}
 
                 try:
-                    _, _, save_log, save_score, _, _ = fetch_verified_market_data(
+                    _, _, save_log, save_score, _, _ = await run_blocking(
+                        fetch_verified_market_data,
                         override_date=m_date_key,
                         override_kospi=m_kospi_val,
                         override_usd=m_usd_val,
@@ -1123,8 +1135,15 @@ def _render_admin_console() -> None:
                 except Exception as exc:              # noqa: BLE001 — 화면엔 문장만, 상세는 로그로 (§0-3-4)
                     print(f'⚠️ 매크로 수동 입력 저장 실패: {type(exc).__name__}: {exc}')
                     with result_box:
+                        # 스레드가 도중에 죽었어도 그때까지 모인 경고는 버리지 않습니다(§0-1).
+                        for kind, message in notes:
+                            _banner_of[kind](message)
                         error_banner('🚫 저장 중 문제가 발생해 아무것도 저장하지 않았습니다. 입력값을 확인한 뒤 다시 시도해 주세요.')
                     return
+
+                with result_box:
+                    for kind, message in notes:
+                        _banner_of[kind](message)
 
                 if save_score is None:
                     # 원본과 동일 — 입력이 유효하지 않으면 저장하지 않고 사유를 그대로 보여줍니다(§0-1).
@@ -1512,9 +1531,27 @@ async def _render_dashboard() -> None:
 
     admin_mode = is_admin()
 
-    date_str, is_live, log_msg, score, details, history_df = fetch_verified_market_data()
+    # 🔴 2026-08-21 — `fetch_verified_market_data()` 는 인자 없이 부르면 **읽기 전용**
+    #    경로를 타는데, 그 안에서 `market_history.csv` 를 `pandas.read_csv()` 로 여러 번
+    #    읽습니다(`_load_history_df()` 포함). 관리자 전용 화면이라 영향받는 사람이 적을
+    #    뿐, 이벤트 루프를 붙잡는다는 점은 다른 화면과 똑같습니다 — 관리자가 이 화면을
+    #    여는 동안 **일반 방문자 전원**이 끊깁니다(`web/blocking.py` 모듈 독스트링).
+    #    ⚠️ 인자 없이 부르는 이 경로에는 콜백(`on_admin_note`/`on_warning`/`on_error`)을
+    #       넘기지 않으므로, 스레드 안에서 `ui.*` 를 만드는 코드가 한 줄도 없습니다.
+    #       (콜백을 쓰는 관리자 저장 경로는 `_render_admin_console()` 에서 따로 처리합니다.)
+    try:
+        date_str, is_live, log_msg, score, details, history_df = await run_blocking(
+            fetch_verified_market_data)
+    except Exception as exc:                       # noqa: BLE001 — 상세는 로그로만 (§0-3-4)
+        print(f'⚠️ 매크로 지표 계산 중단: {type(exc).__name__}: {exc}')
+        error_banner(
+            '🚨 시장 데이터를 불러오는 중 요청이 중단되었습니다. 새로고침해 주세요.\n\n'
+            '가짜 기본값(KOSPI 2,500 / 환율 1,350 등)으로 화면을 채우지 않기 위해 '
+            '위험 점수·지표·차트를 표시하지 않습니다.'
+        )
+        return
 
-    _render_admin_console()
+    await _render_admin_console()
 
     # 🚨 실데이터 로드 실패: 가짜 수치를 그리지 않고 여기서 렌더링을 중단합니다.
     if score is None:

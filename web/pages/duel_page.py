@@ -65,15 +65,21 @@ from utils.scorecard_db import (
     MARKET_KR,
     SNAPSHOT_FILENAMES,
     build_universe_index,
-    current_user,
     format_amount,
     make_price_lookup,
     resolve_stock_query,
     supabase_status,
     user_id_of,
 )
-from web.auth import get_client, has_supabase_session, is_admin, logout
+from web.auth import (
+    current_user_async,
+    get_client_async,
+    has_supabase_session,
+    is_admin,
+    logout_async,
+)
 from web.auth_ui import fail_message, render_auth
+from web.blocking import run_blocking
 from web.components import (
     error_banner, esc, holdings_table_html, info_banner, metric_card, pct_text, warning_banner,
 )
@@ -337,21 +343,25 @@ async def duel_page() -> None:
             render_auth()
             return
 
+        # 🔴 2026-08-21 — 세션 확인 두 단계(`get_client_async` / `current_user_async`)를
+        #    **한 try 안**으로 모았습니다. 둘 다 Supabase 왕복을 하는 비동기 호출이 되면서
+        #    "요청이 중단됨"으로 실패할 수 있게 됐는데(§0-1 — 빈 값으로 위장 금지), 그 실패를
+        #    "로그인 만료"로 오해해 **멀쩡한 토큰을 지워버리면** 안 되기 때문입니다.
         try:
-            client = get_client()
+            client = await get_client_async()
+            if client is None:
+                _render_not_ready(supabase_status())
+                return
+            # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다.**
+            # 저장소에 캐시해둔 값을 믿지 않는 이유는 §0-3-8 그대로입니다.
+            user = await current_user_async(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
             return
-        if client is None:
-            _render_not_ready(supabase_status())
-            return
 
-        # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다.**
-        # 저장소에 캐시해둔 값을 믿지 않는 이유는 §0-3-8 그대로입니다.
-        user = current_user(client)
         user_id = user_id_of(user)
         if not user_id:
-            logout()                                # 끊어진 세션을 남겨두지 않습니다
+            await logout_async()                    # 끊어진 세션을 남겨두지 않습니다
             warning_banner('⚠️ 로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
             render_auth()
             return
@@ -451,8 +461,10 @@ async def _render_body(client, user_id: str, email) -> None:
     ⚠️ `client` 와 `user_id` 는 **반드시 인자로 받습니다.** 이 아래 어떤 함수도 "지금 누가
        로그인했는지"를 전역이나 저장소에서 다시 추측하지 않습니다(§0-3-8 함수 설계 원칙).
     """
-    def _logout_click() -> None:
-        logout()
+    # 🔴 2026-08-21 — `async def` 입니다. `sign_out()` 도 Supabase 왕복(동기 HTTP)이라,
+    #    로그아웃 버튼 하나가 접속자 전원의 이벤트 루프를 붙잡고 있었습니다.
+    async def _logout_click() -> None:
+        await logout_async()
         ui.navigate.reload()
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
@@ -484,17 +496,29 @@ async def _render_body(client, user_id: str, email) -> None:
 
     # 계좌 목록은 **이 refreshable 안에서 매번 새로 조회**합니다. 참여/주문/수정/취소 후
     # `.refresh()` 만 부르면 이 블록만 다시 그려집니다('내 성적표'와 같은 방식).
+    # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
+    #    · 직접 부를 때는 반드시 `await`, 처리기 쪽 `.refresh()` 는 동기 호출 그대로.
     @ui.refreshable
-    def duel_section() -> None:
-        _render_duel_section(client, user_id, market, window, duel_section.refresh)
+    async def duel_section() -> None:
+        await _render_duel_section(client, user_id, market, window, duel_section.refresh)
 
-    duel_section()
+    await duel_section()
 
 
-def _render_duel_section(client, user_id: str, market: dict, window: dict, on_changed) -> None:
-    """계좌가 있으면 대결 화면을, 없으면 참여 안내를 그립니다."""
+async def _render_duel_section(client, user_id: str, market: dict, window: dict, on_changed) -> None:
+    """계좌가 있으면 대결 화면을, 없으면 참여 안내를 그립니다.
+
+    🔴 2026-08-21 — 이 화면은 이 프로젝트에서 **Supabase 왕복이 가장 많은 화면**입니다.
+       계좌 목록 1회 + 계좌 3개 × (현금원장·포지션·스냅샷) 3회 + 계좌 3개 × 주문 1회
+       = 최소 **13번**의 동기 HTTP 왕복이 한 번 그릴 때마다 일어납니다. 그 전부가 예전에는
+       이벤트 루프 위에서 돌았고, 한 사람이 이 화면을 여는 동안 **접속자 전원**의 연결이
+       끊길 수 있었습니다(`web/blocking.py` 모듈 독스트링 — 2026-08-21 사고).
+       그래서 이 아래 사슬(`_render_accounts` → `_render_account_card`,
+       `_render_orders_section` → `_render_account_orders`)이 전부 `async def` 입니다.
+       중간 한 군데라도 동기로 되돌리면 그 지점에서 다시 루프가 막히므로 사슬을 끊지 마세요.
+    """
     try:
-        accounts = fetch_my_accounts(client, user_id)
+        accounts = await run_blocking(fetch_my_accounts, client, user_id)
     except Exception as exc:                       # noqa: BLE001
         error_banner(f'🚫 {_fail(exc, "가상계좌를 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
         return
@@ -512,11 +536,11 @@ def _render_duel_section(client, user_id: str, market: dict, window: dict, on_ch
         _render_opt_in(client, user_id, on_changed)
         return
 
-    _render_accounts(client, user_id, mine, market, on_changed)
+    await _render_accounts(client, user_id, mine, market, on_changed)
     ui.separator()
     _render_order_form(client, user_id, mine, market, window, on_changed)
     ui.separator()
-    _render_orders_section(client, user_id, mine, window, on_changed)
+    await _render_orders_section(client, user_id, mine, window, on_changed)
 
 
 # =============================================================================
@@ -556,10 +580,12 @@ def _render_opt_in(client, user_id: str, on_changed) -> None:
 
         message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
-        def _join() -> None:
+        async def _join() -> None:
             message.text = ''
             try:
-                accounts = opt_in(client)
+                # 계좌 3개 개설 + 시드 지급을 DB 함수 하나가 처리합니다 — 이 모듈에서
+                # 가장 오래 걸리는 단일 왕복이라 반드시 이벤트 루프 밖에서 돌립니다.
+                accounts = await run_blocking(opt_in, client)
             except DuelDbError as exc:
                 # `opt_in()` 이 이미 "사람이 읽을 한국어 한 문장"으로 번역해 둔 오류입니다
                 # (스키마 미설치 / 로그인 만료 / 권한 없음 등). 그대로 보여줍니다 —
@@ -652,7 +678,7 @@ def _twr_display(snapshots) -> tuple:
     return '아직 계산할 수 없음', ''
 
 
-def _render_accounts(client, user_id: str, accounts, market: dict, on_changed) -> None:
+async def _render_accounts(client, user_id: str, accounts, market: dict, on_changed) -> None:
     ui.markdown('#### 💰 내 가상계좌 3개')
     ui.label(
         '세 계좌는 규칙이 완전히 같습니다 — 차이는 "각 계좌에서 어떤 종목을 골랐는가"뿐입니다.'
@@ -669,10 +695,10 @@ def _render_accounts(client, user_id: str, accounts, market: dict, on_changed) -
     # (`web/pages/scorecard_page.py::_render_currency_block()` 의 #122 계열 교훈과 같은 이유).
     with ui.row().classes('w-full gap-4 items-stretch'):
         for account in accounts:
-            _render_account_card(client, user_id, account, market)
+            await _render_account_card(client, user_id, account, market)
 
 
-def _render_account_card(client, user_id: str, account: dict, market: dict) -> None:
+async def _render_account_card(client, user_id: str, account: dict, market: dict) -> None:
     """계좌 1개 카드 — 총자산·현금·평가액·누적 TWR·보유종목.
 
     🔒 그리기 전에 소유자를 한 번 더 확인합니다(§0-3-8 이중 방어).
@@ -690,10 +716,12 @@ def _render_account_card(client, user_id: str, account: dict, market: dict) -> N
         ui.label(f'개설일 {account.get("anchor_date") or "—"}').classes('vh-muted')
 
         try:
-            ledger = fetch_my_cash_ledger(client, account_id)
-            cash = sum_cash_balance(ledger)
-            positions = fetch_my_positions(client, account_id)
-            snapshots = fetch_my_snapshots(client, account_id)
+            # 계좌 하나당 왕복 3회 — 계좌가 3개이므로 이 카드들만으로 9회입니다.
+            # 전부 `client` 를 인자로 받는 순수 조회 함수라 스레드로 넘겨도 안전합니다.
+            ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
+            cash = sum_cash_balance(ledger)                     # 순수 계산 — 루프에서 그대로
+            positions = await run_blocking(fetch_my_positions, client, account_id)
+            snapshots = await run_blocking(fetch_my_snapshots, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "계좌 정보를 불러오지 못했습니다.")}')
             return
@@ -874,7 +902,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
 
     message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
-    def _submit() -> None:
+    async def _submit() -> None:
         message.text = ''
         if not window["is_open"]:
             # 서버(`save_order`)도 같은 규칙으로 거절하지만, 눌러보기 전에 알려 줍니다.
@@ -900,7 +928,8 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
             return
 
         try:
-            order = save_order(
+            order = await run_blocking(
+                save_order,
                 client, account_id, ticker, stock_name, quantity,
                 # 거래일 목록은 **호출부가 확정해서 넘깁니다**(규칙 계층이 캘린더를 갖지
                 # 않는 이유는 `resolve_fill_trading_day()` 독스트링 참고). 화면이 넘기는 값이
@@ -944,7 +973,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
 # =============================================================================
 # 8. 주문 내역 (대기 중 주문 수정·취소 + 최근 결과)
 # =============================================================================
-def _render_orders_section(client, user_id: str, accounts, window: dict, on_changed) -> None:
+async def _render_orders_section(client, user_id: str, accounts, window: dict, on_changed) -> None:
     ui.markdown('#### 📋 내 주문')
     if not window["is_open"]:
         info_banner(
@@ -952,10 +981,10 @@ def _render_orders_section(client, user_id: str, accounts, window: dict, on_chan
             f'다음 접수 시간({ORDER_WINDOW_TEXT})에 다시 열립니다.'
         )
     for account in accounts:
-        _render_account_orders(client, user_id, account, window, on_changed)
+        await _render_account_orders(client, user_id, account, window, on_changed)
 
 
-def _render_account_orders(client, user_id: str, account: dict, window: dict, on_changed) -> None:
+async def _render_account_orders(client, user_id: str, account: dict, window: dict, on_changed) -> None:
     """계좌 1개의 주문 목록 — 대기 중 주문(수정·취소 가능) + 최근 결과.
 
     🔒 소유자 확인은 카드와 같은 이유로 여기서도 한 번 더 합니다(§0-3-8).
@@ -969,7 +998,7 @@ def _render_account_orders(client, user_id: str, account: dict, window: dict, on
     with ui.card().classes('vh-card w-full'):
         ui.markdown(f'**{esc(title)}**')
         try:
-            orders = fetch_my_orders(client, account_id)
+            orders = await run_blocking(fetch_my_orders, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "주문 내역을 불러오지 못했습니다.")}')
             return
@@ -1005,14 +1034,14 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed) -> 
         quantity_input = ui.input(value=str(order.get("requested_quantity") or '')) \
             .props('dense').style('flex: 0 0 90px;').tooltip('바꿀 수량(주)')
 
-        def _save(_=None) -> None:
+        async def _save(_=None) -> None:
             try:
                 quantity = _parse_positive_int(quantity_input.value, '수량')
             except ValueError as exc:
                 ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기')
                 return
             try:
-                edit_order(client, order_id, quantity)
+                await run_blocking(edit_order, client, order_id, quantity)
             except (DuelDbError, DuelRuleError) as exc:
                 ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
                           classes='whitespace-pre-line')
@@ -1024,9 +1053,9 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed) -> 
             ui.notify(f'✅ 수량을 {quantity:,}주로 바꿨습니다.', type='positive')
             on_changed()
 
-        def _cancel(_=None) -> None:
+        async def _cancel(_=None) -> None:
             try:
-                cancel_order(client, order_id)
+                await run_blocking(cancel_order, client, order_id)
             except (DuelDbError, DuelRuleError) as exc:
                 ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
                           classes='whitespace-pre-line')

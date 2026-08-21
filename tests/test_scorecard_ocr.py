@@ -991,11 +991,20 @@ def test_limit_exceeded_is_shown_to_the_user_not_silently_ignored(quota_db):
 def test_manual_entry_is_never_blocked_by_the_upload_limit(quota_db):
     """수동 입력 폼은 한도와 무관하게 계속 쓸 수 있어야 합니다(오너 지시)."""
     page_src = _page_source()
-    submit_src = _source_block(page_src, "    def _submit() -> None:", "\ndef _render_currency_block(")
+    # 2026-08-21 — `_submit()` 이 `async def` 가 되었습니다(저장 호출을 이벤트 루프 밖으로
+    #               내보낸 수정 — `web/blocking.py`). 검사 내용은 그대로입니다.
+    submit_src = _source_block(page_src, "    async def _submit() -> None:",
+                               "\ndef _render_currency_block(")
     assert "consume_ocr_quota" not in submit_src, (
         "직접 입력 저장 경로(_submit)가 업로드 한도를 소모하면 안 됩니다"
     )
-    assert "add_lot(" in submit_src, "직접 입력 저장 경로는 그대로 살아 있어야 합니다"
+    # 2026-08-21 — 저장 호출이 `run_blocking(add_lot, ...)` 형태가 되었습니다(같은 수정).
+    #               "add_lot 으로 저장한다"는 사실은 그대로이고, 어느 스레드에서 도는지만
+    #               바뀌었습니다.
+    assert "add_lot" in submit_src, "직접 입력 저장 경로는 그대로 살아 있어야 합니다"
+    assert "run_blocking(" in submit_src, (
+        "저장 호출은 이벤트 루프 밖(run_blocking)에서 돌아야 합니다 — web/blocking.py 참고"
+    )
     # 입력창·추가 버튼은 OCR 플래그 블록 **밖**에 있어야 합니다(플래그가 꺼져도 동작).
     form_src = _source_block(page_src, "\ndef _render_input_form(", "\ndef _render_currency_block(")
     assert form_src.index("if SCORECARD_OCR_ENABLED:") < form_src.index("query_input = ui.input("), (

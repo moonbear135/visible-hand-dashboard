@@ -61,7 +61,6 @@ from utils.scorecard_db import (
     NO_FX_CONVERSION_NOTICE,
     SNAPSHOT_FILENAMES,
     build_universe_index,
-    current_user,
     format_amount,
     supabase_status,
     user_id_of,
@@ -91,8 +90,9 @@ from utils.report_db import (
     shift_period,
 )
 
-from web.auth import get_client, has_supabase_session, logout
+from web.auth import current_user_async, get_client_async, has_supabase_session, logout_async
 from web.auth_ui import fail_message, render_auth
+from web.blocking import run_blocking
 from web.components import (
     error_banner, esc, holdings_table_html, info_banner, metric_card,
     pct_html, pct_text, warning_banner,
@@ -241,20 +241,25 @@ async def report_page() -> None:
             render_auth()
             return
 
+        # 🔴 2026-08-21 — 세션 확인 두 단계(`get_client_async` / `current_user_async`)를
+        #    **한 try 안**으로 모았습니다. 둘 다 Supabase 왕복을 하는 비동기 호출이 되면서
+        #    "요청이 중단됨"으로 실패할 수 있게 됐는데(§0-1 — 빈 값으로 위장 금지), 그 실패를
+        #    "로그인 만료"로 오해해 **멀쩡한 토큰을 지워버리면** 안 되기 때문입니다.
+        #    실패는 실패대로 배너를 띄우고 세션은 손대지 않습니다.
         try:
-            client = get_client()
+            client = await get_client_async()
+            if client is None:
+                _render_not_ready(supabase_status())
+                return
+            # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다** (§0-3-8).
+            user = await current_user_async(client)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "로그인 상태를 확인하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
             return
-        if client is None:
-            _render_not_ready(supabase_status())
-            return
 
-        # "지금 누가 로그인했는지"는 **이 접속 전용 클라이언트에게 직접 물어봅니다** (§0-3-8).
-        user = current_user(client)
         user_id = user_id_of(user)
         if not user_id:
-            logout()                               # 끊어진 세션을 남겨두지 않습니다
+            await logout_async()                   # 끊어진 세션을 남겨두지 않습니다
             warning_banner('⚠️ 로그인 세션이 만료되었습니다. 다시 로그인해 주세요.')
             render_auth()
             return
@@ -309,8 +314,11 @@ async def _render_signed_in(client, user_id: str, email) -> None:
        새로 만들어지므로 다른 사람의 화면 상태와 섞일 수 없고, Streamlit 의
        `st.session_state` + 위젯 키 관리가 통째로 필요 없어집니다(계획서 §3-3).
     """
-    def _logout_click() -> None:
-        logout()
+    # 🔴 2026-08-21 — `async def` 입니다. `sign_out()` 도 Supabase 왕복(동기 HTTP)이라,
+    #    로그아웃 버튼 하나가 접속자 전원의 이벤트 루프를 붙잡고 있었습니다.
+    #    (NiceGUI 는 `on_click` 에 코루틴 함수를 그대로 받아 줍니다.)
+    async def _logout_click() -> None:
+        await logout_async()
         ui.navigate.reload()
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
@@ -424,13 +432,23 @@ def _on_date_typed(view: dict, raw, date_input, body) -> None:
 # 4. 리포트 본문
 # =============================================================================
 async def _render_report_body(client, user_id: str, period: str, ref_date) -> None:
-    """고른 기간의 리포트 전체(시장별 블록). 계산은 전부 `utils/report_db.py` 가 합니다."""
+    """고른 기간의 리포트 전체(시장별 블록). 계산은 전부 `utils/report_db.py` 가 합니다.
+
+    🔴 2026-08-21 — Supabase 조회 2건(`fetch_user_snapshots` / `fetch_user_holding_snapshots`)을
+       `run_blocking()` 으로 별도 스레드에 넘깁니다. 두 함수 모두 내부에서 **동기 HTTP 왕복**을
+       하고, 기간을 바꿀 때마다(`body.refresh()`) 다시 불립니다. 그 사이 이벤트 루프가 멈추면
+       **다른 화면을 보고 있던 접속자까지** 함께 끊깁니다(`web/blocking.py` 독스트링).
+       ⚠️ 두 함수는 `client` 를 인자로 받고 `app.storage` 를 전혀 만지지 않으므로 스레드로
+          넘겨도 안전합니다 — "누구의 client 인가"는 이미 `@ui.page` 함수가 이벤트 루프
+          위에서 확정해 인자로 내려보낸 값입니다(§0-3-8).
+    """
     window_start, window_end = period_bounds(period, ref_date)
 
     # 기간 시작 **이전**의 스냅샷도 기준점으로 필요하므로 시작일로 자르지 않고, 종료일까지
     # 전부 받아 메모리에서 계산합니다(사용자 1명 × 시장 1개 = 연 250행 수준이라 가볍습니다).
     try:
-        snapshots = fetch_user_snapshots(client, user_id, end_date=window_end)
+        snapshots = await run_blocking(
+            fetch_user_snapshots, client, user_id, end_date=window_end)
     except Exception as exc:                       # noqa: BLE001 — 원문 노출 방지는 _fail 이 담당
         error_banner(f'🚫 {_fail(exc, "저장된 기록을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
         return
@@ -462,7 +480,8 @@ async def _render_report_body(client, user_id: str, period: str, ref_date) -> No
     holding_error = None
     holding_by_market = {}
     try:
-        holding_rows = fetch_user_holding_snapshots(
+        holding_rows = await run_blocking(
+            fetch_user_holding_snapshots,
             client, user_id, start_date=holding_start, end_date=window_end)
     except Exception as exc:                       # noqa: BLE001
         holding_error = exc
@@ -522,7 +541,7 @@ async def _render_market_block(market, snapshots, period, ref_date,
         info_banner('⏳ ' + report["status_message"])
 
     _render_numbers(report, currency)
-    _render_benchmarks(report, market)
+    await _render_benchmarks(report, market)
     await _render_holding_history(market, holding_rows, in_window,
                                   window_start, window_end, currency, error=holding_error)
     _render_snapshot_table(in_window, currency)
@@ -651,10 +670,25 @@ def _benchmark_average_html(outcomes, market, mine):
     return line
 
 
-def _render_benchmarks(report, market) -> None:
-    """포트폴리오와 **정확히 같은 두 날짜**로 벤치마크 수익률을 계산해 나란히 보여줍니다."""
+async def _render_benchmarks(report, market) -> None:
+    """포트폴리오와 **정확히 같은 두 날짜**로 벤치마크 수익률을 계산해 나란히 보여줍니다.
+
+    🔴 2026-08-21 — `async def` 로 바뀌었습니다. `benchmark_closes_for_market()` 은
+       한국이면 `market_history.csv`, 미국이면 `data/us_index_history.json` 을
+       `utils/data_source.read_text()` 로 읽는데, 원격 모드에서는 그게 **동기
+       `requests.get()`** 입니다(1차 수정은 `web/state.load_json_file` 경로만 고쳤고,
+       `utils/report_db.py` 를 지나가는 이 경로는 그대로 남아 있었습니다).
+       계산·렌더링은 한 줄도 바뀌지 않았고, 파일을 읽는 한 줄만 스레드로 나갑니다.
+    """
     ui.markdown('##### 📊 벤치마크 비교')
-    benchmarks = benchmark_closes_for_market(market)
+    try:
+        benchmarks = await run_blocking(benchmark_closes_for_market, market)
+    except Exception as exc:                       # noqa: BLE001 — 취소 등, 상세는 로그로만
+        print(f'⚠️ 벤치마크 데이터 로드 중단 ({market}): {type(exc).__name__}: {exc}')
+        # §0-1 — "벤치마크가 없다"와 "못 읽었다"를 구분해서 말합니다.
+        _muted('벤치마크 데이터를 불러오지 못해 이번에는 비교를 생략했습니다. '
+               '(데이터가 없다는 뜻은 아닙니다 — 새로고침하면 다시 시도합니다.)')
+        return
     if not benchmarks:
         _muted('이 시장의 벤치마크 데이터가 아직 없어 비교를 생략합니다.')
         return

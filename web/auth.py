@@ -29,10 +29,13 @@ from nicegui import app, run
 from utils.scorecard_db import (
     ScorecardError,
     create_supabase_client,
+    current_user,
     sign_in,
     sign_out,
     supabase_status,
 )
+
+from web.blocking import run_blocking
 
 try:
     import bcrypt
@@ -166,6 +169,32 @@ def has_supabase_session() -> bool:
     return bool(user_storage().get(SB_TOKENS_KEY))
 
 
+def _restore_session(client, access_token, refresh_token):
+    """저장해 둔 토큰 2개를 클라이언트에 이어붙입니다 — **네트워크가 일어날 수 있는 한 줄**.
+
+    ⚠️ 인자가 `client` + 문자열 2개뿐인 것이 **의도된 설계**입니다. 이 함수는
+       `get_client_async()` 가 `run_blocking()` 으로 **별도 스레드**에서 실행하는데,
+       그 스레드에는 접속 컨텍스트가 없어 `user_storage()` 를 부를 수 없기 때문입니다
+       (아래 `get_client_async()` 독스트링 참고). 토큰은 **부르는 쪽이 이벤트 루프에서
+       미리 꺼내** 평범한 문자열로 넘깁니다.
+
+    ⚠️ `set_session()` 은 이름만 보면 로컬 대입 같지만, gotrue 는 access token 이 이미
+       만료돼 있으면 **그 자리에서 refresh 왕복(HTTP)** 을 합니다. 즉 몇 초가 걸릴 수
+       있는 진짜 네트워크 호출입니다 — 이번 수정이 이 함수를 따로 떼어낸 이유입니다.
+    """
+    return client.auth.set_session(access_token, refresh_token)
+
+
+def _forget_broken_session(exc) -> None:
+    """세션 복원 실패 처리 — 조용히 넘기지 않고 죽은 토큰을 버립니다 (§0-1).
+
+    그래야 화면이 "로그인 안 된 상태"로 정직하게 되돌아갑니다.
+    ⚠️ 저장소를 만지므로 **반드시 이벤트 루프(호출 스레드)에서만** 부릅니다.
+    """
+    print(f'⚠️ 저장된 Supabase 세션 복원 실패 (재로그인이 필요합니다): {type(exc).__name__}')
+    user_storage().pop(SB_TOKENS_KEY, None)
+
+
 def get_client():
     """**이 접속 전용** Supabase 클라이언트를 돌려줍니다 (없으면 만들어서 보관).
 
@@ -173,6 +202,12 @@ def get_client():
 
     ⚠️ 반환값을 페이지 함수의 지역 변수로만 들고 쓰세요. 모듈 전역·기본 인자·클래스 속성에
        담는 순간 다른 접속자와 공유됩니다(§0-3-8).
+
+    🔴 2026-08-21 — **화면(@ui.page)·이벤트 처리기는 아래 `get_client_async()` 를 쓰세요.**
+       이 동기판은 세션 복원(`_restore_session`)이 네트워크 왕복을 할 수 있어 이벤트 루프를
+       붙잡습니다. 남겨 두는 이유는 `tests/test_web_session_isolation.py` 처럼 이벤트 루프
+       밖에서 저장소 격리를 검증하는 호출자가 있고, 비동기판도 결국 이 함수와 **똑같은
+       규칙**(같은 헬퍼 2개)을 쓰기 때문입니다 (§0-3-10 — 규칙은 한 곳에만).
     """
     store = client_storage()
     client = store.get(SB_CLIENT_KEY)
@@ -186,16 +221,88 @@ def get_client():
     tokens = user_storage().get(SB_TOKENS_KEY)
     if tokens:
         # 새로고침·서버 재시작 뒤에도 RLS 가 걸린 "본인" 상태로 이어붙입니다.
-        # 실패(만료·폐기된 refresh token)하면 조용히 넘기지 않고 토큰을 버립니다 —
-        # 그래야 화면이 "로그인 안 된 상태"로 정직하게 되돌아갑니다(§0-1).
         try:
-            client.auth.set_session(tokens.get('access_token'), tokens.get('refresh_token'))
+            _restore_session(client, tokens.get('access_token'), tokens.get('refresh_token'))
         except Exception as exc:               # noqa: BLE001 — 상세는 서버 로그로만 (§0-3-4)
-            print(f'⚠️ 저장된 Supabase 세션 복원 실패 (재로그인이 필요합니다): {type(exc).__name__}')
-            user_storage().pop(SB_TOKENS_KEY, None)
+            _forget_broken_session(exc)
 
     store[SB_CLIENT_KEY] = client
     return client
+
+
+async def get_client_async():
+    """`get_client()` 의 비동기 판 — **반환값·예외는 동기판과 완전히 같습니다**.
+
+    화면 코드는 `client = get_client()` 를 `client = await get_client_async()` 로
+    바꾸기만 하면 됩니다.
+
+    🔴 왜 "함수 전체를 `run_blocking` 으로 감싸기"가 **틀린 답인가** (2026-08-17 사고 재연 금지)
+    ─────────────────────────────────────────────────────────────────────────────
+    `web/state.load_json_file_async()` 는 함수 **전체**를 스레드에 넘겨도 안전했습니다.
+    그 경로가 만지는 것은 모든 접속자에게 동일한 읽기 전용 캐시뿐이기 때문입니다.
+    **여기는 정반대입니다.** 이 함수는 `client_storage()`(이 접속의 서랍)와
+    `user_storage()`(이 접속자의 서랍)를 읽고 씁니다. 둘 다 `app.storage.*` 이고,
+    `app.storage.*` 는 "지금 어느 접속인지"를 담은 컨텍스트가 있어야 동작합니다.
+    별도 스레드에는 그 컨텍스트가 **없습니다**(NiceGUI GitHub Discussion #2228/#2801).
+    2026-08-17 에 `login()` 을 통째로 감쌌다가 "로그인이 안 된다" 신고를 받은 게 정확히
+    이 실수였습니다 — `web/auth.py::login()` 독스트링에 그 전말이 적혀 있습니다.
+
+    그래서 이 함수는 `login()` 과 **같은 방식으로 쪼갭니다**:
+      ① 저장소 읽기(클라이언트 캐시 조회, 토큰 꺼내기)      → 이벤트 루프에서 **동기로**
+      ② 실제로 몇 초 걸릴 수 있는 네트워크(`_restore_session`) → `run_blocking` 으로 스레드에
+      ③ 저장소 쓰기(클라이언트 보관, 죽은 토큰 폐기)        → 다시 이벤트 루프에서 **동기로**
+    스레드로 넘어가는 것은 `client` 객체와 문자열 토큰 2개뿐이고, 스레드 안의 코드는
+    `app.storage` 를 **한 번도** 건드리지 않습니다.
+
+    ⚠️ ②와 ③ 사이에는 `await` 이 있으므로 그 동안 같은 접속의 다른 처리가 끼어들 수
+       있습니다. 그래도 안전한 이유: ③이 쓰는 값은 전부 **이 접속 자신의 것**이고
+       (`store` 는 ①에서 이 접속의 서랍으로 확정됐습니다), 같은 접속에서 두 번 들어와
+       각자 클라이언트를 만들면 나중 것이 덮어쓸 뿐 **남의 서랍은 절대 건드리지
+       않습니다**. 동기판도 같은 성질입니다.
+    """
+    store = client_storage()                   # ① 여기부터 ↓ 전부 이벤트 루프(이 접속 컨텍스트)
+    client = store.get(SB_CLIENT_KEY)
+    if client is not None:
+        return client
+
+    client = create_supabase_client()
+    if client is None:
+        return None
+
+    tokens = user_storage().get(SB_TOKENS_KEY)
+    access_token = tokens.get('access_token') if tokens else None
+    refresh_token = tokens.get('refresh_token') if tokens else None
+
+    if tokens:
+        try:
+            # ② 스레드로 넘기는 것은 client 객체와 문자열 2개뿐입니다 (저장소 접근 없음).
+            await run_blocking(_restore_session, client, access_token, refresh_token)
+        except Exception as exc:               # noqa: BLE001 — 상세는 서버 로그로만 (§0-3-4)
+            _forget_broken_session(exc)        # ③ 저장소 쓰기 — 다시 이벤트 루프에서
+
+    store[SB_CLIENT_KEY] = client              # ③ 저장소 쓰기 — 다시 이벤트 루프에서
+    return client
+
+
+async def current_user_async(client):
+    """"지금 이 접속에 로그인해 있는 사람"을 **그 접속 전용 클라이언트에게 직접** 물어봅니다.
+
+    `utils/scorecard_db.current_user()` 의 비동기 판입니다. 미로그인이면 `None` —
+    반환값 규약은 동기판과 같습니다.
+
+    🔴 이 한 줄이 왜 블로킹인가: `client.auth.get_user()` 는 Supabase 에 **HTTP 왕복**을
+       합니다(토큰이 유효한지 서버에 물어보는 것이라 로컬 판단이 불가능합니다). 로그인이
+       필요한 화면 4개(/scorecard · /report · /duel · /duel/leaderboard · /duel/consent)가
+       **본문을 그리기 전에 반드시** 이 호출을 하므로, 여기가 막히면 그 사람이 화면을 여는
+       내내 접속자 전원이 멈춥니다.
+
+    ⚠️ `client` 를 **인자로** 받는 것이 핵심입니다 — 스레드 안에서 `get_client()` 를 다시
+       부르면 `app.storage` 에 접근하게 되어 2026-08-17 사고가 재현됩니다
+       (`get_client_async()` 독스트링 참고). 이 함수는 저장소를 한 번도 만지지 않습니다.
+    """
+    if client is None:
+        return None
+    return await run_blocking(current_user, client)
 
 
 async def login(email: str, password: str):
@@ -216,8 +323,14 @@ async def login(email: str, password: str):
     실행하고, 실제로 몇 초씩 걸리는 네트워크 호출(`sign_in`) **한 줄만** `run.io_bound` 로
     감쌉니다. 로딩 스피너가 보이는 데도(§ui.button.props('loading') 반영) 필요한 "제어권을
     한 번 넘겨준다"는 효과는 이 한 줄의 `await` 만으로 충분합니다.
+
+    🔴 2026-08-21 — `get_client()` 도 `await get_client_async()` 로 바꿨습니다. 그 안의
+       세션 복원(`set_session`)이 만료된 토큰을 만나면 refresh 왕복을 하는데, 그것도
+       똑같이 이벤트 루프를 붙잡던 자리였기 때문입니다. **저장소 접근은 여전히 전부
+       이벤트 루프에서** 일어납니다(위 사고 원인 그대로) — 자세한 근거는
+       `get_client_async()` 독스트링에 적어 뒀습니다.
     """
-    client = get_client()
+    client = await get_client_async()
     if client is None:
         raise ScorecardError(
             'Supabase 연결이 준비되지 않아 로그인할 수 없습니다. ' + (supabase_status().reason or '')
@@ -256,6 +369,39 @@ def logout() -> None:
         except ScorecardError as exc:          # 서버 호출이 실패해도 로컬 토큰은 반드시 지웁니다
             print(f'⚠️ Supabase 로그아웃 요청 실패(로컬 세션은 그대로 폐기합니다): {exc}')
     user_storage().pop(SB_TOKENS_KEY, None)
+
+
+async def logout_async() -> None:
+    """`logout()` 의 비동기 판 — 화면·버튼 처리기는 **이쪽**을 쓰세요.
+
+    `sign_out()` 도 Supabase 로 HTTP 왕복을 하는 동기 호출이라, 로그아웃 버튼 하나가
+    접속자 전원의 이벤트 루프를 붙잡고 있었습니다(2026-08-21 2차 수정 — `web/blocking.py`
+    모듈 독스트링 참고).
+
+    🔴 동기판과 **의도적으로 한 가지 다른 점**: 서랍 두 개(이 접속의 클라이언트 / 이 접속자의
+       토큰)를 **네트워크 호출보다 먼저** 비웁니다.
+         · 왜: `await` 이 들어가면 서버 왕복이 끝날 때까지 몇 초가 흐르는데, 그 사이에
+           같은 사람이 다른 탭을 새로고침하면 **아직 남아 있는 토큰으로 다시 로그인된
+           화면**이 그려질 수 있습니다. "로그아웃을 눌렀는데 옆 탭은 로그인 상태"는
+           자산 화면에서 절대 만들면 안 되는 상태입니다(§0-3-8).
+         · 순서를 바꿔도 동기판의 약속("서버 호출이 실패해도 로컬 세션은 반드시 폐기")은
+           그대로이고, 오히려 더 강해집니다.
+       저장소 접근 두 줄은 모두 `await` **앞**이라 이벤트 루프에서 실행됩니다 —
+       스레드로 넘어가는 것은 `client` 객체 하나뿐입니다(`get_client_async()` 와 같은 규칙).
+
+    ⚠️ 동기판 `logout()` 은 그대로 남겨 둡니다 — `tests/test_web_session_isolation.py` 가
+       이벤트 루프 없이 접속 격리를 검증할 때 씁니다.
+    """
+    client = client_storage().pop(SB_CLIENT_KEY, None)
+    user_storage().pop(SB_TOKENS_KEY, None)
+    if client is None:
+        return
+    try:
+        await run_blocking(sign_out, client)
+    except ScorecardError as exc:              # 서버 호출이 실패해도 로컬 세션은 이미 폐기됐습니다
+        print(f'⚠️ Supabase 로그아웃 요청 실패(로컬 세션은 그대로 폐기합니다): {exc}')
+    except Exception as exc:                   # noqa: BLE001 — 취소(BlockingCallAborted) 포함
+        print(f'⚠️ Supabase 로그아웃 요청 중단(로컬 세션은 그대로 폐기합니다): {type(exc).__name__}')
 
 
 def new_auth_client():
