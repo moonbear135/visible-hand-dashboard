@@ -1318,9 +1318,14 @@ def leaderboard_page_count(section_cap=None, *, page_size=None):
 #  계산·닉네임 생성·재동의 차단·페이지네이션)은 **통화와 무관하게 이미 재사용 가능**해서
 #  새로 만들지 않습니다 — 이 절에는 원칙적으로 "숫자 자체가 통화마다 다른" 것들만 옵니다.
 #
-#  ⚠️ 2026-08-21 추가된 예외 하나: `resolve_fill_trading_day_usd()` 는 상수가 아니라
-#     **규칙의 전제 자체**(주문 접수 시간대가 그날 장의 앞이냐 뒤냐)가 통화마다 달라서
-#     갈라진 함수입니다. 자세한 이유는 그 함수 docstring 참고(work order §5-16).
+#  ⚠️ 2026-08-21 추가된 예외 둘: 이 절에는 "숫자"가 아닌 함수도 두 개 있습니다.
+#     · `resolve_fill_trading_day_usd()` — 상수가 아니라 **규칙의 전제 자체**(주문 접수
+#       시간대가 그날 장의 앞이냐 뒤냐)가 통화마다 달라서 갈라진 함수(work order §5-16).
+#     · `resolve_bracket_for_season_usd()` — 규칙은 원화와 완전히 같지만, 원화 함수 본문에
+#       **유효한 체급 목록 `BRACKET_KEYS`(원화 9개)가 박혀 있어** USD 체급을 넘기면 그
+#       자리에서 예외가 납니다. 즉 **검증 대상 집합**이 통화마다 달라 갈라진 함수입니다
+#       (work order §5-17). 시즌 경계 자체(`season_key_for_date()`)는 여전히 공유합니다.
+#     두 함수 모두 자세한 이유는 각 docstring 참고.
 #
 #  ⚠️ 아래 상수도 위 0절과 같은 이유로 **다른 파일에 다시 적지 마세요**(§0-3-10).
 #     `sql/duel_schema.sql` §14-10 의 `duel_seed_amount_usd()` 는 이 파일의
@@ -1494,3 +1499,55 @@ def bracket_label_usd(bracket_key):
     if key not in BRACKET_LABELS_USD:
         raise DuelRuleError(f"알 수 없는 체급 식별자(USD)입니다: {bracket_key!r}")
     return BRACKET_LABELS_USD[key]
+
+
+def resolve_bracket_for_season_usd(existing_assignment, fresh_bracket_key, on_date):
+    """
+    🔴 **"체급은 시즌 동안 고정"을 USD 트랙에서 강제하는 단 하나의 자리.**
+    `resolve_bracket_for_season()`(원화)의 미러이고, 규칙·반환 규약·예외 처리는 **완전히
+    동일**합니다. 시즌 경계(3월 1일 · 12개월)도 원화와 **같은 함수**(`season_key_for_date()`)
+    를 그대로 씁니다 — 5-11-8 확정("시즌은 KRW 트랙과 동일 공유")대로입니다.
+
+    ── 그런데 왜 함수를 새로 만들었는가 (이 트랙의 **네 번째** 예외 사례) ──────────────
+    원화 함수 본문에 **`BRACKET_KEYS`(원화 9개)가 리터럴로 박혀 있습니다.** 저장된 체급
+    문자열과 새로 계산한 체급 문자열이 "아는 값인가"를 그 목록으로 검사하는데, USD 체급
+    (`usd_75000_plus` 등)은 그 목록에 **없습니다.** 그래서 원화 함수에 USD 체급을 넘기면
+    시즌 고정이 조용히 사라지는 게 아니라 `DuelRuleError`("새로 계산한 체급 식별자를 알 수
+    없습니다")로 **USD 발행 배치가 매일 밤 그 자리에서 죽습니다.**
+
+    이 트랙의 확립된 처리 방식("순수 규칙은 공유하되, 통화별 전제가 본문에 박힌 것만 새로
+    정의")의 네 번째 사례입니다:
+      ① `_translate_order_guard_error_usd()` — 오류 문구에 원화 시간대(§5-14)
+      ② `format_summary_lines_usd()` — 로그 문구에 "원"(§5-15)
+      ③ `resolve_fill_trading_day_usd()` — 판정의 전제(그날 장의 앞/뒤, §5-16)
+      ④ **이 함수** — 유효한 체급 식별자 **집합**이 통화마다 다름(§5-17)
+    ①②는 사람이 읽는 문구, ③은 판정 방향, ④는 **검증 대상 집합**이 갈린 경우입니다.
+
+    ⚠️ 원화 함수와 실행 코드의 차이는 **`BRACKET_KEYS` → `BRACKET_KEYS_USD` 두 곳뿐**
+       입니다(그 밖의 오류 문구에 "(USD)"를 덧붙인 것 제외). 규칙 자체를 바꿀 일이 생기면
+       반드시 두 함수를 **함께** 고치세요.
+
+    인자·반환은 `resolve_bracket_for_season()` 과 글자 그대로 같습니다.
+    """
+    season_key = season_key_for_date(on_date)
+
+    existing = existing_assignment or None
+    if existing:
+        if not isinstance(existing, dict):
+            raise DuelRuleError(f"체급 배정 기록이 dict 가 아닙니다: {existing!r}")
+        existing_season = str(existing.get("season_key") or "").strip()
+        existing_bracket = str(existing.get("bracket_key") or "").strip()
+        if existing_season == season_key:
+            if existing_bracket not in BRACKET_KEYS_USD:
+                raise DuelRuleError(
+                    f"저장된 체급 식별자(USD)를 알 수 없습니다: {existing_bracket!r}"
+                    " — 임의의 체급으로 대체하지 않고 중단합니다(§0-1)."
+                )
+            return {"season_key": season_key, "bracket_key": existing_bracket,
+                    "source": "kept", "needs_write": False}
+
+    fresh = str(fresh_bracket_key or "").strip()
+    if fresh not in BRACKET_KEYS_USD:
+        raise DuelRuleError(f"새로 계산한 체급 식별자(USD)를 알 수 없습니다: {fresh_bracket_key!r}")
+    return {"season_key": season_key, "bracket_key": fresh,
+            "source": "assigned", "needs_write": True}
