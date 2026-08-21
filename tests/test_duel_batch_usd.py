@@ -34,7 +34,7 @@ sys.path.append(str(REPO_ROOT))
 sys.path.append(str(Path(__file__).parent))
 
 from test_duel_db import FakeClient  # noqa: E402
-from utils import duel_batch, duel_batch_usd, duel_db_usd, duel_rules  # noqa: E402
+from utils import duel_batch, duel_batch_usd, duel_db, duel_db_usd, duel_rules  # noqa: E402
 from utils.duel_batch_usd import DuelBatchError  # noqa: E402
 from utils.duel_rules import KST  # noqa: E402
 
@@ -411,3 +411,66 @@ def test_every_public_function_in_duel_batch_usd_has_a_docstring():
               and not name.startswith("_")
               and not (function.__doc__ or "").strip()]
     assert missing == [], f"docstring 없는 공개 함수: {missing}"
+
+
+# =============================================================================
+# 7. 창당 1회 리밸런싱 매도 (USD 미러 · 2026-08-21)
+# =============================================================================
+def test_batch_usd_settles_sells_through_the_usd_rpc_only():
+    """
+    🔴 USD 배치도 매도 정산을 **USD 전용 RPC** 로 보냅니다. 일반 upsert 로 보내면 공유
+    트리거(`duel_positions_buy_only()`)가 그날 USD 포지션 저장을 통째로 거절하고,
+    원화 RPC 로 보내면 다른 트랙의 표를 건드리게 됩니다.
+    """
+    accounts = _accounts(1)
+    accounts[0]["first_holding_date"] = "2026-07-01"
+    sell = _order("o-sell", accounts[0]["id"], "AAPL", 4, "2026-08-19T18:30:00+09:00")
+    sell["side"] = "sell"
+    sell["rebalance_window_index"] = 0
+    position = {"account_id": accounts[0]["id"], "ticker": "AAPL", "stock_name": "애플",
+                "quantity": 10, "avg_cost": 150.0, "status": "active", "delisted_date": None}
+
+    client = _client(accounts=accounts, orders=[sell], positions=[position])
+    summary = _run(client, close_price_of=lambda ticker: 200.0 if ticker == "AAPL" else None)
+
+    assert summary["orders"]["sell_filled"] == 1
+    assert summary["sold_amount_total"] == 800.0
+    assert summary["sell_positions_settled"] == 1
+
+    call = client.only_call(duel_db_usd.SETTLE_SELL_RPC_USD, "rpc")
+    assert call.payload == {"p_rows": [
+        {"account_id": accounts[0]["id"], "ticker": "AAPL", "quantity": 6.0}]}
+    assert client.calls_for(duel_db_usd.POSITIONS_TABLE_USD, "upsert") == []
+    # 원화 표·원화 RPC 는 근처에도 가지 않습니다.
+    assert client.calls_for(duel_db.SETTLE_SELL_RPC) == []
+    assert client.calls_for(duel_db.POSITIONS_TABLE) == []
+
+
+def test_batch_usd_records_the_first_holding_date_on_the_first_fill():
+    """USD 계좌의 리밸런싱 창 기준일도 첫 체결이 있는 밤에 USD 계좌 표에 기록됩니다."""
+    accounts = _accounts(1)
+    ledger = _seed_ledger(accounts)
+    client = _client(
+        accounts=accounts, ledger=ledger,
+        orders=[_order("o-1", accounts[0]["id"], "AAPL", 1, "2026-08-19T18:30:00+09:00")],
+    )
+    summary = _run(client, close_price_of=lambda ticker: 200.0 if ticker == "AAPL" else None)
+
+    assert summary["first_holding_dates_set"] >= 1
+    call = client.only_call(duel_db_usd.ACCOUNTS_TABLE_USD, "update")
+    assert call.payload == {"first_holding_date": TARGET_DATE.isoformat()}
+    assert client.calls_for(duel_db.ACCOUNTS_TABLE) == []
+
+
+def test_summary_lines_usd_show_sell_proceeds_in_dollars():
+    """매도 요약 줄도 "원"이 아니라 "$" 여야 합니다(§5-15 와 같은 함정)."""
+    lines = duel_batch_usd.format_summary_lines_usd({
+        "target_date": "2026-08-19", "action": {"fill": True},
+        "orders": {"orders": 1, "filled": 1, "sells": 1, "sell_filled": 1},
+        "filled_amount_total": 0.0, "sold_amount_total": 800.0,
+    })
+    sell_line = [line for line in lines if "리밸런싱 매도" in line]
+    assert len(sell_line) == 1
+    # ("재원" 같은 낱말에 '원' 글자가 들어가므로, 금액 표기 자체를 대조합니다.)
+    assert "$800.00" in sell_line[0]
+    assert "800원" not in sell_line[0] and "800.00원" not in sell_line[0]

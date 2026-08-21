@@ -179,6 +179,17 @@ def _positive_price(value):
     return number if number > 0 else None
 
 
+def _is_sell_order(row):
+    """
+    주문 행이 **리밸런싱 매도**인가(`side='sell'`). 2026-08-21 추가.
+
+    `side` 가 비어 있으면 **매수로 봅니다.** DB 는 `side` 를 not null + CHECK 로 막고 있어
+    비어 올 수 없지만, 이 함수의 호출부가 "모르면 매도"로 기울면 값 하나가 빠졌을 때
+    포지션이 줄어드는 쪽으로 오작동합니다 — 안전한 기본값은 언제나 수량이 줄지 않는 쪽입니다.
+    """
+    return str((row or {}).get("side") or "buy").strip().lower() == "sell"
+
+
 def is_monthly_deposit_date(target_date):
     """
     그날이 정기 입금일(매월 10일)인가. 2-2 참고.
@@ -585,7 +596,26 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
     계산은 전부 규칙 계층이 합니다:
       · 계좌별 FIFO 예수금 배정·부분체결 → `duel_rules.allocate_pending_orders()`
       · 가중평균 평단가 갱신           → `duel_rules.apply_buy_fill_to_position()`
+      · 매도 체결(전량)                → `duel_rules.calculate_sell_fill()`
+      · 매도 후 포지션(평단가 불변)     → `duel_rules.apply_sell_fill_to_position()`
     이 함수는 그 결과를 **표에 넣을 모양으로 담기만** 합니다.
+
+    ── 🔴 계좌 안에서 **매도 먼저, 매수 나중** (2026-08-21 오너 확정 스펙 ④) ─────────────
+    "같은 날 밤 매도 대금이 그날 밤 매수 재원으로 즉시 사용 가능"이 확정 스펙이라, 계좌별
+    루프 안에서 그 계좌의 pending 주문을 side 로 한 번 더 갈라 **매도를 먼저 처리하고 그
+    대금을 가용 현금에 더한 뒤** 기존 매수 배정(`allocate_pending_orders()`)으로 넘깁니다.
+    순서를 뒤집으면 "오늘 판 돈으로 오늘 산다"가 불가능해져 리밸런싱이 하루씩 밀립니다.
+
+    ⚠️ 매도에는 부분체결·만료가 없습니다(제약이 현금이 아니라 보유 수량이고, 저장 시점에
+       이미 검증됐기 때문 — `duel_rules.calculate_sell_fill()` 주석). 그날 확정 종가가 없는
+       매도는 매수와 **같은 자리·같은 방식**으로 `cancelled` 입니다(2-4-5).
+
+    ⚠️ 보유 수량을 넘는 매도(규칙 계층이 예외로 막는 상태)는 **그 주문 하나만** 사유를 달아
+       `cancelled` 로 돌리고 배치는 계속합니다. 예외를 그대로 올리면 계좌 하나의 불가능한
+       상태가 그날 밤 **모든 사용자의 정산**을 멈춥니다 — 이 파일이 이미 계좌별 TWR 실패를
+       같은 방식으로 격리하고 있고(`compute_twr_by_account()`), 활성 계좌 목록에 없는 주문을
+       손대지 않고 경고로 올리는 것과도 같은 판단입니다. 사실은 사라지지 않습니다: 사유
+       문장이 그 주문 행에 그대로 남습니다(§0-1).
 
     인자
         pending_orders    : `duel_db.fetch_pending_orders_for_fill()` 결과(saved_at 오름차순).
@@ -602,32 +632,46 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
        성립하고, `total_cost` 를 실제 쓴 돈으로 더하기 때문입니다).
 
     반환 dict
-        fill_results   : `record_order_fills()` 에 그대로 넘길 목록
-        ledger_entries : `record_buy_ledger_entries()` 에 그대로 넘길 목록(체결금액 0 은 제외)
-        position_rows  : `upsert_positions()` 에 그대로 넘길 목록((계좌,종목) 유일)
+        fill_results   : `record_order_fills()` 에 그대로 넘길 목록(매수·매도 함께)
+        ledger_entries : `record_buy_ledger_entries()` 에 그대로 넘길 목록(체결금액 0 은 제외).
+                         매도 행은 `event_type='sell'` 로 표시돼 있고 금액은 양수입니다.
+        position_rows  : `upsert_positions()` 에 그대로 넘길 목록((계좌,종목) 유일).
+                         **수량이 줄어드는 행은 여기 없습니다** — 아래 참고.
+        sell_position_rows : 수량이 **줄어든** 포지션. `settle_sell_positions()`(매도 정산
+                         RPC) 로만 보낼 수 있습니다 — 일반 upsert 로 보내면
+                         `duel_positions_buy_only()` 트리거가 요청 전체를 거절합니다.
         positions_by_account : 체결을 반영한 포지션(스냅샷 계산에 그대로 씁니다)
         cash_after     : 체결 후 계좌별 예수금(원장을 다시 읽지 않기 위해 계산으로 이어받음)
-        counts         : filled / partially_filled / expired / cancelled / orders / accounts
-        filled_amount_total : 그날 실제로 쓴 현금 합계
+        counts         : filled / partially_filled / expired / cancelled / sells /
+                         sell_filled / orders / accounts
+        filled_amount_total : 그날 **매수에** 실제로 쓴 현금 합계(매도 대금은 포함하지 않습니다 —
+                         "쓴 돈"과 "들어온 돈"을 한 숫자로 섞으면 로그가 거짓말을 합니다)
+        sold_amount_total   : 그날 매도로 들어온 현금 합계
     """
     day = _to_date(fill_date, "체결 거래일")
     balances = dict(cash_balances or {})
     prices = dict(close_prices or {})
 
     # 계좌별 현재 포지션을 (계좌, 종목) 으로 펼쳐 둡니다(원본을 건드리지 않게 복사).
+    #  · `original_quantities` 는 체결 **전** 수량입니다. 마지막에 "이 행이 줄었는가"를
+    #    판정해 일반 upsert 와 매도 정산 RPC 로 갈라 보내는 근거가 됩니다.
     positions = {}
+    original_quantities = {}
     for account_id, rows in (existing_positions or {}).items():
         for row in rows or []:
             ticker = str((row or {}).get("ticker") or "").strip()
             if not ticker:
                 continue
             positions[(account_id, ticker)] = dict(row)
+            original_quantities[(account_id, ticker)] = float((row or {}).get("quantity") or 0)
 
     fill_results = []
     ledger_entries = []
     touched_positions = set()
-    counts = {"filled": 0, "partially_filled": 0, "expired": 0, "cancelled": 0}
+    counts = {"filled": 0, "partially_filled": 0, "expired": 0, "cancelled": 0,
+              "sells": 0, "sell_filled": 0}
     filled_amount_total = 0.0
+    sold_amount_total = 0.0
 
     grouped = duel_db.group_rows_by_account(pending_orders)
     for account_id in sorted(grouped):
@@ -635,7 +679,101 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
         # 잔고 키가 없다 = 그 계좌 원장에 행이 하나도 없다(조회는 전체를 한 번에 했으므로
         # "모르는 상태"가 아니라 "0원"이라는 관측 결과입니다).
         available = balances.get(account_id, 0.0)
-        outcomes = duel_rules.allocate_pending_orders(available, orders, prices)
+
+        # ── ① 매도 먼저 (확정 스펙 ④ — 그날 매도 대금이 그날 매수 재원) ────────────
+        #    입력 순서를 그대로 씁니다. 배치가 받는 목록은 이미 `saved_at` 오름차순이고
+        #    (`duel_db.fetch_pending_orders_for_fill()`), 매도는 서로 현금을 두고 다투지
+        #    않아 순서가 결과를 바꾸는 경우가 같은 종목을 두 번 파는 예외뿐입니다.
+        sell_orders = [row for row in orders if _is_sell_order(row)]
+        buy_orders = [row for row in orders if not _is_sell_order(row)]
+
+        for raw in sell_orders:
+            counts["sells"] += 1
+            ticker = str((raw or {}).get("ticker") or "").strip()
+            if not ticker:
+                raise DuelBatchError(f"매도 주문에 종목코드가 없습니다: {raw!r}")
+            key = (account_id, ticker)
+            existing = positions.get(key)
+            price = prices.get(ticker)
+
+            settled = None
+            if price is None:
+                reason = (
+                    f"{ticker}의 확정 종가를 확보하지 못해 매도를 체결하지 않고 취소했습니다"
+                    " — 모르는 가격으로 팔거나 다음 날로 이월하지 않습니다(작업지시서 2-4-5)."
+                )
+            else:
+                try:
+                    settled = duel_rules.calculate_sell_fill(
+                        raw.get("requested_quantity"), price,
+                        (existing or {}).get("quantity") or 0)
+                except duel_rules.DuelRuleError as exc:
+                    # 계좌 하나의 불가능한 상태가 그날 밤 전체를 멈추지 않게 격리합니다
+                    # (위 docstring 참고). 사유는 주문 행에 그대로 남습니다.
+                    settled, reason = None, f"매도를 체결할 수 없어 취소했습니다: {exc}"
+
+            if settled is None:
+                counts[duel_rules.ORDER_CANCELLED] = counts.get(duel_rules.ORDER_CANCELLED, 0) + 1
+                fill_results.append({
+                    "id": raw.get("id"),
+                    "status": duel_rules.ORDER_CANCELLED,
+                    "filled_quantity": None,
+                    "filled_price": None,
+                    "filled_amount": None,
+                    "filled_date": None,
+                    "fail_reason": reason,
+                })
+                continue
+
+            sold_quantity = int(settled["filled_quantity"])
+            counts[duel_rules.ORDER_FILLED] = counts.get(duel_rules.ORDER_FILLED, 0) + 1
+            counts["sell_filled"] += 1
+            fill_results.append({
+                "id": raw.get("id"),
+                "status": settled["status"],
+                "filled_quantity": sold_quantity,
+                "filled_price": _round6(price),
+                "filled_amount": settled["filled_amount"],
+                "filled_date": day,
+                "fail_reason": settled["fail_reason"],
+            })
+
+            # 매도 대금은 **양수**로 원장에 남깁니다(입금과 같은 방향 — 부호는
+            # `duel_db._fill_ledger_payload()` 한 곳에서만 결정합니다).
+            sold_amount_total += float(settled["filled_amount"])
+            ledger_entries.append({
+                "account_id": account_id,
+                "order_id": raw.get("id"),
+                "event_type": "sell",
+                "filled_amount": settled["filled_amount"],
+                "event_date": day,
+                "memo": f"{ticker} {sold_quantity}주 매도 체결",
+            })
+
+            updated = duel_rules.apply_sell_fill_to_position(
+                (existing or {}).get("quantity"), (existing or {}).get("avg_cost"),
+                sold_quantity)
+            positions[key] = {
+                "account_id": account_id,
+                "ticker": ticker,
+                "stock_name": (existing or {}).get("stock_name")
+                or str(raw.get("stock_name") or "").strip() or ticker,
+                "quantity": updated["quantity"],
+                # 매도는 잔여 주식의 평단가를 바꾸지 않습니다(규칙 계층이 그대로 돌려줍니다).
+                "avg_cost": updated["avg_cost"],
+                "status": (existing or {}).get("status") or "active",
+                "delisted_date": (existing or {}).get("delisted_date"),
+            }
+            touched_positions.add(key)
+
+            # 🔴 그날 밤 매수 재원이 되는 지점.
+            available = _round6(available + float(settled["filled_amount"]))
+
+        # 매도만 있고 매수가 없는 계좌도 잔고가 늘어야 하므로 여기서 한 번 반영합니다.
+        balances[account_id] = _round6(available)
+
+        # ── ② 그다음 매수 (기존 FIFO 배정 그대로 · 위에서 늘어난 현금으로) ──────────
+        outcomes = duel_rules.allocate_pending_orders(available, buy_orders, prices)
 
         for outcome in outcomes:
             status = outcome["status"]
@@ -689,13 +827,26 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
         if outcomes:
             balances[account_id] = outcomes[-1]["cash_after"]
 
-    position_rows = [{
-        "account_id": positions[key]["account_id"],
-        "ticker": positions[key]["ticker"],
-        "stock_name": positions[key]["stock_name"],
-        "quantity": positions[key]["quantity"],
-        "avg_cost": positions[key]["avg_cost"],
-    } for key in sorted(touched_positions)]
+    # 수량이 **줄어든** 행은 일반 upsert 로 보낼 수 없습니다(트리거가 요청 전체를 거절).
+    # 그래서 여기서 두 갈래로 나눠, 호출부가 각각 맞는 경로로 보내게 합니다:
+    #   · 늘거나 그대로 → `duel_db.upsert_positions()`
+    #   · 줄어듦        → `duel_db.settle_sell_positions()`(duel.settled_sell 세션 변수 경로)
+    # 같은 밤에 같은 종목을 팔고 다시 사서 **최종 수량이 늘어난** 경우는 감소가 아니므로
+    # 일반 upsert 가 맞습니다(트리거도 통과합니다 — 줄어든 게 아니니까요).
+    position_rows = []
+    sell_position_rows = []
+    for key in sorted(touched_positions):
+        row = {
+            "account_id": positions[key]["account_id"],
+            "ticker": positions[key]["ticker"],
+            "stock_name": positions[key]["stock_name"],
+            "quantity": positions[key]["quantity"],
+            "avg_cost": positions[key]["avg_cost"],
+        }
+        if float(row["quantity"]) < original_quantities.get(key, 0.0):
+            sell_position_rows.append(row)
+        else:
+            position_rows.append(row)
 
     positions_by_account = {}
     for (account_id, _ticker), row in sorted(positions.items()):
@@ -707,10 +858,12 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
         "fill_results": fill_results,
         "ledger_entries": ledger_entries,
         "position_rows": position_rows,
+        "sell_position_rows": sell_position_rows,
         "positions_by_account": positions_by_account,
         "cash_after": balances,
         "counts": counts,
         "filled_amount_total": _round6(filled_amount_total),
+        "sold_amount_total": _round6(sold_amount_total),
     }
 
 
@@ -896,6 +1049,56 @@ def build_snapshot_rows(accounts, positions_by_account, cash_balances, close_pri
     return rows
 
 
+def resolve_first_holding_updates(accounts, positions_before, positions_after):
+    """
+    "이번 정산으로 **처음** 주식이 들어온 계좌"를 골라냅니다(2026-08-21 추가). 메모리 계산만
+    하고 Supabase 를 부르지 않습니다 — 실제 갱신은 호출부가
+    `duel_db.set_first_holding_dates()` 로 **한 번에** 보냅니다(§0-3-2).
+
+    왜 필요한가: 리밸런싱 창의 카운트다운 기준은 계좌 개설일이 아니라 **계좌에 최초로
+    주식이 들어온 날**입니다(`duel_rules.resolve_rebalance_window()`). 그 날짜를 아는 유일한
+    자리가 "체결로 포지션이 처음 생기는 순간", 즉 여기입니다.
+
+    인자
+        accounts         : `duel_db.fetch_all_active_accounts()` 결과(= `first_holding_date`
+                           포함). 이 값이 이미 차 있으면 **손대지 않습니다**.
+        positions_before : 체결 **전** `{account_id: [포지션 행]}`
+        positions_after  : 체결 **후** `{account_id: [포지션 행]}`
+
+    반환 dict
+        new_ids : 오늘 처음 보유가 생긴 계좌 ID 목록(정렬됨). 이 계좌들만 갱신 대상입니다.
+        missing : 보유는 있는데 `first_holding_date` 가 비어 있고 **오늘 처음 생긴 것도
+                  아닌** 계좌 ID 목록. 이 기능이 생기기 전부터 보유가 있던 계좌들이라,
+                  오늘 날짜로 채우면 **사실과 다른 창**이 만들어집니다(§0-1 — 지어내지
+                  않습니다). 그래서 채우지 않고 호출부가 경고로 올려 오너가 과거 체결
+                  기록을 보고 직접 채우게 합니다.
+
+    ⚠️ "보유가 있다"의 기준은 **수량 > 0** 입니다. 전량 매도로 0주가 된 포지션 행은 남아
+       있지만(스키마상 정상 상태), 그건 "주식을 갖고 있다"가 아닙니다.
+    """
+    def _holds(mapping, account_id):
+        for row in (mapping or {}).get(account_id) or []:
+            try:
+                if float((row or {}).get("quantity") or 0) > 0:
+                    return True
+            except (TypeError, ValueError):
+                continue
+        return False
+
+    new_ids, missing = [], []
+    for account in accounts or []:
+        account_id = (account or {}).get("id")
+        if not account_id or (account or {}).get("first_holding_date"):
+            continue
+        if not _holds(positions_after, account_id):
+            continue
+        if _holds(positions_before, account_id):
+            missing.append(account_id)
+        else:
+            new_ids.append(account_id)
+    return {"new_ids": sorted(new_ids), "missing": sorted(missing)}
+
+
 def compute_twr_by_account(history_rows, new_rows):
     """
     계좌별 **누적 TWR**(2-6)을 계산합니다 — 계산 자체는 `duel_rules.compute_twr()` 가 합니다.
@@ -966,8 +1169,12 @@ def run_nightly_batch(service_client, target_date, *,
 
     ── Supabase 왕복 횟수 (§0-3-2 · 계좌 수와 무관) ──────────────────────────────
         읽기 : 활성 계좌 1 + 원장 1 (+ 체결일이면 주문 1 · 포지션 1 · 스냅샷 이력 1)
-        쓰기 : 정기 입금 1(10일만) + 체결 결과 n(그날 체결된 주문 수) + 매수 원장 1
-               + 포지션 upsert 1 + 스냅샷 upsert 2(합계/종목별) — 또는 실패일이면 일괄 취소 1
+        쓰기 : 정기 입금 1(10일만) + 체결 결과 n(그날 체결된 주문 수) + 체결 원장 1
+               + 매도 정산 RPC 1(**그날 매도 체결이 있는 밤만**) + 포지션 upsert 1
+               + 최초 보유일 1(**그날 처음 보유가 생긴 계좌가 있는 밤만**)
+               + 스냅샷 upsert 2(합계/종목별) — 또는 실패일이면 일괄 취소 1
+               ⚠️ 새로 붙은 두 쓰기도 **계좌 수와 무관**합니다(각각 in 필터·jsonb 배열 1회).
+                  해당 사건이 없는 밤에는 질의 자체를 보내지 않습니다.
     반환: 요약 dict(`format_summary_lines()` 에 그대로 넘길 수 있습니다).
     """
     day = _to_date(target_date, "처리 거래일")
@@ -979,10 +1186,13 @@ def run_nightly_batch(service_client, target_date, *,
         "deposit_applied": 0,
         "deposit_attempted": False,
         "orders": {"filled": 0, "partially_filled": 0, "expired": 0, "cancelled": 0,
-                   "orders": 0, "accounts": 0},
+                   "sells": 0, "sell_filled": 0, "orders": 0, "accounts": 0},
         "filled_amount_total": 0.0,
+        "sold_amount_total": 0.0,
         "ledger_rows_written": 0,
         "positions_written": 0,
+        "sell_positions_settled": 0,
+        "first_holding_dates_set": 0,
         "pending_cancelled": 0,
         "pending_held": 0,
         "snapshots_written": 0,
@@ -1035,6 +1245,9 @@ def run_nightly_batch(service_client, target_date, *,
         pending = duel_db.fetch_pending_orders_for_fill(service_client, day)
         position_rows = duel_db.fetch_positions_for_accounts(service_client, account_ids)
         positions_by_account = duel_db.group_rows_by_account(position_rows)
+        # 체결 **전** 보유 상태를 따로 들고 있습니다 — "오늘 처음 주식이 생긴 계좌"를
+        # 판정하는 유일한 근거입니다(아래 `resolve_first_holding_updates()`).
+        positions_before_fill = positions_by_account
 
         # 그날 pending 주문 조회는 **계좌 상태를 보지 않습니다**(거래일 + status 로만 거릅니다).
         # 활성 계좌 목록에 없는 계좌의 주문이 섞여 있으면, 그 계좌의 원장도 안 읽었으므로
@@ -1062,8 +1275,23 @@ def run_nightly_batch(service_client, target_date, *,
                                      positions_by_account, day)
         summary["orders"] = fill_plan["counts"]
         summary["filled_amount_total"] = fill_plan["filled_amount_total"]
+        summary["sold_amount_total"] = fill_plan["sold_amount_total"]
         positions_by_account = fill_plan["positions_by_account"]
         cash_balances = fill_plan["cash_after"]
+
+        # 오늘 처음 보유가 생긴 계좌(= 리밸런싱 창의 기준일이 오늘로 정해지는 계좌).
+        first_holding = resolve_first_holding_updates(
+            accounts, positions_before_fill, positions_by_account)
+        if first_holding["missing"]:
+            summary["warnings"].append(
+                f"보유 종목이 있는데 `first_holding_date` 가 비어 있는 계좌가"
+                f" {len(first_holding['missing'])}개 있습니다"
+                f" (예: {first_holding['missing'][:3]})."
+                " 오늘 처음 생긴 보유가 아니라 오늘 날짜로 채우지 않았습니다 — 채우면 사실과"
+                " 다른 리밸런싱 창이 만들어집니다(§0-1). 이 계좌들의 첫 체결일을 과거 주문"
+                " 기록에서 확인해 오너가 직접 채워 주세요(그 전까지 매도 화면은 창을 계산할"
+                " 수 없다고 정직하게 표시합니다)."
+            )
 
         if dry_run:
             log(f"  · (dry-run) 체결 결과 {len(fill_plan['fill_results'])}건을 기록하지 않습니다.")
@@ -1071,10 +1299,22 @@ def run_nightly_batch(service_client, target_date, *,
             written = duel_db.record_order_fills(service_client, fill_plan["fill_results"])
             summary["ledger_rows_written"] = duel_db.record_buy_ledger_entries(
                 service_client, fill_plan["ledger_entries"])
+            # 🔴 매도 정산이 **먼저**입니다 — 수량이 줄어드는 행은 전용 RPC 로만 통과하고
+            #    (`duel.settled_sell` 세션 변수), 일반 upsert 로 보내면 트리거가 요청 전체를
+            #    거절합니다. 두 목록은 (계좌, 종목)이 겹치지 않게 갈라져 있습니다.
+            summary["sell_positions_settled"] = duel_db.settle_sell_positions(
+                service_client, fill_plan["sell_position_rows"])
             saved = duel_db.upsert_positions(service_client, fill_plan["position_rows"])
             summary["positions_written"] = len(saved)
+            if first_holding["new_ids"]:
+                summary["first_holding_dates_set"] = duel_db.set_first_holding_dates(
+                    service_client, first_holding["new_ids"], day)
             log(f"  ✅ 체결 결과 {written}건 기록 ·"
-                f" 매수 원장 {summary['ledger_rows_written']}행 · 포지션 {len(saved)}건 갱신")
+                f" 체결 원장 {summary['ledger_rows_written']}행 · 포지션 {len(saved)}건 갱신"
+                + (f" · 매도 정산 {summary['sell_positions_settled']}건"
+                   if summary["sell_positions_settled"] else "")
+                + (f" · 최초 보유일 {summary['first_holding_dates_set']}계좌 기록"
+                   if summary["first_holding_dates_set"] else ""))
 
     elif action["cancel_pending"]:
         # ── ③' 실패일 처리 (2-4-5) — 집합 연산 1회 ───────────────────────────
@@ -1188,6 +1428,14 @@ def format_summary_lines(summary):
             f" 종가없음 취소 {orders.get('cancelled', 0)}"
         )
         lines.append(f"  · 체결에 쓴 현금 합계: {summary.get('filled_amount_total', 0):,.0f}원")
+        if orders.get("sells"):
+            # 매도가 있었던 밤에만 한 줄 늘립니다(대부분의 밤에는 0건이라 조용합니다).
+            lines.append(
+                f"  · 리밸런싱 매도 {orders.get('sells', 0)}건 중"
+                f" {orders.get('sell_filled', 0)}건 체결 —"
+                f" 매도 대금 {summary.get('sold_amount_total', 0):,.0f}원"
+                " (그날 매수 재원으로 즉시 반영됨)"
+            )
     elif action.get("cancel_pending"):
         lines.append(f"  ⚠️ 체결 없음 — 그날 귀속 주문 {summary.get('pending_cancelled', 0)}건 취소")
     else:

@@ -161,6 +161,19 @@ BRACKET_ASSIGNMENTS_TABLE = "duel_bracket_assignments"
 #: 세션으로 그것만 호출합니다. 자세한 근거는 스키마 §9-10 주석과 아래 `opt_in()` 참고.
 OPT_IN_RPC = "duel_opt_in"
 
+#: 🔴 리밸런싱 매도 정산 RPC 의 이름(2026-08-21 추가). `sql/duel_schema.sql` §9-11 의 함수
+#: 이름과 **문자 그대로** 같아야 합니다.
+#:
+#: 왜 표 upsert 가 아니라 RPC 인가: `duel_positions` 의 수량 감소는 트리거가 막고 있고,
+#: 매도 정산만은 **같은 트랜잭션에서** `set local duel.settled_sell = 'on'` 이 먼저 실행됐을
+#: 때 통과합니다. 그런데 PostgREST 는 요청 하나가 곧 트랜잭션 하나라서, 클라이언트가 임의의
+#: 세션 변수를 앞세워 보낼 문법이 **없습니다**(PostgREST 가 심어 주는 값은 role·
+#: request.jwt.claims·request.headers 처럼 정해진 것뿐이고, `db-pre-request` 는 서버 전역
+#: 설정이라 "모든 요청에 항상 켜짐"이 되어 트리거가 무의미해집니다). 그래서 "플래그 켜기 +
+#: 수량 줄이기"를 한 호출로 묶은 좁은 함수를 DB 안에 두고, 배치가 그것만 부릅니다.
+#: 자세한 근거와 이 함수가 스스로를 좁게 유지하는 장치 넷은 스키마 §9-11 주석에 있습니다.
+SETTLE_SELL_RPC = "duel_settle_sell_positions"
+
 #: 한 번에 보내는 행 수. `utils/report_db.py::upsert_snapshots` 와 같은 값입니다 —
 #: PostgREST 요청 하나가 지나치게 커지지 않게만 자르는 것이고, 계좌 수만큼 쿼리를 늘리는
 #: 것과는 전혀 다릅니다(§0-3-2 위반이 아닙니다).
@@ -632,6 +645,108 @@ def save_order(client, account_id, ticker, stock_name, requested_quantity,
     }
     rows = _execute(client.table(ORDERS_TABLE).insert(payload), "주문 저장")
     return _first_row(rows, "주문 저장")
+
+
+def save_sell_order(client, account_id, ticker, stock_name, requested_quantity,
+                    held_quantity, window_index, *, trading_days, now_kst=None):
+    """
+    **창당 1회 리밸런싱 매도** 주문 1건을 저장합니다(`status='pending'`, `side='sell'`).
+    2026-08-21 오너 확정 스펙 참고.
+
+    `save_order()`(매수)의 매도판입니다 — 접수 시간대 판정, 체결 거래일(D+1) 계산,
+    `saved_at` 을 판정에 쓴 바로 그 시각으로 저장하는 규약까지 **완전히 같습니다.**
+    같은 시간대에 접수해 같은 D+1 종가로 체결되므로, 두 함수가 달라야 할 이유가 없습니다.
+    아래 셋만 다릅니다.
+
+      ① `side='sell'` + `rebalance_window_index=window_index`
+         창 번호는 앱이 `duel_rules.resolve_rebalance_window()` 로 계산해 넘깁니다. DB 는
+         이 값과 `unique (account_id, rebalance_window_index) where side='sell' and
+         status <> 'cancelled'` 부분 유니크 인덱스로 **"창당 1회"를 직접 강제**합니다 —
+         이 기능 전체에서 가장 중요한 제약입니다(화면 로직이 실수해도 두 번째 매도 주문
+         저장이 DB 에서 거절됩니다).
+      ② 저장 전에 `requested_quantity <= held_quantity` 를 확인합니다. 이건 **사용자에게
+         친절한 사전 점검**이고, 최종 방어는 체결 시점의
+         `duel_rules.calculate_sell_fill()` 예외입니다(§0-3-9 의 이중 방어).
+      ③ **유니버스 검사를 하지 않습니다.** 매수는 코스피 상위 종목만 가능하지만, 이미
+         보유한 종목이 그 목록에서 빠질 수 있고 그때 "팔 수도 없는" 상태가 되면 그게 더
+         나쁩니다. 그래서 `universe_tickers` 인자 자체를 두지 않았습니다.
+
+    ⚠️ **취소하면 그 창의 자리가 다시 열립니다.** 유니크 인덱스 조건이
+       `status <> 'cancelled'` 이므로, 접수 시간대 안에서 `cancel_order()` 로 취소한 매도는
+       같은 창에 다시 낼 수 있습니다. 반면 배치가 처리해 `filled` 또는 (종가 없음)
+       `cancelled` 로 종결된 매도는 — 뒤쪽은 status 가 cancelled 라 인덱스상 자리가 열리지만,
+       그날 이후 같은 창에 다시 주문할 수 있는지는 화면이 판단합니다. 이 함수는 창 번호를
+       받아 그대로 적을 뿐, 기회가 남았는지를 스스로 판정하지 않습니다(판정은 규칙 계층과
+       DB 인덱스의 몫 — 여기서 세 번째 판정 자리를 만들지 않습니다).
+
+    ⚠️ `held_quantity` 는 **호출부가 조회한 보유 수량**입니다. 이 함수가 포지션 표를 읽지
+       않는 이유는 A 절 규약과 같습니다(사용자 세션은 포지션을 읽을 수 있지만, 그 조회를
+       여기서 또 하면 화면이 이미 갖고 있는 값과 두 번째 출처가 생깁니다).
+
+    인자
+        requested_quantity : 팔려는 수량(1주 ~ 전량).
+        held_quantity      : 지금 보유 수량(화면이 조회해 넘깁니다).
+        window_index       : `resolve_rebalance_window()['window_index']`.
+        trading_days       : 확정된 거래일 목록/집합. **필수**(§0-1 — 지어내지 않습니다).
+        now_kst            : 판정 기준 시각(KST). 테스트·재현용.
+
+    반환: 저장된 주문 행 dict.
+    """
+    _require_client(client)
+    account = _require_text(account_id, "계좌 ID")
+    code = _require_text(ticker, "종목코드")
+    name = _require_text(stock_name, "종목명")
+    quantity = _require_positive_int(requested_quantity, "매도 수량")
+    held = _require_positive_int(held_quantity, "보유 수량")
+    window = _require_offset(window_index, "리밸런싱 창 번호")   # 0 부터 시작하므로 0 허용
+
+    if quantity > held:
+        raise DuelDbError(
+            f"보유 수량({held}주)보다 많은 {quantity}주는 매도할 수 없습니다."
+            " 보유한 수량 이하로 다시 입력해 주세요."
+        )
+
+    moment = _now_kst(now_kst)
+    window_state = duel_rules.resolve_order_window(moment)
+    if not window_state["is_open"]:
+        opens = window_state["window_opens_at"]
+        closes = window_state["window_closes_at"]
+        raise DuelDbError(
+            "지금은 주문 접수 시간이 아닙니다 — "
+            f"{opens.strftime('%Y-%m-%d %H:%M:%S')} 부터 {closes.strftime('%H:%M:%S')} 까지"
+            " 접수합니다(한국시간)."
+            " 매도도 매수와 같은 시간대에 접수하고, 체결은 다음 거래일의 확정 종가로"
+            " 이루어집니다."
+        )
+
+    target_date = duel_rules.resolve_fill_trading_day(moment, trading_days)
+
+    payload = {
+        "account_id": account,
+        "ticker": code,
+        "stock_name": name,
+        "requested_quantity": quantity,
+        "side": "sell",
+        "status": ORDER_PENDING,
+        "saved_at": moment.isoformat(),
+        "target_date": target_date.isoformat(),
+        # 창당 1회를 DB 가 강제하는 근거값. 매수 주문은 여기가 NULL 이어야 하고,
+        # 매도 주문은 NULL 이면 안 됩니다(`duel_orders_rebalance_window_match` CHECK).
+        "rebalance_window_index": window,
+    }
+    try:
+        rows = _execute(client.table(ORDERS_TABLE).insert(payload), "매도 주문 저장")
+    except DuelDbError as exc:
+        if _is_duplicate_key_error(exc):
+            # 부분 유니크 인덱스가 두 번째 매도를 막은 것 — 사고가 아니라 규칙이 제 일을
+            # 한 것이므로, Postgres 원문 대신 사람이 읽을 문장으로 바꿔 올립니다(§0-3-4).
+            raise DuelDbError(
+                "이번 리밸런싱 창에서는 이미 매도 주문을 한 번 사용했습니다"
+                " (창마다 딱 1회만 가능하고, 놓친 기회는 누적되지 않습니다)."
+                " 기존 주문을 접수 시간대 안에서 취소하면 이 창의 기회가 다시 열립니다."
+            ) from exc
+        raise
+    return _first_row(rows, "매도 주문 저장")
 
 
 def edit_order(client, order_id, new_quantity, *, now_kst=None):
@@ -1382,11 +1497,17 @@ def fetch_all_active_accounts(service_client):
 
     이 함수가 §0-3-2 의 출발점입니다. 아래 배치 함수들은 전부 **이 결과 하나**를 받아
     집합으로 처리하고, "사용자별로 다시 조회"하지 않습니다.
+
+    ⚠️ `first_holding_date` 를 함께 읽습니다(2026-08-21 추가). 배치가 "이 계좌에 오늘 처음
+       주식이 들어왔는가"를 판정하려면 **지금 값이 NULL 인지**를 알아야 하는데, 그걸 따로
+       조회하면 계좌 수만큼 왕복이 늘거나(§0-3-2 위반) 두 번째 계좌 조회가 생깁니다.
+       이미 계좌 전체를 읽는 이 질의에 컬럼 하나를 더하는 것이 정확히 같은 왕복 수입니다.
     """
     _require_client(service_client, batch=True)
     rows = _execute(
         service_client.table(ACCOUNTS_TABLE)
-        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status")
+        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
+                "first_holding_date")
         .eq("status", "active"),
         "활성 계좌 전체 조회",
     )
@@ -1854,30 +1975,59 @@ def record_buy_ledger_entry(service_client, account_id, order_id, filled_amount,
     }])
 
 
+def _fill_ledger_payload(entries):
+    """
+    체결 원장 행(매수·매도)의 payload 를 만듭니다. `record_buy_ledger_entries()` 와 USD
+    미러가 **같은 규칙**을 쓰도록 여기 한 곳에 둡니다(§0-3-10).
+
+    ⚠️ 부호를 정하는 **유일한 자리**입니다. 매수는 음수(`amount < 0`), 매도는 양수
+       (`amount > 0` — 입금과 같은 방향)이고, 호출부는 **둘 다 체결금액을 양수로** 넘깁니다.
+       부호를 호출부마다 다루면 언젠가 한 곳에서 빠지고, 그 계좌 잔고가 조용히 두 배가
+       되거나 매도 대금이 잔고를 깎습니다.
+    """
+    payload = []
+    for entry in entries:
+        event_type = str(entry.get("event_type") or "buy").strip()
+        if event_type not in ("buy", "sell"):
+            raise DuelDbError(
+                f"체결 원장에 쓸 수 없는 event_type 입니다: {event_type!r} (가능: buy / sell)."
+                " 시드·정기입금은 이 함수가 아니라 각자의 경로로 기록합니다."
+            )
+        amount = _require_amount(entry.get("filled_amount"), "체결금액")
+        payload.append({
+            "account_id": _require_text(entry.get("account_id"), "계좌 ID"),
+            "event_type": event_type,
+            "amount": -amount if event_type == "buy" else amount,
+            "event_date": _iso_date(entry.get("event_date"), "체결일"),
+            # buy·sell 행에는 주문 링크가 반드시 있어야 추적이 됩니다(`..._order_link` CHECK).
+            "order_id": _require_text(entry.get("order_id"), "주문 ID"),
+            "memo": entry.get("memo"),
+        })
+    return payload
+
+
 def record_buy_ledger_entries(service_client, entries):
-    """(배치 전용) 매수 원장 행 여러 개를 **한 번의 insert** 로. 반환: 넣은 행 수."""
+    """
+    (배치 전용) 체결 원장 행 여러 개를 **한 번의 insert** 로. 반환: 넣은 행 수.
+
+    ⚠️ 이름은 `buy` 로 남아 있지만(호출부·테스트가 이 이름을 쓰고 있습니다), 2026-08-21
+       부터 **매도 행도 같은 함수로** 기록합니다 — 각 항목의 `event_type` 이 `'sell'` 이면
+       금액을 양수로 넣습니다(기본값은 `'buy'` 라 기존 호출부는 글자 하나 안 바뀝니다).
+       얇은 `record_sell_ledger_entries()` 를 따로 만들지 않은 이유는 코드 중복 때문입니다 —
+       두 함수가 되면 CHUNK 처리·검증·부호 규칙이 두 벌이 되고, 그중 하나만 고쳐지는 날이
+       옵니다(§0-3-10).
+    """
     _require_client(service_client, batch=True)
     rows = list(entries or [])
     if not rows:
         return 0
 
-    payload = []
-    for entry in rows:
-        amount = _require_amount(entry.get("filled_amount"), "체결금액")
-        payload.append({
-            "account_id": _require_text(entry.get("account_id"), "계좌 ID"),
-            "event_type": "buy",
-            "amount": -amount,   # 부호를 뒤집는 유일한 자리(위 주석 참고).
-            "event_date": _iso_date(entry.get("event_date"), "체결일"),
-            # buy 행에는 주문 링크가 반드시 있어야 추적이 됩니다(`..._order_link` CHECK).
-            "order_id": _require_text(entry.get("order_id"), "주문 ID"),
-            "memo": entry.get("memo"),
-        })
+    payload = _fill_ledger_payload(rows)
 
     inserted = 0
     for start in range(0, len(payload), CHUNK_SIZE):
         chunk = payload[start:start + CHUNK_SIZE]
-        _execute(service_client.table(LEDGER_TABLE).insert(chunk), "매수 원장 기록")
+        _execute(service_client.table(LEDGER_TABLE).insert(chunk), "체결 원장 기록")
         inserted += len(chunk)
     return inserted
 
@@ -1925,8 +2075,11 @@ def upsert_positions(service_client, rows):
 
     ⚠️ 같은 (계좌, 종목)이 한 요청에 두 번 들어오면 PostgREST 가 요청 전체를 거절합니다.
        그 경우 그날 포지션이 통째로 안 들어가므로 **먼저 잡아** 어느 키가 겹쳤는지 알립니다.
-    ⚠️ 수량을 줄이는 값은 보내지 마세요. 이 모듈에 매도는 없고, `duel_positions_no_sell`
-       트리거가 DB 에서 막습니다(관리 경로만 세션 변수로 예외).
+    ⚠️ **수량을 줄이는 값은 이 함수로 보내지 마세요.** `duel_positions_no_sell` 트리거가
+       DB 에서 막고, 요청 전체가 실패합니다. 리밸런싱 매도 정산은 전용 경로인
+       `settle_sell_positions()`(아래)로 보내야 합니다 — 그쪽만 `duel.settled_sell` 세션
+       변수를 켤 수 있고, 그렇게 경로를 갈라 둔 덕분에 "왜 수량이 줄었는지"가 코드에서도
+       원장에서도 한눈에 보입니다.
     """
     _require_client(service_client, batch=True)
     payload = [dict(row) for row in (rows or [])]
@@ -1942,6 +2095,95 @@ def upsert_positions(service_client, rows):
             "포지션 저장",
         ))
     return [dict(row) for row in saved]
+
+
+def _sell_settlement_payload(rows, label):
+    """
+    매도 정산 RPC 에 보낼 행 목록을 만듭니다(KRW/USD 공통 규칙 — §0-3-10).
+
+    보내는 필드는 **셋뿐**입니다: `account_id` · `ticker` · `quantity`(정산 후 남는 수량).
+    `avg_cost` 를 일부러 보내지 않습니다 — 매도는 잔여 주식의 매입단가를 바꾸지 않고
+    (`duel_rules.apply_sell_fill_to_position()`), DB 함수도 수량만 갱신하도록 좁혀 뒀기
+    때문입니다. 여기서 원가를 함께 보내기 시작하면 "정산 경로로 원가를 다시 쓰는" 길이
+    생깁니다.
+    """
+    payload = []
+    for row in rows:
+        quantity = _require_amount(row.get("quantity"), "매도 후 잔여 수량", allow_zero=True)
+        payload.append({
+            "account_id": _require_text(row.get("account_id"), "계좌 ID"),
+            "ticker": _require_text(row.get("ticker"), "종목코드"),
+            "quantity": quantity,
+        })
+    _assert_unique_keys(payload, ("account_id", "ticker"), label)
+    return payload
+
+
+def settle_sell_positions(service_client, rows):
+    """
+    (배치 전용) 🔴 **리밸런싱 매도 체결을 포지션에 반영하는 유일한 경로.** 반환: 반영된 행 수.
+
+    `upsert_positions()` 로는 수량을 줄일 수 없습니다 — `duel_positions_buy_only()` 트리거가
+    막고, 예외는 같은 트랜잭션에서 `set local duel.settled_sell = 'on'` 이 먼저 실행된
+    경우뿐입니다. PostgREST 는 요청마다 트랜잭션이 달라 클라이언트가 세션 변수를 앞세울 수
+    없으므로, "플래그 켜기 + 수량 줄이기"를 한 호출로 묶은 DB 함수
+    (`sql/duel_schema.sql` §9-11 `duel_settle_sell_positions(jsonb)`)를 부릅니다.
+    자세한 근거는 위 `SETTLE_SELL_RPC` 상수 주석에 있습니다.
+
+    ⚠️ 이 함수는 **계산하지 않습니다.** 잔여 수량은 `duel_rules.apply_sell_fill_to_position()`
+       이 만든 값을 그대로 받습니다.
+    ⚠️ 계좌마다 부르지 마세요 — 그날 매도 정산 **전체**를 한 번(길면 CHUNK_SIZE 단위)에
+       보냅니다(§0-3-2).
+    ⚠️ DB 함수가 "없는 포지션"·"줄지 않는 수량"을 만나면 **아무것도 반영하지 않고 예외**를
+       냅니다. 그 실패는 여기서 삼키지 않고 그대로 올립니다 — 매도가 체결됐다고 기록됐는데
+       수량이 그대로인 상태를 조용히 넘기면, 그 계좌의 자산이 하루아침에 늘어난 것처럼
+       보입니다(§0-1).
+    """
+    _require_client(service_client, batch=True)
+    payload = _sell_settlement_payload(list(rows or []), "매도 정산 요청")
+    if not payload:
+        return 0
+
+    settled = 0
+    for start in range(0, len(payload), CHUNK_SIZE):
+        chunk = payload[start:start + CHUNK_SIZE]
+        try:
+            query = service_client.rpc(SETTLE_SELL_RPC, {"p_rows": chunk})
+        except (AttributeError, TypeError) as exc:
+            raise DuelDbError(
+                "이 Supabase 연결로는 매도 정산을 호출할 수 없습니다"
+                " (저장 프로시저 호출을 지원하지 않는 클라이언트입니다)."
+            ) from exc
+        _execute(query, "매도 포지션 정산")
+        settled += len(chunk)
+    return settled
+
+
+def set_first_holding_dates(service_client, account_ids, first_holding_date):
+    """
+    (배치 전용) 오늘 **처음으로** 보유 종목이 생긴 계좌들의 `first_holding_date` 를 채웁니다.
+    반환: 실제로 채워진 행 수.
+
+    왜 필요한가: 리밸런싱 창의 카운트다운 기준은 계좌 개설일(`anchor_date`)이 아니라
+    **계좌에 최초로 주식이 들어온 날**입니다(2026-08-21 오너 확정). 개설일 기준으로 세면
+    아무것도 안 산 채로 창이 흘러가 첫 매수 전에 매도 기회가 소멸합니다.
+
+    ⚠️ 계좌마다 update 를 보내지 않습니다 — 값이 **모든 대상에 같은 날짜 하나**라서
+       `in` 필터 한 번으로 끝납니다(§0-3-2). 계좌가 900개여도 왕복은 1회입니다.
+    ⚠️ `first_holding_date is null` 조건을 **DB 쪽에서도** 겁니다. 배치를 두 번 돌려도
+       이미 채워진 날짜를 오늘로 덮어쓰지 않게 하는 멱등 장치입니다 — 덮어쓰면 그 계좌의
+       리밸런싱 창이 통째로 밀려 매도 기회가 사라지거나 하나 더 생깁니다.
+    """
+    _require_client(service_client, batch=True)
+    ids = [str(value) for value in (account_ids or []) if str(value or "").strip()]
+    if not ids:
+        return 0        # 대상이 없으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
+
+    day = _iso_date(first_holding_date, "최초 보유일")
+    query = service_client.table(ACCOUNTS_TABLE).update({"first_holding_date": day}) \
+        .in_("id", ids)
+    updated = _execute(_filter_is_null(query, "first_holding_date"), "최초 보유일 기록")
+    return len(updated or [])
 
 
 # -----------------------------------------------------------------------------
@@ -2603,7 +2845,8 @@ def _assert_no_identity_fields(payload, table_name):
 #: "관리자가 대신 참여시키는 기능"을 만들려고 `opt_in(client, user_id=...)` 나
 #: `opt_in(client, seed_amount=...)` 를 붙이는 순간 그 함수의 안전성 근거(대상은 auth.uid()
 #: 뿐, 금액은 DB 상수)가 무너집니다 — 아래 금지 목록이 그 시도를 먼저 잡습니다.
-USER_WRITE_FUNCTIONS = ("opt_in", "save_order", "edit_order", "cancel_order", "save_consent")
+USER_WRITE_FUNCTIONS = ("opt_in", "save_order", "save_sell_order", "edit_order",
+                        "cancel_order", "save_consent")
 
 #: 사용자 경로가 절대 인자로 받으면 안 되는 이름들(스키마 §3-1 트리거가 막는 것과 같은 집합).
 #:  · `user_id` 가 여기 있는 이유(2026-08-20 추가): 이 절의 쓰기 함수는 **"누구의 것인지"를

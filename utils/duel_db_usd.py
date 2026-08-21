@@ -109,6 +109,8 @@ from utils.duel_db import (
     _first_row,
     _is_duplicate_key_error,
     _assert_unique_keys,
+    _fill_ledger_payload,
+    _sell_settlement_payload,
     _filter_is_null,
     _filter_not_null,
     _assert_no_identity_fields,
@@ -141,6 +143,7 @@ __all__ = [
     "DuelDbError",
     "opt_in_usd",
     "save_order_usd",
+    "save_sell_order_usd",
     "edit_order_usd",
     "cancel_order_usd",
     "fetch_my_accounts_usd",
@@ -168,6 +171,8 @@ __all__ = [
     "record_buy_ledger_entries_usd",
     "upsert_position_weighted_average_usd",
     "upsert_positions_usd",
+    "settle_sell_positions_usd",
+    "set_first_holding_dates_usd",
     "expire_or_cancel_all_pending_for_date_usd",
     "write_daily_snapshots_usd",
     "fetch_publishable_consents_usd",
@@ -203,6 +208,13 @@ BRACKET_ASSIGNMENTS_TABLE_USD = "duel_bracket_assignments_usd"
 
 #: 옵트인 RPC. `sql/duel_schema.sql` §14-10 의 함수 이름과 문자 그대로 같아야 합니다.
 OPT_IN_RPC_USD = "duel_opt_in_usd"
+
+#: 🔴 리밸런싱 매도 정산 RPC(USD). `sql/duel_schema.sql` §14-11 의 함수 이름과 문자 그대로
+#: 같아야 합니다. 왜 표 upsert 가 아니라 RPC 인지는 원화 쪽
+#: `utils.duel_db.SETTLE_SELL_RPC` 주석에 전부 적혀 있습니다(같은 이유, 표만 다릅니다) —
+#: 트리거 함수 `duel_positions_buy_only()` 는 원화·USD 가 **공유**하지만, 그 함수를 켜는
+#: 세션 변수와 update 를 묶은 이 RPC 는 표가 박혀 있어 통화별로 하나씩 둡니다(§5-11-1).
+SETTLE_SELL_RPC_USD = "duel_settle_sell_positions_usd"
 
 #: 사용자가 스스로 취소했을 때 남기는 기본 사유. 원화와 같은 문장이 그대로 맞습니다
 #: (시간대·통화를 언급하지 않는 일반 문장이라 새로 쓸 이유가 없습니다).
@@ -362,6 +374,76 @@ def save_order_usd(client, account_id, ticker, stock_name, requested_quantity,
     }
     rows = _execute(client.table(ORDERS_TABLE_USD).insert(payload), "주문 저장")
     return _first_row(rows, "주문 저장")
+
+
+def save_sell_order_usd(client, account_id, ticker, stock_name, requested_quantity,
+                        held_quantity, window_index, *, trading_days, now_kst=None):
+    """
+    **창당 1회 리밸런싱 매도** 주문 1건을 저장합니다(USD). `utils.duel_db.save_sell_order()`
+    의 USD 미러이며, 원화 함수와 다른 것은 `save_order_usd()` 가 `save_order()` 와 다른 것과
+    **정확히 같은 세 가지**뿐입니다:
+      ① 접수 시간대 판정 — `duel_rules.resolve_order_window_usd()`(16:00:01~21:00:00 KST)
+      ② 체결 거래일 — `duel_rules.resolve_fill_trading_day_usd()`(그날 자신을 **포함**)
+      ③ insert 대상 표 — `duel_orders_usd`
+
+    창 길이(30/90/180일)·창 번호 계산·"창당 1회" 강제 방식은 통화와 무관하게 같습니다
+    (`duel_rules.REBALANCE_WINDOW_DAYS` 하나를 양쪽이 공유하고, USD 표에도 같은 모양의
+    부분 유니크 인덱스 `duel_orders_usd_one_sell_per_window` 가 있습니다).
+    나머지 판단 근거는 원화 쪽 docstring 참고 — 여기 반복하지 않습니다.
+
+    반환: 저장된 주문 행 dict.
+    """
+    _require_client(client)
+    account = _require_text(account_id, "계좌 ID")
+    code = _require_text(ticker, "종목코드")
+    name = _require_text(stock_name, "종목명")
+    quantity = _require_positive_int(requested_quantity, "매도 수량")
+    held = _require_positive_int(held_quantity, "보유 수량")
+    window = _require_offset(window_index, "리밸런싱 창 번호")   # 0 부터 시작하므로 0 허용
+
+    if quantity > held:
+        raise DuelDbError(
+            f"보유 수량({held}주)보다 많은 {quantity}주는 매도할 수 없습니다."
+            " 보유한 수량 이하로 다시 입력해 주세요."
+        )
+
+    moment = _now_kst(now_kst)
+    window_state = duel_rules.resolve_order_window_usd(moment)
+    if not window_state["is_open"]:
+        opens = window_state["window_opens_at"]
+        closes = window_state["window_closes_at"]
+        raise DuelDbError(
+            "지금은 주문 접수 시간이 아닙니다 — "
+            f"{opens.strftime('%Y-%m-%d %H:%M:%S')} 부터 {closes.strftime('%H:%M:%S')} 까지"
+            " 접수합니다(한국시간)."
+            " 매도도 매수와 같은 시간대에 접수하고, 체결은 미국 정규장 마감가로"
+            " 이루어집니다."
+        )
+
+    target_date = duel_rules.resolve_fill_trading_day_usd(moment, trading_days)
+
+    payload = {
+        "account_id": account,
+        "ticker": code,
+        "stock_name": name,
+        "requested_quantity": quantity,
+        "side": "sell",
+        "status": ORDER_PENDING,
+        "saved_at": moment.isoformat(),
+        "target_date": target_date.isoformat(),
+        "rebalance_window_index": window,
+    }
+    try:
+        rows = _execute(client.table(ORDERS_TABLE_USD).insert(payload), "매도 주문 저장")
+    except DuelDbError as exc:
+        if _is_duplicate_key_error(exc):
+            raise DuelDbError(
+                "이번 리밸런싱 창에서는 이미 매도 주문을 한 번 사용했습니다"
+                " (창마다 딱 1회만 가능하고, 놓친 기회는 누적되지 않습니다)."
+                " 기존 주문을 접수 시간대 안에서 취소하면 이 창의 기회가 다시 열립니다."
+            ) from exc
+        raise
+    return _first_row(rows, "매도 주문 저장")
 
 
 def edit_order_usd(client, order_id, new_quantity, *, now_kst=None):
@@ -687,11 +769,17 @@ def fetch_public_holdings_for_nickname_usd(client, nickname, *, published_date=N
 # B-1. "모든 USD 계좌를 한 번에"
 # -----------------------------------------------------------------------------
 def fetch_all_active_accounts_usd(service_client):
-    """(배치 전용) **모든 사용자**의 활성 USD 가상계좌를 한 번의 질의로 읽습니다."""
+    """
+    (배치 전용) **모든 사용자**의 활성 USD 가상계좌를 한 번의 질의로 읽습니다.
+
+    ⚠️ `first_holding_date` 를 함께 읽습니다(2026-08-21 추가) — 이유는 원화 쪽
+       `duel_db.fetch_all_active_accounts()` 주석과 같습니다(따로 조회하면 왕복이 늘어남).
+    """
     _require_client(service_client, batch=True)
     rows = _execute(
         service_client.table(ACCOUNTS_TABLE_USD)
-        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status")
+        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
+                "first_holding_date")
         .eq("status", "active"),
         "USD 활성 계좌 전체 조회",
     )
@@ -962,28 +1050,25 @@ def record_buy_ledger_entry_usd(service_client, account_id, order_id, filled_amo
 
 
 def record_buy_ledger_entries_usd(service_client, entries):
-    """(배치 전용) 매수 원장 행 여러 개를 한 번의 insert 로. 반환: 넣은 행 수."""
+    """
+    (배치 전용) 체결 원장 행 여러 개를 한 번의 insert 로. 반환: 넣은 행 수.
+
+    부호·검증 규칙은 원화와 **완전히 같아서** payload 를 만드는 부분을
+    `duel_db._fill_ledger_payload()` 로 공유합니다(표 이름만 다릅니다). 2026-08-21 부터
+    `event_type='sell'` 행(매도 대금, 양수)도 같은 함수로 기록합니다 — 이름이 `buy` 로
+    남은 이유는 원화 쪽 같은 함수의 docstring 참고.
+    """
     _require_client(service_client, batch=True)
     rows = list(entries or [])
     if not rows:
         return 0
 
-    payload = []
-    for entry in rows:
-        amount = _require_amount(entry.get("filled_amount"), "체결금액")
-        payload.append({
-            "account_id": _require_text(entry.get("account_id"), "계좌 ID"),
-            "event_type": "buy",
-            "amount": -amount,
-            "event_date": _iso_date(entry.get("event_date"), "체결일"),
-            "order_id": _require_text(entry.get("order_id"), "주문 ID"),
-            "memo": entry.get("memo"),
-        })
+    payload = _fill_ledger_payload(rows)
 
     inserted = 0
     for start in range(0, len(payload), CHUNK_SIZE):
         chunk = payload[start:start + CHUNK_SIZE]
-        _execute(service_client.table(LEDGER_TABLE_USD).insert(chunk), "매수 원장 기록")
+        _execute(service_client.table(LEDGER_TABLE_USD).insert(chunk), "체결 원장 기록")
         inserted += len(chunk)
     return inserted
 
@@ -1028,6 +1113,53 @@ def upsert_positions_usd(service_client, rows):
             "포지션 저장",
         ))
     return [dict(row) for row in saved]
+
+
+def settle_sell_positions_usd(service_client, rows):
+    """
+    (배치 전용) 🔴 USD 리밸런싱 매도 체결을 포지션에 반영하는 **유일한 경로**.
+    반환: 반영된 행 수.
+
+    `utils.duel_db.settle_sell_positions()` 의 USD 미러입니다 — 왜 표 upsert 가 아니라
+    RPC 인지, 무엇을 보내고 무엇을 일부러 안 보내는지는 원화 쪽 docstring 에 전부
+    있습니다(같은 근거, RPC 이름과 표만 다릅니다).
+    """
+    _require_client(service_client, batch=True)
+    payload = _sell_settlement_payload(list(rows or []), "매도 정산 요청(USD)")
+    if not payload:
+        return 0
+
+    settled = 0
+    for start in range(0, len(payload), CHUNK_SIZE):
+        chunk = payload[start:start + CHUNK_SIZE]
+        try:
+            query = service_client.rpc(SETTLE_SELL_RPC_USD, {"p_rows": chunk})
+        except (AttributeError, TypeError) as exc:
+            raise DuelDbError(
+                "이 Supabase 연결로는 매도 정산을 호출할 수 없습니다"
+                " (저장 프로시저 호출을 지원하지 않는 클라이언트입니다)."
+            ) from exc
+        _execute(query, "매도 포지션 정산(USD)")
+        settled += len(chunk)
+    return settled
+
+
+def set_first_holding_dates_usd(service_client, account_ids, first_holding_date):
+    """
+    (배치 전용) 오늘 처음으로 보유 종목이 생긴 **USD 계좌**들의 `first_holding_date` 를
+    채웁니다. 반환: 실제로 채워진 행 수. 원화 쪽 `set_first_holding_dates()` 의 미러이며
+    (같은 `in` 필터 1회 + `is null` 멱등 조건), 표 이름만 다릅니다.
+    """
+    _require_client(service_client, batch=True)
+    ids = [str(value) for value in (account_ids or []) if str(value or "").strip()]
+    if not ids:
+        return 0
+
+    day = _iso_date(first_holding_date, "최초 보유일")
+    query = service_client.table(ACCOUNTS_TABLE_USD).update({"first_holding_date": day}) \
+        .in_("id", ids)
+    updated = _execute(_filter_is_null(query, "first_holding_date"), "최초 보유일 기록(USD)")
+    return len(updated or [])
 
 
 # -----------------------------------------------------------------------------
@@ -1333,7 +1465,8 @@ def write_public_holdings_usd(service_client, published_date, rows):
 #: A 절에서 사용자가 부르는 쓰기 함수(USD). `tests/test_duel_db_usd.py` 가 이 목록의
 #: 시그니처를 검사합니다 — `utils.duel_db.USER_WRITE_FUNCTIONS` 와 같은 규약입니다.
 USER_WRITE_FUNCTIONS_USD = (
-    "opt_in_usd", "save_order_usd", "edit_order_usd", "cancel_order_usd", "save_consent_usd",
+    "opt_in_usd", "save_order_usd", "save_sell_order_usd", "edit_order_usd",
+    "cancel_order_usd", "save_consent_usd",
 )
 
 

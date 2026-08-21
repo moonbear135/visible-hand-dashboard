@@ -61,6 +61,11 @@ DUEL_MODULE_WORK_ORDER.md 2단계의 파일 계획에 따라 만든 모듈입니
   · 5-4  순위 계산(동점 처리 포함)      → `rank_participants()`
   · 5-6  최소 참가 인원(500명)         → `MIN_PARTICIPANTS_FOR_PUBLICATION`
   · 5-8  철회 후 3개월 재동의 차단      → `resolve_reconsent_block()`
+
+  ── 2026-08-21 추가: 주기적 리밸런싱 **매도**(창당 1회) — 아래 §12 ──
+  · 창 길이 30/90/180일 · 창 번호       → `REBALANCE_WINDOW_DAYS` / `resolve_rebalance_window()`
+  · 매도 체결(전량 체결만)              → `calculate_sell_fill()`
+  · 매도 후 포지션(평단가 불변)          → `apply_sell_fill_to_position()`
 """
 
 from __future__ import annotations
@@ -100,6 +105,20 @@ MONTHLY_DEPOSIT_DAY = 10
 #: 사용자가 각 계좌에서 어떤 종목을 사는지에서 나옵니다. 규칙 레벨의 인위적 차별화를
 #: 추가하지 마세요.
 ACCOUNT_WINDOW_TYPES = ("M1", "M3", "M6")
+
+#: 계좌 유형별 **리밸런싱 창 길이(일)** — 2026-08-21 오너 확정("창당 딱 1회 매도").
+#:
+#:  🔴 이 세 숫자가 창 길이를 적어 둔 **유일한 자리**입니다(§0-3-10). SQL 스키마에는 일부러
+#:     넣지 않았습니다 — 창 번호 계산은 전부 `resolve_rebalance_window()` 를 지나가고, DB 는
+#:     앱이 계산해 넣은 `duel_orders.rebalance_window_index` 하나만 보고 "창당 1회"를
+#:     부분 유니크 인덱스로 강제합니다. 두 곳에 적으면 둘 중 하나만 바뀌는 날 조용히
+#:     어긋나고, 그 어긋남은 "매도 기회가 한 번 더 생기거나 사라지는" 형태로 나타납니다.
+#:
+#:  ⚠️ 위 `ACCOUNT_WINDOW_TYPES` 주석("세 계좌는 매매 규칙이 완전히 동일")과의 관계:
+#:     2026-08-21 이후 세 계좌가 갈라지는 지점은 **리밸런싱 리듬 하나뿐**입니다. 체결 규칙·
+#:     시드·입금액·접수 시간대는 여전히 완전히 같습니다. 여기 말고 다른 곳에 계좌 유형별
+#:     차이를 새로 만들지 마세요.
+REBALANCE_WINDOW_DAYS = {"M1": 30, "M3": 90, "M6": 180}
 
 #: 한국시간. 이 모듈의 모든 시각 판정 기준입니다(DB 의 UTC 를 쓰지 않는 이유는
 #: `sql/scorecard_schema.sql` §8 주석과 같습니다).
@@ -529,9 +548,14 @@ def apply_buy_fill_to_position(existing_quantity, existing_avg_cost,
        반올림된 평단가 × 수량으로 되돌리면 원가가 미세하게 어긋나고, 그 차이가 스냅샷의
        total_cost 로 흘러갑니다.
 
-    ⚠️ 매도는 없습니다. `filled_quantity` 는 항상 1 이상이어야 하고, 음수·0 은 예외입니다 —
-       애플리케이션 경로로 수량을 줄이는 시도를 여기서 막습니다(DB 레벨 방어는
-       `sql/duel_schema.sql` §2-1 의 트리거).
+    ⚠️ **이 함수로는 수량이 절대 줄지 않습니다.** `filled_quantity` 는 항상 1 이상이어야
+       하고, 음수·0 은 예외입니다 — 매수 경로로 수량을 줄이는 시도를 여기서 막습니다
+       (DB 레벨 방어는 `sql/duel_schema.sql` §2-1 의 트리거).
+       2026-08-21 부터 이 모듈에도 **창당 1회 리밸런싱 매도**가 있지만, 그건 전용 함수
+       `apply_sell_fill_to_position()`(§12-3)이 따로 맡습니다 — 매수·매도가 한 함수에
+       섞이면 "수량이 왜 줄었는지"가 코드에서 안 보이게 되고, 그건 DB 가 세션 변수
+       두 개(`duel.allow_quantity_decrease` / `duel.settled_sell`)를 굳이 나눠 둔 이유와
+       같은 규율입니다.
 
     신규 포지션이면 `existing_quantity` 와 `existing_avg_cost` 를 **둘 다** None 으로 주세요.
     한쪽만 None 이면 "수량은 아는데 평단가는 모르는" 복원 불가 상태라 예외입니다.
@@ -1551,3 +1575,235 @@ def resolve_bracket_for_season_usd(existing_assignment, fresh_bracket_key, on_da
         raise DuelRuleError(f"새로 계산한 체급 식별자(USD)를 알 수 없습니다: {fresh_bracket_key!r}")
     return {"season_key": season_key, "bracket_key": fresh,
             "source": "assigned", "needs_write": True}
+
+
+# #############################################################################
+#
+#  12. 🔴 주기적 리밸런싱 **매도** 규칙 — 2026-08-21 오너 확정 (KRW·USD 공유)
+#
+#  ── 이 절이 왜 생겼는가 ──────────────────────────────────────────────────────
+#  이 모듈은 원래 **매수 전용**으로 만들어졌고, 그건 우연한 누락이 아니라 스키마와
+#  작업지시서에 명시적으로 박아 둔 결정이었습니다. 2026-08-21 오너가 그 결정 자체가
+#  **이전 라운드의 대화 착오**였음을 확인해 정정했습니다 — 원래 설계는 M1/M3/M6 계좌가
+#  각각 30/90/180일 주기로 **딱 1회** 리밸런싱 매도를 할 수 있어야 하고, 그래야 "내
+#  성적표(실제 계좌)"와 비교하는 시스템이 성립합니다(매도 없이 한 번 고른 종목에 영원히
+#  묶여 있으면 실제 투자 행태와 너무 달라져 비교 자체가 의미 없어집니다).
+#
+#  ── 확정된 스펙 (이 절이 구현하는 전부) ──────────────────────────────────────
+#    ① 창 길이 = `REBALANCE_WINDOW_DAYS` (§0). 카운트다운의 기준은 **계좌에 최초로 주식이
+#       들어온 날**(`duel_accounts.first_holding_date`)이며, 종목별이 아니라 **계좌 전체
+#       공통 기준 1개**입니다.
+#    ② 창을 놓쳐도 기회는 **누적되지 않습니다** — 매 창마다 딱 1회.
+#    ③ 한 번의 매도 주문 = 종목 1개, 수량은 1주~전량 자유(바스켓 리밸런싱이 아닙니다).
+#    ④ 체결 타이밍은 매수와 완전히 동일합니다(접수 시간대에 저장 → D+1 확정 종가로 체결).
+#       같은 날 밤 배치에서 **매도 먼저 → 그 대금이 그날 밤 매수 재원**이 됩니다.
+#    ⑤ "창당 1회"는 화면이 아니라 **DB 가** 강제합니다(부분 유니크 인덱스
+#       `duel_orders_one_sell_per_window`). 이 파일의 함수들은 그 인덱스에 넣을
+#       `rebalance_window_index` 를 **계산만** 합니다.
+#
+#  ── 이 절도 §0-1 을 그대로 지킵니다 ──────────────────────────────────────────
+#    · 최초 보유일을 모르면 **창을 지어내지 않습니다**(예외). "일단 오늘부터 30일"로 두면
+#      사용자마다 다른 창이 조용히 생기고, 그건 나중에 복원할 수 없습니다.
+#    · 보유 수량을 넘는 매도는 **깎아서 체결하지 않습니다**(예외). 저장 시점에 이미
+#      보유 수량 이하로 검증했으므로, 체결 시점에 초과가 보인다는 건 규칙이 아니라
+#      **버그이거나 그 사이 관리 경로가 수량을 줄인 것**입니다 — 조용히 맞춰 주면 그
+#      사실이 사라집니다.
+#
+# #############################################################################
+
+# =============================================================================
+# 12-1. 리밸런싱 창 계산 — "지금은 몇 번째 창이고, 언제 끝나는가"
+# =============================================================================
+def resolve_rebalance_window(window_type, first_holding_date, today):
+    """
+    계좌 유형(M1/M3/M6)과 **최초 보유일**로 지금이 몇 번째 리밸런싱 창인지 판정합니다.
+    2026-08-21 오너 확정 스펙 ①② 참고.
+
+    ── 왜 `anchor_date`(계좌 개설일)가 아니라 `first_holding_date` 인가 ──────────────
+    개설일 기준으로 세면 **아무것도 안 산 채로 창이 흘러가** 첫 매수를 하기도 전에
+    "이번 창 매도 기회"가 소멸합니다. 팔 게 없는 창을 소진시키는 건 규칙이 아니라 사고라,
+    오너가 "계좌에 최초로 주식이 들어온 날"을 기준으로 확정했습니다. 그래서 `duel_accounts`
+    에 `anchor_date` 와 **별개의 컬럼**(`first_holding_date`)을 새로 뒀습니다 — 둘은 다른
+    개념이므로 재사용하지 않습니다.
+
+    인자
+        window_type        : 'M1' / 'M3' / 'M6'. 모르는 값은 지어내지 않고 예외입니다.
+        first_holding_date : 계좌에 처음 주식이 들어온 날(date / 'YYYY-MM-DD').
+                             **None 이면 예외** — 아직 보유가 없는 계좌는 창 자체가
+                             시작되지 않았고, 시작하지도 않은 창의 번호를 만들어 내면
+                             그 번호로 DB 에 매도 주문이 저장됩니다(§0-1).
+        today              : 판정 기준일(보통 KST 오늘 날짜).
+
+    반환 dict (`resolve_order_window()` / `resolve_fill_trading_day()` 와 같은 관례)
+        window_type            : 판정에 쓴 계좌 유형(대문자로 정규화)
+        window_days            : 이 계좌의 창 길이(일)
+        first_holding_date     : 판정에 쓴 최초 보유일(date)
+        window_index           : **0부터** 시작하는 창 번호. 이 값이 그대로
+                                 `duel_orders.rebalance_window_index` 로 들어가고,
+                                 부분 유니크 인덱스가 "계좌 × 창 번호 = 매도 1건"을 강제합니다.
+        window_started_on      : 이번 창의 첫날(date, 포함)
+        window_ends_on         : 이번 창의 마지막 날(date, **포함**)
+        next_window_starts_on  : 다음 창의 첫날(= `window_ends_on` + 1일).
+                                 이번 창을 이미 썼을 때 화면이 "다음 기회"로 쓰는 날짜입니다.
+        days_remaining         : **오늘을 포함해** 이번 창이 며칠 남았는가(마지막 날이면 1).
+                                 0 이 나오는 경우는 없습니다 — 0 이 될 시점엔 이미 다음 창입니다.
+
+    경계 처리 (테스트로 고정합니다 — M1(30일), 최초 보유일 2026-01-01 기준)
+        2026-01-01 → window_index 0, 창 2026-01-01~2026-01-30, days_remaining 30
+        2026-01-30 → window_index 0 (마지막 날), days_remaining 1
+        2026-01-31 → window_index 1 로 넘어감, 창 2026-01-31~2026-03-01
+
+    ⚠️ 기준일이 최초 보유일보다 **이전**이면 예외입니다. 음수 창 번호를 만들어 돌려주면
+       그 값이 DB 인덱스의 키가 되어, 과거 날짜로 매도 기회가 하나 더 생깁니다.
+    """
+    window = str(window_type or "").strip().upper()
+    if window not in REBALANCE_WINDOW_DAYS:
+        raise DuelRuleError(
+            f"알 수 없는 계좌 유형입니다: {window_type!r}"
+            f" (가능: {sorted(REBALANCE_WINDOW_DAYS)}) — 창 길이를 임의로 정하지 않습니다."
+        )
+    if first_holding_date is None:
+        raise DuelRuleError(
+            "아직 보유 종목이 없어 리밸런싱 창을 계산할 수 없습니다"
+            " — 창은 계좌에 **처음 주식이 들어온 날**부터 세며, 그날이 없으면 시작일을"
+            " 지어내지 않습니다(§0-1). 첫 매수가 체결되면 야간 배치가 그날을 기록합니다."
+        )
+
+    started_from = _to_date(first_holding_date, "최초 보유일")
+    day = _to_date(today, "기준일")
+    if day < started_from:
+        raise DuelRuleError(
+            f"기준일({day.isoformat()})이 최초 보유일({started_from.isoformat()})보다 이전입니다"
+            " — 음수 창 번호를 만들지 않습니다."
+        )
+
+    length = REBALANCE_WINDOW_DAYS[window]
+    index = (day - started_from).days // length
+    window_started_on = started_from + timedelta(days=index * length)
+    window_ends_on = window_started_on + timedelta(days=length - 1)
+
+    return {
+        "window_type": window,
+        "window_days": length,
+        "first_holding_date": started_from,
+        "window_index": index,
+        "window_started_on": window_started_on,
+        "window_ends_on": window_ends_on,
+        "next_window_starts_on": window_ends_on + timedelta(days=1),
+        # 오늘을 포함한 잔여 일수(마지막 날 = 1). 화면의 "D-n" 표기가 이 값입니다.
+        "days_remaining": (window_ends_on - day).days + 1,
+    }
+
+
+# =============================================================================
+# 12-2. 매도 체결 수량 계산 — `calculate_fill()` 의 매도판
+# =============================================================================
+def calculate_sell_fill(requested_quantity, close_price, held_quantity):
+    """
+    매도 주문 1건의 체결 계산. `calculate_fill()`(매수)와 **같은 모양**이지만 제약이
+    현금이 아니라 **보유 수량**입니다.
+
+    ── 왜 부분체결·만료가 없는가 (매수와 갈리는 유일한 지점) ─────────────────────────
+    매수의 부분체결은 "사고 싶은 만큼의 돈이 없을 수 있다"에서 나옵니다. 매도의 제약은
+    보유 수량인데, 그 값은 **주문 저장 시점에 이미 검증**되고 그 뒤로 줄어들 경로가
+    없습니다(창당 1회라 같은 창에 다른 매도가 낄 수 없고, 매수는 수량을 늘리기만 합니다).
+    그래서 체결 시점의 결과는 **전량 체결** 아니면 "그날 확정 종가가 없어 취소" 둘뿐입니다
+    — 후자는 이 함수를 아예 부르지 않고 호출부가 처리합니다(`allocate_pending_orders()` 가
+    종가 없는 매수 주문을 취소하는 것과 **같은 자리·같은 처리**).
+
+    ⚠️ `requested_quantity > held_quantity` 면 **예외**입니다. 보유량만큼만 깎아서 체결하지
+       않습니다 — 상류에서 이미 막았어야 하는 상태라, 여기서 조용히 맞춰 주면 "왜 요청과
+       다른 수량이 팔렸는지"를 아무도 설명할 수 없게 됩니다(§0-1). 실제로 이 예외가 뜰 수
+       있는 경로는 하나뿐입니다: 주문 저장 뒤 체결 전에 **관리 경로**
+       (`duel.allow_quantity_decrease` — 상장폐지 상각·강제 정리)가 수량을 줄인 경우.
+       그건 사고가 아니라 알아야 할 사실이므로 예외로 올립니다.
+
+    ⚠️ 종가가 없거나 0 이하면 계산하지 않습니다(`calculate_fill()` 과 같은 방어) —
+       "일단 전일 종가로" 는 §0-3-1 위반이고, 매도에서는 **사용자가 이미 아는 가격으로
+       파는** 부정이 됩니다.
+
+    반환 dict
+        status            : 항상 'filled' (위 설명 참고 — 다른 값이 나오는 경로가 없습니다)
+        filled_quantity   : 체결 주식 수(= 요청 수량)
+        filled_amount     : 체결금액 = 요청 수량 × 종가 (매도 대금, **양수**)
+        remaining_holding : 체결 후 남는 보유 수량(0 도 정상입니다)
+        fail_reason       : 항상 None (전량 체결이므로) — `calculate_fill()` 과 키를 맞춰
+                            호출부가 매수·매도 결과를 같은 모양으로 다룰 수 있게 둡니다.
+    """
+    requested = _require_int(requested_quantity, "매도 주문 수량", minimum=1)
+    price = _require_number(close_price, "체결 종가(확정 종가)", allow_zero=False)
+    # 보유 수량은 정수를 요구하지 **않습니다** — DB 컬럼이 numeric(20, 6) 이고, 액면병합·
+    # 감자 같은 기업행위 조정(관리 경로)이 소수 수량을 남길 수 있습니다. 거기서 정수를
+    # 강요하면 "팔 수는 있어야 하는 보유"가 체결 시점에 통째로 막힙니다. 파는 수량만
+    # 정수면 됩니다(v1 체결은 정수 주식만 — `_require_int` 위쪽 줄).
+    held = _require_number(held_quantity, "보유 수량")
+
+    if requested > held:
+        raise DuelRuleError(
+            f"보유 수량({held}주)보다 많은 {requested}주 매도는 체결할 수 없습니다"
+            " — 보유량만큼으로 깎아서 체결하지 않습니다(주문 저장 시점에 이미 검증되는"
+            " 값이라, 여기서 어긋났다면 그 사실 자체가 원인입니다)."
+        )
+
+    return {
+        "status": ORDER_FILLED,
+        "filled_quantity": requested,
+        "filled_amount": _round6(requested * price),
+        "remaining_holding": _round6(held - requested),
+        "fail_reason": None,
+    }
+
+
+# =============================================================================
+# 12-3. 매도 체결을 포지션에 반영 — `apply_buy_fill_to_position()` 의 매도판
+# =============================================================================
+def apply_sell_fill_to_position(existing_quantity, existing_avg_cost, sold_quantity):
+    """
+    매도 체결 1건을 기존 포지션에 반영합니다. **평단가는 바뀌지 않습니다.**
+
+    ── 왜 평단가가 그대로인가 (매수와 정반대인 지점이라 근거를 남깁니다) ─────────────
+    매수는 새 돈이 들어와 원가 구성이 달라지므로 가중평균을 다시 계산합니다
+    (`apply_buy_fill_to_position()`). 매도는 **남은 주식의 매입원가를 바꾸지 않습니다** —
+    100주를 10,000원에 샀다면 30주를 얼마에 팔든 남은 70주의 매입단가는 여전히
+    10,000원입니다. 이건 이 프로젝트가 정한 규칙이 아니라 회계·증권사 표준 관례이고,
+    "내 성적표"(`utils/scorecard_db.py`)가 실제 계좌를 다루는 방식과도 같습니다 — 여기서
+    다른 방식을 발명하면 두 모듈의 평단가가 갈라집니다(§0-3-10).
+
+    실현손익을 여기서 계산하지 않는 이유도 같습니다: 이 모듈의 성과 지표는 **TWR**이고
+    (2-6), TWR 은 매일의 총자산(평가액 + 현금)만 봅니다. 매도는 계좌 안에서 주식이 현금으로
+    바뀐 것뿐이라 총자산을 바꾸지 않으므로, `compute_twr()` 는 **손댈 필요가 없습니다**
+    (매도 대금은 외부 현금흐름이 아니라 내부 전환이라 `cash_flow_amount` 에 잡히지
+    않습니다 — 이번 변경에서 확인 완료).
+
+    ⚠️ `new_quantity = 0` 은 **정상 상태**입니다(스키마 `duel_positions` 주석: "0주 포지션이
+       정상 상태입니다"). 행을 지우지 않습니다 — 지우면 "예전에 갖고 있었다"는 사실과
+       평단가가 함께 사라집니다.
+
+    ⚠️ 음수가 되는 조합은 예외입니다. `calculate_sell_fill()` 이 이미 막지만, 이 함수만
+       따로 불릴 수도 있으므로 여기서도 막습니다(§0-3-9 — 조심이 아니라 구조로).
+
+    반환 dict
+        quantity : 매도 후 남는 수량
+        avg_cost : **입력값 그대로**(반올림만) — 위 설명 참고
+
+    `apply_buy_fill_to_position()` 과 달리 `total_cost` 를 돌려주지 않습니다. 매수 쪽의
+    `total_cost` 는 "이번에 실제로 쓴 돈"을 누적해 만든 값이라 의미가 있지만, 매도 후의
+    잔여 원가는 `quantity × avg_cost` 로 언제든 정확히 나오는 파생값이라 두 번째 출처를
+    만들지 않습니다(스냅샷도 그렇게 계산합니다 — `duel_batch.build_snapshot_rows()`).
+    """
+    prev_qty = _require_number(existing_quantity, "기존 보유 수량")
+    prev_avg = _require_number(existing_avg_cost, "기존 평균 매입단가")
+    sold = _require_int(sold_quantity, "매도 수량", minimum=1)
+
+    new_qty = prev_qty - sold
+    if new_qty < 0:
+        raise DuelRuleError(
+            f"보유 {prev_qty}주에서 {sold}주를 팔 수 없습니다(잔여 수량이 음수가 됩니다)"
+            " — 0 으로 보정하지 않고 중단합니다(§0-1)."
+        )
+
+    return {
+        "quantity": _round6(new_qty),
+        # 매도는 잔여 주식의 매입단가를 바꾸지 않습니다. 저장 값과 같은 6자리로만 맞춥니다.
+        "avg_cost": _round6(prev_avg),
+    }

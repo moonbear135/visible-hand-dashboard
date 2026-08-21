@@ -14,7 +14,7 @@
 --    4. 좌측 메뉴 → Table Editor 에서 아래 **11개 표**와 각각의 "RLS enabled" 표시를 눈으로 확인
 --         비공개(계좌 소유자 전용)
 --           · public.duel_accounts          (§1)  가상계좌 — 사용자당 M1/M3/M6 정확히 3개
---           · public.duel_positions         (§2)  가상 보유 포지션 (매수 전용)
+--           · public.duel_positions         (§2)  가상 보유 포지션 (매수 + 창당 1회 리밸런싱 매도)
 --           · public.duel_orders            (§3)  예약 주문 (수량 기준, D+1 종가 체결)
 --           · public.duel_cash_ledger       (§4)  현금 원장 — **append-only**
 --           · public.duel_daily_snapshots   (§5)  계좌 × 거래일 합계 스냅샷 (+ 현금흐름)
@@ -159,6 +159,12 @@ create table if not exists public.duel_accounts (
     seed_amount  numeric(20, 6) not null check (seed_amount > 0),   -- default 없음(위 주석 참고)
     currency     text not null default 'KRW' check (currency = 'KRW'),
     anchor_date  date not null,
+    -- 2026-08-21 오너 확정(창당 1회 리밸런싱 매도 추가) — 리밸런싱 창(30/90/180일)의
+    -- 기준일입니다. anchor_date(계좌 개설일 = 입금 리듬 기준)와 다른 개념이므로 재사용하지
+    -- 않습니다. 계좌에 처음으로 보유 종목이 생긴 날(첫 매수 체결일)만 야간 배치가 채우고,
+    -- 그 전까지는 NULL — "아직 보유가 없어 리밸런싱 창을 계산할 수 없음"과 "0일차"를
+    -- 구분하기 위해 0 이나 오늘 날짜 같은 값으로 채우지 않습니다(§0-1).
+    first_holding_date date,
     status       text not null default 'active' check (status in ('active', 'closed')),
     created_at   timestamptz not null default now(),
     updated_at   timestamptz not null default now(),
@@ -186,7 +192,7 @@ comment on column public.duel_accounts.currency is
 
 
 -- =============================================================================
--- 2. duel_positions — 가상 보유 포지션 (매수 전용)
+-- 2. duel_positions — 가상 보유 포지션 (매수 + 창당 1회 리밸런싱 매도)
 -- =============================================================================
 --  · **numeric(20, 6) 고정** — `holdings.avg_purchase_price` 가 float 이 아닌 이유를 그대로
 --    물려받습니다(§0-3-10). 가중평균을 수십 번 재계산하면 float 는 평단가가 조용히 틀어집니다.
@@ -227,26 +233,42 @@ create trigger duel_positions_set_updated_at
 
 
 -- -----------------------------------------------------------------------------
--- 2-1. 🔐 매도 금지의 DB 레벨 강제 (작업지시서 1-2 마지막 항목)
+-- 2-1. 🔐 수량 감소의 DB 레벨 통제 (작업지시서 1-2 마지막 항목 — 2026-08-21 정정)
 -- -----------------------------------------------------------------------------
---  이 모듈에 매도는 **영원히 없습니다**. 화면 로직·배치 로직에 실수가 있어도 수량이
---  줄어들지 않게 DB 가 마지막으로 한 번 더 막습니다(§0-3-9 의 이중 방어).
+--  ⚠️ 이 절은 원래 "이 모듈에 매도는 영원히 없습니다"라는 절대 규칙으로 쓰여 있었습니다.
+--     2026-08-21 오너 확정으로 그 결정 자체가 **이전 라운드의 대화 착오**였음이 드러나
+--     정정합니다 — 원래 의도는 M1/M3/M6 계좌가 각각 30/90/180일 주기로 **딱 1회**
+--     리밸런싱 매도를 할 수 있어야 한다는 것이었고, 그래야 "내 성적표(실제 계좌)"와
+--     비교하는 시스템이 성립합니다(DUEL_MODULE_WORK_ORDER.md 의 정정 섹션 참고). 아래는
+--     정정된 설계입니다.
 --
---  다만 **관리 경로**는 열어 둬야 합니다 — 작업지시서가 예외로 인정한 두 가지입니다.
---    · 3-1 상장폐지 상각 (평가액 0 확정)
---    · 3-3 유니버스 500위 밖 이탈 종목의 강제 정리
---    · 3-4 액면병합·감자처럼 주식 수 자체가 줄어드는 기업행위 조정
---  작업지시서가 제안한 대로 **세션 변수 경유**로 구현했습니다. 관리자는 같은 트랜잭션 안에서
+--  화면 로직·배치 로직에 실수가 있어도 수량이 **정당한 사유 없이는** 줄어들지 않게 DB 가
+--  마지막으로 한 번 더 막습니다(§0-3-9 의 이중 방어). 정당한 사유는 이제 세 가지입니다.
+--    · 3-1 상장폐지 상각 (평가액 0 확정) — 관리 경로, `duel.allow_quantity_decrease`
+--    · 3-3 유니버스 500위 밖 이탈 종목의 강제 정리 — 관리 경로, 위와 동일 플래그
+--    · 3-4 액면병합·감자처럼 주식 수 자체가 줄어드는 기업행위 조정 — 관리 경로, 위와 동일 플래그
+--    · **신규** 창당 1회 리밸런싱 매도의 야간 정산 — 배치 경로, `duel.settled_sell`
+--  관리 경로와 배치 정산 경로를 **서로 다른 세션 변수**로 나눈 이유: "왜 수량이 줄었는지"가
+--  변수 이름만 봐도 구분돼야 나중에 감사(audit)할 수 있습니다. 관리자는 같은 트랜잭션 안에서
 --      set local duel.allow_quantity_decrease = 'on';
---  를 먼저 실행해야 합니다. 역할(role) 검사로 하지 않은 이유: 야간 체결 배치도 service_role
---  로 도는데, **그 배치조차 수량을 줄일 일이 없어야** 하기 때문입니다. 세션 변수는 "지금
---  이 한 트랜잭션에서 의도적으로 줄인다"를 사람이 명시적으로 선언하게 만듭니다.
+--  를, 야간 배치는 매도 정산 직전에
+--      set local duel.settled_sell = 'on';
+--  를 먼저 실행해야 합니다. 역할(role) 검사로 하지 않은 이유: 야간 배치도 service_role 로
+--  도는데, **배치의 다른 모든 쓰기(매수 체결 등)는 여전히 수량을 줄일 일이 없어야**
+--  하기 때문입니다 — 세션 변수는 "지금 이 한 트랜잭션에서 의도적으로 줄인다"를 명시적으로
+--  선언하게 만듭니다.
 --
 --  🔴 delete 로 우회하는 길은 아래 §9 에서 **권한 자체를 주지 않는 것**으로 막습니다.
 --     (여기에 BEFORE DELETE 트리거를 걸면 계정 탈퇴 시의 on delete cascade 까지 막혀서
 --      개인정보 정리 경로가 끊깁니다 — cascade 는 표 소유자 권한으로 돌아 RLS·권한을
 --      우회하므로, "정책·권한을 안 주는" 방식이 정확히 원하는 결과를 냅니다.)
 -- -----------------------------------------------------------------------------
+-- 🔴 2026-08-21 오너 확정 — 이름·기본 취지("매수 전용, 수량 감소는 원칙적으로 막는다")는
+--    그대로 두되, 이제 수량 감소가 정당한 사유가 **두 가지**가 됐습니다: ① 상장폐지 상각
+--    같은 관리 경로(기존 `duel.allow_quantity_decrease`), ② 창당 1회 리밸런싱 매도의
+--    정산(신규 `duel.settled_sell`). 두 플래그를 하나로 합치지 않는 이유: "왜 줄었는지"가
+--    세션 변수 이름만 봐도 구분돼야 나중에 감사(audit)할 수 있습니다 — 관리자의 예외 처리와
+--    배치의 정상 매도 정산은 서로 다른 사건이고, 하나로 합치면 그 구분이 사라집니다.
 create or replace function public.duel_positions_buy_only()
 returns trigger
 language plpgsql
@@ -257,9 +279,10 @@ begin
     end if;
 
     if new.quantity < old.quantity
-       and coalesce(current_setting('duel.allow_quantity_decrease', true), 'off') <> 'on' then
+       and coalesce(current_setting('duel.allow_quantity_decrease', true), 'off') <> 'on'
+       and coalesce(current_setting('duel.settled_sell', true), 'off') <> 'on' then
         raise exception
-            'duel_positions: 이 모듈은 매수 전용이라 수량을 줄일 수 없습니다 (% → %). 상장폐지 상각·강제정리 같은 관리 경로는 같은 트랜잭션에서 set local duel.allow_quantity_decrease = ''on'' 을 먼저 실행하세요',
+            'duel_positions: 수량을 줄이려면 정당한 사유가 필요합니다 (% → %). 상장폐지 상각·강제정리 같은 관리 경로는 set local duel.allow_quantity_decrease = ''on'' 을, 리밸런싱 매도 정산은 야간 배치가 set local duel.settled_sell = ''on'' 을 같은 트랜잭션에서 먼저 실행하세요',
             old.quantity, new.quantity;
     end if;
 
@@ -273,7 +296,7 @@ create trigger duel_positions_no_sell
     for each row execute function public.duel_positions_buy_only();
 
 comment on table public.duel_positions is
-    '결투다! 가상 보유 포지션. 매수 전용 — quantity 감소는 트리거가 막고, 관리 경로만 세션 변수(duel.allow_quantity_decrease)로 예외 허용. 쓰기는 배치(service_role)만, 사용자는 읽기 전용.';
+    '결투다! 가상 보유 포지션. quantity 감소는 트리거(duel_positions_buy_only)가 원칙적으로 막고, 세션 변수(duel.allow_quantity_decrease=관리 경로, duel.settled_sell=리밸런싱 매도 정산)로만 예외 허용(2026-08-21 오너 확정). 쓰기는 배치(service_role)만, 사용자는 읽기 전용.';
 comment on column public.duel_positions.avg_cost is
     '가중평균 매입단가. holdings.avg_purchase_price 와 같은 규칙·같은 타입(numeric(20,6))입니다 — float 로 두면 반복 매수한 계좌의 평단가가 조용히 틀어집니다.';
 comment on column public.duel_positions.quantity is
@@ -285,8 +308,10 @@ comment on column public.duel_positions.quantity is
 -- =============================================================================
 --  · **주문은 "얼마어치"가 아니라 "몇 주"입니다**(2026-08-19 오너 확정). 최초 설계안의
 --    금액 입력(order_amount_krw)은 폐기됐습니다.
---  · `side` 에 check (side = 'buy') 를 거는 건 장식이 아닙니다. **"나중에 매도 넣을 때 이
---    컬럼만 바꾸면 되지"라는 생각을 물리적으로 막기 위한 표시**입니다.
+--  · `side` 는 'buy'/'sell' 둘 다 허용합니다(2026-08-21 오너 확정 — 이전엔 check (side =
+--    'buy') 로 매도를 물리적으로 막아 뒀으나 정정됨). 'sell' 은 `rebalance_window_index`가
+--    반드시 채워지는 창당 1회 리밸런싱 전용이며, `duel_orders_one_sell_per_window` 유니크
+--    인덱스가 창당 1건만 허용합니다.
 --  · `fail_reason` 은 반드시 채웁니다. 주문이 조용히 사라지는 경로가 하나라도 있으면
 --    §0-1 위반입니다. 아래 CHECK 로 "실패/부분체결인데 사유가 비어 있는 행"을 막습니다.
 --  · `target_date` = 이 주문이 귀속되는 **거래일(D+1)**. 저장 시점에 앱이 채웁니다
@@ -301,7 +326,12 @@ create table if not exists public.duel_orders (
     ticker             text not null check (length(ticker) between 1 and 20),
     stock_name         text not null,
     requested_quantity integer not null check (requested_quantity > 0),
-    side               text not null default 'buy' check (side = 'buy'),
+    side               text not null default 'buy' check (side in ('buy', 'sell')),
+    -- ⚠️ 2026-08-21 오너 확정 — "매도 영원히 없음"을 정정합니다(work order 참고). 매도는
+    --    창(30/90/180일)당 1회 리밸런싱 전용이라 rebalance_window_index 가 반드시 짝을
+    --    이룹니다. 매수는 창 개념이 없으므로 반드시 NULL 이어야 합니다 — 실수로 둘 다 채우거나
+    --    둘 다 비우면 "이 주문이 리밸런싱 소진 대상인지"를 나중에 알 수 없습니다.
+    rebalance_window_index integer,
     status             text not null default 'pending'
                        check (status in
                            ('pending', 'filled', 'partially_filled', 'cancelled', 'expired')),
@@ -317,6 +347,11 @@ create table if not exists public.duel_orders (
     -- 부분체결은 요청보다 적게 체결된 것이지, 더 많이 체결될 수는 없습니다.
     constraint duel_orders_filled_within_request check (
         filled_quantity is null or filled_quantity <= requested_quantity
+    ),
+
+    constraint duel_orders_rebalance_window_match check (
+        (side = 'sell' and rebalance_window_index is not null)
+        or (side = 'buy' and rebalance_window_index is null)
     ),
 
     -- 🔴 "조용히 사라지는 주문" 금지(§0-1). 전량체결이 아닌 종결 상태에는 사람이 읽을
@@ -356,6 +391,15 @@ create index if not exists duel_orders_pending_target_idx
 -- 화면의 "내 주문 내역"은 계좌별 최신순입니다.
 create index if not exists duel_orders_account_saved_idx
     on public.duel_orders (account_id, saved_at desc);
+
+-- 🔴 2026-08-21 추가 — "창당 매도 1회"를 화면이 아니라 DB 가 직접 강제합니다. status
+--    가 'cancelled'(배치 처리 전 사용자가 스스로 취소)인 행은 제외해 그 창의 기회를
+--    되살립니다 — 이미 종결(filled/expired 성격의 취소 = 가격 미확보)된 행만 그 창을
+--    영구히 소진시킵니다. 화면 로직이 실수해도 두 번째 매도 주문의 insert 자체가 이
+--    유니크 인덱스에 막힙니다(§0-3-9 이중 방어).
+create unique index if not exists duel_orders_one_sell_per_window
+    on public.duel_orders (account_id, rebalance_window_index)
+    where side = 'sell' and status <> 'cancelled';
 
 
 -- -----------------------------------------------------------------------------
@@ -424,9 +468,11 @@ create trigger duel_orders_transition_guard
     for each row execute function public.duel_orders_guard();
 
 comment on table public.duel_orders is
-    '결투다! 예약 주문(수량 기준). 저장 = 예약이지 체결이 아니며, 귀속 거래일(D+1)의 확정 종가로 야간 배치가 체결합니다. 사용자는 pending 상태에서만 수량 수정·취소 가능.';
+    '결투다! 예약 주문(수량 기준). 저장 = 예약이지 체결이 아니며, 귀속 거래일(D+1)의 확정 종가로 야간 배치가 체결합니다. 사용자는 pending 상태에서만 수량 수정·취소 가능. side=''sell'' 은 창(30/90/180일)당 1회 리밸런싱 전용(2026-08-21 오너 확정 — 이전의 "매도 영원히 없음" 결정을 정정).';
 comment on column public.duel_orders.side is
-    '''buy'' 고정. CHECK 는 장식이 아니라 "나중에 매도를 여기에 얹지 말라"는 물리적 표시입니다 — 이 모듈에 매도는 없습니다.';
+    '''buy'' 또는 ''sell''. sell 은 rebalance_window_index 가 반드시 채워지고, duel_orders_one_sell_per_window 유니크 인덱스가 창당 1건만 허용합니다.';
+comment on column public.duel_orders.rebalance_window_index is
+    '리밸런싱 창 번호(0부터). utils/duel_rules.resolve_rebalance_window() 가 계좌의 first_holding_date 와 창 길이(M1=30일/M3=90일/M6=180일)로 계산해 매도 주문 저장 시 채웁니다. 매수 주문은 항상 NULL.';
 comment on column public.duel_orders.target_date is
     '이 주문이 귀속되는 거래일(D+1). 앱이 확정 거래일 목록을 보고 채웁니다(utils/duel_rules.resolve_fill_trading_day). 거래일 캘린더를 코드/DB 에 하드코딩하지 않습니다(§0-1). ⚠️ insert 시점의 값은 DB 가 검증할 수 없습니다 — DB 는 거래일을 모르기 때문입니다. duel_db 의 저장 함수가 반드시 서버측에서 계산한 값으로 덮어써야 합니다(사용자가 유리한 날짜를 골라 넣는 경로를 남기지 않기).';
 comment on column public.duel_orders.filled_quantity is
@@ -454,14 +500,15 @@ comment on column public.duel_orders.fail_reason is
 --     잔고가 이중 계상되고 TWR 의 현금흐름 판정까지 오염됩니다. 화면의 "이월 금액"은
 --     원장 행이 아니라 **계산해서 표시하는 값**입니다. 이 누락은 의도적입니다.
 --
---  ⚠️ event_type 에 매도가 없다는 점도 확인하세요. 'reversal' 은 정정 전용입니다.
+--  ⚠️ 2026-08-21 오너 확정 — event_type 에 'sell' 이 추가됐습니다(창당 1회 리밸런싱
+--     매도, work order 정정 섹션 참고). 'reversal' 은 여전히 정정 전용입니다.
 -- -----------------------------------------------------------------------------
 create table if not exists public.duel_cash_ledger (
     id         bigserial primary key,
     account_id uuid not null references public.duel_accounts (id) on delete cascade,
     event_type text not null
-               check (event_type in ('seed', 'monthly_deposit', 'buy', 'reversal')),
-    amount     numeric(20, 6) not null,   -- 입금은 +, 매수는 −
+               check (event_type in ('seed', 'monthly_deposit', 'buy', 'sell', 'reversal')),
+    amount     numeric(20, 6) not null,   -- 입금·매도는 +, 매수는 −
     event_date date not null,             -- KST 기준 날짜 (DB 의 current_date 는 UTC 라 안 씁니다)
 
     -- ⚠️ FK 를 일부러 **on delete no action(기본값)** 으로 둡니다.
@@ -477,7 +524,7 @@ create table if not exists public.duel_cash_ledger (
     -- 방향이 뒤집힌 행을 막습니다. 시드·정기입금은 반드시 +, 매수는 반드시 −.
     -- (reversal 은 정정이라 양쪽 부호가 다 필요하므로 제약하지 않습니다.)
     constraint duel_cash_ledger_sign_match check (
-        (event_type in ('seed', 'monthly_deposit') and amount > 0)
+        (event_type in ('seed', 'monthly_deposit', 'sell') and amount > 0)
         or (event_type = 'buy' and amount < 0)
         or event_type = 'reversal'
     ),
@@ -485,7 +532,7 @@ create table if not exists public.duel_cash_ledger (
     -- 매수 행은 어떤 주문에서 나왔는지가 반드시 남아야 추적이 됩니다. 반대로 입금 행에
     -- 주문이 붙어 있으면 그건 잘못 만든 행입니다.
     constraint duel_cash_ledger_order_link check (
-        (event_type = 'buy' and order_id is not null)
+        (event_type in ('buy', 'sell') and order_id is not null)
         or (event_type in ('seed', 'monthly_deposit') and order_id is null)
         or event_type = 'reversal'
     )
@@ -540,7 +587,7 @@ create trigger duel_cash_ledger_no_update
 comment on table public.duel_cash_ledger is
     '결투다! 현금 원장(append-only). 잔고 컬럼을 두지 않고 항상 sum(amount) 로 계산합니다. 수정은 트리거가 막고, 정정은 reversal 행 추가로만 합니다.';
 comment on column public.duel_cash_ledger.amount is
-    '입금은 +, 매수는 −. 이 표에 매도는 없습니다(event_type CHECK 참고).';
+    '입금·매도는 +, 매수는 −. 매도는 창(30/90/180일)당 1회 리밸런싱 전용(2026-08-21 오너 확정 — event_type CHECK 참고).';
 comment on column public.duel_cash_ledger.event_date is
     '앱이 넣는 한국시간(KST) 기준 날짜. DB 의 current_date(UTC) 를 쓰지 않는 이유는 sql/scorecard_schema.sql §8 주석과 같습니다. 매월 입금은 10일이 주말·공휴일이어도 그대로 10일자입니다(시장 이벤트가 아니라 현금 이벤트).';
 
@@ -1447,6 +1494,105 @@ comment on function public.duel_opt_in() is
 
 
 -- =============================================================================
+-- 9-11. 🔴 리밸런싱 매도 정산 RPC — `duel.settled_sell` 을 켤 수 있는 **유일한 자리**
+--        (2026-08-21 추가 · service_role 전용 · USD 미러는 §14-11)
+-- =============================================================================
+--  ── 왜 표 update 가 아니라 RPC 인가 (이 파일에서 RPC 를 쓰는 두 번째 자리) ─────────
+--  §2-1 의 `duel_positions_buy_only()` 트리거는 수량 감소를 막고, 리밸런싱 매도 정산만은
+--  **같은 트랜잭션에서** `set local duel.settled_sell = 'on'` 이 먼저 실행됐을 때 통과시킵니다.
+--  그런데 야간 배치는 Supabase 를 **PostgREST(REST)** 로 부릅니다 — REST 요청 하나가 곧
+--  트랜잭션 하나이고, 클라이언트가 임의의 세션 변수를 앞세워 보낼 문법이 없습니다.
+--  (PostgREST 가 트랜잭션에 심어 주는 값은 role · request.jwt.claims · request.headers 처럼
+--   정해진 것뿐이고, `db-pre-request` 는 서버 전역 설정이라 "모든 요청에 항상 켜짐"이 됩니다 —
+--   그건 정확히 이 트리거가 막으려던 상태입니다.)
+--  그래서 **"세션 변수 켜기 + 수량 줄이기"를 한 번의 호출 안에서 원자적으로** 하는 좁은
+--  함수를 둡니다. 플래그는 이 함수 안에서만 켜졌다가 끝나기 전에 꺼집니다.
+--
+--  ── 이 함수를 좁게 유지하는 장치 넷 (트리거를 우회하는 유일한 통로이므로) ──────────
+--    · **수량만** 바꿉니다. `avg_cost` 는 손대지 않습니다 — "매도는 잔여 주식의 매입단가를
+--      바꾸지 않는다"(`utils/duel_rules.py::apply_sell_fill_to_position()`)를 DB 에서도
+--      그대로 강제하고, 정산 경로로 원가를 다시 쓰는 길을 아예 없앱니다.
+--    · **줄이는 방향만** 허용합니다. 새 수량이 현재 수량 이상인 행이 하나라도 있으면 전체를
+--      거절합니다 — 이 통로로 수량을 늘릴 수 있으면 트리거 전체가 장식이 됩니다.
+--    · **행을 만들지 않습니다.** 없는 (계좌, 종목)이 들어오면 거절합니다(보유하지 않은
+--      종목이 팔렸다는 뜻이라, 조용히 0건 처리하면 그 사실이 사라집니다 — §0-1).
+--    · execute 는 **service_role 에게만**. 사용자 세션(anon/authenticated)은 이 함수를
+--      부를 수 없습니다(§9-9 의 revoke 관례와 같은 이중 방어).
+--
+--  ⚠️ 한 번에 여러 행을 받습니다(jsonb 배열). 배치가 계좌마다 부르면 그게 §0-3-2 가 금지한
+--     모양이 됩니다 — 호출부(`utils/duel_db.py::settle_sell_positions()`)는 그날 매도 정산
+--     전체를 한 번(또는 CHUNK_SIZE 단위)에 보냅니다.
+-- =============================================================================
+create or replace function public.duel_settle_sell_positions(p_rows jsonb)
+returns integer
+language plpgsql
+as $$
+declare
+    v_expected integer;
+    v_updated  integer;
+begin
+    if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
+        raise exception 'duel_settle_sell_positions: 매도 정산 행 목록(jsonb 배열)이 필요합니다 (받은 형태: %)',
+            coalesce(jsonb_typeof(p_rows), 'null');
+    end if;
+
+    select count(*) into v_expected
+      from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric);
+    if v_expected = 0 then
+        return 0;   -- 매도가 없는 밤은 오류가 아닙니다(정상적으로 대부분의 밤).
+    end if;
+
+    -- ① 보유하지 않은 (계좌, 종목)이 섞여 있으면 **아무것도** 반영하지 않습니다.
+    if exists (
+        select 1
+          from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+          left join public.duel_positions p
+                 on p.account_id = x.account_id and p.ticker = x.ticker
+         where p.id is null
+    ) then
+        raise exception 'duel_settle_sell_positions: 보유하지 않은 (계좌, 종목)이 들어 있어 매도 정산을 중단합니다(행을 새로 만들지 않습니다)';
+    end if;
+
+    -- ② 줄이는 방향만. 0 은 정상(전량 매도), 음수·유지·증가는 전부 거절입니다.
+    if exists (
+        select 1
+          from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+          join public.duel_positions p
+            on p.account_id = x.account_id and p.ticker = x.ticker
+         where x.quantity is null or x.quantity < 0 or x.quantity >= p.quantity
+    ) then
+        raise exception 'duel_settle_sell_positions: 매도 정산은 수량을 줄이는 방향만 허용합니다(0 이상 · 현재 수량 미만)';
+    end if;
+
+    -- ③ 여기서만 플래그를 켭니다(트랜잭션 지역 변수 — 세 번째 인자 true).
+    perform set_config('duel.settled_sell', 'on', true);
+
+    update public.duel_positions p
+       set quantity = x.quantity
+      from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+     where p.account_id = x.account_id and p.ticker = x.ticker;
+    get diagnostics v_updated = row_count;
+
+    -- ④ 같은 트랜잭션에 다른 쓰기가 따라붙어도 플래그가 남아 있지 않게 바로 끕니다.
+    perform set_config('duel.settled_sell', 'off', true);
+
+    if v_updated <> v_expected then
+        raise exception 'duel_settle_sell_positions: % 행을 정산하려 했는데 % 행만 반영됐습니다 — 전부 되돌립니다',
+            v_expected, v_updated;
+    end if;
+
+    return v_updated;
+end;
+$$;
+
+revoke all on function public.duel_settle_sell_positions(jsonb) from public;
+grant execute on function public.duel_settle_sell_positions(jsonb) to service_role;
+
+comment on function public.duel_settle_sell_positions(jsonb) is
+    '창당 1회 리밸런싱 매도의 야간 정산 전용 RPC(2026-08-21). duel.settled_sell 세션 변수를 함수 안에서만 켰다 끄고 duel_positions.quantity 를 **줄이는 방향으로만** 갱신합니다. PostgREST 는 요청마다 트랜잭션이 달라 set local 을 앞세울 수 없어서, 세션 변수와 update 를 한 호출로 묶은 것입니다. avg_cost 는 건드리지 않고, 없는 포지션은 만들지 않으며, execute 는 service_role 에게만 있습니다.';
+
+
+-- =============================================================================
 -- 10. ⚠️ 배치가 절대 하지 말아야 할 것 (코드 리뷰용 메모)
 -- =============================================================================
 --  · 사용자별 루프 금지(§0-3-2, 2-7). 체결은 `update ... from` 한 방, 포지션은
@@ -1493,8 +1639,8 @@ comment on function public.duel_opt_in() is
 --         and table_name in ('duel_public_leaderboard', 'duel_public_holdings')
 --         and column_name in ('user_id', 'account_id', 'email');
 --
---  ④ 매도 금지 트리거가 실제로 막는지 (개발용 계좌에서만 시도하세요)
---      -- 아래 update 는 반드시 예외로 실패해야 정상입니다.
+--  ④ 수량 감소 통제 트리거가 실제로 막는지 (개발용 계좌에서만 시도하세요)
+--      -- 아래 update 는 세션 변수 없이는 반드시 예외로 실패해야 정상입니다.
 --      update public.duel_positions set quantity = quantity - 1 where id = '<개발용 포지션>';
 --      -- 관리 경로는 통과해야 정상입니다.
 --      begin;
@@ -1676,6 +1822,8 @@ create table if not exists public.duel_accounts_usd (
     seed_amount  numeric(20, 6) not null check (seed_amount > 0),   -- default 없음(§1 과 같은 이유)
     currency     text not null default 'USD' check (currency = 'USD'),
     anchor_date  date not null,
+    -- 원화 트랙과 같은 이유(§1 주석 참고) — 2026-08-21 오너 확정.
+    first_holding_date date,
     status       text not null default 'active' check (status in ('active', 'closed')),
     created_at   timestamptz not null default now(),
     updated_at   timestamptz not null default now(),
@@ -1697,7 +1845,7 @@ comment on column public.duel_accounts_usd.seed_amount is
 
 
 -- -----------------------------------------------------------------------------
--- 13-2. duel_positions_usd (§2 미러) — 매수 전용, 트리거 함수는 원화와 공유
+-- 13-2. duel_positions_usd (§2 미러) — 매수 + 창당 1회 리밸런싱 매도, 트리거 함수는 원화와 공유
 -- -----------------------------------------------------------------------------
 create table if not exists public.duel_positions_usd (
     id            uuid primary key default gen_random_uuid(),
@@ -1722,7 +1870,7 @@ create trigger duel_positions_usd_set_updated_at
     before update on public.duel_positions_usd
     for each row execute function public.duel_set_updated_at();
 
--- §2-1 의 매도 금지 트리거 함수(duel_positions_buy_only)는 NEW/OLD 로만 동작하고 표 이름을
+-- §2-1 의 수량 감소 통제 트리거 함수(duel_positions_buy_only)는 NEW/OLD 로만 동작하고 표 이름을
 -- 하드코딩하지 않으므로 그대로 재사용합니다 — 함수를 복제하지 않습니다(5-11-1).
 drop trigger if exists duel_positions_usd_no_sell on public.duel_positions_usd;
 create trigger duel_positions_usd_no_sell
@@ -1730,7 +1878,7 @@ create trigger duel_positions_usd_no_sell
     for each row execute function public.duel_positions_buy_only();
 
 comment on table public.duel_positions_usd is
-    '결투다! USD 트랙 가상 보유 포지션(§5-11). 매수 전용 — 매도 금지 트리거는 원화 표와 같은 함수(duel_positions_buy_only)를 공유합니다. 쓰기는 배치(service_role)만, 사용자는 읽기 전용.';
+    '결투다! USD 트랙 가상 보유 포지션(§5-11). 수량 감소 제어 트리거는 원화 표와 같은 함수(duel_positions_buy_only)를 공유합니다 — 리밸런싱 매도 정산은 duel.settled_sell 세션 변수로(2026-08-21 오너 확정). 쓰기는 배치(service_role)만, 사용자는 읽기 전용.';
 
 
 -- -----------------------------------------------------------------------------
@@ -1742,7 +1890,9 @@ create table if not exists public.duel_orders_usd (
     ticker             text not null check (length(ticker) between 1 and 20),
     stock_name         text not null,
     requested_quantity integer not null check (requested_quantity > 0),
-    side               text not null default 'buy' check (side = 'buy'),
+    side               text not null default 'buy' check (side in ('buy', 'sell')),
+    -- 2026-08-21 오너 확정 — 원화 트랙과 같은 이유로 매도를 추가합니다(§2-1 주석 참고).
+    rebalance_window_index integer,
     status             text not null default 'pending'
                        check (status in
                            ('pending', 'filled', 'partially_filled', 'cancelled', 'expired')),
@@ -1757,6 +1907,10 @@ create table if not exists public.duel_orders_usd (
 
     constraint duel_orders_usd_filled_within_request check (
         filled_quantity is null or filled_quantity <= requested_quantity
+    ),
+    constraint duel_orders_usd_rebalance_window_match check (
+        (side = 'sell' and rebalance_window_index is not null)
+        or (side = 'buy' and rebalance_window_index is null)
     ),
     constraint duel_orders_usd_reason_required check (
         status in ('pending', 'filled')
@@ -1783,6 +1937,11 @@ create index if not exists duel_orders_usd_pending_target_idx
 create index if not exists duel_orders_usd_account_saved_idx
     on public.duel_orders_usd (account_id, saved_at desc);
 
+-- 원화 트랙의 duel_orders_one_sell_per_window 와 같은 이유(§2-1 주석 참고).
+create unique index if not exists duel_orders_usd_one_sell_per_window
+    on public.duel_orders_usd (account_id, rebalance_window_index)
+    where side = 'sell' and status <> 'cancelled';
+
 -- §3-1 의 상태 전이 가드(duel_orders_guard)도 표 이름을 하드코딩하지 않으므로 재사용합니다.
 drop trigger if exists duel_orders_usd_transition_guard on public.duel_orders_usd;
 create trigger duel_orders_usd_transition_guard
@@ -1790,7 +1949,7 @@ create trigger duel_orders_usd_transition_guard
     for each row execute function public.duel_orders_guard();
 
 comment on table public.duel_orders_usd is
-    '결투다! USD 트랙 예약 주문(수량 기준). D일 KST 16:00~21:00 접수 → D+1 미국 정규장 마감가로 야간 배치가 체결합니다(5-11-6 — 이 시간대는 그날 미국 정규장 개장 전이라 국내 모델과 다른 메커니즘이지만 결과는 동일하게 선행매매 불가능합니다). 사용자는 pending 상태에서만 수량 수정·취소 가능.';
+    '결투다! USD 트랙 예약 주문(수량 기준). D일 KST 16:00~21:00 접수 → D+1 미국 정규장 마감가로 야간 배치가 체결합니다(5-11-6 — 이 시간대는 그날 미국 정규장 개장 전이라 국내 모델과 다른 메커니즘이지만 결과는 동일하게 선행매매 불가능합니다). 사용자는 pending 상태에서만 수량 수정·취소 가능. side=''sell'' 은 창당 1회 리밸런싱 전용(2026-08-21 오너 확정, 원화 트랙과 동일 규칙).';
 
 
 -- -----------------------------------------------------------------------------
@@ -1800,7 +1959,7 @@ create table if not exists public.duel_cash_ledger_usd (
     id         bigserial primary key,
     account_id uuid not null references public.duel_accounts_usd (id) on delete cascade,
     event_type text not null
-               check (event_type in ('seed', 'monthly_deposit', 'buy', 'reversal')),
+               check (event_type in ('seed', 'monthly_deposit', 'buy', 'sell', 'reversal')),
     amount     numeric(20, 6) not null,
     event_date date not null,
     order_id   uuid references public.duel_orders_usd (id),   -- on delete no action(§4 와 같은 이유)
@@ -1808,12 +1967,12 @@ create table if not exists public.duel_cash_ledger_usd (
     created_at timestamptz not null default now(),
 
     constraint duel_cash_ledger_usd_sign_match check (
-        (event_type in ('seed', 'monthly_deposit') and amount > 0)
+        (event_type in ('seed', 'monthly_deposit', 'sell') and amount > 0)
         or (event_type = 'buy' and amount < 0)
         or event_type = 'reversal'
     ),
     constraint duel_cash_ledger_usd_order_link check (
-        (event_type = 'buy' and order_id is not null)
+        (event_type in ('buy', 'sell') and order_id is not null)
         or (event_type in ('seed', 'monthly_deposit') and order_id is null)
         or event_type = 'reversal'
     )
@@ -1839,7 +1998,7 @@ create trigger duel_cash_ledger_usd_no_update
     for each row execute function public.duel_cash_ledger_append_only();
 
 comment on table public.duel_cash_ledger_usd is
-    '결투다! USD 트랙 현금 원장(append-only). 매월 $500 정기입금이 창 길이와 무관하게 누적됩니다(5-11-4 — 원화 트랙의 "창 길이에 비례해 깎지 않음" 규칙을 그대로 재사용). 정정은 반대 부호의 reversal 행으로만.';
+    '결투다! USD 트랙 현금 원장(append-only). 매월 $500 정기입금이 창 길이와 무관하게 누적됩니다(5-11-4 — 원화 트랙의 "창 길이에 비례해 깎지 않음" 규칙을 그대로 재사용). event_type=''sell'' 은 창당 1회 리밸런싱 전용(2026-08-21 오너 확정, 원화 트랙과 동일). 정정은 반대 부호의 reversal 행으로만.';
 
 
 -- -----------------------------------------------------------------------------
@@ -2305,6 +2464,105 @@ grant execute on function public.duel_opt_in_usd() to authenticated;
 
 comment on function public.duel_opt_in_usd() is
     '결투 USD 트랙 옵트인(계좌 3개 + 시드 원장 3행)을 사용자 본인 세션으로 처리하는 security definer RPC(§9-10 미러). 인자가 없고 대상은 auth.uid() 뿐이라 남을 대신해 부를 수 없으며, 금액은 duel_seed_amount_usd() 상수입니다. 닉네임은 여기서 만들지 않습니다(5단계 동의 시점에 생성, duel_nicknames 는 원화 트랙과 공유).';
+
+
+-- =============================================================================
+-- 14-11. 🔴 리밸런싱 매도 정산 RPC — `duel.settled_sell` 을 켤 수 있는 **유일한 자리**
+--        (2026-08-21 추가 · service_role 전용 · 원화 원본은 §9-11)
+-- =============================================================================
+--  ── 왜 표 update 가 아니라 RPC 인가 (이 파일에서 RPC 를 쓰는 두 번째 자리) ─────────
+--  §13(USD 표) · §2-1(공유 트리거 함수) 의 `duel_positions_buy_only()` 트리거는 수량 감소를 막고, 리밸런싱 매도 정산만은
+--  **같은 트랜잭션에서** `set local duel.settled_sell = 'on'` 이 먼저 실행됐을 때 통과시킵니다.
+--  그런데 야간 배치는 Supabase 를 **PostgREST(REST)** 로 부릅니다 — REST 요청 하나가 곧
+--  트랜잭션 하나이고, 클라이언트가 임의의 세션 변수를 앞세워 보낼 문법이 없습니다.
+--  (PostgREST 가 트랜잭션에 심어 주는 값은 role · request.jwt.claims · request.headers 처럼
+--   정해진 것뿐이고, `db-pre-request` 는 서버 전역 설정이라 "모든 요청에 항상 켜짐"이 됩니다 —
+--   그건 정확히 이 트리거가 막으려던 상태입니다.)
+--  그래서 **"세션 변수 켜기 + 수량 줄이기"를 한 번의 호출 안에서 원자적으로** 하는 좁은
+--  함수를 둡니다. 플래그는 이 함수 안에서만 켜졌다가 끝나기 전에 꺼집니다.
+--
+--  ── 이 함수를 좁게 유지하는 장치 넷 (트리거를 우회하는 유일한 통로이므로) ──────────
+--    · **수량만** 바꿉니다. `avg_cost` 는 손대지 않습니다 — "매도는 잔여 주식의 매입단가를
+--      바꾸지 않는다"(`utils/duel_rules.py::apply_sell_fill_to_position()`)를 DB 에서도
+--      그대로 강제하고, 정산 경로로 원가를 다시 쓰는 길을 아예 없앱니다.
+--    · **줄이는 방향만** 허용합니다. 새 수량이 현재 수량 이상인 행이 하나라도 있으면 전체를
+--      거절합니다 — 이 통로로 수량을 늘릴 수 있으면 트리거 전체가 장식이 됩니다.
+--    · **행을 만들지 않습니다.** 없는 (계좌, 종목)이 들어오면 거절합니다(보유하지 않은
+--      종목이 팔렸다는 뜻이라, 조용히 0건 처리하면 그 사실이 사라집니다 — §0-1).
+--    · execute 는 **service_role 에게만**. 사용자 세션(anon/authenticated)은 이 함수를
+--      부를 수 없습니다(§9-9 의 revoke 관례와 같은 이중 방어).
+--
+--  ⚠️ 한 번에 여러 행을 받습니다(jsonb 배열). 배치가 계좌마다 부르면 그게 §0-3-2 가 금지한
+--     모양이 됩니다 — 호출부(`utils/duel_db_usd.py::settle_sell_positions_usd()`)는 그날 매도 정산
+--     전체를 한 번(또는 CHUNK_SIZE 단위)에 보냅니다.
+-- =============================================================================
+create or replace function public.duel_settle_sell_positions_usd(p_rows jsonb)
+returns integer
+language plpgsql
+as $$
+declare
+    v_expected integer;
+    v_updated  integer;
+begin
+    if p_rows is null or jsonb_typeof(p_rows) <> 'array' then
+        raise exception 'duel_settle_sell_positions_usd: 매도 정산 행 목록(jsonb 배열)이 필요합니다 (받은 형태: %)',
+            coalesce(jsonb_typeof(p_rows), 'null');
+    end if;
+
+    select count(*) into v_expected
+      from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric);
+    if v_expected = 0 then
+        return 0;   -- 매도가 없는 밤은 오류가 아닙니다(정상적으로 대부분의 밤).
+    end if;
+
+    -- ① 보유하지 않은 (계좌, 종목)이 섞여 있으면 **아무것도** 반영하지 않습니다.
+    if exists (
+        select 1
+          from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+          left join public.duel_positions_usd p
+                 on p.account_id = x.account_id and p.ticker = x.ticker
+         where p.id is null
+    ) then
+        raise exception 'duel_settle_sell_positions_usd: 보유하지 않은 (계좌, 종목)이 들어 있어 매도 정산을 중단합니다(행을 새로 만들지 않습니다)';
+    end if;
+
+    -- ② 줄이는 방향만. 0 은 정상(전량 매도), 음수·유지·증가는 전부 거절입니다.
+    if exists (
+        select 1
+          from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+          join public.duel_positions_usd p
+            on p.account_id = x.account_id and p.ticker = x.ticker
+         where x.quantity is null or x.quantity < 0 or x.quantity >= p.quantity
+    ) then
+        raise exception 'duel_settle_sell_positions_usd: 매도 정산은 수량을 줄이는 방향만 허용합니다(0 이상 · 현재 수량 미만)';
+    end if;
+
+    -- ③ 여기서만 플래그를 켭니다(트랜잭션 지역 변수 — 세 번째 인자 true).
+    perform set_config('duel.settled_sell', 'on', true);
+
+    update public.duel_positions_usd p
+       set quantity = x.quantity
+      from jsonb_to_recordset(p_rows) as x(account_id uuid, ticker text, quantity numeric)
+     where p.account_id = x.account_id and p.ticker = x.ticker;
+    get diagnostics v_updated = row_count;
+
+    -- ④ 같은 트랜잭션에 다른 쓰기가 따라붙어도 플래그가 남아 있지 않게 바로 끕니다.
+    perform set_config('duel.settled_sell', 'off', true);
+
+    if v_updated <> v_expected then
+        raise exception 'duel_settle_sell_positions_usd: % 행을 정산하려 했는데 % 행만 반영됐습니다 — 전부 되돌립니다',
+            v_expected, v_updated;
+    end if;
+
+    return v_updated;
+end;
+$$;
+
+revoke all on function public.duel_settle_sell_positions_usd(jsonb) from public;
+grant execute on function public.duel_settle_sell_positions_usd(jsonb) to service_role;
+
+comment on function public.duel_settle_sell_positions_usd(jsonb) is
+    '창당 1회 리밸런싱 매도의 야간 정산 전용 RPC(2026-08-21, §9-11 의 USD 미러). duel.settled_sell 세션 변수를 함수 안에서만 켰다 끄고 duel_positions.quantity 를 **줄이는 방향으로만** 갱신합니다. PostgREST 는 요청마다 트랜잭션이 달라 set local 을 앞세울 수 없어서, 세션 변수와 update 를 한 호출로 묶은 것입니다. avg_cost 는 건드리지 않고, 없는 포지션은 만들지 않으며, execute 는 service_role 에게만 있습니다.';
 
 
 -- =============================================================================

@@ -18,6 +18,9 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, **가짜 Supabase 클라이언트**
     ⑥ 스냅샷 행이 계좌별로 맞게 만들어지는가(현금만 있는 계좌 / 보유 있는 계좌 / 가격 모르는
        종목 / 상장폐지), 그리고 TWR 이 입금을 수익으로 세지 않는가
     ⑦ 🔴 §0-3-2 — 계좌가 3개든 900개든 **Supabase 왕복 횟수가 그대로**인가 (회귀 고정)
+    ⑧ (2026-08-21 추가) 창당 1회 **리밸런싱 매도** — 계좌 안에서 매도가 먼저 처리돼 그 대금이
+       같은 밤 매수 재원이 되는가, 수량이 줄어드는 포지션이 일반 upsert 가 아니라 전용 정산
+       RPC 로 가는가, 오늘 처음 보유가 생긴 계좌의 `first_holding_date` 가 채워지는가
 
 실행: pytest tests/test_duel_batch.py -v
 """
@@ -106,6 +109,22 @@ def _order(order_id, account_id, ticker, quantity, saved_at, *, stock_name=None)
             "stock_name": stock_name or f"합성{ticker}", "requested_quantity": quantity,
             "side": "buy", "status": duel_rules.ORDER_PENDING,
             "saved_at": saved_at, "target_date": TARGET_DATE.isoformat()}
+
+
+def _sell_order(order_id, account_id, ticker, quantity, saved_at, *, window_index=0,
+                stock_name=None):
+    """리밸런싱 매도 주문 1건(= `side='sell'` + `rebalance_window_index`). 2026-08-21 추가."""
+    row = _order(order_id, account_id, ticker, quantity, saved_at, stock_name=stock_name)
+    row["side"] = "sell"
+    row["rebalance_window_index"] = window_index
+    return row
+
+
+def _position(account_id, ticker, quantity, avg_cost, *, stock_name=None):
+    """`duel_db.fetch_positions_for_accounts()` 가 돌려주는 모양의 보유 포지션 1행."""
+    return {"account_id": account_id, "ticker": ticker,
+            "stock_name": stock_name or f"합성{ticker}", "quantity": quantity,
+            "avg_cost": avg_cost, "status": "active", "delisted_date": None}
 
 
 def _client(*, accounts=None, ledger=None, orders=None, positions=None, snapshots=None,
@@ -1149,3 +1168,290 @@ def test_batch_surfaces_a_twr_failure_as_a_warning():
     summary = _run(client)
     assert summary["snapshots_written"] == 1        # 스냅샷은 정상 적재
     assert any("누적 TWR 을 계산하지 못했습니다" in warning for warning in summary["warnings"])
+
+
+# =============================================================================
+# 14. 🔴 창당 1회 리밸런싱 매도 (2026-08-21 오너 확정)
+# =============================================================================
+def test_sell_proceeds_are_available_to_the_same_nights_buy():
+    """
+    🔴 확정 스펙 ④ 의 회귀 고정: **매도 먼저 → 그 대금이 그날 밤 매수 재원.**
+
+    매수 주문의 `saved_at` 을 매도보다 **더 이르게** 두었습니다. 계좌 안에서 순서가
+    saved_at 만으로 정해진다면 매수가 먼저 처리돼 예수금 5만원으로 2주만 부분체결되고,
+    매도가 먼저 처리돼야만 6만원이 더해져 5주 전량체결이 됩니다 — 즉 이 테스트는
+    "side 로 한 번 더 갈라 매도를 먼저 처리하는가"만을 정확히 봅니다.
+    """
+    existing = {"acc-1": [_position("acc-1", "000001", 10, 10_000.0)]}
+    orders = [
+        _order("o-buy", "acc-1", "000002", 5, "2026-08-19T19:00:00+09:00"),
+        _sell_order("o-sell", "acc-1", "000001", 5, "2026-08-19T20:00:00+09:00"),
+    ]
+    plan = duel_batch.plan_order_fills(
+        orders, {"acc-1": 50_000.0},
+        {"000001": 12_000.0, "000002": 20_000.0}, existing, TARGET_DATE)
+
+    by_id = {row["id"]: row for row in plan["fill_results"]}
+    assert by_id["o-sell"]["status"] == duel_rules.ORDER_FILLED
+    assert by_id["o-sell"]["filled_quantity"] == 5
+    assert by_id["o-sell"]["filled_amount"] == 60_000.0
+    # 매도 대금 6만원이 먼저 더해졌기 때문에 5주 전량체결(그렇지 않으면 2주 부분체결).
+    assert by_id["o-buy"]["status"] == duel_rules.ORDER_FILLED
+    assert by_id["o-buy"]["filled_quantity"] == 5
+    assert plan["cash_after"]["acc-1"] == 10_000.0     # 50,000 + 60,000 − 100,000
+    assert plan["filled_amount_total"] == 100_000.0    # 매수에 쓴 돈만
+    assert plan["sold_amount_total"] == 60_000.0       # 매도로 들어온 돈은 따로
+    assert plan["counts"]["sells"] == 1 and plan["counts"]["sell_filled"] == 1
+
+
+def test_without_the_sell_the_same_buy_would_only_partially_fill():
+    """위 테스트의 대조군 — 매도가 없으면 같은 매수는 2주 부분체결에 그칩니다."""
+    plan = duel_batch.plan_order_fills(
+        [_order("o-buy", "acc-1", "000002", 5, "2026-08-19T19:00:00+09:00")],
+        {"acc-1": 50_000.0}, {"000002": 20_000.0}, {}, TARGET_DATE)
+    assert plan["fill_results"][0]["status"] == duel_rules.ORDER_PARTIALLY_FILLED
+    assert plan["fill_results"][0]["filled_quantity"] == 2
+
+
+def test_sell_position_rows_are_split_out_from_the_normal_upsert():
+    """
+    🔴 수량이 **줄어드는** 행은 일반 upsert 로 보낼 수 없습니다(트리거가 요청 전체를 거절).
+    계획 단계에서 두 목록으로 갈라져 나와야 호출부가 각각 맞는 경로로 보냅니다.
+    """
+    existing = {"acc-1": [_position("acc-1", "000001", 10, 10_000.0)]}
+    orders = [
+        _sell_order("o-sell", "acc-1", "000001", 4, "2026-08-19T19:00:00+09:00"),
+        _order("o-buy", "acc-1", "000002", 1, "2026-08-19T19:30:00+09:00"),
+    ]
+    plan = duel_batch.plan_order_fills(
+        orders, {"acc-1": 1_000_000.0},
+        {"000001": 12_000.0, "000002": 20_000.0}, existing, TARGET_DATE)
+
+    assert [row["ticker"] for row in plan["sell_position_rows"]] == ["000001"]
+    assert plan["sell_position_rows"][0]["quantity"] == 6
+    # 평단가는 매도로 바뀌지 않습니다(규칙 계층 §12-3 을 그대로 담아 옵니다).
+    assert plan["sell_position_rows"][0]["avg_cost"] == 10_000.0
+    assert [row["ticker"] for row in plan["position_rows"]] == ["000002"]
+    # 두 목록의 (계좌, 종목)은 겹치지 않습니다 — 겹치면 같은 행을 두 경로로 쓰게 됩니다.
+    assert not ({(row["account_id"], row["ticker"]) for row in plan["position_rows"]}
+                & {(row["account_id"], row["ticker"]) for row in plan["sell_position_rows"]})
+
+
+def test_full_sell_leaves_a_zero_quantity_row_not_a_deleted_one():
+    """전량 매도는 0주 행으로 남습니다(스키마가 정상 상태로 명시 — 행을 지우지 않습니다)."""
+    existing = {"acc-1": [_position("acc-1", "000001", 10, 10_000.0)]}
+    plan = duel_batch.plan_order_fills(
+        [_sell_order("o-sell", "acc-1", "000001", 10, "2026-08-19T19:00:00+09:00")],
+        {"acc-1": 0.0}, {"000001": 11_000.0}, existing, TARGET_DATE)
+    assert plan["sell_position_rows"][0]["quantity"] == 0
+    assert plan["sell_position_rows"][0]["avg_cost"] == 10_000.0
+    assert plan["cash_after"]["acc-1"] == 110_000.0
+    # 스냅샷 계산이 쓰는 포지션 목록에도 0주 행이 그대로 남아 있어야 합니다.
+    assert plan["positions_by_account"]["acc-1"][0]["quantity"] == 0
+
+
+def test_sell_ledger_entry_is_a_positive_sell_row_linked_to_the_order():
+    """매도 원장 행은 `event_type='sell'` + **양수** 금액 + 주문 링크입니다(스키마 §3 CHECK)."""
+    existing = {"acc-1": [_position("acc-1", "000001", 10, 10_000.0)]}
+    plan = duel_batch.plan_order_fills(
+        [_sell_order("o-sell", "acc-1", "000001", 2, "2026-08-19T19:00:00+09:00")],
+        {"acc-1": 0.0}, {"000001": 11_000.0}, existing, TARGET_DATE)
+
+    entry = plan["ledger_entries"][0]
+    assert entry["event_type"] == "sell"
+    assert entry["filled_amount"] == 22_000.0
+    assert entry["order_id"] == "o-sell"
+    assert "매도" in entry["memo"]
+    # 원장 계층이 부호를 뒤집는 유일한 자리이므로, 실제 payload 도 여기서 확인합니다.
+    payload = duel_db._fill_ledger_payload(plan["ledger_entries"])
+    assert payload[0]["amount"] == 22_000.0          # 매도는 입금과 같은 방향(양수)
+    assert payload[0]["event_type"] == "sell"
+
+
+def test_sell_without_a_close_price_is_cancelled_not_guessed():
+    """매수와 같은 처리 — 모르는 가격으로 팔지 않고, 현금·포지션을 건드리지 않습니다."""
+    existing = {"acc-1": [_position("acc-1", "000001", 10, 10_000.0)]}
+    plan = duel_batch.plan_order_fills(
+        [_sell_order("o-sell", "acc-1", "000001", 5, "2026-08-19T19:00:00+09:00")],
+        {"acc-1": 7_000.0}, {}, existing, TARGET_DATE)
+
+    result = plan["fill_results"][0]
+    assert result["status"] == duel_rules.ORDER_CANCELLED
+    assert result["filled_quantity"] is None and result["filled_amount"] is None
+    assert "확정 종가" in result["fail_reason"]
+    assert plan["cash_after"]["acc-1"] == 7_000.0
+    assert plan["sell_position_rows"] == [] and plan["ledger_entries"] == []
+
+
+def test_a_sell_bigger_than_the_holding_is_cancelled_without_killing_the_night():
+    """
+    🔴 보유 수량을 넘는 매도(관리 경로가 그 사이 수량을 줄인 경우 등)는 **그 주문 하나만**
+    사유를 달아 취소되고, 같은 밤 다른 계좌의 정산은 그대로 진행돼야 합니다
+    (계좌별 TWR 실패를 격리하는 것과 같은 판단 — 아래 12절 참고).
+    """
+    existing = {"acc-1": [_position("acc-1", "000001", 2, 10_000.0)]}
+    orders = [
+        _sell_order("o-sell", "acc-1", "000001", 5, "2026-08-19T19:00:00+09:00"),
+        _order("o-other", "acc-2", "000002", 1, "2026-08-19T19:00:00+09:00"),
+    ]
+    plan = duel_batch.plan_order_fills(
+        orders, {"acc-1": 0.0, "acc-2": 100_000.0},
+        {"000001": 11_000.0, "000002": 20_000.0}, existing, TARGET_DATE)
+
+    by_id = {row["id"]: row for row in plan["fill_results"]}
+    assert by_id["o-sell"]["status"] == duel_rules.ORDER_CANCELLED
+    assert "보유" in by_id["o-sell"]["fail_reason"]
+    assert plan["sell_position_rows"] == []
+    # 다른 계좌는 멀쩡히 체결됩니다.
+    assert by_id["o-other"]["status"] == duel_rules.ORDER_FILLED
+
+
+def test_an_order_without_a_side_is_treated_as_a_buy():
+    """
+    `side` 가 비어 있으면 **매수**로 봅니다. 안전한 기본값은 언제나 수량이 줄지 않는 쪽입니다
+    (DB 는 not null + CHECK 로 막고 있어 실제로는 올 수 없는 값입니다).
+    """
+    order = _order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")
+    order.pop("side")
+    plan = duel_batch.plan_order_fills(
+        [order], {"acc-1": 100_000.0}, {"000001": 10_000.0}, {}, TARGET_DATE)
+    assert plan["counts"]["sells"] == 0
+    assert plan["position_rows"][0]["quantity"] == 1
+    assert plan["sell_position_rows"] == []
+
+
+def test_batch_settles_sells_through_the_rpc_not_the_position_upsert():
+    """
+    🔴 야간 배치에서 매도 정산이 **전용 RPC** 로 가는지. 일반 upsert 로 보내면
+    `duel_positions_buy_only()` 트리거가 그날 포지션 저장을 통째로 거절합니다.
+    (세션 변수 `duel.settled_sell` 은 PostgREST 로는 앞세울 수 없어서, DB 함수 안에서
+     "플래그 켜기 + 수량 줄이기"를 한 번에 합니다 — sql/duel_schema.sql §9-11.)
+    """
+    accounts = _accounts(1)
+    accounts[0]["first_holding_date"] = "2026-07-01"     # 이미 보유가 있던 계좌
+    client = _client(
+        accounts=accounts,
+        positions=[_position("acc-1", "000001", 10, 10_000.0)],
+        orders=[_sell_order("o-sell", "acc-1", "000001", 4, "2026-08-19T19:00:00+09:00")],
+    )
+    summary = _run(client, close_price_of=_price_lookup({"000001": 12_000.0}))
+
+    assert summary["orders"]["sell_filled"] == 1
+    assert summary["sold_amount_total"] == 48_000.0
+    assert summary["sell_positions_settled"] == 1
+
+    rpc_call = client.only_call(duel_db.SETTLE_SELL_RPC, "rpc")
+    assert rpc_call.payload == {"p_rows": [
+        {"account_id": "acc-1", "ticker": "000001", "quantity": 6.0}]}
+    # 줄어든 행이 일반 upsert 로 새어 나가지 않았는지(이게 이 테스트의 핵심).
+    assert client.calls_for(duel_db.POSITIONS_TABLE, "upsert") == []
+    # 매도 대금은 그날 스냅샷의 현금에 그대로 반영됩니다.
+    snapshot = client.only_call(duel_db.DAILY_SNAPSHOTS_TABLE, "upsert").rows[0]
+    assert snapshot["cash_balance"] == duel_rules.SEED_AMOUNT_KRW + 48_000.0
+    assert snapshot["position_value"] == 6 * 12_000.0
+
+
+def test_batch_does_not_call_the_settle_rpc_when_nothing_was_sold():
+    """매도가 없는 밤에는 정산 RPC 를 아예 부르지 않습니다(왕복 수 회귀 고정)."""
+    client = _client(
+        accounts=_accounts(1),
+        orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")],
+    )
+    _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+    assert client.calls_for(duel_db.SETTLE_SELL_RPC, "rpc") == []
+
+
+def test_first_holding_date_is_recorded_on_the_very_first_fill():
+    """
+    🔴 리밸런싱 창의 카운트다운 기준(`first_holding_date`)은 **첫 보유가 생기는 그 밤**에만
+    기록됩니다. `in` 필터 한 번 + `is null` 조건이라, 계좌가 몇 개든 왕복은 1회이고
+    배치를 두 번 돌려도 날짜가 덮어써지지 않습니다.
+    """
+    client = _client(
+        accounts=_accounts(1),                     # first_holding_date 없음(=NULL)
+        orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")],
+    )
+    summary = _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+
+    assert summary["first_holding_dates_set"] == 1
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "update")
+    assert call.payload == {"first_holding_date": TARGET_DATE.isoformat()}
+    assert ("in", "id", ["acc-1"]) in call.filters
+    # 이미 채워진 계좌를 덮어쓰지 않게 DB 쪽에서도 조건을 겁니다(멱등).
+    assert ("is", "first_holding_date", "null") in call.filters
+
+
+def test_first_holding_date_is_not_touched_when_the_account_already_has_one():
+    accounts = _accounts(1)
+    accounts[0]["first_holding_date"] = "2026-07-01"
+    client = _client(
+        accounts=accounts,
+        positions=[_position("acc-1", "000001", 5, 10_000.0)],
+        orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")],
+    )
+    summary = _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+    assert summary["first_holding_dates_set"] == 0
+    assert client.calls_for(duel_db.ACCOUNTS_TABLE, "update") == []
+
+
+def test_legacy_holdings_without_a_first_holding_date_are_flagged_not_backdated():
+    """
+    🔴 §0-1 — 이 기능이 생기기 전부터 보유가 있던 계좌를 **오늘 날짜로 채우지 않습니다.**
+    채우면 사실과 다른 리밸런싱 창이 만들어집니다. 대신 경고로 시끄럽게 올려 오너가 과거
+    체결 기록을 보고 직접 채우게 합니다.
+    """
+    client = _client(
+        accounts=_accounts(1),                                   # first_holding_date NULL
+        positions=[_position("acc-1", "000001", 5, 10_000.0)],   # 그런데 보유는 이미 있음
+        orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")],
+    )
+    summary = _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+
+    assert summary["first_holding_dates_set"] == 0
+    assert client.calls_for(duel_db.ACCOUNTS_TABLE, "update") == []
+    assert any("first_holding_date" in warning for warning in summary["warnings"])
+
+
+def test_first_holding_updates_are_one_query_for_many_accounts():
+    """§0-3-2 — 계좌가 많아도 최초 보유일 기록은 `in` 필터 한 번입니다."""
+    accounts = _accounts(50)
+    orders = [_order(f"o-{index}", account["id"], "000001", 1,
+                     "2026-08-19T19:00:00+09:00")
+              for index, account in enumerate(accounts, start=1)]
+    client = _client(accounts=accounts, orders=orders)
+    summary = _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "update")
+    # 정렬된 계좌 ID 목록 하나(정렬은 배치를 두 번 돌렸을 때 요청이 같아지게 하려는 것).
+    assert ("in", "id", sorted(account["id"] for account in accounts)) in call.filters
+    assert call.payload == {"first_holding_date": TARGET_DATE.isoformat()}
+    # (반환 건수는 가짜 클라이언트가 payload 를 그대로 돌려주는 값이라 여기서는 세지
+    #  않습니다 — 실제 PostgREST 는 갱신된 행 전부를 돌려줍니다. 여기서 고정하는 것은
+    #  "계좌가 50개여도 update 는 한 번"입니다.)
+    assert summary["first_holding_dates_set"] >= 1
+
+
+def test_resolve_first_holding_updates_needs_a_real_share_not_a_zero_row():
+    """전량 매도로 0주가 된 행은 '보유'가 아닙니다(창의 기준일이 될 수 없습니다)."""
+    accounts = [{"id": "acc-1", "first_holding_date": None}]
+    zero_only = {"acc-1": [_position("acc-1", "000001", 0, 10_000.0)]}
+    assert duel_batch.resolve_first_holding_updates(accounts, {}, zero_only) == {
+        "new_ids": [], "missing": []}
+    held = {"acc-1": [_position("acc-1", "000001", 1, 10_000.0)]}
+    assert duel_batch.resolve_first_holding_updates(accounts, {}, held)["new_ids"] == ["acc-1"]
+
+
+def test_summary_shows_the_rebalancing_sell_line_only_when_there_was_one():
+    """매도가 없는 밤에는 요약이 조용합니다(줄이 늘지 않습니다)."""
+    quiet = duel_batch.format_summary_lines({
+        "target_date": "2026-08-20", "action": {"fill": True},
+        "orders": {"orders": 1, "filled": 1, "sells": 0}, "filled_amount_total": 10_000.0,
+    })
+    assert not any("리밸런싱 매도" in line for line in quiet)
+
+    loud = duel_batch.format_summary_lines({
+        "target_date": "2026-08-20", "action": {"fill": True},
+        "orders": {"orders": 2, "filled": 2, "sells": 1, "sell_filled": 1},
+        "filled_amount_total": 10_000.0, "sold_amount_total": 48_000.0,
+    })
+    assert any("리밸런싱 매도 1건 중 1건 체결" in line for line in loud)

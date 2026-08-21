@@ -20,7 +20,10 @@
     순위)으로 정의해 뒀으므로 함수를 두 벌 만들 이유가 없습니다.
   · 판정 로직 — `judge_crawl_freshness()` · `resolve_action()` · `_freshness_reason()`
     (내부에서 import 됨). 문구도 "코스피"를 언급하지 않는 일반 문장이라 그대로 맞습니다.
-  · 체결 계획 — `plan_order_fills()`. FIFO 예수금 배정·평단가 갱신은 계좌·종목 딕셔너리만
+  · 체결 계획 — `plan_order_fills()`(2026-08-21 부터 **리밸런싱 매도 → 매수** 순서 포함) ·
+    `resolve_first_holding_updates()`(오늘 처음 보유가 생긴 계좌 판정 — 계좌·포지션
+    딕셔너리만 보는 순수 계산이라 통화와 무관합니다).
+    FIFO 예수금 배정·평단가 갱신은 계좌·종목 딕셔너리만
     다루는 순수 함수입니다(내부에서 `duel_db.group_rows_by_account()`를 쓰는데, 이 함수도
     표 이름을 몰라도 되는 순수 집계라 원화 모듈에서 가져다 써도 무방합니다 — 이미
     `duel_db_usd.py`도 같은 함수를 재사용합니다).
@@ -127,6 +130,7 @@ from utils.duel_batch import (
     judge_crawl_freshness,
     resolve_action,
     plan_order_fills,
+    resolve_first_holding_updates,
     last_snapshot_dates,
     collect_external_cash_flows,
     build_snapshot_rows,
@@ -218,10 +222,13 @@ def run_nightly_batch_usd(service_client, target_date, *,
         "deposit_applied": 0,
         "deposit_attempted": False,
         "orders": {"filled": 0, "partially_filled": 0, "expired": 0, "cancelled": 0,
-                   "orders": 0, "accounts": 0},
+                   "sells": 0, "sell_filled": 0, "orders": 0, "accounts": 0},
         "filled_amount_total": 0.0,
+        "sold_amount_total": 0.0,
         "ledger_rows_written": 0,
         "positions_written": 0,
+        "sell_positions_settled": 0,
+        "first_holding_dates_set": 0,
         "pending_cancelled": 0,
         "pending_held": 0,
         "snapshots_written": 0,
@@ -277,6 +284,8 @@ def run_nightly_batch_usd(service_client, target_date, *,
         pending = duel_db_usd.fetch_pending_orders_for_fill_usd(service_client, day)
         position_rows = duel_db_usd.fetch_positions_for_accounts_usd(service_client, account_ids)
         positions_by_account = duel_db_usd.group_rows_by_account(position_rows)
+        # 체결 **전** 보유 상태(= "오늘 처음 주식이 생긴 계좌" 판정의 유일한 근거).
+        positions_before_fill = positions_by_account
 
         active_ids = set(account_ids)
         orphaned = [row for row in pending if row.get("account_id") not in active_ids]
@@ -301,8 +310,22 @@ def run_nightly_batch_usd(service_client, target_date, *,
                                      positions_by_account, day)
         summary["orders"] = fill_plan["counts"]
         summary["filled_amount_total"] = fill_plan["filled_amount_total"]
+        summary["sold_amount_total"] = fill_plan["sold_amount_total"]
         positions_by_account = fill_plan["positions_by_account"]
         cash_balances = fill_plan["cash_after"]
+
+        # 오늘 처음 보유가 생긴 계좌(= 리밸런싱 창의 기준일이 오늘로 정해지는 계좌).
+        first_holding = resolve_first_holding_updates(
+            accounts, positions_before_fill, positions_by_account)
+        if first_holding["missing"]:
+            summary["warnings"].append(
+                f"보유 종목이 있는데 `first_holding_date` 가 비어 있는 USD 계좌가"
+                f" {len(first_holding['missing'])}개 있습니다"
+                f" (예: {first_holding['missing'][:3]})."
+                " 오늘 처음 생긴 보유가 아니라 오늘 날짜로 채우지 않았습니다 — 채우면 사실과"
+                " 다른 리밸런싱 창이 만들어집니다(§0-1). 과거 체결 기록을 보고 오너가 직접"
+                " 채워 주세요."
+            )
 
         if dry_run:
             log(f"  · (dry-run) 체결 결과 {len(fill_plan['fill_results'])}건을 기록하지 않습니다.")
@@ -310,10 +333,21 @@ def run_nightly_batch_usd(service_client, target_date, *,
             written = duel_db_usd.record_order_fills_usd(service_client, fill_plan["fill_results"])
             summary["ledger_rows_written"] = duel_db_usd.record_buy_ledger_entries_usd(
                 service_client, fill_plan["ledger_entries"])
+            # 🔴 매도 정산이 먼저 — 수량이 줄어드는 행은 전용 RPC 로만 통과합니다
+            #    (원화 `run_nightly_batch()` 의 같은 자리와 완전히 같은 이유).
+            summary["sell_positions_settled"] = duel_db_usd.settle_sell_positions_usd(
+                service_client, fill_plan["sell_position_rows"])
             saved = duel_db_usd.upsert_positions_usd(service_client, fill_plan["position_rows"])
             summary["positions_written"] = len(saved)
+            if first_holding["new_ids"]:
+                summary["first_holding_dates_set"] = duel_db_usd.set_first_holding_dates_usd(
+                    service_client, first_holding["new_ids"], day)
             log(f"  ✅ [USD] 체결 결과 {written}건 기록 ·"
-                f" 매수 원장 {summary['ledger_rows_written']}행 · 포지션 {len(saved)}건 갱신")
+                f" 체결 원장 {summary['ledger_rows_written']}행 · 포지션 {len(saved)}건 갱신"
+                + (f" · 매도 정산 {summary['sell_positions_settled']}건"
+                   if summary["sell_positions_settled"] else "")
+                + (f" · 최초 보유일 {summary['first_holding_dates_set']}계좌 기록"
+                   if summary["first_holding_dates_set"] else ""))
 
     elif action["cancel_pending"]:
         # ── ③' 실패일 처리 (2-4-5, USD 미러) ─────────────────────────────────
@@ -431,6 +465,13 @@ def format_summary_lines_usd(summary):
         )
         # 🔴 여기만 원화와 다릅니다 — "원" 대신 "$"(달러 기호를 금액 앞에).
         lines.append(f"  · 체결에 쓴 현금 합계: ${summary.get('filled_amount_total', 0):,.2f}")
+        if orders.get("sells"):
+            lines.append(
+                f"  · 리밸런싱 매도 {orders.get('sells', 0)}건 중"
+                f" {orders.get('sell_filled', 0)}건 체결 —"
+                f" 매도 대금 ${summary.get('sold_amount_total', 0):,.2f}"
+                " (그날 매수 재원으로 즉시 반영됨)"
+            )
     elif action.get("cancel_pending"):
         lines.append(f"  ⚠️ 체결 없음 — 그날 귀속 주문 {summary.get('pending_cancelled', 0)}건 취소")
     else:

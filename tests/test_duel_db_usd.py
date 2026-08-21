@@ -363,6 +363,84 @@ def test_cancel_order_usd_accepts_custom_reason():
 
 
 # =============================================================================
+# 2-B. A 절 — 창당 1회 리밸런싱 **매도** 주문 저장 (USD, 2026-08-21)
+# =============================================================================
+def test_save_sell_order_usd_writes_to_the_usd_table_with_the_usd_fill_day():
+    """
+    원화 미러와 다른 것은 세 가지뿐입니다: 접수 시간대(16:00:01~21:00:00) · 체결 거래일
+    (그날 자신 포함) · 표(`duel_orders_usd`). 창 번호 규약은 통화와 무관하게 같습니다.
+    """
+    client = FakeClient()
+    order = duel_db_usd.save_sell_order_usd(
+        client, "acc-1", "AAPL", "애플", 3, 10, 1,
+        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW_USD,
+    )
+    payload = client.only_call(duel_db_usd.ORDERS_TABLE_USD, "insert").rows[0]
+    assert payload["side"] == "sell"
+    assert payload["rebalance_window_index"] == 1
+    assert payload["target_date"] == "2026-08-19"      # USD 는 그날 자신(§5-16)
+    assert order["side"] == "sell"
+    # KRW 표에는 아무것도 가지 않습니다.
+    assert client.calls_for(duel_db.ORDERS_TABLE) == []
+
+
+def test_save_sell_order_usd_rejects_more_than_the_holding_before_touching_the_db():
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db_usd.save_sell_order_usd(client, "acc-1", "AAPL", "애플", 11, 10, 0,
+                                        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW_USD)
+    assert "보유 수량" in str(excinfo.value)
+    assert client.calls == []
+
+
+def test_save_sell_order_usd_outside_the_window_shows_the_usd_time_range():
+    """🔴 USD 사용자에게 원화 시간대(18:00~22:00)를 보여주면 안 됩니다(§5-14 와 같은 함정)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db_usd.save_sell_order_usd(client, "acc-1", "AAPL", "애플", 1, 10, 0,
+                                        trading_days=TRADING_DAYS, now_kst=OUTSIDE_WINDOW_USD)
+    message = str(excinfo.value)
+    assert "16:00:01" in message and "21:00:00" in message
+    assert "18:00" not in message and "22:00" not in message
+    assert client.calls == []
+
+
+def test_settle_sell_positions_usd_uses_the_usd_rpc_and_never_the_krw_one():
+    """매도 정산 RPC 도 표가 박혀 있어 통화별로 하나씩입니다(§5-11-1)."""
+    client = FakeClient()
+    settled = duel_db_usd.settle_sell_positions_usd(client, [
+        {"account_id": "acc-1", "ticker": "AAPL", "quantity": 6, "avg_cost": 190.0}])
+
+    call = client.only_call(duel_db_usd.SETTLE_SELL_RPC_USD, "rpc")
+    assert call.table == "duel_settle_sell_positions_usd"
+    assert call.payload == {"p_rows": [
+        {"account_id": "acc-1", "ticker": "AAPL", "quantity": 6.0}]}
+    assert settled == 1
+    assert client.calls_for(duel_db.SETTLE_SELL_RPC) == []
+    assert client.calls_for(duel_db_usd.POSITIONS_TABLE_USD) == []
+
+
+def test_set_first_holding_dates_usd_updates_the_usd_accounts_table_once():
+    client = FakeClient()
+    duel_db_usd.set_first_holding_dates_usd(client, ["acc-1", "acc-2"], date(2026, 8, 20))
+    call = client.only_call(duel_db_usd.ACCOUNTS_TABLE_USD, "update")
+    assert call.payload == {"first_holding_date": "2026-08-20"}
+    assert ("in", "id", ["acc-1", "acc-2"]) in call.filters
+    assert ("is", "first_holding_date", "null") in call.filters
+    assert client.calls_for(duel_db.ACCOUNTS_TABLE) == []
+
+
+def test_usd_sell_ledger_rows_are_positive_and_go_to_the_usd_ledger():
+    client = FakeClient()
+    duel_db_usd.record_buy_ledger_entries_usd(client, [
+        {"account_id": "acc-1", "order_id": "o-sell", "event_type": "sell",
+         "filled_amount": 570.0, "event_date": "2026-08-20", "memo": "AAPL 3주 매도 체결"}])
+    rows = client.only_call(duel_db_usd.LEDGER_TABLE_USD, "insert").rows
+    assert rows[0]["event_type"] == "sell" and rows[0]["amount"] == 570.0
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+
+
+# =============================================================================
 # 3. A 절 — 조회가 맞는 (USD) 표·맞는 필터로 가는지
 # =============================================================================
 def test_fetch_my_accounts_usd_filters_by_user_on_the_usd_table():
@@ -417,8 +495,10 @@ def test_fetch_my_snapshots_usd_output_feeds_compute_twr_directly():
 # =============================================================================
 def test_usd_user_write_functions_do_not_accept_fill_or_balance_params():
     assert duel_db_usd.user_write_signature_violations_usd() == []
+    # 🔴 2026-08-21 `save_sell_order_usd` 추가(원화 목록의 미러 — 같은 이유).
     assert set(duel_db_usd.USER_WRITE_FUNCTIONS_USD) == {
-        "opt_in_usd", "save_order_usd", "edit_order_usd", "cancel_order_usd", "save_consent_usd"}
+        "opt_in_usd", "save_order_usd", "save_sell_order_usd", "edit_order_usd",
+        "cancel_order_usd", "save_consent_usd"}
 
 
 def _usd_module_ast():

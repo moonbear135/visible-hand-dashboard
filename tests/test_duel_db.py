@@ -592,6 +592,127 @@ def test_save_order_rejects_bad_quantity(bad_quantity):
 
 
 # =============================================================================
+# 1-B. A 절 — 창당 1회 리밸런싱 **매도** 주문 저장 (2026-08-21)
+# =============================================================================
+def test_save_sell_order_writes_a_pending_sell_with_the_window_index():
+    """
+    매도 주문은 매수와 **같은 시간대·같은 D+1 규약**으로 저장되고, 두 가지만 다릅니다:
+    `side='sell'` 과 `rebalance_window_index`. 창 번호는 DB 의 부분 유니크 인덱스가
+    "창당 1회"를 강제하는 근거값이라 반드시 실려야 합니다.
+    """
+    client = FakeClient()
+    order = duel_db.save_sell_order(
+        client, "acc-1", "005930", "삼성전자", 3, 10, 2,
+        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW,
+    )
+
+    payload = client.only_call(duel_db.ORDERS_TABLE, "insert").rows[0]
+    assert payload["side"] == "sell"
+    assert payload["rebalance_window_index"] == 2
+    assert payload["requested_quantity"] == 3
+    assert payload["status"] == "pending"
+    assert payload["target_date"] == "2026-08-20"          # 매수와 같은 D+1
+    assert payload["saved_at"].startswith("2026-08-19T19:30:00")
+    # 보유 수량은 **검증에만** 쓰고 저장하지 않습니다(주문 행이 가질 값이 아닙니다).
+    assert "held_quantity" not in payload
+    assert order["side"] == "sell"
+
+
+def test_save_sell_order_rejects_more_than_the_holding_before_touching_the_db():
+    """
+    🔴 보유 수량 초과는 **DB 로 가기 전에** 사람이 읽을 문장으로 거절합니다(사용자 친화적
+    사전 점검). 최종 방어는 체결 시점의 `duel_rules.calculate_sell_fill()` 예외입니다.
+    """
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 11, 10, 0,
+                                trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert "보유 수량" in str(excinfo.value)
+    assert client.calls == [], "거절된 매도 주문이 DB 까지 가면 안 됩니다"
+
+
+def test_save_sell_order_allows_selling_everything():
+    """전량 매도(요청 = 보유)는 정상입니다 — 경계에서 막히면 안 됩니다."""
+    client = FakeClient()
+    duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 10, 10, 0,
+                            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert client.only_call(duel_db.ORDERS_TABLE, "insert").rows[0]["requested_quantity"] == 10
+
+
+@pytest.mark.parametrize("bad_quantity", [0, -1, 2.5, "세 주", None, True])
+def test_save_sell_order_rejects_bad_quantity(bad_quantity):
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", bad_quantity, 10, 0,
+                                trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert client.calls == []
+
+
+@pytest.mark.parametrize("bad_window", [-1, 1.5, None, True, "첫 번째"])
+def test_save_sell_order_rejects_a_bad_window_index(bad_window):
+    """창 번호는 0 이상의 정수입니다(0 은 첫 창이라 반드시 허용돼야 합니다)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 1, 10, bad_window,
+                                trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert client.calls == []
+
+
+def test_save_sell_order_outside_the_window_is_rejected():
+    client = FakeClient()
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 1, 10, 0,
+                                trading_days=TRADING_DAYS, now_kst=OUTSIDE_WINDOW)
+    assert "주문 접수 시간" in str(excinfo.value)
+    assert client.calls == []
+
+
+def test_save_sell_order_translates_the_one_sell_per_window_index_violation():
+    """
+    🔴 두 번째 매도를 막는 것은 **DB 의 부분 유니크 인덱스**입니다. 그 거절을 삼키지 않고,
+    Postgres 원문 대신 사람이 읽을 문장으로 바꿔 올립니다(§0-3-4).
+    """
+    client = FakeClient(responses={
+        (duel_db.ORDERS_TABLE, "insert"):
+            RuntimeError('duplicate key value violates unique constraint '
+                         '"duel_orders_one_sell_per_window"'),
+    })
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 1, 10, 0,
+                                trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    message = str(excinfo.value)
+    assert "이미 매도 주문을 한 번 사용" in message
+    assert "duplicate key" not in message
+
+
+def test_save_sell_order_never_writes_fill_result_fields():
+    """저장은 예약일 뿐입니다 — 체결 결과도, 현금·포지션 변화도 없습니다."""
+    client = FakeClient()
+    duel_db.save_sell_order(client, "acc-1", "005930", "삼성전자", 1, 10, 0,
+                            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    payload = client.only_call(duel_db.ORDERS_TABLE, "insert").rows[0]
+    for forbidden in ("filled_price", "filled_quantity", "filled_amount", "filled_date"):
+        assert forbidden not in payload
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+    assert client.calls_for(duel_db.POSITIONS_TABLE) == []
+
+
+def test_cancelling_a_sell_order_needs_no_new_function():
+    """
+    `duel_orders_guard` 트리거는 side 와 무관하게 "종결 전엔 자유, 종결 후엔 불가"를
+    강제하므로, 매도 주문의 수정·취소는 기존 `edit_order()`/`cancel_order()` 를 그대로
+    씁니다(새 함수를 만들지 않은 근거를 여기서 고정합니다).
+    """
+    client = FakeClient()
+    duel_db.cancel_order(client, "order-sell-1", now_kst=INSIDE_WINDOW)
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.payload["status"] == "cancelled"
+    assert call.payload["fail_reason"]
+    # 취소는 side 를 보지 않습니다 — 조건은 주문 ID 하나뿐입니다.
+    assert call.filter_map == {"id": "order-sell-1"}
+
+
+# =============================================================================
 # 2. A 절 — 주문 수정·취소 (2-4-7)
 # =============================================================================
 def test_edit_order_updates_quantity_only():
@@ -726,8 +847,12 @@ def test_user_write_functions_do_not_accept_fill_or_balance_params():
     #    것인지"를 인자로 받지 않습니다. 대상은 로그인 세션(auth.uid()) 아니면 소유권이
     #    이미 확인된 계좌·주문 ID 뿐입니다.
     assert "user_id" in duel_db.FORBIDDEN_USER_WRITE_PARAMS
+    # 🔴 2026-08-21 `save_sell_order` 추가 — 리밸런싱 매도도 **사용자 경로의 쓰기**이므로
+    #    같은 금지 목록의 적용을 받아야 합니다(보유 수량·창 번호는 받지만 체결 결과·잔고·
+    #    귀속 거래일은 여전히 인자로 받지 않습니다).
     assert set(duel_db.USER_WRITE_FUNCTIONS) == {
-        "opt_in", "save_order", "edit_order", "cancel_order", "save_consent"}
+        "opt_in", "save_order", "save_sell_order", "edit_order", "cancel_order",
+        "save_consent"}
 
 
 def _module_ast():
@@ -1249,6 +1374,137 @@ def test_upsert_positions_is_one_call_for_many_rows():
             for i in range(30)]
     duel_db.upsert_positions(client, rows)
     assert len(client.calls_for(duel_db.POSITIONS_TABLE, "upsert")) == 1
+
+
+# =============================================================================
+# 8-B. B 절 — 매도 정산 RPC · 최초 보유일 기록 (2026-08-21)
+# =============================================================================
+def test_settle_sell_positions_calls_the_rpc_with_only_three_fields():
+    """
+    🔴 매도 정산은 표 upsert 가 아니라 **RPC** 입니다 — `duel_positions` 의 수량 감소는
+    트리거가 막고, 예외는 같은 트랜잭션에서 `duel.settled_sell` 이 켜진 경우뿐인데
+    PostgREST 로는 세션 변수를 앞세울 수 없기 때문입니다(스키마 §9-11).
+
+    보내는 필드는 셋뿐입니다 — `avg_cost` 를 보내지 않는 것이 규약의 일부입니다(매도는
+    잔여 주식의 매입단가를 바꾸지 않으므로, 정산 경로로 원가를 다시 쓰는 길을 없앱니다).
+    """
+    client = FakeClient()
+    settled = duel_db.settle_sell_positions(client, [
+        {"account_id": "acc-1", "ticker": "005930", "stock_name": "삼성전자",
+         "quantity": 6, "avg_cost": 70_000.0},
+    ])
+
+    call = client.only_call(duel_db.SETTLE_SELL_RPC, "rpc")
+    assert call.op == "rpc"
+    assert call.table == "duel_settle_sell_positions"
+    assert call.payload == {"p_rows": [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 6.0}]}
+    assert settled == 1
+    # 포지션 표를 직접 건드리지 않습니다(그 경로로는 통과할 수 없습니다).
+    assert client.calls_for(duel_db.POSITIONS_TABLE) == []
+
+
+def test_settle_sell_positions_sends_one_call_for_many_rows():
+    """§0-3-2 — 계좌마다 부르지 않고 그날 매도 정산 전체를 한 번에 보냅니다."""
+    client = FakeClient()
+    rows = [{"account_id": f"acc-{index}", "ticker": "005930", "quantity": 1}
+            for index in range(1, 51)]
+    assert duel_db.settle_sell_positions(client, rows) == 50
+    assert len(client.calls_for(duel_db.SETTLE_SELL_RPC, "rpc")) == 1
+
+
+def test_settle_sell_positions_sends_nothing_for_an_empty_list():
+    """매도가 없는 밤에는 질의 자체를 보내지 않습니다."""
+    client = FakeClient()
+    assert duel_db.settle_sell_positions(client, []) == 0
+    assert client.calls == []
+
+
+def test_settle_sell_positions_refuses_duplicate_keys_and_missing_values():
+    """
+    같은 (계좌, 종목)이 두 번 들어오면 어느 쪽이 맞는지 알 수 없으므로 **먼저 잡습니다**
+    (`upsert_positions()` 와 같은 방어). 수량이 비어 있어도 0 으로 메우지 않습니다.
+    """
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.settle_sell_positions(client, [
+            {"account_id": "acc-1", "ticker": "005930", "quantity": 1},
+            {"account_id": "acc-1", "ticker": "005930", "quantity": 2},
+        ])
+    with pytest.raises(DuelDbError):
+        duel_db.settle_sell_positions(client, [
+            {"account_id": "acc-1", "ticker": "005930", "quantity": None}])
+    assert client.calls == []
+
+
+def test_settle_sell_positions_allows_a_zero_quantity():
+    """전량 매도(잔여 0주)는 정상 상태입니다 — 여기서 막히면 안 됩니다."""
+    client = FakeClient()
+    duel_db.settle_sell_positions(client, [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 0}])
+    assert client.only_call(duel_db.SETTLE_SELL_RPC, "rpc").payload["p_rows"][0]["quantity"] == 0
+
+
+def test_sell_ledger_rows_are_positive_and_buy_rows_stay_negative():
+    """
+    부호를 정하는 자리는 원장 계층 **한 곳**입니다. 매수는 음수, 매도는 양수(입금과 같은
+    방향)이고, 호출부는 둘 다 체결금액을 **양수로** 넘깁니다.
+    """
+    client = FakeClient()
+    written = duel_db.record_buy_ledger_entries(client, [
+        {"account_id": "acc-1", "order_id": "o-buy", "filled_amount": 30_000.0,
+         "event_date": "2026-08-20", "memo": "005930 3주 체결"},
+        {"account_id": "acc-1", "order_id": "o-sell", "event_type": "sell",
+         "filled_amount": 48_000.0, "event_date": "2026-08-20", "memo": "000660 4주 매도 체결"},
+    ])
+    assert written == 2
+    rows = client.only_call(duel_db.LEDGER_TABLE, "insert").rows
+    assert rows[0]["event_type"] == "buy" and rows[0]["amount"] == -30_000.0
+    assert rows[1]["event_type"] == "sell" and rows[1]["amount"] == 48_000.0
+    # 두 event_type 모두 주문 링크가 필수입니다(`..._order_link` CHECK).
+    assert rows[0]["order_id"] == "o-buy" and rows[1]["order_id"] == "o-sell"
+
+
+def test_ledger_rejects_an_event_type_that_is_not_a_fill():
+    """시드·정기입금은 이 함수로 넣지 않습니다(각자의 경로가 따로 있습니다)."""
+    client = FakeClient()
+    with pytest.raises(DuelDbError):
+        duel_db.record_buy_ledger_entries(client, [
+            {"account_id": "acc-1", "order_id": "o-1", "event_type": "seed",
+             "filled_amount": 1.0, "event_date": "2026-08-20"}])
+    assert client.calls == []
+
+
+def test_set_first_holding_dates_is_one_update_with_an_idempotent_null_guard():
+    """
+    🔴 리밸런싱 창의 기준일은 한 번만 정해집니다. `is null` 조건을 **DB 쪽에도** 걸어,
+    배치를 두 번 돌려도 이미 채워진 날짜가 오늘로 덮어써지지 않게 합니다(덮어쓰면 그
+    계좌의 매도 기회가 사라지거나 하나 더 생깁니다).
+    """
+    client = FakeClient()
+    duel_db.set_first_holding_dates(client, ["acc-1", "acc-2"], date(2026, 8, 20))
+
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "update")
+    assert call.payload == {"first_holding_date": "2026-08-20"}
+    assert ("in", "id", ["acc-1", "acc-2"]) in call.filters
+    assert ("is", "first_holding_date", "null") in call.filters
+
+
+def test_set_first_holding_dates_sends_nothing_for_an_empty_list():
+    client = FakeClient()
+    assert duel_db.set_first_holding_dates(client, [], date(2026, 8, 20)) == 0
+    assert client.calls == []
+
+
+def test_active_accounts_query_brings_the_first_holding_date_along():
+    """
+    창 계산에 필요한 값이라 **계좌를 읽는 그 질의**에서 함께 가져옵니다(따로 조회하면
+    왕복이 늘거나 두 번째 계좌 조회가 생깁니다 — §0-3-2).
+    """
+    client = FakeClient()
+    duel_db.fetch_all_active_accounts(client)
+    call = client.only_call(duel_db.ACCOUNTS_TABLE, "select")
+    assert "first_holding_date" in call.options["columns"]
 
 
 # =============================================================================

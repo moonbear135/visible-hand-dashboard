@@ -23,8 +23,10 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, `utils/duel_rules.py` 의 **순수 
     ⑧ TWR — 손으로 계산한 예시와 일치하는지, **입금이 있는 기간에 단순 수익률과 다른 값**이
        나오는지(둘이 같으면 TWR 이 안 걸린 것), 현금만 들고 있는 계좌가 0% 인지,
        상장폐지 상각(현금흐름 0인 평가손실)은 손실로 잡히는지
-    ⑨ 매도 불가 — 애플리케이션 경로로 수량을 줄이는 시도가 전부 거부되는지
+    ⑨ 매수 경로로는 수량이 줄지 않는지(매도는 아래 ⑪ 의 전용 함수만 줄일 수 있습니다)
     ⑩ 계층 분리 — `utils/duel_rules.py` 가 Supabase·네트워크·NiceGUI 를 import 하지 않는지
+    ⑪ (2026-08-21 추가) 창당 1회 리밸런싱 매도 — 창 번호 경계값, 최초 보유일이 없으면 예외,
+       매도 전량 체결·보유초과 거절, 매도 후 평단가 불변
 
 ⚠️ 이 파일은 어떤 파일도 수정하지 않고, 네트워크도 쓰지 않습니다. 저장소의 실제 파일은
    ⑩ 의 소스 검사에서 **읽기만** 합니다.
@@ -34,7 +36,7 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, `utils/duel_rules.py` 의 **순수 
 
 import re
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -59,7 +61,9 @@ from utils.duel_rules import (  # noqa: E402
     DuelRuleError,
     allocate_pending_orders,
     apply_buy_fill_to_position,
+    apply_sell_fill_to_position,
     calculate_fill,
+    calculate_sell_fill,
     check_crawl_freshness,
     compute_twr,
     crawl_status_allows_fill,
@@ -67,6 +71,7 @@ from utils.duel_rules import (  # noqa: E402
     resolve_fill_trading_day,
     resolve_fill_trading_day_usd,
     resolve_order_window,
+    resolve_rebalance_window,
 )
 
 
@@ -743,8 +748,10 @@ def test_total_cost_is_money_actually_spent_not_derived_from_the_rounded_average
 @pytest.mark.parametrize("bad_quantity", [0, -1, -100])
 def test_application_path_cannot_reduce_a_position(bad_quantity):
     """
-    🔴 매도 불가 — 애플리케이션 경로로 수량을 줄이는 시도는 전부 거부돼야 합니다.
-    (DB 레벨 방어는 sql/duel_schema.sql §2-1 의 트리거가 따로 맡습니다.)
+    🔴 **매수 경로로는** 수량이 절대 줄지 않습니다 — 음수·0 체결은 전부 거부돼야 합니다.
+    (2026-08-21 부터 리밸런싱 매도가 생겼지만, 수량을 줄일 수 있는 것은 전용 함수
+     `apply_sell_fill_to_position()` 하나뿐입니다 — 아래 ⑪ 참고. DB 레벨 방어는
+     sql/duel_schema.sql §2-1 의 트리거가 세션 변수 두 개로 경로를 갈라 맡습니다.)
     """
     with pytest.raises(DuelRuleError):
         apply_buy_fill_to_position(10, 100_000, bad_quantity, 70_000)
@@ -816,3 +823,200 @@ def test_money_constants_have_exactly_one_source():
     assert "800000" not in executable_sql, (
         "매월 입금액은 실행되는 DDL 어디에도 적지 않습니다(앱 상수가 단일 출처)"
     )
+
+
+# =============================================================================
+# ⑪ 창당 1회 리밸런싱 매도 (2026-08-21 오너 확정 — duel_rules §12)
+# =============================================================================
+def test_rebalance_window_days_are_the_single_source():
+    """
+    §0-3-10 — 창 길이 30/90/180 을 두 곳에 적으면 둘 중 하나만 바뀌는 날 "매도 기회가 하나
+    더 생기거나 사라지는" 형태로 어긋납니다. 정의는 정확히 한 곳이어야 합니다.
+    """
+    assert rules.REBALANCE_WINDOW_DAYS == {"M1": 30, "M3": 90, "M6": 180}
+    # 계좌 유형 목록과 키가 정확히 같아야 합니다(한쪽에만 유형이 늘어나면 창을 못 셉니다).
+    assert set(rules.REBALANCE_WINDOW_DAYS) == set(rules.ACCOUNT_WINDOW_TYPES)
+    assert _rules_source().count("REBALANCE_WINDOW_DAYS = ") == 1
+
+    # 실행되는 SQL 에는 창 길이를 적지 않습니다(시드 금액과 같은 판단 — 위 ⑩ 참고).
+    schema = (REPO_ROOT / "sql" / "duel_schema.sql").read_text(encoding="utf-8")
+    executable_sql = "\n".join(
+        line for line in schema.splitlines() if not line.lstrip().startswith("--")
+    )
+    for length in ("30", "90", "180"):
+        assert f"rebalance_window_index = {length}" not in executable_sql
+
+
+def test_rebalance_window_starts_on_the_first_holding_date():
+    """창 0 의 첫날은 **최초 보유일 그 자신**입니다(개설일이 아닙니다)."""
+    window = resolve_rebalance_window("M1", date(2026, 1, 1), date(2026, 1, 1))
+    assert window["window_index"] == 0
+    assert window["window_started_on"] == date(2026, 1, 1)
+    assert window["window_ends_on"] == date(2026, 1, 30)      # 30일 = 첫날 포함
+    assert window["next_window_starts_on"] == date(2026, 1, 31)
+    assert window["days_remaining"] == 30                     # 오늘 포함
+    assert window["window_days"] == 30
+
+
+def test_rebalance_window_last_day_still_belongs_to_the_same_window():
+    """
+    🔴 경계 고정: 창의 **마지막 날에도** 아직 그 창입니다(그날 매도할 수 있어야 합니다).
+    하루만 어긋나도 사용자가 마지막 날 매도 기회를 잃습니다.
+    """
+    window = resolve_rebalance_window("M1", date(2026, 1, 1), date(2026, 1, 30))
+    assert window["window_index"] == 0
+    assert window["days_remaining"] == 1
+
+
+def test_rebalance_window_rolls_over_the_day_after_the_last_day():
+    """마지막 날 다음 날부터 다음 창입니다 — 기회는 **누적되지 않고** 새로 하나 생깁니다."""
+    window = resolve_rebalance_window("M1", date(2026, 1, 1), date(2026, 1, 31))
+    assert window["window_index"] == 1
+    assert window["window_started_on"] == date(2026, 1, 31)
+    assert window["window_ends_on"] == date(2026, 3, 1)
+    assert window["days_remaining"] == 30
+
+
+@pytest.mark.parametrize("window_type,length", [("M1", 30), ("M3", 90), ("M6", 180)])
+def test_rebalance_window_boundary_is_the_same_rule_for_all_three_accounts(window_type, length):
+    """세 계좌의 차이는 **길이 하나뿐**이고 경계 규칙은 완전히 같습니다."""
+    first_holding = date(2026, 1, 1)
+    last_day = first_holding + timedelta(days=length - 1)
+
+    assert resolve_rebalance_window(window_type, first_holding, last_day)["window_index"] == 0
+    rolled = resolve_rebalance_window(window_type, first_holding,
+                                      last_day + timedelta(days=1))
+    assert rolled["window_index"] == 1
+    assert rolled["window_started_on"] == last_day + timedelta(days=1)
+    # 창 번호는 경과일 // 창길이 — 두 번째 창의 마지막 날까지도 1 이어야 합니다.
+    assert resolve_rebalance_window(
+        window_type, first_holding, last_day + timedelta(days=length))["window_index"] == 1
+
+
+def test_rebalance_window_without_a_first_holding_date_is_an_error_not_a_guess():
+    """
+    🔴 §0-1 — 아직 아무것도 안 산 계좌의 창을 "오늘부터"로 지어내지 않습니다. 지어내면
+    사용자마다 다른 창이 조용히 생기고, 그 값이 DB 유니크 인덱스의 키가 되어 되돌릴 수
+    없습니다.
+    """
+    with pytest.raises(DuelRuleError) as excinfo:
+        resolve_rebalance_window("M1", None, date(2026, 1, 1))
+    assert "보유" in str(excinfo.value)
+
+
+def test_rebalance_window_rejects_an_unknown_account_type():
+    with pytest.raises(DuelRuleError):
+        resolve_rebalance_window("M12", date(2026, 1, 1), date(2026, 1, 1))
+    with pytest.raises(DuelRuleError):
+        resolve_rebalance_window(None, date(2026, 1, 1), date(2026, 1, 1))
+
+
+def test_rebalance_window_refuses_a_date_before_the_first_holding():
+    """음수 창 번호를 만들지 않습니다(과거 날짜로 매도 기회가 하나 더 생기는 경로 차단)."""
+    with pytest.raises(DuelRuleError):
+        resolve_rebalance_window("M1", date(2026, 1, 10), date(2026, 1, 9))
+
+
+def test_sell_fill_is_always_a_full_fill():
+    """매도는 부분체결이 없습니다 — 보유 수량 이하 요청은 전량 체결됩니다."""
+    result = calculate_sell_fill(requested_quantity=3, close_price=70_000, held_quantity=10)
+    assert result["status"] == ORDER_FILLED
+    assert result["filled_quantity"] == 3
+    assert result["filled_amount"] == 210_000
+    assert result["remaining_holding"] == 7
+    assert result["fail_reason"] is None
+
+
+def test_sell_fill_can_sell_everything():
+    result = calculate_sell_fill(10, 1_234.56, 10)
+    assert result["filled_quantity"] == 10
+    assert result["remaining_holding"] == 0
+    assert result["filled_amount"] == round(10 * 1_234.56, 6)
+
+
+def test_sell_more_than_held_is_an_error_not_a_silent_clamp():
+    """
+    🔴 보유 수량을 넘는 매도를 **보유량만큼으로 깎아서** 체결하지 않습니다. 깎으면 "왜 요청과
+    다른 수량이 팔렸는지"를 아무도 설명할 수 없습니다(§0-1).
+    """
+    with pytest.raises(DuelRuleError) as excinfo:
+        calculate_sell_fill(11, 70_000, 10)
+    assert "보유" in str(excinfo.value)
+
+
+@pytest.mark.parametrize("bad_price", [None, 0, -1])
+def test_sell_fill_refuses_to_run_without_a_confirmed_close_price(bad_price):
+    """매수와 같은 방어 — 모르는 가격으로 팔지 않습니다(§0-3-1)."""
+    with pytest.raises(DuelRuleError):
+        calculate_sell_fill(1, bad_price, 10)
+
+
+def test_sell_fill_rejects_zero_and_fractional_quantities():
+    for bad in (0, -1, 1.5):
+        with pytest.raises(DuelRuleError):
+            calculate_sell_fill(bad, 70_000, 10)
+
+
+def test_sell_tolerates_a_fractional_holding_but_still_sells_whole_shares():
+    """
+    보유 수량은 `numeric(20, 6)` 이고 기업행위 조정(관리 경로)이 소수 수량을 남길 수
+    있습니다. 거기서 정수를 강요하면 "팔 수는 있어야 하는 보유"가 체결 시점에 막힙니다 —
+    제약은 **파는 수량이 정수**라는 것뿐입니다.
+    """
+    result = calculate_sell_fill(1, 100.0, 2.5)
+    assert result["filled_quantity"] == 1
+    assert result["remaining_holding"] == 1.5
+    with pytest.raises(DuelRuleError):
+        calculate_sell_fill(3, 100.0, 2.5)
+
+
+def test_full_sell_leaves_zero_quantity_and_an_unchanged_average_cost():
+    """
+    🔴 전량 매도 → 수량 0(스키마가 정상 상태로 명시한 값), 평단가는 **그대로**입니다.
+    행을 지우지도, 평단가를 0 으로 만들지도 않습니다.
+    """
+    updated = apply_sell_fill_to_position(10, 100_000, 10)
+    assert updated["quantity"] == 0
+    assert updated["avg_cost"] == 100_000
+
+
+def test_partial_sell_does_not_touch_the_cost_basis():
+    """
+    남은 주식의 매입단가는 매도로 바뀌지 않습니다(표준 관례). 매수(`apply_buy_...`)가
+    가중평균을 **다시 계산**하는 것과 정반대라, 두 함수가 섞이지 않았는지 여기서 고정합니다.
+    """
+    updated = apply_sell_fill_to_position(10, 93_076.923077, 3)
+    assert updated["quantity"] == 7
+    assert updated["avg_cost"] == 93_076.923077
+    # 매도 결과에는 total_cost 가 없습니다(잔여 원가는 수량 × 평단가로 언제든 정확히 나옵니다).
+    assert set(updated) == {"quantity", "avg_cost"}
+
+
+def test_sell_cannot_push_a_position_negative():
+    with pytest.raises(DuelRuleError):
+        apply_sell_fill_to_position(3, 100_000, 4)
+
+
+def test_sell_needs_both_quantity_and_average_cost():
+    """'수량은 아는데 평단가는 모르는' 상태로 매도를 반영하지 않습니다(매수와 같은 규율)."""
+    with pytest.raises(DuelRuleError):
+        apply_sell_fill_to_position(None, 100_000, 1)
+    with pytest.raises(DuelRuleError):
+        apply_sell_fill_to_position(10, None, 1)
+
+
+def test_twr_is_untouched_by_a_sell_because_it_is_an_internal_conversion():
+    """
+    🔴 매도는 **외부 현금흐름이 아닙니다** — 계좌 안에서 주식이 현금으로 바뀐 것뿐이라
+    총자산이 그대로입니다. 그래서 `compute_twr()` 는 이번 변경에서 손댈 필요가 없었고,
+    그 사실을 여기서 회귀로 고정합니다(누가 매도 대금을 cash_flow_amount 에 넣기 시작하면
+    수익률이 통째로 틀어집니다).
+
+    같은 날 총자산이 그대로인 두 스냅샷(하나는 매도 전, 하나는 매도 후 구성만 다름)의
+    구간 수익률은 0% 여야 합니다.
+    """
+    before = _snap("2026-08-19", 10_000_000, 0)          # 주식 300만 + 현금 700만
+    after = _snap("2026-08-20", 10_000_000, 0)           # 주식 0 + 현금 1,000만 (매도 직후)
+    result = compute_twr([before, after])
+    assert result["status"] == TWR_OK
+    assert result["twr_pct"] == 0.0
