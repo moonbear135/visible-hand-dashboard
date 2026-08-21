@@ -1003,13 +1003,20 @@ def test_krw_rendering_path_is_untouched_when_the_user_has_no_usd_account():
 
 
 def test_krw_notices_and_helpers_kept_their_exact_wording():
-    """원화 문구·시간대가 한 글자도 바뀌지 않았는지(이 라운드의 최우선 제약)."""
+    """원화 문구·시간대의 실제 문장 내용이 한 글자도 바뀌지 않았는지(이 라운드의 최우선
+    제약). 2026-08-21 가독성 개선(오너 요청 — 문단이 너무 빽빽해서 읽기 힘들다)으로
+    문장 사이에 `\\n\\n` 만 추가됐고, 그 외 단어·조사·순서는 그대로입니다.
+    """
     import web.pages.duel_page as page
 
     assert page.NOTICE_FILL_TIMING == (
-        "주문은 저장 즉시 체결되지 않습니다. 저장한 주문은 예약일 뿐이고, "
+        "주문은 저장 즉시 체결되지 않습니다.\n\n저장한 주문은 예약일 뿐이고, "
         "다음 거래일(D+1)의 장이 끝난 뒤 확정된 종가로 그날 밤 배치가 체결합니다."
     )
+    assert page.NOTICE_FILL_TIMING.replace("\n\n", " ") == (
+        "주문은 저장 즉시 체결되지 않습니다. 저장한 주문은 예약일 뿐이고, "
+        "다음 거래일(D+1)의 장이 끝난 뒤 확정된 종가로 그날 밤 배치가 체결합니다."
+    ), "문장 사이 줄바꿈을 다시 공백으로 되돌리면 원래 문구와 완전히 같아야 합니다."
     assert page.NOTICE_BUY_ONLY.startswith("이 모듈은 매수만 가능합니다.")
     assert page.ORDER_WINDOW_TEXT == "18:00:01~22:00:00 (한국시간)"
     assert page.CURRENCY == "KRW"
