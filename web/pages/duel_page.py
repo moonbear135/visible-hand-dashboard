@@ -72,6 +72,7 @@ from utils.duel_db import (
     fetch_my_snapshots,
     opt_in,
     save_order,
+    save_sell_order,
     sum_cash_balance,
 )
 # 💵 USD 트랙 — **표 이름이 본문에 박힌 함수만** 이쪽에서 가져옵니다(§5-14 의 판단 기준 그대로).
@@ -87,6 +88,7 @@ from utils.duel_db_usd import (
     fetch_my_snapshots_usd,
     opt_in_usd,
     save_order_usd,
+    save_sell_order_usd,
 )
 from utils.duel_rules import (
     ACCOUNT_WINDOW_TYPES,
@@ -106,7 +108,9 @@ from utils.scorecard_db import (
     MARKET_KR,
     MARKET_US,
     SNAPSHOT_FILENAMES,
+    build_portfolio,
     build_universe_index,
+    fetch_holdings,
     format_amount,
     make_price_lookup,
     resolve_stock_query,
@@ -144,6 +148,18 @@ WINDOW_TITLES = {
     "M6": "6개월 계좌",
 }
 
+# 🔁 2026-08-21 — **주기적 리밸런싱 매도**가 들어오면서, 세 계좌를 가르는 유일한 규칙 차이가
+#    생겼습니다: 매도 기회가 돌아오는 주기(창 길이)입니다. 30/90/180 이라는 숫자를 화면에
+#    직접 적어두면 규칙이 바뀔 때 화면만 낡으므로(§0-3-10), 규칙 계층의
+#    `duel_rules.REBALANCE_WINDOW_DAYS` 하나에서 문구를 만들어 씁니다.
+#    🔴 이 값은 **통화를 모릅니다** — 원화·달러 트랙이 같은 창 길이를 쓰므로(스펙 확정,
+#       `duel_rules` 상수 하나를 양쪽이 공유) 문구도 하나만 두고 양쪽에서 씁니다.
+REBALANCE_WINDOW_TEXT = " · ".join(
+    f'{WINDOW_TITLES[window_type]} {duel_rules.REBALANCE_WINDOW_DAYS[window_type]}일'
+    for window_type in ACCOUNT_WINDOW_TYPES
+    if window_type in WINDOW_TITLES and window_type in duel_rules.REBALANCE_WINDOW_DAYS
+)
+
 # =============================================================================
 # 상시 노출 고지 3종 — 작업지시서 2-8 (§0-1: 숨기지 않고 화면에 그대로 씁니다)
 # =============================================================================
@@ -167,10 +183,19 @@ NOTICE_FILL_TIMING = (
     "다음 거래일(D+1)의 장이 끝난 뒤 확정된 종가로 그날 밤 배치가 체결합니다."
 )
 
+# 🔁 2026-08-21 오너 확정 — 이 문구는 **사실이 바뀌어서** 다시 썼습니다. 이전 문구는
+#    "매도는 지원하지 않습니다 — 한 번 산 종목은 팔 수 없고…" 였는데, 그 결정 자체가
+#    이전 라운드의 대화 착오였음이 확인돼 정정됐습니다. 이제 계좌마다 정해진 주기로
+#    **딱 1회씩 리밸런싱 매도**가 가능합니다(규칙 계층 §12, DB 부분 유니크 인덱스가 강제).
+#    낡은 문구를 남겨두면 화면이 사실과 다른 말을 하게 되므로 통째로 교체했습니다(§0-1).
 NOTICE_BUY_ONLY = (
-    "이 모듈은 매수만 가능합니다.\n\n"
-    "매도는 지원하지 않습니다 — 한 번 산 종목은 팔 수 없고, "
-    "매달 들어오는 돈으로 계속 사 모으는 적립식 매수 방식입니다."
+    "매수는 언제든, 매도는 창마다 딱 한 번입니다.\n\n"
+    "예수금이 남아 있으면 매수는 접수 시간대 안에서 몇 번이든 할 수 있습니다.\n\n"
+    f"매도는 계좌마다 정해진 리밸런싱 주기({REBALANCE_WINDOW_TEXT}) 안에서 딱 1회, "
+    "종목 하나를 1주부터 전량까지 팔 수 있습니다. 그 창에서 쓰지 않은 기회는 다음 창으로 "
+    "넘어가지 않습니다.\n\n"
+    "주기는 계좌 개설일이 아니라 그 계좌에 처음 주식이 들어온 날부터 셉니다 — "
+    "아직 아무것도 사지 않은 계좌는 창이 시작되지도 않았으므로 기회가 먼저 사라지지 않습니다."
 )
 
 #: 화면 맨 위에 **항상** 보여야 하는 3종. 순서를 바꿔도 되지만 빼지는 마세요(2-8).
@@ -279,10 +304,17 @@ NOTICE_FILL_TIMING_USD = (
     "체결 기록은 마감가가 수집된 뒤 한국 날짜로 다음 날 낮에 도는 배치가 남깁니다."
 )
 
+# 🔁 2026-08-21 — 원화와 **같은 이유로** 다시 쓴 문구입니다(위 `NOTICE_BUY_ONLY` 주석 참고).
+#    창 길이(30/90/180일)는 통화와 무관하게 같으므로 `REBALANCE_WINDOW_TEXT` 를 공유하고,
+#    달라지는 것은 "달러 계좌 기준으로 따로 센다"는 사실 한 줄뿐입니다(§5-11-10 트랙 독립).
 NOTICE_BUY_ONLY_USD = (
-    "달러 트랙도 매수만 가능합니다.\n\n"
-    "매도는 지원하지 않습니다 — 한 번 산 종목은 팔 수 없고, "
-    "매달 들어오는 달러로 계속 사 모으는 적립식 매수 방식입니다."
+    "달러 트랙도 매수는 언제든, 매도는 창마다 딱 한 번입니다.\n\n"
+    "예수금이 남아 있으면 매수는 접수 시간대 안에서 몇 번이든 할 수 있습니다.\n\n"
+    f"매도는 계좌마다 정해진 리밸런싱 주기({REBALANCE_WINDOW_TEXT}) 안에서 딱 1회, "
+    "종목 하나를 1주부터 전량까지 팔 수 있습니다. 그 창에서 쓰지 않은 기회는 다음 창으로 "
+    "넘어가지 않습니다.\n\n"
+    "주기는 그 달러 계좌에 처음 주식이 들어온 날부터 셉니다 — 원화 계좌의 주기와는 "
+    "완전히 따로 흘러갑니다."
 )
 
 # 🔴 §5-11-2 오너 확정 — 화면 레이어에서도 두 통화를 섞지 않는다는 사실을 사용자에게
@@ -486,6 +518,125 @@ def _window_message_usd(window: dict) -> str:
         f"{opens.strftime('%Y-%m-%d %H:%M:%S')} 입니다(매일 {ORDER_WINDOW_TEXT_USD}). "
         "이 시간 밖에서도 화면은 그대로 보이지만 주문 저장·수정·취소는 되지 않습니다."
     )
+
+
+# =============================================================================
+# 1-RB. 🔁 리밸런싱 창 상태 — **통화를 모르는 순수 계산이라 원화·달러가 공유합니다**
+# =============================================================================
+#  §5-11-1 의 판단 기준 그대로입니다: "데이터는 완전 분리, 순수 규칙은 공유". 창 길이도,
+#  창 번호를 세는 방식도, "이번 창을 썼는가"를 판정하는 방식도 통화와 아무 상관이 없습니다
+#  (규칙 계층에서도 `resolve_rebalance_window()` 하나를 두 트랙이 함께 씁니다). 그래서 아래
+#  두 함수에는 `CURRENCY`/`CURRENCY_USD` 도, 금액 서식도, 표 이름도 한 글자도 없습니다 —
+#  통화별로 갈라야 하는 것은 이 값을 **어느 표에서 읽어 오는가**뿐이고, 그건 아래
+#  `_load_account_data()` / `_load_account_data_usd()` 가 갈라서 합니다.
+# =============================================================================
+def _rebalance_state(account: dict, orders, today) -> dict:
+    """계좌 1개의 "지금 몇 번째 창이고, 이번 창 매도를 이미 썼는가".
+
+    🔴 판정을 여기서 새로 만들지 않습니다(§0-3-10) — 창 번호·남은 일수·다음 창 시작일은
+       전부 `duel_rules.resolve_rebalance_window()` 가 돌려준 값 그대로입니다. 이 함수가
+       더하는 것은 "그 창 번호를 쓴 살아 있는 매도 주문이 이미 있는가" 하나뿐입니다.
+
+    ⚠️ `first_holding_date` 가 없는 계좌(= 아직 아무것도 안 산 계좌)에서 규칙 함수는
+       **예외를 던집니다.** 그건 사고가 아니라 정상 상태이므로(§0-1 — 시작하지도 않은 창의
+       번호를 지어내지 않기 위한 의도된 예외), 여기서 잡아 `unavailable_reason` 으로 바꿔
+       돌려주고 화면은 안내만 합니다. 예외가 화면까지 올라가 카드가 통째로 사라지면 안 됩니다.
+
+    ⚠️ **취소된 매도는 창을 소진시키지 않습니다.** DB 의 부분 유니크 인덱스가
+       `status <> 'cancelled'` 조건으로 걸려 있어서(Phase A 확정 — 사용자 취소든, 종가를
+       못 구해 시스템이 취소한 것이든 구분하지 않습니다) 취소하면 그 창의 자리가 다시
+       열립니다. 화면의 판정도 **DB 인덱스와 글자 그대로 같은 조건**이어야 합니다 —
+       여기만 다르게 세면 "화면은 남았다는데 저장이 거절되는"(또는 그 반대의) 상태가 됩니다.
+
+    반환 dict
+        window             : `resolve_rebalance_window()` 결과 dict, 계산 불가면 None
+        used_order         : 이번 창을 이미 쓴 살아 있는 매도 주문 행(없으면 None)
+        unavailable_reason : 창을 계산할 수 없을 때의 한국어 사유(가능하면 None)
+    """
+    try:
+        window = duel_rules.resolve_rebalance_window(
+            account.get("window_type"), account.get("first_holding_date"), today)
+    except DuelRuleError as exc:
+        # 규칙 계층이 이미 "사람이 읽을 한국어 한 문장"으로 던집니다 — 다시 포장하지
+        # 않고 그대로 전달합니다(§0-1 · `_render_opt_in()` 의 DuelDbError 처리와 같은 규율).
+        return {"window": None, "used_order": None, "unavailable_reason": str(exc)}
+
+    used = None
+    for order in orders or []:
+        if (order or {}).get("side") != "sell":
+            continue
+        if order.get("status") == "cancelled":
+            continue                                # ← DB 인덱스와 같은 조건(위 주석 참고)
+        if order.get("rebalance_window_index") != window["window_index"]:
+            continue
+        used = order
+        break
+    return {"window": window, "used_order": used, "unavailable_reason": None}
+
+
+def _rebalance_badge_text(state: dict) -> str:
+    """리밸런싱 창 상태 → 계좌 카드에 붙일 한 줄. **통화를 모릅니다**(금액이 없습니다).
+
+    창 번호는 규칙 계층에서 **0부터** 옵니다(`duel_orders.rebalance_window_index` 에 그대로
+    들어가는 값). 사람에게는 1부터 세어 보여주되, 저장되는 값과 표시값이 다르다는 사실을
+    코드에 남겨 둡니다 — 나중에 "화면엔 2번째 창인데 DB엔 1"이 버그로 보이지 않도록.
+    """
+    if state["window"] is None:
+        return '🔁 리밸런싱 매도 — 아직 계산할 수 없습니다 (첫 매수 전)'
+    window = state["window"]
+    ordinal = window["window_index"] + 1            # 0-기반 저장값 → 1부터 세는 표시값
+    if state["used_order"] is not None:
+        return (
+            f'🔁 리밸런싱 매도 — {ordinal}번째 창은 이미 사용했습니다 '
+            f'(다음 기회 {window["next_window_starts_on"]}부터)'
+        )
+    return (
+        f'🔁 리밸런싱 매도 — {ordinal}번째 창, 앞으로 {window["days_remaining"]}일 남음 '
+        f'({window["window_ends_on"]}까지) · 이번 창 아직 안 씀'
+    )
+
+
+def _sellable_positions(positions):
+    """보유 포지션 중 **실제로 팔 수 있는 것**(수량 > 0)만. 순수 함수 — 통화를 모릅니다.
+
+    ⚠️ 상장폐지 확정 종목도 빼지 않습니다(§0-1 — 조용히 사라지는 목록을 만들지 않습니다).
+       그날 확정 종가가 없으면 배치가 사유를 남기고 취소하며, 취소된 매도는 창을 소진하지
+       않으므로 사용자가 잃는 것이 없습니다. 화면이 미리 골라내면 "왜 이 종목만 목록에
+       없지?"라는, 아무도 답을 못 찾는 상태가 됩니다.
+    """
+    rows = []
+    for position in positions or []:
+        try:
+            quantity = int(float((position or {}).get("quantity") or 0))
+        except (TypeError, ValueError):
+            continue                                # 값을 지어내지 않고 그냥 뺍니다
+        if quantity <= 0:
+            continue                                # 0주 포지션은 스키마상 정상 상태입니다
+        rows.append({
+            "ticker": str(position.get("ticker") or ""),
+            "stock_name": position.get("stock_name") or "",
+            "quantity": quantity,
+        })
+    rows.sort(key=lambda row: row["ticker"])
+    return rows
+
+
+def _order_side_text(order: dict) -> str:
+    """주문 방향 → 한국어. **통화를 모르는 순수 함수**라 원화·달러가 공유합니다.
+
+    매도에는 몇 번째 창을 쓴 주문인지도 함께 보여줍니다 — 주문 내역만 보고 "이번 창을
+    썼는지"를 되짚을 수 있어야 하기 때문입니다(창 번호는 0부터라 +1 해서 표시).
+    """
+    side = (order or {}).get("side")
+    if side == "sell":
+        index = order.get("rebalance_window_index")
+        if isinstance(index, int):
+            return f'🔁 매도 ({index + 1}번째 창)'
+        return '🔁 매도'
+    if side == "buy":
+        return '🛒 매수'
+    # §0-1 — 모르는 값을 '매수'로 위장하지 않습니다(옛 행에는 side 가 없을 수 있습니다).
+    return str(side or '—')
 
 
 # =============================================================================
@@ -700,6 +851,12 @@ def _render_rules_expansion() -> None:
     📖 2026-08-21 — **읽는 방식**을 오너 요청으로 바꿨습니다(딱딱한 긴 문장 목록 → "규칙 N)"
        번호 목록 + 필요한 곳에 "예시)"). 담긴 사실·숫자·단서는 하나도 빼지 않았고, 문장을
        잇던 연결어만 번호 구조에 맞게 다듬었습니다.
+    🔁 2026-08-21 — **규칙 3 은 사실이 바뀌어 통째로 다시 썼습니다.** 이전 문장은 "매도가
+       안 되니까 계좌를 3개로 나눴다"를 근거로 삼고 있었는데, 주기적 리밸런싱 매도가
+       들어오면서 그 전제 자체가 거짓이 됐습니다. 새 근거는 "세 계좌는 이제 각자 다른
+       주기(30/90/180일)로 손볼 수 있으니, 자주 갈아타는 전략과 길게 묻어두는 전략을
+       같은 조건에서 동시에 실험할 수 있다"입니다. 낡은 근거를 남겨두면 화면이 사실과
+       다른 말을 하게 되므로 요약이 아니라 **새로 작성**했습니다(§0-1).
     🔴 `NOTICE_*` 상수는 문장 사이에 `\\n\\n`(문단 나눔)이 들어 있습니다. 그래서 이 상수를
        `**...**` 안에 넣으면 **굵게 표시가 빈 줄을 건너뛰는** 깨진 마크다운이 됩니다(화면에
        `**` 와 `-` 가 글자 그대로 보이던 그 증상). 굵게는 **규칙 제목 한 줄에만** 쓰고,
@@ -707,6 +864,8 @@ def _render_rules_expansion() -> None:
     """
     monthly_total = MONTHLY_DEPOSIT_KRW * len(ACCOUNT_WINDOW_TYPES)
     seed_total = SEED_AMOUNT_KRW * len(ACCOUNT_WINDOW_TYPES)
+    # 🔁 창 길이(30/90/180일)는 규칙 계층에서 가져옵니다 — 화면에 다시 적어두지 않습니다(§0-3-10).
+    days = duel_rules.REBALANCE_WINDOW_DAYS
     with ui.expansion('📖 이 대결은 어떻게 굴러가나요? (규칙 전체 보기)').classes('w-full'):
         ui.markdown(
             f'**규칙 1) 계좌는 3개, 시드는 계좌마다 '
@@ -728,18 +887,28 @@ def _render_rules_expansion() -> None:
             f'{format_amount(monthly_total, CURRENCY)}.\n\n'
             '---\n\n'
 
-            '**규칙 3) 세 계좌의 차이는 규칙이 아니라 선택입니다**\n\n'
-            '같은 규칙 위에서 계좌마다 다른 종목을 골라 보라고 만든 3개입니다.\n\n'
-            '왜 계좌를 3개나 나눠 놨을까요? 세 계좌는 시드·입금액·매수 조건까지 규칙이 '
-            '완전히 같습니다 — 일부러 그렇게 만들었습니다. 계좌마다 규칙까지 다르면, 나중에 '
-            "성적이 갈렸을 때 그게 '규칙 차이' 때문인지 '종목 선택' 때문인지 구분할 수 없기 "
-            '때문입니다. 그래서 규칙은 완전히 통일해 두고, 계좌마다 실제로 어떤 종목을 사는지만 '
-            '다르게 해서, 서로 다른 투자 아이디어를 같은 조건에서 나란히 겨루게 해보는 용도입니다. '
-            "'1개월/3개월/6개월'이라는 이름도 실제 투자 기간을 뜻하는 게 아니라, 입금·정산이 "
-            '도는 리듬을 구분하기 위한 라벨일 뿐입니다.\n\n'
-            '예시) 1개월 계좌엔 이 종목, 3개월 계좌엔 저 종목, 6개월 계좌엔 또 다른 종목을 '
-            '담아 두면 — 같은 규칙, 같은 시작 자금으로 세 가지 투자 아이디어의 결과를 나란히 '
-            '비교해볼 수 있습니다.\n\n'
+            "**규칙 3) 세 계좌의 차이는 '손보는 주기'입니다**\n\n"
+            '세 계좌는 시드도, 정기입금도, 매수 조건도, 체결 방식도 완전히 같습니다. '
+            f'딱 하나 다른 것이 **얼마 만에 한 번 갈아탈 수 있는가**입니다 — '
+            f'1개월 계좌는 {days["M1"]}일, 3개월 계좌는 {days["M3"]}일, 6개월 계좌는 '
+            f'{days["M6"]}일마다 매도(리밸런싱) 기회가 **딱 1회씩** 돌아옵니다.\n\n'
+            '매수는 예수금이 남아 있는 한 언제든 할 수 있습니다. 창마다 1회로 제한되는 것은 '
+            '**매도**뿐이고, 한 번의 매도 주문으로는 종목 하나를 1주부터 전량까지 팔 수 '
+            '있습니다. 창을 그냥 흘려보내면 그 기회는 사라지고 다음 창에 쌓이지 않습니다'
+            '(접수 시간대 안에서 그 매도 주문을 취소하면 그 창의 기회는 다시 열립니다).\n\n'
+            '주기를 세는 시작점은 계좌 개설일이 아니라 **그 계좌에 처음 주식이 들어온 날**'
+            '입니다. 아직 아무것도 사지 않은 계좌는 창이 시작되지도 않았으므로, 첫 매수를 '
+            '하기도 전에 기회가 소멸하는 일은 없습니다.\n\n'
+            '그래서 계좌를 3개로 나눈 이유는 "규칙이 달라서"가 아니라, **자주 손보는 전략과 '
+            '길게 묻어두는 전략을 같은 조건에서 동시에 굴려보기 위해서**입니다. 시드·입금·'
+            "체결 방식까지 다르게 하면 나중에 성적이 갈렸을 때 그게 '규칙 차이' 때문인지 "
+            "'내 판단' 때문인지 구분할 수 없어서, 다른 것은 주기 하나로만 두었습니다. "
+            "'1개월/3개월/6개월'이라는 이름도 실제 투자 기간이 아니라 이 리밸런싱 주기(와 "
+            '입금·정산이 도는 리듬)를 가리키는 라벨입니다.\n\n'
+            f'예시) 1개월 계좌에서는 {days["M1"]}일에 한 번씩 종목을 갈아타 보고, 6개월 '
+            f'계좌에서는 처음 고른 종목을 {days["M6"]}일 동안 그대로 두어 보세요 — 반년 뒤 두 '
+            '계좌의 누적 수익률을 나란히 놓으면 "나에게는 자주 손보는 편이 나았는가"에 대한 '
+            '내 데이터가 남습니다.\n\n'
             '---\n\n'
 
             '**규칙 4) 살 수 있는 종목은 코스피 시가총액 상위 200종목뿐입니다**\n\n'
@@ -801,9 +970,19 @@ def _render_rules_expansion_usd() -> None:
     🔴 원화 판과 **똑같은 이유로** `NOTICE_*` 상수를 `**...**` 안에 넣지 않습니다 — 이 상수들은
        문장 사이에 `\\n\\n`(문단 나눔)을 품고 있어서, 굵게 표시가 빈 줄을 건너뛰면 마크다운이
        깨진 채 `**` 가 글자 그대로 화면에 나옵니다. 굵게는 규칙 제목 한 줄에만 씁니다.
+
+    🔁 2026-08-21 — **"왜 계좌가 3개인가" 규칙(규칙 3)이 이번에 처음 들어왔습니다.** 원화 판에는
+       처음부터 있었지만 달러 판에는 없어서 미뤄 뒀던 항목인데, 주기적 리밸런싱 매도가
+       들어오면서 원화 쪽 근거를 통째로 다시 쓰게 됐고(그쪽 docstring 참고) 그 최종 문구를
+       달러 판에도 **같은 자리·같은 형식**으로 함께 넣었습니다. 창 길이(30/90/180일)는
+       통화와 무관하게 같은 값이므로 규칙 계층 상수 하나(`REBALANCE_WINDOW_DAYS`)를
+       원화 판과 공유하고, 문장만 달러 트랙 기준으로 씁니다.
+       그 뒤 규칙 번호가 하나씩 밀렸습니다(옛 3~10 → 4~11).
     """
     monthly_total = MONTHLY_DEPOSIT_USD * len(ACCOUNT_WINDOW_TYPES)
     seed_total = SEED_AMOUNT_USD * len(ACCOUNT_WINDOW_TYPES)
+    # 🔁 원화 판과 **같은 규칙 계층 상수**에서 가져옵니다(창 길이는 통화를 모릅니다).
+    days = duel_rules.REBALANCE_WINDOW_DAYS
     with ui.expansion('📖 달러 결투는 어떻게 굴러가나요? (규칙 전체 보기)').classes('w-full'):
         ui.markdown(
             f'**규칙 1) 달러 계좌는 3개, 시드는 계좌마다 '
@@ -824,31 +1003,55 @@ def _render_rules_expansion_usd() -> None:
             f'{format_amount(monthly_total, CURRENCY_USD)}.\n\n'
             '---\n\n'
 
-            '**규칙 3) 살 수 있는 종목은 뉴욕·나스닥 시가총액 상위 유니버스뿐입니다**\n\n'
+            "**규칙 3) 세 달러 계좌의 차이는 '손보는 주기'입니다**\n\n"
+            '세 달러 계좌는 시드도, 정기입금도, 매수 조건도, 체결 방식도 완전히 같습니다. '
+            f'딱 하나 다른 것이 **얼마 만에 한 번 갈아탈 수 있는가**입니다 — '
+            f'1개월 계좌는 {days["M1"]}일, 3개월 계좌는 {days["M3"]}일, 6개월 계좌는 '
+            f'{days["M6"]}일마다 매도(리밸런싱) 기회가 **딱 1회씩** 돌아옵니다.\n\n'
+            '매수는 예수금이 남아 있는 한 언제든 할 수 있습니다. 창마다 1회로 제한되는 것은 '
+            '**매도**뿐이고, 한 번의 매도 주문으로는 종목 하나를 1주부터 전량까지 팔 수 '
+            '있습니다. 창을 그냥 흘려보내면 그 기회는 사라지고 다음 창에 쌓이지 않습니다'
+            '(접수 시간대 안에서 그 매도 주문을 취소하면 그 창의 기회는 다시 열립니다).\n\n'
+            '주기를 세는 시작점은 계좌 개설일이 아니라 **그 달러 계좌에 처음 주식이 들어온 '
+            '날**입니다. 원화 계좌의 주기와는 완전히 따로 흘러가고, 한쪽에서 매도했다고 '
+            '다른 쪽 기회가 줄어들지 않습니다.\n\n'
+            '그래서 달러 계좌도 3개인 이유는 "규칙이 달라서"가 아니라, **자주 손보는 전략과 '
+            '길게 묻어두는 전략을 같은 조건에서 동시에 굴려보기 위해서**입니다. 시드·입금·'
+            "체결 방식까지 다르게 하면 나중에 성적이 갈렸을 때 그게 '규칙 차이' 때문인지 "
+            "'내 판단' 때문인지 구분할 수 없어서, 다른 것은 주기 하나로만 두었습니다. "
+            "'1개월/3개월/6개월'이라는 이름도 실제 투자 기간이 아니라 이 리밸런싱 주기(와 "
+            '입금·정산이 도는 리듬)를 가리키는 라벨입니다.\n\n'
+            f'예시) 1개월 달러 계좌에서는 {days["M1"]}일에 한 번씩 종목을 갈아타 보고, 6개월 '
+            f'달러 계좌에서는 처음 고른 종목을 {days["M6"]}일 동안 그대로 두어 보세요 — 반년 뒤 '
+            '두 계좌의 누적 수익률을 나란히 놓으면 "나에게는 자주 손보는 편이 나았는가"에 '
+            '대한 내 데이터가 남습니다.\n\n'
+            '---\n\n'
+
+            '**규칙 4) 살 수 있는 종목은 뉴욕·나스닥 시가총액 상위 유니버스뿐입니다**\n\n'
             '미국주식 화면이 쓰는 바로 그 목록이고, 거래 통화는 달러로만입니다. '
             '코스피·코스닥·원화 종목은 이 트랙에서 거래할 수 없습니다.\n\n'
             '---\n\n'
 
-            f'**규칙 4) 주문 접수 시간은 매일 {ORDER_WINDOW_TEXT_USD} 입니다**\n\n'
+            f'**규칙 5) 주문 접수 시간은 매일 {ORDER_WINDOW_TEXT_USD} 입니다**\n\n'
             '원화 트랙(저녁)과 **다른 시간대**입니다. 이 시간 안에서는 저장한 주문의 수량을 '
             '바꾸거나 취소할 수 있습니다.\n\n'
             '예시) 같은 날이라도 원화 주문과 달러 주문은 서로 다른 시간에 넣어야 합니다 — '
             '달러 접수 시간에 원화 주문을 넣을 수는 없습니다.\n\n'
             '---\n\n'
 
-            "**규칙 5) 체결가는 '주문을 넣은 바로 그날'의 미국 정규장 마감가입니다**\n\n"
+            "**규칙 6) 체결가는 '주문을 넣은 바로 그날'의 미국 정규장 마감가입니다**\n\n"
             f'{NOTICE_WHY_SAME_DAY_USD}\n\n'
             '예시) 오늘 새벽 접수 시간에 넣은 주문은 그날 밤(한국시간) 열리는 미국장의 '
             '마감가로 체결됩니다 — 주문할 때는 아직 존재하지 않는 값입니다.\n\n'
             '---\n\n'
 
-            '**규칙 6) 안 쓴 예수금은 사라지지 않고 이월됩니다**\n\n'
+            '**규칙 7) 안 쓴 예수금은 사라지지 않고 이월됩니다**\n\n'
             f'{NOTICE_CASH_ROLLOVER_USD}\n\n'
             '예시) 이번 달에 한 주도 사지 않았다면 그 달러는 그대로 남아, 다음 입금일에 들어온 '
             '달러와 합쳐져 있습니다.\n\n'
             '---\n\n'
 
-            '**규칙 7) 예수금이 모자라면 살 수 있는 만큼만 체결됩니다**\n\n'
+            '**규칙 8) 예수금이 모자라면 살 수 있는 만큼만 체결됩니다**\n\n'
             '체결 시점에 주문 금액이 예수금을 넘으면 주문 전체가 취소되는 게 아니라, '
             '예수금으로 살 수 있는 최대 정수 수량만 체결되고 나머지는 사유와 함께 '
             '남습니다(1주도 못 사면 그때는 체결 없음으로 끝납니다).\n\n'
@@ -856,19 +1059,19 @@ def _render_rules_expansion_usd() -> None:
             '체결되고, 나머지 3주는 사유와 함께 남습니다.\n\n'
             '---\n\n'
 
-            "**규칙 8) 달러 계좌의 '누적 수익률'도 시간가중수익률(TWR)입니다**\n\n"
+            "**규칙 9) 달러 계좌의 '누적 수익률'도 시간가중수익률(TWR)입니다**\n\n"
             f'{NOTICE_TWR_USD}\n\n'
             '예시) 입금일에 달러만 들어오고 아무것도 사지 않았다면 누적 수익률은 그대로입니다 '
             '— 입금은 수익이 아니기 때문입니다.\n\n'
             '---\n\n'
 
-            '**규칙 9) 원화와 달러는 어디서도 더하지 않습니다**\n\n'
+            '**규칙 10) 원화와 달러는 어디서도 더하지 않습니다**\n\n'
             f'{NOTICE_NO_FX_MIX}\n\n'
             "예시) 화면에 '원화+달러 총자산' 같은 합계가 보이지 않는 것은 빠뜨린 것이 아니라, "
             '만들지 않기로 한 것입니다.\n\n'
             '---\n\n'
 
-            "**규칙 10) 상장폐지는 평가액 $0, '가격 확인 중'은 $0이 아닙니다**\n\n"
+            "**규칙 11) 상장폐지는 평가액 $0, '가격 확인 중'은 $0이 아닙니다**\n\n"
             '확인된 상장폐지는 그 종목 평가액을 $0으로 확정합니다(손실이 손실로 보여야 하므로 '
             '수량·평단가는 지우지 않습니다). 단순히 가격을 못 구한 종목은 '
             '"가격 확인 중"으로 표시하고 **절대 $0으로 처리하지 않습니다**.'
@@ -949,6 +1152,71 @@ async def _render_body(client, user_id: str, email) -> None:
     await duel_section()
 
 
+# -----------------------------------------------------------------------------
+# 4-B. 🔁 계좌별 포지션·주문을 **한 번씩만** 읽어 화면 전체가 나눠 쓰는 묶음
+# -----------------------------------------------------------------------------
+#  🔴 왜 이 함수가 생겼는가 (2026-08-21, 리밸런싱 매도 추가):
+#     주문 폼의 매도 칸은 **보유 수량**(팔 수 있는 상한)과 **그 계좌의 주문 목록**(이번 창을
+#     이미 썼는지)을 둘 다 알아야 그릴 수 있습니다. 그런데 그 두 값은 이미 화면 다른 곳에서
+#     읽고 있었습니다 — 포지션은 `_render_account_card()` 가, 주문은 `_render_account_orders()`
+#     가 각자 자기 안에서. 매도 칸이 같은 것을 또 읽으면 이 화면의 Supabase 왕복이 계좌 수
+#     × 2 만큼 늘어납니다(이 파일 머리말 · `_render_duel_section()` 독스트링의 "13번" 참고 —
+#     이 화면은 이 프로젝트에서 왕복이 가장 많은 화면입니다).
+#     그래서 **읽는 자리를 위로 한 번 올리고**, 카드·주문 목록·주문 폼이 같은 묶음을 나눠
+#     쓰게 했습니다. 총 왕복 수는 **바뀌지 않습니다**(옮겼을 뿐입니다).
+#  🔴 §5-11-2 — 원화용과 달러용을 **갈라 둡니다.** 한 함수가 `fetch_my_positions` 와
+#     `fetch_my_positions_usd` 를 함께 부르면 두 트랙의 값이 한 자리에 모이고, 그게 합산
+#     코드가 생기는 첫 단추입니다(`tests/test_duel_page_usd.py` 가 이 조건을 검사합니다).
+#  🔴 §0-1 — 계좌 하나의 조회가 실패해도 **다른 계좌를 삼키지 않습니다.** 실패한 계좌는
+#     `error` 에 예외를 담아 두고, 그 카드·그 주문 목록만 실패로 표시합니다(예전에 각
+#     함수가 자기 try 안에서 하던 것과 같은 범위의 격리를 그대로 유지합니다).
+# -----------------------------------------------------------------------------
+async def _load_account_data(client, accounts) -> dict:
+    """원화 계좌별 {포지션·주문} 묶음 — `{account_id: {"positions", "orders", "error"}}`."""
+    bundles = {}
+    for account in accounts or []:
+        account_id = (account or {}).get("id")
+        try:
+            positions = await run_blocking(fetch_my_positions, client, account_id)
+            orders = await run_blocking(fetch_my_orders, client, account_id)
+        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
+            bundles[account_id] = {"positions": None, "orders": None, "error": exc}
+            continue
+        bundles[account_id] = {"positions": positions, "orders": orders, "error": None}
+    return bundles
+
+
+async def _load_account_data_usd(client, accounts) -> dict:
+    """달러 계좌별 {포지션·주문} 묶음. 위 원화 함수의 미러 — **다른 표**를 읽는 것만 다릅니다.
+
+    ⚠️ 원화 조회 함수를 하나라도 섞어 부르면 달러 화면에 원화 트랙의 숫자가 나옵니다.
+    """
+    bundles = {}
+    for account in accounts or []:
+        account_id = (account or {}).get("id")
+        try:
+            positions = await run_blocking(fetch_my_positions_usd, client, account_id)
+            orders = await run_blocking(fetch_my_orders_usd, client, account_id)
+        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
+            bundles[account_id] = {"positions": None, "orders": None, "error": exc}
+            continue
+        bundles[account_id] = {"positions": positions, "orders": orders, "error": None}
+    return bundles
+
+
+def _bundle_for(bundles, account_id) -> dict:
+    """계좌 묶음 꺼내기 — 없으면 "아직 못 읽음"이 아니라 **빈 묶음**을 돌려줍니다.
+
+    묶음을 넘기지 않은 옛 호출부·테스트 스텁에서도 화면이 그려져야 하므로(이 파일이 이미
+    `market_usd=None` 에 쓰는 것과 같은 방식), 여기서는 조용히 빈 값을 만들지 말고
+    호출부가 "묶음이 없다"를 구분할 수 있게 `None` 필드를 그대로 둡니다.
+    """
+    bundle = (bundles or {}).get(account_id)
+    if not isinstance(bundle, dict):
+        return {"positions": None, "orders": None, "error": None}
+    return bundle
+
+
 async def _render_duel_section(client, user_id: str, market: dict, window: dict, on_changed,
                                *, market_usd=None, window_usd=None) -> None:
     """계좌가 있으면 대결 화면을, 없으면 참여 안내를 그립니다.
@@ -1017,21 +1285,33 @@ async def _render_duel_section(client, user_id: str, market: dict, window: dict,
             _render_opt_in_usd(client, user_id, on_changed)
         return
 
+    # 🔁 계좌별 포지션·주문을 **여기서 한 번씩만** 읽습니다(4-B 절 참고). 아래 카드·주문
+    #    폼·주문 내역이 같은 묶음을 나눠 쓰므로 왕복 수는 예전과 같고, 매도 칸이 필요로
+    #    하는 "보유 수량 + 이번 창 사용 여부"가 추가 조회 없이 확보됩니다.
+    #    🔴 두 통화를 **각자 다른 함수**로 읽습니다 — 한 함수가 양쪽 표를 만나지 않게(§5-11-2).
+    bundles = await _load_account_data(client, mine) if mine else {}
+    bundles_usd = await _load_account_data_usd(client, mine_usd) if mine_usd else {}
+
     await _render_accounts(client, user_id, mine, market, on_changed,
-                           usd_accounts=mine_usd, usd_market=market_usd)
+                           usd_accounts=mine_usd, usd_market=market_usd,
+                           bundles=bundles, usd_bundles=bundles_usd)
 
     # 통화별 주문 창·주문 내역. 참여한 트랙의 것만 그립니다 — 원화만 참여한 사용자에게
     # 원화 부분은 예전과 **완전히 같은 순서**(계좌 → 주문 창 → 내 주문)로 이어집니다.
     if mine:
         ui.separator()
-        _render_order_form(client, user_id, mine, market, window, on_changed)
+        _render_order_form(client, user_id, mine, market, window, on_changed,
+                           bundles=bundles)
         ui.separator()
-        await _render_orders_section(client, user_id, mine, window, on_changed)
+        await _render_orders_section(client, user_id, mine, window, on_changed,
+                                     bundles=bundles)
     if mine_usd:
         ui.separator()
-        _render_order_form_usd(client, user_id, mine_usd, market_usd, window_usd, on_changed)
+        _render_order_form_usd(client, user_id, mine_usd, market_usd, window_usd, on_changed,
+                               bundles=bundles_usd)
         ui.separator()
-        await _render_orders_section_usd(client, user_id, mine_usd, window_usd, on_changed)
+        await _render_orders_section_usd(client, user_id, mine_usd, window_usd, on_changed,
+                                         bundles=bundles_usd)
 
     # 아직 참여하지 않은 트랙의 안내는 **맨 아래**에 붙입니다(이미 쓰고 있는 트랙의 흐름을
     # 중간에서 끊지 않기 위해서). 두 트랙의 참여는 서로 완전히 독립입니다(§5-11-10).
@@ -1068,7 +1348,9 @@ def _render_opt_in(client, user_id: str, on_changed) -> None:
             f'- 이후 매월 {MONTHLY_DEPOSIT_DAY}일에 세 계좌 각각 '
             f'{format_amount(MONTHLY_DEPOSIT_KRW, CURRENCY)}씩'
             f'(월 합계 {format_amount(monthly_total, CURRENCY)}) 추가 입금됩니다.\n'
-            '- 거래는 **매수만** 가능하고, **코스피 상위 200종목·원화**만 다룹니다.\n'
+            '- 거래는 **코스피 상위 200종목·원화**만 다룹니다. 매수는 예수금이 있으면 '
+            '언제든 할 수 있고, **매도**는 계좌마다 정해진 리밸런싱 주기'
+            f'({REBALANCE_WINDOW_TEXT}) 안에서 **딱 1회**씩 할 수 있습니다.\n'
             '- **배당금은 반영되지 않습니다.** 주문은 저장 즉시 체결되지 않고 '
             '**다음 거래일 종가**로 체결됩니다.\n'
             '- 여기서 오가는 돈은 전부 **가상**입니다. 실제 계좌·실제 주식과는 아무 관계가 없습니다.'
@@ -1138,7 +1420,9 @@ def _render_opt_in_usd(client, user_id: str, on_changed) -> None:
             f'- 이후 매월 {MONTHLY_DEPOSIT_DAY}일에 세 계좌 각각 '
             f'{format_amount(MONTHLY_DEPOSIT_USD, CURRENCY_USD)}씩'
             f'(월 합계 {format_amount(monthly_total, CURRENCY_USD)}) 추가 입금됩니다.\n'
-            '- 거래는 **매수만** 가능하고, **미국 상위 유니버스 종목·달러**만 다룹니다.\n'
+            '- 거래는 **미국 상위 유니버스 종목·달러**만 다룹니다. 매수는 예수금이 있으면 '
+            '언제든 할 수 있고, **매도**는 달러 계좌마다 정해진 리밸런싱 주기'
+            f'({REBALANCE_WINDOW_TEXT}) 안에서 **딱 1회**씩 할 수 있습니다.\n'
             '- **배당금은 반영되지 않습니다.** 주문은 저장 즉시 체결되지 않고 '
             '**주문을 넣은 바로 그날의 미국 정규장 마감가**로 체결됩니다'
             '(원화 트랙의 "다음 거래일 종가"와 다릅니다 — 이유는 위 규칙 설명 참고).\n'
@@ -1246,7 +1530,8 @@ def _twr_display(snapshots) -> tuple:
 
 
 async def _render_accounts(client, user_id: str, accounts, market: dict, on_changed, *,
-                           usd_accounts=(), usd_market=None) -> None:
+                           usd_accounts=(), usd_market=None,
+                           bundles=None, usd_bundles=None) -> None:
     """계좌 비교 영역.
 
     💵 2026-08-21 — 달러 계좌가 하나라도 있으면 **같은 창유형 카드 안에 위쪽 원화 블록,
@@ -1277,8 +1562,13 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
         # 절대 줄바꿈되지 않아 폰에서 카드가 짓눌리므로 쓰지 않습니다
         # (`web/pages/scorecard_page.py::_render_currency_block()` 의 #122 계열 교훈과 같은 이유).
         with ui.row().classes('w-full gap-4 items-stretch'):
+            # 📊 맨 앞 칸은 **실제 자산**('내 성적표') 요약입니다(2026-08-21 오너 요청 스케치:
+            #    성적표 → 1개월 → 3개월 → 6개월 순). 계산 방식이 다르다는 사실은 카드 안의
+            #    캡션이 직접 말합니다 — 여기서 두 수익률을 섞어 계산하는 자리는 없습니다.
+            await _render_scorecard_summary_card_krw(client, user_id, market)
             for account in accounts:
-                await _render_account_card(client, user_id, account, market)
+                await _render_account_card(client, user_id, account, market,
+                                           bundle=_bundle_for(bundles, account.get("id")))
         return
 
     # ── 원화 + 달러 병기 (§5-11-2) ────────────────────────────────────────────
@@ -1310,6 +1600,18 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
     ordered = known + sorted(set(extra), key=str)
 
     with ui.row().classes('w-full gap-4 items-stretch'):
+        # 📊 맨 앞 칸 — **실제 자산**('내 성적표'). 창유형 칸들과 같은 구조(위쪽 원화,
+        #    아래쪽 달러)로 두어 눈으로 바로 대조되게 합니다(2026-08-21 오너 스케치).
+        #    🔴 §5-11-2 — 아래 두 줄은 **서로 완전히 독립된 두 번의 호출**입니다. 통화도
+        #       시장 데이터도 각자 인자로 따로 넘기고, 두 호출이 공유하는 변수(누적합 등)가
+        #       하나도 없습니다 — 원화 값과 달러 값이 같은 산술식에 들어갈 자리 자체가
+        #       없어야 하기 때문입니다(환율 시계열이 없으므로 더하면 지어낸 값이 됩니다).
+        with ui.element('div').style(
+                'flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; align-content: start;'):
+            await _render_scorecard_summary_card_krw(client, user_id, market)
+            if usd_market is not None:
+                await _render_scorecard_summary_card_usd(client, user_id, usd_market)
+
         for window_type in ordered:
             krw_account = krw_by_window.get(window_type)
             usd_account = usd_by_window.get(window_type)
@@ -1322,14 +1624,18 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
             with ui.element('div').style(
                     'flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; align-content: start;'):
                 if krw_account is not None:
-                    await _render_account_card(client, user_id, krw_account, market)
+                    await _render_account_card(
+                        client, user_id, krw_account, market,
+                        bundle=_bundle_for(bundles, krw_account.get("id")))
                 else:
                     ui.label(
                         f'{WINDOW_TITLES.get(window_type, str(window_type))} — 원화 계좌는 아직 '
                         '없습니다(아래 원화 참여 안내 참고).'
                     ).classes('vh-muted vh-keep-all')
                 if usd_account is not None:
-                    await _render_account_card_usd(client, user_id, usd_account, usd_market)
+                    await _render_account_card_usd(
+                        client, user_id, usd_account, usd_market,
+                        bundle=_bundle_for(usd_bundles, usd_account.get("id")))
                 else:
                     ui.label(
                         f'{WINDOW_TITLES.get(window_type, str(window_type))} — 달러 계좌는 아직 '
@@ -1337,10 +1643,17 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
                     ).classes('vh-muted vh-keep-all')
 
 
-async def _render_account_card(client, user_id: str, account: dict, market: dict) -> None:
-    """계좌 1개 카드 — 총자산·현금·평가액·누적 TWR·보유종목.
+async def _render_account_card(client, user_id: str, account: dict, market: dict,
+                               *, bundle=None) -> None:
+    """계좌 1개 카드 — 총자산·현금·평가액·누적 TWR·리밸런싱 창 상태·보유종목.
 
     🔒 그리기 전에 소유자를 한 번 더 확인합니다(§0-3-8 이중 방어).
+
+    🔁 2026-08-21 — `bundle`(4-B 절의 계좌별 포지션·주문 묶음)을 받습니다. 넘어오면 포지션을
+       **다시 읽지 않고** 그 값을 쓰고, 주문 목록으로 "이번 리밸런싱 창을 이미 썼는지"까지
+       뱃지에 적습니다. 묶음을 넘기지 않는 옛 호출부·테스트 스텁에서는 예전과 **글자 그대로
+       같은 경로**로 포지션을 직접 읽고, 창 뱃지만 생략합니다(이 파일이 `market_usd=None`
+       에 이미 쓰고 있는 것과 같은 방식 — 새 인자가 옛 화면을 깨뜨리지 않게).
     """
     if account.get("user_id") != user_id:
         error_banner('🚫 소유자가 확인되지 않는 계좌라 표시하지 않았습니다.')
@@ -1354,16 +1667,32 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
         ui.markdown(f'##### ⚔️ {esc(title)}').classes('vh-keep-all')
         ui.label(f'개설일 {account.get("anchor_date") or "—"}').classes('vh-muted')
 
+        if bundle is not None and bundle.get("error") is not None:
+            # 묶음을 읽다 이 계좌만 실패한 경우 — 예전에 아래 try 가 하던 것과 같은 문구입니다.
+            error_banner(f'🚫 {_fail(bundle["error"], "계좌 정보를 불러오지 못했습니다.")}')
+            return
+
         try:
-            # 계좌 하나당 왕복 3회 — 계좌가 3개이므로 이 카드들만으로 9회입니다.
+            # 계좌 하나당 왕복 3회(묶음이 있으면 포지션 1회가 빠져 2회)입니다.
             # 전부 `client` 를 인자로 받는 순수 조회 함수라 스레드로 넘겨도 안전합니다.
             ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
             cash = sum_cash_balance(ledger)                     # 순수 계산 — 루프에서 그대로
-            positions = await run_blocking(fetch_my_positions, client, account_id)
+            if bundle is not None and bundle.get("positions") is not None:
+                positions = bundle["positions"]
+            else:
+                positions = await run_blocking(fetch_my_positions, client, account_id)
             snapshots = await run_blocking(fetch_my_snapshots, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "계좌 정보를 불러오지 못했습니다.")}')
             return
+
+        # 🔁 리밸런싱 창 뱃지 — "몇 번째 창인지 · 며칠 남았는지 · 이번 창을 이미 썼는지".
+        #    사용자 요청("리밸런싱 기간 중 1회만 가능하게 카운트를 표시")의 자리입니다.
+        #    계산은 통화를 모르는 공유 함수(1-RB 절)가 하고, 여기서는 그리기만 합니다.
+        if bundle is not None and bundle.get("orders") is not None:
+            state = _rebalance_state(account, bundle["orders"],
+                                     datetime.now(KST).date())
+            ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
 
         summary = _position_rows(positions, market["price_lookup"])
         total_value = cash + summary["position_value"]
@@ -1386,7 +1715,8 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
         if not duel_rules.is_buy_window_open(cash):
             info_banner(
                 f'ℹ️ 이 계좌는 예수금이 0원이라 지금은 매수할 수 없습니다. '
-                f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다.'
+                f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다. '
+                '(리밸런싱 매도는 예수금과 상관없이, 보유 종목이 있으면 그대로 할 수 있습니다.)'
             )
 
         if summary["rows"]:
@@ -1474,10 +1804,15 @@ def _position_rows_usd(positions, price_lookup):
     return {"rows": rows, "position_value": position_value, "unpriced": unpriced}
 
 
-async def _render_account_card_usd(client, user_id: str, account: dict, market: dict) -> None:
-    """달러 계좌 1개 카드 — 총자산·현금·평가액·누적 TWR·보유종목.
+async def _render_account_card_usd(client, user_id: str, account: dict, market: dict,
+                                   *, bundle=None) -> None:
+    """달러 계좌 1개 카드 — 총자산·현금·평가액·누적 TWR·리밸런싱 창 상태·보유종목.
 
     🔒 원화와 **같은 이중 방어** — 그리기 전에 소유자를 한 번 더 확인합니다(§0-3-8).
+
+    🔁 2026-08-21 — `bundle`(4-B 절) 처리도 원화 카드와 같은 모양입니다. 창 길이·창 번호
+       계산은 통화를 모르는 공유 함수(1-RB 절)를 그대로 쓰고, 갈라지는 것은 그 값을 **어느
+       표에서 읽어 왔는가**뿐입니다(이 함수는 달러 표만 봅니다).
 
     🔴 이 함수 안의 모든 금액은 **달러 하나뿐**입니다. 여기서 계산하는 "총자산"은 이 달러
        계좌 하나의 총자산이고, 원화 계좌의 값과 만나는 자리가 한 곳도 없습니다(§5-11-2).
@@ -1500,14 +1835,27 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
         ui.markdown(f'##### 💵 {esc(title)} (달러)').classes('vh-keep-all')
         ui.label(f'개설일 {account.get("anchor_date") or "—"}').classes('vh-muted')
 
+        if bundle is not None and bundle.get("error") is not None:
+            error_banner(f'🚫 {_fail(bundle["error"], "달러 계좌 정보를 불러오지 못했습니다.")}')
+            return
+
         try:
             ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
             cash = sum_cash_balance(ledger)                     # 순수 계산 — 원화와 공유
-            positions = await run_blocking(fetch_my_positions_usd, client, account_id)
+            if bundle is not None and bundle.get("positions") is not None:
+                positions = bundle["positions"]
+            else:
+                positions = await run_blocking(fetch_my_positions_usd, client, account_id)
             snapshots = await run_blocking(fetch_my_snapshots_usd, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "달러 계좌 정보를 불러오지 못했습니다.")}')
             return
+
+        # 🔁 리밸런싱 창 뱃지 — 원화 카드와 같은 공유 계산, 달러 계좌의 주문만 봅니다.
+        if bundle is not None and bundle.get("orders") is not None:
+            state = _rebalance_state(account, bundle["orders"],
+                                     datetime.now(KST).date())
+            ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
 
         summary = _position_rows_usd(positions, market["price_lookup"])
         total_value = cash + summary["position_value"]          # 달러 + 달러 (통화 혼합 없음)
@@ -1529,7 +1877,8 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
         if not duel_rules.is_buy_window_open(cash):
             info_banner(
                 f'ℹ️ 이 달러 계좌는 예수금이 $0이라 지금은 매수할 수 없습니다. '
-                f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다.'
+                f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다. '
+                '(리밸런싱 매도는 예수금과 상관없이, 보유 종목이 있으면 그대로 할 수 있습니다.)'
             )
 
         if summary["rows"]:
@@ -1568,18 +1917,127 @@ def _render_positions_table_usd(rows) -> None:
 
 
 # =============================================================================
-# 7. 주문 창 (2-4 — 매수 전용, 수량 기준, 코스피 상위 200 안에서만)
+# 6-SC. 📊 "내 성적표"(실제 자산) 요약 카드 — 가상계좌 카드들 옆에 나란히
+# =============================================================================
+# 2026-08-21 오너 요청 — "내 가상계좌" 비교 줄에 **실제 보유 자산**("내 성적표") 카드를
+# 하나 더 붙여서 한눈에 같이 보고 싶다는 결정입니다.
+#
+# 🔴 두 숫자는 **계산 방식이 다릅니다.** 결투 계좌는 매달 자동 입금이 있어서 시간가중
+#    수익률(TWR)로 계산하고, "내 성적표"는 예수금 개념이 없는 **매입원가 대비 평가손익률**
+#    입니다. 오너 확정(2026-08-21): "예수금이 없는 매입원가 대비 수익률입니다" 라고 카드에
+#    **직접 써 두는 조건**으로 나란히 보여줍니다 — 그래서 아래 캡션은 지워도 되는 장식이
+#    아니라 이 카드가 존재해도 되는 전제입니다(§0-1 · NOTICE_TWR 과 같은 취지).
+#
+# 🔴 §0-3-10 — 수익률 계산식을 여기서 다시 만들지 않습니다. 조회는
+#    `utils/scorecard_db.py::fetch_holdings()`, 집계는 같은 모듈의 `build_portfolio()`,
+#    표시 계산은 `web/pages/scorecard_page.py::_render_currency_block()` 과 **글자 그대로
+#    같은 식**(`profit / base * 100`)입니다. 한쪽만 고쳐지는 사고를 막기 위해서입니다.
+#
+# 🔴 §5-11-2 — 이 함수는 **통화 하나만** 다룹니다(`currency` 인자 하나). 원화 카드와 달러
+#    카드는 이 함수를 **두 번 따로** 부른 결과일 뿐이고, 두 호출 사이에 공유되는 변수도,
+#    두 통화 값이 만나는 산술식도 이 파일 어디에도 없습니다.
+async def _render_scorecard_summary_card(client, user_id: str, currency: str,
+                                         market: dict) -> None:
+    """'내 성적표'(실제 증권계좌) 통화 1개짜리 요약 카드.
+
+    🔒 §0-3-8 — `fetch_holdings(client, user_id)` 는 우리가 넘긴 `user_id` 로 서버에서
+       필터하는 함수입니다("내 성적표" 화면도 추가 재확인 없이 이 함수만 씁니다). 미리
+       받아둔 남의 레코드가 섞여 들어올 수 있는 결투 계좌 카드와 달리 여기엔 "남의 것"
+       경로 자체가 없으므로, 성립하지 않는 소유자 재확인을 흉내 내지 않습니다.
+    """
+    with ui.column().classes('vh-card gap-2').style('flex: 1 1 320px; min-width: 0;'):
+        ui.markdown('##### 📊 내 성적표 (실제 자산)').classes('vh-keep-all')
+
+        try:
+            # DB 왕복 — 이 파일의 모든 Supabase 호출과 같이 스레드로 넘깁니다.
+            holdings = await run_blocking(fetch_holdings, client, user_id)
+        except Exception as exc:                   # noqa: BLE001
+            # §0-1 — 조회 실패를 "보유 종목 없음"으로 위장하지 않고 실패했다고 적습니다.
+            # 문구는 **이 카드 안**, 숫자가 있었어야 할 자리에 그대로 둡니다. 이 카드는
+            # 결투 계좌 카드들 옆에 붙는 보조 카드라, 실패했을 때 붉은 배너를 띄우면
+            # "결투 계좌 쪽이 실패했다"로 읽히기 쉽습니다(같은 줄에 나란히 있으므로).
+            ui.label(f'🚫 {_fail(exc, "내 성적표 보유 종목을 불러오지 못했습니다.")}') \
+                .classes('vh-muted vh-keep-all')
+            return
+
+        # 순수 계산(입출력 없음) — `_position_rows()` 처럼 그대로 부릅니다.
+        portfolio = build_portfolio(holdings, market["price_lookup"])
+        group = portfolio.get(currency)
+
+        if group is None or not group["rows"]:
+            # §0-1 — 등록된 종목이 없으면 0원짜리 지표 카드를 만들어 채우지 않습니다.
+            ui.label(
+                "아직 등록된 보유 종목이 없습니다 — '내 성적표' 화면에서 먼저 종목을 "
+                '등록해 보세요.'
+            ).classes('vh-muted')
+            return
+
+        # ⬇️ `scorecard_page.py::_render_currency_block()` 과 같은 분기·같은 식입니다.
+        with ui.row().classes('w-full gap-2 items-stretch'):
+            metric_card('매입원가 합계', format_amount(group["total_cost"], currency))
+            if group["total_value"] is not None:
+                base = group["total_cost_priced"]
+                profit = group["total_profit"]
+                metric_card('평가금액 합계', format_amount(group["total_value"], currency))
+                metric_card('평가손익', format_amount(profit, currency),
+                            pct_text(profit / base * 100 if base else None))
+            else:
+                # 현재가를 아는 종목이 하나도 없는 상태 — 수익률을 지어내지 않습니다(§0-1).
+                metric_card('평가금액 합계', '—')
+                metric_card('평가손익', '—')
+
+        if group["unpriced_count"]:
+            info_banner(
+                f'ℹ️ {group["unpriced_count"]}개 종목의 현재 가격을 확인하지 못해 '
+                f'내 성적표 평가금액에서 빠져 있습니다: '
+                f'{", ".join(group["unpriced_tickers"])}. 가격을 지어내지 않습니다.'
+            )
+
+        # 🔴 오너 확정 조건 — 숫자를 보여주는 카드에는 반드시 이 문장이 함께 나갑니다.
+        ui.label(
+            '⚠️ 이 수익률은 예수금을 제외한, 매입원가 대비 평가손익률입니다 — 결투 계좌의 '
+            '시간가중수익률(TWR)과 계산 방식이 다릅니다. 두 수익률을 직접 비교하지 마세요.'
+        ).classes('vh-muted vh-keep-all')
+
+
+# 🔴 §5-11-2 를 코드로 강제하기 위한 통화별 얇은 창구 두 개입니다.
+#    이 파일에는 "한 함수 안에서 `CURRENCY` 와 `CURRENCY_USD` 가 함께 쓰이지 않는다"는
+#    규칙이 있고(`tests/test_duel_page_usd.py::test_no_function_mixes_the_two_currency_constants`),
+#    그 규칙이 곧 "두 통화를 더한 숫자를 만들 자리 자체가 없다"는 보증입니다. 계좌 카드가
+#    `_render_account_card` / `_render_account_card_usd` 로 갈라져 있는 것과 같은 이유이며,
+#    다만 성적표 카드는 통화 상수 하나만 다르므로 **본문은 위 한 함수를 공유**합니다
+#    (§0-3-10 — 같은 계산을 두 벌 만들지 않습니다).
+async def _render_scorecard_summary_card_krw(client, user_id: str, market: dict) -> None:
+    """원화(내 성적표) 요약 카드 — 원화 값만 다룹니다."""
+    await _render_scorecard_summary_card(client, user_id, CURRENCY, market)
+
+
+async def _render_scorecard_summary_card_usd(client, user_id: str, market: dict) -> None:
+    """달러(내 성적표) 요약 카드 — 달러 값만 다룹니다. 위 원화 카드와 공유하는 변수는 없습니다."""
+    await _render_scorecard_summary_card(client, user_id, CURRENCY_USD, market)
+
+
+# =============================================================================
+# 7. 주문 창 (2-4 — 매수 + 창당 1회 리밸런싱 매도, 수량 기준, 코스피 상위 200 안에서만)
 # =============================================================================
 def _render_order_form(client, user_id: str, accounts, market: dict, window: dict,
-                       on_changed) -> None:
-    """주문 저장 폼.
+                       on_changed, *, bundles=None) -> None:
+    """주문 저장 폼 — 위쪽이 **매수**, 아래쪽이 **창당 1회 리밸런싱 매도**입니다.
 
     ⚠️ 유니버스 검사·시간대 검사·거래일 확정은 전부 `utils/duel_db.py::save_order()` 와
        `utils/duel_rules.py` 가 합니다. 이 함수가 하는 일은 **입력 도우미(검색·수량 입력·
        사전 고지)** 와 실패 문구 표시뿐입니다(§0-3-10 — 판정 로직을 두 번 만들지 않습니다).
+
+    🔁 2026-08-21 — 매도 칸이 생기면서 두 가지가 달라졌습니다.
+       ① 제목·버튼에서 "(매수 전용)"·"(매수)" 표기를 뺐습니다 — 이제 사실이 아닙니다.
+       ② 매도 칸은 **유니버스 목록이 없어도 그립니다.** 매수는 코스피 상위 목록 안에서만
+          가능하지만, 매도에는 유니버스 검사가 아예 없습니다(`save_sell_order()` 독스트링:
+          이미 보유한 종목이 목록에서 빠졌다고 "팔 수도 없는" 상태가 되면 그게 더 나쁩니다).
+          그래서 목록을 못 읽어 매수 칸을 못 여는 날에도 매도 칸은 그대로 열립니다 —
+          아래 이른 반환 자리에서 매도 칸을 한 번 더 부르는 이유입니다.
     """
     index = market["index"]
-    ui.markdown('#### 🛒 주문하기 (매수 전용)')
+    ui.markdown('#### 🛒 주문하기')
     ui.label(
         f'코스피 상위 종목만, 원화로만, 주식 수 단위로 주문합니다. '
         f'현재 주문 가능 목록에는 {len(index)}종목이 있습니다.'
@@ -1587,8 +2045,15 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
     ui.label(f'⏱️ {NOTICE_FILL_TIMING}').classes('vh-muted')
 
     if not index:
-        error_banner('🚫 주문 가능 종목 목록을 읽지 못해 주문 창을 열 수 없습니다.')
+        error_banner(
+            '🚫 주문 가능 종목 목록을 읽지 못해 **매수** 창을 열 수 없습니다. '
+            '(보유 종목을 파는 리밸런싱 매도는 유니버스 목록과 무관하므로 아래에 그대로 '
+            '열려 있습니다.)'
+        )
+        _render_sell_form(client, user_id, accounts, window, on_changed, bundles=bundles)
         return
+
+    ui.markdown('##### 🛒 매수')
 
     # ⚠️ 이 dict 들은 **페이지 함수 호출마다 새로 만들어지는 지역 상태**입니다(접속마다 별개).
     #    모듈 전역에 두면 접속자끼리 입력값이 섞입니다(§0-3-8).
@@ -1745,18 +2210,205 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         )
         on_changed()
 
-    ui.button('🛒 주문 저장 (매수)', on_click=_submit).props('no-caps color=primary')
+    ui.button('🛒 매수 주문 저장', on_click=_submit).props('no-caps color=primary')
     ui.label(
         '※ 저장 시점에는 예수금이 충분한지 확정할 수 없습니다 — 체결가(다음 거래일 종가)를 '
         '아직 모르기 때문입니다. 체결 시점에 모자라면 살 수 있는 만큼만 체결되고 사유가 남습니다.'
     ).classes('vh-muted')
+
+    ui.separator()
+    _render_sell_form(client, user_id, accounts, window, on_changed, bundles=bundles)
+
+
+# -----------------------------------------------------------------------------
+# 7-SELL. 🔁 리밸런싱 매도 칸 (원화) — 계좌마다 창당 1회, 종목 1개, 1주~전량
+# -----------------------------------------------------------------------------
+#  🔴 왜 계좌마다 **별도의 칸**인가: 매도의 제약(보유 종목 목록 · 창 번호 · 이번 창 사용
+#     여부)이 전부 **계좌마다 다릅니다.** 매수처럼 계좌 선택 드롭다운 하나로 묶으면 계좌를
+#     바꿀 때마다 종목 목록·버튼 활성 여부·안내 문구를 전부 갈아끼워야 하고, 그 갈아끼우기가
+#     한 군데라도 빠지면 화면이 **다른 계좌의 조건으로 매도를 받는** 상태가 됩니다. 계좌별로
+#     칸을 나누면 그 상태 자체가 생길 수 없습니다(§0-3-9 의 "사고가 날 자리를 없애기").
+#  🔴 최종 권한은 서버입니다 — 화면이 버튼을 감추는 것과 별개로, `save_sell_order()` 가
+#     접수 시간대·보유 수량을 다시 보고, DB 부분 유니크 인덱스가 "창당 1회"를 강제합니다.
+# -----------------------------------------------------------------------------
+def _render_sell_form(client, user_id: str, accounts, window: dict, on_changed,
+                      *, bundles=None) -> None:
+    """원화 계좌들의 리밸런싱 매도 칸 묶음."""
+    ui.markdown('##### 🔁 리밸런싱 매도 (계좌마다 창당 1회)')
+    ui.label(
+        '한 번의 매도 주문으로 종목 하나를 1주부터 보유 전량까지 팔 수 있습니다. '
+        f'접수 시간대는 매수와 같고({ORDER_WINDOW_TEXT}), 체결도 매수와 같이 '
+        '다음 거래일 종가로 이루어집니다.'
+    ).classes('vh-muted')
+    # 2-4-5 — 체결이 취소될 수 있는 경우를 **주문 전에** 알려 둡니다(사후 통보로 끝내지 않기).
+    ui.label(
+        '⚠️ 그날 종가 수집이 실패하거나 휴장일이면 이 매도 주문도 체결되지 않고 사유와 함께 '
+        '취소됩니다. 그 경우 이번 창의 기회는 **다시 열립니다** — 취소된 매도는 창을 '
+        '소진하지 않습니다(데이터 문제로 사용자의 기회를 빼앗지 않기 위한 규칙입니다).'
+    ).classes('vh-muted vh-keep-all')
+
+    for account in accounts or []:
+        _render_sell_panel(client, user_id, account, window, on_changed,
+                           bundle=_bundle_for(bundles, account.get("id")))
+
+
+def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_changed,
+                       *, bundle) -> None:
+    """계좌 1개의 매도 칸.
+
+    🔒 원화 카드·주문 목록과 같은 이유로 소유자를 여기서도 한 번 더 확인합니다(§0-3-8).
+    """
+    if account.get("user_id") != user_id:
+        error_banner('🚫 소유자가 확인되지 않는 계좌라 매도 창을 그리지 않았습니다.')
+        return
+
+    account_id = account.get("id")
+    title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
+
+    with ui.card().classes('vh-card w-full'):
+        ui.markdown(f'**{esc(title)}**')
+
+        if bundle.get("error") is not None:
+            error_banner(
+                f'🚫 {_fail(bundle["error"], "보유 종목·주문 내역을 불러오지 못해 매도 창을 열 수 없습니다.")}'
+            )
+            return
+        if bundle.get("positions") is None or bundle.get("orders") is None:
+            # §0-1 — 못 읽은 것을 "보유 없음"으로 위장하지 않습니다.
+            ui.label('보유 종목·주문 내역을 아직 읽지 못해 매도 창을 열 수 없습니다.') \
+                .classes('vh-muted')
+            return
+
+        state = _rebalance_state(account, bundle["orders"], datetime.now(KST).date())
+        ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
+
+        if state["window"] is None:
+            # 첫 매수 전 — 예외가 아니라 **정상 상태**입니다. 안내만 하고 조용히 끝냅니다.
+            info_banner(
+                'ℹ️ 아직 매수한 종목이 없어 리밸런싱 매도를 계산할 수 없습니다. '
+                '첫 매수가 체결되면 그날부터 이 계좌의 창이 시작됩니다.\n\n'
+                f'{state["unavailable_reason"]}'
+            )
+            return
+
+        if state["used_order"] is not None:
+            used = state["used_order"]
+            info_banner(
+                'ℹ️ 이번 창은 이미 사용했습니다 — 다음 기회: '
+                f'{state["window"]["next_window_starts_on"]}\n\n'
+                f'이번 창에 쓴 주문: {used.get("stock_name") or ""} ({used.get("ticker")}) '
+                f'{used.get("requested_quantity")}주 · {_order_status_text(used)}\n\n'
+                '아직 체결 전(대기)이고 접수 시간대 안이라면, 아래 "내 주문"에서 그 매도 '
+                '주문을 취소해 이번 창의 기회를 되살릴 수 있습니다.'
+            )
+            return
+
+        sellable = _sellable_positions(bundle["positions"])
+        if not sellable:
+            ui.label('이 계좌에는 팔 수 있는 보유 종목이 없습니다.').classes('vh-muted')
+            return
+
+        held_by_ticker = {row["ticker"]: row["quantity"] for row in sellable}
+        name_by_ticker = {row["ticker"]: (row["stock_name"] or row["ticker"])
+                          for row in sellable}
+        options = {
+            row["ticker"]: f'{row["ticker"]} · {row["stock_name"] or row["ticker"]} '
+                           f'(보유 {row["quantity"]:,}주)'
+            for row in sellable
+        }
+
+        ticker_select = ui.select(
+            options, value=next(iter(options)), label='팔 종목 (보유 종목 중에서)',
+        ).classes('w-full')
+        quantity_input = ui.input(
+            '매도 수량 (몇 주)', placeholder='예: 3',
+        ).style('flex: 1 1 160px;')
+        ui.label(
+            '※ 1주부터 보유 전량까지 가능합니다. 이 계좌에서는 이번 창에 **딱 한 번**만 '
+            '저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
+        ).classes('vh-muted vh-keep-all')
+
+        message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+        async def _submit_sell(_=None) -> None:
+            message.text = ''
+            if not window["is_open"]:
+                # 서버(`save_sell_order`)도 같은 규칙으로 거절하지만, 눌러보기 전에 알려 줍니다.
+                message.text = f'🚫 {_window_message(window)}'
+                return
+            ticker = ticker_select.value
+            if not ticker:
+                message.text = '🚫 팔 종목을 골라 주세요.'
+                return
+            held = held_by_ticker.get(ticker)
+            if not held:
+                message.text = ('🚫 보유 수량을 확인하지 못했습니다 — 화면을 새로고침한 뒤 '
+                                '다시 시도해 주세요.')
+                return
+            try:
+                quantity = _parse_positive_int(quantity_input.value, '매도 수량')
+            except ValueError as exc:
+                message.text = f'🚫 {exc}'
+                return
+            if quantity > held:
+                message.text = (f'🚫 보유 수량({held:,}주)보다 많은 {quantity:,}주는 매도할 수 '
+                                '없습니다. 보유한 수량 이하로 다시 입력해 주세요.')
+                return
+
+            # 🔴 창 번호는 **누를 때 다시 계산합니다.** 화면을 열어둔 채 자정을 넘겨 창이
+            #    바뀌었는데 그릴 때 잡아둔 번호로 저장하면, 지난 창의 자리에 주문이 들어갑니다.
+            try:
+                current = duel_rules.resolve_rebalance_window(
+                    account.get("window_type"), account.get("first_holding_date"),
+                    datetime.now(KST).date())
+            except DuelRuleError as exc:
+                message.text = f'🚫 {exc}'
+                return
+
+            try:
+                order = await run_blocking(
+                    save_sell_order,
+                    client, account_id, ticker, name_by_ticker.get(ticker) or ticker,
+                    quantity, held, current["window_index"],
+                    # 매수와 **같은 후보 목록**입니다 — 매도도 D+1 종가로 체결되므로
+                    # 저장일 자신을 빼는 원화 규칙이 그대로 적용됩니다.
+                    trading_days=_upcoming_trading_days(window["now_kst"].date()),
+                )
+            except (DuelDbError, DuelRuleError) as exc:
+                # 보유 초과·창 소진(부분 유니크 인덱스)·접수 시간대 밖 — 전부 DB 계층이 이미
+                # "사람이 읽을 한국어 한 문장"으로 번역해 둔 예외입니다. 다시 포장하면 원인이
+                # 흐려지므로 그대로 보여줍니다(§0-1, 매수 폼과 같은 규율).
+                message.text = f'🚫 {exc}'
+                ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
+                          classes='whitespace-pre-line')
+                return
+            except Exception as exc:               # noqa: BLE001
+                text = _fail(exc, '매도 주문을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+                message.text = f'🚫 {text}'
+                ui.notify(f'🚫 {text}', type='negative', multi_line=True, close_button='닫기')
+                return
+
+            quantity_input.value = ''
+            ui.notify(
+                f'✅ 리밸런싱 매도 주문을 저장했습니다 — {name_by_ticker.get(ticker)} '
+                f'({ticker}) {quantity:,}주\n'
+                f'체결 예정일: {order.get("target_date")} 종가 (지금 체결된 것이 아닙니다)\n'
+                f'{ORDER_WINDOW_TEXT} 안에서는 수량 수정·취소가 가능하고, 취소하면 이번 '
+                '창의 기회가 다시 열립니다.',
+                type='positive', multi_line=True, close_button='닫기',
+                classes='text-lg whitespace-pre-line',
+            )
+            on_changed()
+
+        ui.button('🔁 리밸런싱 매도 주문 저장', on_click=_submit_sell) \
+            .props('no-caps color=negative')
 
 
 # -----------------------------------------------------------------------------
 # 7-USD. 💵 달러 주문 창 — 미국 유니버스 · USD 접수 시간대 · **당일 마감가** 체결
 # -----------------------------------------------------------------------------
 def _render_order_form_usd(client, user_id: str, accounts, market: dict, window: dict,
-                           on_changed) -> None:
+                           on_changed, *, bundles=None) -> None:
     """달러 주문 저장 폼. 원화 `_render_order_form()` 의 미러이고, 다른 곳은 네 군데입니다.
 
       ① 종목 검색·유니버스 검사가 **`MARKET_US`** 기준입니다. 종목 조회 자체는 '내 성적표'·
@@ -1773,7 +2425,7 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
     같은 근거이므로 반복하지 않습니다.
     """
     index = market["index"]
-    ui.markdown('#### 💵 달러 주문하기 (매수 전용)')
+    ui.markdown('#### 💵 달러 주문하기')
     ui.label(
         f'미국 상위 유니버스 종목만, 달러로만, 주식 수 단위로 주문합니다. '
         f'현재 주문 가능 목록에는 {len(index)}종목이 있습니다.'
@@ -1781,8 +2433,15 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
     ui.label(f'⏱️ {NOTICE_FILL_TIMING_USD}').classes('vh-muted')
 
     if not index:
-        error_banner('🚫 미국 주문 가능 종목 목록을 읽지 못해 달러 주문 창을 열 수 없습니다.')
+        error_banner(
+            '🚫 미국 주문 가능 종목 목록을 읽지 못해 달러 **매수** 창을 열 수 없습니다. '
+            '(보유 종목을 파는 리밸런싱 매도는 유니버스 목록과 무관하므로 아래에 그대로 '
+            '열려 있습니다.)'
+        )
+        _render_sell_form_usd(client, user_id, accounts, window, on_changed, bundles=bundles)
         return
+
+    ui.markdown('##### 💵 매수')
 
     # ⚠️ 원화와 같은 이유로 **페이지 함수 호출마다 새로 만들어지는 지역 상태**입니다(§0-3-8).
     account_options = {
@@ -1935,18 +2594,198 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         )
         on_changed()
 
-    ui.button('💵 달러 주문 저장 (매수)', on_click=_submit_usd).props('no-caps color=primary')
+    ui.button('💵 달러 매수 주문 저장', on_click=_submit_usd).props('no-caps color=primary')
     ui.label(
         '※ 저장 시점에는 예수금이 충분한지 확정할 수 없습니다 — 체결가(그날 미국 정규장 '
         '마감가)를 아직 모르기 때문입니다. 체결 시점에 모자라면 살 수 있는 만큼만 체결되고 '
         '사유가 남습니다.'
     ).classes('vh-muted')
 
+    ui.separator()
+    _render_sell_form_usd(client, user_id, accounts, window, on_changed, bundles=bundles)
+
+
+# -----------------------------------------------------------------------------
+# 7-SELL-USD. 🔁 리밸런싱 매도 칸 (달러) — 원화 판의 미러
+# -----------------------------------------------------------------------------
+#  갈라진 이유는 이 파일의 다른 미러들과 **정확히 같습니다**: ① 저장 함수가
+#  `save_sell_order_usd()`(다른 표) ② 접수 시간대 판정·문구가 USD 기준
+#  (`_window_message_usd` · `ORDER_WINDOW_TEXT_USD`) ③ 거래일 후보가
+#  `_upcoming_trading_days_usd()`(**저장일 자신을 포함** — §5-16).
+#  반대로 창 길이·창 번호·"이번 창 썼는가" 판정은 통화를 모르는 공유 함수(1-RB 절)를
+#  그대로 씁니다 — 규칙이 바뀌었는데 한쪽만 고쳐지는 사고를 막기 위해서입니다(§5-11-1).
+# -----------------------------------------------------------------------------
+def _render_sell_form_usd(client, user_id: str, accounts, window: dict, on_changed,
+                          *, bundles=None) -> None:
+    """달러 계좌들의 리밸런싱 매도 칸 묶음."""
+    ui.markdown('##### 🔁 달러 리밸런싱 매도 (계좌마다 창당 1회)')
+    ui.label(
+        '한 번의 매도 주문으로 종목 하나를 1주부터 보유 전량까지 팔 수 있습니다. '
+        f'접수 시간대는 달러 매수와 같고({ORDER_WINDOW_TEXT_USD}), 체결도 달러 매수와 같이 '
+        '주문을 넣은 바로 그날의 미국 정규장 마감가로 이루어집니다.'
+    ).classes('vh-muted')
+    ui.label(
+        '⚠️ 그날 미국 종가 수집이 실패하거나 미국 증시 휴장일이면 이 매도 주문도 체결되지 '
+        '않고 사유와 함께 취소됩니다. 그 경우 이번 창의 기회는 **다시 열립니다** — 취소된 '
+        '매도는 창을 소진하지 않습니다.'
+    ).classes('vh-muted vh-keep-all')
+
+    for account in accounts or []:
+        _render_sell_panel_usd(client, user_id, account, window, on_changed,
+                               bundle=_bundle_for(bundles, account.get("id")))
+
+
+def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on_changed,
+                           *, bundle) -> None:
+    """달러 계좌 1개의 매도 칸.
+
+    🔒 원화와 **같은 이중 방어** — 소유자를 여기서도 한 번 더 확인합니다(§0-3-8).
+    """
+    if account.get("user_id") != user_id:
+        error_banner('🚫 소유자가 확인되지 않는 달러 계좌라 매도 창을 그리지 않았습니다.')
+        return
+
+    account_id = account.get("id")
+    title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
+
+    with ui.card().classes('vh-card w-full'):
+        ui.markdown(f'**{esc(title)} (달러)**')
+
+        if bundle.get("error") is not None:
+            error_banner(
+                f'🚫 {_fail(bundle["error"], "달러 보유 종목·주문 내역을 불러오지 못해 매도 창을 열 수 없습니다.")}'
+            )
+            return
+        if bundle.get("positions") is None or bundle.get("orders") is None:
+            ui.label('달러 보유 종목·주문 내역을 아직 읽지 못해 매도 창을 열 수 없습니다.') \
+                .classes('vh-muted')
+            return
+
+        state = _rebalance_state(account, bundle["orders"], datetime.now(KST).date())
+        ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
+
+        if state["window"] is None:
+            info_banner(
+                'ℹ️ 아직 매수한 종목이 없어 리밸런싱 매도를 계산할 수 없습니다. '
+                '첫 매수가 체결되면 그날부터 이 달러 계좌의 창이 시작됩니다.\n\n'
+                f'{state["unavailable_reason"]}'
+            )
+            return
+
+        if state["used_order"] is not None:
+            used = state["used_order"]
+            info_banner(
+                'ℹ️ 이번 창은 이미 사용했습니다 — 다음 기회: '
+                f'{state["window"]["next_window_starts_on"]}\n\n'
+                f'이번 창에 쓴 주문: {used.get("stock_name") or ""} ({used.get("ticker")}) '
+                f'{used.get("requested_quantity")}주 · {_order_status_text(used)}\n\n'
+                '아직 체결 전(대기)이고 접수 시간대 안이라면, 아래 "내 달러 주문"에서 그 '
+                '매도 주문을 취소해 이번 창의 기회를 되살릴 수 있습니다.'
+            )
+            return
+
+        sellable = _sellable_positions(bundle["positions"])
+        if not sellable:
+            ui.label('이 달러 계좌에는 팔 수 있는 보유 종목이 없습니다.').classes('vh-muted')
+            return
+
+        held_by_ticker = {row["ticker"]: row["quantity"] for row in sellable}
+        name_by_ticker = {row["ticker"]: (row["stock_name"] or row["ticker"])
+                          for row in sellable}
+        options = {
+            row["ticker"]: f'{row["ticker"]} · {row["stock_name"] or row["ticker"]} '
+                           f'(보유 {row["quantity"]:,}주)'
+            for row in sellable
+        }
+
+        ticker_select = ui.select(
+            options, value=next(iter(options)), label='팔 종목 (보유 종목 중에서)',
+        ).classes('w-full')
+        quantity_input = ui.input(
+            '매도 수량 (몇 주)', placeholder='예: 3',
+        ).style('flex: 1 1 160px;')
+        ui.label(
+            '※ 1주부터 보유 전량까지 가능합니다. 이 달러 계좌에서는 이번 창에 **딱 한 번**만 '
+            '저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
+        ).classes('vh-muted vh-keep-all')
+
+        message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
+
+        async def _submit_sell_usd(_=None) -> None:
+            message.text = ''
+            if not window["is_open"]:
+                message.text = f'🚫 {_window_message_usd(window)}'
+                return
+            ticker = ticker_select.value
+            if not ticker:
+                message.text = '🚫 팔 종목을 골라 주세요.'
+                return
+            held = held_by_ticker.get(ticker)
+            if not held:
+                message.text = ('🚫 보유 수량을 확인하지 못했습니다 — 화면을 새로고침한 뒤 '
+                                '다시 시도해 주세요.')
+                return
+            try:
+                quantity = _parse_positive_int(quantity_input.value, '매도 수량')
+            except ValueError as exc:
+                message.text = f'🚫 {exc}'
+                return
+            if quantity > held:
+                message.text = (f'🚫 보유 수량({held:,}주)보다 많은 {quantity:,}주는 매도할 수 '
+                                '없습니다. 보유한 수량 이하로 다시 입력해 주세요.')
+                return
+
+            # 🔴 원화와 같은 이유로 창 번호를 **누를 때 다시 계산**합니다(위 원화 판 주석 참고).
+            try:
+                current = duel_rules.resolve_rebalance_window(
+                    account.get("window_type"), account.get("first_holding_date"),
+                    datetime.now(KST).date())
+            except DuelRuleError as exc:
+                message.text = f'🚫 {exc}'
+                return
+
+            try:
+                order = await run_blocking(
+                    save_sell_order_usd,
+                    client, account_id, ticker, name_by_ticker.get(ticker) or ticker,
+                    quantity, held, current["window_index"],
+                    # 🔴 **저장일 자신을 포함하는** 후보 목록이어야 합니다(§5-16) — 달러
+                    #    매도도 매수와 같이 그날 마감가로 체결되기 때문입니다.
+                    trading_days=_upcoming_trading_days_usd(window["now_kst"].date()),
+                )
+            except (DuelDbError, DuelRuleError) as exc:
+                message.text = f'🚫 {exc}'
+                ui.notify(f'🚫 {exc}', type='negative', multi_line=True, close_button='닫기',
+                          classes='whitespace-pre-line')
+                return
+            except Exception as exc:               # noqa: BLE001
+                text = _fail(exc, '달러 매도 주문을 저장하지 못했습니다. 잠시 후 다시 시도해 주세요.')
+                message.text = f'🚫 {text}'
+                ui.notify(f'🚫 {text}', type='negative', multi_line=True, close_button='닫기')
+                return
+
+            quantity_input.value = ''
+            ui.notify(
+                f'✅ 달러 리밸런싱 매도 주문을 저장했습니다 — {name_by_ticker.get(ticker)} '
+                f'({ticker}) {quantity:,}주\n'
+                f'체결 예정일: {order.get("target_date")} 미국 정규장 마감가 '
+                '(지금 체결된 것이 아닙니다)\n'
+                f'{ORDER_WINDOW_TEXT_USD} 안에서는 수량 수정·취소가 가능하고, 취소하면 이번 '
+                '창의 기회가 다시 열립니다.',
+                type='positive', multi_line=True, close_button='닫기',
+                classes='text-lg whitespace-pre-line',
+            )
+            on_changed()
+
+        ui.button('🔁 달러 리밸런싱 매도 주문 저장', on_click=_submit_sell_usd) \
+            .props('no-caps color=negative')
+
 
 # =============================================================================
 # 8. 주문 내역 (대기 중 주문 수정·취소 + 최근 결과)
 # =============================================================================
-async def _render_orders_section(client, user_id: str, accounts, window: dict, on_changed) -> None:
+async def _render_orders_section(client, user_id: str, accounts, window: dict, on_changed,
+                                 *, bundles=None) -> None:
     ui.markdown('#### 📋 내 주문')
     if not window["is_open"]:
         info_banner(
@@ -1954,13 +2793,20 @@ async def _render_orders_section(client, user_id: str, accounts, window: dict, o
             f'다음 접수 시간({ORDER_WINDOW_TEXT})에 다시 열립니다.'
         )
     for account in accounts:
-        await _render_account_orders(client, user_id, account, window, on_changed)
+        await _render_account_orders(client, user_id, account, window, on_changed,
+                                     bundle=_bundle_for(bundles, account.get("id")))
 
 
-async def _render_account_orders(client, user_id: str, account: dict, window: dict, on_changed) -> None:
+async def _render_account_orders(client, user_id: str, account: dict, window: dict, on_changed,
+                                 *, bundle=None) -> None:
     """계좌 1개의 주문 목록 — 대기 중 주문(수정·취소 가능) + 최근 결과.
 
     🔒 소유자 확인은 카드와 같은 이유로 여기서도 한 번 더 합니다(§0-3-8).
+
+    🔁 2026-08-21 — 주문 목록을 `bundle`(4-B 절)에서 받습니다. 매도 칸이 "이번 창을 썼는지"를
+       판정하려면 같은 목록이 필요한데, 두 곳이 각자 읽으면 왕복이 계좌 수만큼 늘고 게다가
+       **두 목록이 서로 다른 순간의 상태**가 될 수 있습니다(그 사이에 저장된 주문이 한쪽에만
+       보이는 상태). 묶음을 넘기지 않는 옛 호출부에서는 예전처럼 직접 읽습니다.
     """
     if account.get("user_id") != user_id:
         error_banner('🚫 소유자가 확인되지 않는 계좌라 주문을 표시하지 않았습니다.')
@@ -1970,8 +2816,14 @@ async def _render_account_orders(client, user_id: str, account: dict, window: di
     title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
     with ui.card().classes('vh-card w-full'):
         ui.markdown(f'**{esc(title)}**')
+        if bundle is not None and bundle.get("error") is not None:
+            error_banner(f'🚫 {_fail(bundle["error"], "주문 내역을 불러오지 못했습니다.")}')
+            return
         try:
-            orders = await run_blocking(fetch_my_orders, client, account_id)
+            if bundle is not None and bundle.get("orders") is not None:
+                orders = bundle["orders"]
+            else:
+                orders = await run_blocking(fetch_my_orders, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "주문 내역을 불러오지 못했습니다.")}')
             return
@@ -1996,7 +2848,10 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed) -> 
     (`utils/duel_db.py` 의 시간대 판정 + DB 트리거). 화면은 버튼을 감추는 것까지만 합니다.
     """
     order_id = order.get("id")
-    label = (f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
+    # 🔁 2026-08-21 — 매수·매도가 같은 목록에 섞이므로 방향을 **맨 앞에** 붙입니다.
+    #    (수량 수정·취소 자체는 side 와 무관하게 같은 함수·같은 트리거를 씁니다.)
+    label = (f'{_order_side_text(order)} · '
+             f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
              f'{order.get("requested_quantity")}주 · 체결 예정일 {order.get("target_date")}')
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
@@ -2065,14 +2920,20 @@ def _order_status_text(order: dict) -> str:
 
 
 def _render_order_history_table(orders) -> None:
-    """최근 주문 결과 표. 체결가·체결금액·사유를 **전부** 보여줍니다(§0-1 — 조용한 실패 금지)."""
-    headers = ['종목', '상태', '체결일', '체결가', '체결금액', '사유']
+    """최근 주문 결과 표. 체결가·체결금액·사유를 **전부** 보여줍니다(§0-1 — 조용한 실패 금지).
+
+    🔁 2026-08-21 — **'구분'(매수/매도) 칸이 생겼습니다.** 두 방향이 한 표에 섞이는데 방향을
+       안 적으면 "왜 이 종목이 줄었지?"를 내역만 보고는 알 수 없습니다. 매도 행에는 몇 번째
+       창을 쓴 주문인지도 함께 나옵니다(`_order_side_text()` — 통화를 모르는 공유 함수).
+    """
+    headers = ['종목', '구분', '상태', '체결일', '체결가', '체결금액', '사유']
     body_rows = []
     for order in orders:
         name = order.get("stock_name") or order.get("ticker")
         body_rows.append([
             (f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">'
              f'{esc(str(name))}<br>({esc(str(order.get("ticker")))})</div>'),
+            esc(_order_side_text(order)),
             esc(_order_status_text(order)),
             esc(str(order.get("filled_date") or order.get("target_date") or '—')),
             esc(format_amount(order.get("filled_price"), CURRENCY)
@@ -2089,7 +2950,7 @@ def _render_order_history_table(orders) -> None:
 # 8-USD. 💵 달러 주문 내역 — 다른 표(`duel_orders_usd`) · USD 접수 시간대 · 달러 표기
 # -----------------------------------------------------------------------------
 async def _render_orders_section_usd(client, user_id: str, accounts, window: dict,
-                                     on_changed) -> None:
+                                     on_changed, *, bundles=None) -> None:
     """달러 주문 내역 영역. 원화 `_render_orders_section()` 의 미러입니다.
 
     갈라진 이유는 ① 조회 함수가 `fetch_my_orders_usd`(다른 표) ② 안내 문구의 접수 시간대가
@@ -2102,11 +2963,12 @@ async def _render_orders_section_usd(client, user_id: str, accounts, window: dic
             f'다음 접수 시간({ORDER_WINDOW_TEXT_USD})에 다시 열립니다.'
         )
     for account in accounts:
-        await _render_account_orders_usd(client, user_id, account, window, on_changed)
+        await _render_account_orders_usd(client, user_id, account, window, on_changed,
+                                         bundle=_bundle_for(bundles, account.get("id")))
 
 
 async def _render_account_orders_usd(client, user_id: str, account: dict, window: dict,
-                                     on_changed) -> None:
+                                     on_changed, *, bundle=None) -> None:
     """달러 계좌 1개의 주문 목록 — 대기 중 주문(수정·취소 가능) + 최근 결과.
 
     🔒 소유자 확인은 원화와 같은 이유로 여기서도 한 번 더 합니다(§0-3-8).
@@ -2119,8 +2981,14 @@ async def _render_account_orders_usd(client, user_id: str, account: dict, window
     title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
     with ui.card().classes('vh-card w-full'):
         ui.markdown(f'**{esc(title)} (달러)**')
+        if bundle is not None and bundle.get("error") is not None:
+            error_banner(f'🚫 {_fail(bundle["error"], "달러 주문 내역을 불러오지 못했습니다.")}')
+            return
         try:
-            orders = await run_blocking(fetch_my_orders_usd, client, account_id)
+            if bundle is not None and bundle.get("orders") is not None:
+                orders = bundle["orders"]
+            else:
+                orders = await run_blocking(fetch_my_orders_usd, client, account_id)
         except Exception as exc:                   # noqa: BLE001
             error_banner(f'🚫 {_fail(exc, "달러 주문 내역을 불러오지 못했습니다.")}')
             return
@@ -2149,7 +3017,9 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed)
     수정·취소 가능 시간대인지는 화면에서도 확인하지만 **최종 권한은 서버**입니다.
     """
     order_id = order.get("id")
-    label = (f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
+    # 🔁 원화와 같은 이유로 방향을 맨 앞에 붙입니다(매수·매도가 한 목록에 섞입니다).
+    label = (f'{_order_side_text(order)} · '
+             f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
              f'{order.get("requested_quantity")}주 · '
              f'체결 예정일 {order.get("target_date")} (미국 정규장 마감가)')
 
@@ -2203,16 +3073,17 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed)
 def _render_order_history_table_usd(orders) -> None:
     """달러 최근 주문 결과 표. 체결가·체결금액·사유를 **전부** 보여줍니다(§0-1).
 
-    상태 문구(`_order_status_text()`)는 통화를 모르는 순수 함수라 원화와 **공유**하고,
-    갈라진 것은 금액 표기 통화 하나뿐입니다.
+    상태 문구(`_order_status_text()`)와 방향 문구(`_order_side_text()`)는 통화를 모르는
+    순수 함수라 원화와 **공유**하고, 갈라진 것은 금액 표기 통화 하나뿐입니다.
     """
-    headers = ['종목', '상태', '체결일', '체결가', '체결금액', '사유']
+    headers = ['종목', '구분', '상태', '체결일', '체결가', '체결금액', '사유']
     body_rows = []
     for order in orders:
         name = order.get("stock_name") or order.get("ticker")
         body_rows.append([
             (f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">'
              f'{esc(str(name))}<br>({esc(str(order.get("ticker")))})</div>'),
+            esc(_order_side_text(order)),
             esc(_order_status_text(order)),
             esc(str(order.get("filled_date") or order.get("target_date") or '—')),
             esc(format_amount(order.get("filled_price"), CURRENCY_USD)

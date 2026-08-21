@@ -398,8 +398,8 @@ def test_usd_order_form_passes_the_usd_candidate_builder_to_save_order_usd():
 # 4. 🔴 DB 호출 — 달러 블록은 `_usd` 함수만 부릅니다 (다른 표를 읽으면 안 됩니다)
 # =============================================================================
 KRW_DB_FUNCTIONS = ("fetch_my_accounts", "fetch_my_cash_ledger", "fetch_my_positions",
-                    "fetch_my_snapshots", "fetch_my_orders", "save_order", "edit_order",
-                    "cancel_order", "opt_in")
+                    "fetch_my_snapshots", "fetch_my_orders", "save_order", "save_sell_order",
+                    "edit_order", "cancel_order", "opt_in")
 USD_DB_FUNCTIONS = tuple(f"{name}_usd" for name in KRW_DB_FUNCTIONS)
 
 
@@ -980,7 +980,10 @@ def test_krw_rendering_path_is_untouched_when_the_user_has_no_usd_account():
 
     drawn = []
 
-    async def _spy_card(client, user_id, account, market):
+    # 🔁 2026-08-21 — 계좌 카드가 `bundle`(포지션·주문 묶음)을 **키워드로** 받습니다.
+    #    묶음을 위에서 한 번만 읽어 카드·주문 폼·주문 내역이 나눠 쓰는 구조로 바뀐 결과이고
+    #    (왕복 수는 그대로), 카드가 그려지는 **순서와 개수**를 보는 이 검사의 취지는 그대로입니다.
+    async def _spy_card(client, user_id, account, market, *, bundle=None):
         drawn.append(account.get("window_type"))
 
     stub = _UiStub([])
@@ -1017,7 +1020,11 @@ def test_krw_notices_and_helpers_kept_their_exact_wording():
         "주문은 저장 즉시 체결되지 않습니다. 저장한 주문은 예약일 뿐이고, "
         "다음 거래일(D+1)의 장이 끝난 뒤 확정된 종가로 그날 밤 배치가 체결합니다."
     ), "문장 사이 줄바꿈을 다시 공백으로 되돌리면 원래 문구와 완전히 같아야 합니다."
-    assert page.NOTICE_BUY_ONLY.startswith("이 모듈은 매수만 가능합니다.")
+    # 🔁 2026-08-21 — `NOTICE_BUY_ONLY` 는 **사실이 바뀌어** 다시 썼습니다(옛 문장:
+    #    "이 모듈은 매수만 가능합니다. / 매도는 지원하지 않습니다 …"). 그 검사는 아래
+    #    §10 의 리밸런싱 매도 절로 옮겼습니다 — 이 함수는 "이번 라운드가 원화 문구를
+    #    건드리지 않았는가"를 보는 자리이므로, 의도적으로 바꾼 문구는 여기서 고정하지
+    #    않습니다(안 그러면 두 자리가 서로 반대되는 것을 주장하게 됩니다).
     assert page.ORDER_WINDOW_TEXT == "18:00:01~22:00:00 (한국시간)"
     assert page.CURRENCY == "KRW"
 
@@ -1087,3 +1094,507 @@ def test_usd_card_and_orders_render_chain_is_async_end_to_end():
         assert isinstance(FUNCTIONS[name], ast.AsyncFunctionDef), (
             f"{name}() 이 동기 함수입니다 — 그 지점에서 이벤트 루프가 다시 막힙니다."
         )
+
+
+# =============================================================================
+# 10. 🔁 주기적 리밸런싱 **매도** (2026-08-21 오너 정정 — 원화·달러 공통)
+# =============================================================================
+#  ── 이 절이 왜 생겼는가 ──────────────────────────────────────────────────────
+#  이 모듈은 "매도는 영원히 없다"를 스키마·작업지시서·화면 문구·테스트에까지 박아 두고
+#  만들어졌습니다. 2026-08-21 오너가 그 결정 자체가 **이전 라운드의 대화 착오**였음을
+#  확인해 정정했고(계좌마다 30/90/180일 주기로 딱 1회 리밸런싱 매도), 그래서 이번 라운드는
+#  **사실이 반대로 바뀐 자리들**을 고칩니다. 이 절이 고정하려는 사고는 두 종류입니다.
+#    ① 🔴 **낡은 문구가 살아남는 것** — "매도는 지원하지 않습니다"가 한 군데라도 남으면
+#       화면이 사실과 반대인 말을 합니다(§0-1). 특히 규칙 3 은 "매도가 안 되니까 계좌를
+#       3개로 나눴다"를 **논거로** 쓰고 있었으므로, 문장 몇 개를 지우는 것으로는 부족하고
+#       근거 자체가 바뀌었는지를 봐야 합니다.
+#    ② 🔴 **창 판정이 두 벌이 되는 것** — 창 길이·창 번호는 규칙 계층
+#       (`resolve_rebalance_window()`)에만 있어야 하고, 화면이 30/90/180 을 다시 세면
+#       규칙이 바뀔 때 화면만 낡습니다(§0-3-10).
+# =============================================================================
+def _capture_render(fn, *args, **kwargs):
+    """화면 함수를 스텁 위젯으로 실제 실행하고, 화면에 나간 문자열을 하나로 이어 돌려줍니다.
+
+    `web/components/widgets.py` 의 배너들도 `ui` 를 통해 그리므로 두 모듈을 함께 갈아끼웁니다
+    (이 파일 위쪽 `_RenderHarness` 와 같은 방식).
+    """
+    import web.components.widgets as widgets
+    import web.pages.duel_page as page
+
+    sink = []
+    stub = _UiStub(sink)
+    saved = (page.ui, widgets.ui)
+    page.ui, widgets.ui = stub, stub
+    try:
+        fn(*args, **kwargs)
+    finally:
+        page.ui, widgets.ui = saved
+    return "\n".join(sink)
+
+
+def _today_kst():
+    return datetime.now(KST).date()
+
+
+# -----------------------------------------------------------------------------
+# 10-1. 고지 문구 — "매도 없음"이 한 글자도 남아 있지 않아야 합니다
+# -----------------------------------------------------------------------------
+def test_buy_only_notices_now_describe_the_rebalancing_sell():
+    """`NOTICE_BUY_ONLY` / `_USD` 가 **매수 + 창당 1회 매도**를 말하는지."""
+    import web.pages.duel_page as page
+
+    for name, text in (("NOTICE_BUY_ONLY", page.NOTICE_BUY_ONLY),
+                       ("NOTICE_BUY_ONLY_USD", page.NOTICE_BUY_ONLY_USD)):
+        # ① 옛 사실이 남아 있으면 화면이 사실과 반대인 말을 합니다.
+        assert "매도는 지원하지 않습니다" not in text, f"{name} 에 옛 '매도 없음' 문구가 남아 있습니다."
+        assert "매수만 가능합니다" not in text, f"{name} 이 아직 '매수만 가능'이라고 말합니다."
+        assert "팔 수 없" not in text, f"{name} 에 '팔 수 없다'는 옛 서술이 남아 있습니다."
+        # ② 새 사실 — 창마다 1회, 종목 1개, 1주~전량, 기회는 누적되지 않음.
+        assert "창마다 딱 한 번" in text, f"{name} 이 '창당 1회'를 말하지 않습니다."
+        assert "1주부터 전량까지" in text, f"{name} 이 매도 수량 범위를 말하지 않습니다."
+        assert "다음 창으로 넘어가지 않습니다" in text, (
+            f"{name} 이 '놓친 기회는 누적되지 않는다'를 말하지 않습니다(스펙 확정 ②)."
+        )
+        # ③ 창 길이 세 개가 전부 문구에 들어 있는지(규칙 계층 값 그대로).
+        for window_type, window_days in duel_rules.REBALANCE_WINDOW_DAYS.items():
+            assert f"{window_days}일" in text, f"{name} 에 {window_type} 창 길이가 없습니다."
+        # ④ 창을 세는 기준이 개설일이 아니라 **최초 보유일**이라는 사실.
+        assert "처음 주식이 들어온 날" in text, (
+            f"{name} 이 창 계산의 기준일을 말하지 않습니다 — 이걸 안 적으면 사용자는 "
+            "개설일부터 세는 줄 압니다."
+        )
+
+    # 두 문구는 서로 복사본이 아니어야 합니다(달러 쪽은 '원화와 따로 센다'가 더 붙습니다).
+    assert page.NOTICE_BUY_ONLY != page.NOTICE_BUY_ONLY_USD
+    # 상시 노출 목록의 자리·개수는 그대로입니다(고지는 여전히 원화 3종 / 달러 4종).
+    assert page.NOTICE_BUY_ONLY in page.MANDATORY_NOTICES
+    assert page.NOTICE_BUY_ONLY_USD in page.MANDATORY_NOTICES_USD
+    assert len(page.MANDATORY_NOTICES) == 3 and len(page.MANDATORY_NOTICES_USD) == 4
+
+
+def test_rebalance_window_text_is_built_from_the_rule_layer_constant():
+    """§0-3-10 — 화면이 30/90/180 을 따로 적어두지 않고 규칙 계층에서 만들어 씁니다."""
+    import web.pages.duel_page as page
+
+    expected = " · ".join(
+        f'{page.WINDOW_TITLES[window_type]} {duel_rules.REBALANCE_WINDOW_DAYS[window_type]}일'
+        for window_type in duel_rules.ACCOUNT_WINDOW_TYPES
+    )
+    assert page.REBALANCE_WINDOW_TEXT == expected
+    # 통화를 모르는 값이므로 **하나만** 있어야 합니다(원화용/달러용으로 갈리면 안 됩니다).
+    assert not hasattr(page, "REBALANCE_WINDOW_TEXT_USD"), (
+        "창 길이는 통화와 무관한 값입니다 — 달러용 복제본을 만들면 한쪽만 낡습니다(§5-11-1)."
+    )
+
+
+def test_join_cards_no_longer_say_buy_only():
+    """참여(옵트인) 카드의 '매수만 가능' 불릿이 두 트랙 모두 바뀌었는지."""
+    for name in ("_render_opt_in", "_render_opt_in_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert "거래는 **매수만** 가능" not in src, f"{name}() 에 옛 '매수만' 불릿이 남아 있습니다."
+        assert "REBALANCE_WINDOW_TEXT" in src, (
+            f"{name}() 이 리밸런싱 주기를 안내하지 않습니다."
+        )
+
+
+def test_order_form_headings_dropped_the_buy_only_qualifier():
+    """주문 폼 제목·버튼에서 '(매수 전용)'/'(매수)' 표기가 빠졌는지."""
+    assert "주문하기 (매수 전용)" not in PAGE_SRC
+    assert "주문 저장 (매수)" not in PAGE_SRC
+    assert "'#### 🛒 주문하기'" in PAGE_SRC
+    assert "'#### 💵 달러 주문하기'" in PAGE_SRC
+    assert "'🛒 매수 주문 저장'" in PAGE_SRC
+    assert "'💵 달러 매수 주문 저장'" in PAGE_SRC
+
+
+# -----------------------------------------------------------------------------
+# 10-2. 규칙 3 — 근거 자체가 바뀌었는지 (문장 몇 개 지우는 것으로는 부족합니다)
+# -----------------------------------------------------------------------------
+def test_krw_rule_three_no_longer_argues_that_selling_is_impossible():
+    """원화 규칙 3 이 "매도가 안 되니까 3개"라는 **논거**를 더 이상 쓰지 않는지."""
+    src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_render_rules_expansion"])
+
+    for dead in ("매도는 지원하지 않습니다", "한 번 산 종목은",
+                 "팔고 갈아탈 방법이 없습니다", "세 계좌의 차이는 규칙이 아니라 선택입니다"):
+        assert dead not in src, (
+            f"규칙 설명에 옛 논거/제목이 남아 있습니다: {dead!r} — 이 전제는 이제 사실이 "
+            "아닙니다(2026-08-21 오너 정정)."
+        )
+    # 새 근거: 세 계좌가 서로 다른 **주기**로 리밸런싱한다.
+    assert "규칙 3) 세 계좌의 차이는 '손보는 주기'입니다" in src
+    assert "리밸런싱" in src and "창마다 1회로 제한되는 것은" in src
+    assert "예시)" in src, "규칙 3 에 '예시)' 줄이 사라졌습니다(이 화면의 읽기 방식)."
+    # 번호 목록·구분선 관례가 유지되는지(형식 회귀).
+    assert src.count("---\\n\\n") >= 9
+    assert "vh-rule-divider" in src
+
+
+def test_usd_rules_expansion_now_has_the_three_accounts_rule_too():
+    """달러 규칙 설명에도 같은 규칙이 **같은 자리(3번)** 로 들어왔는지."""
+    src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_render_rules_expansion_usd"])
+
+    assert "규칙 3) 세 달러 계좌의 차이는 '손보는 주기'입니다" in src, (
+        "달러 규칙 설명에 '왜 계좌가 3개인지' 규칙이 없습니다(원화와 같은 자리여야 합니다)."
+    )
+    assert "예시)" in src
+    # 뒤 규칙들이 하나씩 밀렸는지 — 번호가 겹치거나 빠지면 사용자가 규칙을 찾지 못합니다.
+    for number in range(1, 12):
+        assert f"**규칙 {number})" in src, f"달러 규칙 {number} 번이 없습니다(번호가 밀리다 빠짐)."
+    assert "**규칙 12)" not in src
+
+    # 창 길이는 두 판이 **같은 규칙 상수**를 씁니다(숫자를 다시 적지 않았는지).
+    for name in ("_render_rules_expansion", "_render_rules_expansion_usd"):
+        body = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert "duel_rules.REBALANCE_WINDOW_DAYS" in body, (
+            f"{name}() 이 창 길이를 규칙 계층에서 가져오지 않습니다(§0-3-10)."
+        )
+
+
+# -----------------------------------------------------------------------------
+# 10-3. 매도 폼 배선 — 두 통화 모두, 각자의 저장 함수·거래일 후보로
+# -----------------------------------------------------------------------------
+def test_sell_panels_save_through_the_matching_currency_function():
+    """매도 저장이 통화별로 **다른 함수·다른 거래일 후보**를 쓰는지(AST)."""
+    krw = [c for c in _run_blocking_calls(FUNCTIONS["_render_sell_panel"])
+           if c[0] == "save_sell_order"]
+    assert len(krw) == 1, f"원화 매도 저장 호출이 정확히 1건이어야 합니다: {krw}"
+    krw_days = {kw.arg: kw.value for kw in krw[0][2]}.get("trading_days")
+    assert (isinstance(krw_days, ast.Call) and isinstance(krw_days.func, ast.Name)
+            and krw_days.func.id == "_upcoming_trading_days"), (
+        "원화 매도가 원화용 거래일 후보(저장일 **다음 날**부터)를 넘기지 않습니다."
+    )
+
+    usd = [c for c in _run_blocking_calls(FUNCTIONS["_render_sell_panel_usd"])
+           if c[0] == "save_sell_order_usd"]
+    assert len(usd) == 1, f"달러 매도 저장 호출이 정확히 1건이어야 합니다: {usd}"
+    usd_days = {kw.arg: kw.value for kw in usd[0][2]}.get("trading_days")
+    assert (isinstance(usd_days, ast.Call) and isinstance(usd_days.func, ast.Name)
+            and usd_days.func.id == "_upcoming_trading_days_usd"), (
+        "달러 매도가 `_upcoming_trading_days_usd()` 를 넘기지 않습니다 — 원화용을 넘기면 "
+        "체결이 조용히 하루 밀립니다(§5-16, 매수에서 실제로 났던 사고)."
+    )
+
+    # 첫 인자는 두 경우 모두 이 접속 전용 클라이언트여야 합니다(§0-3-8).
+    for target, args, _kw in krw + usd:
+        assert args and isinstance(args[0], ast.Name) and args[0].id == "client", target
+
+
+def test_sell_panels_ask_the_rule_layer_for_the_window_number():
+    """§0-3-10 — 화면이 창 번호를 스스로 세지 않고 규칙 함수에 물어봅니다."""
+    for name in ("_render_sell_panel", "_render_sell_panel_usd"):
+        used = _referenced_callables(FUNCTIONS[name])
+        assert "_rebalance_state" in used, f"{name}() 이 창 상태 계산을 공유 함수에 맡기지 않습니다."
+        assert "resolve_rebalance_window" in used, (
+            f"{name}() 이 저장 직전에 창 번호를 다시 계산하지 않습니다 — 화면을 열어둔 채 "
+            "창이 바뀌면 지난 창의 자리에 주문이 들어갑니다."
+        )
+        # 창 길이를 화면이 다시 세지 않는지.
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert "REBALANCE_WINDOW_DAYS" not in src
+
+
+def test_sell_panels_recheck_the_owner_like_every_other_account_renderer():
+    """🔒 §0-3-8 이중 방어 — 계좌를 그리는 새 함수에도 소유자 확인이 있는지."""
+    for name in ("_render_sell_panel", "_render_sell_panel_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert 'account.get("user_id") != user_id' in src, f"{name}() 에 소유자 확인이 없습니다."
+        args = [a.arg for a in FUNCTIONS[name].args.args]
+        assert "client" in args and "user_id" in args, f"{name}{tuple(args)}"
+
+
+def test_sell_form_is_reachable_even_when_the_universe_snapshot_is_missing():
+    """매도에는 유니버스 검사가 없으므로, 목록을 못 읽는 날에도 매도 칸은 열려야 합니다.
+
+    (`save_sell_order()` 독스트링: 보유 종목이 상위 목록에서 빠졌다고 "팔 수도 없는" 상태가
+    되면 그게 더 나쁩니다 — 그래서 그 함수에는 `universe_tickers` 인자 자체가 없습니다.)
+    """
+    for form, sell in (("_render_order_form", "_render_sell_form"),
+                       ("_render_order_form_usd", "_render_sell_form_usd")):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[form])
+        assert src.count(f"{sell}(") >= 2, (
+            f"{form}() 이 유니버스를 못 읽어 일찍 반환하는 경로에서 {sell}() 를 부르지 "
+            "않습니다 — 그날은 매도 칸이 통째로 사라집니다."
+        )
+
+
+# -----------------------------------------------------------------------------
+# 10-4. 창 상태 계산 — 순수 함수의 실제 동작
+# -----------------------------------------------------------------------------
+def test_rebalance_state_does_not_crash_before_the_first_buy():
+    """🔴 `first_holding_date` 가 없으면 **예외가 화면까지 올라오면 안 됩니다**(§0-1)."""
+    import web.pages.duel_page as page
+
+    account = {"id": "a1", "user_id": "u1", "window_type": "M1", "first_holding_date": None}
+    state = page._rebalance_state(account, [], _today_kst())
+    assert state["window"] is None
+    assert state["used_order"] is None
+    assert state["unavailable_reason"], "왜 계산할 수 없는지 사유가 비어 있습니다."
+    assert "리밸런싱 창을 계산할 수 없습니다" in state["unavailable_reason"]
+
+    badge = page._rebalance_badge_text(state)
+    assert "아직 계산할 수 없습니다" in badge and "첫 매수 전" in badge
+
+
+def test_rebalance_state_counts_only_live_sell_orders_of_this_window():
+    """취소된 매도·다른 창의 매도·매수는 이번 창을 소진하지 않습니다(DB 인덱스와 같은 조건)."""
+    import web.pages.duel_page as page
+
+    account = {"id": "a1", "user_id": "u1", "window_type": "M1",
+               "first_holding_date": "2020-01-01"}
+    today = _today_kst()
+    current = duel_rules.resolve_rebalance_window("M1", "2020-01-01", today)
+    index = current["window_index"]
+
+    # ① 아무 매도도 없을 때.
+    empty = page._rebalance_state(account, [], today)
+    assert empty["window"]["window_index"] == index
+    assert empty["used_order"] is None
+
+    # ② 관계없는 주문들만 있을 때 — 전부 이번 창을 소진하지 않습니다.
+    irrelevant = [
+        {"id": "o-buy", "side": "buy", "status": "filled", "rebalance_window_index": None},
+        {"id": "o-cancelled", "side": "sell", "status": "cancelled",
+         "rebalance_window_index": index},
+        {"id": "o-other-window", "side": "sell", "status": "pending",
+         "rebalance_window_index": index - 1},
+    ]
+    assert page._rebalance_state(account, irrelevant, today)["used_order"] is None, (
+        "취소된 매도/다른 창의 매도/매수 중 하나가 이번 창을 소진시키고 있습니다 — "
+        "DB 부분 유니크 인덱스(status <> 'cancelled')와 조건이 어긋납니다."
+    )
+
+    # ③ 살아 있는 이번 창의 매도가 있으면 소진 — pending 도 filled 도 모두.
+    for status in ("pending", "filled"):
+        rows = irrelevant + [{"id": f"o-{status}", "side": "sell", "status": status,
+                              "ticker": "005930", "stock_name": "삼성전자",
+                              "requested_quantity": 2, "rebalance_window_index": index}]
+        used = page._rebalance_state(account, rows, today)["used_order"]
+        assert used is not None and used["id"] == f"o-{status}"
+
+    badge = page._rebalance_badge_text(
+        page._rebalance_state(account, [
+            {"id": "o", "side": "sell", "status": "pending", "rebalance_window_index": index},
+        ], today))
+    assert "이미 사용했습니다" in badge
+    assert str(current["next_window_starts_on"]) in badge, (
+        "이미 쓴 창의 뱃지가 '다음 기회' 날짜를 말하지 않습니다."
+    )
+
+
+def test_rebalance_badge_counts_the_window_from_one_for_humans():
+    """저장값은 0부터, 표시값은 1부터 — 둘이 섞이지 않는지."""
+    import web.pages.duel_page as page
+
+    account = {"id": "a1", "user_id": "u1", "window_type": "M1",
+               "first_holding_date": _today_kst()}
+    state = page._rebalance_state(account, [], _today_kst())
+    assert state["window"]["window_index"] == 0
+    badge = page._rebalance_badge_text(state)
+    assert "1번째 창" in badge and "0번째 창" not in badge
+    assert f'{duel_rules.REBALANCE_WINDOW_DAYS["M1"]}일 남음' in badge
+
+
+def test_sellable_positions_keeps_everything_it_can_actually_sell():
+    """0주 포지션만 빠지고, 상장폐지 종목은 **조용히 사라지지 않습니다**(§0-1)."""
+    import web.pages.duel_page as page
+
+    rows = page._sellable_positions([
+        {"ticker": "005930", "stock_name": "삼성전자", "quantity": 3, "status": "active"},
+        {"ticker": "000660", "stock_name": "SK하이닉스", "quantity": 0, "status": "active"},
+        {"ticker": "DEAD", "stock_name": "상장폐지사", "quantity": 1, "status": "delisted"},
+    ])
+    tickers = [row["ticker"] for row in rows]
+    assert "000660" not in tickers, "0주 포지션은 팔 수 없습니다."
+    assert tickers == ["005930", "DEAD"], f"상장폐지 종목이 목록에서 사라졌습니다: {tickers}"
+
+
+# -----------------------------------------------------------------------------
+# 10-5. 실제 렌더 — 창을 이미 썼으면 버튼이 없어야 합니다
+# -----------------------------------------------------------------------------
+_SELL_ACCOUNT = {"id": "krw-m1", "user_id": "uid-1", "window_type": "M1",
+                 "anchor_date": "2026-08-03", "first_holding_date": "2020-01-01"}
+_SELL_ACCOUNT_USD = {"id": "usd-m1", "user_id": "uid-1", "window_type": "M1",
+                     "anchor_date": "2026-08-05", "first_holding_date": "2020-01-01"}
+_SELL_POSITIONS = [{"ticker": "005930", "stock_name": "삼성전자", "quantity": 4,
+                    "avg_cost": 70000.0, "status": "active"}]
+
+
+def _open_window():
+    import web.pages.duel_page as page
+    return page._order_window_state(datetime(2026, 8, 19, 19, 0, 0, tzinfo=KST))
+
+
+def _open_window_usd():
+    import web.pages.duel_page as page
+    return page._order_window_state_usd(datetime(2026, 8, 19, 17, 0, 0, tzinfo=KST))
+
+
+def test_sell_panel_offers_the_button_when_the_window_is_free():
+    import web.pages.duel_page as page
+
+    blob = _capture_render(
+        page._render_sell_panel, object(), "uid-1", _SELL_ACCOUNT, _open_window(),
+        lambda: None,
+        bundle={"positions": _SELL_POSITIONS, "orders": [], "error": None})
+
+    assert "🔁 리밸런싱 매도 주문 저장" in blob, "창이 비어 있는데 매도 버튼이 없습니다."
+    assert "이미 사용했습니다" not in blob
+    assert "이번 창 아직 안 씀" in blob
+
+
+def test_sell_panel_hides_the_button_and_names_the_next_chance_when_used():
+    """🔴 이번 창을 이미 썼으면 버튼이 사라지고 **다음 기회 날짜**를 말해야 합니다."""
+    import web.pages.duel_page as page
+
+    today = _today_kst()
+    window = duel_rules.resolve_rebalance_window("M1", "2020-01-01", today)
+    used = {"id": "o1", "side": "sell", "status": "pending", "ticker": "005930",
+            "stock_name": "삼성전자", "requested_quantity": 2,
+            "rebalance_window_index": window["window_index"]}
+
+    blob = _capture_render(
+        page._render_sell_panel, object(), "uid-1", _SELL_ACCOUNT, _open_window(),
+        lambda: None,
+        bundle={"positions": _SELL_POSITIONS, "orders": [used], "error": None})
+
+    assert "🔁 리밸런싱 매도 주문 저장" not in blob, (
+        "이번 창을 이미 썼는데 매도 버튼이 그대로 있습니다 — DB 가 막긴 하지만 사용자는 "
+        "누를 수 있다고 착각하게 됩니다."
+    )
+    assert "이번 창은 이미 사용했습니다" in blob
+    assert str(window["next_window_starts_on"]) in blob, "다음 기회 날짜가 없습니다."
+
+
+def test_sell_panel_is_informational_before_the_first_buy():
+    """첫 매수 전 — 예외가 아니라 **안내**로 끝나야 합니다(계좌 카드가 사라지면 안 됩니다)."""
+    import web.pages.duel_page as page
+
+    account = dict(_SELL_ACCOUNT, first_holding_date=None)
+    blob = _capture_render(
+        page._render_sell_panel, object(), "uid-1", account, _open_window(), lambda: None,
+        bundle={"positions": [], "orders": [], "error": None})
+
+    assert "아직 매수한 종목이 없어 리밸런싱 매도를 계산할 수 없습니다" in blob
+    assert "🔁 리밸런싱 매도 주문 저장" not in blob
+
+
+def test_usd_sell_panel_behaves_the_same_but_speaks_dollars():
+    import web.pages.duel_page as page
+
+    blob = _capture_render(
+        page._render_sell_panel_usd, object(), "uid-1", _SELL_ACCOUNT_USD, _open_window_usd(),
+        lambda: None,
+        bundle={"positions": [{"ticker": "AAPL", "stock_name": "Apple Inc.", "quantity": 3,
+                               "avg_cost": 200.0, "status": "active"}],
+                "orders": [], "error": None})
+
+    assert "🔁 달러 리밸런싱 매도 주문 저장" in blob
+    assert "(달러)" in blob
+
+
+def test_sell_panel_refuses_a_bundle_it_could_not_read():
+    """§0-1 — 못 읽은 것을 '보유 없음'으로 위장하지 않습니다."""
+    import web.pages.duel_page as page
+
+    blob = _capture_render(
+        page._render_sell_panel, object(), "uid-1", _SELL_ACCOUNT, _open_window(), lambda: None,
+        bundle={"positions": None, "orders": None, "error": None})
+    assert "읽지 못해 매도 창을 열 수 없습니다" in blob
+    assert "🔁 리밸런싱 매도 주문 저장" not in blob
+
+
+def test_a_sell_panel_for_someone_elses_account_is_not_drawn():
+    """🔒 §0-3-8 이중 방어 — 남의 계좌의 매도 칸은 그리지 않습니다."""
+    import web.pages.duel_page as page
+
+    banners = []
+    saved = page.error_banner
+    page.error_banner = lambda text: banners.append(str(text))
+    try:
+        blob = _capture_render(
+            page._render_sell_panel, object(), "uid-1",
+            dict(_SELL_ACCOUNT, user_id="uid-someone-else"), _open_window(), lambda: None,
+            bundle={"positions": _SELL_POSITIONS, "orders": [], "error": None})
+    finally:
+        page.error_banner = saved
+
+    assert any("소유자가 확인되지 않는" in text for text in banners), banners
+    assert "🔁 리밸런싱 매도 주문 저장" not in blob
+
+
+# -----------------------------------------------------------------------------
+# 10-6. 주문 내역 — 매수/매도 구분 칸
+# -----------------------------------------------------------------------------
+def test_order_history_tables_have_a_buy_sell_column_in_both_currencies():
+    import web.pages.duel_page as page
+
+    orders = [
+        {"ticker": "005930", "stock_name": "삼성전자", "side": "buy", "status": "filled",
+         "filled_quantity": 3, "filled_price": 70000.0, "filled_amount": 210000.0,
+         "filled_date": "2026-08-18", "rebalance_window_index": None},
+        {"ticker": "005930", "stock_name": "삼성전자", "side": "sell", "status": "filled",
+         "filled_quantity": 2, "filled_price": 71000.0, "filled_amount": 142000.0,
+         "filled_date": "2026-08-20", "rebalance_window_index": 0},
+    ]
+    blob = _capture_render(page._render_order_history_table, orders)
+    assert "구분" in blob, "매수/매도 구분 칸이 없습니다."
+    assert "🛒 매수" in blob and "🔁 매도 (1번째 창)" in blob
+    # 기존 칸이 그대로 남아 있는지(회귀).
+    for header in ("종목", "상태", "체결일", "체결가", "체결금액", "사유"):
+        assert header in blob
+
+    blob_usd = _capture_render(page._render_order_history_table_usd, [
+        dict(orders[1], ticker="AAPL", stock_name="Apple Inc.", filled_price=200.0,
+             filled_amount=400.0),
+    ])
+    assert "구분" in blob_usd and "🔁 매도 (1번째 창)" in blob_usd
+    assert "$200.00" in blob_usd, "달러 표기가 사라졌습니다."
+
+
+def test_order_side_text_never_guesses_an_unknown_side():
+    """§0-1 — side 를 모르면 '매수'로 위장하지 않습니다(옛 행에는 side 가 없을 수 있습니다)."""
+    import web.pages.duel_page as page
+
+    assert page._order_side_text({"side": "buy"}) == "🛒 매수"
+    assert page._order_side_text({"side": "sell"}) == "🔁 매도"
+    assert page._order_side_text({"side": "sell", "rebalance_window_index": 2}) == "🔁 매도 (3번째 창)"
+    assert page._order_side_text({}) == "—"
+    assert page._order_side_text({"side": "weird"}) == "weird"
+
+
+def test_pending_rows_show_the_side_in_both_currencies():
+    for name in ("_render_pending_order_row", "_render_pending_order_row_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert "_order_side_text(order)" in src, (
+            f"{name}() 이 대기 주문의 매수/매도를 표시하지 않습니다 — 두 방향이 한 목록에 "
+            "섞이는데 방향이 없으면 어느 쪽인지 알 수 없습니다."
+        )
+
+
+# -----------------------------------------------------------------------------
+# 10-7. 왕복 수 — 매도 칸 때문에 조회가 늘어나지 않았는지 (§0-3-2 의 정신)
+# -----------------------------------------------------------------------------
+def test_positions_and_orders_are_read_once_per_account_not_twice():
+    """계좌별 포지션·주문은 **한 번씩만** 읽고 카드·주문 폼·주문 내역이 나눠 씁니다."""
+    with _RenderHarness(SYNTHETIC_KRW_ACCOUNTS, SYNTHETIC_USD_ACCOUNTS) as harness:
+        harness.run()
+
+    for name, accounts in (("fetch_my_positions", SYNTHETIC_KRW_ACCOUNTS),
+                           ("fetch_my_orders", SYNTHETIC_KRW_ACCOUNTS),
+                           ("fetch_my_positions_usd", SYNTHETIC_USD_ACCOUNTS),
+                           ("fetch_my_orders_usd", SYNTHETIC_USD_ACCOUNTS)):
+        assert harness.calls.count(name) == len(accounts), (
+            f"{name} 을 계좌 수({len(accounts)})보다 많이/적게 불렀습니다: "
+            f"{harness.calls.count(name)}회. 매도 칸이 같은 값을 또 읽고 있지 않은지 "
+            "확인하세요(이 화면은 이 프로젝트에서 왕복이 가장 많은 화면입니다)."
+        )
+
+
+def test_the_two_bundle_loaders_never_touch_each_others_tables():
+    """§5-11-2 — 묶음을 읽는 함수도 통화별로 갈라져 있어야 합니다."""
+    krw = _referenced_callables(FUNCTIONS["_load_account_data"])
+    usd = _referenced_callables(FUNCTIONS["_load_account_data_usd"])
+    assert {"fetch_my_positions", "fetch_my_orders"} <= krw
+    assert not ({"fetch_my_positions_usd", "fetch_my_orders_usd"} & krw)
+    assert {"fetch_my_positions_usd", "fetch_my_orders_usd"} <= usd
+    assert not ({"fetch_my_positions", "fetch_my_orders"} & usd)
