@@ -50,7 +50,14 @@ from web.components.widgets import error_banner
 DUEL_ENABLED = (os.environ.get("DUEL_ENABLED") or "").strip().lower() == "true"
 
 #: 2단계(관리자 전용) ↔ 3단계(전체 공개)를 가르는 **단 하나의 불리언**. 위 설명 참고.
-DUEL_MENU_ADMIN_ONLY = True
+#
+# ✅ 오너 확정 (2026-08-22) — 3단계(전체 공개)로 전환합니다. 최근 라운드(리밸런싱 매도 +
+# 성적표 카드 가격 버그 + 예상 금액 표시)까지 검수를 마쳤고, 관리자 로그인 없이 일반
+# 로그인 사용자 전원이 `/duel`(1갈래 "덤벼라 나 자신")을 볼 수 있어야 모바일 확인도
+# 수월해집니다. 2갈래(공개 동의·공개 순위표, `DUEL_CONSENT_MENU_ADMIN_ONLY` /
+# `DUEL_LEADERBOARD_MENU_ADMIN_ONLY`)는 이 값과 별개이며 그대로 관리자 전용으로 둡니다
+# (오너 방침: "일정 사람이 쌓이기 전까지 공개를 하지 않는 방향으로" — 아직 유효).
+DUEL_MENU_ADMIN_ONLY = False
 
 # =============================================================================
 # ⚔️ 2갈래 "내 밑으로 눈 깔어"(공개 인프라) 공개 스위치 — 작업지시서 5단계 · 7단계

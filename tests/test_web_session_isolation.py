@@ -1617,8 +1617,13 @@ def test_duel_page_wiring():
           "그 항목의 관리자전용 플래그가 DUEL_MENU_ADMIN_ONLY 와 같은 값 "
           "(3단계 전환 = 이 불리언 하나만 False 로)",
           f"실제: {entries}")
-    check(admin_only_flag is True,
-          "지금은 2단계(관리자 전용) 설정 — 오너가 직접 써 본 뒤 3단계로 넘깁니다",
+    # ✅ 오너 확정 (2026-08-22) — 2단계(관리자 전용) → 3단계(전체 공개)로 전환.
+    # 리밸런싱 매도 라운드 + 성적표 카드 가격 버그까지 검수를 마친 뒤 오너가 직접
+    # 확정한 전환입니다(web/layout.py 의 DUEL_MENU_ADMIN_ONLY 주석 참고). 이전엔
+    # 여기서 `admin_only_flag is True` 를 확인했었습니다 — 이력은 지우지 않고
+    # 값만 뒤집어 남겨둡니다.
+    check(admin_only_flag is False,
+          "지금은 3단계(전체 공개) 설정 — 관리자 로그인 없이도 /duel 메뉴가 보임",
           f"실제 DUEL_MENU_ADMIN_ONLY={admin_only_flag}")
 
     # ── (o) main.py 등록 ──
