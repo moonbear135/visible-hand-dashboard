@@ -2208,7 +2208,8 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         on_change=lambda _e: _update_estimate(),
     ).style('flex: 1 1 160px;')
 
-    estimate_label = ui.label('').classes('vh-muted')
+    estimate_label = ui.label('').classes('text-lg font-bold whitespace-pre-line')
+    estimate_caveat_label = ui.label('').classes('vh-muted')
 
     def _resolve_ticker():
         """입력창 텍스트 → (티커, 종목명, 실패사유). 코스피 상위 200 **안에서만** 찾습니다.
@@ -2243,22 +2244,28 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         ticker, _name, error = _resolve_ticker()
         if not ticker or error:
             estimate_label.text = ''
+            estimate_caveat_label.text = ''
             return
         price = market["price_lookup"](MARKET_KR, ticker)
         if price is None:
             estimate_label.text = f'{ticker} — 최근 종가를 확인하지 못해 예상 금액을 계산할 수 없습니다.'
+            estimate_caveat_label.text = ''
             return
         try:
             quantity = _parse_positive_int(quantity_input.value, '수량')
         except ValueError:
-            estimate_label.text = (
-                f'참고 — {ticker}의 최근 확정 종가는 {format_amount(price, CURRENCY)}입니다.'
-            )
+            estimate_label.text = f'{ticker} 최근 확정 종가 {format_amount(price, CURRENCY)}'
+            estimate_caveat_label.text = ''
             return
+        # 🔴 오너 피드백(2026-08-22) — 수량·예상 금액이 한눈에 크게 보이는 게 중요한
+        # 포인트라, 굵고 큰 글씨로 줄바꿈해 두 줄로 보여주고, 안내 문장은 짧게 줄여
+        # 아래 작은 글씨로 뺍니다(§ "수량하고 금액을 잘 보는게 중요한 포인트").
         estimate_label.text = (
-            f'참고 — 최근 확정 종가 {format_amount(price, CURRENCY)} × {quantity:,}주 ≈ '
-            f'{format_amount(price * quantity, CURRENCY)}. '
-            '실제 체결가는 다음 거래일 종가라 이 금액과 다릅니다.'
+            f'{quantity:,}주 × {format_amount(price, CURRENCY)}\n'
+            f'≈ {format_amount(price * quantity, CURRENCY)}'
+        )
+        estimate_caveat_label.text = (
+            '예상 금액일 뿐 — 실제 체결가는 다음 거래일 종가로 정해집니다.'
         )
 
     # 🔴 2-4-5 — "크롤링이 실패하면 이 주문은 체결되지 않고 취소됩니다"를 **주문 전에**
@@ -2320,6 +2327,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         query_input.value = ''
         quantity_input.value = ''
         estimate_label.text = ''
+        estimate_caveat_label.text = ''
         ui.notify(
             f'✅ 주문을 저장했습니다 — {stock_name} ({ticker}) {quantity:,}주\n'
             f'체결 예정일: {order.get("target_date")} 종가 (지금 체결된 것이 아닙니다)\n'
@@ -2597,7 +2605,8 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         on_change=lambda _e: _update_estimate(),
     ).style('flex: 1 1 160px;')
 
-    estimate_label = ui.label('').classes('vh-muted')
+    estimate_label = ui.label('').classes('text-lg font-bold whitespace-pre-line')
+    estimate_caveat_label = ui.label('').classes('vh-muted')
 
     def _resolve_ticker():
         """입력창 텍스트 → (티커, 종목명, 실패사유). 미국 상위 유니버스 **안에서만** 찾습니다.
@@ -2631,22 +2640,28 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         ticker, _name, error = _resolve_ticker()
         if not ticker or error:
             estimate_label.text = ''
+            estimate_caveat_label.text = ''
             return
         price = market["price_lookup"](MARKET_US, ticker)
         if price is None:
             estimate_label.text = f'{ticker} — 최근 마감가를 확인하지 못해 예상 금액을 계산할 수 없습니다.'
+            estimate_caveat_label.text = ''
             return
         try:
             quantity = _parse_positive_int(quantity_input.value, '수량')
         except ValueError:
-            estimate_label.text = (
-                f'참고 — {ticker}의 최근 확정 마감가는 {format_amount(price, CURRENCY_USD)}입니다.'
-            )
+            estimate_label.text = f'{ticker} 최근 확정 마감가 {format_amount(price, CURRENCY_USD)}'
+            estimate_caveat_label.text = ''
             return
+        # 🔴 오너 피드백(2026-08-22) — 수량·예상 금액이 한눈에 크게 보이는 게 중요한
+        # 포인트라, 굵고 큰 글씨로 줄바꿈해 두 줄로 보여주고, 안내 문장은 짧게 줄여
+        # 아래 작은 글씨로 뺍니다(§ "수량하고 금액을 잘 보는게 중요한 포인트").
         estimate_label.text = (
-            f'참고 — 최근 확정 마감가 {format_amount(price, CURRENCY_USD)} × {quantity:,}주 ≈ '
-            f'{format_amount(price * quantity, CURRENCY_USD)}. '
-            '실제 체결가는 오늘 밤 열릴 미국 정규장의 마감가라 이 금액과 다릅니다.'
+            f'{quantity:,}주 × {format_amount(price, CURRENCY_USD)}\n'
+            f'≈ {format_amount(price * quantity, CURRENCY_USD)}'
+        )
+        estimate_caveat_label.text = (
+            '예상 금액일 뿐 — 실제 체결가는 오늘 밤 열릴 미국 정규장의 마감가로 정해집니다.'
         )
 
     warning_banner(NOTICE_CRAWL_FAILURE_USD)
@@ -2704,6 +2719,7 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         query_input.value = ''
         quantity_input.value = ''
         estimate_label.text = ''
+        estimate_caveat_label.text = ''
         ui.notify(
             f'✅ 달러 주문을 저장했습니다 — {stock_name} ({ticker}) {quantity:,}주\n'
             f'체결 예정일: {order.get("target_date")} 미국 정규장 마감가 '
