@@ -1140,7 +1140,12 @@ def _today_kst():
 # 10-1. 고지 문구 — "매도 없음"이 한 글자도 남아 있지 않아야 합니다
 # -----------------------------------------------------------------------------
 def test_buy_only_notices_now_describe_the_rebalancing_sell():
-    """`NOTICE_BUY_ONLY` / `_USD` 가 **매수 + 창당 1회 매도**를 말하는지."""
+    """`NOTICE_BUY_ONLY` / `_USD` 가 **매수 + 주기당 1회 매도 기회**를 말하는지.
+
+    🗣️ 2026-08-22 오너 리뷰 — 사실은 그대로이고 **부르는 말**만 바뀌었습니다("'창'보다도
+       '매도 기회'라고 하는게 직관적으로 이해될 것 같아"). 그래서 이 검사도 사실 목록은
+       그대로 두고, 문장이 "매도 기회"를 주어로 세우는지를 함께 봅니다.
+    """
     import web.pages.duel_page as page
 
     for name, text in (("NOTICE_BUY_ONLY", page.NOTICE_BUY_ONLY),
@@ -1149,11 +1154,19 @@ def test_buy_only_notices_now_describe_the_rebalancing_sell():
         assert "매도는 지원하지 않습니다" not in text, f"{name} 에 옛 '매도 없음' 문구가 남아 있습니다."
         assert "매수만 가능합니다" not in text, f"{name} 이 아직 '매수만 가능'이라고 말합니다."
         assert "팔 수 없" not in text, f"{name} 에 '팔 수 없다'는 옛 서술이 남아 있습니다."
-        # ② 새 사실 — 창마다 1회, 종목 1개, 1주~전량, 기회는 누적되지 않음.
-        assert "창마다 딱 한 번" in text, f"{name} 이 '창당 1회'를 말하지 않습니다."
+        # ② 새 사실 — 주기마다 1회, 종목 1개, 1주~전량, 기회는 누적되지 않음.
+        assert "매도 기회는 주기마다 딱 한 번" in text, (
+            f"{name} 이 '주기당 매도 기회 1회'를 말하지 않습니다."
+        )
         assert "1주부터 전량까지" in text, f"{name} 이 매도 수량 범위를 말하지 않습니다."
-        assert "다음 창으로 넘어가지 않습니다" in text, (
+        assert "다음 기회에 쌓이지 않습니다" in text, (
             f"{name} 이 '놓친 기회는 누적되지 않는다'를 말하지 않습니다(스펙 확정 ②)."
+        )
+        # ②-1 🗣️ 오너 리뷰 — 문장의 주어가 "창"이 아니라 "매도 기회"여야 합니다.
+        assert "매도 기회" in text, f"{name} 이 '매도 기회'라는 말을 쓰지 않습니다."
+        assert "창" not in text, (
+            f"{name} 에 '창' 표현이 남아 있습니다 — 사용자에게는 '매도 기회'로만 "
+            "말합니다(코드 쪽 window_index/window_type 은 그대로 둡니다)."
         )
         # ③ 창 길이 세 개가 전부 문구에 들어 있는지(규칙 계층 값 그대로).
         for window_type, window_days in duel_rules.REBALANCE_WINDOW_DAYS.items():
@@ -1222,7 +1235,7 @@ def test_krw_rule_three_no_longer_argues_that_selling_is_impossible():
         )
     # 새 근거: 세 계좌가 서로 다른 **주기**로 리밸런싱한다.
     assert "규칙 3) 세 계좌의 차이는 '손보는 주기'입니다" in src
-    assert "리밸런싱" in src and "창마다 1회로 제한되는 것은" in src
+    assert "리밸런싱" in src and "주기마다 1회로 제한되는 것은" in src
     assert "예시)" in src, "규칙 3 에 '예시)' 줄이 사라졌습니다(이 화면의 읽기 방식)."
     # 번호 목록·구분선 관례가 유지되는지(형식 회귀).
     assert src.count("---\\n\\n") >= 9
@@ -1390,7 +1403,7 @@ def test_rebalance_badge_counts_the_window_from_one_for_humans():
     state = page._rebalance_state(account, [], _today_kst())
     assert state["window"]["window_index"] == 0
     badge = page._rebalance_badge_text(state)
-    assert "1번째 창" in badge and "0번째 창" not in badge
+    assert "1번째 기회" in badge and "0번째 기회" not in badge
     assert f'{duel_rules.REBALANCE_WINDOW_DAYS["M1"]}일 남음' in badge
 
 
@@ -1437,9 +1450,9 @@ def test_sell_panel_offers_the_button_when_the_window_is_free():
         lambda: None,
         bundle={"positions": _SELL_POSITIONS, "orders": [], "error": None})
 
-    assert "🔁 리밸런싱 매도 주문 저장" in blob, "창이 비어 있는데 매도 버튼이 없습니다."
+    assert "🔁 리밸런싱 매도 주문 저장" in blob, "매도 기회가 남았는데 매도 버튼이 없습니다."
     assert "이미 사용했습니다" not in blob
-    assert "이번 창 아직 안 씀" in blob
+    assert "이번 기회 아직 안 씀" in blob
 
 
 def test_sell_panel_hides_the_button_and_names_the_next_chance_when_used():
@@ -1461,7 +1474,7 @@ def test_sell_panel_hides_the_button_and_names_the_next_chance_when_used():
         "이번 창을 이미 썼는데 매도 버튼이 그대로 있습니다 — DB 가 막긴 하지만 사용자는 "
         "누를 수 있다고 착각하게 됩니다."
     )
-    assert "이번 창은 이미 사용했습니다" in blob
+    assert "이번 매도 기회는 이미 사용했습니다" in blob
     assert str(window["next_window_starts_on"]) in blob, "다음 기회 날짜가 없습니다."
 
 
@@ -1538,7 +1551,7 @@ def test_order_history_tables_have_a_buy_sell_column_in_both_currencies():
     ]
     blob = _capture_render(page._render_order_history_table, orders)
     assert "구분" in blob, "매수/매도 구분 칸이 없습니다."
-    assert "🛒 매수" in blob and "🔁 매도 (1번째 창)" in blob
+    assert "🛒 매수" in blob and "🔁 매도 (1번째 기회)" in blob
     # 기존 칸이 그대로 남아 있는지(회귀).
     for header in ("종목", "상태", "체결일", "체결가", "체결금액", "사유"):
         assert header in blob
@@ -1547,7 +1560,7 @@ def test_order_history_tables_have_a_buy_sell_column_in_both_currencies():
         dict(orders[1], ticker="AAPL", stock_name="Apple Inc.", filled_price=200.0,
              filled_amount=400.0),
     ])
-    assert "구분" in blob_usd and "🔁 매도 (1번째 창)" in blob_usd
+    assert "구분" in blob_usd and "🔁 매도 (1번째 기회)" in blob_usd
     assert "$200.00" in blob_usd, "달러 표기가 사라졌습니다."
 
 
@@ -1557,7 +1570,7 @@ def test_order_side_text_never_guesses_an_unknown_side():
 
     assert page._order_side_text({"side": "buy"}) == "🛒 매수"
     assert page._order_side_text({"side": "sell"}) == "🔁 매도"
-    assert page._order_side_text({"side": "sell", "rebalance_window_index": 2}) == "🔁 매도 (3번째 창)"
+    assert page._order_side_text({"side": "sell", "rebalance_window_index": 2}) == "🔁 매도 (3번째 기회)"
     assert page._order_side_text({}) == "—"
     assert page._order_side_text({"side": "weird"}) == "weird"
 
@@ -1598,3 +1611,132 @@ def test_the_two_bundle_loaders_never_touch_each_others_tables():
     assert not ({"fetch_my_positions_usd", "fetch_my_orders_usd"} & krw)
     assert {"fetch_my_positions_usd", "fetch_my_orders_usd"} <= usd
     assert not ({"fetch_my_positions", "fetch_my_orders"} & usd)
+
+
+# =============================================================================
+# 11. 📊 '내 성적표' 카드의 **넓은** 현재가 폴백 (2026-08-22 오너 실사용 버그)
+# =============================================================================
+#  ── 무슨 사고였나 ────────────────────────────────────────────────────────────
+#  결투 계좌 줄 맨 앞의 "내 성적표" 카드가 사용자의 **실제** 보유 종목을 그리면서, 결투
+#  계좌용으로 **일부러 좁혀 둔** 시세 목록(코스피 상위 200 / 미국 상위 유니버스)으로 값을
+#  찾고 있었습니다. 그래서 `/scorecard` 화면에서는 멀쩡히 값이 나오는 KRX 상장 ETF
+#  (0174R0 · 379810 · 458730)가 결투 화면에서는 "가격을 확인하지 못해 제외"로 빠졌습니다.
+#  ── 이 절이 고정하려는 것 ────────────────────────────────────────────────────
+#    ① 성적표 카드는 넓은 폴백을 **실제로** 쓴다.
+#    ② 결투 계좌의 시세는 **여전히 좁다** — 넓힌 값이 주문 폼·포지션 표로 새면 거래 가능
+#       종목의 경계가 화면에서 흐려집니다(그 좁음은 버그가 아니라 설계입니다).
+#    ③ 파일을 읽는 **세 번째 경로**를 만들지 않는다(§0-3-10).
+# =============================================================================
+def test_the_scorecard_card_is_wired_to_the_broad_price_fallback():
+    """성적표 카드의 통화별 창구가 넓은 폴백으로 조회 함수를 만드는지(AST)."""
+    assert "_load_broad_price_fallbacks" in FUNCTIONS, (
+        "넓은 폴백을 읽는 로더가 없습니다 — 성적표 카드는 유니버스 밖 종목도 값매김해야 합니다."
+    )
+
+    for wrapper, kwarg, other in (
+            ("_render_scorecard_summary_card_krw", "broad_kr_prices", "broad_us_prices"),
+            ("_render_scorecard_summary_card_usd", "broad_us_prices", "broad_kr_prices")):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[wrapper])
+        assert "make_price_lookup" in src, f"{wrapper}() 이 조회 함수를 만들지 않습니다."
+        assert kwarg in src, f"{wrapper}() 이 {kwarg} 폴백을 넘기지 않습니다."
+        assert other not in src, (
+            f"{wrapper}() 이 다른 시장의 폴백({other})까지 넘깁니다 — 원/달러 조회가 서로의 "
+            "목록을 스칠 수 있는 통로가 생깁니다(§5-11-2)."
+        )
+
+    # 카드 본문은 결투 계좌용 좁은 조회 함수를 **더 이상 쓰지 않습니다**.
+    #  ⚠️ 주석·독스트링을 걷어낸 **코드만** 봅니다 — 이 카드의 독스트링은 "예전에는
+    #     market['price_lookup'] 을 썼다"는 사고 경위를 일부러 적어 두고 있습니다.
+    card = FUNCTIONS["_render_scorecard_summary_card"]
+    card_code = ast.unparse(card)
+    assert 'market[\'price_lookup\']' not in card_code, (
+        "성적표 카드가 다시 결투 계좌용 좁은 시세로 실제 보유 종목을 찾고 있습니다."
+    )
+    assert "build_portfolio(holdings, price_lookup)" in card_code
+
+    # 폴백은 화면을 그릴 때 **한 번만** 읽습니다(카드마다 다시 읽지 않도록).
+    body = _referenced_callables(FUNCTIONS["_render_body"])
+    assert "_load_broad_price_fallbacks" in body, (
+        "폴백 목록을 화면 최상단에서 한 번 읽어 내려보내지 않습니다."
+    )
+
+
+def test_the_broad_fallback_loader_reuses_the_scorecard_files_and_merges_us_etfs():
+    """§0-3-10 — 파일명·인덱스 만드는 계산을 새로 만들지 않았는지."""
+    src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_load_broad_price_fallbacks"])
+    for constant in ("KR_ALL_MARKET_PRICES_FILENAME", "US_ALL_MARKET_PRICES_FILENAME",
+                     "US_ALL_ETF_PRICES_FILENAME"):
+        assert constant in src, f"{constant} 을 쓰지 않습니다 — 파일명을 본문에 다시 적지 마세요."
+    assert "build_universe_index" in src, (
+        "'내 성적표'가 이미 쓰는 build_universe_index() 를 재사용해야 합니다(§0-3-10)."
+    )
+    assert "load_json_file_async" in src, (
+        "파일 읽기는 비동기판으로만 합니다 — 동기로 읽으면 접속자 전원의 루프가 멈춥니다."
+    )
+    # 미국은 주식/ETF 두 파일을 **읽는 쪽에서** 합칩니다('내 성적표' 화면과 같은 방식).
+    assert "{**us_etf_prices, **broad_us_prices}" in src, (
+        "미국 ETF 가격 파일을 합치지 않았습니다 — 미국 ETF 보유 종목이 계속 빠집니다."
+    )
+
+
+def test_the_duel_accounts_are_still_priced_by_the_narrow_universe_only():
+    """🔴 결투 계좌 쪽 시세는 **여전히 좁아야** 합니다(그 좁음은 설계입니다)."""
+    for name in ("_load_kospi_universe", "_load_us_universe"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        for leaked in ("broad_kr_prices", "broad_us_prices", "KR_ALL_MARKET_PRICES_FILENAME",
+                       "US_ALL_MARKET_PRICES_FILENAME", "US_ALL_ETF_PRICES_FILENAME"):
+            assert leaked not in src, (
+                f"{name}() 에 넓은 폴백({leaked})이 들어갔습니다 — 결투 계좌는 거래 가능 "
+                "유니버스 안에서만 값매김해야 합니다(주문 폼과 같은 목록)."
+            )
+
+    # 폴백 값이 흐르는 함수는 **성적표 경로뿐**이어야 합니다.
+    allowed = {"_load_broad_price_fallbacks", "_render_body", "duel_section",
+               "_render_duel_section", "_render_accounts",
+               "_render_scorecard_summary_card_krw", "_render_scorecard_summary_card_usd"}
+    carriers = {name for name, node in FUNCTIONS.items()
+                if "broad_prices" in _names_used(node)}
+    assert carriers <= allowed, (
+        f"넓은 폴백이 성적표 카드 밖으로 샜습니다: {sorted(carriers - allowed)} — 결투 "
+        "포지션 표·주문 폼이 유니버스 밖 종목까지 값매김하면 거래 가능 종목의 경계가 "
+        "화면에서 흐려집니다."
+    )
+    for name in ("_render_account_card", "_render_account_card_usd", "_render_order_form",
+                 "_render_order_form_usd", "_position_rows", "_position_rows_usd"):
+        assert "broad_prices" not in _names_used(FUNCTIONS[name]), name
+
+
+def test_a_krx_etf_outside_the_top200_now_gets_a_real_price(tmp_path):
+    """🔴 실제 저장소 데이터로 확인 — 상위 200 밖 ETF 가 값매김되는지.
+
+    `data/kr_all_market_prices.json` 이 없는 체크아웃에서는 건너뜁니다(그 파일은 수집기가
+    만드는 스냅샷이라 없을 수 있고, 없으면 화면은 예전처럼 정직하게 "가격 확인 못 함"을
+    표시할 뿐이라 이 검사만 성립하지 않습니다).
+    """
+    from utils.scorecard_db import MARKET_KR, make_price_lookup
+
+    import web.pages.duel_page as page
+
+    if not (REPO_ROOT / "data" / "kr_all_market_prices.json").exists():
+        pytest.skip("data/kr_all_market_prices.json 스냅샷이 없는 체크아웃입니다.")
+
+    market = asyncio.run(page._load_kospi_universe())
+    broad = asyncio.run(page._load_broad_price_fallbacks())
+    narrow = market["price_lookup"]                     # 결투 계좌용(좁음 — 그대로 둡니다)
+    wide = make_price_lookup({MARKET_KR: market["index"]},
+                             broad_kr_prices=broad["broad_kr_prices"])
+
+    outside = [t for t in ("379810", "458730", "0174R0")
+               if t not in (market["index"] or {}) and t in (broad["broad_kr_prices"] or {})]
+    if not outside:
+        pytest.skip("이 스냅샷에는 상위 200 밖 검증용 ETF 가 들어 있지 않습니다.")
+
+    for ticker in outside:
+        assert narrow(MARKET_KR, ticker) is None, (
+            f"{ticker} 이 상위 200 스냅샷 안에 들어왔습니다 — 이 검사를 다시 골라야 합니다."
+        )
+        price = wide(MARKET_KR, ticker)
+        assert price is not None and price > 0, (
+            f"{ticker} 의 현재가를 넓은 폴백으로도 못 찾았습니다 — '내 성적표' 화면에서는 "
+            "나오는 값이라 두 화면이 서로 다른 말을 하게 됩니다."
+        )
