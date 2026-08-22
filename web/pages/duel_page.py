@@ -2392,9 +2392,12 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
     account_id = account.get("id")
     title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
 
-    with ui.card().classes('vh-card w-full'):
-        ui.markdown(f'**{esc(title)}**')
-
+    # 🔴 2026-08-22 — 오너 요청("굳이 상시 공개로 할 필요는 없을 것 같아"): 창당 1회뿐인
+    #    매도 안내문이 계좌 3개마다 항상 펼쳐진 채로 화면을 길게 잡아먹었습니다. `ui.card()`
+    #    → `ui.expansion()`으로만 바꿨습니다(이 파일·이 저장소에 이미 있는 접이식 패턴을
+    #    그대로 재사용 — §0-3-10, 예: 940번째 줄 "이 대결은 어떻게 굴러가나요?"). 기본값은
+    #    닫힘(`value=False`)이고, 안쪽 로직·문구는 한 글자도 바꾸지 않았습니다.
+    with ui.expansion(esc(title), icon='🔁', value=False).classes('vh-card w-full'):
         if bundle.get("error") is not None:
             error_banner(
                 f'🚫 {_fail(bundle["error"], "보유 종목·주문 내역을 불러오지 못해 매도 창을 열 수 없습니다.")}'
@@ -2784,9 +2787,9 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
     account_id = account.get("id")
     title = WINDOW_TITLES.get(account.get("window_type"), str(account.get("window_type")))
 
-    with ui.card().classes('vh-card w-full'):
-        ui.markdown(f'**{esc(title)} (달러)**')
-
+    # 🔴 2026-08-22 — 원화 매도 칸과 같은 이유로 같은 방식으로 고칩니다(위 KRW
+    #    `_render_sell_panel()` 주석 참고). `ui.card()` → `ui.expansion()`, 기본 닫힘.
+    with ui.expansion(esc(f'{title} (달러)'), icon='🔁', value=False).classes('vh-card w-full'):
         if bundle.get("error") is not None:
             error_banner(
                 f'🚫 {_fail(bundle["error"], "달러 보유 종목·주문 내역을 불러오지 못해 매도 창을 열 수 없습니다.")}'
