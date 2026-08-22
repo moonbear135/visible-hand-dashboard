@@ -85,7 +85,14 @@ DUEL_MENU_ADMIN_ONLY = False
 DUEL_CONSENT_ENABLED = (os.environ.get("DUEL_CONSENT_ENABLED") or "").strip().lower() == "true"
 
 #: 위 화면의 2단계(관리자 전용) ↔ 3단계(전체 공개).
-DUEL_CONSENT_MENU_ADMIN_ONLY = True
+#
+# ✅ 오너 확정 (2026-08-22) — 3단계(전체 공개)로 전환합니다. `/duel`(1갈래)이 이미 공개된
+# 상태에서, 500명 미만 그룹은 절대 발행되지 않는 구조적 안전장치(`duel_rules.
+# MIN_PARTICIPANTS_FOR_PUBLICATION`)와 닉네임 익명성·세션 격리·XSS 방어를 전체 재검토한
+# 뒤 확정했습니다(코드 근거까지 직접 재확인 완료). 이 화면은 실제 참가자를 모으는 화면이라
+# 순위표(아래 DUEL_LEADERBOARD_MENU_ADMIN_ONLY)보다 먼저 공개하는 것이 오너 방침의 원래
+# 순서입니다("1갈래 단독 배포 → 사용자 모집 → 2갈래 공개").
+DUEL_CONSENT_MENU_ADMIN_ONLY = False
 
 #: 🏆 공개 순위표 열람 화면(`/duel/leaderboard`, 작업지시서 5-3 · 5-7) 기본 숨김 스위치.
 DUEL_LEADERBOARD_ENABLED = (
@@ -93,7 +100,13 @@ DUEL_LEADERBOARD_ENABLED = (
 )
 
 #: 위 화면의 2단계(관리자 전용) ↔ 3단계(전체 공개).
-DUEL_LEADERBOARD_MENU_ADMIN_ONLY = True
+#
+# ✅ 오너 확정 (2026-08-22) — 3단계(전체 공개)로 전환합니다. 500명 미만인 (창유형×체급)
+# 그룹은 `utils/duel_publish.py::split_groups_by_threshold()` 가 애초에 발행표에 쓰지도
+# 않으므로(강제 발행 경로 없음, 화면도 발행표만 읽고 실시간 집계를 하지 않음 — 직접
+# 코드로 재확인 완료), 참가자가 쌓이기 전까지는 이 화면을 열어도 "참가자가 부족합니다"
+# 안내만 보입니다. 실제 순위·닉네임이 나오는 시점은 여전히 그 500명 게이팅이 막습니다.
+DUEL_LEADERBOARD_MENU_ADMIN_ONLY = False
 
 # (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
 # 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.

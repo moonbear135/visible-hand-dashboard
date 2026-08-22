@@ -764,8 +764,12 @@ def test_public_screens_are_hidden_by_default():
     layout_module = importlib.reload(layout_module)
     assert layout_module.DUEL_CONSENT_ENABLED is False
     assert layout_module.DUEL_LEADERBOARD_ENABLED is False
-    assert layout_module.DUEL_CONSENT_MENU_ADMIN_ONLY is True
-    assert layout_module.DUEL_LEADERBOARD_MENU_ADMIN_ONLY is True
+    # ✅ 오너 확정 (2026-08-22) — 2단계(관리자 전용) → 3단계(전체 공개)로 전환. 이 값이
+    # False 가 되어도 위 두 ENABLED 스위치가 꺼져 있으면 메뉴/본문은 여전히 "준비중"만
+    # 그립니다(§0-3-6) — 아래 770번째 줄 확인이 그 사실을 고정합니다. 이전엔 여기서
+    # `is True` 를 확인했었습니다 — 이력은 지우지 않고 값만 뒤집어 남겨둡니다.
+    assert layout_module.DUEL_CONSENT_MENU_ADMIN_ONLY is False
+    assert layout_module.DUEL_LEADERBOARD_MENU_ADMIN_ONLY is False
     assert not [p for p in (item[0] for item in layout_module._MENU)
                 if p.startswith("/duel/")]
 

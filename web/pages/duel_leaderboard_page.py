@@ -51,11 +51,12 @@
 뜻이고 **화면이 안 보인다**는 뜻은 아니라서 화면 쪽 스위치를 따로 둡니다.
 
 -------------------------------------------------------------------------------
-📝 문구에 대하여
+📝 문구에 대하여 (✅ 2026-08-22 — 7-2 오너 검토 완료, 전체 공개 전환과 함께 확정)
 -------------------------------------------------------------------------------
 · 맨 위 **고정 문구 두 문단은 작업지시서 5-3 에서 글자 그대로** 옮긴 것입니다(오너 확정).
   요약·축약·재배치 금지. 스크롤 없이 보이는 위치에 고정합니다.
-· 그 밖의 안내 문구는 **초안**이며 7-2 에서 오너가 다시 검토합니다.
+· 그 밖의 안내 문구는 오너가 직접 읽고 승인했습니다(2026-08-22 — 내용은 그대로, 문장 단위
+  줄바꿈과 렌더링 안 되던 `**` 표시 제거만 반영). 이제 "초안"이 아니라 확정 문안입니다.
 """
 
 from nicegui import ui
@@ -127,9 +128,10 @@ NOT_PUBLISHED_TEXT = "비공개"
 
 # --- 안내 문구(초안 — 7-2 오너 검토 대기) -------------------------------------
 NOTICE_HOW_RANKING_WORKS = (
-    "순위는 '체급'(원금 구간) 안에서 **시간가중수익률(TWR)** 로만 갈립니다. 체급은 실제 "
-    "'내 성적표' 매입원가합계로 나뉘는데, 결투 시드머니는 모두 같은 금액이라 그것으로는 "
-    "구분이 되지 않기 때문입니다. 체급 산정에 실제 매입총합을 쓰는 데 동의하지 않은 분들은 "
+    "순위는 '체급'(원금 구간) 안에서 시간가중수익률(TWR)로만 갈립니다.\n\n"
+    "체급은 실제 '내 성적표' 매입원가합계로 나뉘는데, 결투 시드머니는 모두 같은 금액이라 "
+    "그것으로는 구분이 되지 않기 때문입니다.\n\n"
+    "체급 산정에 실제 매입총합을 쓰는 데 동의하지 않은 분들은 "
     f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹에서 겨룹니다."
 )
 
@@ -140,8 +142,8 @@ NOTICE_MIN_PARTICIPANTS = (
 )
 
 NOTICE_DAILY = (
-    "순위표는 하루 한 번, 밤에 그날치로 통째로 다시 만들어집니다. 지금 보시는 값은 화면을 "
-    "여는 순간 계산한 것이 아니라 **가장 최근 발행분**입니다."
+    "순위표는 하루 한 번, 밤에 그날치로 통째로 다시 만들어집니다.\n\n"
+    "지금 보시는 값은 화면을 여는 순간 계산한 것이 아니라 가장 최근 발행분입니다."
 )
 
 NOTICE_OVERLAP = (
@@ -173,10 +175,11 @@ CURRENCY_TITLES = {
 #: 🔴 두 순위표가 왜 별개인지. 사용자가 "왜 달러 1등이 원화 1등보다 수익률이 높은데 위에
 #:    없지?" 라고 묻기 전에 먼저 밝힙니다(§0-1 — 없는 것은 없다고 말합니다).
 NOTICE_TRACKS_NEVER_MERGED = (
-    "원화 순위표와 달러 순위표는 **완전히 다른 표**입니다. 두 통화의 성적을 합치거나 서로 "
-    "비교하지 않습니다 — 이 앱에는 환율 시계열이 없어서 두 통화를 한 줄에 세울 방법이 "
-    "없고(없는 값을 지어내지 않습니다), 두 시장은 마감 시각과 휴장일도 달라 갱신 주기 "
-    "자체가 다르기 때문입니다. 통화를 바꾸면 그 통화의 발행표만 새로 읽습니다."
+    "원화 순위표와 달러 순위표는 완전히 다른 표입니다.\n\n"
+    "두 통화의 성적을 합치거나 서로 비교하지 않습니다 — 이 앱에는 환율 시계열이 없어서 "
+    "두 통화를 한 줄에 세울 방법이 없고(없는 값을 지어내지 않습니다), 두 시장은 마감 "
+    "시각과 휴장일도 달라 갱신 주기 자체가 다르기 때문입니다.\n\n"
+    "통화를 바꾸면 그 통화의 발행표만 새로 읽습니다."
 )
 
 #: 💵 달러 트랙의 체급 기준 통화. 원화 안내(`NOTICE_HOW_RANKING_WORKS`)는 "매입원가합계"
@@ -184,8 +187,8 @@ NOTICE_TRACKS_NEVER_MERGED = (
 #:    결과를 가릅니다 — `duel_publish_usd.summarize_real_principal_usd()` 는 "내 성적표"에
 #:    달러가 아닌 통화가 하나라도 있으면 **합치지 않고** '구간 미적용'으로 보냅니다.
 NOTICE_BRACKET_CURRENCY_USD = (
-    "달러 순위표의 체급은 '내 성적표'의 **달러 보유분** 매입원가합계로만 나뉩니다. 원화 "
-    "종목을 함께 갖고 있는 분은 두 통화를 더하지 않고 "
+    "달러 순위표의 체급은 '내 성적표'의 달러 보유분 매입원가합계로만 나뉩니다.\n\n"
+    "원화 종목을 함께 갖고 있는 분은 두 통화를 더하지 않고 "
     f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹에서 겨룹니다."
 )
 
@@ -442,11 +445,11 @@ async def _render_body(client) -> None:
        끼리 화면 상태가 섞입니다(§0-3-8 — 순위표는 사용자 데이터가 아니지만, "다른 사람이
        페이지를 넘기면 내 화면이 바뀌는" 것 자체가 같은 종류의 사고입니다).
     """
-    ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted')
+    ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted whitespace-pre-line')
     ui.label(NOTICE_MIN_PARTICIPANTS).classes('vh-muted')
-    ui.label(NOTICE_DAILY).classes('vh-muted')
+    ui.label(NOTICE_DAILY).classes('vh-muted whitespace-pre-line')
     # 💵 2026-08-21(§5-19) — 통화 선택이 생겼으므로 "두 표는 절대 안 합친다"를 먼저 밝힙니다.
-    ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all')
+    ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all whitespace-pre-line')
 
     windows = window_options()
     currencies = currency_options()
@@ -538,7 +541,7 @@ async def _render_group(client, view: dict, on_changed) -> None:
         f'{esc(readers["bracket_label"](bracket_key))}'
     )
     if view["currency"] == CURRENCY_USD:
-        ui.label(NOTICE_BRACKET_CURRENCY_USD).classes('vh-muted vh-keep-all')
+        ui.label(NOTICE_BRACKET_CURRENCY_USD).classes('vh-muted vh-keep-all whitespace-pre-line')
 
     if not published_date:
         # 🔴 정상 상태입니다(오류 아님). 참가자가 없거나, 최소 인원 미달이라 발행되지

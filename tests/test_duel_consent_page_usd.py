@@ -659,14 +659,57 @@ def test_usd_card_and_save_helpers_are_async_where_they_need_to_be():
 # =============================================================================
 def test_krw_only_path_is_a_separate_branch_that_was_not_rewritten():
     """
-    달러 계좌가 없을 때 타는 코드가 예전 그대로인지 — 같은 제목, 같은 안내문, 같은 루프.
-    (`/duel` 화면 §5-18 이 쓴 "의도적인 두 경로" 와 같은 방식입니다.)
+    달러 계좌가 없을 때 타는 코드가 예전 그대로인지 — 같은 제목, 같은 안내문, 계좌마다
+    한 장씩 도는 같은 렌더 루프. (`/duel` 화면 §5-18 이 쓴 "의도적인 두 경로" 와 같은
+    방식입니다.)
+
+    🔴 2026-08-22 — 예전에는 `"await account_section()"` 라는 **루프의 옛 모양 자체**를
+       확인했습니다. 그 모양이 바로 늦은 이름 결정 버그(계좌 2개 이상일 때 두 번째 카드의
+       저장·철회가 마지막 카드를 다시 그림)의 원인이라, 달러 경로가 이미 쓰던
+       `_consent_section()` 팩토리로 바뀌었습니다. 확인하려던 것(= 원화 전용 분기가 살아
+       있고, 계좌마다 원화 카드를 한 장씩 그린다)은 그대로 확인합니다.
     """
     src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_render_body"])
     assert "#### 계좌마다 따로 정합니다\\n" in src
     assert "계좌마다 서로 다른 무작위 닉네임이 발급되며" in src
-    assert "await account_section()" in src, "예전 렌더 루프가 그대로 남아 있어야 합니다."
+    assert "for account in mine:" in src, "계좌마다 한 장씩 도는 루프가 있어야 합니다."
+    assert "_consent_section(_render_account_consent, client, user_id, account)()" in src, (
+        "원화 전용 경로가 계좌마다 원화 동의 카드를 그리지 않습니다."
+    )
     assert "_render_both_tracks" in src, "달러가 있을 때만 새 경로로 갈라져야 합니다."
+
+
+def test_krw_only_loop_does_not_define_a_refreshable_inside_the_loop():
+    """
+    🔴 늦은 이름 결정 회귀 방지 — `for` 루프 **안에서** `@ui.refreshable` 을 정의하면
+       `.refresh()` 가 마지막 반복의 섹션을 가리킵니다(그래서 계좌 2번 카드의 저장이 3번
+       카드를 다시 그렸습니다). 두 트랙 모두 `_consent_section()` 팩토리만 씁니다.
+    """
+    body = FUNCTIONS["_render_body"]
+    for node in ast.walk(body):
+        if not isinstance(node, (ast.For, ast.AsyncFor)):
+            continue
+        for inner in ast.walk(node):
+            if not isinstance(inner, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            decorators = {ast.unparse(d) for d in inner.decorator_list}
+            assert "ui.refreshable" not in decorators, (
+                f"_render_body() 의 루프 안에서 @ui.refreshable 을 직접 정의했습니다"
+                f"({inner.name}) — `_consent_section()` 팩토리를 쓰세요."
+            )
+
+    # 팩토리 쪽은 루프 밖의 제 함수 안에서 정의합니다(여기가 유일한 실제 정의 자리 —
+    # 문자열이 아니라 실제 데코레이터만 셉니다. 주석·독스트링에는 여러 번 나옵니다).
+    decorated = [
+        node.name
+        for node in ast.walk(ast.parse(PAGE_SRC))
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and any(ast.unparse(d) == "ui.refreshable" for d in node.decorator_list)
+    ]
+    assert decorated == ["section"], (
+        f"`@ui.refreshable` 정의 자리는 `_consent_section()` 안의 `section()` 한 곳뿐이어야 "
+        f"합니다. 실제: {decorated}"
+    )
 
 
 def test_krw_render_functions_were_not_touched_by_this_round():

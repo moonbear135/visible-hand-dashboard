@@ -76,13 +76,14 @@
   직후에만 부릅니다 — 5-5 의 발급 시점).
 
 -------------------------------------------------------------------------------
-📝 문구에 대하여 (7-2 — 오너 최종 검토 대기)
+📝 문구에 대하여 (✅ 2026-08-22 — 7-2 오너 검토 완료, 전체 공개 전환과 함께 확정)
 -------------------------------------------------------------------------------
 · **작업지시서에서 글자 그대로 가져온 문장**: 항목별 동의 5개(5-2-1), 독립 동의 1개
   (5-2-4). 이 6문장은 오너가 문안을 확정하기 전까지 **손대지 마세요.** 특히 보유종목
   문장의 "개별 열람" 은 오너가 명시적으로 요구한 문구 요소입니다.
-· **그 밖의 안내·책임 고지 문구는 전부 초안입니다.** 7-2 에서 오너가 직접 읽고 승인해야
-  합니다("법적·신뢰 측면에서 오너가 직접 읽고 승인해야 합니다" — 작업지시서 7-2).
+· **그 밖의 안내·책임 고지 문구**(책임 고지·철회 안내 포함)는 오너가 직접 읽고 승인했습니다
+  (2026-08-22 — 내용은 그대로, 문장 단위 줄바꿈과 렌더링 안 되던 `**` 표시 제거만 반영).
+  이제 "초안"이 아니라 확정 문안입니다. 내용을 다시 바꿀 때는 여기 주석도 같이 갱신하세요.
 """
 
 from nicegui import ui
@@ -168,33 +169,37 @@ CONSENT_REAL_PRINCIPAL_SENTENCE = (
 # =============================================================================
 #  ⚠️ 정확한 문안은 7-2 에서 오너가 확정합니다. 아래는 **초안**이고, 요구사항 자체(두 곳
 #     이상에 명확히 노출)는 지금 지킵니다 — "한 곳에만 작게 적어두는 걸로는 부족합니다".
+#  ✍️ 2026-08-22 — 문장마다 `"\n\n"` 로 끊어 읽기 쉽게 했습니다(오너 요청). 뜻·순서·표현은
+#     그대로이고 줄바꿈 위치만 넣었습니다. `duel_page.py::NOTICE_BUY_ONLY` 와 같은 관례입니다.
 NOTICE_RESPONSIBILITY = (
-    "⚠️ 읽지 않고 동의하신 것도 본인 책임입니다. 아래 항목에 동의하시면 그 내용이 다른 "
-    "이용자에게 실제로 공개됩니다 — 무엇이 공개되는지 한 문장씩 직접 확인해 주세요. "
+    "⚠️ 읽지 않고 동의하신 것도 본인 책임입니다.\n\n"
+    "아래 항목에 동의하시면 그 내용이 다른 이용자에게 실제로 공개됩니다 — 무엇이 "
+    "공개되는지 한 문장씩 직접 확인해 주세요.\n\n"
     "한 번 공개된 기록을 나중에 되돌릴 수 있게 하는 절차(철회)는 있지만, 그때까지 남이 "
     "이미 본 내용까지 되돌릴 수는 없습니다."
 )
 
 #: 전부-아니면-전무 규칙(5-2-2)을 사용자에게 설명하는 문구. 초안입니다.
 NOTICE_ALL_OR_NOTHING = (
-    "이 5개 항목은 전부 공개하거나, 전부 공개하지 않거나 둘 중 하나입니다. "
+    "이 5개 항목은 전부 공개하거나, 전부 공개하지 않거나 둘 중 하나입니다.\n\n"
     "'수익률만 공개하고 순위는 비공개' 같은 부분 조합은 제공하지 않습니다."
 )
 
 #: 최종 확인이 왜 따로 있는지(5-2-3). 초안입니다.
 NOTICE_FINAL_CONFIRM = (
-    "5개를 다 체크했다고 바로 공개되지 않습니다. 아래에서 **한 번 더** 확인하셔야 그때부터 "
-    "공개 순위표 발행 대상이 됩니다."
+    "5개를 다 체크했다고 바로 공개되지 않습니다.\n\n"
+    "아래에서 한 번 더 확인하셔야 그때부터 공개 순위표 발행 대상이 됩니다."
 )
 
 #: 독립 동의 설명(5-2-4 · 5-3). 초안이지만 "가상이 아니라 실제 데이터"라는 사실은 반드시
 #: 남겨야 합니다(§0-1).
 NOTICE_REAL_PRINCIPAL = (
-    "이 동의만 **다른 모듈('내 성적표')의 실제 보유 데이터**를 사용합니다. 위 5개 항목과는 "
-    "완전히 별개이고, 따로 켜고 끌 수 있습니다. 켜면 실제 매입원가합계로 '체급'(원금 구간)이 "
-    "정해져 비슷한 규모끼리 겨루게 되고, 끄면 체급 없이 '구간 미적용' 그룹에서 겨룹니다 — "
-    "끈다고 순위표에서 빠지지는 않습니다. 실제 매입총합 **금액 자체는 공개되지 않고**, "
-    "어느 구간에 속하는지만 쓰입니다."
+    "이 동의만 다른 모듈('내 성적표')의 실제 보유 데이터를 사용합니다.\n\n"
+    "위 5개 항목과는 완전히 별개이고, 따로 켜고 끌 수 있습니다.\n\n"
+    "켜면 실제 매입원가합계로 '체급'(원금 구간)이 정해져 비슷한 규모끼리 겨루게 되고, "
+    "끄면 체급 없이 '구간 미적용' 그룹에서 겨룹니다 — 끈다고 순위표에서 빠지지는 "
+    "않습니다.\n\n"
+    "실제 매입총합 금액 자체는 공개되지 않고, 어느 구간에 속하는지만 쓰입니다."
 )
 
 #: 💵 독립 동의 설명 — **달러 트랙 전용**(§5-19). 위 `NOTICE_REAL_PRINCIPAL` 을 그대로
@@ -204,20 +209,22 @@ NOTICE_REAL_PRINCIPAL = (
 #: 달러분 매입원가합계로만 체급($750/$2,250/…)을 정합니다. 이 앱에는 환율 시계열이 없어
 #: 두 통화를 더할 수 없기 때문입니다(§0-1 — 없는 값을 지어내지 않습니다).
 NOTICE_REAL_PRINCIPAL_USD = (
-    "이 동의만 **다른 모듈('내 성적표')의 실제 보유 데이터**를 사용합니다. 위 5개 항목과는 "
-    "완전히 별개이고, 따로 켜고 끌 수 있습니다. 달러 순위표의 체급은 '내 성적표'의 "
-    "**달러 보유분 매입원가합계**로만 정해집니다($750 · $2,250 · $3,750 · $7,500 · $22,500 · "
-    "$45,000 · $75,000 경계). 원화 종목을 하나라도 함께 갖고 계시면 **두 통화를 더하지 않고** "
-    "'구간 미적용' 그룹으로 갑니다 — 이 앱에는 환율 시계열이 없어서 합칠 수가 없습니다. "
-    "끈다고 순위표에서 빠지지는 않고, 실제 매입총합 **금액 자체는 공개되지 않습니다**."
+    "이 동의만 다른 모듈('내 성적표')의 실제 보유 데이터를 사용합니다.\n\n"
+    "위 5개 항목과는 완전히 별개이고, 따로 켜고 끌 수 있습니다.\n\n"
+    "달러 순위표의 체급은 '내 성적표'의 달러 보유분 매입원가합계로만 정해집니다"
+    "($750 · $2,250 · $3,750 · $7,500 · $22,500 · $45,000 · $75,000 경계).\n\n"
+    "원화 종목을 하나라도 함께 갖고 계시면 두 통화를 더하지 않고 '구간 미적용' 그룹으로 "
+    "갑니다 — 이 앱에는 환율 시계열이 없어서 합칠 수가 없습니다.\n\n"
+    "끈다고 순위표에서 빠지지는 않고, 실제 매입총합 금액 자체는 공개되지 않습니다."
 )
 
 #: 💵 트랙 독립(5-11-10) — 원화·달러 동의는 서로 아무 관계가 없다는 사실.
 NOTICE_TRACKS_INDEPENDENT = (
-    "※ 원화 결투와 달러 결투의 공개 동의는 **완전히 별개**입니다. 저장되는 표부터 다르고, "
-    "한쪽만 공개하셔도 되며, 한쪽을 철회해도 다른 쪽은 그대로입니다(철회 후 3개월 재동의 "
-    "차단도 트랙마다 따로 셉니다). 순위표도 원화·달러가 서로 완전히 다른 표입니다 — "
-    "두 통화의 성적을 섞거나 비교하지 않습니다."
+    "※ 원화 결투와 달러 결투의 공개 동의는 완전히 별개입니다.\n\n"
+    "저장되는 표부터 다르고, 한쪽만 공개하셔도 되며, 한쪽을 철회해도 다른 쪽은 "
+    "그대로입니다(철회 후 3개월 재동의 차단도 트랙마다 따로 셉니다).\n\n"
+    "순위표도 원화·달러가 서로 완전히 다른 표입니다 — 두 통화의 성적을 섞거나 비교하지 "
+    "않습니다."
 )
 
 #: 🔴 💵 닉네임 공유(5-11-10) — 사용자가 **모르고 동의하면 안 되는** 사실이라 명시합니다.
@@ -225,20 +232,23 @@ NOTICE_TRACKS_INDEPENDENT = (
 #:    그 두 줄이 같은 사람이라는 것이 드러납니다. (교차 *사용자* 유출은 아닙니다 — 남의
 #:    데이터는 어느 경로로도 흐르지 않습니다 — 하지만 공개 범위에 대한 정보이므로 §0-1.)
 NOTICE_SHARED_NICKNAME = (
-    "※ 닉네임은 **같은 창유형이면 원화·달러가 같은 이름**을 씁니다(한 사람에게 이름을 두 개 "
-    "만들지 않습니다). 그래서 같은 창유형의 원화와 달러를 **둘 다** 공개하시면, 두 순위표에 "
-    "같은 닉네임이 실려서 보는 사람이 '이 두 줄은 같은 사람'이라고 알 수 있습니다. 한쪽만 "
-    "공개하시면 그런 연결은 생기지 않습니다. 닉네임 말고 사람을 특정할 수 있는 값(이메일· "
-    "아이디·가입일)은 어느 순위표에도 **저장조차 되지 않습니다**."
+    "※ 닉네임은 같은 창유형이면 원화·달러가 같은 이름을 씁니다(한 사람에게 이름을 두 개 "
+    "만들지 않습니다).\n\n"
+    "그래서 같은 창유형의 원화와 달러를 둘 다 공개하시면, 두 순위표에 같은 닉네임이 "
+    "실려서 보는 사람이 '이 두 줄은 같은 사람'이라고 알 수 있습니다.\n\n"
+    "한쪽만 공개하시면 그런 연결은 생기지 않습니다.\n\n"
+    "닉네임 말고 사람을 특정할 수 있는 값(이메일·아이디·가입일)은 어느 순위표에도 "
+    "저장조차 되지 않습니다."
 )
 
 #: 체급 고정 규칙(5-3, 4·5차 확정). 숫자는 전부 `duel_rules` 상수에서 만듭니다(§0-3-10).
 NOTICE_BRACKET_FIXED = (
-    f"한 번 정해진 체급은 다음 시즌 전까지 바뀌지 않습니다. 시즌은 "
-    f"{duel_rules.DUEL_SEASON_LENGTH_MONTHS}개월이고 매년 "
+    "한 번 정해진 체급은 다음 시즌 전까지 바뀌지 않습니다.\n\n"
+    f"시즌은 {duel_rules.DUEL_SEASON_LENGTH_MONTHS}개월이고 매년 "
     f"{duel_rules.DUEL_SEASON_ANCHOR_MONTH}월 {duel_rules.DUEL_SEASON_ANCHOR_DAY}일에 "
-    "새로 시작합니다. 시즌 도중에 실제 매입총합이 늘거나 줄어도 그 시즌 안에서는 처음 "
-    "배정된 체급 그대로이고, 순위는 그 체급 안에서 수익률로만 갈립니다."
+    "새로 시작합니다.\n\n"
+    "시즌 도중에 실제 매입총합이 늘거나 줄어도 그 시즌 안에서는 처음 배정된 체급 "
+    "그대로이고, 순위는 그 체급 안에서 수익률로만 갈립니다."
 )
 
 # =============================================================================
@@ -247,9 +257,9 @@ NOTICE_BRACKET_FIXED = (
 #: 철회하면 무슨 일이 일어나는지. 5-8-1 · 5-8-2 의 내용을 사용자 말로 옮긴 **초안**입니다.
 #: 숫자(3개월)는 `duel_rules.RECONSENT_BLOCK_MONTHS` 에서 만들어 씁니다(§0-3-10).
 NOTICE_REVOKE = (
-    f"철회하면 ① 발행돼 있던 공개 기록(과거 순위·과거 수익률·공개된 보유종목)이 "
-    f"**숨김이 아니라 영구 삭제**되고, ② 그 뒤 "
-    f"**{duel_rules.RECONSENT_BLOCK_MONTHS}개월 동안 다시 동의할 수 없습니다.** "
+    "철회하면 ① 발행돼 있던 공개 기록(과거 순위·과거 수익률·공개된 보유종목)이 숨김이 "
+    "아니라 영구 삭제되고,\n\n"
+    f"② 그 뒤 {duel_rules.RECONSENT_BLOCK_MONTHS}개월 동안 다시 동의할 수 없습니다.\n\n"
     "되돌리기가 아니라 처음부터 다시 시작하는 절차입니다."
 )
 
@@ -257,8 +267,8 @@ NOTICE_REVOKE = (
 #: `utils/duel_db.py::revoke_consent()` 독스트링의 "최대 하루의 간격"을 그대로 옮긴 것입니다.
 NOTICE_REVOKE_TIMING = (
     "실제 삭제는 다음 야간 발행 배치가 처리합니다 — 철회한 시점과 공개 기록이 실제로 "
-    "사라지는 시점 사이에 **최대 하루의 간격**이 있습니다. 그 사이에도 새로 발행되지는 "
-    "않습니다."
+    "사라지는 시점 사이에 최대 하루의 간격이 있습니다.\n\n"
+    "그 사이에도 새로 발행되지는 않습니다."
 )
 
 #: 철회 확인 체크박스 문구(초안). 버튼 하나로 끝나지 않게 하는 것이 요구사항입니다.
@@ -490,8 +500,8 @@ def _render_coming_soon() -> None:
     """플래그가 꺼져 있거나 관리자 전용 단계일 때. 관리자 화면의 존재를 광고하지 않습니다."""
     warning_banner(
         '🚧 공개 순위표(2갈래 "내 밑으로 눈 깔어")는 아직 준비중입니다.\n\n'
-        '준비가 끝나면 왼쪽 메뉴에 나타납니다. 그때까지 결투 성적은 **아무에게도 공개되지 '
-        '않습니다** — 이 기능은 처음부터 끝까지 동의하신 분만 참여합니다.'
+        '준비가 끝나면 왼쪽 메뉴에 나타납니다. 그때까지 결투 성적은 아무에게도 공개되지 '
+        '않습니다 — 이 기능은 처음부터 끝까지 동의하신 분만 참여합니다.'
     )
 
 
@@ -501,7 +511,7 @@ def _render_header() -> None:
         '동의하지 않으면 공개 순위표 어디에도 나타나지 않습니다.'
     ).classes('vh-muted')
     info_banner(
-        'ℹ️ 여기서 공개되는 것은 **결투다! 가상계좌의 성적**입니다. 실제 보유 자산 금액이 '
+        'ℹ️ 여기서 공개되는 것은 결투다! 가상계좌의 성적입니다. 실제 보유 자산 금액이 '
         "그대로 공개되지는 않습니다(아래 '실제 매입총합' 항목만 예외적으로 실제 데이터를 "
         '쓰는데, 그것도 금액이 아니라 어느 구간인지만 씁니다).'
     )
@@ -590,11 +600,13 @@ async def _render_body(client, user_id: str) -> None:
     for account in mine:
         # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
         #    직접 부를 때는 `await`, 처리기 쪽 `.refresh()` 는 동기 호출 그대로입니다.
-        @ui.refreshable
-        async def account_section(account=account) -> None:
-            await _render_account_consent(client, user_id, account, account_section.refresh)
-
-        await account_section()
+        # 🔴 2026-08-22 — 예전에는 이 자리에서 `@ui.refreshable` 을 바로 정의했습니다.
+        #    그러면 `.refresh()` 가 참조하는 이름이 **마지막 반복의 객체**로 풀려서
+        #    (파이썬의 늦은 이름 결정), 계좌가 2개 이상일 때 두 번째 카드의 저장·철회가
+        #    마지막 카드를 다시 그렸습니다. 달러 경로가 이미 쓰던 `_consent_section()`
+        #    팩토리를 그대로 재사용해서 고칩니다(§0-3-10 — 새 함수를 만들지 않습니다).
+        #    그리는 내용도, 넘기는 인자도 예전과 같습니다 — 갱신 대상만 제자리로.
+        await _consent_section(_render_account_consent, client, user_id, account)()
 
 
 # =============================================================================
@@ -606,8 +618,12 @@ def _consent_section(render_fn, client, user_id: str, account: dict):
     ⚠️ 왜 팩토리인가: `for` 루프 안에서 `@ui.refreshable` 을 바로 정의하면, 나중에
        `.refresh()` 로 다시 그릴 때 본문이 참조하는 이름이 **마지막 반복의 객체**로 풀립니다
        (파이썬의 늦은 이름 결정). 팩토리 안에서는 `section` 이 그 호출만의 지역 이름이라
-       그 문제가 아예 생기지 않습니다. (원화 전용 경로의 기존 루프는 `/duel` 화면과 같은
-       예전 모양 그대로 두었습니다 — 원화 무수정 원칙, §5-19.)
+       그 문제가 아예 생기지 않습니다.
+    🔴 2026-08-22 — 원화 전용 경로(`_render_body()` 의 `for account in mine:`)도 이 팩토리를
+       쓰도록 바꿨습니다. 예전 모양 그대로 두었던 그 루프에서 실제로 위 증상이 났습니다
+       (계좌 2번 카드의 저장·철회가 3번 카드를 다시 그림). 화면에 그려지는 내용과 넘기는
+       인자는 그대로이고, 갱신 대상만 제 카드로 돌아옵니다 — 원화 무수정 원칙(§5-19)이
+       지키려는 것은 "사용자가 보는 화면"이지 버그가 아닙니다.
     """
     @ui.refreshable
     async def section() -> None:
@@ -633,8 +649,8 @@ async def _render_both_tracks(client, user_id: str, mine, usd_by_window: dict) -
         '둘 수 있습니다. 창유형(1·3·6개월)마다 원화 계좌와 달러 계좌가 **각각 별도 계좌**라, '
         '같은 칸의 위쪽이 원화 동의, 아래쪽이 달러 동의입니다.'
     )
-    ui.label(NOTICE_TRACKS_INDEPENDENT).classes('vh-muted vh-keep-all')
-    ui.label(NOTICE_SHARED_NICKNAME).classes('vh-muted vh-keep-all')
+    ui.label(NOTICE_TRACKS_INDEPENDENT).classes('vh-muted vh-keep-all whitespace-pre-line')
+    ui.label(NOTICE_SHARED_NICKNAME).classes('vh-muted vh-keep-all whitespace-pre-line')
     ui.label(
         f'※ 순위표는 참가자가 충분히 모인 그룹만 공개됩니다(같은 창유형·같은 체급에 '
         f'{duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION}명 이상). 인원이 적은 그룹은 '
@@ -784,7 +800,10 @@ def _render_current_state(state: dict, nickname_row) -> None:
     """지금 이 계좌가 어떤 상태인지 — 닉네임 · 항목별 on/off · 언제 동의했는지."""
     labels = {
         "none": '비공개 (공개 동의 기록이 없습니다)',
-        "in_progress": '비공개 (항목은 체크됐지만 **최종 확인 전**이라 아직 발행되지 않습니다)',
+        # 🔴 2026-08-22 — 이 문자열은 806줄에서 이미 `**현재 상태 — …**` 로 한 번 더
+        #    감싸입니다. 여기 안에 또 `**`를 넣으면 굵게 안에 굵게(중첩)가 되어 마크다운이
+        #    애매하게 해석되므로, 강조는 바깥쪽 한 겹에만 맡기고 여기서는 뺍니다.
+        "in_progress": '비공개 (항목은 체크됐지만 최종 확인 전이라 아직 발행되지 않습니다)',
         "confirmed": '공개 신청 완료 (발행 대상)',
         "revoked": '철회됨',
     }
@@ -832,7 +851,7 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
     already = state["state"] == "confirmed"
     ui.markdown('#### 1단계 — 무엇을 공개할지 한 문장씩 확인')
     warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **첫 번째**
-    ui.label(NOTICE_ALL_OR_NOTHING).classes('vh-muted')
+    ui.label(NOTICE_ALL_OR_NOTHING).classes('vh-muted whitespace-pre-line')
 
     boxes = {}
     for flag, name, sentence in consent_item_rows():
@@ -867,7 +886,7 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
     # ── 2층 — 별도의 최종 확인 (5-2-3) ────────────────────────────────────────
     ui.separator()
     ui.markdown('#### 2단계 — 최종 확인')
-    ui.label(NOTICE_FINAL_CONFIRM).classes('vh-muted')
+    ui.label(NOTICE_FINAL_CONFIRM).classes('vh-muted whitespace-pre-line')
     warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **두 번째**
 
     if already:
@@ -902,8 +921,8 @@ def _render_consent_form(client, account: dict, state: dict, on_changed) -> None
 def _render_real_principal_form(client, account: dict, state: dict, on_changed) -> None:
     """완전히 별개인 독립 동의(5-2-4). **위 5개와 같은 카드 묶음처럼 보이지 않게** 그립니다."""
     ui.markdown('#### 별개 항목 — 실제 매입총합을 체급 산정에 사용')
-    ui.label(NOTICE_REAL_PRINCIPAL).classes('vh-muted')
-    ui.label(NOTICE_BRACKET_FIXED).classes('vh-muted')
+    ui.label(NOTICE_REAL_PRINCIPAL).classes('vh-muted whitespace-pre-line')
+    ui.label(NOTICE_BRACKET_FIXED).classes('vh-muted whitespace-pre-line')
 
     box = ui.checkbox(
         CONSENT_REAL_PRINCIPAL_SENTENCE, value=bool(state["real_principal"]),
@@ -944,7 +963,7 @@ def _render_consent_form_usd(client, account: dict, state: dict, on_changed) -> 
     already = state["state"] == "confirmed"
     ui.markdown('#### 1단계 — 무엇을 공개할지 한 문장씩 확인 (달러)')
     warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **첫 번째**
-    ui.label(NOTICE_ALL_OR_NOTHING).classes('vh-muted')
+    ui.label(NOTICE_ALL_OR_NOTHING).classes('vh-muted whitespace-pre-line')
 
     boxes = {}
     for flag, name, sentence in consent_item_rows():
@@ -977,19 +996,19 @@ def _render_consent_form_usd(client, account: dict, state: dict, on_changed) -> 
     # ── 2층 — 별도의 최종 확인 (5-2-3) ────────────────────────────────────────
     ui.separator()
     ui.markdown('#### 2단계 — 최종 확인 (달러)')
-    ui.label(NOTICE_FINAL_CONFIRM).classes('vh-muted')
+    ui.label(NOTICE_FINAL_CONFIRM).classes('vh-muted whitespace-pre-line')
     warning_banner(NOTICE_RESPONSIBILITY)          # 🔴 5-2-5 — 두 곳 중 **두 번째**
 
     if already:
         info_banner(
-            '✅ 이 달러 계좌는 최종 확인까지 마친 상태입니다. 다음 발행 배치부터 **달러 '
-            '순위표**에 나타납니다(같은 그룹에 사람이 충분히 모였다면). 원화 순위표와는 '
+            '✅ 이 달러 계좌는 최종 확인까지 마친 상태입니다. 다음 발행 배치부터 달러 '
+            '순위표에 나타납니다(같은 그룹에 사람이 충분히 모였다면). 원화 순위표와는 '
             '아무 관계가 없습니다.'
         )
         return
 
     final_box = ui.checkbox(
-        '위 5개 항목 전부를 읽고 이해했으며, 내 **달러 결투** 성적을 공개 순위표에 공개하는 '
+        '위 5개 항목 전부를 읽고 이해했으며, 내 달러 결투 성적을 공개 순위표에 공개하는 '
         '데 최종적으로 동의합니다.'
     ).props('dense').classes('w-full vh-keep-all')
     final_message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
@@ -1005,7 +1024,7 @@ def _render_consent_form_usd(client, account: dict, state: dict, on_changed) -> 
             final_message.text = f'🚫 {exc}'
             return
         await _save_usd(client, account, payload, final_message, on_changed,
-                        '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 **달러** 공개 순위표 '
+                        '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 달러 공개 순위표 '
                         '대상이 됩니다.')
 
     ui.button('🔓 최종 확인하고 달러 순위표 공개 신청', on_click=_save_final) \
@@ -1020,8 +1039,8 @@ def _render_real_principal_form_usd(client, account: dict, state: dict, on_chang
        으로 갑니다. 원화 문구를 그대로 쓰면 사실과 다른 안내가 됩니다(§0-1).
     """
     ui.markdown('#### 별개 항목 — 실제 **달러** 매입총합을 체급 산정에 사용')
-    ui.label(NOTICE_REAL_PRINCIPAL_USD).classes('vh-muted vh-keep-all')
-    ui.label(NOTICE_BRACKET_FIXED).classes('vh-muted')
+    ui.label(NOTICE_REAL_PRINCIPAL_USD).classes('vh-muted vh-keep-all whitespace-pre-line')
+    ui.label(NOTICE_BRACKET_FIXED).classes('vh-muted whitespace-pre-line')
 
     box = ui.checkbox(
         CONSENT_REAL_PRINCIPAL_SENTENCE, value=bool(state["real_principal"]),
@@ -1047,7 +1066,7 @@ def _render_real_principal_form_usd(client, account: dict, state: dict, on_chang
 def _render_revoke(client, account_id, on_changed) -> None:
     with ui.expansion('🚫 공개 동의 철회하기').classes('w-full'):
         warning_banner(NOTICE_REVOKE)
-        ui.label(NOTICE_REVOKE_TIMING).classes('vh-muted')
+        ui.label(NOTICE_REVOKE_TIMING).classes('vh-muted whitespace-pre-line')
         confirm = ui.checkbox(REVOKE_CONFIRM_LABEL).props('dense').classes('w-full vh-keep-all')
         message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
 
@@ -1090,9 +1109,9 @@ def _render_revoke_usd(client, account_id, on_changed) -> None:
     """
     with ui.expansion('🚫 달러 결투 공개 동의 철회하기').classes('w-full'):
         warning_banner(NOTICE_REVOKE)
-        ui.label(NOTICE_REVOKE_TIMING).classes('vh-muted')
+        ui.label(NOTICE_REVOKE_TIMING).classes('vh-muted whitespace-pre-line')
         ui.label(
-            '※ 이 철회는 **달러 순위표에만** 적용됩니다. 원화 결투의 공개 동의는 그대로 '
+            '※ 이 철회는 달러 순위표에만 적용됩니다. 원화 결투의 공개 동의는 그대로 '
             '남고, 원화 순위표 기록도 지워지지 않습니다(원화도 그만두시려면 위쪽 원화 '
             '카드에서 따로 철회하셔야 합니다).'
         ).classes('vh-muted vh-keep-all')
