@@ -1252,35 +1252,53 @@ async def _render_body(client, user_id: str, email) -> None:
 #     함수가 자기 try 안에서 하던 것과 같은 범위의 격리를 그대로 유지합니다).
 # -----------------------------------------------------------------------------
 async def _load_account_data(client, accounts) -> dict:
-    """원화 계좌별 {포지션·주문} 묶음 — `{account_id: {"positions", "orders", "error"}}`."""
-    bundles = {}
-    for account in accounts or []:
-        account_id = (account or {}).get("id")
-        try:
-            positions = await run_blocking(fetch_my_positions, client, account_id)
-            orders = await run_blocking(fetch_my_orders, client, account_id)
-        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
-            bundles[account_id] = {"positions": None, "orders": None, "error": exc}
-            continue
-        bundles[account_id] = {"positions": positions, "orders": orders, "error": None}
-    return bundles
+    """원화 계좌별 {예수금·포지션·주문} 묶음 — `{account_id: {"cash", "positions", "orders", "error"}}`.
 
-
-async def _load_account_data_usd(client, accounts) -> dict:
-    """달러 계좌별 {포지션·주문} 묶음. 위 원화 함수의 미러 — **다른 표**를 읽는 것만 다릅니다.
-
-    ⚠️ 원화 조회 함수를 하나라도 섞어 부르면 달러 화면에 원화 트랙의 숫자가 나옵니다.
+    💰 2026-08-22 — `cash` 가 여기로 **올라왔습니다.** 예수금은 원래 `_render_account_card()`
+       가 자기 안에서 `fetch_my_cash_ledger()` 로 읽던 값인데, 화면 아래쪽 주문 폼도 같은
+       값을 보여줘야 해서(오너 요청: "여기만 봐서는 내가 얼마나 주문을 더 할 수 있을 지 알
+       수가 없어") 포지션·주문과 **같은 자리**로 옮겼습니다. 카드는 묶음에 `cash` 가 있으면
+       자기 조회를 건너뛰므로 **왕복 수는 그대로**입니다(§0-3-2 — 옮긴 것이지 늘린 게
+       아닙니다). 계산은 기존 순수 함수 `sum_cash_balance()` 를 그대로 씁니다.
     """
     bundles = {}
     for account in accounts or []:
         account_id = (account or {}).get("id")
         try:
+            ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
+            cash = sum_cash_balance(ledger)        # 순수 계산 — 왕복이 아닙니다
+            positions = await run_blocking(fetch_my_positions, client, account_id)
+            orders = await run_blocking(fetch_my_orders, client, account_id)
+        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
+            bundles[account_id] = {"cash": None, "positions": None, "orders": None,
+                                   "error": exc}
+            continue
+        bundles[account_id] = {"cash": cash, "positions": positions, "orders": orders,
+                               "error": None}
+    return bundles
+
+
+async def _load_account_data_usd(client, accounts) -> dict:
+    """달러 계좌별 {예수금·포지션·주문} 묶음. 위 원화 함수의 미러 — **다른 표**를 읽는 것만 다릅니다.
+
+    ⚠️ 원화 조회 함수를 하나라도 섞어 부르면 달러 화면에 원화 트랙의 숫자가 나옵니다.
+       (`sum_cash_balance()` 는 통화를 모르는 순수 합계라 원화와 공유합니다 — 이 파일이
+       이미 두 계좌 카드에서 그렇게 쓰고 있습니다.)
+    """
+    bundles = {}
+    for account in accounts or []:
+        account_id = (account or {}).get("id")
+        try:
+            ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
+            cash = sum_cash_balance(ledger)        # 순수 계산 — 원화와 공유
             positions = await run_blocking(fetch_my_positions_usd, client, account_id)
             orders = await run_blocking(fetch_my_orders_usd, client, account_id)
         except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
-            bundles[account_id] = {"positions": None, "orders": None, "error": exc}
+            bundles[account_id] = {"cash": None, "positions": None, "orders": None,
+                                   "error": exc}
             continue
-        bundles[account_id] = {"positions": positions, "orders": orders, "error": None}
+        bundles[account_id] = {"cash": cash, "positions": positions, "orders": orders,
+                               "error": None}
     return bundles
 
 
@@ -1290,10 +1308,13 @@ def _bundle_for(bundles, account_id) -> dict:
     묶음을 넘기지 않은 옛 호출부·테스트 스텁에서도 화면이 그려져야 하므로(이 파일이 이미
     `market_usd=None` 에 쓰는 것과 같은 방식), 여기서는 조용히 빈 값을 만들지 말고
     호출부가 "묶음이 없다"를 구분할 수 있게 `None` 필드를 그대로 둡니다.
+
+    💰 `cash` 도 같은 규칙입니다 — `None` 은 "예수금 0원"이 아니라 "아직 못 읽음"입니다
+       (§0-1 — 못 읽은 것을 0 으로 위장하지 않습니다).
     """
     bundle = (bundles or {}).get(account_id)
     if not isinstance(bundle, dict):
-        return {"positions": None, "orders": None, "error": None}
+        return {"cash": None, "positions": None, "orders": None, "error": None}
     return bundle
 
 
@@ -1744,6 +1765,11 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
        뱃지에 적습니다. 묶음을 넘기지 않는 옛 호출부·테스트 스텁에서는 예전과 **글자 그대로
        같은 경로**로 포지션을 직접 읽고, 창 뱃지만 생략합니다(이 파일이 `market_usd=None`
        에 이미 쓰고 있는 것과 같은 방식 — 새 인자가 옛 화면을 깨뜨리지 않게).
+
+    💰 2026-08-22 — **예수금도 같은 방식**이 됐습니다. `bundle["cash"]` 가 있으면 그 값을
+       쓰고 `fetch_my_cash_ledger()` 를 부르지 않습니다(그 조회는 4-B 절 로더로 올라갔고,
+       주문 폼이 같은 값을 나눠 씁니다 — 왕복 총수는 그대로입니다). 묶음이 없거나 못 읽은
+       옛 경로에서는 지금까지처럼 여기서 직접 읽습니다.
     """
     if account.get("user_id") != user_id:
         error_banner('🚫 소유자가 확인되지 않는 계좌라 표시하지 않았습니다.')
@@ -1763,10 +1789,13 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
             return
 
         try:
-            # 계좌 하나당 왕복 3회(묶음이 있으면 포지션 1회가 빠져 2회)입니다.
+            # 계좌 하나당 왕복 3회(묶음이 있으면 예수금·포지션 2회가 빠져 1회)입니다.
             # 전부 `client` 를 인자로 받는 순수 조회 함수라 스레드로 넘겨도 안전합니다.
-            ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
-            cash = sum_cash_balance(ledger)                     # 순수 계산 — 루프에서 그대로
+            if bundle is not None and bundle.get("cash") is not None:
+                cash = bundle["cash"]              # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
+            else:
+                ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
+                cash = sum_cash_balance(ledger)                 # 순수 계산 — 루프에서 그대로
             if bundle is not None and bundle.get("positions") is not None:
                 positions = bundle["positions"]
             else:
@@ -1904,6 +1933,9 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
        계산은 통화를 모르는 공유 함수(1-RB 절)를 그대로 쓰고, 갈라지는 것은 그 값을 **어느
        표에서 읽어 왔는가**뿐입니다(이 함수는 달러 표만 봅니다).
 
+    💰 2026-08-22 — 원화 카드와 같이 `bundle["cash"]` 가 있으면 예수금을 다시 읽지 않습니다
+       (그 조회는 `_load_account_data_usd()` 로 올라갔고, 달러 주문 폼이 나눠 씁니다).
+
     🔴 이 함수 안의 모든 금액은 **달러 하나뿐**입니다. 여기서 계산하는 "총자산"은 이 달러
        계좌 하나의 총자산이고, 원화 계좌의 값과 만나는 자리가 한 곳도 없습니다(§5-11-2).
        위 원화 카드와 같은 이름의 지표를 쓰지만, 두 카드의 숫자를 더하는 코드는 이 파일
@@ -1930,8 +1962,11 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
             return
 
         try:
-            ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
-            cash = sum_cash_balance(ledger)                     # 순수 계산 — 원화와 공유
+            if bundle is not None and bundle.get("cash") is not None:
+                cash = bundle["cash"]              # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
+            else:
+                ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
+                cash = sum_cash_balance(ledger)                 # 순수 계산 — 원화와 공유
             if bundle is not None and bundle.get("positions") is not None:
                 positions = bundle["positions"]
             else:
@@ -2183,9 +2218,36 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         if account.get("user_id") == user_id       # 🔒 남의 계좌를 고를 수 있는 경로 자체를 없앰
     }
 
+    # 💰 계좌별 예수금 — 4-B 절 묶음이 이미 읽어 둔 값입니다(여기서 다시 읽지 않습니다).
+    #    키는 `account_options` 와 같은 `str(id)` 로 맞춥니다 — 드롭다운이 돌려주는 값이
+    #    그 문자열이기 때문입니다.
+    cash_by_account = {
+        str(account.get("id")): _bundle_for(bundles, account.get("id")).get("cash")
+        for account in accounts
+        if account.get("user_id") == user_id       # 🔒 위 목록과 **같은** 소유자 조건
+    }
+
     account_select = ui.select(
         account_options, value=next(iter(account_options), None), label='주문할 계좌',
+        on_change=lambda _e: _update_cash_label(),
     ).classes('w-full')
+
+    # 🔴 오너 피드백(2026-08-22) — "여기만 봐서는 내가 얼마나 주문을 더 할 수 있을 지 알 수가
+    #    없어". 예수금은 화면 위쪽 계좌 카드에 이미 있지만 모바일에서 여기까지 내려오면 화면
+    #    밖입니다. 그래서 **계좌를 고른 자리 바로 아래**에, 종목·수량을 정하기 **전에**
+    #    보이게 둡니다(가격 보이고 → 수량 조절).
+    cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
+
+    def _update_cash_label() -> None:
+        """고른 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
+        cash = cash_by_account.get(account_select.value)
+        if cash is None:
+            # §0-1 — 못 읽은 것을 0원으로 위장하지 않습니다(0원이면 아래 줄로 갑니다).
+            cash_label.text = '💰 이 계좌의 예수금을 읽지 못했습니다 — 위 계좌 카드를 확인해 주세요.'
+            return
+        cash_label.text = f'💰 이 계좌 주문 가능 예수금: {format_amount(cash, CURRENCY)}'
+
+    _update_cash_label()
 
     def _picked(event) -> None:
         if event.value:
@@ -2582,9 +2644,32 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         if account.get("user_id") == user_id       # 🔒 남의 계좌를 고를 수 있는 경로 자체를 없앰
     }
 
+    # 💰 계좌별 예수금 — `_load_account_data_usd()` 묶음이 이미 읽어 둔 **달러** 값입니다.
+    cash_by_account = {
+        str(account.get("id")): _bundle_for(bundles, account.get("id")).get("cash")
+        for account in accounts
+        if account.get("user_id") == user_id       # 🔒 위 목록과 **같은** 소유자 조건
+    }
+
     account_select = ui.select(
         account_options, value=next(iter(account_options), None), label='주문할 달러 계좌',
+        on_change=lambda _e: _update_cash_label(),
     ).classes('w-full')
+
+    # 🔴 오너 피드백(2026-08-22) — 원화 폼과 같은 이유·같은 자리입니다(계좌 바로 아래,
+    #    종목·수량 입력보다 위).
+    cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
+
+    def _update_cash_label() -> None:
+        """고른 달러 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
+        cash = cash_by_account.get(account_select.value)
+        if cash is None:
+            # §0-1 — 못 읽은 것을 $0 으로 위장하지 않습니다($0 이면 아래 줄로 갑니다).
+            cash_label.text = '💰 이 달러 계좌의 예수금을 읽지 못했습니다 — 위 계좌 카드를 확인해 주세요.'
+            return
+        cash_label.text = f'💰 이 달러 계좌 주문 가능 예수금: {format_amount(cash, CURRENCY_USD)}'
+
+    _update_cash_label()
 
     def _picked(event) -> None:
         if event.value:
