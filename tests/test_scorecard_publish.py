@@ -24,6 +24,9 @@
     ⑥ 최소 인원 500명 경계(499 vs 500), 미달 그룹의 과거 행 제거.
     ⑦ 🔴 **원화·달러가 어디서도 섞이지 않는가** — 체급 키 집합, 그룹, 발행 payload, 삭제 필터.
     ⑧ 전량 재작성 · dry-run 무기록 · §0-3-2(사용자 수와 무관한 왕복 수).
+    ⑨ 🔴 **종목별 상세지표 5종**(2026-08-23 신설) — 이미 계산된 값을 그대로 옮기는가,
+       `consent_holding_details` 없이는 다섯 값이 전부 None 인가(0 이 아니라), 그리고
+       스키마 추가분(ALTER)이 두 SQL 파일에 **같은 내용으로** 들어 있는가.
 
 실행: pytest tests/test_scorecard_publish.py -v
 """
@@ -368,16 +371,33 @@ def test_fully_consented_row_passes():
     assert scorecard_publish.assert_full_consent(_consent_row()) is None
 
 
-def test_there_is_no_sixth_independent_consent_flag():
+def test_consent_flags_are_exactly_these_six_in_this_order():
     """
-    🔴 결투의 여섯 번째 독립 동의(`consent_real_principal_bracket`)에 해당하는 항목이
-    **여기에는 없습니다.** 공개되는 데이터 자체가 이미 실제 자산이라, 매입원가합계는 이미
-    공개된 값들의 단순 합으로 재구성 가능합니다(스키마 §2-2). 나중에 누가 이 목록에 항목을
-    끼워 넣으면 DB CHECK 와 앱 판정이 갈라지므로 여기서 고정합니다.
+    🔴 항목별 동의 목록을 **글자와 순서까지** 고정합니다. 이 목록이 바뀌면 DB 의
+    `scorecard_consent_final_requires_all` CHECK · 화면의 `CONSENT_ITEM_SENTENCES` 도
+    함께 바뀌어야 하고, 셋 중 하나만 바뀌면 "사용자가 본 문장"과 "실제로 저장·발행되는
+    항목"이 갈라집니다 — 이 모듈에서 가장 나쁜 종류의 버그입니다.
+
+    2026-08-23 에 여섯 번째 항목 `consent_holding_details`("종목별 상세지표")가 **끝에**
+    붙었습니다. 앞의 다섯 개는 순서까지 그대로여야 합니다(기존 사용자의 동의 이력이 같은
+    컬럼을 가리켜야 하므로).
     """
     assert scorecard_publish_db.CONSENT_ITEM_FLAGS == (
         "consent_rank", "consent_return", "consent_holdings",
-        "consent_quantity", "consent_buy_amount")
+        "consent_quantity", "consent_buy_amount", "consent_holding_details")
+
+
+def test_the_duels_independent_bracket_consent_never_came_back():
+    """
+    🔴 결투의 독립 동의(`consent_real_principal_bracket` — "실제 매입총합을 체급 산정에
+    사용")는 이 계층에 **없습니다(앞으로도 만들지 않습니다).** 공개되는 데이터 자체가 이미
+    실제 자산이라, 매입원가합계는 이미 공개된 값들의 단순 합으로 재구성 가능합니다
+    (스키마 §2-2).
+
+    ⚠️ 2026-08-23 에 여섯 번째 항목이 생겼지만 그건 **다른 것**입니다 — 체급과 무관하고,
+       따로 켜고 끄는 독립 동의도 아니라 앞의 다섯 개와 같은 "전부 아니면 전무" 묶음입니다.
+       "여섯 번째가 생겼으니 결투 것도 되살리자"가 되지 않게 여기서 따로 못 박습니다.
+    """
     assert duel_db.CONSENT_REAL_PRINCIPAL_FLAG not in scorecard_publish_db.CONSENT_ITEM_FLAGS
 
     code = _executable_source("scorecard_publish.py") + _executable_source(
@@ -535,9 +555,17 @@ def test_rank_participants_is_fed_the_literal_twr_pct_key():
 # =============================================================================
 # 5. 발행 payload — 🔴 식별자가 절대 실리지 않아야 합니다
 # =============================================================================
-def _ranked(nickname="닉네임가", return_pct=12.5, holdings=None):
+def _ranked(nickname="닉네임가", return_pct=12.5, holdings=None, details=True):
+    """
+    `build_publish_rows()` 가 만드는 모양의 참가자 한 명.
+
+    `details` 는 6번째 동의 항목(`consent_holding_details`)이 켜져 있는지입니다 — 기본은
+    True(= 전부 아니면 전무 규칙 아래 실제로 발행되는 상태)이고, 게이팅을 확인하는 검사만
+    False 나 "키 자체 없음"을 씁니다.
+    """
     return [{"nickname": nickname, "twr_pct": return_pct, "rank": 1,
              "user_id": "user-1", "currency": KRW,
+             "consent_holding_details": details,
              "holdings": holdings if holdings is not None else []}]
 
 
@@ -570,7 +598,11 @@ def test_holdings_payload_never_carries_identifiers_including_the_holding_row_id
     payload = scorecard_publish.holdings_payload(
         (KRW, "krw_under_1m"), _ranked(holdings=[row]))
     assert set(payload[0]) == {"currency", "nickname", "ticker", "stock_name",
-                               "quantity", "buy_amount"}
+                               "quantity", "buy_amount",
+                               "avg_price", "current_price", "profit", "profit_pct",
+                               "weight_pct"}
+    # 작업용으로만 들고 다니던 동의 플래그도 payload 로 새어 나가지 않아야 합니다.
+    assert "consent_holding_details" not in payload[0]
     for key in duel_db.FORBIDDEN_PUBLISH_FIELDS:
         assert key not in payload[0]
     duel_db._assert_no_identity_fields(
@@ -623,6 +655,272 @@ def test_write_functions_refuse_identifier_fields_as_a_last_line_of_defence():
         with pytest.raises(DuelDbError):
             writer(client, TODAY, [{"currency": KRW, "nickname": "닉", "user_id": "u1"}])
     assert client.calls_for(op="insert") == [], "거절된 요청이 전송되면 안 됩니다"
+
+
+# =============================================================================
+# 5-b. 🔴 종목별 상세지표 5종 (2026-08-23 신설)
+# =============================================================================
+#  오너 확정: "'내 성적표'에 나오는 정보는 기본적으로 전부 공개." 그래서 발행 보유종목 행에
+#  평균매입가·현재가·평가손익·수익률·비중이 함께 실립니다. 여기서 보는 것은 두 가지입니다:
+#    ① **계산하지 않고 옮기기만 하는가** — `evaluate_holding()`/`build_portfolio()` 가 이미
+#       만든 값과 **정확히 같은 숫자**여야 합니다. 여기서 다시 곱하거나 나누면 "내 성적표"
+#       화면과 순위표가 언젠가 갈라집니다(§0-1/§0-3-10).
+#    ② **동의 없이는 실리지 않는가** — 없으면 0 이 아니라 None(§0-1 "비공개 ≠ 0").
+# =============================================================================
+DETAIL_FIELDS = ("avg_price", "current_price", "profit", "profit_pct", "weight_pct")
+
+
+def _detail_payload(details=True, prices=None, holdings=None):
+    """상세지표 확인용 보유종목 payload 한 벌."""
+    rows = holdings if holdings is not None else [_kr_holding("u1", 3, 50_000)]
+    summary = _summary(rows, {("KR", "005930"): 60_000} if prices is None else prices)
+    return scorecard_publish.holdings_payload(
+        (KRW, "krw_under_1m"),
+        _ranked(holdings=summary["rows"], details=details)), summary
+
+
+def test_detail_metrics_are_copied_from_the_already_computed_row_not_recalculated():
+    """
+    ① 다섯 값이 `build_portfolio()` 의 행과 **글자 그대로 같은 숫자**인가.
+
+    3주 × 50,000원(매입) → 현재가 60,000원이면 평가손익 30,000원 · 수익률 20% 입니다.
+    이 검사가 보는 것은 그 숫자가 맞는지가 아니라(그건 `scorecard_db` 의 몫), **발행
+    payload 가 그 값을 그대로 옮겼는지**입니다.
+    """
+    payload, summary = _detail_payload()
+    row = summary["rows"][0]
+    published = payload[0]
+
+    assert published["avg_price"] == pytest.approx(row["avg_purchase_price"])
+    assert published["current_price"] == pytest.approx(row["current_price"])
+    assert published["profit"] == pytest.approx(row["profit"])
+    assert published["profit_pct"] == pytest.approx(row["profit_pct"])
+    assert published["weight_pct"] == pytest.approx(row["weight_pct"])
+
+    # 값 자체도 한 번 봅니다(옮기기는 했는데 엉뚱한 필드를 옮겼을 수 있으므로).
+    assert published["avg_price"] == pytest.approx(50_000)
+    assert published["current_price"] == pytest.approx(60_000)
+    assert published["profit"] == pytest.approx(30_000)
+    assert published["profit_pct"] == pytest.approx(20.0)
+
+
+def test_weight_pct_is_the_same_definition_the_scorecard_screen_uses():
+    """
+    🔴 비중은 "내 성적표" 화면이 쓰는 값(`build_portfolio()` 의 `weight_pct`) **그대로**
+    입니다. 여기서 매입원가 기준으로 따로 계산하면, 같은 "비중"이라는 이름표를 달고 사용자
+    본인의 `/scorecard` 화면과 순위표가 서로 다른 숫자를 보여주게 됩니다(§0-1/§0-3-10).
+
+    두 종목의 매입원가는 같지만(각 300,000원) 현재가가 달라 평가금액이 갈리는 입력을 씁니다
+    — 매입원가 기준이면 50/50, 평가금액 기준이면 60/40 이라 **어느 쪽을 실었는지가 실제로
+    구별됩니다.**
+    """
+    holdings = [_kr_holding("u1", 3, 100_000, ticker="005930"),
+                _kr_holding("u1", 3, 100_000, ticker="000660", stock_name="SK하이닉스")]
+    payload, summary = _detail_payload(
+        holdings=holdings,
+        prices={("KR", "005930"): 120_000, ("KR", "000660"): 80_000})
+
+    by_ticker = {row["ticker"]: row for row in payload}
+    assert by_ticker["005930"]["weight_pct"] == pytest.approx(60.0)
+    assert by_ticker["000660"]["weight_pct"] == pytest.approx(40.0)
+    assert by_ticker["005930"]["weight_pct"] != pytest.approx(50.0), \
+        "매입원가 기준으로 다시 계산한 값이 실렸습니다(화면과 갈라집니다)"
+
+    # 화면이 쓰는 바로 그 필드와 같은 값인지 직접 대조합니다.
+    screen = {row["ticker"]: row["weight_pct"] for row in summary["rows"]}
+    for row in payload:
+        assert row["weight_pct"] == pytest.approx(screen[row["ticker"]])
+
+
+def test_detail_metrics_are_none_when_that_holding_has_no_price():
+    """
+    가격을 못 구한 종목은 넷이 **원래부터 None** 입니다(0 이 아닙니다 — §0-1).
+    평균매입가는 시세와 무관하므로 그 경우에도 값이 있어야 합니다.
+    """
+    payload, _summary_unused = _detail_payload(prices={})     # 가격표가 비어 있음
+    published = payload[0]
+    assert published["avg_price"] == pytest.approx(50_000)
+    for field in ("current_price", "profit", "profit_pct", "weight_pct"):
+        assert published[field] is None, f"{field} 가 None 이 아닙니다"
+    # 매입금액·수량은 시세와 무관하므로 여전히 실립니다.
+    assert published["buy_amount"] == pytest.approx(150_000)
+
+
+def test_no_detail_metrics_without_the_sixth_consent_and_they_are_none_not_zero():
+    """
+    ② 🔒 `consent_holding_details` 가 없으면 다섯 값이 **전부 None** 입니다.
+    0 으로 채우면 "평가손익 0원 / 비중 0%"라는 사실이 아닌 정보를 남에게 발행하게 됩니다.
+    키를 빼 버리는 것도 안 됩니다 — 컬럼이 있는데 값을 안 보내면 그날 그 종목만 값이 안
+    바뀐 채 남을 수 있고, 화면은 "왜 이 사람만 칸이 다르지"가 됩니다.
+    """
+    payload, _ = _detail_payload(details=False)
+    published = payload[0]
+    for field in DETAIL_FIELDS:
+        assert field in published, f"{field} 키 자체가 빠졌습니다(null 로 실어야 합니다)"
+        assert published[field] is None, f"{field} 가 None 이 아닙니다"
+        assert published[field] != 0, "비공개를 0 으로 그리지 않습니다(§0-1)"
+    # 앞의 5개 항목에 걸린 값들은 그대로 실립니다(6번째만 빠진 것이므로).
+    assert published["quantity"] == pytest.approx(3)
+    assert published["buy_amount"] == pytest.approx(150_000)
+
+
+def test_missing_consent_key_is_treated_as_not_consented():
+    """
+    🔒 기본값은 **공개가 아니라 비공개**입니다(§0-3-8). 호출부가 플래그를 아예 안 실어
+    보냈다면(예: 새로 생긴 경로가 그 필드를 모른다면) 다섯 값은 None 이어야 합니다 —
+    "없으면 켜진 것으로 본다"가 되는 순간 그게 정확히 §0-3-8 사고입니다.
+    """
+    summary = _summary([_kr_holding("u1", 3, 50_000)], {("KR", "005930"): 60_000})
+    entry = _ranked(holdings=summary["rows"])
+    del entry[0]["consent_holding_details"]                   # 플래그가 통째로 없는 상태
+
+    payload = scorecard_publish.holdings_payload((KRW, "krw_under_1m"), entry)
+    for field in DETAIL_FIELDS:
+        assert payload[0][field] is None, f"{field} 가 동의 없이 실렸습니다"
+
+
+def test_build_publish_rows_carries_the_sixth_consent_flag_from_the_consent_row():
+    """
+    게이팅 값의 출처는 **동의 행**입니다. `build_publish_rows()` 가 그 값을 참가자 dict 에
+    실어 주지 않으면, `holdings_payload()` 는 (기본 비공개 규칙에 따라) 동의한 사람의
+    상세지표까지 전부 비워 버립니다 — 조용히 값이 사라지는 쪽이라 검사로 고정합니다.
+    """
+    portfolio = _portfolio(krw_holdings=[_kr_holding("u1", 3, 50_000)],
+                           prices={("KR", "005930"): 60_000})
+    built = scorecard_publish.build_publish_rows(
+        [_consent_row("u1")], {"u1": portfolio}, {"u1": "닉네임가"}, {})
+    (entries,) = built["groups"].values()
+    assert entries[0]["consent_holding_details"] is True
+
+    payload = scorecard_publish.holdings_payload(
+        (KRW, duel_rules.BRACKET_NONE_KEY), entries)
+    assert payload[0]["avg_price"] == pytest.approx(50_000)
+
+
+def test_leaderboard_payload_does_not_carry_the_consent_flag():
+    """순위표 payload 는 whitelist 라 작업용 필드가 하나도 새지 않습니다."""
+    payload = scorecard_publish.leaderboard_payload((KRW, "krw_under_1m"), _ranked())
+    assert set(payload[0]) == {"currency", "bracket_key", "rank", "nickname", "return_pct"}
+
+
+def test_write_public_holdings_accepts_the_new_detail_columns():
+    """
+    마지막 방어선(`_assert_no_identity_fields()`)이 새 필드 이름을 식별자로 오인하지 않고,
+    발행 요청이 실제로 나가는지. (`profit` 같은 흔한 이름이 금지 목록과 겹치지 않는지도
+    함께 봅니다.)
+    """
+    for field in DETAIL_FIELDS:
+        assert field not in duel_db.FORBIDDEN_PUBLISH_FIELDS
+
+    payload, _ = _detail_payload()
+    client = FakeClient()
+    written = scorecard_publish_db.write_public_holdings(client, "2026-08-23", payload)
+    assert written == len(payload)
+    sent = client.only_call(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "insert").payload
+    assert sent[0]["profit_pct"] == pytest.approx(20.0)
+    for key in duel_db.FORBIDDEN_PUBLISH_FIELDS:
+        assert key not in sent[0]
+
+
+def test_the_reader_selects_the_new_columns_by_name_never_star():
+    """
+    화면이 새 값을 읽으려면 조회 컬럼 목록에도 들어 있어야 합니다. 다만 `select("*")` 로
+    바꿔 해결하면 안 됩니다 — 나중에 발행표에 컬럼이 하나 늘면 그걸 화면으로 그대로
+    날라 주게 됩니다(§0-3-8).
+    """
+    columns = scorecard_publish_db.PUBLIC_HOLDINGS_COLUMNS
+    assert "*" not in columns
+    for field in DETAIL_FIELDS:
+        assert field in columns.split(","), f"{field} 를 읽지 않습니다"
+
+
+def test_publish_batch_end_to_end_carries_the_detail_metrics_into_the_written_rows():
+    """
+    조각이 아니라 **배치 전체**를 돌려서, 동의 → 조립 → 발행까지 다섯 값이 살아서 도착하는지
+    확인합니다(중간 어느 단계에서 잘려도 여기서 잡힙니다).
+    """
+    client = _publish_client(duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION)
+    _run(client)
+    # 삽입은 청크로 나뉘어 여러 번 나갑니다 — 전부 모아서 봅니다.
+    rows = [row for call in client.calls_for(
+        scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "insert") for row in call.payload]
+    assert rows, "보유종목이 한 행도 발행되지 않았습니다"
+    for row in rows:
+        for field in DETAIL_FIELDS:
+            assert field in row
+        assert row["avg_price"] is not None, \
+            "동의한 사용자인데 상세지표가 비어 있습니다"
+
+
+# =============================================================================
+# 5-c. 스키마 추가분(2026-08-23) — 두 SQL 파일이 **같은 내용**인가
+# =============================================================================
+#  `sql/scorecard_public_schema.sql` 의 원본 CREATE 스크립트는 이미 운영 DB 에서 실행됐기
+#  때문에 다시 만들지 않고, 끝에 ALTER 만 덧붙였습니다. 오너가 실제로 붙여넣어 실행할
+#  파일은 저장소 루트의 사본(`MIGRATION_2026-08-23_holding_details.sql`)이라, 둘이 갈라지면
+#  "기록된 것"과 "실행된 것"이 달라집니다 — 그건 나중에 추적이 불가능해지는 종류의
+#  어긋남이라 검사로 고정합니다.
+# =============================================================================
+ADDENDUM_MARK = ("-- #############################################################################"
+                 "\n-- ============ 2026-08-23 추가")
+
+
+def _addendum(path):
+    text = (REPO_ROOT / path).read_text(encoding="utf-8")
+    index = text.find(ADDENDUM_MARK)
+    assert index >= 0, f"{path} 에 2026-08-23 추가분이 없습니다"
+    return text[index:]
+
+
+def test_the_migration_file_and_the_schema_addendum_are_identical():
+    assert _addendum("sql/scorecard_public_schema.sql") == \
+        _addendum("MIGRATION_2026-08-23_holding_details.sql"), \
+        "두 SQL 파일의 추가분이 어긋났습니다(한쪽만 고쳤습니다)"
+
+
+def test_the_addendum_only_alters_and_never_drops_a_table():
+    """
+    🔴 원본 스크립트는 이미 실행됐습니다. 추가분에 `drop table` / `create table` 이 섞이면
+    실제 데이터가 사라집니다. (제약조건 재작성을 위한 `drop constraint` 는 예외입니다.)
+    """
+    sql = _addendum("sql/scorecard_public_schema.sql").lower()
+    assert "drop table" not in sql
+    assert "create table" not in sql
+    assert "truncate" not in sql
+    for statement in ("alter table public.scorecard_public_consent",
+                      "alter table public.scorecard_public_holdings"):
+        assert statement in sql
+
+
+def test_the_addendum_adds_every_column_the_code_expects():
+    """코드가 읽고 쓰는 컬럼이 실제로 추가되는지 — 이름 하나만 틀려도 운영에서 터집니다."""
+    sql = _addendum("sql/scorecard_public_schema.sql").lower()
+    assert "add column if not exists consent_holding_details boolean not null default false" in sql
+    for field in DETAIL_FIELDS:
+        assert f"add column if not exists {field}" in sql, f"{field} 컬럼 추가가 없습니다"
+        assert "numeric(20, 6)" in sql
+
+
+def test_the_addendum_backfills_before_it_re_adds_the_check():
+    """
+    🔴 순서. 백필이 CHECK 재작성보다 뒤에 있으면 `add constraint` 가 기존 행(오너의 검증
+    1건)에서 거절돼 마이그레이션이 통째로 멈춥니다.
+    """
+    sql = _addendum("sql/scorecard_public_schema.sql")
+    backfill = sql.find("set consent_holding_details = true")
+    add_check = sql.find("add constraint scorecard_consent_final_requires_all")
+    assert backfill >= 0 and add_check >= 0
+    assert backfill < add_check, "백필이 CHECK 재작성보다 먼저여야 합니다"
+
+
+def test_the_new_check_requires_all_six_flags():
+    """DB 의 '전부 아니면 전무'가 앱의 목록과 같은 6개를 요구하는가."""
+    sql = _addendum("sql/scorecard_public_schema.sql")
+    start = sql.find("add constraint scorecard_consent_final_requires_all")
+    clause = sql[start:start + 400]
+    for flag in scorecard_publish_db.CONSENT_ITEM_FLAGS:
+        assert flag in clause, f"CHECK 에 {flag} 가 빠졌습니다"
+
 
 
 # =============================================================================

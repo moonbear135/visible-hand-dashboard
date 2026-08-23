@@ -27,13 +27,19 @@
      🔴 두 통화는 **어디서도 합산하지 않습니다**(§0-1 / `scorecard_db.NO_FX_CONVERSION_NOTICE`).
         KRW 체급 키 집합(`BRACKET_KEYS`)과 USD 체급 키 집합(`BRACKET_KEYS_USD`)도 서로
         다른 튜플이라, 한쪽 키가 다른 쪽 그룹에 섞이면 시즌 고정 함수가 그 자리에서 멈춥니다.
-  ③ **여섯 번째 독립 동의(`consent_real_principal_bracket`)가 없습니다.** 결투에서 그 동의가
+  ③ **결투의 독립 동의(`consent_real_principal_bracket`)가 없습니다.** 결투에서 그 동의가
      분리돼 있던 이유는 "다른 모듈(내 성적표)의 실제 자산을 끌어다 쓴다"는 것이었는데, 여기서
-     **공개되는 데이터 자체가 이미 그 실제 자산**입니다. 5개 항목 동의(보유종목·수량·매입금액
+     **공개되는 데이터 자체가 이미 그 실제 자산**입니다. 항목별 동의(보유종목·수량·매입금액
      포함)에 최종 확인을 한 순간 매입원가합계는 이미 공개된 값들의 단순 합으로 누구나
      재구성할 수 있으므로, 체급 산정을 위한 **두 번째 동의 게이트를 만들지 않습니다.**
      → 실제 보유종목을 읽는 대상은 **발행 대상 사용자와 정확히 같은 집합**입니다
        (`final_confirmed=true` 그리고 `revoked_at is null`).
+     ⚠️ 2026-08-23 — 항목별 동의는 5개에서 **6개**가 됐습니다
+        (`scorecard_publish_db.CONSENT_ITEM_FLAGS`). 늘어난 항목은 체급과 무관한
+        `consent_holding_details`("종목별 상세지표": 평균매입가·현재가·평가손익·수익률·비중)
+        이고, 앞의 5개와 **같은 '전부 아니면 전무' 묶음**에 들어갑니다 — 결투처럼 따로 켜고
+        끄는 독립 동의가 아닙니다. 위 문단이 말하는 "두 번째 동의 게이트를 만들지 않는다"는
+        여전히 **체급 산정에 대한** 이야기입니다.
   ④ **수익률의 정의가 다릅니다.** 결투는 일별 스냅샷으로 누적 TWR 을 계산했지만, "내 성적표"
      에는 그런 시계열이 없습니다. 대신 화면이 이미 쓰는 규칙
      (`scorecard_db.evaluate_holding()` 의 `profit_pct`)을 포트폴리오 단위로 올린
@@ -175,6 +181,26 @@ def _as_float(value, label):
     if not math.isfinite(number):
         raise ScorecardPublishError(f"{label}가 유효한 숫자가 아닙니다: {value!r}")
     return number
+
+
+def _optional_float(value, label):
+    """
+    숫자로 바꾸되, **없는 값(None)은 없는 채로** 돌려줍니다.
+
+    바로 위 `_as_float()` 와 짝입니다. 차이는 딱 하나 — None 을 받았을 때 예외가 아니라
+    None 을 돌려줍니다. "반드시 있어야 하는 값"(수량·매입금액)과 "정상적으로 없을 수 있는
+    값"을 서로 다른 함수로 가르기 위해서입니다:
+      · 수량이 없는 보유 행은 **데이터 손상**이라 발행을 멈춰야 합니다(`_as_float`).
+      · 오늘 가격을 못 구한 종목의 현재가·평가손익·수익률·비중은 **정상적으로 없는 값**
+        입니다(`evaluate_holding()` 이 그렇게 두도록 만들어져 있습니다). 그런 값까지
+        예외로 다루면, 가격 파일에 빠진 종목 하나가 그날 발행 전체를 멈춥니다.
+
+    🔴 어느 쪽이든 **0 으로 바꾸지 않습니다**(§0-1). None 은 "0 원"이 아니라 "모름"입니다.
+       숫자가 아닌 값(문자열 등)이 들어오면 그건 "모름"이 아니라 손상이므로 예외입니다.
+    """
+    if value is None:
+        return None
+    return _as_float(value, label)
 
 
 def _require_currency(currency, label="통화"):
@@ -325,7 +351,7 @@ def assert_full_consent(consent_row):
 
     ── 이게 왜 죽은 코드가 아닌가 (중요) ─────────────────────────────────────────
     DB 의 `scorecard_consent_final_requires_all` CHECK 는 `final_confirmed=true` 인 행에
-    항목별 동의 5개가 전부 true 임을 이미 보장합니다. 그러니 이 확인은 "이론적으로 절대
+    항목별 동의 6개가 전부 true 임을 이미 보장합니다. 그러니 이 확인은 "이론적으로 절대
     실패하지 않는" 확인입니다. 그래도 둡니다:
       · 이 함수가 지키는 것은 **DB 의 상태**가 아니라 **우리 조회 필터**입니다. 위층에서
         `.eq("final_confirmed", True)` 를 실수로 빼거나 오타를 내면(`final_confimed`),
@@ -396,9 +422,10 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
     반환 dict
         groups   : `{(currency, bracket_key): [순위 매겨진 참가자 dict, ...]}`
                    참가자 dict = {"nickname", "twr_pct", "rank", "user_id", "currency",
-                                  "holdings"}
-                   ⚠️ `user_id` 와 `holdings` 는 **여기서만** 들고 다니는 작업용 필드입니다.
-                      실제 발행 payload 를 만들 때 잘라 냅니다(아래 두 함수).
+                                  "holdings", "consent_holding_details"}
+                   ⚠️ `user_id` · `holdings` · `consent_holding_details` 는 **여기서만** 들고
+                      다니는 작업용 필드입니다. 실제 발행 payload 를 만들 때 잘라 냅니다
+                      (아래 두 함수는 넣을 키를 whitelist 로 명시합니다).
         skipped  : `[{"user_id", "reason", "currency"?}, ...]` — 빠진 사용자와 그 이유(§0-1)
 
     ── 🔴 `"twr_pct"` 라는 키 이름에 대하여 (헷갈리지 않도록 여기 적어 둡니다) ──────
@@ -467,6 +494,13 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
                 "user_id": user_id,
                 "currency": currency,
                 "holdings": list(summary.get("rows") or []),
+                # 🔴 6번째 동의 항목(2026-08-23)을 **동의 행에서 그대로** 실어 보냅니다.
+                #    `holdings_payload()` 가 종목별 상세지표 5종을 채울지 말지를 이 값
+                #    하나로 가릅니다 — 그 함수가 동의 행을 다시 읽거나 "어차피 전부
+                #    아니면 전무니까 켜져 있겠지"라고 가정하지 않게 하려는 것입니다
+                #    (가정을 코드에 남기면 그 가정이 깨지는 날 조용히 새어 나갑니다).
+                "consent_holding_details": bool(
+                    consent.get("consent_holding_details")),
             })
 
     groups = {}
@@ -481,6 +515,24 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
             )
         groups[key] = ranked
     return {"groups": groups, "skipped": skipped}
+
+
+def _holding_detail(holding, allowed, field, label, ticker):
+    """
+    (`holdings_payload()` 전용) 종목별 상세지표 한 칸.
+
+    하는 일이 **두 가지뿐**입니다 — ① 동의(`consent_holding_details`)가 없으면 None,
+    ② 있으면 행에 **이미 계산돼 있는** 값을 숫자로만 확인해서 그대로 돌려줍니다.
+    여기서 곱하거나 나누는 일은 하나도 없습니다(§0-3-10 — 같은 산수를 두 번 하지 않기).
+
+    저장 정밀도(`numeric(20,6)`)에 맞춰 소수점 6자리에서 반올림합니다. `buy_amount` 가
+    이미 같은 처리를 하고 있고, 컬럼이 잘라 버릴 자리를 미리 맞춰 두면 "발행 요청에 보낸
+    값"과 "DB 에 저장된 값"이 어긋나지 않습니다.
+    """
+    if not allowed:
+        return None
+    number = _optional_float(holding.get(field), f"{label}({ticker})")
+    return None if number is None else round(number, 6)
 
 
 def leaderboard_payload(group_key, ranked_entries):
@@ -518,12 +570,55 @@ def holdings_payload(group_key, ranked_entries):
     한 그룹의 순위 결과 → `scorecard_public_holdings` 에 넣을 payload 목록.
 
     ── 필드가 항상 함께 채워지는 이유 ────────────────────────────────────────────
-    "5개 항목은 전부 아니면 전무" 확정과 DB CHECK(`scorecard_consent_final_requires_all`)
+    "항목별 동의는 전부 아니면 전무" 확정과 DB CHECK(`scorecard_consent_final_requires_all`)
     때문에, 여기 오는 사용자는 **보유종목·수량·매입금액에 전부 동의한 사용자**뿐입니다
     (`assert_full_consent()` 가 이미 확인했습니다). 그래서 "수량은 공개하지만 매입금액은
     비공개" 같은 반쪽 행은 **만들 수 없습니다** — 만들 수 있는 조합 자체가 없습니다.
     스키마가 `quantity` · `buy_amount` 를 nullable 로 둔 것은 그 조합을 위해서가 아니라,
     "0 이나 빈 문자열로 채우지 않는다"는 규율을 컬럼 수준에서 표현하기 위해서입니다.
+
+    ── 🔴 종목별 상세지표 5종 (2026-08-23 신설) ─────────────────────────────────
+    오너 확정("'내 성적표'에 나오는 정보는 기본적으로 전부 공개")에 따라, 이 payload 는
+    **평균매입가 · 현재가 · 평가손익 · 수익률 · 비중**을 함께 싣습니다. 다섯 값 전부
+    `scorecard_db.evaluate_holding()` / `build_portfolio()` 가 **이미 계산해 둔 필드를
+    그대로 옮긴 것**이고, 여기서 같은 산수를 다시 하지 않습니다(§0-3-10) — 다시 하면
+    "'내 성적표' 화면이 보여준 숫자"와 "순위표에 실린 숫자"가 언젠가 갈라지고, 그 순간
+    둘 중 하나는 사실이 아닌 정보가 됩니다.
+
+        payload 키      ← 행의 필드            (계산 주체)
+        avg_price       ← "avg_purchase_price" (evaluate_holding)
+        current_price   ← "current_price"      (evaluate_holding, 가격 없으면 None)
+        profit          ← "profit"             (evaluate_holding, 가격 없으면 None)
+        profit_pct      ← "profit_pct"         (evaluate_holding, 가격 없으면 None)
+        weight_pct      ← "weight_pct"         (build_portfolio, 가격 없으면 None)
+
+    🔴 `weight_pct` 의 정의에 대하여 — **"내 성적표" 화면이 쓰는 그 값 그대로**입니다.
+       `build_portfolio()` 가 이미 계산해 둔 값이고, 분모는 **가격을 확인한 종목들의 평가금액
+       합**(`total_value`)입니다(`scorecard_db.build_portfolio()` 독스트링). 매입원가 기준
+       비중을 여기서 따로 계산할 수도 있었지만 그러지 않았습니다 — 같은 "비중"이라는 이름표를
+       달고 사용자 본인의 `/scorecard` 화면과 순위표가 **서로 다른 숫자**를 보여주게 되고,
+       그건 §0-1 이 금지하는 "사실과 다른 정보"이자 §0-3-10 이 금지하는 "같은 값의 두 번째
+       계산식"입니다. 이 모듈이 수익률에 대해 이미 지키고 있는 규율("화면이 보여준 값과 순위표
+       값이 다르면 그 자체가 사실이 아닌 정보")과 같은 판단입니다.
+         · 분모가 없는 경우(가격을 하나도 못 구함)에는 `build_portfolio()` 가 이미 None 을
+           넣어 둡니다 — 0% 로 위장되는 경로가 없습니다(§0-1).
+
+    ⚠️ 가격을 확인하지 못한 종목은 이 중 넷이 **원래부터 None** 입니다. 그 None 은 "동의
+       안 함"이 아니라 "오늘 가격을 못 구함"이지만, 화면에서는 둘 다 "비공개"가 아니라
+       각각의 사실대로 보이는 것이 이상적입니다 — 다만 발행표는 두 사유를 구분해 담지
+       않습니다(구분해 담으면 "이 사람은 동의는 했는데 가격이 없다"는 정보가 남에게
+       드러납니다). **어느 쪽이든 0 으로 채우지 않는다**는 것이 지켜야 할 규율입니다(§0-1).
+
+    ── 🔒 게이팅: 다섯 값은 `consent_holding_details` 없이는 실리지 않습니다 ────────
+    동의하지 않았으면 다섯 값 **전부 None** 입니다(0 도, 빈 문자열도, 키 생략도 아닙니다 —
+    `quantity`/`buy_amount` 와 똑같은 "비공개 ≠ 0" 규약). 판정 값은 호출부가 참가자 dict 에
+    실어 보낸 `consent_holding_details` 이고(`build_publish_rows()`), **키가 아예 없으면
+    False 로 봅니다** — 기본값이 "공개"인 경로를 만들지 않습니다(§0-3-8 기본 비공개).
+      ⚠️ 지금의 DB CHECK 아래에서는 `final_confirmed` 인 사람은 이 값이 항상 true 라서, 이
+         분기는 "이론적으로 절대 타지 않는" 분기입니다. 그래도 둡니다 — `assert_full_consent()`
+         를 남겨 둔 것과 **정확히 같은 이유**입니다(위 §2 독스트링). 이 함수가 지키는 것은
+         DB 의 상태가 아니라 **호출부가 넘긴 것**이고, 조회 필터 오타 하나가 곧 §0-3-8
+         사고인 계층에서는 "여기까지 왔으면 동의했겠지"가 가장 위험한 문장입니다.
 
     ── 매입금액 ─────────────────────────────────────────────────────────────────
     `buy_amount` 는 `scorecard_db.evaluate_holding()` 이 이미 계산해 둔 `cost`
@@ -542,6 +637,9 @@ def holdings_payload(group_key, ranked_entries):
     payload = []
     for entry in ranked_entries or []:
         nickname = entry["nickname"]
+        # 🔒 이 참가자가 종목별 상세지표까지 공개하기로 했는가(위 독스트링). 키가 없으면
+        #    False — 기본값은 언제나 비공개입니다(§0-3-8).
+        details_allowed = bool((entry or {}).get("consent_holding_details"))
         for holding in entry.get("holdings") or []:
             ticker = str((holding or {}).get("ticker") or "").strip()
             if not ticker:
@@ -549,6 +647,10 @@ def holdings_payload(group_key, ranked_entries):
                     f"종목코드가 없는 보유 행이 있습니다(nickname={nickname})."
                     " 빈 값으로 발행하지 않고 중단합니다."
                 )
+
+            # 🔴 키를 whitelist 로 **하나하나** 적습니다(`**holding` 같은 전개 금지) —
+            #    행에는 원본 `holdings.id` · `market` · `market_value` 같은, 발행표에
+            #    실리면 안 되는 값이 함께 들어 있습니다.
             payload.append({
                 "currency": code,
                 "nickname": nickname,
@@ -556,6 +658,17 @@ def holdings_payload(group_key, ranked_entries):
                 "stock_name": holding.get("stock_name"),
                 "quantity": _as_float(holding.get("quantity"), f"수량({ticker})"),
                 "buy_amount": round(_as_float(holding.get("cost"), f"매입금액({ticker})"), 6),
+                # ↓ 2026-08-23 신설 5종. 전부 이미 계산된 값의 이동일 뿐입니다.
+                "avg_price": _holding_detail(
+                    holding, details_allowed, "avg_purchase_price", "평균매입가", ticker),
+                "current_price": _holding_detail(
+                    holding, details_allowed, "current_price", "현재가", ticker),
+                "profit": _holding_detail(
+                    holding, details_allowed, "profit", "평가손익", ticker),
+                "profit_pct": _holding_detail(
+                    holding, details_allowed, "profit_pct", "수익률", ticker),
+                "weight_pct": _holding_detail(
+                    holding, details_allowed, "weight_pct", "비중", ticker),
             })
     return payload
 

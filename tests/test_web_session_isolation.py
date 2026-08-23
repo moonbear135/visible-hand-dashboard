@@ -247,7 +247,8 @@ ALLOWED_MUTABLE_GLOBALS = {
     #       아래 두 항목이 그 자리를 이어받습니다 — 성격(값이 대입되지 않는 고정 문구표)은
     #       같고, 창유형(M1/M3/M6) 축이 사라져 `WINDOW_TITLES` 는 아예 없습니다.
     ("web/pages/scorecard_consent_page.py", "CONSENT_ITEM_SENTENCES"):
-        "동의 항목 5개의 **고정 문구**(항목 이름 · 무엇이 공개되는지 한 문장). 키는 "
+        "동의 항목 6개(2026-08-23 에 5개 → 6개)의 **고정 문구**(항목 이름 · 무엇이 "
+        "공개되는지 한 문장). 키는 "
         "scorecard_publish_db.CONSENT_ITEM_FLAGS 와 같아야 하며(그 사실을 "
         "consent_item_rows() 가 매번 확인), 값이 대입되는 코드가 없습니다. 사용자별 동의 "
         "상태는 전부 함수 인자로만 흐릅니다(client·user_id 를 인자로 받는 함수들).",

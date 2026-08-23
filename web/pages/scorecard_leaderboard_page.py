@@ -40,7 +40,9 @@
 무엇이 통화마다 다른가 — **딱 세 가지**입니다. 셋이 `track_readers()` 한 곳에 모여 있어서,
 §0-3-8 검토가 "이 함수만 보면 된다"가 됩니다:
     ① 체급 목록·라벨(`BRACKET_KEYS`/`bracket_label()` ↔ `..._USD`/`bracket_label_usd()`)
-    ② **금액 서식 통화** — 놓치면 달러 매입금액에 "원"이 찍힙니다(§0-1).
+    ② **금액 서식 통화** — 놓치면 달러 금액 칸에 "원"이 찍힙니다(§0-1). 2026-08-23 에 금액
+       칸이 넷(매입금액·평균매입가·현재가·평가손익)으로 늘어 이 위험이 커졌으므로, 금액
+       서식은 `_amount_cell()` 한 함수만 거치게 모았습니다.
     ③ 화면에 쓸 트랙 이름
   ⚠️ 조회 함수 3개는 두 통화가 **같은 함수**입니다(결투와 다른 점 — 결투는 표 자체가
      둘이라 함수도 둘이었지만, 여기서는 한 표의 `currency` 컬럼이 축입니다). 그래도
@@ -67,6 +69,17 @@
      그대로 옮겼습니다.
 · 그 밖의 안내 문구는 공개 대상이 바뀐 만큼 다시 썼습니다(특히 순위 산정 방식 —
   TWR 이 아닙니다).
+
+-------------------------------------------------------------------------------
+📈 2026-08-23 — 보유종목 상세표가 "내 성적표" 화면과 같은 열 구성이 됨
+-------------------------------------------------------------------------------
+오너가 실사용 검증 뒤 "'내 성적표'에 나오는 정보는 기본적으로 전부 공개"를 확정해서,
+"📄 보유종목 보기"가 종목·수량·매입금액에 더해 **평균매입가·현재가·평가손익·수익률·비중**
+까지 보여줍니다(`HOLDINGS_TABLE_HEADERS`). 그 다섯 값은 동의 항목에 새로 생긴
+`consent_holding_details`("종목별 상세지표")에 동의한 사람만 채워지고, 아니면 발행 단계에서
+이미 null 이라 이 화면은 **"비공개"** 로 그립니다(0 이 아닙니다 — §0-1).
+서식은 "내 성적표" 화면(`scorecard_page._render_table()`)이 쓰는 함수를 그대로 씁니다
+(§0-3-10 — 같은 값이 두 화면에서 다르게 보이지 않도록).
 """
 
 from nicegui import ui
@@ -94,7 +107,7 @@ from web.auth import (
 from web.auth_ui import fail_message, render_auth
 from web.blocking import run_blocking
 from web.components import (
-    error_banner, esc, holdings_table_html, info_banner, pct_text, warning_banner,
+    error_banner, esc, holdings_table_html, info_banner, pct_html, pct_text, warning_banner,
 )
 from web.layout import (
     SCORECARD_LEADERBOARD_ENABLED,
@@ -329,9 +342,28 @@ def rank_text(row):
     return f'{value}위'
 
 
+#: 공개 보유종목 표의 열 제목. **"내 성적표" 화면(`scorecard_page._render_table()`)의 표와
+#: 같은 것을 보여주자**는 오너 확정(2026-08-23)에 따라, 그 화면의 열 다섯 개
+#: (평균매입가·현재가·평가손익·수익률·비중)가 여기에도 붙었습니다.
+#:
+#: 🔴 순서에 대하여 — 새 다섯 열은 기존 세 열 **뒤에** 붙였고, 다섯 열끼리의 순서는 "내
+#:    성적표" 표와 **똑같이** 두었습니다(평균매입가 → 현재가 → 평가손익 → 수익률 → 비중).
+#:    두 화면을 번갈아 보는 사람이 같은 순서로 읽게 하려는 것이고, 기존 세 열의 자리를
+#:    건드리지 않아 "매입금액이 어느 칸인지"에 의존하던 코드·검사가 조용히 어긋나지
+#:    않습니다.
+HOLDINGS_TABLE_HEADERS = (
+    '종목', '수량', '매입금액', '평균매입가', '현재가', '평가손익', '수익률', '비중',
+)
+
+
+def _amount_cell(value, currency):
+    """금액 한 칸 — 없으면(=동의 안 함 / 값 없음) **"비공개"**, 0 으로 그리지 않습니다."""
+    return esc(format_amount(value, currency) if value is not None else NOT_PUBLISHED_TEXT)
+
+
 def holding_row_cells(row, currency=CURRENCY_KRW):
     """
-    공개 보유종목 한 행 → 표 셀 3개. 동의하지 않은 항목(null)은 **"비공개"** 로 그립니다.
+    공개 보유종목 한 행 → 표 셀 8개. 동의하지 않은 항목(null)은 **"비공개"** 로 그립니다.
 
     🔐 §0-3-9 — **`stock_name` 은 사용자가 자유 입력한 값입니다.** `holdings.stock_name` 을
        배치가 그대로 옮겨 실으므로(`utils/scorecard_publish.holdings_payload()` 독스트링 ·
@@ -347,18 +379,45 @@ def holding_row_cells(row, currency=CURRENCY_KRW):
        통화에 걸린 것은 `format_amount()` 의 인자 하나뿐이고, 나머지는 전부 XSS 이스케이프
        (§0-3-9)와 "비공개 ≠ 0"(§0-1) 판정입니다. 그 둘을 복제하면 이스케이프 경로가 두 개가
        되어, 한쪽만 고치는 순간 조용히 뚫립니다.
+       🔴 2026-08-23 에 금액 칸이 넷(매입금액·평균매입가·현재가·평가손익)으로 늘면서 이
+          위험이 네 배가 됐습니다. 그래서 금액 칸은 `_amount_cell()` **하나만** 쓰게
+          모았습니다 — 통화를 넘기는 것을 한 칸에서만 빠뜨려도 그 칸만 "1,234원"이 되므로.
+
+    ── 🔴 2026-08-23 늘어난 다섯 칸 (평균매입가·현재가·평가손익·수익률·비중) ────────
+    오너 확정("'내 성적표'에 나오는 정보는 기본적으로 전부 공개")에 따라, 이 표는 이제 "내
+    성적표" 화면의 보유종목 표와 **같은 열 구성**입니다. 서식 함수도 그 화면
+    (`scorecard_page._render_table()`)과 **같은 것을 씁니다**(§0-3-10):
+        · 금액 네 칸  → `format_amount(value, currency)` (`_amount_cell()` 경유)
+        · 수익률      → `pct_html()`  (국내 증시 관례 색: 오르면 빨강 / 내리면 파랑.
+                        `web/components` 안에서 이스케이프까지 끝난 조각을 돌려줍니다 —
+                        `esc()` 로 한 번 더 감싸면 색 태그가 글자로 보입니다)
+        · 비중        → 소수점 한 자리 + '%'
+    같은 값을 두 화면이 서로 다르게 보여주면 그 자체가 사실이 아닌 정보이므로(§0-1), 여기서
+    서식을 새로 짜지 않습니다.
+
+    🔴 다섯 칸 모두 **없으면 "비공개"** 입니다. null 의 사유는 두 가지(그 참가자가
+       `consent_holding_details` 에 동의하지 않았거나, 그날 그 종목의 가격을 구하지
+       못했거나)인데 발행표는 둘을 구분해 담지 않습니다 — 구분해 담으면 "이 사람은 동의는
+       했는데 가격이 없다"가 남에게 드러납니다. 어느 쪽이든 **0 으로 그리지 않는다**는 것이
+       지켜야 할 규율입니다("평가손익 0원"과 "평가손익 비공개"는 다른 말입니다).
     """
     data = dict(row or {})
     ticker = str(data.get("ticker") or "")
     name = data.get("stock_name") or ticker
     quantity = data.get("quantity")
-    buy_amount = data.get("buy_amount")
+    profit_pct = data.get("profit_pct")
+    weight_pct = data.get("weight_pct")
     return [
         (f'<div style="white-space: normal; overflow-wrap: anywhere; line-height: 1.3;">'
          f'{esc(str(name))}<br>({esc(ticker)})</div>'),
         esc(f'{float(quantity):,.6g}주' if quantity is not None else NOT_PUBLISHED_TEXT),
-        esc(format_amount(buy_amount, currency) if buy_amount is not None
-            else NOT_PUBLISHED_TEXT),
+        _amount_cell(data.get("buy_amount"), currency),
+        _amount_cell(data.get("avg_price"), currency),
+        _amount_cell(data.get("current_price"), currency),
+        _amount_cell(data.get("profit"), currency),
+        # `pct_html()` 은 이미 이스케이프를 마친 HTML 조각을 돌려줍니다(위 독스트링).
+        pct_html(profit_pct) if profit_pct is not None else esc(NOT_PUBLISHED_TEXT),
+        esc(f'{float(weight_pct):.1f}%' if weight_pct is not None else NOT_PUBLISHED_TEXT),
     ]
 
 
@@ -366,11 +425,15 @@ def holdings_table(rows, currency=CURRENCY_KRW):
     """공개 보유종목 표 HTML. 행이 없으면 None(호출부가 안내 문구를 대신 그립니다).
 
     💵 `currency` 는 위 `holding_row_cells()` 로 그대로 넘어갑니다(생략하면 원화).
+
+    ⚠️ 열 제목은 `HOLDINGS_TABLE_HEADERS` 한 곳에만 있습니다 — 칸을 하나 늘리면서 제목을
+       빠뜨리면 표가 통째로 밀립니다(제목과 칸을 서로 다른 자리에 적어 두면 언젠가 그렇게
+       됩니다).
     """
     body = [holding_row_cells(row, currency) for row in rows or []]
     if not body:
         return None
-    return holdings_table_html(['종목', '수량', '매입금액'], body)
+    return holdings_table_html(list(HOLDINGS_TABLE_HEADERS), body)
 
 
 # =============================================================================
@@ -696,14 +759,53 @@ async def _render_holdings(client, published_date: str, nickname: str, readers: 
     ).classes('vh-muted')
 
 
+def resolve_jump_target(raw_value, max_pages):
+    """
+    "N 페이지로 이동" 입력 → `(page_index, 오류 문장)` 중 **정확히 한쪽만** 채워 돌려줍니다.
+
+    (위젯 없이 검증할 수 있게 순수 함수로 뺐습니다 — 아래 `_render_pager()` 의 처리기는
+     이 함수를 부르고 결과를 화면에 옮기기만 합니다.)
+
+    🔴 **범위를 벗어난 값을 조용히 잘라 맞추지 않습니다**(§0-1). 사용자가 99 를 넣었는데
+       말없이 17페이지를 보여주면, 그 사람은 자기가 99페이지를 보고 있다고 믿게 됩니다.
+       대신 "1 ~ {max_pages} 사이"라고 말하고 페이지를 **바꾸지 않습니다.**
+
+    ⚠️ `ui.number` 는 값을 float 로 줍니다(빈칸이면 None). 1.5 처럼 정수가 아닌 값은
+       가까운 쪽으로 반올림하지 않고 거절합니다 — "1.5페이지"라는 것이 없기 때문입니다.
+
+    반환: `(page_index, None)` 또는 `(None, 사용자에게 보여줄 한국어 문장)`.
+    """
+    if raw_value is None or str(raw_value).strip() == '':
+        return None, '이동할 페이지 번호를 입력해 주세요.'
+    try:
+        number = float(raw_value)
+    except (TypeError, ValueError):
+        return None, '페이지 번호는 숫자로 입력해 주세요.'
+    if number != int(number):
+        return None, '페이지 번호는 정수로 입력해 주세요.'
+    page_number = int(number)
+    if page_number < 1 or page_number > max_pages:
+        return None, f'1 ~ {max_pages} 사이의 페이지 번호를 입력해 주세요.'
+    return page_number - 1, None
+
+
 def _render_pager(view: dict, section: str, page_index: int, *, has_next: bool,
                   on_changed) -> None:
     """
-    이전/다음 버튼. 페이지 번호는 **이 접속의 지역 상태**(`view`)에만 있습니다.
+    이전/다음 버튼 + **페이지 직접 이동**. 페이지 번호는 **이 접속의 지역 상태**(`view`)
+    에만 있습니다.
 
     누를 수 없는 방향의 버튼은 비활성으로 두지 않고 **아예 그리지 않습니다** — 눌러도
     아무 일이 없는 버튼보다 없는 편이 덜 헷갈리고, 화면 상태 판정이 한 곳(여기)에만
     남습니다.
+
+    🔴 2026-08-23 오너 요청 — "이전/다음만으로 17페이지를 넘기는 건 너무 느리다". 그래서
+       번호를 직접 넣어 뛰는 칸을 **덧붙였습니다**(기존 이전/다음 동작은 한 줄도 바꾸지
+       않았습니다). 페이지가 한 장뿐이면 뛸 곳이 없으므로 그 칸도 그리지 않습니다.
+       ⚠️ 뛰어도 `view[section]` 을 바꾸고 `on_changed()` 를 부르는 것이 전부입니다 —
+          "지금 몇 페이지인가"의 단일 출처는 여전히 `view` 하나입니다(§0-3-10). 이 함수는
+          질의를 직접 보내지 않고, 상한을 넘은 페이지에서 질의가 나가지 않게 막는 것도
+          기존 그대로 `_render_section()`(limit <= 0)의 몫입니다.
     """
     max_pages = duel_rules.leaderboard_page_count(section_cap(section))
 
@@ -719,3 +821,24 @@ def _render_pager(view: dict, section: str, page_index: int, *, has_next: bool,
         ui.label(f'{page_index + 1} / 최대 {max_pages} 페이지').classes('vh-muted')
         if has_next and page_index + 1 < max_pages:
             ui.button('다음 ▶', on_click=_go(1)).props('flat dense no-caps')
+
+    if max_pages <= 1:
+        return
+
+    with ui.row().classes('items-center gap-2'):
+        jump_input = ui.number(label='페이지로 이동', value=page_index + 1,
+                               min=1, max=max_pages, step=1) \
+            .props('dense').style('flex: 0 0 140px;')
+        jump_message = ui.label('').classes('text-red-400 vh-muted')
+
+        def _jump(_event=None) -> None:
+            target, problem = resolve_jump_target(jump_input.value, max_pages)
+            if problem:
+                # 값을 지어내지 않고 이유만 알려 줍니다 — 페이지는 그대로입니다.
+                jump_message.text = f'🚫 {problem}'
+                return
+            jump_message.text = ''
+            view[section] = target
+            on_changed()
+
+        ui.button('이동', on_click=_jump).props('flat dense no-caps')

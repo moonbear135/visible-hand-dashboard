@@ -14,11 +14,14 @@
 
 검증 대상
     [1] 동의 화면의 **핵심 규칙**(위젯 없이 순수 함수로 확인)
-        — 5개 전부 아니면 전무 / 최종 확인 분리 / 철회 확인 단계 / 재동의 차단 안내
-        — 🔴 **여섯 번째 동의(`consent_real_principal_bracket`)가 어디에도 없는가**
+        — 전부 아니면 전무 / 최종 확인 분리 / 철회 확인 단계 / 재동의 차단 안내
+        — 🔴 **결투의 독립 동의(`consent_real_principal_bracket`)가 어디에도 없는가**
+        — 🔴 2026-08-23 에 늘어난 **여섯 번째 항목**(`consent_holding_details`)이 화면과
+          DB 계층 양쪽에 같은 순서로 있는가
         — 🔴 화면 문구가 "가상계좌·결투"가 아니라 **실제 보유 자산**을 말하는가
     [2] 순위표 화면 — 고정 문구 2문단(오너 확정, 글자 그대로) · 원본 표 격리 ·
-        순위 재계산 금지 · **창유형(window_type) 축이 완전히 사라졌는가**
+        순위 재계산 금지 · **창유형(window_type) 축이 완전히 사라졌는가** ·
+        보유종목 상세표의 여덟 칸(2026-08-23 에 셋 → 여덟)과 페이지 직접 이동
     [3] 🔐 **XSS (§0-3-9 — 이 파일에서 가장 중요한 검사)**
         `stock_name` 은 사용자가 자유 입력한 값입니다(스키마 §2-4 컬럼 주석 ·
         `scorecard_publish.holdings_payload()` 독스트링이 `<img onerror=...>` 를 명시적으로
@@ -179,6 +182,9 @@ def _install_stubs():
             components.__path__ = []
             components.esc = lambda value: _html.escape(str(value))
             components.pct_text = lambda value: f"{float(value):+.2f}%"
+            # 색이 붙은 등락률 조각(진짜 함수는 안에서 이스케이프까지 끝냅니다).
+            components.pct_html = lambda value, digits=2, suffix="%": (
+                "—" if value is None else f"<span>{float(value):+.2f}{suffix}</span>")
 
             def _table(headers, rows):
                 head = "".join(f"<th>{h}</th>" for h in headers)
@@ -193,7 +199,7 @@ def _install_stubs():
 
             widgets = types.ModuleType("web.components.widgets")
             for name in ("error_banner", "warning_banner", "info_banner", "metric_card",
-                         "esc", "pct_text", "holdings_table_html"):
+                         "esc", "pct_text", "pct_html", "holdings_table_html"):
                 setattr(widgets, name, getattr(components, name))
             components.widgets = widgets
             sys.modules["web.components.widgets"] = widgets
@@ -328,7 +334,41 @@ def test_consent_item_rows_match_the_db_layer_exactly():
     """
     rows = consent_page.consent_item_rows()
     assert [flag for flag, _n, _s in rows] == list(scorecard_publish_db.CONSENT_ITEM_FLAGS)
-    assert len(rows) == 5, "항목별 동의는 정확히 5개입니다(여섯 번째를 만들지 마세요)"
+    assert len(rows) == 6, "항목별 동의는 2026-08-23 부터 6개입니다"
+    assert rows[-1][0] == "consent_holding_details", \
+        "여섯 번째 항목은 **끝에** 붙습니다(앞의 다섯 개 순서는 그대로여야 합니다)"
+
+
+def test_the_sixth_consent_item_uses_the_owner_confirmed_wording_verbatim():
+    """
+    🔴 오너가 글자 그대로 확정한 문구입니다(2026-08-23). 다듬거나 줄이지 마세요 — 이 문장이
+    곧 "무엇을 공개하기로 했는가"의 정의이고, 문장에 없는 값을 공개하면 §0-1 위반입니다.
+    """
+    label, sentence = consent_page.CONSENT_ITEM_SENTENCES["consent_holding_details"]
+    assert label == "종목별 상세지표"
+    assert sentence == "종목별로 평균매입가·현재가·평가손익·수익률·비중까지 함께 공개됩니다."
+
+    # 실제로 발행되는 다섯 지표가 문장에 하나도 빠짐없이 적혀 있는가(문장 ↔ 코드 대조).
+    for word in ("평균매입가", "현재가", "평가손익", "수익률", "비중"):
+        assert word in sentence, f"동의 문장에 '{word}' 가 없는데 화면은 그 값을 공개합니다"
+
+
+def test_every_column_the_board_shows_is_named_in_some_consent_sentence():
+    """
+    🔴 이 파일에서 두 번째로 중요한 검사 — **화면이 보여주는 것과 사용자가 동의한 것이
+    같은가.** 순위표 상세표의 열 제목이 동의 문장 어딘가에 실제로 적혀 있어야 합니다.
+    2026-08-23 에 열이 셋에서 여덟로 늘 때, 동의 항목을 함께 늘리지 않았다면 여기서
+    잡힙니다.
+    """
+    sentences = " ".join(
+        f"{name} {sentence}"
+        for _flag, name, sentence in consent_page.consent_item_rows())
+    for header in board_page.HOLDINGS_TABLE_HEADERS:
+        if header == "종목":
+            assert "보유종목" in sentences        # 열 제목과 항목 이름이 다른 유일한 칸
+            continue
+        assert header in sentences, \
+            f"'{header}' 열을 공개하면서 그 값을 말하는 동의 문장이 없습니다(§0-1)"
 
 
 def test_consent_sentences_describe_real_holdings_not_the_duel_accounts():
@@ -348,15 +388,19 @@ def test_consent_sentences_describe_real_holdings_not_the_duel_accounts():
     assert "공개됩니다" in holdings_sentence
 
 
-def test_no_sixth_consent_item_anywhere_in_the_new_screens():
+def test_the_duels_independent_bracket_consent_is_not_in_the_new_screens():
     """
-    🔴 결투에 있던 여섯 번째 독립 동의(`consent_real_principal_bracket`)에 해당하는 것이
-    **이 계층에는 존재하지 않습니다.** 공개되는 데이터 자체가 이미 실제 자산이라, 체급
-    산정을 위한 두 번째 동의 게이트를 세울 대상이 남아 있지 않기 때문입니다
-    (`utils/scorecard_publish_db.CONSENT_ITEM_FLAGS` 주석 · 스키마 §2-2).
+    🔴 결투에 있던 **독립 동의**(`consent_real_principal_bracket` — "실제 매입총합을 체급
+    산정에 사용")에 해당하는 것이 이 계층에는 존재하지 않습니다. 공개되는 데이터 자체가
+    이미 실제 자산이라, 체급 산정을 위한 두 번째 동의 게이트를 세울 대상이 남아 있지 않기
+    때문입니다(`utils/scorecard_publish_db.CONSENT_ITEM_FLAGS` 주석 · 스키마 §2-2).
 
     누가 "결투에는 있었으니까"라며 되살리면 DB CHECK 와 화면 판정이 갈라집니다. 화면 코드
     (주석·docstring 제외)에 그 흔적이 하나도 없어야 합니다.
+
+    ⚠️ 2026-08-23 에 여섯 번째 **항목**(`consent_holding_details`)이 생겼지만 그건 다른
+       것입니다 — 체급과 무관하고, 앞의 다섯 개와 같은 "전부 아니면 전무" 묶음입니다.
+       이 검사는 개수가 아니라 **그 결투 플래그 이름**만 봅니다.
     """
     assert "consent_real_principal_bracket" not in scorecard_publish_db.CONSENT_ITEM_FLAGS
     for name in (CONSENT_PAGE_NAME, BOARD_PAGE_NAME):
@@ -369,8 +413,11 @@ def test_no_sixth_consent_item_anywhere_in_the_new_screens():
     assert "real_principal" not in consent_page.consent_state(None)
 
 
-def test_five_items_are_all_or_nothing():
-    """전부 아니면 전무. 하나라도 빠지면 최종 확인 payload 자체를 만들 수 없습니다."""
+def test_every_item_is_all_or_nothing():
+    """전부 아니면 전무. 하나라도 빠지면 최종 확인 payload 자체를 만들 수 없습니다.
+
+    ⚠️ 목록을 글자로 적지 않고 `CONSENT_ITEM_FLAGS` 를 돌기 때문에, 2026-08-23 에 여섯 번째
+       항목이 늘었을 때 이 검사도 **자동으로** 그 항목을 함께 봅니다."""
     assert consent_page.all_items_checked(_all_checked()) is True
     for flag in scorecard_publish_db.CONSENT_ITEM_FLAGS:
         partial = dict(_all_checked(), **{flag: False})
@@ -738,6 +785,184 @@ def test_screens_do_not_hardcode_the_numbers_that_live_in_the_rules_layer():
 
 
 # =============================================================================
+# 2-b. 🔴 보유종목 상세표 — 2026-08-23 에 셋 → 여덟 칸
+# =============================================================================
+#  오너 확정: "'내 성적표'에 나오는 정보는 기본적으로 전부 공개." 그래서 이 표는 이제 "내
+#  성적표" 화면(`scorecard_page._render_table()`)과 같은 열 구성입니다. 여기서 보는 것은
+#  ① 칸 수와 제목이 맞물리는가, ② 없는 값이 0 이 아니라 "비공개"인가(§0-1),
+#  ③ 통화 서식이 네 금액 칸 **전부**에 걸리는가(§0-1 — 달러에 "원"이 찍히면 안 됨).
+# =============================================================================
+#: 상세지표가 전부 채워진, 사람이 검산할 수 있는 행 하나.
+#:  3주 × 50,000원 매입 → 현재가 60,000원 → 평가손익 30,000원 · 수익률 +20% · 비중 100%.
+FULL_HOLDING_ROW = {
+    "ticker": "005930", "stock_name": "삼성전자",
+    "quantity": 3, "buy_amount": 150000.0,
+    "avg_price": 50000.0, "current_price": 60000.0,
+    "profit": 30000.0, "profit_pct": 20.0, "weight_pct": 100.0,
+}
+
+#: 6번째 동의(`consent_holding_details`)를 하지 않은 참가자의 행 — 다섯 값이 전부 null.
+NO_DETAIL_ROW = dict(FULL_HOLDING_ROW,
+                     avg_price=None, current_price=None,
+                     profit=None, profit_pct=None, weight_pct=None)
+
+#: 표의 칸 번호(제목 순서와 같습니다). 숫자를 검사문마다 다시 세지 않으려고 여기 둡니다.
+CELL_NAME, CELL_QTY, CELL_BUY, CELL_AVG, CELL_NOW, CELL_PROFIT, CELL_PCT, CELL_WEIGHT = range(8)
+
+
+def test_the_table_has_a_header_for_every_cell_and_they_are_in_the_scorecard_order():
+    """
+    칸을 늘리면서 제목을 빠뜨리면 표가 통째로 밀립니다(그 상태에서도 화면은 조용히 그려
+    집니다 — 그래서 검사로 잡습니다).
+    """
+    cells = board_page.holding_row_cells(FULL_HOLDING_ROW)
+    assert len(cells) == len(board_page.HOLDINGS_TABLE_HEADERS) == 8
+    assert board_page.HOLDINGS_TABLE_HEADERS == (
+        '종목', '수량', '매입금액', '평균매입가', '현재가', '평가손익', '수익률', '비중')
+
+    # 새 다섯 칸의 **상대 순서**는 "내 성적표" 화면의 표와 같아야 합니다(두 화면을 번갈아
+    # 보는 사람이 같은 순서로 읽게 하려는 것 — 그 화면의 헤더 목록과 직접 대조합니다).
+    scorecard_headers = ['종목', '수량', '평균매입가', '현재가', '평가손익', '수익률', '비중']
+    detail_order = [h for h in board_page.HOLDINGS_TABLE_HEADERS if h in scorecard_headers]
+    assert detail_order == scorecard_headers, \
+        "'내 성적표' 표와 열 순서가 어긋났습니다"
+
+
+def test_detail_cells_render_real_numbers_when_they_are_published():
+    """값이 있으면 실제 숫자가, "내 성적표"와 같은 서식으로 보여야 합니다."""
+    cells = board_page.holding_row_cells(FULL_HOLDING_ROW, KRW)
+    assert "50,000" in cells[CELL_AVG] and "원" in cells[CELL_AVG]
+    assert "60,000" in cells[CELL_NOW]
+    assert "30,000" in cells[CELL_PROFIT]
+    assert "20.00%" in cells[CELL_PCT]
+    assert "100.0%" in cells[CELL_WEIGHT]
+    for index in (CELL_AVG, CELL_NOW, CELL_PROFIT, CELL_PCT, CELL_WEIGHT):
+        assert board_page.NOT_PUBLISHED_TEXT not in cells[index]
+
+
+def test_detail_cells_are_private_not_zero_when_the_sixth_consent_is_missing():
+    """
+    🔴 §0-1 — "평가손익 0원"과 "평가손익 비공개"는 다른 말입니다. 빈칸도 안 됩니다(빈칸은
+    "0" 만큼이나 사실을 감춥니다).
+    """
+    cells = board_page.holding_row_cells(NO_DETAIL_ROW, KRW)
+    for index in (CELL_AVG, CELL_NOW, CELL_PROFIT, CELL_PCT, CELL_WEIGHT):
+        assert cells[index] == board_page.NOT_PUBLISHED_TEXT, \
+            f"{board_page.HOLDINGS_TABLE_HEADERS[index]} 칸이 '비공개'가 아닙니다: {cells[index]!r}"
+        assert "0" not in cells[index]
+    # 앞의 항목들에 걸린 값은 그대로 보입니다(6번째만 빠진 것이므로).
+    assert board_page.NOT_PUBLISHED_TEXT not in cells[CELL_QTY]
+    assert board_page.NOT_PUBLISHED_TEXT not in cells[CELL_BUY]
+
+
+def test_a_loss_is_shown_as_a_negative_number_never_as_private():
+    """손실(음수)은 정상값입니다 — falsy 로 다루면 조용히 '비공개'가 됩니다."""
+    losing = dict(FULL_HOLDING_ROW, current_price=40000.0, profit=-30000.0, profit_pct=-20.0)
+    cells = board_page.holding_row_cells(losing, KRW)
+    assert board_page.NOT_PUBLISHED_TEXT not in cells[CELL_PROFIT]
+    assert "-" in cells[CELL_PROFIT] or "−" in cells[CELL_PROFIT]
+    assert "-20.00%" in cells[CELL_PCT]
+
+
+def test_zero_profit_is_shown_as_zero_not_as_private():
+    """평가손익이 정확히 0 인 것도 정상값입니다(§0-1 — falsy 함정)."""
+    flat = dict(FULL_HOLDING_ROW, current_price=50000.0, profit=0.0, profit_pct=0.0)
+    cells = board_page.holding_row_cells(flat, KRW)
+    assert cells[CELL_PROFIT] != board_page.NOT_PUBLISHED_TEXT
+    assert cells[CELL_PCT] != board_page.NOT_PUBLISHED_TEXT
+    assert "0.00%" in cells[CELL_PCT]
+
+
+def test_every_amount_cell_follows_the_track_currency_not_just_the_buy_amount():
+    """
+    💵 금액 칸이 넷으로 늘었습니다. 한 칸이라도 통화를 빼먹으면 **그 칸만** 달러 금액에
+    "원"이 찍힙니다(§0-1 — 예외도 로그도 없이 사용자에게만 틀린 값이 보이는 종류).
+    """
+    krw = board_page.holding_row_cells(FULL_HOLDING_ROW, KRW)
+    usd = board_page.holding_row_cells(
+        dict(FULL_HOLDING_ROW, ticker="AAPL", stock_name="Apple"), USD)
+    for index in (CELL_BUY, CELL_AVG, CELL_NOW, CELL_PROFIT):
+        header = board_page.HOLDINGS_TABLE_HEADERS[index]
+        assert "원" in krw[index] and "$" not in krw[index], f"{header}(원화)"
+        assert "$" in usd[index] and "원" not in usd[index], f"{header}(달러)"
+
+
+def test_the_full_table_html_carries_the_new_columns():
+    """표 전체(HTML)까지 실제로 조립해 봅니다 — 제목과 값이 함께 들어가는지."""
+    html = board_page.holdings_table([FULL_HOLDING_ROW], KRW)
+    for header in board_page.HOLDINGS_TABLE_HEADERS:
+        assert header in html, f"열 제목 '{header}' 가 표에 없습니다"
+    assert "20.00%" in html and "100.0%" in html
+
+    private = board_page.holdings_table([NO_DETAIL_ROW], KRW)
+    assert private.count(board_page.NOT_PUBLISHED_TEXT) >= 5
+
+
+# =============================================================================
+# 2-c. 페이지 직접 이동 (2026-08-23 오너 요청)
+# =============================================================================
+#  "이전/다음만으로 17페이지를 넘기는 건 너무 느리다". 판정은 순수 함수
+#  `resolve_jump_target()` 에 있고, 위젯은 그 결과를 옮기기만 합니다.
+# =============================================================================
+def test_jump_target_accepts_a_valid_page_number():
+    """1페이지는 index 0 — 사용자에게 보이는 번호와 내부 index 가 1 차이입니다."""
+    assert board_page.resolve_jump_target(1, 17) == (0, None)
+    assert board_page.resolve_jump_target(17, 17) == (16, None)
+    assert board_page.resolve_jump_target(7.0, 17) == (6, None)      # ui.number 는 float
+
+
+@pytest.mark.parametrize("bad", [0, -1, 18, 999])
+def test_jump_target_refuses_out_of_range_instead_of_silently_clamping(bad):
+    """
+    🔴 §0-1 — 범위를 벗어난 값을 말없이 잘라 맞추면, 사용자는 자기가 요청한 페이지를 보고
+    있다고 믿게 됩니다. 페이지를 바꾸지 않고 이유를 돌려줍니다.
+    """
+    page, problem = board_page.resolve_jump_target(bad, 17)
+    assert page is None
+    assert problem and "17" in problem
+
+
+@pytest.mark.parametrize("bad", [None, "", "  ", "abc", 1.5])
+def test_jump_target_refuses_values_that_are_not_a_page_number(bad):
+    page, problem = board_page.resolve_jump_target(bad, 17)
+    assert page is None and isinstance(problem, str) and problem
+
+
+def test_the_pager_draws_a_jump_control_and_keeps_prev_next_untouched():
+    """
+    구조로 확인 — `_render_pager()` 가 ① 숫자 입력(`ui.number`)과 '이동' 버튼을 그리고,
+    ② 기존 '◀ 이전'/'다음 ▶' 버튼을 **그대로** 갖고 있으며, ③ 페이지 번호의 단일 출처가
+    여전히 `view[section]` 인가(§0-3-10).
+    """
+    source = ast.get_source_segment(
+        _page_source(BOARD_PAGE_NAME), _function_nodes(BOARD_PAGE_NAME)["_render_pager"])
+    assert "ui.number(" in source, "페이지 직접 이동 입력이 없습니다"
+    assert "'이동'" in source or '"이동"' in source
+    assert "◀ 이전" in source and "다음 ▶" in source, "기존 이전/다음이 사라졌습니다"
+    assert "resolve_jump_target(" in source, "판정을 순수 함수에 맡기지 않았습니다"
+    # 상한은 규칙 계층에서 옵니다(화면이 17 같은 숫자를 직접 적지 않습니다).
+    assert "leaderboard_page_count(" in source
+    # 페이지 상태를 바꾸는 자리는 view[section] 대입뿐입니다.
+    assert source.count("view[section] =") == 2, \
+        "페이지 번호를 바꾸는 자리가 늘었습니다(이전/다음 · 이동 둘뿐이어야 합니다)"
+
+
+def test_the_pager_still_sends_no_query_when_the_section_cap_is_exceeded():
+    """
+    상한을 넘은 페이지에서는 질의를 보내지 않는 기존 동작이 그대로여야 합니다(`limit <= 0`).
+    이동 칸이 생겼다고 이 판정이 화면 쪽으로 옮겨오면 안 됩니다.
+    """
+    cap = board_page.section_cap(board_page.SECTION_TOP)
+    beyond = duel_rules.leaderboard_page_count(cap)
+    _offset, limit = duel_rules.leaderboard_page_bounds(beyond, section_cap=cap)
+    assert limit <= 0
+    section_source = ast.get_source_segment(
+        _page_source(BOARD_PAGE_NAME), _function_nodes(BOARD_PAGE_NAME)["_render_section"])
+    assert "if limit <= 0:" in section_source
+
+
+
+# =============================================================================
 # 3. 🔐 XSS (§0-3-9) — 이 파일에서 **가장 중요한 검사**
 # =============================================================================
 #  `scorecard_public_holdings.stock_name` 은 사용자가 자유 입력한 값을 배치가 **그대로**
@@ -823,6 +1048,74 @@ def test_only_one_place_writes_raw_html_and_it_is_the_escaped_table():
     assert len(html_calls) == 1, f"ui.html() 호출이 {len(html_calls)}개입니다(1개여야 합니다)"
     (only,) = html_calls
     assert isinstance(only.args[0], ast.Name) and only.args[0].id == "table"
+
+def test_no_column_including_the_new_ones_can_emit_raw_html():
+    """
+    🔐 2026-08-23 에 칸이 셋에서 여덟로 늘었습니다. "숫자 칸이니까 안전하다"는 가정을 코드에
+    남기지 않기 위해, **칸마다 하나씩** 악성 문자열을 흘려보고 raw HTML 이 새지 않는지
+    봅니다(발행표의 숫자 컬럼은 numeric 이지만, 이 함수는 그걸 보장받는 자리가 아닙니다 —
+    dict 하나를 받아 문자열을 만드는 순수 함수입니다).
+
+    ⚠️ 여기서 요구하는 것은 "항상 무언가를 그린다"가 아니라 **"악성 값이 태그로 살아나지
+       않는다"** 입니다. 숫자 자리에 숫자가 아닌 값이 오면 이 함수는 (기존 동작 그대로)
+       예외를 냅니다 — 그러면 호출부가 표 대신 오류 안내를 그리고, 브라우저에 도달하는
+       문자열 자체가 없습니다. 조용히 틀린 값을 그리는 것보다 나은 결과라 그대로 둡니다
+       (§0-1). 그러니 "이스케이프해서 그렸다" 또는 "아무것도 안 그리고 멈췄다" 둘 중
+       하나여야 하고, **raw HTML 이 나오는 세 번째 경우가 없어야** 합니다.
+    """
+    fields = ("ticker", "stock_name", "quantity", "buy_amount", "avg_price",
+              "current_price", "profit", "profit_pct", "weight_pct")
+    rendered_at_least_one = False
+    for field in fields:
+        poisoned = dict(FULL_HOLDING_ROW, **{field: XSS_STOCK_NAME})
+        try:
+            cells = board_page.holding_row_cells(poisoned, KRW)
+        except (TypeError, ValueError):
+            continue                                   # 그리지 않고 멈춤 — 안전합니다.
+        rendered_at_least_one = True
+        for index, cell in enumerate(cells):
+            assert "<img src=x onerror=" not in cell, (
+                f"🔐 {field} 에 넣은 악성 값이 "
+                f"'{board_page.HOLDINGS_TABLE_HEADERS[index]}' 칸에서 살아났습니다")
+            assert XSS_STOCK_NAME not in cell
+    assert rendered_at_least_one, "전부 예외라면 이 검사가 아무것도 확인하지 못한 것입니다"
+
+    # 사용자가 실제로 자유 입력하는 두 칸(종목명·종목코드)은 **반드시 그려지고**, 반드시
+    # 이스케이프됩니다 — 이 둘이 이 화면의 진짜 공격면입니다.
+    for field in ("stock_name", "ticker"):
+        html = board_page.holdings_table(
+            [dict(FULL_HOLDING_ROW, **{field: XSS_STOCK_NAME})], KRW)
+        assert "&lt;img src=x onerror=alert(1)&gt;" in html
+        assert "<img src=x onerror=" not in html
+
+
+def test_the_shared_amount_cell_helper_escapes_what_it_returns():
+    """
+    🔐 구조로 확인 — 금액 네 칸은 `_amount_cell()` 하나를 함께 씁니다. 그 함수가 `esc()` 를
+    빠뜨리면 네 칸이 **동시에** 뚫립니다. 그래서 그 함수 본문의 return 이 `esc(...)` 인지
+    직접 봅니다(위 f-string 검사기는 f-string 만 보므로 이 자리를 못 봅니다).
+    """
+    node = _function_nodes(BOARD_PAGE_NAME)["_amount_cell"]
+    returns = [sub for sub in ast.walk(node) if isinstance(sub, ast.Return)]
+    assert returns, "검사기가 return 을 못 찾았습니다(검사가 무의미해집니다)"
+    for statement in returns:
+        assert (isinstance(statement.value, ast.Call)
+                and isinstance(statement.value.func, ast.Name)
+                and statement.value.func.id == "esc"), \
+            "🔐 금액 칸이 esc() 를 거치지 않고 나갑니다"
+
+
+def test_the_percent_cell_uses_the_shared_coloured_helper_not_a_hand_rolled_span():
+    """
+    수익률 칸은 '내 성적표'와 **같은 함수**(`pct_html()`)를 씁니다 — 그 함수는 안에서
+    이스케이프까지 끝낸 조각을 돌려줍니다. 여기서 직접 `<span style=...>` 를 만들기
+    시작하면 색 규칙이 두 곳에 생기고(§0-3-10), 이스케이프 경로도 하나 늘어납니다.
+    """
+    source = ast.get_source_segment(
+        _page_source(BOARD_PAGE_NAME), _function_nodes(BOARD_PAGE_NAME)["holding_row_cells"])
+    assert "pct_html(" in source
+    assert "<span" not in source, "색 태그를 손으로 만들고 있습니다"
+
 
 
 def test_nickname_is_escaped_where_it_reaches_the_screen():
@@ -1150,3 +1443,127 @@ def test_leaderboard_usd_track_reads_the_usd_rows_and_formats_in_dollars():
     assert captured == [USD]
     call = client.only_call(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "select")
     assert call.filter_map["currency"] == USD
+
+
+class _RecordingUI:
+    """
+    위젯 대신 **호출만 기록**하는 대역 `ui`. 어떤 속성을 읽어도 자기 자신을 돌려주고,
+    불러도 자기 자신을 돌려주며, `with` 블록도 받습니다(`web/components` 스텁과 같은 방식).
+
+    🔴 진짜 `ui` 를 쓰지 않는 이유: NiceGUI 는 "위젯이 그려질 자리(슬롯)"를 **전역 태스크
+       사전**에 들고 있어서, 같은 파이썬 프로세스에서 앞서 어떤 테스트가 돌았는지에 따라
+       위젯 생성이 그 자리에서 터집니다(이 저장소의 렌더 스모크 실패들이 전부 그것입니다).
+       이 검사가 보려는 것은 "NiceGUI 가 실제로 그리는가"가 아니라 **"화면 함수가 체크박스를
+       몇 개, 어떤 문장으로 만들려 하는가"** 이므로, 전역 상태에 흔들리지 않게 대역을 씁니다.
+    """
+
+    def __init__(self):
+        self.checkbox_labels = []
+
+    def checkbox(self, *args, **kwargs):
+        self.checkbox_labels.append(args[0] if args else kwargs.get("text"))
+        return self
+
+    def __call__(self, *args, **kwargs):
+        return self
+
+    def __getattr__(self, _name):
+        return self
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_args):
+        return False
+
+
+def test_consent_form_renders_one_checkbox_per_item_six_not_five():
+    """
+    🔴 화면이 **실제로** 여섯 개를 만드는지 — 상수만 늘리고 렌더 루프가 다섯 개에서 멈춰
+    있으면, 사용자는 여섯 번째에 동의한 적이 없는데 저장 payload 에는 그 항목이 들어갑니다.
+
+    그리는 방식도 함께 고정합니다: 항목은 `consent_item_rows()` 를 **루프로** 돌아야 하고,
+    하드코딩한 체크박스가 있으면 안 됩니다(§0-3-10). 그래서 라벨을 문자열로 적어 두지 않고
+    `consent_item_rows()` 가 주는 값에서 만들어 비교합니다.
+    """
+    fake_ui = _RecordingUI()
+    saved = _patch(consent_page, ui=fake_ui,
+                   warning_banner=lambda *a, **k: None,
+                   info_banner=lambda *a, **k: None,
+                   error_banner=lambda *a, **k: None)
+    try:
+        consent_page._render_consent_form(
+            object(), "uid-1", consent_page.consent_state(None), lambda: None)
+    finally:
+        _restore(consent_page, saved)
+
+    expected = [f'{name} — {sentence}'
+                for _flag, name, sentence in consent_page.consent_item_rows()]
+    assert len(expected) == 6
+    item_boxes = [label for label in fake_ui.checkbox_labels if label in expected]
+    assert item_boxes == expected, \
+        f"항목 체크박스가 문장과 순서까지 그대로 만들어져야 합니다: {fake_ui.checkbox_labels}"
+
+    # 최종 확인 체크박스는 항목과 **별개**로 정확히 하나 더 있습니다(2단계 분리).
+    assert len(fake_ui.checkbox_labels) == len(expected) + 1, \
+        f"항목 6개 + 최종 확인 1개 말고 다른 체크박스가 있습니다: {fake_ui.checkbox_labels}"
+
+
+def test_the_consent_form_loop_is_generic_and_has_no_hardcoded_checkbox():
+    """
+    구조로 확인 — 체크박스를 만드는 자리가 **루프 한 곳**뿐인가. 여섯 번째를 손으로 그려
+    넣었다면 항목 목록(상수)과 화면이 갈라질 수 있습니다(§0-3-10).
+    """
+    node = _function_nodes(CONSENT_PAGE_NAME)["_render_consent_form"]
+    checkbox_calls = [sub for sub in ast.walk(node)
+                      if isinstance(sub, ast.Call) and isinstance(sub.func, ast.Attribute)
+                      and sub.func.attr == "checkbox"]
+    assert len(checkbox_calls) == 2, \
+        f"체크박스를 만드는 자리는 (항목 루프 1 + 최종 확인 1) 둘뿐이어야 합니다: {len(checkbox_calls)}"
+    source = ast.get_source_segment(_page_source(CONSENT_PAGE_NAME), node)
+    assert "for flag, name, sentence in consent_item_rows():" in source
+
+
+def test_consent_screen_texts_say_six_not_five():
+    """
+    🔴 문구도 사실이어야 합니다(§0-1). 항목이 여섯 개가 됐는데 안내문이 "5개 항목"이라고
+    말하면 그건 화면이 사용자에게 하는 거짓말입니다. 숫자를 글자로 박지 않고
+    `CONSENT_ITEM_FLAGS` 에서 세는지도 함께 봅니다(§0-3-10).
+    """
+    count = len(scorecard_publish_db.CONSENT_ITEM_FLAGS)
+    assert consent_page.CONSENT_ITEM_COUNT == count == 6
+    for notice in (consent_page.NOTICE_ALL_OR_NOTHING, consent_page.NOTICE_FINAL_CONFIRM):
+        assert f"{count}개" in notice, notice
+        assert "5개" not in notice, f"옛 개수가 남아 있습니다: {notice}"
+
+    # 코드 안에 "5개"라는 사용자 문구가 남아 있지 않은지(주석·docstring 은 제외).
+    for literal in _code_strings(CONSENT_PAGE_NAME):
+        assert "5개 항목" not in literal, f"화면 문구에 옛 개수가 남아 있습니다: {literal!r}"
+
+
+def test_the_detail_columns_survive_the_whole_read_then_render_chain():
+    """
+    조회 계층이 읽어 오는 **컬럼 이름**과 화면이 찾는 **dict 키**가 같은지 — 사슬 전체를
+    한 번에 봅니다. 이름이 하나만 어긋나도(예: avg_price ↔ average_price) 값이 조용히
+    '비공개'로 보이게 되고, 그건 화면이 사용자에게 하는 거짓말입니다(§0-1).
+
+    ⚠️ 위젯을 그리지 않습니다 — 조회 함수와 표 조립 함수만 부릅니다(전역 슬롯 상태에
+       흔들리지 않게).
+    """
+    stored = dict(FULL_HOLDING_ROW, published_date="2026-08-22", currency=KRW,
+                  nickname="닉네임1")
+    client = FakeClient(responses={
+        (scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "select"): [stored]})
+
+    rows = scorecard_publish_db.fetch_public_holdings_for_nickname(
+        client, "닉네임1", published_date="2026-08-22", currency=KRW)
+    html = board_page.holdings_table(rows, KRW)
+
+    assert "20.00%" in html and "100.0%" in html, html
+    assert "50,000" in html and "60,000" in html and "30,000" in html
+    assert board_page.NOT_PUBLISHED_TEXT not in html, \
+        "동의된 값인데 '비공개'로 그려졌습니다"
+
+    # 조회는 컬럼을 이름으로 지정합니다(select("*") 로 바꿔 해결하면 안 됩니다 — §0-3-8).
+    call = client.only_call(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "select")
+    assert "*" not in str(call.options.get("columns", ""))

@@ -130,22 +130,36 @@ BRACKET_ASSIGNMENTS_TABLE = "scorecard_bracket_assignments"
 PUBLIC_LEADERBOARD_TABLE = "scorecard_public_leaderboard"
 PUBLIC_HOLDINGS_TABLE = "scorecard_public_holdings"
 
-#: 항목별 동의 5개. **이 5개만** "전부 아니면 전무" 규칙의 대상입니다.
+#: 항목별 동의 6개. **이 6개 전부**가 "전부 아니면 전무" 규칙의 대상입니다.
 #:
-#: 🔴 결투에 있던 여섯 번째 독립 동의(`consent_real_principal_bracket`)에 해당하는 항목이
-#:    **여기에는 없습니다.** 그 동의가 분리돼 있던 이유는 "이 모듈이 아닌 다른 모듈의 실제
-#:    자산 데이터를 끌어다 쓴다"는 것이었는데, 이 표에서는 공개되는 데이터 자체가 이미 실제
-#:    자산("내 성적표")입니다. `consent_buy_amount` 에 동의하는 순간 매입원가합계는 이미
-#:    공개된 값들의 단순 합으로 누구나 재구성 가능하므로, 체급 산정을 위한 두 번째 동의
-#:    게이트를 만들 이유가 사라졌습니다(스키마 §2-2 주석과 같은 판단).
-#:    ⚠️ 그러므로 이 목록에 항목을 **더하지 마세요.** 더하는 순간 DB 의
-#:       `scorecard_consent_final_requires_all` CHECK 와 앱의 판정이 갈라집니다.
+#: 🔴 결투에 있던 독립 동의(`consent_real_principal_bracket` — "실제 매입총합을 체급 산정에
+#:    사용")에 해당하는 항목은 **여기에 없습니다(앞으로도 만들지 않습니다).** 그 동의가
+#:    분리돼 있던 이유는 "이 모듈이 아닌 다른 모듈의 실제 자산 데이터를 끌어다 쓴다"는
+#:    것이었는데, 이 표에서는 공개되는 데이터 자체가 이미 실제 자산("내 성적표")입니다.
+#:    `consent_buy_amount` 에 동의하는 순간 매입원가합계는 이미 공개된 값들의 단순 합으로
+#:    누구나 재구성 가능하므로, 체급 산정을 위한 두 번째 동의 게이트를 만들 이유가
+#:    사라졌습니다(스키마 §2-2 주석과 같은 판단).
+#:
+#: 🔴 2026-08-23 추가 — `consent_holding_details`(6번째 항목). 오너가 실사용 검증 뒤
+#:    "'내 성적표'에 나오는 정보는 기본적으로 전부 공개하라"고 확정하면서, 순위표의 보유종목
+#:    상세표가 종목·수량·매입금액에 더해 **평균매입가·현재가·평가손익·수익률·비중**까지
+#:    함께 싣게 됐습니다. 그 다섯 지표는 앞의 5개 항목 어느 문장에도 적혀 있지 않던 값이라,
+#:    "동의 문장에 없는 것을 공개"하지 않기 위해(§0-1) **항목을 조용히 늘리지 않고 동의
+#:    체크박스를 하나 더 세웠습니다.** 오너 지시 원문: "동의 체크 항목에서 빠져 있는 내용이면
+#:    동의 체크 항목에 추가를 해야지".
+#:    ⚠️ 이 목록에 항목을 더하거나 순서를 바꾸려면 **세 곳을 함께** 고쳐야 합니다 —
+#:       ① 여기, ② `web/pages/scorecard_consent_page.py::CONSENT_ITEM_SENTENCES`
+#:       (`consent_item_rows()` 가 매번 키·순서 일치를 확인하고 어긋나면 예외),
+#:       ③ DB 의 `scorecard_consent_final_requires_all` CHECK
+#:       (`sql/scorecard_public_schema.sql` 끝의 2026-08-23 추가분).
+#:       하나라도 빠지면 화면이 저장하려는 항목과 DB 의 판정이 갈라집니다.
 CONSENT_ITEM_FLAGS = (
     "consent_rank",
     "consent_return",
     "consent_holdings",
     "consent_quantity",
     "consent_buy_amount",
+    "consent_holding_details",
 )
 
 #: 발행 축이 되는 통화. `scorecard_db` 의 상수를 그대로 씁니다(문자열을 다시 적지 않습니다 —
@@ -191,11 +205,11 @@ def save_consent(client, user_id, **consent_flags):
 
     받는 키(그 밖의 키는 **거절**합니다 — 오타로 동의가 조용히 안 켜지는 사고를 막습니다):
         consent_rank / consent_return / consent_holdings / consent_quantity /
-        consent_buy_amount        … 항목별 동의 5개
-        final_confirmed           … 5개를 전부 체크한 뒤 밟는 **별도의** 최종 확인
+        consent_buy_amount / consent_holding_details   … 항목별 동의 6개
+        final_confirmed           … 6개를 전부 체크한 뒤 밟는 **별도의** 최종 확인
 
     ── 이 함수가 앱에서도 강제하는 것(DB 가 최종 권한, 여기는 이중 방어) ──────────────
-    ① `final_confirmed=True` 는 **5개가 전부 True 일 때만** 허용합니다.
+    ① `final_confirmed=True` 는 **6개가 전부 True 일 때만** 허용합니다.
        DB 의 `scorecard_consent_final_requires_all` CHECK 와 같은 규칙을 앱에서 한 번 더
        봅니다. DB 만 믿어도 데이터는 안전하지만, 그때 사용자는 Postgres 제약 이름이 섞인
        오류를 보게 됩니다(§0-3-4). 여기서 먼저 잡아 **왜 안 되는지**를 한국어로 알려 줍니다.
@@ -210,7 +224,7 @@ def save_consent(client, user_id, **consent_flags):
        ⚠️ 판정 자체는 이 파일이 하지 않습니다 — `duel_rules.resolve_reconsent_block()` 이
           "3개월"이라는 숫자와 경계 규칙의 단일 출처입니다(§0-3-10).
 
-    ⚠️ 5개 항목을 **부분적으로 저장하는 것 자체는 막지 않습니다.** 화면이 체크박스를 하나씩
+    ⚠️ 항목을 **부분적으로 저장하는 것 자체는 막지 않습니다.** 화면이 체크박스를 하나씩
        켜는 중간 상태가 정상이기 때문입니다. "전부 아니면 전무"는 **발행 대상이 되는 조건**
        (= final_confirmed)에 걸리는 규칙이고, 위 ①이 정확히 그걸 강제합니다.
 
@@ -242,7 +256,11 @@ def save_consent(client, user_id, **consent_flags):
         missing = [flag for flag in CONSENT_ITEM_FLAGS if not payload.get(flag)]
         if missing:
             raise DuelDbError(
-                "최종 확인은 공개 항목 5개를 **모두** 체크했을 때만 할 수 있습니다"
+                # 🔴 개수를 글자로 적지 않고 `CONSENT_ITEM_FLAGS` 에서 셉니다(§0-3-10) —
+                #    2026-08-23 에 항목이 5개에서 6개로 늘었을 때, 이런 자리에 박아 둔
+                #    "5개"가 사용자에게 그대로 보이는 거짓말이 됩니다.
+                f"최종 확인은 공개 항목 {len(CONSENT_ITEM_FLAGS)}개를 **모두** 체크했을 때만"
+                " 할 수 있습니다"
                 f" (아직 체크되지 않음: {missing})."
                 " 이 모듈은 '일부만 공개' 조합을 제공하지 않습니다 — 전부 공개하거나,"
                 " 전부 공개하지 않거나 둘 중 하나입니다."
@@ -313,7 +331,7 @@ def revoke_consent(client, user_id, *, now_kst=None):
     공개 동의를 **철회**합니다(`scorecard_public_consent.revoked_at` 기록).
 
     ── 이 함수가 하는 일 / 하지 않는 일 ──────────────────────────────────────────
-    하는 일: 동의 행에 `revoked_at` 을 찍고, `final_confirmed` 와 항목별 동의 5개를 전부
+    하는 일: 동의 행에 `revoked_at` 을 찍고, `final_confirmed` 와 항목별 동의 6개를 전부
              끕니다. 그 결과 이 사용자는 **다음 발행 대상에서 즉시 빠집니다.**
     하지 않는 일: **행을 지우지 않습니다.** `revoked_at` 한 줄은 3개월 재동의 차단을
              판정하는 데 필요한 **비공개 관리 기록**이고, 삭제 대상인 "발행된 공개 기록"과는
@@ -324,9 +342,9 @@ def revoke_consent(client, user_id, *, now_kst=None):
              ⚠️ 즉 **철회 시점과 공개 기록이 실제로 사라지는 시점 사이에 최대 하루의 간격이
                 있습니다.** 이 사실을 화면에 그대로 써야 합니다(§0-1 — 조용히 넘기지 않기).
 
-    ── 왜 항목별 동의 5개까지 함께 끄는가 ────────────────────────────────────────
+    ── 왜 항목별 동의 6개까지 함께 끄는가 ────────────────────────────────────────
     DB CHECK(`scorecard_consent_revoked_not_confirmed`)는 "철회 + 최종확인"이 동시에 서지
-    못하게만 합니다. 5개 항목을 그대로 true 로 남기면 그 상태가 "최종확인 직전까지 다 체크한
+    못하게만 합니다. 항목을 그대로 true 로 남기면 그 상태가 "최종확인 직전까지 다 체크한
     사람"과 **글자 그대로 같아집니다** — 화면이 그 상태를 "동의 중"으로 그릴 위험이 있고,
     나중에 어떤 코드가 `final_confirmed` 하나만 켜면 CHECK 를 그냥 통과해 버립니다. 전부 꺼
     두면 그 실수는 CHECK 에 걸려 막힙니다(§0-3-9 — 조심이 아니라 구조로).
@@ -503,7 +521,18 @@ def _fetch_nickname_row(client, user_id):
 PUBLIC_LEADERBOARD_COLUMNS = "published_date,currency,bracket_key,rank,nickname,return_pct"
 
 #: 공개 보유종목 화면에 실어 보내는 컬럼(위 ①).
-PUBLIC_HOLDINGS_COLUMNS = "published_date,currency,nickname,ticker,stock_name,quantity,buy_amount"
+#:
+#: 🔴 2026-08-23 — 뒤의 5개(`avg_price`·`current_price`·`profit`·`profit_pct`·`weight_pct`)가
+#:    함께 늘었습니다. "'내 성적표'에 나오는 정보는 기본적으로 전부 공개"라는 오너 확정에
+#:    따라, 순위표의 보유종목 상세표가 "내 성적표" 화면의 표와 **같은 열 구성**이 됐습니다.
+#:    이 다섯 값은 `consent_holding_details`(6번째 동의 항목)에 동의한 사람만 채워지고,
+#:    동의하지 않았으면 **null** 입니다 — 화면은 null 을 "비공개"로 그립니다(0 이 아닙니다,
+#:    §0-1). 늘어난 뒤에도 규칙은 그대로입니다: `select("*")` 를 쓰지 않고 읽을 컬럼을
+#:    하나하나 적습니다(위 ①).
+PUBLIC_HOLDINGS_COLUMNS = (
+    "published_date,currency,nickname,ticker,stock_name,quantity,buy_amount,"
+    "avg_price,current_price,profit,profit_pct,weight_pct"
+)
 
 
 def fetch_public_leaderboard_latest_date(client, *, currency, bracket_key):
@@ -595,10 +624,12 @@ def fetch_public_holdings_for_nickname(client, nickname, *, published_date=None,
                             더하게 되고, 이 앱에는 환율 시계열이 없습니다(§0-1).
 
     ── 동의하지 않은 항목은 여기서 거르지 않습니다(그럴 필요가 없습니다) ────────────
-    `quantity` · `buy_amount` 는 동의가 없으면 **발행 배치가 애초에 null 로 넣습니다**(0 이나
-    빈 문자열로 채우지 않습니다). 그리고 `consent_holdings` 자체가 없으면 이 표에 **행이
-    만들어지지 않습니다.** 즉 여기서 다시 걸러야 할 것이 없고, 화면은 null 을 "비공개"로
-    그리기만 하면 됩니다. 필터를 여기에 또 만들면 "동의 판정"이 두 곳에 존재하게 됩니다.
+    `quantity` · `buy_amount` 와 2026-08-23 에 늘어난 상세 5종
+    (`avg_price` · `current_price` · `profit` · `profit_pct` · `weight_pct`)은 동의가 없으면
+    **발행 배치가 애초에 null 로 넣습니다**(0 이나 빈 문자열로 채우지 않습니다). 그리고
+    `consent_holdings` 자체가 없으면 이 표에 **행이 만들어지지 않습니다.** 즉 여기서 다시
+    걸러야 할 것이 없고, 화면은 null 을 "비공개"로 그리기만 하면 됩니다. 필터를 여기에 또
+    만들면 "동의 판정"이 두 곳에 존재하게 됩니다.
 
     ⚠️ `stock_name` 은 사용자가 자유 입력한 값입니다 — 화면은 렌더링하는 모든 자리에서
        `esc()` 를 반드시 적용해야 합니다(스키마 §2-4 컬럼 주석 / §0-3-9).
@@ -647,8 +678,8 @@ def fetch_publishable_consents(service_client):
         그 '배치' 쪽입니다. 조건 하나를 아끼는 것보다, 나중에 CHECK 를 손대는 사람이 이 필터를
         보고 "아, 여기도 같은 규칙이 있구나"를 아는 편이 낫습니다.
 
-    ⚠️ 항목별 동의 5개를 여기서 거르지 **않습니다.** `scorecard_consent_final_requires_all`
-       CHECK 때문에 `final_confirmed=true` 인 행은 5개가 전부 true 임이 DB 수준에서
+    ⚠️ 항목별 동의 6개를 여기서 거르지 **않습니다.** `scorecard_consent_final_requires_all`
+       CHECK 때문에 `final_confirmed=true` 인 행은 6개가 전부 true 임이 DB 수준에서
        보장되지만, 그 보장을 **믿고 넘어가지 않고**
        `scorecard_publish.assert_full_consent()` 가 행마다 다시 확인합니다. 여기서 필터로
        처리하면 "조건에 안 맞아서 빠진 사람"이 조용히 사라지는데, 그건 데이터가 이상하다는
