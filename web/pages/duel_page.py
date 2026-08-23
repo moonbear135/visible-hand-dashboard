@@ -2250,8 +2250,12 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
     cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
     # 📉 오너 요청(2026-08-23) — 위 줄이 보여주는 것은 **지금 정산된** 예수금이라, 이미
     #    넣어 둔 대기 주문이 체결되면 얼마가 남는지는 알 수 없었습니다. 그 추정치를 한 줄
-    #    더 붙입니다(작은 글씨 — 확정 숫자가 아니라 추정이기 때문입니다).
-    remaining_cash_label = ui.label('').classes('vh-muted vh-keep-all')
+    #    더 붙입니다.
+    # 🔴 오너 피드백(2026-08-23) — 처음엔 `vh-muted`(회색·작은 글씨)로 뒀더니 "너무 안
+    #    보인다"고 하셔서, 위 예수금 줄과 같은 크기·같은 기본 글자색으로 바꿨습니다
+    #    (`vh-muted` 는 흐린 회색 + 0.85rem — 대기 주문 반영액도 실제 주문에 영향을 주는
+    #    중요한 숫자라 굳이 덜 보이게 할 이유가 없습니다).
+    remaining_cash_label = ui.label('').classes('text-base vh-keep-all')
 
     def _update_cash_label() -> None:
         """고른 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
@@ -2708,7 +2712,9 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
     cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
     # 📉 오너 요청(2026-08-23) — 원화 폼과 같은 이유·같은 자리·같은 문구입니다(통화 서식만
     #    달러). 이 앱에는 영어 화면이 따로 없으므로 문장 자체는 한 벌입니다.
-    remaining_cash_label = ui.label('').classes('vh-muted vh-keep-all')
+    # 🔴 오너 피드백(2026-08-23) — 원화 폼과 같은 이유로 `vh-muted` 를 빼고 위 예수금 줄과
+    #    같은 크기·기본 글자색으로 바꿨습니다.
+    remaining_cash_label = ui.label('').classes('text-base vh-keep-all')
 
     def _update_cash_label() -> None:
         """고른 달러 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
