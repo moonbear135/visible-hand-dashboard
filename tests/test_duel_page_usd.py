@@ -1868,3 +1868,232 @@ def test_a_krx_etf_outside_the_top200_now_gets_a_real_price(tmp_path):
             f"{ticker} 의 현재가를 넓은 폴백으로도 못 찾았습니다 — '내 성적표' 화면에서는 "
             "나오는 값이라 두 화면이 서로 다른 말을 하게 됩니다."
         )
+
+
+# =============================================================================
+# 12. 💡 대기 주문 줄의 "최근 종가 기준 예상 금액" (2026-08-23 오너 요청)
+# =============================================================================
+#  ── 오너가 본 것 ──────────────────────────────────────────────────────────────
+#  "주문을 넣은 곳에도 얼마나 샀는지 가격이 얼마나 샀는지 표시해 주는건 안한거지?"
+#  `/duel` 의 "📋 내 주문" 대기 목록이 `매수 · 삼성증권 (016360) · 20주 · 체결 예정일
+#  2026-08-24` 까지만 보여줘서, 이 주문이 체결되면 얼마가 빠져나가는지 알 수 없었습니다.
+#  ── 이 절이 고정하려는 것 ────────────────────────────────────────────────────
+#    ① 대기 주문 줄에 수량 × 최근 가격 ≈ 예상 금액이 **실제로 그려진다**(매수·매도 모두).
+#    ② 그 숫자가 확정 체결가로 오해되지 않게 "참고"·"예상"이 문구에 있다(2-4-3).
+#    ③ 가격을 못 구하면 0 원이 아니라 "가격 확인 중"이다(§0-1 — `_position_rows()` 와 같은 원칙).
+#    ④ 원화 줄은 `MARKET_KR` 로만, 달러 줄은 `MARKET_US` 로만 묻는다(§5-11-2 — 통화 안 섞임).
+#    ⑤ 조회 함수를 **새로 만들지 않고** 위에서 받은 `price_lookup` 을 그대로 쓴다(§0-3-2).
+# =============================================================================
+PENDING_KRW_ORDER = {
+    "id": "ko-1", "account_id": "krw-m1", "ticker": "016360", "stock_name": "삼성증권",
+    "requested_quantity": 20, "status": "pending", "side": "buy",
+    "target_date": "2026-08-24", "saved_at": "2026-08-23T18:30:00+09:00",
+}
+
+PENDING_USD_ORDER = {
+    "id": "uo-1", "account_id": "usd-m1", "ticker": "MSFT", "stock_name": "Microsoft",
+    "requested_quantity": 4, "status": "pending", "side": "buy",
+    "target_date": "2026-08-24", "saved_at": "2026-08-23T16:30:00+09:00",
+}
+
+
+def _render_pending_row(name, order, prices, *, window_open=True):
+    """대기 주문 한 줄을 **실제로 실행**하고 화면에 나간 문자열 + 조회 이력을 돌려줍니다."""
+    import web.pages.duel_page as page
+
+    sink = []
+    lookup, asked = _price_lookup_spy(prices)
+    saved_ui = page.ui
+    page.ui = _UiStub(sink)
+    try:
+        getattr(page, name)(object(), dict(order), {"is_open": window_open}, lambda: None,
+                            price_lookup=lookup)
+    finally:
+        page.ui = saved_ui
+    return "\n".join(sink), asked
+
+
+def test_a_pending_krw_order_row_shows_the_expected_amount():
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    blob, asked = _render_pending_row(
+        "_render_pending_order_row", PENDING_KRW_ORDER, {(MARKET_KR, "016360"): 164300})
+
+    assert "20주" in blob
+    assert "164,300원" in blob, f"최근 종가가 줄에 없습니다: {blob}"
+    assert "3,286,000원" in blob, (
+        "20주 × 164,300원 ≈ 3,286,000원 이 대기 주문 줄에 없습니다 — 오너가 화면에서 "
+        f"확인하고 요청한 바로 그 숫자입니다: {blob}"
+    )
+    # 🔴 확정 체결가로 오해되면 안 됩니다(2-4-3 — 이 앱에는 실시간 시세가 없습니다).
+    assert "참고" in blob or "예상" in blob, (
+        f"추정치라는 표시가 없습니다 — 사용자가 '이미 이 가격에 체결됐다'로 읽습니다: {blob}"
+    )
+    assert "체결가" in blob, "실제 체결가가 아직 정해지지 않았다는 안내가 없습니다."
+    # 원화 줄은 한국 시장으로만 묻습니다.
+    assert asked == [(MARKET_KR, "016360")], f"원화 줄의 조회 이력: {asked}"
+    assert all(market != MARKET_US for market, _ in asked)
+    assert "$" not in blob, "원화 줄에 달러 표기가 섞였습니다(§5-11-2)."
+
+
+def test_a_pending_usd_order_row_shows_the_expected_amount_in_dollars():
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    blob, asked = _render_pending_row(
+        "_render_pending_order_row_usd", PENDING_USD_ORDER, {(MARKET_US, "MSFT"): 500.0})
+
+    assert "4주" in blob
+    assert "$500.00" in blob and "$2,000.00" in blob, (
+        f"4주 × $500.00 ≈ $2,000.00 이 달러 대기 주문 줄에 없습니다: {blob}"
+    )
+    assert "참고" in blob or "예상" in blob
+    assert "체결가" in blob
+    # 달러 줄은 미국 시장으로만 묻습니다 — 원화 시장으로 물으면 미국 티커를 못 찾습니다.
+    assert asked == [(MARKET_US, "MSFT")], f"달러 줄의 조회 이력: {asked}"
+    assert all(market != MARKET_KR for market, _ in asked)
+    assert "원" not in blob, "달러 줄에 원화 표기가 섞였습니다(§5-11-2)."
+
+
+def test_a_pending_row_without_a_price_says_so_instead_of_showing_zero():
+    """§0-1 — 못 구한 값을 0 원/$0 으로 위장하지 않습니다(`_position_rows()` 와 같은 문구)."""
+    for name, order, zero in (("_render_pending_order_row", PENDING_KRW_ORDER, "0원"),
+                              ("_render_pending_order_row_usd", PENDING_USD_ORDER, "$0.00")):
+        blob, _asked = _render_pending_row(name, order, {})        # 스냅샷에 없는 종목
+        assert "가격 확인 중" in blob, (
+            f"{name}() 이 가격을 못 구했는데 그 사실을 말하지 않습니다: {blob}"
+        )
+        assert zero not in blob, (
+            f"{name}() 이 가격을 못 구한 주문을 {zero} 으로 표시합니다 — 수집 실패를 "
+            "'공짜'로 위장하는 가장 나쁜 형태입니다(§0-1)."
+        )
+        assert "≈" not in blob, "가격을 모르는데 예상 금액을 그렸습니다."
+
+
+def test_a_pending_sell_order_gets_the_same_estimate():
+    """매도도 같은 목록에 섞입니다 — 수량 × 최근 가격이 매도에도 그대로 맞습니다."""
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    blob, _asked = _render_pending_row(
+        "_render_pending_order_row",
+        dict(PENDING_KRW_ORDER, side="sell", rebalance_window_index=0),
+        {(MARKET_KR, "016360"): 164300})
+    assert "🔁 매도" in blob and "3,286,000원" in blob, (
+        f"매도 대기 주문에는 예상 금액이 나오지 않습니다: {blob}"
+    )
+
+    blob_usd, _asked_usd = _render_pending_row(
+        "_render_pending_order_row_usd",
+        dict(PENDING_USD_ORDER, side="sell", rebalance_window_index=0),
+        {(MARKET_US, "MSFT"): 500.0})
+    assert "🔁 매도" in blob_usd and "$2,000.00" in blob_usd
+
+
+def test_the_estimate_is_drawn_even_outside_the_order_window():
+    """접수 시간이 아니어도(수정·취소 버튼이 없어도) 금액은 보여야 합니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    blob, _asked = _render_pending_row(
+        "_render_pending_order_row", PENDING_KRW_ORDER,
+        {(MARKET_KR, "016360"): 164300}, window_open=False)
+    assert "3,286,000원" in blob, (
+        "접수 시간 밖에서 예상 금액이 사라집니다 — 이 줄은 버튼과 무관하게 정보입니다."
+    )
+
+
+def test_the_pending_estimate_helper_is_shared_and_currency_agnostic():
+    """§5-11-1 — 계산·문구 규칙은 한 군데(공유 순수 함수)에만 둡니다."""
+    assert "_pending_estimate_text" in FUNCTIONS, (
+        "대기 주문 예상 금액 문구를 만드는 공유 함수가 없습니다."
+    )
+    assert "_pending_estimate_text_usd" not in FUNCTIONS, (
+        "통화별 복제본이 생겼습니다 — 규칙이 바뀌면 한쪽만 고치는 사고가 납니다."
+    )
+    used = _names_used(FUNCTIONS["_pending_estimate_text"])
+    for constant in ("CURRENCY", "CURRENCY_USD", "MARKET_KR", "MARKET_US"):
+        assert constant not in used, (
+            f"공유 함수가 {constant} 를 직접 씁니다 — 시장·통화는 인자로 받아야 합니다."
+        )
+
+
+def test_each_pending_row_picks_exactly_one_market_and_one_currency():
+    """AST — 원화 줄은 `MARKET_KR`/`CURRENCY` 만, 달러 줄은 `MARKET_US`/`CURRENCY_USD` 만."""
+    for name, mine, theirs in (("_render_pending_order_row", ("MARKET_KR", "CURRENCY"),
+                                ("MARKET_US", "CURRENCY_USD")),
+                               ("_render_pending_order_row_usd", ("MARKET_US", "CURRENCY_USD"),
+                                ("MARKET_KR", "CURRENCY"))):
+        used = _names_used(FUNCTIONS[name])
+        for constant in mine:
+            assert constant in used, f"{name}() 이 {constant} 를 쓰지 않습니다."
+        for constant in theirs:
+            assert constant not in used, (
+                f"{name}() 이 남의 트랙 상수({constant})를 씁니다 — 이 파일에서 가장 "
+                "반복돼 온 사고 형태입니다(§5-11-2)."
+            )
+
+
+def test_the_orders_section_passes_the_price_lookup_all_the_way_down():
+    """§0-3-2 — 새 조회 함수를 만들지 않고 위에서 받은 것을 끝까지 넘기기만 합니다."""
+    chain = ("_render_orders_section", "_render_account_orders", "_render_pending_order_row",
+             "_render_orders_section_usd", "_render_account_orders_usd",
+             "_render_pending_order_row_usd")
+    for name in chain:
+        node = FUNCTIONS[name]
+        kwonly = [a.arg for a in node.args.kwonlyargs]
+        assert "price_lookup" in kwonly, (
+            f"{name}() 이 price_lookup 을 키워드 인자로 받지 않습니다 — 이 값은 "
+            "화면 최상단에서 한 번 만들어진 것을 그대로 내려보내야 합니다."
+        )
+        assert "make_price_lookup" not in _calls_in(node), (
+            f"{name}() 이 조회 함수를 새로 만듭니다 — 주문 폼과 다른 목록을 보게 되고 "
+            "파일을 읽는 경로가 하나 더 생깁니다(§0-3-2 · §0-3-10)."
+        )
+        # 화면 함수가 스스로 스냅샷 파일을 읽지 않는지도 함께.
+        assert "load_json_file_async" not in _referenced_callables(node), name
+
+    # 위 두 단계는 실제로 **넘겨주기만** 하는지(중간에서 값을 잃어버리지 않는지).
+    for parent in ("_render_orders_section", "_render_account_orders",
+                   "_render_orders_section_usd", "_render_account_orders_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[parent])
+        assert "price_lookup=price_lookup" in src, (
+            f"{parent}() 이 price_lookup 을 아래로 넘기지 않습니다 — 대기 주문 줄이 "
+            "가격을 못 받아 늘 '가격 확인 중'만 보여주게 됩니다."
+        )
+
+
+def test_render_body_wires_each_track_to_its_own_price_lookup():
+    """🔴 통화가 섞이는 유일한 자리 — 원화 섹션에 달러 조회 함수가 들어가면 안 됩니다.
+
+    ⚠️ 두 섹션을 부르는 자리는 화면 조립 함수(`_render_duel_section()`)입니다 — 함수 이름에
+       기대지 않도록 파일 전체에서 그 호출을 찾아 확인합니다.
+    """
+    expected = {"_render_orders_section": "market['price_lookup']",
+                "_render_orders_section_usd": "market_usd['price_lookup']"}
+    seen = {}
+    for child in ast.walk(PAGE_TREE):
+        if not (isinstance(child, ast.Call) and isinstance(child.func, ast.Name)):
+            continue
+        if child.func.id not in expected:
+            continue
+        kwargs = {kw.arg: ast.unparse(kw.value) for kw in child.keywords}
+        assert "price_lookup" in kwargs, (
+            f"_render_body() 가 {child.func.id}() 에 price_lookup 을 넘기지 않습니다."
+        )
+        seen[child.func.id] = kwargs["price_lookup"]
+    assert seen == expected, (
+        f"트랙별 조회 함수 연결이 어긋났습니다: {seen} (기대: {expected}). 원화 섹션에 "
+        "달러 조회 함수가 들어가면 한국 티커를 하나도 못 찾아 화면 전체가 '가격 확인 중' "
+        "으로 바뀝니다(§5-11-2)."
+    )
+
+
+def test_the_pending_rows_still_keep_their_edit_and_cancel_buttons():
+    """회귀 — 참고 줄을 넣으면서 수량 수정·취소 경로를 건드리지 않았는지."""
+    for name, edit, cancel in (("_render_pending_order_row", "edit_order", "cancel_order"),
+                               ("_render_pending_order_row_usd", "edit_order_usd",
+                                "cancel_order_usd")):
+        used = _referenced_callables(FUNCTIONS[name])
+        assert edit in used and cancel in used, f"{name}() 의 수정·취소 경로가 사라졌습니다."
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert 'if not window["is_open"]:' in src, (
+            f"{name}() 의 접수 시간대 확인이 사라졌습니다."
+        )

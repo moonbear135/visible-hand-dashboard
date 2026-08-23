@@ -1412,14 +1412,16 @@ async def _render_duel_section(client, user_id: str, market: dict, window: dict,
                            bundles=bundles)
         ui.separator()
         await _render_orders_section(client, user_id, mine, window, on_changed,
-                                     bundles=bundles)
+                                     bundles=bundles,
+                                     price_lookup=market["price_lookup"])
     if mine_usd:
         ui.separator()
         _render_order_form_usd(client, user_id, mine_usd, market_usd, window_usd, on_changed,
                                bundles=bundles_usd)
         ui.separator()
         await _render_orders_section_usd(client, user_id, mine_usd, window_usd, on_changed,
-                                         bundles=bundles_usd)
+                                         bundles=bundles_usd,
+                                         price_lookup=market_usd["price_lookup"])
 
     # 아직 참여하지 않은 트랙의 안내는 **맨 아래**에 붙입니다(이미 쓰고 있는 트랙의 흐름을
     # 중간에서 끊지 않기 위해서). 두 트랙의 참여는 서로 완전히 독립입니다(§5-11-10).
@@ -3010,7 +3012,14 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
 # 8. 주문 내역 (대기 중 주문 수정·취소 + 최근 결과)
 # =============================================================================
 async def _render_orders_section(client, user_id: str, accounts, window: dict, on_changed,
-                                 *, bundles=None) -> None:
+                                 *, bundles=None, price_lookup=None) -> None:
+    """내 주문 영역.
+
+    💡 2026-08-23 오너 요청 — 대기 주문 줄에 "최근 종가 기준 예상 금액"을 붙이려고
+       `price_lookup` 을 **위에서 받아 그대로 내려보냅니다.** 여기서 조회 함수를 새로
+       만들면 주문 폼이 쓰는 목록과 어긋날 수 있고 파일을 읽는 경로가 하나 더 생깁니다
+       (§0-3-2 · §0-3-10) — 이미 만들어져 있는 `market["price_lookup"]` 을 전달만 합니다.
+    """
     ui.markdown('#### 📋 내 주문')
     if not window["is_open"]:
         info_banner(
@@ -3019,11 +3028,12 @@ async def _render_orders_section(client, user_id: str, accounts, window: dict, o
         )
     for account in accounts:
         await _render_account_orders(client, user_id, account, window, on_changed,
-                                     bundle=_bundle_for(bundles, account.get("id")))
+                                     bundle=_bundle_for(bundles, account.get("id")),
+                                     price_lookup=price_lookup)
 
 
 async def _render_account_orders(client, user_id: str, account: dict, window: dict, on_changed,
-                                 *, bundle=None) -> None:
+                                 *, bundle=None, price_lookup=None) -> None:
     """계좌 1개의 주문 목록 — 대기 중 주문(수정·취소 가능) + 최근 결과.
 
     🔒 소유자 확인은 카드와 같은 이유로 여기서도 한 번 더 합니다(§0-3-8).
@@ -3057,7 +3067,8 @@ async def _render_account_orders(client, user_id: str, account: dict, window: di
         if pending:
             ui.label(f'⏳ 체결 대기 중인 주문 {len(pending)}건').classes('vh-muted')
             for order in pending:
-                _render_pending_order_row(client, order, window, on_changed)
+                _render_pending_order_row(client, order, window, on_changed,
+                                          price_lookup=price_lookup)
         else:
             ui.label('체결 대기 중인 주문이 없습니다.').classes('vh-muted')
 
@@ -3066,11 +3077,47 @@ async def _render_account_orders(client, user_id: str, account: dict, window: di
             _render_order_history_table(history)
 
 
-def _render_pending_order_row(client, order: dict, window: dict, on_changed) -> None:
-    """대기 주문 한 줄 — 수량 수정 · 취소.
+def _pending_estimate_text(order: dict, price_lookup, market: str, currency: str,
+                           *, price_name: str, caveat: str) -> str:
+    """대기 주문 줄에 붙는 **참고용** 예상 금액 문구.
+
+    통화도 시장도 **인자로 받는** 순수 함수입니다(§5-11-1 — 데이터는 분리, 규칙은 공유).
+    두 트랙이 이 계산을 각자 복제하면 한쪽만 고치는 사고가 나므로 여기 한 군데만 둡니다.
+
+    · 매수·매도 구분이 없습니다 — 두 방향 모두 "수량 × 최근 가격"이 그대로 맞습니다.
+    · §0-1 — 가격을 못 구하면 **0 으로 위장하지 않고** "가격 확인 중"이라고 말합니다
+      (`_position_rows()` 가 이미 쓰는 것과 같은 문구·같은 원칙).
+    · 2-4-3 — 이 값은 확정 체결가가 아니라 최근 종가 기준 추정입니다. 그 사실이 문구에서
+      드러나도록 "참고"·"예상"과 `caveat` 를 함께 답니다.
+    """
+    price = price_lookup(market, order.get("ticker")) if price_lookup is not None else None
+    try:
+        quantity = int(order.get("requested_quantity"))
+    except (TypeError, ValueError):
+        quantity = None
+
+    if price is None:
+        return f'💡 참고 · 가격 확인 중 — {price_name}를 확인하지 못해 예상 금액을 낼 수 없습니다.'
+    if quantity is None:
+        return f'💡 참고 · {price_name} {format_amount(price, currency)} — 주문 수량을 읽지 못해 예상 금액을 낼 수 없습니다.'
+    return (f'💡 참고 · {price_name} {format_amount(price, currency)} × {quantity:,}주 '
+            f'≈ 예상 {format_amount(price * quantity, currency)} — {caveat}')
+
+
+def _render_pending_order_row(client, order: dict, window: dict, on_changed,
+                              *, price_lookup=None) -> None:
+    """대기 주문 한 줄 — 수량 수정 · 취소 + 최근 종가 기준 **참고용** 예상 금액.
 
     수정·취소가 가능한 시간대인지는 화면에서도 확인하지만, **최종 권한은 서버**입니다
     (`utils/duel_db.py` 의 시간대 판정 + DB 트리거). 화면은 버튼을 감추는 것까지만 합니다.
+
+    💡 2026-08-23 오너 요청 — "주문을 넣은 곳에도 얼마나 샀는지 가격이 얼마나 샀는지 표시해
+       주는건 안한거지?". 저장된 대기 주문만 봐서는 체결되면 얼마가 빠져나갈지 알 수 없어
+       주문 폼의 예상 금액과 **같은 성격의 참고 줄**을 여기에도 붙입니다.
+       ⚠️ 이 숫자는 **최근 종가 기준 추정**이지 확정 체결가가 아닙니다(2-4-3 — 이 앱에는
+          실시간 시세가 없고 체결가는 체결일 종가로 정해집니다). 그래서 문구에 "참고"·
+          "예상"을 넣고, 체결가가 아직 정해지지 않았다는 말을 함께 답니다.
+       매도 주문도 같은 계산(수량 × 최근 종가)이 그대로 맞아 방향을 가리지 않습니다.
     """
     order_id = order.get("id")
     # 🔁 2026-08-21 — 매수·매도가 같은 목록에 섞이므로 방향을 **맨 앞에** 붙입니다.
@@ -3078,9 +3125,14 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed) -> 
     label = (f'{_order_side_text(order)} · '
              f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
              f'{order.get("requested_quantity")}주 · 체결 예정일 {order.get("target_date")}')
+    estimate = _pending_estimate_text(order, price_lookup, MARKET_KR, CURRENCY,
+                                      price_name='최근 종가',
+                                      caveat='실제 체결가는 체결일 종가로 정해집니다')
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
-        ui.label(label).classes('flex-1 min-w-0 vh-keep-all')
+        with ui.column().classes('flex-1 min-w-0 gap-0'):
+            ui.label(label).classes('vh-keep-all')
+            ui.label(estimate).classes('vh-muted vh-keep-all')
         if not window["is_open"]:
             return
 
@@ -3175,11 +3227,15 @@ def _render_order_history_table(orders) -> None:
 # 8-USD. 💵 달러 주문 내역 — 다른 표(`duel_orders_usd`) · USD 접수 시간대 · 달러 표기
 # -----------------------------------------------------------------------------
 async def _render_orders_section_usd(client, user_id: str, accounts, window: dict,
-                                     on_changed, *, bundles=None) -> None:
+                                     on_changed, *, bundles=None, price_lookup=None) -> None:
     """달러 주문 내역 영역. 원화 `_render_orders_section()` 의 미러입니다.
 
     갈라진 이유는 ① 조회 함수가 `fetch_my_orders_usd`(다른 표) ② 안내 문구의 접수 시간대가
     `ORDER_WINDOW_TEXT_USD` ③ 금액 표기가 달러 — 이 세 가지뿐이고, 판정 논리는 같습니다.
+
+    💡 2026-08-23 — 원화와 같은 이유로 `price_lookup` 을 받아 그대로 내려보냅니다. 여기로
+       오는 것은 **달러 유니버스로 만든** `market_usd["price_lookup"]` 이어야 합니다 —
+       원화 조회 함수가 들어오면 미국 티커를 하나도 못 찾습니다(§5-11-2).
     """
     ui.markdown('#### 📋 내 달러 주문')
     if not window["is_open"]:
@@ -3189,11 +3245,12 @@ async def _render_orders_section_usd(client, user_id: str, accounts, window: dic
         )
     for account in accounts:
         await _render_account_orders_usd(client, user_id, account, window, on_changed,
-                                         bundle=_bundle_for(bundles, account.get("id")))
+                                         bundle=_bundle_for(bundles, account.get("id")),
+                                         price_lookup=price_lookup)
 
 
 async def _render_account_orders_usd(client, user_id: str, account: dict, window: dict,
-                                     on_changed, *, bundle=None) -> None:
+                                     on_changed, *, bundle=None, price_lookup=None) -> None:
     """달러 계좌 1개의 주문 목록 — 대기 중 주문(수정·취소 가능) + 최근 결과.
 
     🔒 소유자 확인은 원화와 같은 이유로 여기서도 한 번 더 합니다(§0-3-8).
@@ -3222,7 +3279,8 @@ async def _render_account_orders_usd(client, user_id: str, account: dict, window
         if pending:
             ui.label(f'⏳ 체결 대기 중인 달러 주문 {len(pending)}건').classes('vh-muted')
             for order in pending:
-                _render_pending_order_row_usd(client, order, window, on_changed)
+                _render_pending_order_row_usd(client, order, window, on_changed,
+                                              price_lookup=price_lookup)
         else:
             ui.label('체결 대기 중인 달러 주문이 없습니다.').classes('vh-muted')
 
@@ -3231,8 +3289,9 @@ async def _render_account_orders_usd(client, user_id: str, account: dict, window
             _render_order_history_table_usd(history)
 
 
-def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed) -> None:
-    """달러 대기 주문 한 줄 — 수량 수정 · 취소.
+def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed,
+                                  *, price_lookup=None) -> None:
+    """달러 대기 주문 한 줄 — 수량 수정 · 취소 + 최근 마감가 기준 **참고용** 예상 금액.
 
     ⚠️ `edit_order_usd()` / `cancel_order_usd()` 를 부릅니다. 원화 함수를 섞어 부르면
        **다른 표의 주문 id 를 찾게 되어** 아무것도 못 찾거나(운이 좋으면) 엉뚱한 행을
@@ -3240,6 +3299,10 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed)
        거절 문구까지 `_translate_order_guard_error_usd()` 가 달러용으로 번역해 둡니다.
 
     수정·취소 가능 시간대인지는 화면에서도 확인하지만 **최종 권한은 서버**입니다.
+
+    💡 2026-08-23 — 원화와 같은 참고 줄을 붙입니다. 계산·문구 규칙은 통화를 모르는 공유
+       함수(`_pending_estimate_text()`)에 있고, 여기서는 **미국 시장·달러 서식**만 골라
+       넘깁니다. 이 값도 확정 체결가가 아니라 최근 마감가 기준 추정입니다(2-4-3).
     """
     order_id = order.get("id")
     # 🔁 원화와 같은 이유로 방향을 맨 앞에 붙입니다(매수·매도가 한 목록에 섞입니다).
@@ -3247,9 +3310,14 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed)
              f'{order.get("stock_name") or ""} ({order.get("ticker")}) · '
              f'{order.get("requested_quantity")}주 · '
              f'체결 예정일 {order.get("target_date")} (미국 정규장 마감가)')
+    estimate = _pending_estimate_text(order, price_lookup, MARKET_US, CURRENCY_USD,
+                                      price_name='최근 마감가',
+                                      caveat='실제 체결가는 그날 미국 정규장 마감가로 정해집니다')
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
-        ui.label(label).classes('flex-1 min-w-0 vh-keep-all')
+        with ui.column().classes('flex-1 min-w-0 gap-0'):
+            ui.label(label).classes('vh-keep-all')
+            ui.label(estimate).classes('vh-muted vh-keep-all')
         if not window["is_open"]:
             return
 
