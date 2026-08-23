@@ -1588,18 +1588,26 @@ def test_pending_rows_show_the_side_in_both_currencies():
 # 10-7. 왕복 수 — 매도 칸 때문에 조회가 늘어나지 않았는지 (§0-3-2 의 정신)
 # -----------------------------------------------------------------------------
 def test_positions_and_orders_are_read_once_per_account_not_twice():
-    """계좌별 포지션·주문은 **한 번씩만** 읽고 카드·주문 폼·주문 내역이 나눠 씁니다."""
+    """계좌별 예수금·포지션·주문은 **한 번씩만** 읽고 카드·주문 폼·주문 내역이 나눠 씁니다.
+
+    💰 2026-08-22 — 예수금(`fetch_my_cash_ledger*`)이 이 목록에 들어왔습니다. 주문 폼도
+       예수금을 보여주게 되면서 그 조회가 `_load_account_data*()` 로 **옮겨졌기** 때문에,
+       "옮긴 것이지 늘린 것이 아니다"를 여기서 숫자로 고정합니다 — 카드가 묶음의 값을 쓰지
+       않고 다시 읽으면 계좌 수만큼 왕복이 늘고 이 검사가 깨집니다.
+    """
     with _RenderHarness(SYNTHETIC_KRW_ACCOUNTS, SYNTHETIC_USD_ACCOUNTS) as harness:
         harness.run()
 
-    for name, accounts in (("fetch_my_positions", SYNTHETIC_KRW_ACCOUNTS),
+    for name, accounts in (("fetch_my_cash_ledger", SYNTHETIC_KRW_ACCOUNTS),
+                           ("fetch_my_positions", SYNTHETIC_KRW_ACCOUNTS),
                            ("fetch_my_orders", SYNTHETIC_KRW_ACCOUNTS),
+                           ("fetch_my_cash_ledger_usd", SYNTHETIC_USD_ACCOUNTS),
                            ("fetch_my_positions_usd", SYNTHETIC_USD_ACCOUNTS),
                            ("fetch_my_orders_usd", SYNTHETIC_USD_ACCOUNTS)):
         assert harness.calls.count(name) == len(accounts), (
             f"{name} 을 계좌 수({len(accounts)})보다 많이/적게 불렀습니다: "
-            f"{harness.calls.count(name)}회. 매도 칸이 같은 값을 또 읽고 있지 않은지 "
-            "확인하세요(이 화면은 이 프로젝트에서 왕복이 가장 많은 화면입니다)."
+            f"{harness.calls.count(name)}회. 매도 칸·주문 폼이 같은 값을 또 읽고 있지 "
+            "않은지 확인하세요(이 화면은 이 프로젝트에서 왕복이 가장 많은 화면입니다)."
         )
 
 
@@ -1607,10 +1615,130 @@ def test_the_two_bundle_loaders_never_touch_each_others_tables():
     """§5-11-2 — 묶음을 읽는 함수도 통화별로 갈라져 있어야 합니다."""
     krw = _referenced_callables(FUNCTIONS["_load_account_data"])
     usd = _referenced_callables(FUNCTIONS["_load_account_data_usd"])
-    assert {"fetch_my_positions", "fetch_my_orders"} <= krw
-    assert not ({"fetch_my_positions_usd", "fetch_my_orders_usd"} & krw)
-    assert {"fetch_my_positions_usd", "fetch_my_orders_usd"} <= usd
-    assert not ({"fetch_my_positions", "fetch_my_orders"} & usd)
+    assert {"fetch_my_cash_ledger", "fetch_my_positions", "fetch_my_orders"} <= krw
+    assert not ({"fetch_my_cash_ledger_usd", "fetch_my_positions_usd",
+                 "fetch_my_orders_usd"} & krw)
+    assert {"fetch_my_cash_ledger_usd", "fetch_my_positions_usd",
+            "fetch_my_orders_usd"} <= usd
+    assert not ({"fetch_my_cash_ledger", "fetch_my_positions", "fetch_my_orders"} & usd)
+
+
+# -----------------------------------------------------------------------------
+# 10-8. 💰 주문 폼의 "이 계좌 예수금" (2026-08-22 오너 요청)
+# -----------------------------------------------------------------------------
+#  ── 오너가 본 것 ──────────────────────────────────────────────────────────────
+#  "밑에 종목 골라서 주문 넣은 곳에서도 어느정도 가격인지는 대충 보일 필요가 있을 것 같아,
+#   그래야 수량을 조절하지, 여기만 봐서는 내가 얼마나 주문을 더 할 수 있을 지 알 수가 없어."
+#  예수금은 위쪽 계좌 카드에 이미 있지만, 모바일에서 주문 폼까지 내려오면 화면 밖입니다.
+#  ── 이 절이 고정하려는 것 ────────────────────────────────────────────────────
+#    ① 두 주문 폼 모두 고른 계좌의 예수금을 **자기 통화 서식**으로 보여준다.
+#    ② 그 값은 4-B 절 묶음에서 온다 — 폼이 DB 를 다시 읽지 않는다(§0-3-2).
+#    ③ 계좌를 바꾸면 표시도 바뀐다(`account_select` 의 `on_change` 가 실제로 걸려 있다).
+#    ④ 예수금 0 은 **0 으로 표시**한다 — 숨기거나 빈칸으로 두지 않는다(§0-1).
+#    ⑤ 계좌를 고른 자리 바로 아래, 종목·수량 입력보다 **위**에 있다(오너가 말한 흐름).
+# -----------------------------------------------------------------------------
+_ORDER_FORMS = (("_render_order_form", "CURRENCY", "CURRENCY_USD"),
+                ("_render_order_form_usd", "CURRENCY_USD", "CURRENCY"))
+
+
+def _order_form_src(name):
+    return ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+
+
+def test_both_order_forms_show_the_selected_accounts_cash():
+    """주문 폼이 고른 계좌의 예수금을 자기 통화 서식으로 그리는지."""
+    for name, mine, theirs in _ORDER_FORMS:
+        src = _order_form_src(name)
+        assert f"format_amount(cash, {mine})" in src, (
+            f"{name}() 이 예수금을 {mine} 서식으로 표시하지 않습니다 — 수량을 정하기 전에 "
+            "'이 계좌에 얼마가 있는지'가 보여야 합니다(오너 요청 2026-08-22)."
+        )
+        assert f"format_amount(cash, {theirs})" not in src, (
+            f"{name}() 이 남의 통화 서식({theirs})으로 예수금을 그립니다(§5-11-2)."
+        )
+
+
+def test_the_order_forms_read_cash_from_the_bundle_and_never_query_again():
+    """§0-3-2 — 폼은 4-B 절 묶음의 값을 쓰고, 스스로 원장을 다시 읽지 않습니다."""
+    for name, _mine, _theirs in _ORDER_FORMS:
+        used = _referenced_callables(FUNCTIONS[name])
+        assert "_bundle_for" in used, (
+            f"{name}() 이 묶음에서 예수금을 꺼내지 않습니다 — 묶음을 통하지 않으면 결국 "
+            "폼이 직접 조회하게 되고, 계좌 수만큼 왕복이 늘어납니다."
+        )
+        for reader in ("fetch_my_cash_ledger", "fetch_my_cash_ledger_usd"):
+            assert reader not in used, (
+                f"{name}() 이 {reader}() 를 직접 부릅니다 — 예수금은 이미 "
+                "`_load_account_data*()` 가 읽어 둔 값입니다(중복 왕복 금지)."
+            )
+
+
+def test_changing_the_account_updates_the_cash_display():
+    """계좌 드롭다운에 `on_change` 가 걸려 있고, 그 핸들러가 예수금 표시를 갱신합니다."""
+    for name, _mine, _theirs in _ORDER_FORMS:
+        node = FUNCTIONS[name]
+        selects = [child for child in ast.walk(node)
+                   if isinstance(child, ast.Assign)
+                   and any(isinstance(t, ast.Name) and t.id == "account_select"
+                           for t in child.targets)]
+        assert len(selects) == 1, f"{name}() 의 account_select 대입을 찾지 못했습니다."
+        call = selects[0].value
+        while isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) \
+                and call.func.attr in ("classes", "props", "style"):
+            call = call.func.value                  # `.classes(...)` 체인을 벗겨 냅니다
+        handlers = [kw for kw in call.keywords if kw.arg == "on_change"]
+        assert handlers, (
+            f"{name}() 의 계좌 드롭다운에 on_change 가 없습니다 — 계좌를 바꿔도 예수금 "
+            "표시가 이전 계좌의 값으로 남습니다(조용히 틀리는 화면)."
+        )
+        assert "_update_cash_label" in ast.dump(handlers[0].value), (
+            f"{name}() 의 on_change 가 예수금 갱신 함수를 부르지 않습니다."
+        )
+
+
+def test_a_zero_balance_account_still_shows_zero_not_a_blank():
+    """§0-1 — 예수금 0 은 '못 읽음'이 아니라 **0** 으로 보여야 합니다.
+
+    구분은 `None`(못 읽음) 대 숫자로 합니다. `if cash:` 같은 참/거짓 검사를 쓰면 0 원인
+    계좌가 "못 읽었다"로 표시됩니다 — 그래서 `is None` 을 구조로 고정합니다.
+    """
+    for name, _mine, _theirs in _ORDER_FORMS:
+        src = _order_form_src(name)
+        assert "if cash is None:" in src, (
+            f"{name}() 이 예수금을 `is None` 으로 구분하지 않습니다 — 0 원 계좌가 "
+            "'읽지 못함'으로 표시될 수 있습니다(§0-1)."
+        )
+
+
+def test_the_cash_line_sits_above_the_stock_and_quantity_inputs():
+    """오너가 말한 흐름 — 계좌 고르기 → **얼마 있는지** → 종목·수량."""
+    for name, _mine, _theirs in _ORDER_FORMS:
+        src = _order_form_src(name)
+        for marker in ("account_select = ", "cash_label = ",
+                       "query_input = ", "quantity_input = "):
+            assert marker in src, f"{name}() 에서 `{marker.strip()}` 를 찾지 못했습니다."
+        assert (src.index("account_select = ") < src.index("cash_label = ")
+                < src.index("query_input = ") < src.index("quantity_input = ")), (
+            f"{name}() 의 예수금 줄이 계좌 선택 바로 아래(종목·수량 입력 위)에 있지 "
+            "않습니다 — 수량을 정한 뒤에 잔액을 보면 순서가 거꾸로입니다."
+        )
+
+
+def test_the_account_cards_no_longer_reread_cash_when_the_bundle_has_it():
+    """카드는 묶음에 예수금이 있으면 원장을 **다시 읽지 않습니다**(옮긴 것이지 늘린 게 아님).
+
+    위 왕복 수 검사와 짝입니다 — 저쪽은 실제 호출 횟수를, 이쪽은 그 횟수가 그렇게 나오는
+    **이유**(묶음 우선 분기)를 구조로 고정합니다.
+    """
+    for name in ("_render_account_card", "_render_account_card_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert 'bundle.get("cash") is not None' in src, (
+            f"{name}() 이 묶음의 예수금을 먼저 보지 않습니다 — 묶음이 이미 읽은 값을 "
+            "카드가 또 읽으면 계좌 수만큼 왕복이 늘어납니다(§0-3-2)."
+        )
+        assert 'cash = bundle["cash"]' in src, (
+            f"{name}() 이 묶음의 예수금을 실제로 쓰지 않습니다."
+        )
 
 
 # =============================================================================
