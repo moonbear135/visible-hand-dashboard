@@ -1,10 +1,10 @@
 {
-  "generated_at_kst": "2026-08-22T12:37:58.943186+09:00",
+  "generated_at_kst": "2026-08-23T12:45:47.493134+09:00",
   "index_keys": [
     "NASDAQ_PROXY_ONEQ",
     "SP500_PROXY_SPY"
   ],
-  "target_date": "2026-08-21",
+  "target_date": "2026-08-22",
   "values": {
     "AAPL": 309.35,
     "ABBV": 264.96,
