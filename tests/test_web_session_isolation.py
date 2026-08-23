@@ -239,18 +239,19 @@ ALLOWED_MUTABLE_GLOBALS = {
         "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 값이 대입되는 코드가 없고, "
         "사용자별 계좌·주문·현금은 전부 @ui.page 함수 안의 지역 변수이거나 함수 인자로만 "
         "흐릅니다(아래 [9] 가 매번 확인).",
-    # ── ⚔️ 2갈래(공개 인프라) 화면 2종 — 2026-08-20 추가 ─────────────────────
-    ("web/pages/duel_consent_page.py", "WINDOW_TITLES"):
-        "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 위 duel_page.py 와 같은 값·같은 사유.",
-    ("web/pages/duel_consent_page.py", "CONSENT_ITEM_SENTENCES"):
-        "동의 항목 5개의 **고정 문구**(작업지시서 5-2-1 에서 글자 그대로 옮긴 문자열 튜플). "
-        "키는 duel_db.CONSENT_ITEM_FLAGS 와 같아야 하며(그 사실을 consent_item_rows() 가 "
-        "매번 확인), 값이 대입되는 코드가 없습니다. 사용자별 동의 상태는 전부 함수 인자로만 "
-        "흐릅니다(client·account_id 를 인자로 받는 함수들).",
-    ("web/pages/duel_leaderboard_page.py", "WINDOW_TITLES"):
-        "계좌 유형 코드(M1/M3/M6) → 화면 표기명(고정 문자열). 위와 같은 사유.",
-    # ── 💵 달러 결투(USD 트랙) 순위표의 통화 선택 — 2026-08-21 추가 (§5-19) ──────
-    ("web/pages/duel_leaderboard_page.py", "CURRENCY_TITLES"):
+    # ── 💼 "내 성적표" 공개 계층 화면 2종 — 2026-08-23 추가 ────────────────────
+    #    🗑️ 이 자리에 있던 `web/pages/duel_consent_page.py` ·
+    #       `web/pages/duel_leaderboard_page.py` 항목 4개는 두 화면이 **파일째 은퇴**하면서
+    #       함께 뺐습니다(공개 대상이 결투 가상계좌 성적에서 "내 성적표" 실제 보유 자산으로
+    #       바뀐 전환 — `tests/test_duel_public_ui.py` [3] 이 그 은퇴를 고정합니다).
+    #       아래 두 항목이 그 자리를 이어받습니다 — 성격(값이 대입되지 않는 고정 문구표)은
+    #       같고, 창유형(M1/M3/M6) 축이 사라져 `WINDOW_TITLES` 는 아예 없습니다.
+    ("web/pages/scorecard_consent_page.py", "CONSENT_ITEM_SENTENCES"):
+        "동의 항목 5개의 **고정 문구**(항목 이름 · 무엇이 공개되는지 한 문장). 키는 "
+        "scorecard_publish_db.CONSENT_ITEM_FLAGS 와 같아야 하며(그 사실을 "
+        "consent_item_rows() 가 매번 확인), 값이 대입되는 코드가 없습니다. 사용자별 동의 "
+        "상태는 전부 함수 인자로만 흐릅니다(client·user_id 를 인자로 받는 함수들).",
+    ("web/pages/scorecard_leaderboard_page.py", "CURRENCY_TITLES"):
         "통화 코드(KRW/USD) → 화면 표기명(고정 문자열). `web/pages/scorecard_page.py` 의 "
         "같은 이름 상수와 성격이 같고, 값이 대입되는 코드가 없습니다. 통화 코드 자체는 "
         "`utils/scorecard_db.py` 의 CURRENCY_KRW/CURRENCY_USD 가 단일 출처이며, '지금 어느 "

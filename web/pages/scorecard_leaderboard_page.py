@@ -1,83 +1,88 @@
 """
-⚔️ 결투다! — 2갈래 "내 밑으로 눈 깔어" **공개 순위표 열람 화면** (로그인 필요, URL `/duel/leaderboard`).
+🏆 "내 성적표" — **공개 순위표 열람 화면** (로그인 필요, URL `/scorecard/leaderboard`).
 
-`DUEL_MODULE_WORK_ORDER.md` **5-3 · 5-6 · 5-7 · 5-2** 의 화면입니다.
+2026-08-23 — 은퇴한 `web/pages/duel_leaderboard_page.py`(결투 가상계좌 공개 순위표)를
+대신하는 화면입니다. 순위표에 실리는 것이 가상계좌 성적에서 **"내 성적표"(실제 보유 자산)**
+로 바뀌었습니다.
 
 -------------------------------------------------------------------------------
-🔴 이 화면이 읽는 것은 **발행 전용 표 두 개뿐**입니다 (5-4-5 · §0-3-8)
+🔴 이 화면이 읽는 것은 **발행 전용 표 두 개뿐**입니다 (§0-3-8)
 -------------------------------------------------------------------------------
-작업지시서 5-4-5 원문: *"화면은 **이 두 표만** 읽습니다. `duel_positions`·`holdings`·
-`profiles`·`duel_cash_ledger` 를 순위표 코드 경로에서 **import 조차 하지 않게** 하세요."*
+`utils/scorecard_publish_db.py` 에서 가져오는 것은 **발행표를 읽는 A 절 함수 3개뿐**입니다.
+원본 표(`holdings`·`profiles`)나 동의·닉네임을 읽는 함수는 이름조차 가져오지 않고, 배치
+전용 B 절 함수는 더더욱 부르지 않습니다(부르는 순간 앱 서버에 service_role 키가 필요해지고
+이 모듈의 모든 RLS 가 장식이 됩니다).
 
-그래서 이 파일이 `utils/duel_db.py` 에서 가져오는 것은 **발행표를 읽는 함수 3개뿐**입니다.
-계좌·포지션·현금·스냅샷·동의를 읽는 함수는 이름조차 가져오지 않습니다. 발행표에는
-`user_id` 도 `account_id` 도 **컬럼 자체가 없고**(스키마 §8), 그 함수들은 `select("*")` 를
-쓰지 않고 읽을 컬럼을 하나하나 적습니다 — 즉 이 화면이 아무리 잘못 짜여도 **닉네임 말고
-사람을 가리키는 값이 흘러 들어올 자리가 물리적으로 없습니다.** §0-3-8 이 요구하는 것은
-조심이 아니라 이런 구조입니다.
+발행표에는 `user_id` 컬럼이 **아예 없고**(스키마 §2-4), 그 함수들은 `select("*")` 를 쓰지
+않고 읽을 컬럼을 하나하나 적습니다 — 즉 이 화면이 아무리 잘못 짜여도 **닉네임 말고 사람을
+가리키는 값이 흘러 들어올 자리가 물리적으로 없습니다.** §0-3-8 이 요구하는 것은 조심이
+아니라 이런 구조입니다.
 
 순위(`rank`)는 **밤에 배치가 계산해 저장해 둔 값**을 그대로 읽습니다. 이 화면은 순위도,
-수익률도 계산하지 않습니다(§0-3-2 / 5-7 — 방문자 수만큼 전체 스캔이 돌면 안 됩니다).
+수익률도 계산하지 않습니다(§0-3-2 — 방문자 수만큼 전체 스캔이 돌면 안 됩니다).
 
 -------------------------------------------------------------------------------
-💵 2026-08-21 — 통화 선택(원화 / 달러)이 들어왔습니다 (§5-19)
+🔁 결투 순위표와 **구조가 다른 점 두 가지**
 -------------------------------------------------------------------------------
-🔴 **원화 순위표와 달러 순위표는 절대 병합·비교하지 않습니다**(5-11-9 오너 확정). 표부터
-   물리적으로 다릅니다(`duel_public_leaderboard` ↔ `duel_public_leaderboard_usd`,
-   `duel_public_holdings` ↔ `duel_public_holdings_usd`). 이 화면은 통화를 고른 **한쪽만**
-   읽습니다 — 같은 요청에 두 통화가 섞이는 자리가 하나도 없습니다. 이유는 두 가지입니다:
-   ① 환율 시계열이 없어 두 통화의 성적을 한 줄에 세울 수 없고(§0-1), ② 두 트랙은 배치
-   시각·휴장일 캘린더가 달라 한쪽만 갱신된 상태가 상시로 생깁니다(5-11-9-b).
+① **창유형(M1/M3/M6) 선택기가 없습니다.** "내 성적표"는 사용자당 포트폴리오 하나이므로
+   창유형이라는 축 자체가 존재하지 않습니다. 선택기는 **통화와 체급 둘뿐**입니다.
+② **수익률의 정의가 다릅니다.** 결투는 일별 스냅샷으로 누적 TWR(시간가중수익률)을
+   계산했지만, "내 성적표"에는 그런 시계열이 없습니다. 여기 실리는 값은 화면이 이미 쓰는
+   규칙과 같은 **매입원가 대비 수익률**입니다
+   (`utils/scorecard_publish.resolve_portfolio_return_pct()`). 아래
+   `NOTICE_HOW_RANKING_WORKS` 가 그 사실을 사용자에게 그대로 말합니다 — 없는 것(TWR)을
+   있는 척하지 않습니다(§0-1).
 
-무엇이 통화마다 다른가 — **딱 다섯 가지**입니다. 이 다섯 가지가 `track_readers()` 한 곳에
-모여 있어서, §0-3-8 검토가 "이 함수만 보면 된다"가 됩니다:
-    ① 발행일 조회 함수  ② 순위표 조회 함수  ③ 보유종목 조회 함수
-    ④ 체급 목록·라벨(`BRACKET_KEYS`/`bracket_label()` ↔ `..._USD`)
-    ⑤ **금액 서식 통화** — 놓치면 달러 매입금액에 "원"이 찍힙니다(§0-1).
+🔴 **원화 순위표와 달러 순위표는 절대 병합·비교하지 않습니다.** 이 앱에는 환율 시계열이
+   없어 두 통화의 성적을 한 줄에 세울 수 없고(§0-1 / `scorecard_db.NO_FX_CONVERSION_NOTICE`),
+   두 시장은 마감 시각·휴장일 캘린더도 다릅니다. 이 화면은 고른 통화 **한쪽만** 읽습니다.
 
-통화와 **무관한 것**(그래서 그대로 재사용하는 것): 창유형 목록(`ACCOUNT_WINDOW_TYPES`),
-"구간 미적용"(`BRACKET_NONE_KEY`), 최소 인원(500명), 상위/하위 500·페이지 크기,
-순위 표기, "비공개" 표기, 그리고 아래 5-3 고정 문구 두 문단(**화면 전체에 딱 한 번**).
-
--------------------------------------------------------------------------------
-🚧 공개 게이트 — `duel_page.py` 와 **똑같은 3단계 패턴**, 스위치만 다릅니다
--------------------------------------------------------------------------------
-    DUEL_ENABLED                     … 1갈래 전체 스위치(꺼져 있으면 2갈래도 없습니다)
-    DUEL_LEADERBOARD_ENABLED         … 이 화면 전용 스위치(기본 꺼짐, 환경변수)
-    DUEL_LEADERBOARD_MENU_ADMIN_ONLY … 관리자 전용 단계 ↔ 전체 공개
-
-오너 방침(2026-08-20): *"코드는 지금 만들어도 되지만 실제 공개는 사람이 쌓이기 전까지
-미룬다."* 최소 인원 게이팅(5-6)이 이미 구조적으로 막고 있지만, 그건 "발행이 안 된다"는
-뜻이고 **화면이 안 보인다**는 뜻은 아니라서 화면 쪽 스위치를 따로 둡니다.
+무엇이 통화마다 다른가 — **딱 세 가지**입니다. 셋이 `track_readers()` 한 곳에 모여 있어서,
+§0-3-8 검토가 "이 함수만 보면 된다"가 됩니다:
+    ① 체급 목록·라벨(`BRACKET_KEYS`/`bracket_label()` ↔ `..._USD`/`bracket_label_usd()`)
+    ② **금액 서식 통화** — 놓치면 달러 매입금액에 "원"이 찍힙니다(§0-1).
+    ③ 화면에 쓸 트랙 이름
+  ⚠️ 조회 함수 3개는 두 통화가 **같은 함수**입니다(결투와 다른 점 — 결투는 표 자체가
+     둘이라 함수도 둘이었지만, 여기서는 한 표의 `currency` 컬럼이 축입니다). 그래도
+     `track_readers()` 가 함께 돌려주는 이유는, "어느 통화로 무엇을 읽고 어떤 통화로
+     서식하는가"를 **한 dict 에서 함께 꺼내야** 중간에 갈리지 않기 때문입니다.
 
 -------------------------------------------------------------------------------
-📝 문구에 대하여 (✅ 2026-08-22 — 7-2 오너 검토 완료, 전체 공개 전환과 함께 확정)
+🚧 공개 게이트 — 다른 화면과 **똑같은 2단계 패턴**, 스위치만 다릅니다
 -------------------------------------------------------------------------------
-· 맨 위 **고정 문구 두 문단은 작업지시서 5-3 에서 글자 그대로** 옮긴 것입니다(오너 확정).
-  요약·축약·재배치 금지. 스크롤 없이 보이는 위치에 고정합니다.
-· 그 밖의 안내 문구는 오너가 직접 읽고 승인했습니다(2026-08-22 — 내용은 그대로, 문장 단위
-  줄바꿈과 렌더링 안 되던 `**` 표시 제거만 반영). 이제 "초안"이 아니라 확정 문안입니다.
+    SCORECARD_LEADERBOARD_ENABLED         … 이 화면 전용 스위치(기본 꺼짐, 환경변수)
+    SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY … 관리자 전용 단계 ↔ 전체 공개
+
+최소 인원 게이팅(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`)이 이미 구조적으로 막고
+있지만, 그건 "발행이 안 된다"는 뜻이고 **화면이 안 보인다**는 뜻은 아니라서 화면 쪽 스위치를
+따로 둡니다.
+
+-------------------------------------------------------------------------------
+📝 문구에 대하여
+-------------------------------------------------------------------------------
+· 맨 위 **고정 문구 두 문단은 오너 확정 문안 그대로**입니다. 요약·축약·재배치 금지.
+  ⚠️ 이 두 문단은 원래 결투 순위표 맨 위에 붙어 있었지만, 그 화면에서는 "'내 성적표'의
+     데이터"를 말하면서 정작 순위표에는 가상계좌 성적이 실리는 상태였습니다. 이번 전환으로
+     **처음으로 문구와 화면의 내용이 실제로 일치합니다** — 그래서 한 글자도 손대지 않고
+     그대로 옮겼습니다.
+· 그 밖의 안내 문구는 공개 대상이 바뀐 만큼 다시 썼습니다(특히 순위 산정 방식 —
+  TWR 이 아닙니다).
 """
 
 from nicegui import ui
 
 from utils import duel_rules
-from utils.duel_db import (
+from utils.duel_rules import DuelRuleError
+# ⚠️ `utils/scorecard_db.py` 에서 가져오는 것은 **로그인 확인과 금액 서식뿐**입니다.
+#    실제 보유 자산을 읽는 함수는 이름조차 가져오지 않습니다(위 머리말).
+from utils.scorecard_db import (
+    CURRENCY_KRW, CURRENCY_USD, format_amount, supabase_status, user_id_of,
+)
+from utils.scorecard_publish_db import (
     DuelDbError,
     fetch_public_holdings_for_nickname,
     fetch_public_leaderboard,
     fetch_public_leaderboard_latest_date,
-)
-from utils.duel_db_usd import (
-    fetch_public_holdings_for_nickname_usd,
-    fetch_public_leaderboard_usd,
-    fetch_public_leaderboard_latest_date_usd,
-)
-from utils.duel_rules import DuelRuleError
-# ⚠️ `utils/scorecard_db.py` 에서 가져오는 것은 **로그인 확인과 금액 서식뿐**입니다.
-#    실제 보유 자산을 읽는 함수는 이름조차 가져오지 않습니다(5-4-5 위 머리말).
-from utils.scorecard_db import (
-    CURRENCY_KRW, CURRENCY_USD, format_amount, supabase_status, user_id_of,
 )
 from web.auth import (
     current_user_async,
@@ -92,21 +97,22 @@ from web.components import (
     error_banner, esc, holdings_table_html, info_banner, pct_text, warning_banner,
 )
 from web.layout import (
-    DUEL_ENABLED,
-    DUEL_LEADERBOARD_ENABLED,
-    DUEL_LEADERBOARD_MENU_ADMIN_ONLY,
+    SCORECARD_LEADERBOARD_ENABLED,
+    SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY,
     layout,
 )
 from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS
 
 # =============================================================================
-# 🔴 순위표 최상단 고정 문구 — 작업지시서 5-3, **오너 확정 · 글자 그대로**
+# 🔴 순위표 최상단 고정 문구 — **오너 확정 · 글자 그대로**
 # =============================================================================
-#  작업지시서 원문: *"아래 문구를 랭킹 페이지 어디서도 스크롤 없이 바로 보이는
-#  위치(최상단)에 고정합니다. 문구는 그대로 씁니다 — 요약·축약하지 마세요."*
+#  원문 지시: *"아래 문구를 랭킹 페이지 어디서도 스크롤 없이 바로 보이는 위치(최상단)에
+#  고정합니다. 문구는 그대로 씁니다 — 요약·축약하지 마세요."*
 #
 #  ⚠️ 이 두 문단은 다듬지 마세요. 맞춤법·띄어쓰기까지 원문 그대로입니다("공개되어있는",
-#     "주의바랍니다"). 고치고 싶으면 작업지시서 5-3 을 먼저 고치고 오너 확인을 받으세요.
+#     "주의바랍니다"). 결투 순위표에서 **한 글자도 바꾸지 않고** 옮겨 왔습니다 — 두 문단
+#     어디에도 "가상계좌"·"결투" 같은 말이 없고, 오히려 "'내 성적표'의 데이터"를 가리키고
+#     있어서 이번 화면에서 비로소 정확한 안내가 됩니다.
 FIXED_NOTICE_PARAGRAPHS = (
     "종목의 추천, 매수, 매도 권유가 아니라 지금의 데이터는 어디까지나 개인의 공부를 목적으로 "
     "진행되고 있는 것이며 투자의 책임은 개인에게 있습니다.",
@@ -114,25 +120,30 @@ FIXED_NOTICE_PARAGRAPHS = (
     "데이터를 확인, 검증하고 있지 않으며 확인, 검증을 요청하고 있지 않습니다. 주의바랍니다.",
 )
 
-#: 창유형 → 화면 이름(`duel_page.py::WINDOW_TITLES` 와 같은 라벨). 순서는 규칙 계층의
-#: `ACCOUNT_WINDOW_TYPES` 를 따릅니다(§0-3-10 — 목록의 출처는 한 곳).
-WINDOW_TITLES = {
-    "M1": "1개월 계좌",
-    "M3": "3개월 계좌",
-    "M6": "6개월 계좌",
-}
-
 #: "동의하지 않아 발행되지 않은 값"을 화면에 그리는 말. **0 이나 빈칸으로 그리지 않습니다** —
-#: "수익률 0%"와 "수익률 비공개"는 다른 말입니다(§0-1 / 스키마 §8 컬럼 주석).
+#: "수익률 0%"와 "수익률 비공개"는 다른 말입니다(§0-1 / 스키마 §2-4 컬럼 주석).
 NOT_PUBLISHED_TEXT = "비공개"
 
-# --- 안내 문구(초안 — 7-2 오너 검토 대기) -------------------------------------
+# --- 안내 문구 ----------------------------------------------------------------
+#: 🔴 순위가 어떻게 갈리는가. **여기 실리는 수익률은 TWR 이 아닙니다** — 그 사실을 에둘러
+#:    말하지 않고 문장으로 못 박습니다(§0-1). "내 성적표"에는 날짜별 잔고 시계열이 없어서
+#:    시간가중수익률을 계산할 방법 자체가 없고, 대신 화면이 이미 쓰는
+#:    `scorecard_db.evaluate_holding()` 의 규칙을 포트폴리오 단위로 올려 씁니다
+#:    (`utils/scorecard_publish.resolve_portfolio_return_pct()`).
 NOTICE_HOW_RANKING_WORKS = (
-    "순위는 '체급'(원금 구간) 안에서 시간가중수익률(TWR)로만 갈립니다.\n\n"
-    "체급은 실제 '내 성적표' 매입원가합계로 나뉘는데, 결투 시드머니는 모두 같은 금액이라 "
-    "그것으로는 구분이 되지 않기 때문입니다.\n\n"
-    "체급 산정에 실제 매입총합을 쓰는 데 동의하지 않은 분들은 "
-    f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹에서 겨룹니다."
+    "순위는 '체급'(매입원가 구간) 안에서 수익률로만 갈립니다.\n\n"
+    "여기서 말하는 수익률은 시간가중수익률(TWR)이 아닙니다. '내 성적표' 화면이 이미 쓰는 "
+    "것과 같은 규칙, 즉 (평가금액 − 매입원가) ÷ 매입원가 로 계산한 "
+    "'매입원가 대비 수익률'입니다. '내 성적표'에는 날짜별 잔고 시계열이 없어서 "
+    "시간가중수익률을 계산할 방법 자체가 "
+    "없습니다 — 없는 값을 지어내지 않습니다.\n\n"
+    "그래서 언제 얼마를 더 넣었는지·뺐는지는 반영되지 않습니다. 지금 등록돼 있는 보유종목의 "
+    "매입원가와 현재 평가금액만 비교한 값입니다.\n\n"
+    "가격을 확인하지 못한 종목이 있으면 그 종목은 분자와 분모 양쪽에서 함께 빠집니다 — "
+    "어떤 분의 수익률은 보유 전부를 반영한 값이 아닐 수 있습니다.\n\n"
+    "체급은 그분이 공개에 동의한 종목별 매입금액을 통화별로 합한 매입원가합계로 나뉩니다. "
+    f"그 통화의 보유종목이 없어 매입원가합계를 구할 수 없으면 "
+    f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹입니다."
 )
 
 NOTICE_MIN_PARTICIPANTS = (
@@ -157,19 +168,19 @@ NOTICE_EMPTY_GROUP = (
     "뒤부터 보입니다 — 오류가 아닙니다."
 )
 
-#: 위쪽/아래쪽 두 구간의 표시 이름과 규칙 계층 상한. 화면에 숫자를 다시 적지 않습니다(§0-3-10).
+#: 위쪽/아래쪽 두 구간의 표시 이름. 인원 상한은 규칙 계층에서 가져옵니다(§0-3-10).
 SECTION_TOP = "top"
 SECTION_BOTTOM = "bottom"
 
 # =============================================================================
-# 💵 통화(트랙) — 2026-08-21 §5-19
+# 💵 통화(트랙)
 # =============================================================================
 #: 통화 코드 → 선택기에 보일 이름. 코드 자체는 `scorecard_db.CURRENCY_KRW/USD` 가 단일
 #: 출처입니다(§0-3-10 — 이 화면이 "KRW"/"USD" 문자열을 새로 정의하지 않습니다).
 #: 순서가 곧 기본값입니다 — 첫 항목(원화)이 화면을 열었을 때 선택돼 있습니다.
 CURRENCY_TITLES = {
-    CURRENCY_KRW: "🇰🇷 원화 결투 (코스피 상위 200)",
-    CURRENCY_USD: "🇺🇸 달러 결투 (미국주식)",
+    CURRENCY_KRW: "🇰🇷 원화 성적표 (국내 보유종목)",
+    CURRENCY_USD: "🇺🇸 달러 성적표 (미국 보유종목)",
 }
 
 #: 🔴 두 순위표가 왜 별개인지. 사용자가 "왜 달러 1등이 원화 1등보다 수익률이 높은데 위에
@@ -179,17 +190,18 @@ NOTICE_TRACKS_NEVER_MERGED = (
     "두 통화의 성적을 합치거나 서로 비교하지 않습니다 — 이 앱에는 환율 시계열이 없어서 "
     "두 통화를 한 줄에 세울 방법이 없고(없는 값을 지어내지 않습니다), 두 시장은 마감 "
     "시각과 휴장일도 달라 갱신 주기 자체가 다르기 때문입니다.\n\n"
-    "통화를 바꾸면 그 통화의 발행표만 새로 읽습니다."
+    "한 분이 국내 종목과 미국 종목을 함께 갖고 계시면 두 순위표에 각각 따로 실립니다 — "
+    "같은 닉네임으로 실리지만, 두 줄의 성적을 더하거나 비교하지 않습니다.\n\n"
+    "통화를 바꾸면 그 통화의 발행분만 새로 읽습니다."
 )
 
-#: 💵 달러 트랙의 체급 기준 통화. 원화 안내(`NOTICE_HOW_RANKING_WORKS`)는 "매입원가합계"
-#:    까지만 말하고 통화를 밝히지 않는데, 달러 트랙에서는 그 통화가 무엇인지가 실제로
-#:    결과를 가릅니다 — `duel_publish_usd.summarize_real_principal_usd()` 는 "내 성적표"에
-#:    달러가 아닌 통화가 하나라도 있으면 **합치지 않고** '구간 미적용'으로 보냅니다.
+#: 💵 달러 트랙의 체급 기준 통화. 위 `NOTICE_HOW_RANKING_WORKS` 는 "통화별 매입원가합계"
+#:    까지만 말하는데, 달러 순위표를 보고 있을 때는 그 통화가 무엇인지가 실제로 결과를
+#:    가르므로 한 번 더 못 박습니다.
 NOTICE_BRACKET_CURRENCY_USD = (
     "달러 순위표의 체급은 '내 성적표'의 달러 보유분 매입원가합계로만 나뉩니다.\n\n"
-    "원화 종목을 함께 갖고 있는 분은 두 통화를 더하지 않고 "
-    f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹에서 겨룹니다."
+    "원화 보유분은 여기에 더해지지 않고 원화 순위표에서 따로 셉니다 — 두 통화를 더하지 "
+    "않습니다."
 )
 
 
@@ -198,18 +210,12 @@ NOTICE_BRACKET_CURRENCY_USD = (
 # =============================================================================
 def _fail(exc, fallback: str) -> str:
     """예외 → 사용자에게 보여줄 한국어 한 문장(§0-3-4)."""
-    return fail_message(exc, fallback, context='결투다! 순위표')
-
-
-def window_options():
-    """창유형 선택지 {값: 라벨}. 목록의 출처는 `duel_rules.ACCOUNT_WINDOW_TYPES` 입니다."""
-    return {key: f'{WINDOW_TITLES.get(key, key)} ({key})'
-            for key in duel_rules.ACCOUNT_WINDOW_TYPES}
+    return fail_message(exc, fallback, context='내 성적표 공개 순위표')
 
 
 def bracket_options():
     """
-    체급 선택지 {bracket_key: 한글 라벨} — 8구간 + "구간 미적용".
+    원화 체급 선택지 {bracket_key: 한글 라벨} — 8구간 + "구간 미적용".
 
     라벨은 `duel_rules.bracket_label()` 만 씁니다. 화면에 금액 경계를 다시 적으면 경계값이
     두 곳에 존재하게 되고, 언젠가 한쪽만 바뀝니다(§0-3-10).
@@ -219,7 +225,7 @@ def bracket_options():
 
 def bracket_options_usd():
     """
-    💵 달러 체급 선택지 {bracket_key: 라벨} — 8구간 + "구간 미적용"(§5-19).
+    💵 달러 체급 선택지 {bracket_key: 라벨} — 8구간 + "구간 미적용".
 
     위 `bracket_options()` 와 **같은 모양**이고 출처만 다릅니다
     (`BRACKET_KEYS`/`bracket_label()` → `BRACKET_KEYS_USD`/`bracket_label_usd()`).
@@ -239,7 +245,7 @@ def currency_options():
 
 def track_readers(currency):
     """
-    🔴 **통화마다 다른 것이 전부 모여 있는 단 하나의 자리**(§5-19 · 5-11-9).
+    🔴 **통화마다 다른 것이 전부 모여 있는 단 하나의 자리**.
 
     돌려주는 dict
         latest_date   : 발행일 조회 함수
@@ -247,12 +253,18 @@ def track_readers(currency):
         detail_rows   : 한 참가자의 발행된 보유종목 조회 함수
         bracket_label : bracket_key → 라벨 함수
         brackets      : 체급 선택지 {key: 라벨}
+        currency      : 조회 함수에 넘길 통화 코드
         amount        : `format_amount()` 에 넘길 통화 코드
         title         : 화면에 쓸 트랙 이름
 
-    ⚠️ 이 함수가 하는 일은 **고르기뿐**입니다 — 두 통화의 값을 섞거나 합치는 계산은
-       하나도 없고, 호출부는 고른 쪽 함수만 씁니다. 모르는 통화는 기본값으로 때우지 않고
-       예외입니다(§0-1 — 잘못 고른 통화로 남의 트랙 표를 읽는 것보다 안 그리는 게 낫습니다).
+    ⚠️ 조회 함수 3개는 두 통화가 **같은 함수**입니다(발행표가 한 벌이고 `currency` 컬럼이
+       축이라서). 그래도 여기서 함께 돌려주는 이유는 "무엇을 어느 통화로 읽고, 어느 통화로
+       금액을 서식하는가"가 **한 dict 에서 함께 나와야** 화면 중간에 갈리지 않기
+       때문입니다. 결투 화면이 같은 이유로 쓰던 구조를 그대로 가져왔습니다(§0-3-10).
+
+    ⚠️ 이 함수가 하는 일은 **고르기뿐**입니다 — 두 통화의 값을 섞거나 합치는 계산은 하나도
+       없고, 호출부는 고른 쪽 값만 씁니다. 모르는 통화는 기본값으로 때우지 않고 예외입니다
+       (§0-1 — 잘못 고른 통화로 남의 트랙 행을 읽는 것보다 안 그리는 게 낫습니다).
     """
     code = str(currency or "").strip()
     if code == CURRENCY_KRW:
@@ -262,16 +274,18 @@ def track_readers(currency):
             "detail_rows": fetch_public_holdings_for_nickname,
             "bracket_label": duel_rules.bracket_label,
             "brackets": bracket_options(),
+            "currency": CURRENCY_KRW,
             "amount": CURRENCY_KRW,
             "title": CURRENCY_TITLES[CURRENCY_KRW],
         }
     if code == CURRENCY_USD:
         return {
-            "latest_date": fetch_public_leaderboard_latest_date_usd,
-            "page_rows": fetch_public_leaderboard_usd,
-            "detail_rows": fetch_public_holdings_for_nickname_usd,
+            "latest_date": fetch_public_leaderboard_latest_date,
+            "page_rows": fetch_public_leaderboard,
+            "detail_rows": fetch_public_holdings_for_nickname,
             "bracket_label": duel_rules.bracket_label_usd,
             "brackets": bracket_options_usd(),
+            "currency": CURRENCY_USD,
             "amount": CURRENCY_USD,
             "title": CURRENCY_TITLES[CURRENCY_USD],
         }
@@ -279,7 +293,7 @@ def track_readers(currency):
 
 
 def section_cap(section):
-    """구간(위/아래)의 최대 인원. 5-7 의 "상위 500 + 하위 500"."""
+    """구간(위/아래)의 최대 인원 — "상위 500 + 하위 500"."""
     if section == SECTION_TOP:
         return duel_rules.LEADERBOARD_TOP_COUNT
     if section == SECTION_BOTTOM:
@@ -287,11 +301,15 @@ def section_cap(section):
     raise DuelRuleError(f"알 수 없는 순위표 구간입니다: {section!r}")
 
 
-def twr_display(value):
+def return_display(value):
     """
     발행된 수익률 → 화면 문자열. **None 은 '비공개'** 입니다(0% 로 그리지 않습니다 — §0-1).
 
     값이 있는데 숫자로 해석되지 않으면 그것도 지어내지 않고 그대로 알립니다.
+
+    🔴 이름이 결투판의 `twr_display()` 와 다릅니다. 여기 실리는 값은 시간가중수익률이
+       아니라 매입원가 대비 수익률이라(위 `NOTICE_HOW_RANKING_WORKS`), 함수 이름에 TWR 이
+       남아 있으면 다음 사람이 그 값을 TWR 로 취급하게 됩니다.
     """
     if value is None:
         return NOT_PUBLISHED_TEXT
@@ -315,17 +333,20 @@ def holding_row_cells(row, currency=CURRENCY_KRW):
     """
     공개 보유종목 한 행 → 표 셀 3개. 동의하지 않은 항목(null)은 **"비공개"** 로 그립니다.
 
-    🔐 §0-3-9 — 종목명은 배치가 넣은 값이지만 예외 없이 `esc()` 를 거칩니다.
+    🔐 §0-3-9 — **`stock_name` 은 사용자가 자유 입력한 값입니다.** `holdings.stock_name` 을
+       배치가 그대로 옮겨 실으므로(`utils/scorecard_publish.holdings_payload()` 독스트링 ·
+       스키마 §2-4 컬럼 주석), `<img src=x onerror=...>` 같은 문자열이 이 자리에 도착할 수
+       있습니다. 이 화면에서 **가장 중요한 한 줄**이 아래 `esc()` 입니다 — 종목명도,
+       종목코드도 예외 없이 거칩니다("종목코드는 숫자니까 괜찮다"는 판단을 코드에 남기지
+       않습니다).
 
-    💵 2026-08-21(§5-19) — `currency` 가 붙었습니다(**생략하면 예전과 똑같이 원화**).
-       예전에는 `format_amount(buy_amount, "KRW")` 로 통화가 본문에 박혀 있어서, 달러
-       보유종목의 매입금액이 그대로 **"1,234원"** 으로 찍혔을 자리입니다(§0-1 정면 위반 —
-       예외도 로그도 없이 사용자에게만 틀린 값이 보이는 종류).
+    💵 `currency` 를 인자로 받습니다(생략하면 원화). 통화가 본문에 박혀 있으면 달러
+       보유종목의 매입금액이 그대로 **"1,234원"** 으로 찍힙니다(§0-1 정면 위반 — 예외도
+       로그도 없이 사용자에게만 틀린 값이 보이는 종류).
        🔴 그런데도 `holding_row_cells_usd()` 를 따로 만들지 **않은** 이유: 이 함수에서
-       통화에 걸린 것은 `format_amount()` 의 인자 하나뿐이고, 나머지는 전부 **XSS 이스케이프
-       (§0-3-9)와 "비공개 ≠ 0"(§0-1) 판정**입니다. 그 둘을 복제하면 이스케이프 경로가 두 개가
-       되어, 한쪽만 고치는 순간 조용히 뚫립니다 — 이 트랙이 지금까지 함수를 복제해 온 기준
-       ("표 이름·시간대가 본문에 박힌 것")과 정반대의 상황이라 여기서는 인자로 갈랐습니다.
+       통화에 걸린 것은 `format_amount()` 의 인자 하나뿐이고, 나머지는 전부 XSS 이스케이프
+       (§0-3-9)와 "비공개 ≠ 0"(§0-1) 판정입니다. 그 둘을 복제하면 이스케이프 경로가 두 개가
+       되어, 한쪽만 고치는 순간 조용히 뚫립니다.
     """
     data = dict(row or {})
     ticker = str(data.get("ticker") or "")
@@ -355,24 +376,22 @@ def holdings_table(rows, currency=CURRENCY_KRW):
 # =============================================================================
 # 2. 페이지 (공개 플래그 게이트 → 고정 문구 → 로그인 게이트)
 # =============================================================================
-# 🔴 2026-08-21 — `async def` + `response_timeout` 이 붙었습니다.
-#    NiceGUI 는 **비동기 페이지 함수에만** `response_timeout`(기본 3초)을 겁니다. 발행일
-#    조회 + 위/아래 두 구간 조회가 순서대로 일어나므로 느린 날에는 3초를 넘길 수 있고,
-#    그러면 화면 대신 **영어 500 오류 페이지**가 나갑니다(§0-3-4 위반). 값의 근거는
-#    `web/state.PAGE_RESPONSE_TIMEOUT_SECONDS` 주석에 적어 뒀습니다.
-@ui.page('/duel/leaderboard', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def duel_leaderboard_page() -> None:
-    with layout('⚔️ 결투다! — 공개 순위표', width_class='max-w-6xl'):
-        ui.markdown('## 🏆 내 밑으로 눈 깔어 — 공개 순위표')
+#  NiceGUI 는 **비동기 페이지 함수에만** `response_timeout`(기본 3초)을 겁니다. 발행일
+#  조회 + 위/아래 두 구간 조회가 순서대로 일어나므로 느린 날에는 3초를 넘길 수 있고,
+#  그러면 화면 대신 **영어 500 오류 페이지**가 나갑니다(§0-3-4 위반).
+@ui.page('/scorecard/leaderboard', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def scorecard_leaderboard_page() -> None:
+    with layout('💼 내 성적표 — 공개 순위표', width_class='max-w-6xl'):
+        ui.markdown('## 🏆 내 밑으로 눈 깔어 — 성적표 공개 순위표')
 
-        if not (DUEL_ENABLED and DUEL_LEADERBOARD_ENABLED):
+        if not SCORECARD_LEADERBOARD_ENABLED:
             _render_coming_soon()
             return
-        if DUEL_LEADERBOARD_MENU_ADMIN_ONLY and not is_admin():
+        if SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY and not is_admin():
             _render_coming_soon()
             return
 
-        # 🔴 5-3 고정 문구 — **본문 맨 위, 로그인 폼보다도 위**. 이 화면에서 무엇을 보든
+        # 🔴 고정 문구 — **본문 맨 위, 로그인 폼보다도 위**. 이 화면에서 무엇을 보든
         #    이 두 문단을 먼저 보게 됩니다(스크롤 없이 보이는 위치).
         _render_fixed_notice()
 
@@ -383,15 +402,12 @@ async def duel_leaderboard_page() -> None:
 
         # ── 로그인 게이트 ────────────────────────────────────────────────────
         #    비로그인 접근 불가 — 발행표의 RLS 도 `authenticated` 에게만 select 를
-        #    허용합니다(스키마 §9-7). 화면과 DB 가 같은 방향으로 막습니다.
+        #    허용합니다(스키마 §3-4). 화면과 DB 가 같은 방향으로 막습니다.
         if not has_supabase_session():
             info_banner('🔒 공개 순위표는 로그인한 이용자에게만 보입니다. 먼저 로그인해 주세요.')
             render_auth()
             return
 
-        # 🔴 2026-08-21 — 세션 확인 두 단계를 **한 try 안**으로 모았습니다. 둘 다 Supabase
-        #    왕복이라 "요청이 중단됨"으로 실패할 수 있는데, 그 실패를 "로그인 만료"로
-        #    오해해 멀쩡한 토큰을 지워버리면 안 되기 때문입니다(§0-1).
         try:
             client = await get_client_async()
             if client is None:
@@ -417,12 +433,12 @@ async def duel_leaderboard_page() -> None:
 def _render_coming_soon() -> None:
     warning_banner(
         '🚧 공개 순위표는 아직 준비중입니다.\n\n'
-        '참가자가 충분히 모이면 열립니다. 그때까지 누구의 성적도 공개되지 않습니다.'
+        '참가자가 충분히 모이면 열립니다. 그때까지 누구의 성적표도 공개되지 않습니다.'
     )
 
 
 def _render_fixed_notice() -> None:
-    """🔴 5-3 고정 문구 두 문단. **글자 그대로**, 크게, 맨 위에."""
+    """🔴 고정 문구 두 문단. **글자 그대로**, 크게, 맨 위에."""
     with ui.card().classes('vh-card w-full'):
         for paragraph in FIXED_NOTICE_PARAGRAPHS:
             ui.label(paragraph).classes('text-base vh-keep-all')
@@ -433,46 +449,41 @@ def _render_fixed_notice() -> None:
 # =============================================================================
 async def _render_body(client) -> None:
     """
-    창유형 · 체급을 고르면 그 그룹의 순위표를 그립니다.
+    통화 · 체급을 고르면 그 그룹의 순위표를 그립니다(창유형 축은 없습니다).
 
-    🔴 2026-08-21 — 공개 순위표 조회 3종(`fetch_public_leaderboard_latest_date` /
-       `fetch_public_leaderboard` / `fetch_public_holdings_for_nickname`)을
-       `run_blocking()` 으로 별도 스레드에 넘깁니다. 전부 Supabase 로 **동기 HTTP 왕복**을
-       하고, 그룹을 바꾸거나 페이지를 넘길 때마다 다시 불립니다. 그동안 이벤트 루프가
-       멈추면 **다른 화면을 보던 접속자까지** 함께 끊깁니다(`web/blocking.py` 독스트링).
+    🔴 발행표 조회 3종을 `run_blocking()` 으로 별도 스레드에 넘깁니다. 전부 Supabase 로
+       **동기 HTTP 왕복**을 하고, 그룹을 바꾸거나 페이지를 넘길 때마다 다시 불립니다.
+       그동안 이벤트 루프가 멈추면 **다른 화면을 보던 접속자까지** 함께 끊깁니다
+       (`web/blocking.py` 독스트링).
 
     ⚠️ 선택 값과 페이지 번호는 **이 함수 안의 지역 변수**입니다. 모듈 전역에 두면 접속자
        끼리 화면 상태가 섞입니다(§0-3-8 — 순위표는 사용자 데이터가 아니지만, "다른 사람이
        페이지를 넘기면 내 화면이 바뀌는" 것 자체가 같은 종류의 사고입니다).
     """
-    ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted whitespace-pre-line')
+    ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted vh-keep-all whitespace-pre-line')
     ui.label(NOTICE_MIN_PARTICIPANTS).classes('vh-muted')
     ui.label(NOTICE_DAILY).classes('vh-muted whitespace-pre-line')
-    # 💵 2026-08-21(§5-19) — 통화 선택이 생겼으므로 "두 표는 절대 안 합친다"를 먼저 밝힙니다.
     ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all whitespace-pre-line')
 
-    windows = window_options()
     currencies = currency_options()
     default_currency = next(iter(currencies))
     brackets = track_readers(default_currency)["brackets"]
     # 지역 상태(접속마다 별개). 값은 "지금 무엇을 보고 있는가"뿐이고 사용자 데이터가 아닙니다.
     view = {
         "currency": default_currency,
-        "window_type": next(iter(windows)),
         "bracket_key": next(iter(brackets)),
         SECTION_TOP: 0,
         SECTION_BOTTOM: 0,
     }
 
     def _changed(_event=None) -> None:
-        view["window_type"] = window_select.value
         view["bracket_key"] = bracket_select.value
         view[SECTION_TOP] = 0                      # 그룹이 바뀌면 페이지는 처음으로
         view[SECTION_BOTTOM] = 0
         group_section.refresh()
 
     def _currency_changed(_event=None) -> None:
-        """🔴 통화가 바뀌면 **체급 목록 자체가 통째로 바뀝니다**(§5-19).
+        """🔴 통화가 바뀌면 **체급 목록 자체가 통째로 바뀝니다**.
 
         원화 체급 키(`krw_…`)와 달러 체급 키(`usd_…`)는 겹치는 것이 하나도 없어서, 옛 값을
         그대로 들고 가면 `bracket_label_usd()` 가 모르는 키로 예외를 냅니다. 그래서 목록을
@@ -488,19 +499,15 @@ async def _render_body(client) -> None:
         group_section.refresh()
 
     with ui.row().classes('w-full gap-4 items-end'):
-        # `on_change=` 생성자 인자는 `duel_page.py::_render_order_form()` 이 이미 쓰는
-        # 방식 그대로입니다(§0-3-10 — 화면마다 다른 이벤트 배선 관례를 만들지 않습니다).
-        # 통화를 **맨 앞**에 둔 이유: 통화가 바로 아래 체급 목록을 결정하기 때문입니다.
+        # 통화를 **맨 앞**에 둔 이유: 통화가 바로 옆 체급 목록을 결정하기 때문입니다.
         currency_select = ui.select(currencies, value=view["currency"], label='통화(트랙)',
                                     on_change=_currency_changed).style('flex: 1 1 240px;')
-        window_select = ui.select(windows, value=view["window_type"], label='계좌 유형',
-                                  on_change=_changed).style('flex: 1 1 200px;')
         bracket_select = ui.select(brackets, value=view["bracket_key"],
-                                   label='체급(원금 구간)',
+                                   label='체급(매입원가 구간)',
                                    on_change=_changed).style('flex: 1 1 260px;')
 
     # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
-    #    직접 부를 때는 `await`, 위 `_changed()` 안의 `.refresh()` 는 동기 호출 그대로입니다.
+    #    직접 부를 때는 `await`, 위 처리기 안의 `.refresh()` 는 동기 호출 그대로입니다.
     @ui.refreshable
     async def group_section() -> None:
         await _render_group(client, view, group_section.refresh)
@@ -509,13 +516,12 @@ async def _render_body(client) -> None:
 
 
 async def _render_group(client, view: dict, on_changed) -> None:
-    """한 그룹(통화 × 창유형 × 체급)의 순위표. 발행일을 **먼저 한 번** 확정하고 시작합니다.
+    """한 그룹(통화 × 체급)의 순위표. 발행일을 **먼저 한 번** 확정하고 시작합니다.
 
-    💵 §5-19 — 고른 통화의 함수만 씁니다. `readers` 를 여기서 한 번 고른 뒤 아래 두 단계
+    💵 고른 통화의 값만 씁니다. `readers` 를 여기서 한 번 고른 뒤 아래 두 단계
        (`_render_section` → `_render_holdings`)에 **그대로 넘겨**, 한 화면 안에서 통화가
        중간에 갈릴 수 있는 자리를 없앴습니다.
     """
-    window_type = view["window_type"]
     bracket_key = view["bracket_key"]
     try:
         readers = track_readers(view["currency"])
@@ -525,7 +531,7 @@ async def _render_group(client, view: dict, on_changed) -> None:
     try:
         published_date = await run_blocking(
             readers["latest_date"],
-            client, window_type=window_type, bracket_key=bracket_key)
+            client, currency=readers["currency"], bracket_key=bracket_key)
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
         return
@@ -536,9 +542,7 @@ async def _render_group(client, view: dict, on_changed) -> None:
     # 🔴 제목에 **통화를 먼저** 적습니다. 원화 표와 달러 표는 절대 섞이지 않지만, 보는
     #    사람이 어느 쪽을 보고 있는지 헷갈리면 그것만으로도 잘못된 비교를 하게 됩니다.
     ui.markdown(
-        f'#### {esc(readers["title"])} · '
-        f'{esc(WINDOW_TITLES.get(window_type, str(window_type)))} · '
-        f'{esc(readers["bracket_label"](bracket_key))}'
+        f'#### {esc(readers["title"])} · {esc(readers["bracket_label"](bracket_key))}'
     )
     if view["currency"] == CURRENCY_USD:
         ui.label(NOTICE_BRACKET_CURRENCY_USD).classes('vh-muted vh-keep-all whitespace-pre-line')
@@ -546,7 +550,9 @@ async def _render_group(client, view: dict, on_changed) -> None:
     if not published_date:
         # 🔴 정상 상태입니다(오류 아님). 참가자가 없거나, 최소 인원 미달이라 발행되지
         #    않았거나, 발행됐다가 인원이 줄어 지워진 경우 — 셋을 구분해 보여주지 않습니다
-        #    (구분 자체가 "이 구간에 몇 명쯤 있는지"의 힌트가 되기 때문 — 5-6).
+        #    (구분 자체가 "이 구간에 몇 명쯤 있는지"의 힌트가 되고, 그건 소수 N 역추적의
+        #     재료입니다 — `scorecard_publish_db.fetch_public_leaderboard_latest_date()`
+        #     독스트링과 같은 판단).
         info_banner(f'ℹ️ {NOTICE_EMPTY_GROUP}')
         return
 
@@ -584,7 +590,7 @@ async def _render_section(client, view: dict, published_date: str, section: str,
     try:
         rows = await run_blocking(
             readers["page_rows"],
-            client, window_type=view["window_type"], bracket_key=view["bracket_key"],
+            client, currency=readers["currency"], bracket_key=view["bracket_key"],
             published_date=published_date, limit=limit, offset=offset,
             order_desc=(section == SECTION_BOTTOM),
         )
@@ -604,37 +610,40 @@ async def _render_section(client, view: dict, published_date: str, section: str,
     # 보여줍니다(읽는 사람에게는 "…998위, 999위, 1000위" 가 자연스럽습니다).
     display_rows = list(rows) if section == SECTION_TOP else list(reversed(rows))
     for row in display_rows:
-        _render_participant(client, published_date, view["window_type"], row, readers)
+        _render_participant(client, published_date, row, readers)
 
     _render_pager(view, section, page_index, has_next=len(rows) >= limit,
                   on_changed=on_changed)
 
 
-def _render_participant(client, published_date: str, window_type: str, row: dict,
-                        readers: dict) -> None:
+def _render_participant(client, published_date: str, row: dict, readers: dict) -> None:
     # (이 함수 자체는 위젯만 만듭니다 — 조회는 아래 `_open()` 을 눌렀을 때만 일어납니다.)
     """
-    순위표 한 줄. 펼치면 그 닉네임의 **공개된** 보유종목을 개별 열람합니다(5-2).
+    순위표 한 줄. 펼치면 그 닉네임의 **공개된** 보유종목을 개별 열람합니다.
 
     보유종목은 **펼칠 때 처음 읽습니다.** 페이지를 여는 것만으로 30명분 상세를 미리 읽으면
     그게 §0-3-2 가 막는 모양이고, 대부분의 방문자는 몇 명만 펼쳐 봅니다.
+
+    🔐 §0-3-9 — 닉네임은 서버가 무작위로 뽑은 값이라 사용자가 내용을 정할 수 없지만, 화면에
+       나가는 값은 예외 없이 `esc()` 를 거칩니다("이 값은 안전하다"는 판단이 코드에 흩어지기
+       시작하면 언젠가 한 곳이 틀립니다).
     """
     nickname = str((row or {}).get("nickname") or '')
-    header = f'{rank_text(row)} · {nickname} · 수익률 {twr_display((row or {}).get("twr_pct"))}'
+    header = (f'{rank_text(row)} · {esc(nickname)} · '
+              f'수익률 {return_display((row or {}).get("return_pct"))}')
 
     with ui.card().classes('vh-card w-full'):
         # 이 행 하나만의 지역 상태(접속마다·행마다 별개 — 모듈 전역에 두지 않습니다).
         slot = {"body": None, "loaded": False}
 
         async def _open(_event=None) -> None:
-            # 🔴 2026-08-21 — `async def`. 펼칠 때 Supabase 왕복이 일어나므로 이 처리기도
-            #    이벤트 루프를 붙잡으면 안 됩니다. NiceGUI 는 `on_click` 에 코루틴 함수를
-            #    그대로 받아 줍니다.
+            # 펼칠 때 Supabase 왕복이 일어나므로 이 처리기도 이벤트 루프를 붙잡으면 안
+            # 됩니다. NiceGUI 는 `on_click` 에 코루틴 함수를 그대로 받아 줍니다.
             if slot["loaded"] or slot["body"] is None:
                 return
             slot["loaded"] = True                  # 두 번 눌러도 두 번 읽지 않습니다
             with slot["body"]:
-                await _render_holdings(client, published_date, window_type, nickname, readers)
+                await _render_holdings(client, published_date, nickname, readers)
 
         with ui.row().classes('no-wrap items-center gap-2 w-full'):
             ui.label(header).classes('flex-1 min-w-0 vh-keep-all')
@@ -643,13 +652,19 @@ def _render_participant(client, published_date: str, window_type: str, row: dict
         slot["body"] = ui.column().classes('w-full gap-1')
 
 
-async def _render_holdings(client, published_date: str, window_type: str, nickname: str,
-                           readers: dict) -> None:
+async def _render_holdings(client, published_date: str, nickname: str, readers: dict) -> None:
     """한 참가자의 공개 보유종목 표(없으면 그 사실을 그대로 알립니다).
 
-    💵 §5-19 — 조회 함수도, 금액 서식 통화도 `readers` 에서 옵니다. 둘이 어긋나면(예: 달러
-       표를 읽고 원화로 서식) 화면이 조용히 "1,234원"이라고 말하게 됩니다 — 그래서 **한
-       dict 에서 함께 꺼냅니다**(두 곳에서 따로 고르지 않습니다).
+    💵 조회 통화도, 금액 서식 통화도 `readers` 에서 옵니다. 둘이 어긋나면(예: 달러 행을 읽고
+       원화로 서식) 화면이 조용히 "1,234원"이라고 말하게 됩니다 — 그래서 **한 dict 에서 함께
+       꺼냅니다**(두 곳에서 따로 고르지 않습니다).
+       🔴 통화를 반드시 걸어야 하는 또 다른 이유: 한 분이 국내·미국 종목을 둘 다 공개했다면
+          **닉네임이 같습니다.** 통화를 안 걸면 원화 순위표에서 그분의 달러 종목까지 함께
+          보입니다.
+
+    🔐 §0-3-9 — 표 안의 종목명·종목코드는 `holdings_table()` → `holding_row_cells()` 가
+       전부 `esc()` 로 감싼 뒤에야 `ui.html()` 에 들어갑니다. 이 화면에서 사용자 자유
+       입력값이 raw HTML 로 나갈 수 있는 자리는 여기 하나뿐입니다.
     """
     if not nickname:
         error_banner('🚫 닉네임을 확인하지 못해 보유종목을 불러오지 않았습니다.')
@@ -657,7 +672,7 @@ async def _render_holdings(client, published_date: str, window_type: str, nickna
     try:
         rows = await run_blocking(
             readers["detail_rows"],
-            client, nickname, published_date=published_date, window_type=window_type)
+            client, nickname, published_date=published_date, currency=readers["currency"])
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
         return
@@ -667,10 +682,11 @@ async def _render_holdings(client, published_date: str, window_type: str, nickna
 
     table = holdings_table(rows, readers["amount"])
     if table is None:
-        # 행이 아예 없는 것은 "보유종목을 공개하지 않았다" 또는 "아직 아무것도 사지 않았다"
-        # 입니다. 둘 중 무엇인지 이 표만 보고는 알 수 없으므로 **단정하지 않습니다**(§0-1).
+        # 행이 아예 없는 것은 "보유종목을 공개하지 않았다" 또는 "그 통화로는 아직 아무것도
+        # 등록하지 않았다"입니다. 둘 중 무엇인지 이 표만 보고는 알 수 없으므로 **단정하지
+        # 않습니다**(§0-1).
         ui.label(
-            '이 참가자의 보유종목은 공개되어 있지 않거나, 아직 보유한 종목이 없습니다.'
+            '이 참가자의 보유종목은 공개되어 있지 않거나, 아직 등록된 종목이 없습니다.'
         ).classes('vh-muted')
         return
     ui.html(table).classes('w-full')

@@ -1,0 +1,138 @@
+# .github/workflows/scorecard_publish_daily.yml
+# =============================================================================
+# 📋 "내 성적표" 공개 순위표 **발행 배치**
+#
+#   하는 일 (순서가 곧 `utils/scorecard_publish.py::run_publish_batch()` 의 순서입니다):
+#     ⓪ 철회한 사용자의 발행 기록을 **모든 날짜에서** 삭제
+#     ① 발행 대상 고르기 — final_confirmed=true 이고 revoked_at 이 없는 사용자
+#     ② 그 사용자들의 "내 성적표" 보유종목을 한 번에 읽어 **통화별** 포트폴리오로 집계
+#     ③ 체급 배정 — 통화별 매입원가합계(전 종목) → 시즌 고정 규칙 적용
+#     ④ 매입원가 대비 수익률 → (통화 × 체급) 그룹별 순위
+#     ⑤ 최소 인원(500명) 미달 그룹은 발행 안 함 + 과거 행도 삭제
+#     ⑥ 그날 발행분 전량 삭제 후 재작성
+#
+#   실제 로직은 전부 파이썬에 있습니다
+#   (`run_scorecard_publish_batch.py` → `utils/scorecard_publish.py`).
+#   이 워크플로우는 **언제·어떤 권한으로 그걸 부르는가**만 정합니다.
+# -----------------------------------------------------------------------------
+# 🕘 왜 이 시각인가 — 이 배치에는 **선행 배치가 없습니다**
+# -----------------------------------------------------------------------------
+#   은퇴하는 결투 발행 배치(`duel_publish_daily.yml`)는 그날의 일별 스냅샷(→ 누적 TWR)이
+#   필요해서 체결 배치(`duel_daily.yml`)가 끝난 뒤에 돌아야 했습니다. **이 배치는 다릅니다.**
+#   읽는 것은 두 가지뿐입니다:
+#     · `public.holdings` — 사용자가 직접 고치는 표(배치가 만들지 않습니다).
+#     · 가격 스냅샷 파일 — 저장소에 커밋돼 있는 수집 결과(`data/`).
+#   그래서 다른 워크플로우의 완료를 기다릴 이유가 없고, `concurrency` 로 **자기 자신끼리만**
+#   겹치지 않게 하면 충분합니다.
+#
+#   ⚠️ 그래도 **가격 수집이 끝난 뒤**에 도는 편이 낫습니다 — 가격을 못 구한 종목만 있는
+#      사용자는 수익률을 계산할 수 없어 그날 발행에서 빠지기 때문입니다(0% 로 채우지
+#      않습니다 — §0-1). 같은 저장소의 실제 값으로 계산한 시간표:
+#        · `scrape.yml`     cron '5 7 * * 1-5'   = UTC 07:05 = KST 16:05 (코스피 종가)
+#        · `scrape_us.yml`  cron '35 20/21 * * 1-5' = UTC 20:35/21:35   (미국 종가)
+#        · **이 파일**      cron '30 22 * * *'   = UTC 22:30 = KST 07:30 (다음 날 아침)
+#          → 그날의 한국·미국 가격 수집이 **둘 다 끝난 뒤**입니다. 주말에도 돌립니다
+#            (보유종목·동의·철회는 장이 열리지 않아도 바뀌고, 특히 **철회 청소는 하루도
+#            거르면 안 되는 일**입니다 — 주말에 철회한 사람의 공개 기록이 월요일까지
+#            남아 있으면 그게 이 모듈에서 가장 나쁜 실패입니다).
+#
+#   ⚠️ 여유를 더 두고 싶으면 늦추세요 — 늦어서 손해 보는 것은 "순위표가 몇 시간 늦게
+#      갱신된다"뿐이고, 일러서 생기는 손해는 "틀린 값이 남에게 공개된다"입니다. 두 위험의
+#      크기가 다릅니다(§0-3-8).
+# -----------------------------------------------------------------------------
+# 🔴 이 배치가 만드는 표는 **로그인한 모든 사용자가 읽습니다** (§0-3-8)
+# -----------------------------------------------------------------------------
+#   게다가 그 내용은 가상 데이터가 아니라 사용자의 **실제 보유 자산**입니다. 그래서
+#   실패했을 때 기본 동작은 "조용히 넘어가기"가 아니라 **시끄럽게 멈추기**입니다.
+#   파이썬 쪽이 비정상 종료하면 이 job 이 실패로 남고, 아래 `if: failure()` 단계가 무엇을
+#   확인해야 하는지 로그에 남깁니다. 실패한 날의 순위표는 **어제 발행분이 그대로 남습니다**
+#   (화면은 그 그룹의 가장 최근 발행일을 읽습니다) — 잘못된 값을 새로 올리는 것보다 낫습니다.
+# =============================================================================
+
+name: Scorecard Publish Daily
+
+on:
+  schedule:
+    # 매일 22:30 UTC = KST 07:30 (한국·미국 가격 수집이 둘 다 끝난 뒤 — 위 머리말 참고).
+    - cron: "30 22 * * *"
+  # 수동 실행. 처음 며칠은 dry-run 으로 "무엇이 발행될 뻔했는지"부터 확인하는 것을 권합니다.
+  workflow_dispatch:
+    inputs:
+      published_date:
+        description: "발행일 (YYYY-MM-DD, KST). 비우면 오늘"
+        required: false
+        default: ""
+      dry_run:
+        description: "저장하지 않고 계산만 (발행표를 건드리지 않음)"
+        required: false
+        default: false
+        type: boolean
+
+# 이 배치는 저장소에 **아무것도 커밋하지 않습니다**(결과는 전부 Supabase 로 갑니다).
+# 그래서 쓰기 권한을 주지 않습니다 — 최소 권한(§0-3-9).
+permissions:
+  contents: read
+
+# 같은 발행일을 두 번 처리하려는 실행이 겹치면, 한쪽이 "그날 발행분 전량 삭제"를 하는 사이
+# 다른 쪽이 삽입하는 상태가 생길 수 있습니다. 배치 자체는 다시 돌리면 스스로 따라잡지만,
+# 그 사이 화면에 절반만 실린 순위표가 보일 수 있으므로 겹쳐 돌지 않게 막습니다.
+concurrency:
+  group: scorecard-publish-batch
+  cancel-in-progress: false
+
+jobs:
+  scorecard-publish:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        # 커밋해 되돌릴 것이 없으므로 전체 이력을 받지 않습니다(기본 얕은 클론).
+        # ⚠️ 다만 `data/` 의 가격 스냅샷 파일은 **체크아웃으로 함께 받아야** 합니다
+        #    (수익률 계산이 그 파일을 읽습니다). 얕은 클론이라도 최신 커밋의 파일은
+        #    전부 들어 있으므로 추가 설정이 필요 없습니다.
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 성적표 발행 배치 실행
+        env:
+          # 🔴 배치 전용 키. 사용자가 접속하는 앱 서버(Render)에는 **절대** 넣지 않습니다
+          #    (§0-3-8 · utils/duel_db.py 머리말). 변수 이름은 duel_db.py 가 읽는 것과
+          #    글자 그대로 같아야 합니다: SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY.
+          #    (성적표 발행 배치는 결투 배치와 **같은 Supabase 프로젝트**의 다른 표를
+          #     쓰므로, 키도 같은 것 하나를 씁니다 — 두 번째 키 경로를 만들지 않습니다.)
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_ROLE_KEY: ${{ secrets.SUPABASE_SERVICE_ROLE_KEY }}
+        run: |
+          ARGS=""
+          if [ -n "${{ github.event.inputs.published_date }}" ]; then
+            ARGS="$ARGS --published-date ${{ github.event.inputs.published_date }}"
+          fi
+          if [ "${{ github.event.inputs.dry_run }}" = "true" ]; then
+            ARGS="$ARGS --dry-run"
+          fi
+          echo "실행: python run_scorecard_publish_batch.py $ARGS"
+          python run_scorecard_publish_batch.py $ARGS
+
+      - name: 실패했을 때 확인할 것
+        if: failure()
+        run: |
+          echo "❌ 발행 배치가 실패했습니다. 순위표는 **이전 발행분이 그대로 남아 있습니다**"
+          echo "   (화면은 각 그룹의 가장 최근 발행일을 읽습니다). 확인 순서:"
+          echo "   1) 위 로그의 마지막 '❌ 성적표 발행 배치 실패:' 줄 — 원인이 한국어로 적혀 있습니다."
+          echo "   2) Secrets 에 SUPABASE_URL / SUPABASE_SERVICE_ROLE_KEY 가 있는지."
+          echo "   3) sql/scorecard_public_schema.sql 이 Supabase 에서 실행됐는지 —"
+          echo "      표가 없으면 '... does not exist' 계열 오류가 납니다."
+          echo "   4) 삭제 후 삽입 도중에 끊긴 경우, 그날 발행분이 일부만 남아 있을 수 있습니다."
+          echo "      → workflow_dispatch 로 같은 --published-date 를 다시 실행하면 그날치를"
+          echo "        통째로 지우고 다시 씁니다(전량 재작성이 그 복구 경로입니다)."
+          exit 1

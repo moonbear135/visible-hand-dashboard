@@ -26,22 +26,28 @@ import web.theme
 #   admin_page     → '/admin'       (관리자 게이트)
 #   duel_page             → '/duel'             (로그인 필요 · "결투다!" 1갈래,
 #                                                 DUEL_ENABLED 로 단계적 공개, 2026-08-20 추가)
-#   duel_consent_page     → '/duel/consent'      (로그인 필요 · 2갈래 공개 동의 관리,
-#                                                 DUEL_CONSENT_ENABLED, 2026-08-20 추가)
-#   duel_leaderboard_page → '/duel/leaderboard'  (로그인 필요 · 2갈래 공개 순위표 열람,
-#                                                 DUEL_LEADERBOARD_ENABLED, 2026-08-20 추가)
+#   scorecard_consent_page     → '/scorecard/consent'      (로그인 필요 · "내 성적표" 공개
+#                                 동의 관리, SCORECARD_CONSENT_ENABLED · 기본 관리자 전용)
+#   scorecard_leaderboard_page → '/scorecard/leaderboard'  (로그인 필요 · "내 성적표" 공개
+#                                 순위표 열람, SCORECARD_LEADERBOARD_ENABLED · 기본 관리자 전용)
+#
+# (2026-08-23 전환) `duel_consent_page → '/duel/consent'` 와
+#   `duel_leaderboard_page → '/duel/leaderboard'` 두 화면을 **성적표 공개 계층으로 전환**
+#   하며 파일째 지웠습니다. 공개되는 대상이 결투 가상계좌 성적에서 "내 성적표"(실제 보유
+#   자산)로 바뀌어, 두 화면의 문구·구조·읽는 표가 전부 달라졌기 때문입니다(부분 수정이
+#   아니라 교체). `/duel`(1갈래 가상계좌 대결) 자체는 아무 영향이 없습니다.
 #
 # (2026-08-17 삭제) `demo_page → '/demo'` — 0단계 모바일 반응형·저장소 지속성 검증 전용
 #   화면이었습니다. 8단계와 컷오버가 모두 끝나 역할이 사라져 파일째 지웠습니다
 #   (`web/auth.py` 의 데모 카운터 두 함수도 함께 — ENGINEERING_SPEC.md §0-3-10).
 from web.pages import (  # noqa: F401
     admin_page,
-    duel_consent_page,
-    duel_leaderboard_page,
     duel_page,
     macro_page,
     pegy_page,
     report_page,
+    scorecard_consent_page,
+    scorecard_leaderboard_page,
     scorecard_page,
     us_stocks_page,
 )

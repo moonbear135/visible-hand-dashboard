@@ -512,7 +512,9 @@ for user in users:                       # ❌ 사용자 수 × 쿼리 수
 
 ---
 
-## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (✅ 완료 — 백엔드·화면 2종·발행 워크플로우·`main.py` 배선까지 전부 작성·검증·반영 완료)
+## 5단계 — Branch 2 "내 밑으로 눈 깔어" 공개 인프라 (✅ 완료 — 백엔드·화면 2종·발행 워크플로우·`main.py` 배선까지 전부 작성·검증·반영 완료 → 🔴 2026-08-23, 이 단계 전체가 은퇴됨. 아래 §5-20 참고)
+
+🔴 **2026-08-23 정정 — 이 단계(Branch 2) 전체가 은퇴되었습니다.** 공개 대상이 결투 가상계좌 성적에서 "내 성적표"(실제 보유 자산)로 바뀌면서, 아래에 적힌 화면·표·플래그는 전부 삭제/DROP 대상이 되었고 새 모듈(`scorecard_public_*`)로 교체됐습니다. **이 절의 서술은 정정하지 않고 그대로 남겨 둡니다** — 처음 이 설계를 왜 이렇게 잡았는지의 기록이자, 실제로는 무엇이 잘못 구현됐었는지의 증거이기 때문입니다. 아래 §5-20에 무엇이, 왜, 어떻게 바뀌었는지 전부 적었습니다. 새 설계의 상세는 별도 문서 `SCORECARD_PUBLIC_LEADERBOARD_WORK_ORDER.md`를 보세요. **`/duel`(Branch 1, "덤벼라 나 자신")은 이 은퇴와 무관하며 그대로 운영됩니다.**
 
 ✅ **2026-08-20 오너 정정 — 이 경고문의 의미를 명확히 함.** "착수하지 말라"는 **코딩을 미루라는 뜻이 아니라, 실제로 순위표가 화면에 발행/노출되는 시점을 사람이 충분히 쌓이기 전까지 미루라는 뜻**입니다("착수하지 말라고 보다는 일정 사람이 쌓이기 전까지 공개를 하지 않는 방향으로 가자, 만들 수 있을 때는 만들어만 두는 건 좋을 거 같아"). 코드는 지금 만들어도 됩니다 — 어차피 5-1(기본 비공개)·5-6(최소 인원 미달 시 미발행)·2-8/7단계의 3단계 공개 전환 패턴이 이미 "실제로 아무도 안 쌓였는데 순위표가 뜨는 사고"를 구조적으로 막고 있습니다. 그리고 §0-3-8은 이 프로젝트의 **최상위 무예외 원칙**입니다 — 이 단계의 모든 코드는 "버그가 나도 새어나갈 수 없는가"를 기준으로 리뷰해야 합니다.
 
@@ -1069,6 +1071,51 @@ USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본�
 
 **✅ 오너 확정 (2026-08-22, 같은 날 이어서) — 2갈래(공개 동의 · 공개 순위표)도 3단계 공개 전환.** 오너 요청으로 두 화면·발행 배치 전체를 결투 서브에이전트 + 직접 코드 재확인으로 검토한 뒤 진행했습니다. 확인한 것: ① 500명 미만 (창유형×체급) 그룹은 `duel_publish.py::split_groups_by_threshold()`가 애초에 발행하지 않고, 이를 우회하는 강제 발행 경로·화면 실시간 집계는 존재하지 않습니다(코드 근거로 재확인). ② 발행표에는 `user_id`/`account_id` 컬럼 자체가 없고 payload whitelist + `_assert_no_identity_fields()` + 컬럼 명시 select 로 삼중 방어됩니다. ③ 세션 격리(RLS + 명시 필터 + 화면 이중 확인), XSS 방어(`esc()`, 닉네임은 사용자 입력이 아니라 서버 난수)도 확인 완료. `web/layout.py`의 `DUEL_CONSENT_MENU_ADMIN_ONLY`·`DUEL_LEADERBOARD_MENU_ADMIN_ONLY`를 각각 `True → False`로 전환했습니다. 검토 중 실제 버그 하나(원화 계좌 2개 이상 시 두 번째 이후 카드 저장이 마지막 카드를 다시 그리는 새로고침 문제 — 파이썬 늦은 이름 결정)를 찾아 같이 고쳤고(USD 경로가 쓰던 `_consent_section()` 팩토리를 원화 경로에도 적용), 오너 검토 요청에 따라 책임 고지·철회 안내를 포함한 초안 문구 전체를 문장 단위 줄바꿈으로 다시 표현하고, 렌더링되지 않던 마크다운 `**` 표시(평문 라벨이라 굵게가 아니라 리터럴 별표로 보이던 기존 버그)를 제거했습니다 — 뜻은 한 글자도 바꾸지 않았습니다. 이로써 **7-2(문구 최종 검토)도 완료**로 정정합니다(위 §5-2-5·5-8 주변의 "초안"·"오너 최종 검토 대기" 표기는 각 화면 파일 안에서 정정 완료). ⚠️ **오너가 Render 대시보드에서 직접 확인·설정해야 하는 것**: `DUEL_CONSENT_ENABLED`/`DUEL_LEADERBOARD_ENABLED` 환경변수가 `true`가 아니면 이번 코드 전환과 무관하게 두 화면이 계속 "준비중"으로만 보입니다 — 저장소 안에서는 이 값을 알 수 없습니다.
 
+### 5-20. 🔴 2026-08-23 정정 — Branch 2("내 밑으로 눈 깔어") 공개 대상을 결투 가상계좌에서 "내 성적표"(실제 자산)로 전면 전환. 이 절 전체가 은퇴됨
+
+**무엇이 드러났나.** 바로 위 §5-10(2026-08-20)에서 완성해 §5-19(2026-08-22 오너 확정)까지 실제로 전체 공개까지 전환했던 공개 순위표는, 순위표 최상단에 **오너가 원문 그대로 고정한 문구**("실제로 공개되어있는 '내 성적표'의 데이터는 개인이 등록한 것입니다…")를 달고 있었습니다. 그런데 이 문구가 처음 이 문서에 등장한 자리(당시 5-3 근처, 2026-08-19 3차 라운드)부터, 실제 코드가 공개하는 것은 **결투 가상계좌의 성적**(순위·수익률·보유종목·수량·매입금액)이었고 "내 성적표"의 실제 자산은 **원금 구간 계산에만, 그것도 별도 독립 동의(위 §5-2-4)가 있어야만** 쓰이는 구조였습니다. 즉 **오너가 처음 지시서에 적은 고정 문구 자체가, 그 문구가 붙을 화면이 실제로 하는 일과 처음부터 어긋나 있었습니다.** 이번 세션 오너가 실사용 중(모바일 포함) `/duel/leaderboard`를 보고 "이거 가상계좌 얘기가 아니라 내 성적표 얘기 아니었어?"라고 정확히 짚어냈고, AI가 즉시 동의하거나 즉시 고치지 않고 `utils/duel_publish.py`·이 문서(당시 §5-3, 지금 §5-2-4)를 직접 재확인해 "이 불일치는 이번 세션이 만든 게 아니라 원본 지시서에 있던 것"이라는 근거를 오너에게 먼저 보고했습니다.
+
+**오너 결정 (AskUserQuestion 2라운드 + 중간 확인, 전부 이번 세션):**
+1. 공개 대상을 실제로 "내 성적표"(실제 자산)로 바꾼다 — 가상계좌 성적 공개는 **하지 않는다**("가상계좌의 공개는 할 필요도 없어", "내용의 착오를 만들 수 있으니 빼버려야해").
+2. 결투 가상계좌 기능(`/duel`, 주문·매수·리밸런싱 매도) 자체는 **손대지 않고 그대로 둔다** — "나와의 결투"라는 원래 목적(내 실제 투자 방식과 다른 모의투자를 스스로 비교) 그대로 개인 연습 도구로 유지.
+3. 그룹 기준은 **체급(원금 구간)만** — "내 성적표"에는 M1/M3/M6 같은 창유형 구분이 없으므로.
+4. 수익률 계산은 **"내 성적표"가 이미 쓰는 방식 그대로**(매입원가 대비, TWR 아님).
+
+**은퇴 대상 (이 문서 §5 전체가 서술하던 것, 코드는 이미 삭제·DB는 오너가 수동 DROP 예정):**
+- 화면: `web/pages/duel_consent_page.py`(§5-9·§5-19), `web/pages/duel_leaderboard_page.py`(§5-10·§5-19) — **파일째 삭제**.
+- 표: `duel_public_consent`, `duel_public_leaderboard`, `duel_public_holdings`, `duel_bracket_assignments`, `duel_nicknames`(§1-6~1-8) + USD 대응표(§5-12) — `sql/scorecard_public_schema.sql`로 DROP 문 작성 완료, **오너가 Supabase SQL Editor에서 직접 실행해야 실제로 지워짐(아직 미실행)**.
+- 배치: `run_duel_publish_batch.py`(§5-10)·`.github/workflows/duel_publish_daily.yml`, USD 대응(§5-17) — 삭제.
+- `web/layout.py`의 `DUEL_CONSENT_ENABLED`/`DUEL_CONSENT_MENU_ADMIN_ONLY`/`DUEL_LEADERBOARD_ENABLED`/`DUEL_LEADERBOARD_MENU_ADMIN_ONLY`(§5-10) — 제거.
+- 테스트: `tests/test_duel_consent_page_usd.py`(§5-19)·`tests/test_duel_leaderboard_page_usd.py`(§5-19) 삭제, `tests/test_duel_public_ui.py`(§5-10) 트리밍(공개 계층 검증만 제거, `/duel` 자체 검증과 무관한 부분은 유지 + "정말로 은퇴했는가" 확인 테스트 3개 신규 추가).
+
+**절대 안 건드린 것:** `/duel` 화면(§2-8·§5-18) 자체, `duel_accounts`/`duel_orders`/`duel_positions`/`duel_cash_ledger`/`duel_daily_snapshots`(§1-1~1-5), 야간 정산 배치(§2-5·§5-15), `DUEL_ENABLED`/`DUEL_MENU_ADMIN_ONLY`(이미 전체 공개 상태 그대로), `utils/duel_rules.py`의 통화·계좌 무관 순수 함수(체급 판정·최소 인원·시즌 계산 등은 새 모듈이 그대로 import해서 재사용 — 사본을 새로 만들지 않았습니다).
+
+**교체 결과 — 새 모듈 `scorecard_public_*` / `scorecard_publish` 계열** (결투의 검증된 패턴을 1:1로 미러링, 계좌 축이 없어지는 만큼 오히려 더 단순해짐):
+- `sql/scorecard_public_schema.sql`(신규) — 위 DROP 5종 + 신규 CREATE 5종(`scorecard_nicknames`/`scorecard_public_consent`/`scorecard_bracket_assignments`/`scorecard_public_leaderboard`/`scorecard_public_holdings`) + RLS(계좌 소유 헬퍼 대신 직접 `auth.uid()=user_id`). **오너가 아직 실행 안 함 — 이후 코드가 실제로 동작하려면 반드시 먼저 실행해야 합니다.**
+- `utils/scorecard_publish.py`(신규, 858줄) — 신규 순수 함수 `resolve_portfolio_return_pct()`(포트폴리오 단위 수익률 = `total_profit / total_cost_priced`, 분모 0/None 이면 결과도 None) · `resolve_bracket_cost_basis()`(체급 입력은 무조건 합 `total_cost`, 가격 유무와 무관 — 오늘 시세 커버리지에 따라 체급이 흔들리지 않도록) 등. `duel_rules.py`의 체급·최소인원·시즌·순위 함수는 **그대로 import**.
+- `utils/scorecard_publish_db.py`(신규, 1053줄) — 동의 CRUD·닉네임·발행 조회/쓰기. 계좌 루프가 없어 시그니처가 전부 `account_id` 대신 `user_id`, 창유형 인자 없음.
+- `run_scorecard_publish_batch.py`(신규) + `.github/workflows/scorecard_publish_daily.yml`(신규, 독립 cron — **`.github/workflows/` 는 `device_commit_files` 로 못 넣으므로 별도 방식으로 전달 필요**, 5-15·5-17 때 USD 워크플로우를 전달했던 것과 같은 방식).
+- `web/pages/scorecard_consent_page.py`(신규, 743줄) — 카드 한 장(계좌 루프 없음), **5개 항목만**(6번째 "실제 매입총합" 독립 동의는 삭제 — 이유: 공개되는 데이터 자체가 이미 실제 자산이라, 매입금액 5개 항목에 동의한 순간 원가합계는 이미 공개된 값의 단순 합이 되어 별도 동의를 세울 대상이 남지 않음).
+- `web/pages/scorecard_leaderboard_page.py`(신규, 721줄) — 창유형 선택기 없음(통화·체급만), `twr_display()` → `return_display()`로 개명(더 이상 TWR이 아니므로), 순위 산정 방식 안내 문구를 매입원가 대비 수익률로 새로 작성. **맨 위 고정 문구 2문단은 글자 하나 안 건드리고 그대로 재사용** — 이번 전환으로 그 문구가 **처음으로 실제 구현과 맞는 말이 됨**.
+- `web/layout.py` — `DUEL_CONSENT_*`/`DUEL_LEADERBOARD_*` 제거, `SCORECARD_CONSENT_ENABLED`/`SCORECARD_CONSENT_MENU_ADMIN_ONLY`/`SCORECARD_LEADERBOARD_ENABLED`/`SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY` 신설(모두 **관리자 전용으로 시작** — `DUEL_ENABLED`는 참조하지 않음, "내 성적표"는 결투 스위치와 무관한 별개 데이터이므로).
+- `main.py` — import를 `duel_consent_page`/`duel_leaderboard_page`에서 `scorecard_consent_page`/`scorecard_leaderboard_page`로 교체.
+
+**검증 (AI가 직접 실행, 서브에이전트 보고를 그대로 믿지 않고 재확인):**
+- `python -m py_compile` — 신규·변경 파일 전부(화면 2종·`layout.py`·`main.py`·신규 테스트) 클린.
+- `pytest tests/test_scorecard_public_ui.py -q` → **48개 전부 통과**.
+- `pytest tests/ -k duel -q` → **886 통과, 365 deselected, 오류 0**(은퇴 전 결투 스위트 기준선 1006 통과였던 것과 비교해, 줄어든 개수는 정확히 삭제된 화면·테스트 파일분과 일치).
+- 저장소 **전체 스위트** → **2 failed, 1249 passed, 3 errors** — 실패·오류 목록이 이 전환 **이전부터 있던, 세션 순서에 따라 흔들리는 NiceGUI 전역 슬롯스택 문제**(`test_upload_widget_is_really_not_rendered_when_flag_is_off`·`test_macro_render_smoke`·`test_render_smoke`·`test_report_render_smoke`·`test_duel_render_smoke`)와 **byte-identical** — 이 전환이 만든 새 실패는 0건.
+- 실제 파일을 직접 읽어 `esc()` 적용 자리 확인: `scorecard_consent_page.py` 551·567·569행(닉네임·시각), `scorecard_leaderboard_page.py` 357-360·545·632행(종목명·종목코드·닉네임·체급라벨) — `ui.html()` 호출은 파일 전체에서 **692행 단 한 곳**뿐이고 그 직전에 전부 `esc()`를 거칩니다.
+- 악성 `stock_name`(`<img src=x onerror=alert(1)>`)을 실제 `holding_row_cells()`/`holdings_table()`에 직접 넣어 실행 → 출력 HTML에 `&lt;img …&gt;`로 이스케이프되어 있고 raw `<img onerror`는 어디에도 없음을 직접 확인.
+- `main.py`·`tests/test_duel_public_ui.py`·`tests/test_web_session_isolation.py` 안에 은퇴한 화면 모듈 이름(`duel_consent_page`/`duel_leaderboard_page`)이 남아있는지 저장소 전체를 grep — 주석(설명용)·"삭제됐음을 확인하는 테스트 코드" 자리에만 남아 있고, import·호출은 전부 사라졌음을 확인.
+
+**아직 안 끝난 것:**
+1. 오너가 Supabase SQL Editor에서 `sql/scorecard_public_schema.sql` 실행(위 DROP 5종 + CREATE 5종) — 실행 전까지는 이 화면들을 열어도 DB 쪽에서 실패합니다.
+2. 오너가 Render에서 `SCORECARD_CONSENT_ENABLED`/`SCORECARD_LEADERBOARD_ENABLED` 환경변수 설정(기본 꺼짐) — 결투 때와 같은 절차.
+3. **6단계(실검증)**를 이 새 모듈에 대해 처음부터 다시(등록 → 5개 동의+최종확인 → 배치 실행 → 순위표에서 본인 닉네임 확인 → 철회 → 사라짐 확인).
+4. `.github/workflows/scorecard_publish_daily.yml`을 GitHub에 반영 — `device_commit_files`가 `.github/workflows/` 경로를 막으므로 §5-15/§5-17 때처럼 별도 방식(오너 컴퓨터에 직접 쓰기 등)으로 전달 필요.
+5. git 반영 시 **삭제된 파일**(`duel_consent_page.py`·`duel_leaderboard_page.py`·`test_duel_consent_page_usd.py`·`test_duel_leaderboard_page_usd.py`)을 `git add -A`(또는 `git rm`)로 함께 커밋해야 합니다 — 새 파일만 add하면 저장소에 죽은 코드가 남습니다.
+
 ---
 
 ## 6단계 — 실검증 (미착수)
@@ -1252,6 +1299,8 @@ USD 트랙의 야간 배치가 처리할 "확정하려는 거래일"의 기본�
 7. **✅ §5-18의 1순위 후보였던 것 — 이미 해결됐습니다.** `tests/test_web_session_isolation.py` 에 `_assert_no_check_failures` autouse fixture 가 들어와, 이제 `check()` 실패가 **pytest 에서도 빨간불**입니다. §5-19 는 실제로 그 덕을 봤습니다(새 전역을 허용 목록에 등록 안 했을 때 곧바로 잡힘). 같은 파일 `test_duel_render_smoke` 의 `await` 누락은 아직 남아 있습니다 — 그 시나리오는 §5-18·§5-19 의 신규 테스트가 달러 기준으로 제대로 검증하고 있어 급하지 않습니다.
 8. **🔴 §5-18의 화면 문구 오너 검토 3건** — `NOTICE_FILL_TIMING_USD`("주문을 넣은 바로 그날의 미국 정규장 마감가")·`NOTICE_WHY_SAME_DAY_USD`(원화와 이유가 정반대라는 설명)·달러 카드 지표명 "총자산 (달러)". 그리고 상시 노출 배너가 원화 3종 + 달러 4종 = 7개로 늘었습니다(§5-18 의 10번 항목). 자세한 내용은 §5-18 끝부분 참고.
 9. **🔴 §5-19 오너 확인 3건** — ① **닉네임 공유의 부작용**: 같은 창유형의 원화·달러에 **둘 다** 공개 동의하면 두 순위표에 같은 닉네임이 실려 "이 두 줄은 같은 사람"이 드러납니다(5-11-10 확정의 자연스러운 귀결이고 교차 *사용자* 유출은 아니지만, 사용자가 모르면 안 되는 사실이라 동의 화면에 `NOTICE_SHARED_NICKNAME` 으로 밝혀 뒀습니다 — 문구와 방침 확인 부탁드립니다). ② 원화 전용 화면에 그대로 남겨 둔 문장 두 개("계좌마다 서로 다른 무작위 닉네임", "가상계좌 3개가 만들어지고")가 달러까지 참여하면 불완전해집니다 — 원화 무수정 원칙 때문에 손대지 않았는데, 미리 고칠지 판단 부탁드립니다. ③ 순위표 통화 선택기 라벨("🇰🇷 원화 결투 (코스피 상위 200)" / "🇺🇸 달러 결투 (미국주식)")과 달러 순위표 제목에 통화를 앞에 붙인 것이 실제로 보기에 괜찮은지. 자세한 내용은 §5-19 끝부분 참고.
+
+10. **🔴 2026-08-23 — Branch 2 전체가 결투 가상계좌 기준에서 "내 성적표"(실제 자산) 기준으로 전면 교체됐습니다. 위 1~9번 항목은 전부 은퇴한 화면(`duel_consent_page.py`/`duel_leaderboard_page.py`) 얘기이니, 저장소를 다시 열면 이제 참고용으로만 보세요 — 실제로 살아있는 화면은 `scorecard_consent_page.py`/`scorecard_leaderboard_page.py`입니다.** 자세한 경위·오너 결정·새 설계·검증 내역은 신규 §5-20을 보고, 코드 설계 상세는 별도 신규 문서 `SCORECARD_PUBLIC_LEADERBOARD_WORK_ORDER.md`를 보세요. `/duel` 화면 자체(1갈래)는 이번 전환과 무관하며 이미 전체 공개 상태 그대로 운영 중입니다. **다음에 이 저장소를 열면 먼저 할 일**: ① 오너가 아직 실행 안 한 `sql/scorecard_public_schema.sql`을 Supabase에 적용했는지 확인, ② `SCORECARD_CONSENT_ENABLED`/`SCORECARD_LEADERBOARD_ENABLED` Render 환경변수 설정 여부 확인, ③ `.github/workflows/scorecard_publish_daily.yml`이 실제로 GitHub에 반영됐는지 확인(§5-20 끝의 "아직 안 끝난 것" 4번), ④ 그 다음이 새 모듈의 6단계(실검증).
 
 > ⚠️ **작업 시작 전에 반드시 `git pull`.** 오너가 여러 창(웹·데스크톱·Cowork)을 오가며 서로 다른 AI 세션을 동시에 돌리는 일이 실제로 있었고, 2026-08-18에 병합 충돌이 났습니다. 코드에 손대기 전 로컬이 origin 최신인지 확인하세요 — 규칙은 `PROJECT_STATUS.md` §7-1.
 
