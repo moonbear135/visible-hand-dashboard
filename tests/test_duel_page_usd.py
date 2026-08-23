@@ -2097,3 +2097,507 @@ def test_the_pending_rows_still_keep_their_edit_and_cancel_buttons():
         assert 'if not window["is_open"]:' in src, (
             f"{name}() 의 접수 시간대 확인이 사라졌습니다."
         )
+
+
+# =============================================================================
+# 13. 📉 주문 폼의 "예상 남은 예수금" (2026-08-23 오너 요청)
+# =============================================================================
+#  ── 오너가 본 것 ──────────────────────────────────────────────────────────────
+#  "여기 좀 더 신경써서, 남은 예수금 = 지금 예수금 - 지금 주문넣은 예상 가격 도 표현할 수
+#   있을까?"
+#  §10-8 에서 붙인 "💰 이 계좌 주문 가능 예수금" 줄은 **지금 정산된** 잔고입니다. 이미
+#  넣어 둔 대기 주문이 그날 밤 체결되면 얼마가 남는지는 그 줄만 봐서는 알 수 없어서,
+#  "얼마나 더 주문할 수 있나"를 재려면 사용자가 머리로 빼야 했습니다.
+#  ── 이 절이 고정하려는 것 ────────────────────────────────────────────────────
+#    ① 대기 주문의 **추정** 영향을 반영한 남은 예수금 줄이 두 폼 모두에 실제로 그려진다.
+#    ② 방향이 맞다 — 매수는 빼고, 매도는 **더한다**(리밸런싱 매도 대금은 같은 밤 배치에서
+#       매수 재원으로 쓰입니다). 방향이 뒤집히면 화면이 조용히 정반대 숫자를 말합니다.
+#    ③ 🔴 §0-1 — 가격·수량을 못 구한 주문은 **0 으로 지어내 합치지 않습니다.** 합계에서
+#       빼고 몇 건을 뺐는지 말하며, 전부 못 구했으면 숫자 자체를 내지 않습니다.
+#    ④ 확정 체결가가 아니라 **최근 종가 기준 추정**이라는 사실이 문구에 있다(2-4-3).
+#    ⑤ 계산은 통화를 모르는 **공유 순수 함수** 한 벌뿐이다(§5-11-1) — 복제본 금지.
+#    ⑥ 주문 목록도 4-B 절 묶음에서 온다 — 폼이 DB 를 다시 읽지 않는다(§0-3-2).
+#    ⑦ 회귀 — 이 라운드의 리팩터링(`_pending_order_price_and_quantity()` 추출)이
+#       `_pending_estimate_text()` 의 출력 문구를 **한 글자도** 바꾸지 않았다.
+# =============================================================================
+def _impact(orders, prices, market):
+    import web.pages.duel_page as page
+
+    lookup, asked = _price_lookup_spy(prices)
+    return page._pending_orders_cash_impact(orders, lookup, market), asked
+
+
+def test_pending_cash_impact_subtracts_buys_and_adds_sells():
+    """매수는 예수금을 줄이고, 매도는 늘립니다(같은 밤 배치가 매도를 먼저 정산합니다)."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2, side="buy"),
+        dict(PENDING_KRW_ORDER, id="s1", ticker="005930", requested_quantity=1, side="sell"),
+    ]
+    impact, asked = _impact(orders, {(MARKET_KR, "016360"): 164300,
+                                     (MARKET_KR, "005930"): 70000}, MARKET_KR)
+    assert impact["delta"] == -2 * 164300 + 70000, (
+        f"매수·매도의 방향이 어긋났습니다: {impact}. 부호가 뒤집히면 화면이 조용히 정반대 "
+        "숫자를 말합니다."
+    )
+    assert impact["pending_count"] == 2
+    assert impact["buy_count"] == 1 and impact["sell_count"] == 1
+    assert impact["unknown_count"] == 0
+    assert all(market == MARKET_KR for market, _ in asked), asked
+
+
+def test_pending_cash_impact_excludes_orders_without_a_price():
+    """§0-1 — 가격을 못 구한 주문은 0 으로 지어내 합치지 않고 개수만 셉니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2, side="buy"),
+        dict(PENDING_KRW_ORDER, id="b2", ticker="ZZZZZZ", requested_quantity=5, side="buy"),
+    ]
+    impact, _asked = _impact(orders, {(MARKET_KR, "016360"): 164300}, MARKET_KR)
+    assert impact["delta"] == -2 * 164300, (
+        f"가격을 모르는 주문이 0 원짜리로 합계에 섞였습니다: {impact}"
+    )
+    assert impact["unknown_count"] == 1 and impact["pending_count"] == 2
+
+
+def test_pending_cash_impact_excludes_orders_with_an_unreadable_quantity():
+    """수량을 못 읽는 옛 행도 같은 규칙 — 합계에서 빼고 개수만 셉니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2, side="buy"),
+        dict(PENDING_KRW_ORDER, id="b2", ticker="016360", requested_quantity="열 주", side="buy"),
+        dict(PENDING_KRW_ORDER, id="b3", ticker="016360", requested_quantity=None, side="buy"),
+    ]
+    impact, _asked = _impact(orders, {(MARKET_KR, "016360"): 164300}, MARKET_KR)
+    assert impact["delta"] == -2 * 164300, f"수량을 못 읽은 주문이 합계에 섞였습니다: {impact}"
+    assert impact["unknown_count"] == 2 and impact["pending_count"] == 3
+
+
+def test_pending_cash_impact_ignores_orders_that_are_no_longer_pending():
+    """체결·취소된 주문은 예수금에 **이미** 반영돼 있습니다 — 두 번 빼면 안 됩니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="f1", status="filled", side="buy", requested_quantity=3),
+        dict(PENDING_KRW_ORDER, id="c1", status="cancelled", side="buy", requested_quantity=3),
+    ]
+    impact, asked = _impact(orders, {(MARKET_KR, "016360"): 164300}, MARKET_KR)
+    assert impact == {"delta": 0, "unknown_count": 0, "pending_count": 0,
+                      "buy_count": 0, "sell_count": 0}, impact
+    assert asked == [], f"대기 주문이 아닌 행의 가격까지 물었습니다: {asked}"
+
+
+def test_pending_cash_impact_on_an_empty_list_is_a_clean_zero():
+    """주문이 없거나 목록을 못 읽은 계좌 — 예외 없이 '대기 0건'이어야 합니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    for orders in ([], None):
+        impact, _asked = _impact(orders, {}, MARKET_KR)
+        assert impact["pending_count"] == 0 and impact["delta"] == 0, impact
+
+
+def test_a_pending_order_with_an_unknown_side_is_not_guessed():
+    """§0-1 — 방향을 모르는 옛 행을 '매수겠지'로 지어내지 않습니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [dict(PENDING_KRW_ORDER, id="x1", side=None, requested_quantity=2)]
+    impact, _asked = _impact(orders, {(MARKET_KR, "016360"): 164300}, MARKET_KR)
+    assert impact["delta"] == 0 and impact["unknown_count"] == 1, impact
+    assert impact["buy_count"] == 0 and impact["sell_count"] == 0
+
+
+def test_the_price_and_quantity_extractor_returns_none_instead_of_zero():
+    """§0-1 — 못 구한 값은 `None` 입니다(0 이 아닙니다). 두 결측을 따로 구분합니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    import web.pages.duel_page as page
+
+    lookup, _asked = _price_lookup_spy({(MARKET_KR, "016360"): 164300})
+
+    price, quantity = page._pending_order_price_and_quantity(
+        dict(PENDING_KRW_ORDER, ticker="ZZZZZZ"), lookup, MARKET_KR)
+    assert price is None and quantity == 20, (price, quantity)
+
+    price, quantity = page._pending_order_price_and_quantity(
+        dict(PENDING_KRW_ORDER, requested_quantity="스무 주"), lookup, MARKET_KR)
+    assert price == 164300 and quantity is None, (price, quantity)
+
+    # 조회 함수 자체가 없는 호출부(옛 스텁)도 예외 없이 "모름"으로 떨어져야 합니다.
+    assert page._pending_order_price_and_quantity(dict(PENDING_KRW_ORDER), None,
+                                                  MARKET_KR) == (None, 20)
+
+
+def test_the_cash_impact_helpers_are_shared_and_currency_agnostic():
+    """§5-11-1 — 계산 규칙은 한 벌, 시장·통화는 **인자로만** 받습니다."""
+    for name in ("_pending_order_price_and_quantity", "_pending_orders_cash_impact"):
+        assert name in FUNCTIONS, f"{name}() 이 없습니다 — 공유 순수 함수로 두기로 했습니다."
+        assert f"{name}_usd" not in FUNCTIONS, (
+            f"{name}() 의 통화별 복제본이 생겼습니다 — 규칙이 바뀌면 한쪽만 고치는 사고가 납니다."
+        )
+        used = _names_used(FUNCTIONS[name])
+        for constant in ("CURRENCY", "CURRENCY_USD", "MARKET_KR", "MARKET_US"):
+            assert constant not in used, (
+                f"{name}() 이 {constant} 를 직접 씁니다 — 시장·통화는 인자로 받아야 합니다."
+            )
+
+
+def test_the_estimate_text_helper_reuses_the_shared_extractor():
+    """§0-3-10 — 가격·수량을 꺼내는 코드가 두 벌이 되지 않았는지(구조)."""
+    src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_pending_estimate_text"])
+    assert "_pending_order_price_and_quantity(" in src, (
+        "_pending_estimate_text() 가 공유 추출 함수를 쓰지 않습니다 — 같은 try/except 가 "
+        "두 곳에 남으면 한쪽만 고치는 사고가 납니다."
+    )
+    assert "int(order.get(" not in src, (
+        "_pending_estimate_text() 안에 수량 파싱이 그대로 남아 있습니다(중복)."
+    )
+
+
+def test_the_estimate_text_output_did_not_change_one_character():
+    """🔴 회귀 잠금 — 리팩터링이 §12 의 문구를 바꾸지 않았음을 **문자열 그대로** 고정합니다.
+
+    §12 의 렌더 검사들이 이미 이 문구에 기대고 있으므로, 여기서는 네 갈래(가격 없음 /
+    수량 없음 / 매수 / 매도)를 함수 수준에서 한 번 더 못 박습니다.
+    """
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    import web.pages.duel_page as page
+
+    krw, _asked = _price_lookup_spy({(MARKET_KR, "016360"): 164300})
+    usd, _asked_usd = _price_lookup_spy({(MARKET_US, "MSFT"): 500.0})
+    krw_kwargs = dict(price_name='최근 종가', caveat='실제 체결가는 체결일 종가로 정해집니다')
+
+    assert page._pending_estimate_text(dict(PENDING_KRW_ORDER), krw, MARKET_KR, "KRW",
+                                       **krw_kwargs) == (
+        '💡 참고 · 최근 종가 164,300원 × 20주 ≈ 예상 3,286,000원 — '
+        '실제 체결가는 체결일 종가로 정해집니다')
+
+    assert page._pending_estimate_text(dict(PENDING_KRW_ORDER, side="sell"), krw, MARKET_KR,
+                                       "KRW", **krw_kwargs) == (
+        '💡 참고 · 최근 종가 164,300원 × 20주 ≈ 예상 3,286,000원 — '
+        '실제 체결가는 체결일 종가로 정해집니다'), "매도도 같은 문구여야 합니다."
+
+    assert page._pending_estimate_text(dict(PENDING_KRW_ORDER, ticker="ZZZZZZ"), krw,
+                                       MARKET_KR, "KRW", **krw_kwargs) == (
+        '💡 참고 · 가격 확인 중 — 최근 종가를 확인하지 못해 예상 금액을 낼 수 없습니다.')
+
+    assert page._pending_estimate_text(dict(PENDING_USD_ORDER, requested_quantity="넉 주"),
+                                       usd, MARKET_US, "USD",
+                                       price_name='최근 마감가',
+                                       caveat='실제 체결가는 그날 마감가로 정해집니다') == (
+        '💡 참고 · 최근 마감가 $500.00 — 주문 수량을 읽지 못해 예상 금액을 낼 수 없습니다.')
+
+
+# -----------------------------------------------------------------------------
+# 13-R. 주문 폼을 **실제로 실행**해 남은 예수금 줄을 확인합니다
+# -----------------------------------------------------------------------------
+#  ⚠️ 이 줄들은 `ui.label('')` 로 만들어 놓고 나중에 `.text` 로 채웁니다. 그래서 호출
+#     인자만 모으는 `_UiStub` 로는 화면에 나간 문구가 **통째로 안 보입니다.** 아래 스텁은
+#     `_WidgetStub` 과 같은 발상이되 두 가지를 더 합니다.
+#       ① 위젯마다 **별개의 객체**를 돌려줍니다(공용 스텁은 하나를 돌려씁니다). 주문 폼은
+#          `account_select` · `cash_label` · `remaining_cash_label` 을 각각 붙들고 쓰므로
+#          한 객체를 공유하면 `account_select.value` 가 다른 위젯 값에 덮여 버립니다.
+#       ② `value=` 초기값을 기억하고 `.text` 대입을 sink 에 남깁니다.
+# -----------------------------------------------------------------------------
+class _FormWidgetStub:
+    """주문 폼 전용 위젯 스텁 — `.value` 를 기억하고 `.text` 대입을 sink 에 남깁니다."""
+
+    def __init__(self, sink, value=None):
+        object.__setattr__(self, "_sink", sink)
+        object.__setattr__(self, "value", value)
+        object.__setattr__(self, "text", "")
+
+    def __call__(self, *args, **kwargs):
+        return self                                 # `.classes(...).props(...)` 체인
+
+    def __getattr__(self, _name):
+        return self
+
+    def __setattr__(self, name, value):
+        if name == "text" and isinstance(value, str):
+            self._sink.append(value)
+        object.__setattr__(self, name, value)
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *_a):
+        return False
+
+
+class _FormFactoryStub:
+    """`ui.label` · `ui.select` … — 부를 때마다 **새** 위젯을 만듭니다."""
+
+    def __init__(self, sink):
+        self._sink = sink
+
+    def __call__(self, *args, **kwargs):
+        if len(args) == 1 and callable(args[0]) and not kwargs:
+            return args[0]                          # 데코레이터로 쓰인 경우
+        for value in args:
+            if isinstance(value, str):
+                self._sink.append(value)
+        return _FormWidgetStub(self._sink, kwargs.get("value"))
+
+    def __getattr__(self, _name):
+        return self
+
+    def __enter__(self):
+        return _FormWidgetStub(self._sink)
+
+    def __exit__(self, *_a):
+        return False
+
+
+class _FormUiStub:
+    def __init__(self, sink):
+        self._sink = sink
+        self._factory = _FormFactoryStub(sink)
+
+    def __getattr__(self, name):
+        if name == "refreshable":
+            return _RefreshableStub
+        return self._factory
+
+
+_FORM_INDEX_KRW = {"016360": {"name": "삼성증권"}, "005930": {"name": "삼성전자"}}
+_FORM_INDEX_USD = {"MSFT": {"name": "Microsoft"}, "AAPL": {"name": "Apple Inc."}}
+
+
+def _render_form_with(name, *, cash, orders, prices, index):
+    """주문 폼을 실제로 실행하고 (화면 문자열, 시세 조회 이력)을 돌려줍니다.
+
+    §0-1 — 계좌·주문·예수금은 전부 합성 데이터이고 Supabase 에는 접속하지 않습니다.
+    """
+    import web.components.widgets as widgets
+    import web.pages.duel_page as page
+
+    account = {"id": "acc-1", "user_id": "uid-1", "window_type": "M1",
+               "first_holding_date": None}
+    bundles = {"acc-1": {"cash": cash, "positions": [], "orders": orders, "error": None}}
+    lookup, asked = _price_lookup_spy(prices)
+
+    sink = []
+    stub = _FormUiStub(sink)
+    saved = (page.ui, widgets.ui)
+    page.ui, widgets.ui = stub, stub
+    try:
+        getattr(page, name)(
+            object(), "uid-1", [account],
+            {"index": dict(index), "price_lookup": lookup},
+            {"is_open": True, "now_kst": datetime.now(KST)},
+            lambda: None, bundles=bundles,
+        )
+    finally:
+        page.ui, widgets.ui = saved
+    return "\n".join(sink), asked
+
+
+def test_the_krw_order_form_shows_the_estimated_remaining_cash():
+    """매수 2주(164,300원) · 매도 1주(70,000원) → 1,840,000 - 328,600 + 70,000."""
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2, side="buy"),
+        dict(PENDING_KRW_ORDER, id="s1", ticker="005930", requested_quantity=1, side="sell",
+             rebalance_window_index=0),
+    ]
+    blob, asked = _render_form_with(
+        "_render_order_form", cash=1_840_000, orders=orders,
+        prices={(MARKET_KR, "016360"): 164300, (MARKET_KR, "005930"): 70000},
+        index=_FORM_INDEX_KRW)
+
+    assert "💰 이 계좌 주문 가능 예수금: 1,840,000원" in blob, (
+        f"§10-8 의 예수금 줄이 사라졌습니다(회귀): {blob}"
+    )
+    assert "예상 남은 예수금: 1,581,400원" in blob, (
+        "대기 주문을 반영한 남은 예수금이 화면에 없습니다 — 오너가 요청한 바로 그 "
+        f"숫자입니다(1,840,000 - 328,600 + 70,000): {blob}"
+    )
+    assert "매수 1건" in blob and "매도 1건" in blob, f"대기 주문 건수 안내가 없습니다: {blob}"
+    # 🔴 확정 체결가로 오해되면 안 됩니다(2-4-3).
+    assert "추정" in blob and "체결가" in blob, (
+        f"추정치라는 표시가 없습니다 — 사용자가 확정 잔액으로 읽습니다: {blob}"
+    )
+    # 원화 폼은 한국 시장으로만 묻습니다(§5-11-2).
+    assert asked and all(market == MARKET_KR for market, _ in asked), asked
+    assert all(market != MARKET_US for market, _ in asked)
+
+
+def test_the_usd_order_form_shows_the_estimated_remaining_cash_in_dollars():
+    """달러 미러 — 문장은 같고 서식만 달러입니다."""
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    orders = [
+        dict(PENDING_USD_ORDER, id="b1", ticker="MSFT", requested_quantity=4, side="buy"),
+        dict(PENDING_USD_ORDER, id="s1", ticker="AAPL", requested_quantity=2, side="sell",
+             rebalance_window_index=0),
+    ]
+    blob, asked = _render_form_with(
+        "_render_order_form_usd", cash=10_000.0, orders=orders,
+        prices={(MARKET_US, "MSFT"): 500.0, (MARKET_US, "AAPL"): 200.0},
+        index=_FORM_INDEX_USD)
+
+    assert "💰 이 달러 계좌 주문 가능 예수금: $10,000.00" in blob, blob
+    assert "예상 남은 예수금: $8,400.00" in blob, (
+        f"10,000 - 2,000 + 400 = 8,400 이 달러 폼에 없습니다: {blob}"
+    )
+    assert "매수 1건" in blob and "매도 1건" in blob
+    assert "추정" in blob and "체결가" in blob
+    assert asked and all(market == MARKET_US for market, _ in asked), asked
+    assert all(market != MARKET_KR for market, _ in asked)
+
+
+def test_no_remaining_cash_line_when_there_are_no_pending_orders():
+    """대기 주문이 없으면 뺄 것도 없습니다 — 같은 숫자를 두 줄로 반복하지 않습니다."""
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    for name, cash, prices, index, cash_line in (
+            ("_render_order_form", 1_840_000, {(MARKET_KR, "016360"): 164300},
+             _FORM_INDEX_KRW, "💰 이 계좌 주문 가능 예수금: 1,840,000원"),
+            ("_render_order_form_usd", 10_000.0, {(MARKET_US, "MSFT"): 500.0},
+             _FORM_INDEX_USD, "💰 이 달러 계좌 주문 가능 예수금: $10,000.00")):
+        # 대기 주문이 하나도 없는 계좌(체결된 주문만 있음).
+        orders = [dict(PENDING_KRW_ORDER if "usd" not in name else PENDING_USD_ORDER,
+                       id="f1", status="filled")]
+        blob, _asked = _render_form_with(name, cash=cash, orders=orders, prices=prices,
+                                         index=index)
+        assert cash_line in blob, f"{name}(): 예수금 줄이 사라졌습니다: {blob}"
+        assert "예상 남은 예수금" not in blob, (
+            f"{name}(): 대기 주문이 없는데 남은 예수금 줄을 그렸습니다: {blob}"
+        )
+
+
+def test_the_remaining_cash_line_never_invents_a_number_it_could_not_compute():
+    """🔴 §0-1 — 대기 주문의 가격을 하나도 못 구했으면 **숫자를 내지 않습니다**."""
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    for name, cash, index, order in (
+            ("_render_order_form", 1_840_000, _FORM_INDEX_KRW, PENDING_KRW_ORDER),
+            ("_render_order_form_usd", 10_000.0, _FORM_INDEX_USD, PENDING_USD_ORDER)):
+        orders = [dict(order, id="b1", ticker="ZZZZZZ", side="buy", requested_quantity=3)]
+        blob, _asked = _render_form_with(name, cash=cash, orders=orders, prices={},
+                                         index=index)
+        assert "대기 중인 주문 1건이 있지만" in blob and "계산할 수 없습니다" in blob, (
+            f"{name}(): 가격을 못 구했는데 그 사실을 말하지 않습니다: {blob}"
+        )
+        assert "예상 남은 예수금:" not in blob, (
+            f"{name}(): 계산할 수 없는데 남은 예수금 숫자를 그렸습니다 — 수집 실패를 "
+            f"금액으로 위장하는 가장 나쁜 형태입니다(§0-1): {blob}"
+        )
+    assert MARKET_KR != MARKET_US                   # 두 시장 상수가 같아지면 위 검사가 무의미
+
+
+def test_orders_whose_price_is_missing_are_reported_as_excluded():
+    """일부만 못 구한 경우 — 계산은 하되 **몇 건을 뺐는지** 반드시 말합니다."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [
+        dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2, side="buy"),
+        dict(PENDING_KRW_ORDER, id="b2", ticker="ZZZZZZ", requested_quantity=5, side="buy"),
+    ]
+    blob, _asked = _render_form_with(
+        "_render_order_form", cash=1_840_000, orders=orders,
+        prices={(MARKET_KR, "016360"): 164300}, index=_FORM_INDEX_KRW)
+
+    assert "예상 남은 예수금: 1,511,400원" in blob, f"1,840,000 - 328,600: {blob}"
+    assert "가격을 확인하지 못한 주문 1건은 이 계산에서 제외했습니다." in blob, (
+        f"합계에서 뺀 주문이 있다는 사실을 말하지 않습니다(§0-1): {blob}"
+    )
+
+
+def test_an_unreadable_cash_balance_leaves_the_remaining_line_blank():
+    """§0-1 — 예수금을 못 읽었으면 남은 예수금도 지어내지 않습니다(빈 줄)."""
+    from utils.scorecard_db import MARKET_KR
+
+    orders = [dict(PENDING_KRW_ORDER, id="b1", ticker="016360", requested_quantity=2,
+                   side="buy")]
+    blob, _asked = _render_form_with(
+        "_render_order_form", cash=None, orders=orders,
+        prices={(MARKET_KR, "016360"): 164300}, index=_FORM_INDEX_KRW)
+
+    assert "💰 이 계좌의 예수금을 읽지 못했습니다" in blob, blob
+    assert "예상 남은 예수금" not in blob and "대기 중인 주문" not in blob, (
+        f"예수금을 못 읽었는데 남은 예수금을 말합니다: {blob}"
+    )
+
+
+# -----------------------------------------------------------------------------
+# 13-A. 구조(AST) — 새 왕복 금지 · 통화 안 섞임 · 첫 렌더에서도 채워짐
+# -----------------------------------------------------------------------------
+def test_the_order_forms_read_pending_orders_from_the_bundle_and_never_query_again():
+    """§0-3-2 — 남은 예수금 줄도 4-B 절 묶음의 값을 씁니다(주문을 다시 읽지 않습니다).
+
+    §10-8 의 예수금 검사와 같은 짝입니다 — 저쪽은 원장을, 이쪽은 주문 목록을 봅니다.
+    """
+    for name, _mine, _theirs in _ORDER_FORMS:
+        node = FUNCTIONS[name]
+        used = _referenced_callables(node)
+        src = _order_form_src(name)
+        assert "orders_by_account" in src, (
+            f"{name}() 이 계좌별 대기 주문 목록을 만들지 않습니다 — 남은 예수금 줄이 "
+            "그릴 재료가 없습니다."
+        )
+        assert '_bundle_for(bundles, account.get("id")).get("orders")' in src, (
+            f"{name}() 이 주문 목록을 묶음에서 꺼내지 않습니다 — 묶음을 통하지 않으면 "
+            "결국 폼이 직접 조회하게 되고 계좌 수만큼 왕복이 늘어납니다(§0-3-2)."
+        )
+        for reader in ("fetch_my_orders", "fetch_my_orders_usd"):
+            assert reader not in used, (
+                f"{name}() 이 {reader}() 를 직접 부릅니다 — 주문 목록은 이미 "
+                "`_load_account_data*()` 가 읽어 둔 값입니다(중복 왕복 금지)."
+            )
+        assert "make_price_lookup" not in _calls_in(node), (
+            f"{name}() 이 시세 조회 함수를 새로 만듭니다 — 위에서 받은 "
+            "market['price_lookup'] 을 그대로 써야 합니다(§0-3-2 · §0-3-10)."
+        )
+
+
+def test_each_order_form_picks_exactly_one_market_and_one_currency():
+    """AST — 원화 폼은 `MARKET_KR`/`CURRENCY` 만, 달러 폼은 `MARKET_US`/`CURRENCY_USD` 만.
+
+    (§10-8 의 문자열 검사는 `CURRENCY` 가 `CURRENCY_USD` 의 부분 문자열이라 통화를 가릴
+     수 없습니다 — 여기서는 이름 단위로 봅니다.)
+    """
+    for name, mine, theirs in (("_render_order_form", ("MARKET_KR", "CURRENCY"),
+                                ("MARKET_US", "CURRENCY_USD")),
+                               ("_render_order_form_usd", ("MARKET_US", "CURRENCY_USD"),
+                                ("MARKET_KR", "CURRENCY"))):
+        used = _names_used(FUNCTIONS[name])
+        for constant in mine:
+            assert constant in used, f"{name}() 이 {constant} 를 쓰지 않습니다."
+        for constant in theirs:
+            assert constant not in used, (
+                f"{name}() 이 남의 트랙 상수({constant})를 씁니다 — 이 파일에서 가장 "
+                "반복돼 온 사고 형태입니다(§5-11-2)."
+            )
+
+
+def test_the_remaining_cash_line_is_filled_on_the_first_render_too():
+    """계좌를 바꾸기 전에도 보여야 합니다 — 정의 직후 한 번 부르는 기존 패턴 그대로."""
+    for name, _mine, _theirs in _ORDER_FORMS:
+        src = _order_form_src(name)
+        for marker in ("remaining_cash_label = ", "_pending_orders_cash_impact(",
+                       "\n    _update_cash_label()"):
+            assert marker in src, (
+                f"{name}() 에서 `{marker.strip()}` 를 찾지 못했습니다 — 첫 렌더에서 "
+                "남은 예수금 줄이 비어 있게 됩니다."
+            )
+        # 남은 예수금 줄은 예수금 줄과 **같은 함수** 안에서 갱신돼야 합니다(따로 두면
+        # 계좌를 바꿀 때 한쪽만 갱신되는 상태가 생깁니다).
+        update = next(child for child in ast.walk(FUNCTIONS[name])
+                      if isinstance(child, ast.FunctionDef)
+                      and child.name == "_update_cash_label")
+        names = _names_used(update)
+        assert {"cash_label", "remaining_cash_label"} <= names, (
+            f"{name}() 의 _update_cash_label() 이 두 줄을 함께 갱신하지 않습니다."
+        )
+        assert "_pending_orders_cash_impact" in _calls_in(update)
+        # 계좌 선택 바로 아래(종목·수량 입력 위)라는 §10-8 의 순서도 그대로입니다.
+        assert (src.index("cash_label = ") < src.index("remaining_cash_label = ")
+                < src.index("query_input = ")), (
+            f"{name}() 의 남은 예수금 줄이 예수금 줄 바로 아래에 있지 않습니다."
+        )

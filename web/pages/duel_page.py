@@ -2229,6 +2229,15 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         if account.get("user_id") == user_id       # 🔒 위 목록과 **같은** 소유자 조건
     }
 
+    # 📉 오너 요청(2026-08-23) — "남은 예수금 = 예수금 - 지금 주문넣은 예상 가격"까지 보여
+    #    달라는 요청입니다. 주문 목록도 4-B 절 묶음이 이미 읽어 둔 값이라 여기서 새로
+    #    읽지 않습니다(§0-3-2).
+    orders_by_account = {
+        str(account.get("id")): _bundle_for(bundles, account.get("id")).get("orders")
+        for account in accounts
+        if account.get("user_id") == user_id
+    }
+
     account_select = ui.select(
         account_options, value=next(iter(account_options), None), label='주문할 계좌',
         on_change=lambda _e: _update_cash_label(),
@@ -2239,6 +2248,10 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
     #    밖입니다. 그래서 **계좌를 고른 자리 바로 아래**에, 종목·수량을 정하기 **전에**
     #    보이게 둡니다(가격 보이고 → 수량 조절).
     cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
+    # 📉 오너 요청(2026-08-23) — 위 줄이 보여주는 것은 **지금 정산된** 예수금이라, 이미
+    #    넣어 둔 대기 주문이 체결되면 얼마가 남는지는 알 수 없었습니다. 그 추정치를 한 줄
+    #    더 붙입니다(작은 글씨 — 확정 숫자가 아니라 추정이기 때문입니다).
+    remaining_cash_label = ui.label('').classes('vh-muted vh-keep-all')
 
     def _update_cash_label() -> None:
         """고른 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
@@ -2246,8 +2259,32 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         if cash is None:
             # §0-1 — 못 읽은 것을 0원으로 위장하지 않습니다(0원이면 아래 줄로 갑니다).
             cash_label.text = '💰 이 계좌의 예수금을 읽지 못했습니다 — 위 계좌 카드를 확인해 주세요.'
+            remaining_cash_label.text = ''
             return
         cash_label.text = f'💰 이 계좌 주문 가능 예수금: {format_amount(cash, CURRENCY)}'
+
+        orders = orders_by_account.get(account_select.value) or []
+        impact = _pending_orders_cash_impact(orders, market["price_lookup"], MARKET_KR)
+        if impact["pending_count"] == 0:
+            remaining_cash_label.text = ''
+        elif impact["unknown_count"] == impact["pending_count"]:
+            # §0-1 — 전부 못 구했으면 숫자를 지어내지 않고 그 사실만 말합니다.
+            remaining_cash_label.text = (
+                f'📉 대기 중인 주문 {impact["pending_count"]}건이 있지만 최근 가격을 확인하지 '
+                '못해 예상 남은 예수금을 계산할 수 없습니다.'
+            )
+        else:
+            remaining = cash + impact["delta"]
+            remaining_cash_label.text = (
+                f'📉 대기 중인 주문(매수 {impact["buy_count"]}건 · 매도 {impact["sell_count"]}건) '
+                f'반영 시 예상 남은 예수금: {format_amount(remaining, CURRENCY)} '
+                '(최근 종가 기준 추정 — 실제 체결가로 달라질 수 있습니다)'
+            )
+            if impact["unknown_count"] > 0:
+                remaining_cash_label.text += (
+                    f' · 가격을 확인하지 못한 주문 {impact["unknown_count"]}건은 이 계산에서 '
+                    '제외했습니다.'
+                )
 
     _update_cash_label()
 
@@ -2653,6 +2690,14 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         if account.get("user_id") == user_id       # 🔒 위 목록과 **같은** 소유자 조건
     }
 
+    # 📉 오너 요청(2026-08-23) — 원화 폼과 같은 이유·같은 자리입니다. 주문 목록도 묶음이
+    #    이미 읽어 둔 값이라 여기서 새로 읽지 않습니다(§0-3-2).
+    orders_by_account = {
+        str(account.get("id")): _bundle_for(bundles, account.get("id")).get("orders")
+        for account in accounts
+        if account.get("user_id") == user_id
+    }
+
     account_select = ui.select(
         account_options, value=next(iter(account_options), None), label='주문할 달러 계좌',
         on_change=lambda _e: _update_cash_label(),
@@ -2661,6 +2706,9 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
     # 🔴 오너 피드백(2026-08-22) — 원화 폼과 같은 이유·같은 자리입니다(계좌 바로 아래,
     #    종목·수량 입력보다 위).
     cash_label = ui.label('').classes('text-base font-bold vh-keep-all')
+    # 📉 오너 요청(2026-08-23) — 원화 폼과 같은 이유·같은 자리·같은 문구입니다(통화 서식만
+    #    달러). 이 앱에는 영어 화면이 따로 없으므로 문장 자체는 한 벌입니다.
+    remaining_cash_label = ui.label('').classes('vh-muted vh-keep-all')
 
     def _update_cash_label() -> None:
         """고른 달러 계좌의 예수금 표시. 계좌를 바꾸면 이 함수가 다시 불립니다."""
@@ -2668,8 +2716,32 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         if cash is None:
             # §0-1 — 못 읽은 것을 $0 으로 위장하지 않습니다($0 이면 아래 줄로 갑니다).
             cash_label.text = '💰 이 달러 계좌의 예수금을 읽지 못했습니다 — 위 계좌 카드를 확인해 주세요.'
+            remaining_cash_label.text = ''
             return
         cash_label.text = f'💰 이 달러 계좌 주문 가능 예수금: {format_amount(cash, CURRENCY_USD)}'
+
+        orders = orders_by_account.get(account_select.value) or []
+        impact = _pending_orders_cash_impact(orders, market["price_lookup"], MARKET_US)
+        if impact["pending_count"] == 0:
+            remaining_cash_label.text = ''
+        elif impact["unknown_count"] == impact["pending_count"]:
+            # §0-1 — 전부 못 구했으면 숫자를 지어내지 않고 그 사실만 말합니다.
+            remaining_cash_label.text = (
+                f'📉 대기 중인 주문 {impact["pending_count"]}건이 있지만 최근 가격을 확인하지 '
+                '못해 예상 남은 예수금을 계산할 수 없습니다.'
+            )
+        else:
+            remaining = cash + impact["delta"]
+            remaining_cash_label.text = (
+                f'📉 대기 중인 주문(매수 {impact["buy_count"]}건 · 매도 {impact["sell_count"]}건) '
+                f'반영 시 예상 남은 예수금: {format_amount(remaining, CURRENCY_USD)} '
+                '(최근 종가 기준 추정 — 실제 체결가로 달라질 수 있습니다)'
+            )
+            if impact["unknown_count"] > 0:
+                remaining_cash_label.text += (
+                    f' · 가격을 확인하지 못한 주문 {impact["unknown_count"]}건은 이 계산에서 '
+                    '제외했습니다.'
+                )
 
     _update_cash_label()
 
@@ -3077,6 +3149,59 @@ async def _render_account_orders(client, user_id: str, account: dict, window: di
             _render_order_history_table(history)
 
 
+def _pending_order_price_and_quantity(order, price_lookup, market):
+    """대기 주문 1건의 (가격, 수량) — 최근 종가 기준, 확정 체결가가 아닙니다.
+
+    `_pending_estimate_text()` 와 `_pending_orders_cash_impact()` 가 공유하는 추출 로직입니다
+    (§0-3-10 — 같은 계산을 두 번 만들지 않습니다). 못 구한 값은 `None` 으로 돌려주고,
+    "0"으로 지어내지 않습니다(§0-1) — 호출부가 각자의 규칙대로 처리합니다.
+    """
+    price = price_lookup(market, order.get("ticker")) if price_lookup is not None else None
+    try:
+        quantity = int(order.get("requested_quantity"))
+    except (TypeError, ValueError):
+        quantity = None
+    return price, quantity
+
+
+def _pending_orders_cash_impact(orders, price_lookup, market):
+    """대기 중인 매수·매도 주문이 예수금에 미칠 **추정** 영향의 합.
+
+    순수 함수 — 통화를 모릅니다(시장은 인자로 받습니다, §5-11-1). 매수는 예수금을 줄이고
+    매도는 늘립니다(리밸런싱 매도 대금은 같은 밤 배치에서 매수 재원으로 쓰이므로, 남을
+    예수금을 추정할 때도 더해 주는 게 맞습니다). 둘 다 아직 확정 체결가가 아닌 **최근 종가
+    기준 추정**입니다(2-4-3). 가격 또는 수량을 모르는 주문, 방향(side)을 모르는 옛 행은
+    합계에서 빼고 개수만 셉니다(§0-1 — 모르는 값을 0으로 지어내 합치지 않습니다).
+    """
+    delta = 0
+    unknown_count = 0
+    buy_count = 0
+    sell_count = 0
+    pending_count = 0
+    for order in orders or []:
+        if (order or {}).get("status") != ORDER_PENDING:
+            continue
+        pending_count += 1
+        side = order.get("side")
+        if side == "buy":
+            buy_count += 1
+        elif side == "sell":
+            sell_count += 1
+        price, quantity = _pending_order_price_and_quantity(order, price_lookup, market)
+        if price is None or quantity is None or side not in ("buy", "sell"):
+            unknown_count += 1
+            continue
+        amount = price * quantity
+        delta += amount if side == "sell" else -amount
+    return {
+        "delta": delta,
+        "unknown_count": unknown_count,
+        "pending_count": pending_count,
+        "buy_count": buy_count,
+        "sell_count": sell_count,
+    }
+
+
 def _pending_estimate_text(order: dict, price_lookup, market: str, currency: str,
                            *, price_name: str, caveat: str) -> str:
     """대기 주문 줄에 붙는 **참고용** 예상 금액 문구.
@@ -3090,11 +3215,7 @@ def _pending_estimate_text(order: dict, price_lookup, market: str, currency: str
     · 2-4-3 — 이 값은 확정 체결가가 아니라 최근 종가 기준 추정입니다. 그 사실이 문구에서
       드러나도록 "참고"·"예상"과 `caveat` 를 함께 답니다.
     """
-    price = price_lookup(market, order.get("ticker")) if price_lookup is not None else None
-    try:
-        quantity = int(order.get("requested_quantity"))
-    except (TypeError, ValueError):
-        quantity = None
+    price, quantity = _pending_order_price_and_quantity(order, price_lookup, market)
 
     if price is None:
         return f'💡 참고 · 가격 확인 중 — {price_name}를 확인하지 못해 예상 금액을 낼 수 없습니다.'
