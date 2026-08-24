@@ -106,7 +106,7 @@
 
 import calendar as calendar_module
 import os
-from datetime import date
+from datetime import date, datetime, timedelta, timezone
 
 from nicegui import ui
 
@@ -462,6 +462,18 @@ def parse_iso_date(value):
         return date.fromisoformat(str(value))
     except (TypeError, ValueError):
         return None
+
+
+_KST = timezone(timedelta(hours=9))
+
+
+def today_kst() -> date:
+    """오늘 날짜(KST) — 서버가 어느 시간대에서 돌든(UTC 등) 항상 한국 시간 기준으로 계산합니다.
+
+    `date.today()`를 그냥 쓰지 않는 이유: 배포 서버의 로컬 시간대가 UTC일 수 있고, 그러면
+    한국 자정~오전 9시 사이엔 날짜가 하루 밀려 보입니다(§0-1 — 서버 시간대에 기대지 않기).
+    """
+    return datetime.now(timezone.utc).astimezone(_KST).date()
 
 
 def busiest_month(grouped):
@@ -828,15 +840,26 @@ async def _render_body() -> None:
     _render_summary(summary, confirmed, pending, grouped)
 
     # ── 상태는 전부 이 함수의 지역 변수입니다 (§0-3-8) ───────────────────
-    default_month = busiest_month(grouped)
+    # 🔴 2026-08-25 오너 지시: 기본으로 여는 달은 "데이터가 몰린 달"이 아니라
+    #    **오늘(KST)이 속한 달**입니다 — 매일 공시감시(daily watch)가 매일 데이터를 갱신하는
+    #    지금, "지금이 몇 월인지"와 "달력이 몇 월을 보여주는지"가 어긋나면 안 된다는 오너
+    #    피드백. 다만 이 달력의 날짜는 결산기준일이라(위 CALENDAR_DATE_NOTICE) 실제로 공시가
+    #    몰리는 달과 다를 수 있어, 오늘 달이 비어 있을 수 있습니다 — 그럴 땐 조용히 다른 달을
+    #    대신 열지 않고 "이번 달은 비어 있다"고 그대로 밝힌 뒤(§0-1) 데이터가 있는 달로
+    #    넘어가는 버튼만 둡니다(아래 `_render_calendar`).
+    suggested_month = busiest_month(grouped)      # 빈 달 안내에 쓸 "데이터가 몰린 달"
+    today = today_kst()
     view = {
-        'year': default_month[0] if default_month else None,
-        'month': default_month[1] if default_month else None,
+        # 확정 배당이 아예 0건이면 오늘 달을 열어도 항상 빈 화면이라, 그때만 기존대로
+        # None(달력 자체를 안 그림 — `_render_calendar`의 None 분기가 처리)으로 둡니다.
+        'year': today.year if suggested_month else None,
+        'month': today.month if suggested_month else None,
         'selected_date': None,
         'day_page': 1,
         'pending_page': 1,
         'query': '',
         'market': MARKET_ALL,
+        'suggested_month': suggested_month,
     }
 
     all_entries = confirmed + pending
@@ -1122,6 +1145,39 @@ def _render_calendar(view, entries, total_confirmed, on_changed, on_day_changed)
         if parsed is not None and (parsed.year, parsed.month) == (year, month):
             month_total += len(items)
     ui.label(f'📌 {year}년 {month}월에 결산기준일이 잡힌 확정 배당: {month_total:,}건').classes('vh-muted')
+
+    if month_total == 0:
+        # 오늘이 속한 달을 기본으로 열다 보니(위 `_render_body`) 자주 벌어지는 상황입니다 —
+        # 조용히 다른 달로 대신 넘어가지 않고, 비어 있다는 사실 그대로 밝힌 뒤(§0-1) 데이터가
+        # 있는 달로 넘어가는 버튼만 둡니다. 지금 필터를 통과한 건수 기준으로 세므로(아래
+        # `grouped`가 이미 필터된 `entries`), 필터 때문에 그 달도 0건이면 버튼을 안 보여줍니다.
+        suggested = view.get('suggested_month')
+        suggested_count = 0
+        if suggested and suggested != (year, month):
+            for key, items in grouped.items():
+                parsed = parse_iso_date(key)
+                if parsed is not None and (parsed.year, parsed.month) == suggested:
+                    suggested_count += len(items)
+        if suggested and suggested != (year, month) and suggested_count:
+            s_year, s_month = suggested
+
+            def _jump_to_suggested(_event=None) -> None:
+                view['year'], view['month'] = suggested
+                view['selected_date'] = None
+                view['day_page'] = 1
+                on_changed()
+                on_day_changed()
+
+            with ui.row().classes('w-full items-center gap-2'):
+                ui.label(
+                    f'📭 이번 달은 아직 확정된 배당이 없어요 — 배당이 몰려있는 달은 '
+                    f'{s_year}년 {s_month}월이에요({suggested_count:,}건).'
+                ).classes('vh-notice-text')
+                ui.button(f'{s_month}월로 이동', on_click=_jump_to_suggested) \
+                    .props('flat dense no-caps color=primary')
+        else:
+            ui.label('📭 이번 달은 아직 확정된 배당이 없어요.').classes('vh-notice-text')
+
     if len(entries) != total_confirmed:
         ui.label(
             f'🔎 필터 적용 중 — 달력의 건수는 필터를 통과한 종목만 셉니다 '
