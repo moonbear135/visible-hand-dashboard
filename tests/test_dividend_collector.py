@@ -2348,3 +2348,592 @@ def test_cli_overwrite_guard_exits_nonzero_without_traceback(tmp_path, capsys, m
     assert "수집을 중단했습니다" in out
     assert "--allow-overwrite" in out
     assert "Traceback" not in out
+
+
+# =============================================================================
+# 15. KRX 6자 영숫자 종목코드 대응 (normalize_stock_code 확대 + 회사명 2차 매칭)
+#
+# 배경(실물 확인 — 2026-08-24, data/kr_ticker_master.json 대조):
+#   type=="STOCK" 2,873건 중 **79건**의 종목코드가 순수 숫자가 아니라 '0126Z0' / '00680K'
+#   / '03473K' 처럼 대문자 알파벳이 하나 섞인 **6자 영숫자**입니다. 79건 전부 길이가
+#   정확히 6자이고 실재하는 상장 증권입니다(KRX 가 한 발행사의 숫자 코드 공간이 소진되면
+#   쓰는 실제 표기 — 우선주에서 특히 흔합니다). 깨진 데이터가 아닙니다.
+#   확대 전 `normalize_stock_code()` 는 이 79건을 전부 None 으로 떨어뜨려, DART 에
+#   물어보지도 못한 채 "형식 오류"로 버리고 있었습니다.
+#
+# 이 절이 지키는 선:
+#   · 확대는 **딱 한 형태**(정확히 6자, ^[0-9A-Z]{6}$)만입니다. 5자·7자·기호·한글은 전과
+#     똑같이 None 이어야 합니다.
+#   · 기존 숫자 경로(0 패딩 복원 / 7자리 이상 거부)는 **한 글자도** 달라지면 안 됩니다.
+#   · 회사명 2차 매칭은 **앞뒤 공백만 제거한 완전일치**뿐입니다. 유사·부분 일치 금지(§0-1).
+# =============================================================================
+
+# ── 15-1. normalize_stock_code() 확대 ────────────────────────────────────────
+def test_normalize_stock_code_accepts_real_krx_alphanumeric_codes():
+    """실재하는 KRX 6자 영숫자 코드는 패딩 없이 **그대로** 통과해야 합니다."""
+    assert ccm.normalize_stock_code("0126Z0") == "0126Z0"      # 삼성에피스홀딩스
+    assert ccm.normalize_stock_code("00680K") == "00680K"
+    assert ccm.normalize_stock_code("03473K") == "03473K"      # SK우
+    assert ccm.normalize_stock_code("0030R0") == "0030R0"      # 대신밸류리츠
+
+
+def test_normalize_stock_code_uppercases_alphanumeric_input():
+    """소문자로 들어와도 대문자로 올려 같은 코드로 봅니다(표기 복원 — 지어내기 아님)."""
+    assert ccm.normalize_stock_code("0126z0") == "0126Z0"
+    assert ccm.normalize_stock_code(" 03473k ") == "03473K"
+
+
+def test_normalize_stock_code_still_rejects_wrong_length_alphanumerics():
+    """확대는 '정확히 6자' 한 형태뿐입니다 — 5자·7자는 전과 똑같이 None 이어야 합니다."""
+    assert ccm.normalize_stock_code("0126Z") is None           # 5자
+    assert ccm.normalize_stock_code("0126Z00") is None         # 7자
+    assert ccm.normalize_stock_code("A005930") is None         # 7자(기존 테스트와 같은 값)
+
+
+def test_normalize_stock_code_still_rejects_non_alphanumeric_characters():
+    """영숫자가 아닌 문자가 하나라도 섞이면 None 입니다 — 관대해진 게 아닙니다."""
+    assert ccm.normalize_stock_code("0126Z-") is None
+    assert ccm.normalize_stock_code("01 6Z0") is None
+    assert ccm.normalize_stock_code("0126Z_") is None
+    assert ccm.normalize_stock_code("삼성전자") is None
+    assert ccm.normalize_stock_code("012_Z0") is None
+
+
+def test_normalize_stock_code_digit_path_is_byte_for_byte_unchanged():
+    """
+    §확대의 전제: **기존 숫자 경로는 하나도 안 건드렸다.**
+    지금까지 이 파일과 docstring 이 보장하던 예시를 전부 한자리에 모아 고정합니다.
+    """
+    # 0 패딩 복원 (엑셀이 뭉갠 정수 포함)
+    assert ccm.normalize_stock_code(5930) == "005930"
+    assert ccm.normalize_stock_code("005930") == "005930"
+    assert ccm.normalize_stock_code("5930") == "005930"
+    assert ccm.normalize_stock_code("660") == "000660"
+    assert ccm.normalize_stock_code("000660") == "000660"
+    assert ccm.normalize_stock_code("123456") == "123456"
+    # 7자리 이상 숫자는 잘라내지 않고 거부
+    assert ccm.normalize_stock_code("1234567") is None
+    assert ccm.normalize_stock_code(1234567) is None
+    # 빈 값 / None
+    assert ccm.normalize_stock_code("") is None
+    assert ccm.normalize_stock_code("   ") is None
+    assert ccm.normalize_stock_code(None) is None
+
+
+# ── 15-2. build_corp_name_index() ────────────────────────────────────────────
+NAME_INDEX_XML = """
+<list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>
+ <corp_eng_name>SAMSUNG ELECTRONICS CO,.LTD</corp_eng_name>
+ <stock_code>005930</stock_code><modify_date>20260401</modify_date></list>
+<list><corp_code>00777777</corp_code><corp_name>대신밸류리츠</corp_name>
+ <corp_eng_name>DAISHIN VALUE REIT</corp_eng_name>
+ <stock_code> </stock_code><modify_date>20260601</modify_date></list>
+<list><corp_code>00888888</corp_code><corp_name> </corp_name>
+ <corp_eng_name>NO NAME CO</corp_eng_name>
+ <stock_code>111111</stock_code><modify_date>20250101</modify_date></list>
+"""
+
+
+def test_build_corp_name_index_builds_exact_name_lookup():
+    """(합성) 회사명 → entry 색인이 정확일치로 만들어져야 합니다."""
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(NAME_INDEX_XML))
+    name_index, stats = ccm.build_corp_name_index(entries)
+    assert name_index["삼성전자"]["corp_code"] == "00126380"
+    assert name_index["대신밸류리츠"]["corp_code"] == "00777777"
+    # 비슷한 이름으로는 절대 찾히지 않아야 합니다(§0-1 부분일치 금지).
+    assert name_index.get("삼성") is None
+    assert name_index.get("삼성전자서비스") is None
+
+
+def test_build_corp_name_index_counts_entries_without_a_name():
+    """corp_name 이 없는 항목은 색인에서 빠지되 **개수는 세어져야** 합니다(조용히 증발 금지)."""
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(NAME_INDEX_XML))
+    name_index, stats = ccm.build_corp_name_index(entries)
+    assert stats["total_entries"] == 3
+    assert stats["total_named_entries"] == 2
+    assert stats["named_entries"] == len(name_index) == 2
+    assert stats["unnamed_entries"] == 1          # corp_name 이 공백뿐이던 00888888
+    assert "00888888" not in {e["corp_code"] for e in name_index.values()}
+
+
+def test_build_corp_name_index_duplicate_tiebreak_matches_stock_code_index():
+    """
+    동명이인 회사의 중복 처리는 `build_stock_code_index()` 와 **완전히 같은 규칙·같은 모양**
+    이어야 합니다. 두 색인을 나란히 만들어 직접 대조합니다.
+    """
+    dup_xml = """
+    <list><corp_code>00000001</corp_code><corp_name>같은이름</corp_name>
+     <stock_code>123456</stock_code><modify_date>20200101</modify_date></list>
+    <list><corp_code>00000002</corp_code><corp_name>같은이름</corp_name>
+     <stock_code>123456</stock_code><modify_date>20260101</modify_date></list>
+    """
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(dup_xml))
+    code_index, code_stats = ccm.build_stock_code_index(entries)
+    name_index, name_stats = ccm.build_corp_name_index(entries)
+
+    # ① 같은 항목을 골랐는가 (최신 modify_date)
+    assert code_index["123456"]["corp_code"] == "00000002"
+    assert name_index["같은이름"]["corp_code"] == "00000002"
+
+    # ② 감사 흔적의 **모양**이 같은가 (키 이름만 stock_code ↔ corp_name)
+    code_dup = code_stats["duplicates"][0]
+    name_dup = name_stats["duplicate_names"][0]
+    assert code_dup["chosen"] == name_dup["chosen"]
+    assert code_dup["dropped"] == name_dup["dropped"]
+    assert code_dup["note"] == name_dup["note"]
+    assert name_dup["corp_name"] == "같은이름"
+    assert name_dup["dropped"][0]["corp_code"] == "00000001"
+
+
+def test_build_corp_name_index_flags_ambiguous_tiebreak_like_stock_code_index():
+    """modify_date 로 우열을 못 가리면 그 사실이 note 에 남아야 합니다(양쪽 동일)."""
+    tie_xml = """
+    <list><corp_code>00000001</corp_code><corp_name>동률회사</corp_name>
+     <stock_code>222222</stock_code><modify_date>20260101</modify_date></list>
+    <list><corp_code>00000002</corp_code><corp_name>동률회사</corp_name>
+     <stock_code>222222</stock_code><modify_date>20260101</modify_date></list>
+    """
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(tie_xml))
+    _, code_stats = ccm.build_stock_code_index(entries)
+    _, name_stats = ccm.build_corp_name_index(entries)
+    assert "사람이 확인해야 합니다" in code_stats["duplicates"][0]["note"]
+    assert code_stats["duplicates"][0]["note"] == name_stats["duplicate_names"][0]["note"]
+
+
+def test_build_corp_name_index_handles_empty_input():
+    """빈 입력에도 터지지 않고 빈 색인 + 0 통계를 돌려줘야 합니다."""
+    name_index, stats = ccm.build_corp_name_index([])
+    assert name_index == {}
+    assert stats["total_entries"] == 0
+    assert stats["named_entries"] == 0
+    assert stats["duplicate_names"] == []
+
+
+# ── 15-3. map_stock_codes() 회사명 2차 매칭 ──────────────────────────────────
+# (합성) 종목코드 직접매칭이 안 되는 상황을 만들기 위한 표:
+#   · 005930 삼성전자      → 종목코드 있음 (직접매칭 성공 대상)
+#   · 0126Z0 삼성에피스홀딩스 → 종목코드가 6자 영숫자 그대로 실려 있음 (확대의 성과)
+#   · (종목코드 없음) 대신밸류리츠 → 이름으로만 찾을 수 있음 (2차 매칭 대상)
+FALLBACK_XML = """
+<list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>
+ <corp_eng_name>SAMSUNG ELECTRONICS CO,.LTD</corp_eng_name>
+ <stock_code>005930</stock_code><modify_date>20260401</modify_date></list>
+<list><corp_code>00555555</corp_code><corp_name>삼성에피스홀딩스</corp_name>
+ <corp_eng_name>SAMSUNG EPIS HOLDINGS</corp_eng_name>
+ <stock_code>0126Z0</stock_code><modify_date>20260701</modify_date></list>
+<list><corp_code>00777777</corp_code><corp_name>대신밸류리츠</corp_name>
+ <corp_eng_name>DAISHIN VALUE REIT</corp_eng_name>
+ <stock_code> </stock_code><modify_date>20260601</modify_date></list>
+"""
+
+
+def _fallback_indexes():
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(FALLBACK_XML))
+    index, _ = ccm.build_stock_code_index(entries)
+    name_index, _ = ccm.build_corp_name_index(entries)
+    return index, name_index
+
+
+def test_map_stock_codes_default_args_behave_exactly_as_before():
+    """
+    (a) 새 인자를 **안 주면** 예전과 완전히 같아야 합니다.
+    기존 필드·사유 문자열을 전부 리터럴로 고정합니다. 추가된 것은 `matched_via` 하나뿐이며,
+    그것을 떼어내면 예전 dict 와 글자 단위로 같아야 합니다.
+    """
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(SAMPLE_XML))
+    index, _ = ccm.build_stock_code_index(entries)
+    mapping, unmapped = ccm.map_stock_codes(["005930", "000660", "999999", "bad!"], index)
+
+    assert set(mapping) == {"005930", "000660"}
+    # `matched_via` 를 떼면 확대 전 스키마 그대로여야 합니다.
+    assert {k: v for k, v in mapping["005930"].items() if k != "matched_via"} == {
+        "corp_code": "00126380",
+        "corp_name": "삼성전자",
+        "corp_eng_name": "SAMSUNG ELECTRONICS CO,.LTD",
+        "modify_date": "20260401",
+    }
+    # 사유 문자열도 확대 전 그대로 — 이름을 시도조차 안 했으므로 덧붙는 문장이 없어야 합니다.
+    assert unmapped == [
+        {"stock_code_input": "999999", "stock_code": "999999",
+         "reason": "DART 고유번호 표(corpCode.xml)에 이 종목코드가 없습니다 "
+                   "(상장폐지·비상장 전환·표 갱신 지연 등 가능)."},
+        {"stock_code_input": "bad!", "stock_code": None,
+         "reason": "종목코드를 6자리로 정규화할 수 없습니다(형식 오류)."},
+    ]
+    assert all("회사명" not in u["reason"] for u in unmapped)
+
+
+def test_map_stock_codes_name_fallback_needs_both_arguments():
+    """한쪽만 주면 2차 매칭은 켜지지 않습니다(기존 동작 유지)."""
+    index, name_index = _fallback_indexes()
+    code_name_map = {"0030R0": "대신밸류리츠"}
+    for kwargs in ({"name_index": name_index}, {"code_name_map": code_name_map}):
+        mapping, unmapped = ccm.map_stock_codes(["0030R0"], index, **kwargs)
+        assert mapping == {}
+        assert len(unmapped) == 1
+        assert "회사명" not in unmapped[0]["reason"]
+
+
+def test_map_stock_codes_format_error_is_untouched_by_name_fallback():
+    """
+    (b) 정규화 자체가 실패한 값은 2차 매칭이 **건드리지 않습니다.**
+    코드가 무엇인지도 모르는 상태에서 이름만 보고 회사를 정하는 것은 추측입니다(§0-1).
+    """
+    index, name_index = _fallback_indexes()
+    # 이름은 표에 분명히 있지만, 코드가 7자라 정규화 단계에서 이미 탈락합니다.
+    mapping, unmapped = ccm.map_stock_codes(
+        ["0126Z00"], index,
+        name_index=name_index, code_name_map={"0126Z00": "삼성에피스홀딩스"})
+    assert mapping == {}
+    assert unmapped[0]["stock_code"] is None
+    assert unmapped[0]["reason"] == "종목코드를 6자리로 정규화할 수 없습니다(형식 오류)."
+    assert "회사명" not in unmapped[0]["reason"]
+
+
+def test_map_stock_codes_resolves_via_name_when_stock_code_missing():
+    """(c) 코드는 정규화됐지만 표에 없고, 이름이 정확히 일치하면 2차 매칭으로 살아납니다."""
+    index, name_index = _fallback_indexes()
+    mapping, unmapped = ccm.map_stock_codes(
+        ["0030R0"], index,
+        name_index=name_index, code_name_map={"0030R0": "대신밸류리츠"})
+    assert unmapped == []
+    assert mapping["0030R0"] == {
+        "corp_code": "00777777",
+        "corp_name": "대신밸류리츠",
+        "corp_eng_name": "DAISHIN VALUE REIT",
+        "modify_date": "20260601",
+        "matched_via": "name_fallback",
+    }
+
+
+def test_map_stock_codes_name_fallback_strips_whitespace_only():
+    """이름 정규화는 앞뒤 공백 제거 **하나뿐**입니다(가운데 공백은 그대로 의미가 있습니다)."""
+    index, name_index = _fallback_indexes()
+    mapping, _ = ccm.map_stock_codes(
+        ["0030R0"], index,
+        name_index=name_index, code_name_map={"0030R0": "  대신밸류리츠  "})
+    assert mapping["0030R0"]["corp_code"] == "00777777"
+
+
+def test_map_stock_codes_name_fallback_refuses_partial_matches():
+    """부분일치·접두사 일치로는 절대 매칭되면 안 됩니다(§0-1 회사 매칭 추측 금지)."""
+    index, name_index = _fallback_indexes()
+    for wrong in ("대신밸류", "대신밸류리츠제1호", "대신 밸류리츠"):
+        mapping, unmapped = ccm.map_stock_codes(
+            ["0030R0"], index,
+            name_index=name_index, code_name_map={"0030R0": wrong})
+        assert mapping == {}, f"{wrong!r} 로 매칭되면 안 됩니다"
+        assert len(unmapped) == 1
+
+
+def test_map_stock_codes_reports_that_both_paths_were_tried():
+    """(d) 이름으로도 못 찾으면 **두 경로를 다 시도했다는 사실**이 사유에 남아야 합니다."""
+    index, name_index = _fallback_indexes()
+    mapping, unmapped = ccm.map_stock_codes(
+        ["0999Z9"], index,
+        name_index=name_index, code_name_map={"0999Z9": "표에없는회사"})
+    assert mapping == {}
+    reason = unmapped[0]["reason"]
+    assert unmapped[0]["stock_code"] == "0999Z9"
+    assert "corpCode.xml" in reason                    # 기존 문장 유지
+    assert "표에없는회사" in reason                      # 무엇으로 찾아봤는지
+    assert "완전일치" in reason                          # 어떻게 찾아봤는지
+    # 왜 실패했는지는 알 수 없으므로 단정하지 않습니다 — '해본 것'만 적혀 있어야 합니다.
+    assert "폐지되었습니다" not in reason
+
+
+def test_map_stock_codes_without_a_name_for_that_code_keeps_original_reason():
+    """이름 정보가 없는 종목이면(=키가 없음) 사유가 예전 문장 그대로여야 합니다."""
+    index, name_index = _fallback_indexes()
+    mapping, unmapped = ccm.map_stock_codes(
+        ["0999Z9"], index,
+        name_index=name_index, code_name_map={"0030R0": "대신밸류리츠"})
+    assert mapping == {}
+    assert unmapped[0]["reason"] == ("DART 고유번호 표(corpCode.xml)에 이 종목코드가 없습니다 "
+                                     "(상장폐지·비상장 전환·표 갱신 지연 등 가능).")
+
+
+def test_map_stock_codes_direct_match_never_consults_name_fallback():
+    """
+    (e) 종목코드로 바로 찾히면 2차 매칭은 **아예 보지 않습니다.**
+    증명: 그 종목의 이름을 일부러 표에 없는 값으로 줘도 직접매칭으로 살아나야 합니다.
+    """
+    index, name_index = _fallback_indexes()
+    mapping, unmapped = ccm.map_stock_codes(
+        ["005930", "0126Z0"], index,
+        name_index=name_index,
+        code_name_map={"005930": "존재하지않는이름", "0126Z0": "이것도아님"})
+    assert unmapped == []
+    assert mapping["005930"]["corp_code"] == "00126380"
+    assert mapping["005930"]["matched_via"] == "stock_code"
+    # 6자 영숫자 코드가 DART 표에도 같은 코드로 있으면 **확대만으로** 직접매칭됩니다(Task 1 성과).
+    assert mapping["0126Z0"]["corp_code"] == "00555555"
+    assert mapping["0126Z0"]["matched_via"] == "stock_code"
+
+
+def test_map_stock_codes_widened_code_flows_through_dart_side_too():
+    """
+    확대는 **양쪽에서** 효과를 냅니다: 우리 유니버스의 '0126Z0' 뿐 아니라, DART corpCode.xml
+    이 같은 형식으로 실어 보낸 stock_code 도 이제 색인에 들어갑니다.
+    """
+    entries = ccm.parse_corpcode_zip(_make_corpcode_zip(FALLBACK_XML))
+    by_corp = {e["corp_code"]: e for e in entries}
+    assert by_corp["00555555"]["stock_code"] == "0126Z0"       # 파싱 단계에서 살아남음
+    assert by_corp["00555555"]["stock_code_raw"] == "0126Z0"   # 원문도 보존(§0-3-3)
+    index, stats = ccm.build_stock_code_index(entries)
+    assert "0126Z0" in index
+    assert "0126Z0" not in stats["malformed_stock_codes"]      # 더 이상 '형식오류'가 아님
+
+
+# ── 15-4. load_universe_name_map() ───────────────────────────────────────────
+def test_load_universe_name_map_reads_ticker_master_shape(tmp_path):
+    """(합성) data/kr_ticker_master.json 모양 — 코드 키 "code", 이름 키 "name"."""
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps({
+        "metadata": {"note": "리스트가 아닌 값은 무시돼야 합니다"},
+        "stocks": [
+            {"code": "005930", "name": "삼성전자", "market": "KOSPI", "type": "STOCK"},
+            {"code": "0126Z0", "name": "삼성에피스홀딩스", "market": "KOSPI", "type": "STOCK"},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    assert cdk.load_universe_name_map(str(path)) == {
+        "005930": "삼성전자", "0126Z0": "삼성에피스홀딩스"}
+
+
+def test_load_universe_name_map_reads_dividend_history_shape(tmp_path):
+    """(합성) data/dividend_history_kr_2023_2025.json 모양 — "stock_code" / "company_name"."""
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps({
+        "source": "KIND",
+        "records": [
+            {"stock_code": "095570", "company_name": "AJ네트웍스", "fiscal_year": 2023},
+            {"stock_code": "006840", "company_name": "AK홀딩스", "fiscal_year": 2023},
+            # 같은 종목이 연도별로 여러 줄 있는 실제 형태 — 앞선 항목을 유지해야 합니다.
+            {"stock_code": "095570", "company_name": "AJ네트웍스", "fiscal_year": 2024},
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    assert cdk.load_universe_name_map(str(path)) == {
+        "095570": "AJ네트웍스", "006840": "AK홀딩스"}
+
+
+def test_load_universe_name_map_returns_empty_for_plain_code_list(tmp_path):
+    """이름이 아예 없는 유니버스는 **오류가 아니라 정상** — 빈 dict 여야 합니다."""
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+    assert cdk.load_universe_name_map(str(path)) == {}
+
+
+def test_load_universe_name_map_skips_entries_missing_code_or_name(tmp_path):
+    """코드나 이름 한쪽이 없는 항목은 그 항목만 건너뜁니다(수집을 죽이지 않습니다)."""
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps([
+        {"code": "005930", "name": "삼성전자"},
+        {"code": "000660"},                 # 이름 없음
+        {"name": "이름만있음"},              # 코드 없음
+    ], ensure_ascii=False), encoding="utf-8")
+    assert cdk.load_universe_name_map(str(path)) == {"005930": "삼성전자"}
+
+
+def test_load_universe_is_unchanged_alongside_the_new_name_map(tmp_path):
+    """
+    `load_universe()` 는 이 작업으로 **한 글자도 달라지지 않았습니다.**
+    같은 파일을 두 함수로 읽어, load_universe 쪽 반환을 리터럴로 고정합니다.
+    """
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps({
+        "stocks": [
+            {"code": "005930", "name": "삼성전자"},
+            {"code": "0126Z0", "name": "삼성에피스홀딩스"},
+            {"code": "005930", "name": "삼성전자"},        # 중복 — 순서 유지 제거
+        ],
+    }, ensure_ascii=False), encoding="utf-8")
+    assert cdk.load_universe(str(path)) == ["005930", "0126Z0"]     # 예전과 동일
+    assert cdk.load_universe_name_map(str(path)) == {
+        "005930": "삼성전자", "0126Z0": "삼성에피스홀딩스"}
+
+
+def test_load_universe_name_map_does_not_raise_where_load_universe_does(tmp_path):
+    """
+    형태 검증은 `load_universe()` 담당입니다. 이름 맵은 보조 정보라, 같은 파일에서
+    조용히 빈 dict 를 돌려줄 뿐 수집을 죽이지 않아야 합니다.
+    """
+    path = tmp_path / "u.json"
+    path.write_text(json.dumps([{"name": "삼성전자"}], ensure_ascii=False), encoding="utf-8")
+    with pytest.raises(ValueError, match="종목코드 키를 찾지 못했습니다"):
+        cdk.load_universe(str(path))                     # 기존 가드는 그대로 살아 있고
+    assert cdk.load_universe_name_map(str(path)) == {}   # 이름 맵은 그냥 비어 있습니다
+
+
+# ── 15-5. run_collection() 전 구간 배선 ──────────────────────────────────────
+# (합성) 네 가지 경우를 한 번에 담은 DART 표:
+#   005930 삼성전자          → 6자리 숫자 + 직접매칭  (기존 경로가 그대로 도는지)
+#   0126Z0 삼성에피스홀딩스   → 6자 영숫자 + 직접매칭  (Task 1 확대의 성과)
+#   (코드없음) 대신밸류리츠   → 이름으로만 찾힘        (Task 2·3 2차 매칭의 성과)
+#   0999Z9 표에없는회사       → 둘 다 실패 → UNMAPPED (조용히 사라지지 않는지)
+E2E_XML = """
+<list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>
+ <corp_eng_name>SAMSUNG ELECTRONICS CO,.LTD</corp_eng_name>
+ <stock_code>005930</stock_code><modify_date>20260401</modify_date></list>
+<list><corp_code>00555555</corp_code><corp_name>삼성에피스홀딩스</corp_name>
+ <corp_eng_name>SAMSUNG EPIS HOLDINGS</corp_eng_name>
+ <stock_code>0126Z0</stock_code><modify_date>20260701</modify_date></list>
+<list><corp_code>00777777</corp_code><corp_name>대신밸류리츠</corp_name>
+ <corp_eng_name>DAISHIN VALUE REIT</corp_eng_name>
+ <stock_code> </stock_code><modify_date>20260601</modify_date></list>
+"""
+
+
+@pytest.fixture
+def faked_network_widened(monkeypatch):
+    """`faked_network` 와 같은 방식이되 corpCode 표만 E2E_XML 로 갈아끼웁니다."""
+    zip_bytes = _make_corpcode_zip(E2E_XML)
+    monkeypatch.setattr(ccm, "_http_get_bytes",
+                        lambda url, params, timeout, session: (200, zip_bytes))
+    monkeypatch.setattr(cdk, "_http_get_json",
+                        lambda url, params, timeout, session:
+                        (200, REAL_SAMSUNG_2026_Q1 if params["reprt_code"] == "11013"
+                         else REAL_NO_DATA))
+    monkeypatch.setattr(cdk, "polite_sleep", lambda rng=None: 0.0)
+    monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
+
+
+def _write_widened_universe(tmp_path):
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps({"stocks": [
+        {"code": "005930", "name": "삼성전자"},              # (a) 숫자 + 직접매칭
+        {"code": "0126Z0", "name": "삼성에피스홀딩스"},        # (b) 영숫자 + 직접매칭
+        {"code": "0030R0", "name": "대신밸류리츠"},           # (c) 이름으로만 찾힘
+        {"code": "0999Z9", "name": "표에없는회사"},           # (d) 둘 다 실패
+    ]}, ensure_ascii=False), encoding="utf-8")
+    return uni
+
+
+def test_run_collection_resolves_widened_and_name_fallback_codes(tmp_path, faked_network_widened):
+    """
+    네 가지 경우가 각각 의도대로 끝나야 합니다 — 특히 (d) 가 **조용히 사라지지 않아야** 합니다.
+    """
+    uni = _write_widened_universe(tmp_path)
+    records, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path),
+        universe_name_map=cdk.load_universe_name_map(str(uni)),
+        log=lambda *a: None)
+
+    by_code = {r["stock_code"]: r for r in records}
+    assert set(by_code) == {"005930", "0126Z0", "0030R0", "0999Z9"}
+
+    # (a)(b) 직접매칭 — 6자 영숫자도 확대만으로 그대로 수집됩니다.
+    assert by_code["005930"]["corp_code"] == "00126380"
+    assert by_code["005930"]["corp_code_matched_via"] == "stock_code"
+    assert by_code["0126Z0"]["corp_code"] == "00555555"
+    assert by_code["0126Z0"]["corp_code_matched_via"] == "stock_code"
+    assert by_code["0126Z0"]["status"] == "OK"
+
+    # (c) 회사명 2차 매칭
+    assert by_code["0030R0"]["corp_code"] == "00777777"
+    assert by_code["0030R0"]["corp_code_matched_via"] == "name_fallback"
+    assert by_code["0030R0"]["status"] == "OK"
+
+    # (d) 둘 다 실패 → UNMAPPED 로 **남아 있어야** 하고, 사유에 두 시도가 다 적혀야 합니다.
+    assert by_code["0999Z9"]["status"] == "UNMAPPED"
+    assert by_code["0999Z9"]["corp_code"] is None
+    assert by_code["0999Z9"]["corp_code_matched_via"] is None
+    detail = {u["stock_code"]: u["reason"] for u in summary["unmapped_detail"]}
+    assert "0999Z9" in detail
+    assert "corpCode.xml" in detail["0999Z9"] and "표에없는회사" in detail["0999Z9"]
+
+
+def test_run_collection_reports_name_fallback_aggregates(tmp_path, faked_network_widened):
+    """리포트에 2차 매칭 집계가 정확히 올라가야 합니다(unit_mismatch 집계와 같은 방식)."""
+    uni = _write_widened_universe(tmp_path)
+    _, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path),
+        universe_name_map=cdk.load_universe_name_map(str(uni)),
+        log=lambda *a: None)
+
+    assert summary["mapped_via_name_fallback"] == 1
+    assert summary["stock_codes_mapped_via_name_fallback"] == ["0030R0"]
+    assert summary["name_fallback_attempted"] is True
+    assert summary["name_fallback_universe_names"] == 4
+    assert summary["name_fallback_index_stats"]["named_entries"] == 3
+    assert summary["by_status"] == {"OK": 3, "UNMAPPED": 1}
+    assert summary["unmapped_stock_codes"] == 1
+
+
+def test_run_collection_targets_loop_picks_up_widened_codes_unchanged(tmp_path,
+                                                                     faked_network_widened):
+    """
+    Task 1 의 값어치: `targets = [... normalize_stock_code(x) ... ]` 한 줄을 **건드리지 않고도**
+    6자 영숫자 종목이 수집 대상에 자연스럽게 들어옵니다.
+    """
+    uni = _write_widened_universe(tmp_path)
+    universe = cdk.load_universe(str(uni))
+    records, _ = cdk.run_collection(
+        universe, "2026", str(tmp_path),
+        universe_name_map=cdk.load_universe_name_map(str(uni)),
+        log=lambda *a: None)
+    collected = {r["stock_code"] for r in records if r["status"] == "OK"}
+    assert "0126Z0" in collected and "0030R0" in collected
+    # run_collection 이 쓰는 그 표현식을 그대로 재현해도 같은 대상이 나와야 합니다.
+    assert [c for c in (ccm.normalize_stock_code(x) for x in universe) if c] == [
+        "005930", "0126Z0", "0030R0", "0999Z9"]
+
+
+def test_run_collection_without_name_map_behaves_as_before(tmp_path, faked_network_widened):
+    """
+    이름 맵을 안 넘기면(기본) 2차 매칭은 아예 동작하지 않고, 그 사실이 리포트에 남아야
+    합니다 — 0건이 '못 찾았다'로 오해되면 안 됩니다(§0-1).
+    """
+    uni = _write_widened_universe(tmp_path)
+    records, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path), log=lambda *a: None)
+
+    assert summary["name_fallback_attempted"] is False
+    assert summary["mapped_via_name_fallback"] == 0
+    assert summary["stock_codes_mapped_via_name_fallback"] == []
+    assert summary["name_fallback_index_stats"] is None
+    # 이름 없이도 확대(Task 1)만으로 0126Z0 은 여전히 직접매칭됩니다.
+    by_code = {r["stock_code"]: r for r in records}
+    assert by_code["0126Z0"]["status"] == "OK"
+    # 반면 이름으로만 찾히던 0030R0 은 예전처럼 UNMAPPED 로 남습니다.
+    assert by_code["0030R0"]["status"] == "UNMAPPED"
+    assert by_code["0030R0"]["corp_code_matched_via"] is None
+    assert summary["by_status"] == {"OK": 2, "UNMAPPED": 2}
+
+
+def test_run_collection_logs_name_fallback_resolutions(tmp_path, faked_network_widened):
+    """어느 종목이 어느 경로로 매핑됐는지 로그로 사람이 볼 수 있어야 합니다."""
+    uni = _write_widened_universe(tmp_path)
+    lines = []
+    cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path),
+        universe_name_map=cdk.load_universe_name_map(str(uni)),
+        log=lines.append)
+    blob = "\n".join(str(x) for x in lines)
+    assert "종목코드 직접매칭" in blob
+    assert "회사명" in blob and "0030R0" in blob
+
+
+def test_cli_passes_universe_name_map_without_a_new_flag(tmp_path, monkeypatch):
+    """
+    Task 3 의 '무설정' 요구: 새 CLI 플래그 없이, 유니버스 파일에 이름이 있으면 그대로 켜집니다.
+    """
+    seen = {}
+
+    def fake_run(universe, year, out_dir, **kwargs):
+        seen.update(kwargs)
+        return [], {}
+
+    monkeypatch.setattr(cdk, "run_collection", fake_run)
+
+    uni = _write_widened_universe(tmp_path)
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert seen["universe_name_map"]["0030R0"] == "대신밸류리츠"
+
+    # 이름이 없는 유니버스면 빈 dict 가 넘어가고, 2차 매칭은 알아서 꺼집니다.
+    seen.clear()
+    plain = tmp_path / "plain.json"
+    plain.write_text(json.dumps(["005930"]), encoding="utf-8")
+    assert cdk.main(["--universe", str(plain), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert seen["universe_name_map"] == {}

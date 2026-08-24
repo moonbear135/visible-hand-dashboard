@@ -58,6 +58,7 @@ DART는 전체 회사의 매핑을 한 번에 주는 벌크 엔드포인트를 �
 import io
 import json
 import os
+import re
 import time
 import zipfile
 import xml.etree.ElementTree as ET
@@ -142,14 +143,36 @@ def get_api_key(explicit=None):
     return key.strip() if key and key.strip() else None
 
 
+# KRX 6자 영숫자 종목코드(숫자 + 대문자 알파벳). 아래 normalize_stock_code() 참고.
+_KRX_ALNUM6_RE = re.compile(r"^[0-9A-Z]{6}$")
+
+
 def normalize_stock_code(value):
     """
     종목코드를 6자리 문자열로 정규화합니다.
 
-    · 엑셀/CSV 를 거치며 '005930' 이 정수 5930 으로 뭉개지는 사고가 흔해서 좌측 0 패딩을
-      복원합니다. 이건 '지어내기'가 아니라 **같은 값의 표기 복원**입니다.
-    · 6자리 숫자가 아니면(예: 빈 문자열, 'A005930', 7자리) None 을 돌려주고, 호출부가
-      "정규화 실패"로 기록합니다. 임의로 잘라내거나 붙이지 않습니다.
+    받아들이는 형태는 **정확히 두 가지**입니다. 그 밖에는 전부 None 입니다.
+
+    ① 순수 숫자 — 좌측 0 패딩을 복원해 6자리로 만듭니다.
+       엑셀/CSV 를 거치며 '005930' 이 정수 5930 으로 뭉개지는 사고가 흔해서 복원합니다.
+       이건 '지어내기'가 아니라 **같은 값의 표기 복원**입니다.
+       7자리 이상 숫자는 종목코드가 아니므로 잘라내지 않고 None 입니다.
+
+    ② 6자 영숫자(숫자 + 대문자 알파벳) — 예: '03473K'(SK우), '00680K', '0126Z0'.
+       ⚠️ **깨진 데이터가 아니라 KRX 가 실제로 쓰는 종목코드 표기**입니다. 한 발행사에
+          배정된 순수 숫자 코드 공간이 소진되면 KRX 는 알파벳 한 글자가 섞인 6자 코드를
+          부여하며, 우선주(우선주 종목)에서 특히 흔합니다.
+       [확인됨 — 2026-08-24, data/kr_ticker_master.json 실물 대조]
+          type=="STOCK" 2,873건 중 79건이 이 형태이고, 79건 전부 길이가 정확히 6자이며
+          실재하는 상장 증권입니다(우선주 23건 · 스팩 30건 · 신규상장 등 26건).
+       이 형태는 **이미 6자**라 패딩할 여지가 없고, 알파벳이 놓인 자리 자체가 코드를
+       구분하는 정보이므로 대문자로만 올린 뒤 **그대로** 돌려줍니다. 숫자 문자열처럼
+       "어디에 0을 채울까"를 고민할 여지가 애초에 없습니다.
+
+    ⚠️ 이 두 번째 경로는 "관대하게 봐주기"가 아니라 **실물로 확인된 한 가지 형식**만
+       좁게 여는 것입니다. 5자·7자 영숫자, 한글·기호가 섞인 값, 대문자로 올려도
+       [0-9A-Z]{6} 이 되지 않는 값은 전과 똑같이 None 이고, 호출부가 "정규화 실패"로
+       기록합니다. 임의로 잘라내거나 붙이지 않습니다.
     """
     if value is None:
         return None
@@ -160,6 +183,11 @@ def normalize_stock_code(value):
         if len(text) > 6:
             return None            # 7자리 이상은 종목코드가 아님 — 지어내서 자르지 않습니다.
         return text.zfill(6)
+    # 순수 숫자는 위에서 이미 처리됐으므로, 여기 오는 6자 영숫자는 알파벳이 섞인 경우뿐입니다.
+    # (upper() 로 길이가 변하는 문자가 섞이면 len 검사에서 걸러집니다 — 예: 'ß' → 'SS')
+    upper = text.upper()
+    if len(upper) == 6 and _KRX_ALNUM6_RE.match(upper):
+        return upper
     return None
 
 
@@ -351,13 +379,116 @@ def build_stock_code_index(entries):
     return index, stats
 
 
-def map_stock_codes(stock_codes, index):
+def build_corp_name_index(entries):
+    """
+    회사 목록 → {회사명: 회사 dict} 색인을 만듭니다. (순수 함수)
+
+    `build_stock_code_index()` 와 **같은 입력**(parse_corpcode_zip 결과)을 받아, 종목코드가
+    아니라 `corp_name` 으로 찾을 수 있게 만든 **보조 색인**입니다. 종목코드 직접매칭이
+    실패했을 때만 쓰는 2차 경로입니다(`map_stock_codes()` 참고).
+
+    반환: (name_index, stats)
+      name_index : {corp_name(앞뒤 공백 제거): entry}
+      stats : {
+        "total_entries",           # 입력 항목 수 (build_stock_code_index 와 같은 뜻)
+        "total_named_entries",     # corp_name 이 있어 후보가 된 항목 수 (중복 제거 전)
+        "named_entries",           # 색인에 실제로 들어간 고유 회사명 수 (중복 제거 후)
+                                   #   ↳ build_stock_code_index 의 "listed_entries" 에 대응
+        "unnamed_entries",         # corp_name 이 없어 건너뛴 항목 수
+                                   #   ↳ build_stock_code_index 의 "unlisted_entries" 에 대응
+        "duplicate_names": [ {corp_name, chosen, dropped:[...], note}, ... ],
+                                   #   ↳ build_stock_code_index 의 "duplicates" 와 **같은 모양**.
+                                   #      키 이름만 다르게 둔 이유: 두 색인의 stats 를 나란히
+                                   #      로그에 찍을 때 어느 쪽 중복인지 헷갈리지 않기 위함입니다.
+      }
+
+    ⚠️ **정확 일치만 합니다**(§0-1 "회사 매칭을 추측하지 않는다"). 부분일치·유사도·접두사
+       매칭을 일절 하지 않습니다. '삼성전자' 와 '삼성전자서비스' 는 남남입니다.
+       정규화도 앞뒤 공백 제거 하나뿐입니다 — 그 이상 손대면(공백 제거·특수문자 제거 등)
+       서로 다른 회사가 같은 키로 뭉개질 수 있습니다.
+
+    ⚠️ 중복 처리 원칙(§0-1): 동명이인 회사(실제로 존재합니다)는 임의로 첫 번째를 고르지
+       않습니다. **`build_stock_code_index()` 와 완전히 같은 규칙**으로 `modify_date` 가
+       가장 최신인 항목을 쓰되, 버린 후보를 전부 `duplicate_names` 에 남깁니다.
+       modify_date 로 우열을 못 가리면 그 사실도 note 에 적습니다.
+
+    ⚠️ corp_name 이 없는 항목은 **세지 않고 버리지 않습니다** — `unnamed_entries` 에
+       개수가 남아, 색인 크기와 입력 크기가 안 맞는 이유를 설명할 수 있습니다.
+    """
+    index = {}
+    stats = {
+        "total_entries": len(entries or []),
+        "total_named_entries": 0,
+        "named_entries": 0,
+        "unnamed_entries": 0,
+        "duplicate_names": [],
+    }
+    buckets = {}
+    for entry in entries or []:
+        name = (entry.get("corp_name") or "").strip()
+        if not name:
+            stats["unnamed_entries"] += 1
+            continue
+        stats["total_named_entries"] += 1
+        buckets.setdefault(name, []).append(entry)
+
+    for name, candidates in buckets.items():
+        if len(candidates) == 1:
+            index[name] = candidates[0]
+            continue
+        # modify_date(YYYYMMDD 문자열) 최신순. 값이 없으면 빈 문자열로 취급해 뒤로 밀립니다.
+        # (build_stock_code_index() 와 한 글자도 다르지 않은 정렬·판정 규칙입니다.)
+        ordered = sorted(candidates, key=lambda e: (e.get("modify_date") or ""), reverse=True)
+        chosen = ordered[0]
+        dates = [e.get("modify_date") for e in candidates]
+        ambiguous = (chosen.get("modify_date") is None) or (
+            len([d for d in dates if d == chosen.get("modify_date")]) > 1
+        )
+        stats["duplicate_names"].append({
+            "corp_name": name,
+            "chosen": {"corp_code": chosen.get("corp_code"), "corp_name": chosen.get("corp_name"),
+                       "modify_date": chosen.get("modify_date")},
+            "dropped": [{"corp_code": e.get("corp_code"), "corp_name": e.get("corp_name"),
+                         "modify_date": e.get("modify_date")} for e in ordered[1:]],
+            "note": ("modify_date 로 우열을 가릴 수 없어(값 없음 또는 동률) 정렬 순서상 첫 항목을 "
+                     "썼습니다 — 사람이 확인해야 합니다."
+                     if ambiguous else "modify_date 가 가장 최신인 항목을 선택했습니다."),
+        })
+        index[name] = chosen
+
+    stats["named_entries"] = len(index)
+    return index, stats
+
+
+def map_stock_codes(stock_codes, index, name_index=None, code_name_map=None):
     """
     우리 유니버스의 종목코드 목록을 corp_code 로 매핑합니다. (순수 함수)
 
     반환: (mapping, unmapped)
-      mapping  : {stock_code: {"corp_code","corp_name","corp_eng_name","modify_date"}}
+      mapping  : {stock_code: {"corp_code","corp_name","corp_eng_name","modify_date",
+                               "matched_via"}}
       unmapped : [{"stock_code_input", "stock_code", "reason"}, ...]
+
+    `matched_via` 는 그 종목을 **어느 경로로 찾았는지**를 남기는 필드입니다(추가만 했고
+    기존 필드는 하나도 바꾸지 않았습니다).
+      · "stock_code"    — 종목코드 직접매칭(1차, 기존 경로)
+      · "name_fallback" — 회사명 정확일치 2차 경로(아래 참고)
+
+    ── 선택 인자: 회사명 2차 매칭 ───────────────────────────────────────────────
+    name_index    : `build_corp_name_index()` 결과 {회사명: entry}
+    code_name_map : {유니버스 원문 종목코드: 회사명}
+        유니버스 파일이 이름 컬럼을 갖고 있을 때만 호출부가 만들어 넘깁니다.
+        키는 **정규화 전 원문**입니다 — `map_stock_codes` 가 순회하는 값이 원문이라,
+        그 시점에 바로 찾을 수 있는 유일한 키이기 때문입니다.
+
+    ⚠️ **둘 다 주어졌을 때만** 2차 경로가 동작합니다. 하나라도 없으면(기본값 None)
+       이 함수의 동작은 이 인자들이 생기기 전과 완전히 동일합니다.
+    ⚠️ 2차 경로가 끼어드는 지점은 **딱 한 곳**입니다: 종목코드 정규화는 성공했는데
+       `index` 에 그 코드가 없는 경우. 정규화 자체가 실패한 값(형식 오류)에는 손대지
+       않습니다 — 코드가 무엇인지도 모르는 상태에서 이름으로 회사를 정하는 것은
+       추측이기 때문입니다(§0-1).
+    ⚠️ 이름 매칭은 **앞뒤 공백만 제거한 완전일치**입니다. 유사·부분 일치는 하지 않습니다.
+       찾지 못하면 그대로 실패로 두고, 두 경로를 모두 시도했다는 사실을 사유에 적습니다.
 
     ⚠️ 매핑 실패를 **조용히 빼지 않습니다**(§0-1). 상장폐지·사명변경·비상장 전환 등으로
        DART 표에 없는 종목이 반드시 나오는데, 그 개수와 목록을 모르면 "2,700개 중 2,600개만
@@ -366,6 +497,8 @@ def map_stock_codes(stock_codes, index):
     mapping = {}
     unmapped = []
     seen = set()
+    # 두 인자가 **모두** 있을 때만 2차 경로를 켭니다. 빈 dict 도 켤 이유가 없습니다.
+    name_fallback_enabled = bool(name_index) and bool(code_name_map)
     for raw in stock_codes or []:
         code = normalize_stock_code(raw)
         if code is None:
@@ -381,20 +514,46 @@ def map_stock_codes(stock_codes, index):
             continue
         seen.add(code)
         entry = index.get(code)
-        if entry is None:
-            unmapped.append({
-                "stock_code_input": raw,
-                "stock_code": code,
-                "reason": "DART 고유번호 표(corpCode.xml)에 이 종목코드가 없습니다 "
-                          "(상장폐지·비상장 전환·표 갱신 지연 등 가능).",
-            })
+        if entry is not None:
+            mapping[code] = {
+                "corp_code": entry.get("corp_code"),
+                "corp_name": entry.get("corp_name"),
+                "corp_eng_name": entry.get("corp_eng_name"),
+                "modify_date": entry.get("modify_date"),
+                "matched_via": "stock_code",
+            }
             continue
-        mapping[code] = {
-            "corp_code": entry.get("corp_code"),
-            "corp_name": entry.get("corp_name"),
-            "corp_eng_name": entry.get("corp_eng_name"),
-            "modify_date": entry.get("modify_date"),
-        }
+
+        # ── 2차: 회사명 정확일치 ────────────────────────────────────────────────
+        tried_name = None
+        if name_fallback_enabled:
+            candidate_name = code_name_map.get(raw)
+            if candidate_name is not None:
+                tried_name = str(candidate_name).strip()
+                if tried_name:
+                    name_entry = name_index.get(tried_name)
+                    if name_entry is not None:
+                        mapping[code] = {
+                            "corp_code": name_entry.get("corp_code"),
+                            "corp_name": name_entry.get("corp_name"),
+                            "corp_eng_name": name_entry.get("corp_eng_name"),
+                            "modify_date": name_entry.get("modify_date"),
+                            "matched_via": "name_fallback",
+                        }
+                        continue
+
+        reason = ("DART 고유번호 표(corpCode.xml)에 이 종목코드가 없습니다 "
+                  "(상장폐지·비상장 전환·표 갱신 지연 등 가능).")
+        if tried_name:
+            # 왜 실패했는지까지는 알 수 없습니다 — '무엇을 해봤는지'만 정직하게 적습니다.
+            reason += (f" 회사명 '{tried_name}' 으로도 한 번 더 찾아봤지만 그 이름 역시 표에 "
+                       "없었습니다(이름은 앞뒤 공백만 제거한 완전일치로만 봅니다 — 비슷한 "
+                       "이름으로 넘겨짚지 않습니다).")
+        unmapped.append({
+            "stock_code_input": raw,
+            "stock_code": code,
+            "reason": reason,
+        })
     return mapping, unmapped
 
 
@@ -535,7 +694,15 @@ def get_corp_code_index(cache_path, api_key=None, max_age_days=CORPCODE_CACHE_MA
 
     반환: (index, info)
       index : {stock_code: entry}
-      info  : {"source": "cache"|"network", "stats": {...}, "cache_note": str}
+      info  : {"source": "cache"|"network", "stats": {...}, "cache_note": str,
+               "entries": [...]}
+
+    `info["entries"]` 는 색인을 만들기 전의 **원본 파싱 결과 리스트**입니다(캐시에서 왔든
+    네트워크에서 왔든 같은 모양). `build_corp_name_index()` 처럼 종목코드 색인이 아닌
+    다른 색인을 만들려면 이 리스트가 필요해서 함께 돌려줍니다 — 같은 파일을 두 번 읽거나
+    corpCode.xml 을 두 번 받는 일을 막기 위함입니다(§0-3-2).
+    ⚠️ 이 리스트는 수만 건이라 **리포트/캐시에 그대로 싣지 않습니다**. `stats` 가 아니라
+       `info` 최상위에 둔 이유가 그것입니다(`stats` 는 리포트에 통째로 실립니다).
 
     raw_zip_path 를 주면 내려받은 **원본 ZIP 을 그대로** 그 경로에 저장합니다
     (§0-3-3 raw/가공 분리 보관 — 나중에 파싱 규칙을 바꿔도 재다운로드가 필요 없습니다).
@@ -546,7 +713,8 @@ def get_corp_code_index(cache_path, api_key=None, max_age_days=CORPCODE_CACHE_MA
             index, stats = build_stock_code_index(entries)
             log(f"  ℹ️ corpCode 캐시 사용 ({note.get('entry_count')}건, "
                 f"{note.get('age_days')}일 경과) — 네트워크 요청 없음")
-            return index, {"source": "cache", "stats": stats, "cache_note": note.get("reason", "")}
+            return index, {"source": "cache", "stats": stats,
+                           "cache_note": note.get("reason", ""), "entries": entries}
         log(f"  ℹ️ corpCode 캐시를 쓰지 않습니다 — {note.get('reason')}")
 
     zip_bytes = download_corpcode_zip(api_key=api_key, session=session)
@@ -567,4 +735,4 @@ def get_corp_code_index(cache_path, api_key=None, max_age_days=CORPCODE_CACHE_MA
         f"상장 종목코드 보유 {stats['listed_entries']:,}건 "
         f"(비상장 {stats['unlisted_entries']:,}건, 형식오류 {len(stats['malformed_stock_codes'])}건, "
         f"종목코드 중복 {len(stats['duplicates'])}건)")
-    return index, {"source": "network", "stats": stats, "cache_note": ""}
+    return index, {"source": "network", "stats": stats, "cache_note": "", "entries": entries}

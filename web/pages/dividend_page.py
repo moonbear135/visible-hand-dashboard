@@ -51,6 +51,26 @@
    2025년 행을 집으면 2024년에 배당한 회사가 전부 "데이터 없음"이 됩니다.
 
 -------------------------------------------------------------------------------
+🟣 우선주(優先株) 현금배당 — 있는 회사에만 붙는 줄 (§0-1)
+-------------------------------------------------------------------------------
+수집기는 처음부터 보통주와 **우선주** 배당을 따로 담아 왔습니다(`dps_cash_preferred` ·
+`dps_cash_preferred_all` · `cash_yield_preferred`). 그런데 이 화면은 그동안 보통주 칸만
+그려서, **이미 가지고 있는 값이 화면에는 없는 상태**였습니다(실측 2,734건 중 21건 —
+그중 20건이 확정분, 1건은 보통주 배당이 없어 미확정 목록에 있는 종목).
+그래서 달력 상세 표의 "주당 현금배당금"·"배당수익률" 칸 **아래 한 줄**로 함께 적습니다.
+  · 두 숫자를 절대 합치거나 섞지 않습니다 — 우선주 줄에는 항상 "우선주"라고 이름을 붙이고,
+    그 줄이 붙는 순간 위의 숫자에도 "보통주"라고 이름을 붙입니다.
+  · 우선주가 없는 대다수 종목의 칸은 **글자 하나까지 지금까지와 같습니다**(빈 줄·빈 칸을
+    만들지 않습니다 — 없는 것을 "없음"이라고 그리면 2,700건에 잡음만 늘어납니다).
+  · 🔴 우선주가 2종 이상이고 배당금이 서로 다르면 수집기는 대표값(`dps_cash_preferred`)을
+    **일부러 비우고**(None) 후보를 `dps_cash_preferred_all` 에만 남깁니다
+    (실측: 아모레퍼시픽홀딩스 002790 = [405.0, 667.0]). 대표값만 보면 하필 그 회사가 화면에서
+    통째로 사라지므로, 이 화면은 두 필드를 합쳐서 보고 후보를 **전부** 나열합니다
+    ("우선주 2종: 405원, 667원"). 하나를 골라 대표인 척 보여주지 않습니다.
+  · 확정/미확정 판정은 예전 그대로 **보통주 기준**입니다(아래 참고). 우선주 배당만 확인된
+    종목이 그것 때문에 "확정"으로 올라오는 일은 없고, 그런 건수는 요약 줄에 숫자로 밝힙니다.
+
+-------------------------------------------------------------------------------
 🔴 상태 관리 · 세션 격리 (§0-3-8)
 -------------------------------------------------------------------------------
 "지금 보고 있는 달 / 고른 날짜 / 검색어 / 시장 / 페이지"는 전부 `_render_body()` 안의
@@ -190,6 +210,29 @@ YIELD_SOURCE_NOTICE = (
     '문구를 그대로 보여드립니다.'
 )
 
+#: 🟣 우선주 줄에 붙는 이름표. 두 숫자를 절대 합치지 않으므로 **양쪽 다** 이름을 답니다.
+PREFERRED_LABEL = '우선주'
+COMMON_LABEL = '보통주'
+
+#: 우선주 줄의 인라인 스타일(보통주 값보다 작고 연보라 — 다른 종류의 주식임을 색으로도 구분).
+PREFERRED_LINE_STYLE = (
+    'margin-top: 3px; font-size: 12px; font-weight: 700; color: #c4b5fd; '
+    'white-space: normal; overflow-wrap: anywhere;'
+)
+
+#: 우선주가 여러 종류라 수집기가 대표값을 정하지 못했을 때 다는 배지 제목.
+PREFERRED_MULTI_LABEL = '❔ 대표값 미정'
+
+#: 🟣 "왜 어떤 줄에만 우선주가 보이지?" 를 미리 답해 두는 문구(요약 카드 바로 아래).
+PREFERRED_NOTICE = (
+    '🟣 우선주 현금배당은 DART 원문에 값이 있는 회사에만 보통주 배당 아래 한 줄로 함께 적습니다. '
+    '대부분의 회사는 우선주가 없어 이 줄이 나오지 않습니다 — 빠뜨린 것이 아니라 원문에 없는 것입니다.\n'
+    '보통주와 우선주는 주당 배당금이 다를 수 있어 한 숫자로 합치지 않고, 항상 "보통주"·"우선주"라고 '
+    '이름을 붙여 따로 적습니다.\n'
+    '우선주가 2종 이상이라 수집기가 대표값을 하나로 정하지 못한 경우에는 후보 값을 전부 나열합니다 '
+    '— 그중 하나만 골라 대표인 척 보여주지 않습니다.'
+)
+
 COMING_SOON_TEXT = (
     '🚧 "투자 감사합니다!"(배당 캘린더)는 아직 준비중입니다.\n\n'
     '데이터 검수가 끝나고 오너 승인이 나면 열립니다. 그때까지는 아무 수치도 그리지 않습니다.'
@@ -224,6 +267,39 @@ def is_confirmed_this_year(record) -> bool:
     """
     data = record or {}
     return data.get('status') == 'OK' and data.get('dps_cash_common') is not None
+
+
+def preferred_cash_values(record):
+    """레코드 1건 → 우선주 주당 현금배당금 후보 **전부**(중복 없이, 원문 순서대로) 튜플.
+
+    🔴 대표값(`dps_cash_preferred`) 하나만 보면 안 되는 이유가 실측으로 있습니다. 수집기는
+       우선주가 2종 이상이고 값이 서로 다르면 **대표값을 일부러 None 으로 비우고** 후보를
+       `dps_cash_preferred_all` 에만 남깁니다
+       (`tests/test_dividend_collector.py::test_parse_refuses_to_pick_when_preferred_classes_disagree`,
+       실측 데이터: 아모레퍼시픽홀딩스 002790 = [405.0, 667.0]).
+       그래서 "대표값이 None 이면 우선주 없음"으로 읽으면, 하필 **우선주가 여러 종류라 가장
+       설명이 필요한 회사**가 화면에서 통째로 사라집니다. 두 필드를 합쳐서 봅니다(§0-1).
+
+    같은 값이 두 번 온 경우(우선주 2종이 동액)는 한 번만 담습니다 — 중복은 다양성이
+    아니어서, "2종: 1,700원, 1,700원" 은 정보가 아니라 잡음입니다.
+
+    :return: 함수 지역 튜플(값이 하나도 없으면 빈 튜플).
+    """
+    data = record or {}
+    values = []
+    for raw in data.get('dps_cash_preferred_all') or ():
+        number = to_float(raw)
+        if number is not None and number not in values:
+            values.append(number)
+    single = to_float(data.get('dps_cash_preferred'))
+    if single is not None and single not in values:
+        values.append(single)
+    return tuple(values)
+
+
+def count_with_preferred(entries) -> int:
+    """표시용 dict 목록 중 **우선주 배당 줄이 실제로 붙는** 건수(요약 줄에 그대로 씁니다)."""
+    return sum(1 for entry in entries or [] if entry.get('dps_preferred_all'))
 
 
 def market_group(label) -> str:
@@ -294,6 +370,10 @@ def display_entry(record, history_row):
             'dividend_basis_year': to_int(data.get('bsns_year')),
             'dps_krw': to_float(data.get('dps_cash_common')),
             'dividend_yield_pct': to_float(data.get('cash_yield_common')),
+            # 🟣 우선주는 **보통주 값과 절대 섞지 않고** 처음부터 다른 열쇠에 담습니다.
+            'dps_preferred': to_float(data.get('dps_cash_preferred')),
+            'dps_preferred_all': preferred_cash_values(data),
+            'yield_preferred': to_float(data.get('cash_yield_preferred')),
             'yield_note': data.get('yield_reliability_note'),
             'settle_date': str(data.get('stlm_dt') or '').strip() or None,
             'report_name': data.get('reprt_name'),
@@ -315,6 +395,14 @@ def display_entry(record, history_row):
         'dividend_basis_year': basis_year,
         'dps_krw': dps,
         'dividend_yield_pct': to_float(history.get('dividend_yield_pct')) if dps is not None else None,
+        # 🟣 우선주 값은 폴백에서도 **2026년 레코드(data)** 에서 옵니다 — 기준선(KIND 연간 집계)
+        #    에는 우선주 항목 자체가 없기 때문입니다. 두 갈래가 같은 모양을 갖도록 여기서도
+        #    같은 열쇠를 채웁니다(위 docstring "확정분과 폴백분이 같은 모양"). 다만 이 목록의
+        #    표(`pending_row_cells`)는 "작년 배당율" 을 말하는 자리라 우선주 줄을 그리지 않고,
+        #    우선주만 확인된 종목이 몇 건인지는 요약 줄에서 숫자로 밝힙니다(§0-1).
+        'dps_preferred': to_float(data.get('dps_cash_preferred')),
+        'dps_preferred_all': preferred_cash_values(data),
+        'yield_preferred': to_float(data.get('cash_yield_preferred')),
         'yield_note': None,
         'settle_date': None,                       # 🔴 폴백 종목은 2026년 날짜가 없습니다
         'report_name': None,
@@ -493,17 +581,79 @@ def name_cell_html(entry) -> str:
             f'({esc(entry.get("stock_code") or "")})</div>')
 
 
+def preferred_line_html(body_html: str) -> str:
+    """보통주 값 아래 붙는 우선주 한 줄의 껍데기(색·크기는 `PREFERRED_LINE_STYLE` 한 곳)."""
+    return f'<div style="{PREFERRED_LINE_STYLE}">{body_html}</div>'
+
+
+def preferred_dps_html(entry) -> str:
+    """🟣 우선주 주당 현금배당금 한 줄. **값이 없으면 빈 문자열**(빈 줄을 만들지 않습니다).
+
+    후보가 2개 이상이면 "우선주 2종: 405원, 667원" 처럼 **전부** 적고 배지로 사유를 답니다 —
+    수집기가 대표값을 정하지 못한 사실을 화면에서 다시 지우지 않기 위해서입니다(§0-1).
+    """
+    values = entry.get('dps_preferred_all') or ()
+    if not values:
+        return ''
+    if len(values) == 1:
+        return preferred_line_html(esc(f'{PREFERRED_LABEL} {fmt_num(values[0], "원", 0)}'))
+    listed = ', '.join(fmt_num(value, '원', 0) for value in values)
+    return preferred_line_html(
+        esc(f'{PREFERRED_LABEL} {len(values)}종: {listed}')
+        + warn_badge(
+            PREFERRED_MULTI_LABEL,
+            'DART 원문에 우선주 주당 현금배당금이 <b>서로 다른 값으로 여러 개</b> 실려 '
+            '있습니다(예: 2우B·3우C 처럼 우선주가 여러 종류이거나, 원자료가 어긋난 경우).<br>'
+            '수집기가 대표값 하나를 임의로 고르지 않고 후보를 전부 남겼기 때문에, 이 화면도 '
+            '하나만 골라 보여주지 않고 그대로 나열합니다.<br>'
+            '어느 값이 어느 우선주의 것인지는 원문 확인이 필요합니다 — 같은 줄의 '
+            '"📝 파싱 메모" 배지에 수집기가 남긴 사유 원문이 그대로 들어 있습니다.',
+        )
+    )
+
+
+def preferred_yield_html(entry) -> str:
+    """🟣 우선주 배당수익률 한 줄(없으면 빈 문자열).
+
+    보통주와 **같은 서식**(`fmt_num(..., '%', 2)`)을 씁니다 — 같은 칸 안에서 숫자 서식이
+    달라지면 다른 종류의 수치처럼 보이기 때문입니다.
+    ⚠️ "원문값" 주의 배지를 여기에 다시 달지 않는 이유: `yield_reliability_note` 는 레코드
+       하나에 붙는 경고(그 보고서의 수익률 전체가 누적과 어긋날 수 있다)라 보통주 줄에 이미
+       달려 있고, 같은 칸 안에서 같은 배지를 두 번 보여주면 서로 다른 경고처럼 읽힙니다.
+    """
+    value = entry.get('yield_preferred')
+    if value is None:
+        return ''
+    return preferred_line_html(esc(f'{PREFERRED_LABEL} {fmt_num(value, "%", 2)}'))
+
+
+def dps_cell_html(entry) -> str:
+    """주당 현금배당금 한 칸 — 보통주 값 + (있을 때만) 우선주 줄.
+
+    우선주 줄이 붙는 순간 위의 숫자에도 "보통주" 이름표를 답니다. 이름 없는 숫자 두 개가
+    세로로 붙어 있으면 합계나 두 기간의 값처럼 읽히기 때문입니다.
+    """
+    common_text = esc(fmt_num(entry.get('dps_krw'), '원', 0))
+    preferred = preferred_dps_html(entry)
+    if not preferred:
+        # 우선주가 없는 대다수 종목(실측 2,734건 중 2,713건)은 예전과 **글자 하나까지 같은 칸**.
+        return common_text
+    return f'<div>{esc(COMMON_LABEL)} {common_text}</div>{preferred}'
+
+
 def yield_cell_html(entry) -> str:
-    """배당수익률 한 칸 + 원문값 주의 배지.
+    """배당수익률 한 칸 + 원문값 주의 배지 (+ 있을 때만 우선주 줄).
 
     수치는 DART 원문 그대로이고, 우리가 (DPS ÷ 현재가)로 계산해 대체하지 않습니다.
     `yield_reliability_note` 가 있으면 그 문구를 **그대로**(이스케이프해서) 툴팁에 답니다.
     """
     text = esc(fmt_num(entry.get('dividend_yield_pct'), '%', 2))
     note = entry.get('yield_note')
-    if not note:
-        return text
-    return text + warn_badge(YIELD_WARN_LABEL, esc(note))
+    common_html = text if not note else text + warn_badge(YIELD_WARN_LABEL, esc(note))
+    preferred = preferred_yield_html(entry)
+    if not preferred:
+        return common_html      # ← 우선주 수익률이 없으면 예전 출력과 완전히 동일합니다
+    return f'<div>{esc(COMMON_LABEL)} {common_html}</div>{preferred}'
 
 
 def parse_note_badge_html(entry) -> str:
@@ -520,7 +670,7 @@ def confirmed_row_cells(entry):
     return [
         name_cell_html(entry) + parse_note_badge_html(entry),
         esc(entry.get('market_text') or MARKET_UNKNOWN),
-        esc(fmt_num(entry.get('dps_krw'), '원', 0)),
+        dps_cell_html(entry),
         yield_cell_html(entry),
         esc(entry.get('report_name') or NA_TEXT),
         esc(entry.get('settle_date') or NA_TEXT),
@@ -782,6 +932,28 @@ def _render_summary(summary, confirmed, pending, grouped) -> None:
         )
 
     ui.label(YIELD_SOURCE_NOTICE).classes('vh-muted vh-keep-all whitespace-pre-line')
+
+    # 🟣 우선주 배당 안내 — **요약 카드 아래**에 둡니다(알려진 한계 섹션이 아니라).
+    #    바로 위 `_render_known_limitations()` 는 `summary.known_limitations` 를 **수집기 원문
+    #    그대로** 싣는 자리라, 우리가 쓴 화면 설명 문장을 섞으면 어디까지가 수집기 말인지
+    #    구분이 사라집니다. 반대로 이 자리는 이미 우리가 쓴 설명(`YIELD_SOURCE_NOTICE`)이
+    #    사는 곳이고, 수치를 보기 **전에** 읽어야 오해가 안 생기는 종류의 안내입니다.
+    ui.label(PREFERRED_NOTICE).classes('vh-muted vh-keep-all whitespace-pre-line')
+
+    shown = count_with_preferred(confirmed)
+    preferred_only = count_with_preferred(pending)
+    preferred_line = (
+        f'🟣 이번 수집에서 우선주 현금배당이 함께 확인된 확정 종목: {shown:,}건 '
+        f'(확정 {len(confirmed):,}건 중) — 달력에서 날짜를 누르면 나오는 표의 '
+        '"주당 현금배당금"·"배당수익률" 칸 아래에 우선주 줄이 함께 붙습니다.'
+    )
+    if preferred_only:
+        preferred_line += (
+            f' · 그 밖에 {preferred_only:,}건은 2026년 우선주 배당만 확인되고 보통주 배당은 아직 '
+            '확정되지 않아, 아래 "미확정" 목록에 그대로 있습니다 — 확정 판정 기준은 예전과 같이 '
+            '보통주이며, 우선주 값이 있다고 확정으로 올리지 않았습니다.'
+        )
+    ui.label(preferred_line).classes('vh-muted vh-keep-all')
 
 
 def _render_known_limitations(summary) -> None:

@@ -183,6 +183,7 @@ from corp_code_mapper import (  # noqa: E402
     DART_FATAL_STATUSES,
     DART_STATUS_MESSAGES,
     _now_kst,
+    build_corp_name_index,
     get_api_key,
     get_corp_code_index,
     map_stock_codes,
@@ -898,6 +899,11 @@ def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
         # ── 식별 ──────────────────────────────────────────────────────────────
         "stock_code": stock_code,
         "corp_code": (corp_info or {}).get("corp_code"),
+        # 이 종목의 corp_code 를 **어느 경로로 찾았는지**(§0-1: 어떻게 얻은 값인지 남깁니다).
+        #   · "stock_code"    — 종목코드 직접매칭(1차, 기존 경로)
+        #   · "name_fallback" — 회사명 정확일치 2차 경로
+        #   · None            — 매핑 실패(UNMAPPED) 또는 매핑 정보 없음
+        "corp_code_matched_via": (corp_info or {}).get("matched_via"),
         "corp_name": meta.get("corp_name") or (corp_info or {}).get("corp_name"),
         "corp_cls": meta.get("corp_cls"),
         "market": market_from_corp_cls(meta.get("corp_cls")),
@@ -984,6 +990,8 @@ def summarize_results(records, unmapped, extra=None):
     cross_source_codes = []
     unit_mismatch_count = 0
     cross_source_count = 0
+    name_fallback_codes = []
+    name_fallback_count = 0
     for rec in records or []:
         st = rec.get("status") or "UNKNOWN"
         by_status[st] = by_status.get(st, 0) + 1
@@ -1006,6 +1014,13 @@ def summarize_results(records, unmapped, extra=None):
             code = rec.get("stock_code")
             if code not in cross_source_codes:
                 cross_source_codes.append(code)
+        # 회사명 2차 매칭으로 살아난 종목(§0-1: '어떻게 찾았는지'도 숫자로 남깁니다).
+        # 위 두 지표와 **같은 방식**으로 셉니다 — 건수 + 종목코드 목록.
+        if rec.get("corp_code_matched_via") == "name_fallback":
+            name_fallback_count += 1
+            code = rec.get("stock_code")
+            if code not in name_fallback_codes:
+                name_fallback_codes.append(code)
 
     ok_records = [r for r in records or [] if r.get("status") == "OK"]
     by_report = {}
@@ -1035,6 +1050,18 @@ def summarize_results(records, unmapped, extra=None):
         #       이 값이 0 이라고 해서 "두 출처가 일치했다"는 뜻이 아닙니다.
         "records_with_cross_source_mismatch": cross_source_count,
         "stock_codes_with_cross_source_mismatch": cross_source_codes,
+        # ③ 회사명 2차 매칭(corp_code 매핑 경로): 종목코드로는 못 찾고 회사명 정확일치로
+        #    살아난 종목 수와 목록.
+        #    ⚠️ 유니버스에 회사명이 없어 2차 매칭을 **아예 시도하지 않은** 실행에서도 이 값은
+        #       0 입니다. 0 이 '못 찾았다'는 뜻이 아니라는 것을 아래 세 필드가 구분해 줍니다
+        #       (`--history-baseline` 미지정과 같은 사정입니다 — §0-1).
+        "mapped_via_name_fallback": name_fallback_count,
+        "stock_codes_mapped_via_name_fallback": name_fallback_codes,
+        # 아래 세 값은 실행 단위 사실이라 호출부(run_collection)가 extra 로 덮어씁니다.
+        # 기본값은 '2차 매칭을 시도하지 않았다' 입니다.
+        "name_fallback_attempted": False,
+        "name_fallback_universe_names": 0,
+        "name_fallback_index_stats": None,
         # ⚠️ 반드시 읽어야 하는 한계 — 리포트에 늘 붙여 다닙니다.
         "known_limitations": [
             "DART 는 '존재하지 않는 corp_code' 와 '배당 데이터 없음' 을 똑같이 status 013 으로 "
@@ -1192,6 +1219,82 @@ def _extract_codes(data, path):
             continue
         raise ValueError(f"유니버스 항목의 형태를 알 수 없습니다: {type(item).__name__} — {path}")
     return codes
+
+
+# ── 회사명 2차 매칭용 보조 입력 ───────────────────────────────────────────────
+# `_CODE_KEYS` 와 나란히 두는 이름 키 후보입니다. 유니버스 파일마다 컬럼 이름이 달라서
+# (data/kr_ticker_master.json 은 "name", KIND 배당 이력은 "company_name") 코드 키와 똑같이
+# **명시적인 후보 목록**으로만 받아들입니다 — 처음 보는 키를 이름이라고 넘겨짚지 않습니다.
+_NAME_KEYS = ("name", "company_name", "종목명", "corp_name")
+
+
+def load_universe_name_map(path):
+    """
+    유니버스 JSON 에서 {원문 종목코드: 회사명} 을 읽습니다. (`load_universe()` 와 별개)
+
+    쓰임: 종목코드로 DART corpCode.xml 에서 못 찾은 종목을 **회사명 정확일치**로 한 번 더
+    찾아보는 2차 경로(`corp_code_mapper.map_stock_codes(code_name_map=...)`)의 입력입니다.
+
+    ⚠️ 키는 **정규화 전 원문 코드**입니다 — `map_stock_codes()` 가 순회하는 값이 원문이라,
+       그 시점에 바로 찾을 수 있는 유일한 키이기 때문입니다.
+
+    ⚠️ 이 함수는 `load_universe()` / `_extract_codes()` 를 **전혀 건드리지 않습니다.**
+       형태 검증(어떤 파일이 유니버스로 적법한가)은 여전히 `load_universe()` 담당이고,
+       이름 맵은 어디까지나 **보조 정보**입니다. 그래서 여기서는:
+         · 이름이 아예 없는 유니버스(①  ["005930", …] 형태) → 오류가 아니라 빈 dict
+         · 코드나 이름 한쪽이 빠진 항목 → 그 항목만 조용히 건너뜀(수집을 죽이지 않음)
+       이름이 없으면 2차 매칭이 그냥 꺼질 뿐, 기존 동작과 완전히 같습니다.
+
+    ⚠️ 같은 코드가 여러 줄 나오면(연도별 배당 이력 파일이 그렇습니다) **처음 값을 유지**합니다
+       — `load_universe()` 의 '순서 유지 중복 제거'와 같은 방향입니다.
+
+    받아들이는 형태는 `load_universe()` 와 같은 ①②③ 입니다.
+    """
+    with open(path, "r", encoding="utf-8") as f:
+        data = json.load(f)
+    name_map = {}
+    _collect_name_pairs(data, name_map)
+    return name_map
+
+
+def _collect_name_pairs(data, name_map):
+    """
+    `_extract_codes()` 와 **같은 형태**를 훑되, 예외를 던지지 않고 찾은 짝만 모읍니다.
+
+    별도 함수로 둔 이유: `_extract_codes()` 를 한 글자도 바꾸지 않기 위해서입니다.
+    (그 함수의 반환값·예외는 기존 테스트가 리터럴로 고정하고 있습니다.)
+    """
+    if isinstance(data, dict):
+        # ③ 시장별 dict — `_extract_codes()` 와 똑같이 값이 리스트인 키만 훑습니다.
+        for value in data.values():
+            if isinstance(value, list):
+                _collect_name_pairs(value, name_map)
+        return
+    if not isinstance(data, list):
+        return
+    for item in data:
+        # ① 문자열만 있는 유니버스에는 이름이 없습니다 — 건너뜁니다(오류 아님).
+        if not isinstance(item, dict):
+            continue
+        code = None
+        for key in _CODE_KEYS:
+            if key in item and item[key] not in (None, ""):
+                code = item[key]
+                break
+        name = None
+        for key in _NAME_KEYS:
+            if key in item and item[key] not in (None, ""):
+                name = item[key]
+                break
+        if code is None or name is None:
+            continue
+        if not isinstance(code, (str, int)):
+            # 코드 자리에 list/dict 가 온 파일은 우리가 해석할 수 있는 형태가 아닙니다.
+            continue
+        name = str(name).strip()
+        if not name:
+            continue
+        name_map.setdefault(code, name)
 
 
 DEFAULT_CHECKPOINT_MAX_AGE_DAYS = 14
@@ -1437,7 +1540,7 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
                    corpcode_max_age_days=7, force_corpcode_refresh=False,
                    limit=None, log=print, history_baseline_path=None,
                    checkpoint_max_age_days=DEFAULT_CHECKPOINT_MAX_AGE_DAYS,
-                   allow_overwrite=False):
+                   allow_overwrite=False, universe_name_map=None):
     """
     전 종목 배당 수집. 산출물:
       {out_dir}/dividend_kr_{year}_latest.json   가공본 + 리포트
@@ -1450,6 +1553,13 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         남깁니다. 주지 않으면(기본) 교차검증을 하지 않고 기존과 완전히 동일하게 동작합니다.
         ⚠️ 경로를 줬는데 읽지 못하면 **조용히 넘어가지 않고 예외를 던집니다** — 교차검증을
            해달라고 명시한 사람에게 "검증 안 된 결과"를 검증된 것처럼 돌려주면 §0-1 위반입니다.
+
+    universe_name_map : `load_universe_name_map()` 결과 {원문 종목코드: 회사명}(선택).
+        주면 종목코드로 DART 표에서 못 찾은 종목을 **회사명 정확일치**로 한 번 더 찾습니다
+        (2차 매칭). 안 주면(기본 None) 또는 빈 dict 면 2차 매칭을 아예 켜지 않고, 이 인자가
+        생기기 전과 **완전히 동일하게** 동작합니다 — 새 CLI 플래그도 필요 없습니다.
+        ⚠️ 시도했는지 여부는 리포트의 `name_fallback_attempted` 에 그대로 남습니다.
+           2차 매칭 0건이 '못 찾았다'인지 '안 해봤다'인지 구분하기 위한 것입니다(§0-1).
 
     checkpoint_max_age_days : 체크포인트 신선도 기준(기본 14일). `load_checkpoint()` 참고.
 
@@ -1549,9 +1659,42 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         cache_path, api_key=key, max_age_days=corpcode_max_age_days,
         force_refresh=force_corpcode_refresh, raw_zip_path=raw_zip_path,
         session=session, log=log)
-    mapping, unmapped = map_stock_codes(universe, index)
+
+    # 회사명 2차 매칭(선택). 유니버스에 이름이 있을 때만 켜집니다 — 무설정 원칙.
+    # ⚠️ 색인은 ① 에서 **이미 받아 온** 원본 항목 리스트(corp_info_meta["entries"])로 만듭니다.
+    #    corpCode.xml 을 두 번 받거나 캐시를 두 번 읽지 않기 위함입니다(§0-3-2).
+    #    (`entries` 가 `stats` 안이 아니라 meta 최상위에 있는 이유: `stats` 는 리포트에
+    #     통째로 실리는데 이 리스트는 수만 건이라 실으면 안 됩니다.)
+    universe_name_map = dict(universe_name_map or {})
+    name_fallback_attempted = bool(universe_name_map)
+    name_index = None
+    name_index_stats = None
+    if name_fallback_attempted:
+        name_index, name_index_stats = build_corp_name_index(
+            corp_info_meta.get("entries") or [])
+        log(f"  ℹ️ 유니버스에 회사명 {len(universe_name_map):,}건이 있어 회사명 2차 매칭을 켭니다 "
+            f"(DART 표 회사명 색인 {name_index_stats['named_entries']:,}건). "
+            "종목코드로 바로 찾히면 2차 매칭은 아예 보지 않습니다 — 앞뒤 공백만 제거한 "
+            "완전일치이며, 비슷한 이름으로 넘겨짚지 않습니다.")
+
+    mapping, unmapped = map_stock_codes(
+        universe, index,
+        name_index=name_index,
+        code_name_map=(universe_name_map or None))
     log(f"  → 유니버스 {len(universe):,}종목 중 {len(mapping):,}종목 매핑 성공, "
         f"{len(unmapped):,}종목 실패(목록은 리포트에 그대로 남깁니다)")
+
+    # 어느 종목이 어느 경로로 매핑됐는지 사람이 로그만 보고도 알 수 있어야 합니다(§0-1).
+    via_direct = [c for c, m in mapping.items() if m.get("matched_via") == "stock_code"]
+    via_name = [c for c, m in mapping.items() if m.get("matched_via") == "name_fallback"]
+    log(f"     ↳ 매핑 경로: 종목코드 직접매칭 {len(via_direct):,}종목 / "
+        f"회사명 2차 매칭 {len(via_name):,}종목"
+        + ("" if name_fallback_attempted else
+           " (유니버스에 회사명이 없어 2차 매칭은 아예 시도하지 않았습니다 — "
+           "0종목은 '못 찾았다'가 아니라 '안 해봤다'입니다)"))
+    if via_name:
+        log("     ↳ 회사명으로 찾은 종목: "
+            + ", ".join(f"{c}({mapping[c].get('corp_name')})" for c in via_name))
 
     # ── ② 수집 루프 ─────────────────────────────────────────────────────────
     # ⚠️ run_key 에 실행 날짜를 넣지 않습니다 — 넣으면 다음 날 이어할 때 체크포인트가
@@ -1644,6 +1787,12 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         "cross_source_baseline_entries": (len(kind_baseline_index)
                                           if kind_baseline_index else 0),
         "cross_source_checked": bool(kind_baseline_index),
+        # 회사명 2차 매칭을 실제로 켰는지 여부와 그 재료의 크기(§0-1: 안 해본 것과 못 찾은
+        # 것을 리포트에서 구분할 수 있어야 합니다). 건수·종목 목록은 summarize_results() 가
+        # 레코드에서 직접 셉니다 — 손으로 더하지 않습니다.
+        "name_fallback_attempted": name_fallback_attempted,
+        "name_fallback_universe_names": len(universe_name_map),
+        "name_fallback_index_stats": name_index_stats,
         "checkpoint_max_age_days": checkpoint_max_age_days,
         "verification_status": (
             "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. "
@@ -1673,6 +1822,13 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
     log(f"   raw   : {raw_path}")
     if summary["unknown_se_labels"]:
         log(f"   ⚠️ 처음 보는 se 라벨: {summary['unknown_se_labels']}")
+    if name_fallback_attempted:
+        log(f"   corp_code 매핑 경로: 종목코드 직접매칭 {len(via_direct):,}종목 / "
+            f"회사명 2차 매칭 {summary['mapped_via_name_fallback']:,}종목"
+            + (f" — {summary['stock_codes_mapped_via_name_fallback']}" if via_name else ""))
+    else:
+        log(f"   corp_code 매핑 경로: 종목코드 직접매칭 {len(via_direct):,}종목 "
+            "(회사명 2차 매칭은 시도하지 않았습니다 — 유니버스 파일에 회사명이 없습니다)")
     if summary["records_with_unit_mismatch"]:
         log(f"   ⚠️ 단위 검증 미통과 레코드: {summary['records_with_unit_mismatch']:,}건 "
             "(값은 원문 그대로 두었습니다 — 각 레코드의 unit_mismatch_notes 참고)")
@@ -2021,6 +2177,11 @@ def main(argv=None):
                      "델타 병합만 하려면 --merge-delta DELTA_OUT_DIR 을 쓰세요.")
 
     universe = load_universe(args.universe)
+    # 회사명 2차 매칭은 **새 플래그 없이** 켜집니다: 유니버스 파일에 이름 컬럼이 있으면
+    # 그대로 쓰고, 없으면 빈 dict 가 넘어가 2차 매칭이 알아서 꺼집니다.
+    # (`run_collection()` 은 경로가 아니라 이미 읽은 종목 목록을 받으므로, 파일을 아는
+    #  main() 이 이름 맵도 함께 읽어 넘깁니다.)
+    universe_name_map = load_universe_name_map(args.universe)
     priority = REPRT_CODE_PRIORITY_OWNER_ORDER if args.owner_order else REPRT_CODE_PRIORITY
     try:
         run_collection(
@@ -2030,7 +2191,8 @@ def main(argv=None):
             force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit,
             history_baseline_path=args.history_baseline,
             checkpoint_max_age_days=args.checkpoint_max_age_days,
-            allow_overwrite=args.allow_overwrite)
+            allow_overwrite=args.allow_overwrite,
+            universe_name_map=universe_name_map)
     except (DartFatalError, DartCorpCodeError) as e:
         # §0-3-4: 스택트레이스를 그대로 뿌리지 않고 사람이 읽을 문장으로 끝냅니다.
         # (⚠️ 그래도 '조용히 성공'하지는 않습니다 — 종료코드 2 로 Actions 를 빨간불로 만듭니다.)
