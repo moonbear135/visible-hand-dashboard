@@ -37,8 +37,8 @@ rcept_no=20260820800655)에는 배당기준일(2026-09-03)·배당금지급 예�
   · `data/`의 어떤 파일도 읽거나 쓰지 않습니다. 화면(로그)에 결과를 출력만 합니다.
   · 받은 zip은 이 실행 안에서만 임시로 풀어보고 커밋하지 않습니다.
   · §0-3-2(외부 서버 예의) — 호출 사이 짧은 딜레이를 둡니다. 호출 횟수는 이 파일 안에서
-    고정돼 있고(3회), 반복 실행을 전제하지 않습니다(확인 끝나면 이 파일과 짝인 워크플로우를
-    지우세요 — 이 프로젝트 관례).
+    고정돼 있고(4회 — list.json 3일치 + document.xml 1건), 반복 실행을 전제하지 않습니다
+    (확인 끝나면 이 파일과 짝인 워크플로우를 지우세요 — 이 프로젝트 관례).
   · 인증키는 기존 스크립트들과 똑같이 환경변수 `DART_API_KEY`에서만 읽습니다.
 
 이 개발 샌드박스는 프록시 allowlist 때문에 opendart.fss.or.kr 에 직접 못 붙습니다
@@ -92,40 +92,53 @@ def main():
 
     session = requests.Session()
 
-    # ── 케이스 1: list.json(pblntf_ty=I) 로 그날 거래소공시 목록에서 기준 건 재현 ──
-    print(f"\n{'=' * 70}\n[1] list.json pblntf_ty=I — {KNOWN_RCEPT_DT} 거래소공시 전체\n{'=' * 70}")
-    resp = _get(DART_LIST_URL, {
-        "bgn_de": KNOWN_RCEPT_DT, "end_de": KNOWN_RCEPT_DT,
-        "pblntf_ty": "I", "page_count": "100", "page_no": "1",
-    }, api_key, session)
-    payload = resp.json()
-    status = payload.get("status")
-    total_count = payload.get("total_count")
-    total_page = payload.get("total_page")
-    print(f"status={status} message={payload.get('message')!r} "
-          f"total_count={total_count} total_page={total_page}")
-    rows = payload.get("list") or []
-    found_known = None
-    dividend_keyword_hits = []
-    for row in rows:
-        name = row.get("report_nm") or ""
-        if row.get("rcept_no") == KNOWN_RCEPT_NO:
-            found_known = row
-        if "배당" in name:
-            dividend_keyword_hits.append(
-                f"{row.get('corp_name')} / {name} / rcept_no={row.get('rcept_no')}"
-            )
-    print(f"  → 이 페이지({len(rows)}건)에서 기준 건(rcept_no={KNOWN_RCEPT_NO}) 발견: "
-          f"{'✅ ' + str(found_known) if found_known else '❌ 이 페이지엔 없음(페이지 넘어갔을 수 있음)'}")
-    print(f"  → 이 페이지에서 report_nm에 '배당' 들어간 건 {len(dividend_keyword_hits)}건:")
-    for line in dividend_keyword_hits[:30]:
-        print(f"     · {line}")
-    if len(dividend_keyword_hits) > 30:
-        print(f"     … 외 {len(dividend_keyword_hits) - 30}건 생략")
-    if total_page and int(total_page) > 1:
-        print(f"  ⚠️ total_page={total_page} — 이 하루치가 1페이지(100건)를 넘습니다. "
-              "기준 건이 이 페이지에 없다면 다음 페이지에 있을 수 있습니다(이 조사에서는 "
-              "1페이지만 봅니다 — 진짜 기능을 만들 때 페이지네이션 필요).")
+    # ── 케이스 1: list.json(pblntf_ty=I) 로 여러 날짜의 report_nm 표기를 모아 "배당결정"
+    #    매칭 규칙을 실제 문구 기반으로 세웁니다(하루치만 보면 표기 변형을 놓칠 수 있음).
+    SAMPLE_DATES = [KNOWN_RCEPT_DT, "20260813", "20260806"]
+    all_names_seen = set()
+    print(f"\n{'=' * 70}\n[1] list.json pblntf_ty=I — {len(SAMPLE_DATES)}개 날짜 표본으로 "
+          f"'배당' 표기 카탈로그 만들기\n{'=' * 70}")
+    for i, day in enumerate(SAMPLE_DATES):
+        if i:
+            time.sleep(2)
+        resp = _get(DART_LIST_URL, {
+            "bgn_de": day, "end_de": day,
+            "pblntf_ty": "I", "page_count": "100", "page_no": "1",
+        }, api_key, session)
+        payload = resp.json()
+        status = payload.get("status")
+        total_count = payload.get("total_count")
+        total_page = payload.get("total_page")
+        print(f"\n  --- {day} ---")
+        print(f"  status={status} message={payload.get('message')!r} "
+              f"total_count={total_count} total_page={total_page}")
+        rows = payload.get("list") or []
+        found_known = None
+        dividend_keyword_hits = []
+        for row in rows:
+            name = row.get("report_nm") or ""
+            if row.get("rcept_no") == KNOWN_RCEPT_NO:
+                found_known = row
+            if "배당" in name:
+                dividend_keyword_hits.append(
+                    f"{row.get('corp_name')} / {name!r} / rcept_no={row.get('rcept_no')}"
+                )
+                all_names_seen.add(name.strip())
+        if day == KNOWN_RCEPT_DT:
+            print(f"  → 기준 건(rcept_no={KNOWN_RCEPT_NO}) 발견: "
+                  f"{'✅ ' + str(found_known) if found_known else '❌ 이 페이지엔 없음(페이지 넘어갔을 수 있음)'}")
+        print(f"  → 이 페이지({len(rows)}건)에서 report_nm에 '배당' 들어간 건 "
+              f"{len(dividend_keyword_hits)}건:")
+        for line in dividend_keyword_hits:
+            print(f"     · {line}")
+        if total_page and int(total_page) > 1:
+            print(f"  ⚠️ total_page={total_page} — 이 하루치가 1페이지(100건)를 넘습니다. "
+                  "이 조사에서는 1페이지만 봅니다(진짜 기능을 만들 때 페이지네이션 필요).")
+
+    print(f"\n  === {len(SAMPLE_DATES)}개 날짜에서 관찰된 '배당' 포함 report_nm 표기 전부"
+          f"({len(all_names_seen)}종) ===")
+    for name in sorted(all_names_seen):
+        print(f"     · {name!r}")
     time.sleep(2)
 
     # ── 케이스 2: document.xml 로 기준 건 원본 문서 받아서 실제로 열어보기 ──────
@@ -174,10 +187,13 @@ def main():
                 else:
                     snippet = text[max(0, idx - 20):idx + 120].replace("\n", "\\n")
                     print(f"     · '{label}' → ✅ 위치 {idx}, 주변: …{snippet}…")
-            # 파일이 너무 길면 전체를 다 출력하지 않고 앞부분만 보여줍니다(§0-3-2 취지 —
-            # 로그를 과하게 쏟아내지 않기). 구조 파악에는 앞부분+라벨 주변이면 충분합니다.
-            print(f"  --- {name} 앞 1500자 미리보기 ---")
-            print(text[:1500])
+            # 🔴 전체 원문을 그대로 출력합니다(앞부분만 보여주지 않습니다) — 실제 파서를
+            # 만들 때 이 로그를 그대로 테스트 픽스처로 씁니다. 일부만 보고 짐작해서 파서를
+            # 짜면 안 보인 나머지 부분에서 구조가 다를 수 있습니다(§0-1). 호출 횟수는 이미
+            # 고정 3회라 늘어나지 않으니 §0-3-2와도 무관합니다.
+            print(f"  === {name} 전체 원문 시작 ===")
+            print(text)
+            print(f"  === {name} 전체 원문 끝 ===")
 
     print("\n\n✅ 조사 완료. 이 로그 전체를 그대로 복사해서 개발 세션에 붙여넣어주세요.")
     print(f"   (참고 — 화면에서 읽은 정답값: 1주당 배당금={KNOWN_DPS}원, "
