@@ -16,7 +16,7 @@ dividend_module/test_dividend_collector.py
    않습니다.
 
 ⚠️ 이 테스트가 전부 통과해도 "DART 실서버와 잘 통신한다"는 뜻은 아닙니다.
-   실통신 검증은 GitHub Actions 첫 실행 로그로만 가능합니다(README_상황보고.md 참고).
+   실통신 검증은 GitHub Actions 첫 실행 로그로만 가능합니다.
 """
 import io
 import json
@@ -26,7 +26,9 @@ import zipfile
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+_REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+if _REPO_ROOT not in sys.path:
+    sys.path.insert(0, _REPO_ROOT)
 
 import corp_code_mapper as ccm                       # noqa: E402
 import collector_dividend_kr as cdk                  # noqa: E402
