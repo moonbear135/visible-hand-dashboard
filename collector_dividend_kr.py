@@ -164,9 +164,10 @@ import json
 import os
 import random
 import re
+import shutil
 import sys
 import time
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta
 
 try:
     import requests
@@ -194,6 +195,23 @@ from corp_code_mapper import (  # noqa: E402
 # 1. 엔드포인트·보고서 코드
 # =============================================================================
 DART_ALOT_MATTER_URL = "https://opendart.fss.or.kr/api/alotMatter.json"
+
+# DART "공시검색"(list.json). 접수일 구간에 **새로 접수된 공시 목록**만 가볍게 훑는 용도입니다.
+# (2026-08-24 GitHub Actions 에서 실제 DART_API_KEY 로 호출해 응답 형태를 실측했습니다.)
+DART_DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
+
+# 정기공시(pblntf_ty="A") 중 배당 표가 실려 오는 세 가지 상세유형.
+#   A001 = 사업보고서 / A002 = 반기보고서 / A003 = 분기보고서
+# ⚠️ A003 은 1분기·3분기를 **이름으로 구분하지 않습니다**(둘 다 그냥 "분기보고서"이고
+#    `report_nm` 괄호 안 "(YYYY.MM)" 으로만 갈립니다 — 실측). 이 감시 기능은 그 괄호를
+#    파싱하지 않습니다: "이 회사가 새 정기보고서를 냈다"는 신호만 얻고, 어느 보고서를 쓸지는
+#    기존 `collect_one()` 의 우선순위 탐색(3분기→반기→1분기)이 그대로 판정합니다.
+PERIODIC_DETAIL_TYPES = ("A001", "A002", "A003")
+
+# list.json 의 page_count 최대값(문서·실측 모두 100).
+DART_LIST_PAGE_COUNT = 100
+# 방어적 상한. total_page 가 이 수를 넘으면 무한 루프를 의심하고 크게 실패합니다.
+DART_LIST_MAX_PAGES = 1000
 
 # DART 공시 원문 문서 URL 템플릿 (rcept_no 로 바로 연결됩니다 — 사용자가 원문 대조 가능)
 DART_DOCUMENT_URL_TEMPLATE = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
@@ -1155,6 +1173,201 @@ def polite_sleep(rng=None):
     return delay
 
 
+# ── 8-2. 공시검색(list.json) — "어제 누가 새 정기보고서를 냈나" 가볍게 훑기 ──────────
+#
+# 왜 필요한가: 지금까지는 "분기 마감일마다 유니버스 2,734종목을 통째로 다시 훑는" 방식뿐이라
+# 한 번에 5,000건 넘는 요청이 들어갑니다. 그런데 2026-08-24 실측으로 알게 된 사실이 있습니다 —
+# 1분기보고서(3/31 기준) 접수가 몰린 날은 5/15경이 아니라 **5/29**였고, 2025년 3분기보고서는
+# **11/28**이었습니다. 즉 "법정기한 = 마감 후 45일" 로 잡아 둔 자동 스케줄 날짜와 실제 몰림
+# 날짜 사이에 2주 가까운 차이가 있습니다(이유는 확인하지 못했고, 여기서 추측하지 않습니다).
+# 날짜를 못 맞히는 문제는 "매일 어제치만 가볍게 확인"으로 구조적으로 사라집니다.
+def _fetch_disclosure_list_page(params, session):
+    """
+    list.json 한 페이지를 받아 응답 dict 를 그대로 돌려줍니다.
+
+    재시도·치명 판정 규칙은 `fetch_alot_matter()` 와 **같은 철학**입니다(§0-3-2):
+      · HTTP 403/429, DART 치명 status(키·IP·한도·점검) → DartFatalError (재시도 금지, 즉시 중단)
+      · 그 밖의 개별 실패                                  → DartApiError
+    ⚠️ 오류 메시지에 params 를 넣지 않습니다 — 인증키가 그대로 로그에 찍힙니다.
+    """
+    last_error = None
+    for attempt in range(DART_NETWORK_RETRY + 1):
+        try:
+            status_code, payload = _http_get_json(
+                DART_DISCLOSURE_LIST_URL, params, DART_REQUEST_TIMEOUT_SEC, session)
+        except (DartApiError, DartFatalError):
+            raise
+        except Exception as e:
+            last_error = f"네트워크 오류: {type(e).__name__}"
+            if attempt < DART_NETWORK_RETRY:
+                time.sleep(DART_RETRY_DELAY_SEC)
+                continue
+            raise DartApiError(f"공시목록 조회 실패 — {last_error}")
+
+        if status_code in (403, 429):
+            raise DartFatalError(
+                f"DART 가 HTTP {status_code} 로 차단했습니다(공시목록 조회). 재시도하지 않고 "
+                "실행 전체를 중단합니다(§0-3-2). 감시 상태 파일은 갱신하지 않으므로 "
+                "다음 실행이 같은 구간을 다시 확인합니다.")
+        if status_code is not None and 400 <= status_code < 500:
+            raise DartApiError(f"공시목록 조회 HTTP {status_code} — 재시도하지 않습니다.")
+        if status_code is not None and status_code >= 500:
+            last_error = f"서버 오류(HTTP {status_code})"
+            if attempt < DART_NETWORK_RETRY:
+                time.sleep(DART_RETRY_DELAY_SEC)
+                continue
+            raise DartApiError(f"공시목록 조회 실패 — {last_error}")
+        if status_code not in (200, None):
+            raise DartApiError(f"공시목록 조회 — 예상치 못한 HTTP 상태 {status_code}.")
+
+        if not isinstance(payload, dict):
+            raise DartApiError("공시목록 응답이 JSON 객체가 아닙니다.")
+
+        status = dart_status_of(payload)
+        if status in DART_FATAL_STATUSES:
+            raise DartFatalError(
+                f"DART status {status} — {DART_STATUS_MESSAGES.get(status, '알 수 없는 코드')} "
+                "재시도하지 않고 실행 전체를 중단합니다(§0-3-2, 공시목록 조회). "
+                "감시 상태 파일은 갱신하지 않습니다.")
+        return payload
+
+    raise DartApiError(f"공시목록 조회 실패 — {last_error}")   # 방어(도달하지 않습니다)
+
+
+def _positive_int(value):
+    """숫자로 읽히면 int, 아니면 None. (문자열 "166" 도 받습니다 — DART 는 둘 다 씁니다)"""
+    if isinstance(value, bool) or value is None:
+        return None
+    try:
+        number = int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+    return number if number >= 0 else None
+
+
+def fetch_new_periodic_filings(bgn_de, end_de, api_key, session=None,
+                               detail_types=PERIODIC_DETAIL_TYPES, log=print):
+    """
+    `bgn_de`~`end_de`(접수일, YYYYMMDD) 사이에 **새로 접수된 정기보고서**를 종목코드 기준으로
+    모읍니다. 파일을 쓰지 않는 순수 조회 함수입니다.
+
+    반환: {정규화된 6자리 종목코드: {"corp_code", "report_nm", "rcept_no", "rcept_dt"}}
+
+    이 함수가 하지 않는 일(중요):
+      · `report_nm` 의 "(YYYY.MM)" 을 파싱하지 않습니다. A003(분기보고서)은 1분기·3분기를
+        이름으로 구분하지 않으므로 어차피 이름만으로는 알 수 없고, **알 필요도 없습니다** —
+        "이 회사가 새 정기보고서를 냈다"는 신호만 얻으면 그 뒤는 기존 `collect_one()` 의
+        우선순위 탐색이 그 회사의 현재 최신 보고서를 정확히 골라 줍니다.
+      · 우리 유니버스로 거르지 않습니다(그건 호출부의 일입니다). 다만 `stock_code` 가 비어
+        있는 항목(채권만 발행한 비상장 법인 등)은 종목코드 자체가 없어 건너뜁니다.
+
+    중복 처리: 같은 종목이 여러 detail_type/페이지에 걸쳐 나오면(예: "[기재정정]" 으로 같은
+    분기에 두 번 접수) **rcept_no 가 가장 큰(=가장 나중에 접수된) 항목**만 남깁니다.
+    DART 의 rcept_no 는 접수 순으로 증가하는 문자열이라 사전순 비교가 곧 시간순 비교입니다.
+    """
+    found = {}
+    seen_pairs = 0
+    skipped_no_stock_code = 0
+    skipped_bad_stock_code = []
+    request_count = 0
+
+    for detail_ty in detail_types:
+        page_no = 1
+        while True:
+            params = {
+                "crtfc_key": api_key,
+                "pblntf_ty": "A",                 # 정기공시
+                "pblntf_detail_ty": detail_ty,
+                "bgn_de": str(bgn_de),
+                "end_de": str(end_de),
+                "page_no": str(page_no),
+                "page_count": str(DART_LIST_PAGE_COUNT),
+            }
+            # §0-3-2: 이 API 도 같은 DART 서버입니다. **요청 사이**에 딜레이를 둡니다
+            # (첫 요청 앞에서는 기다리지 않습니다 — 기다릴 상대가 아직 없습니다).
+            if request_count:
+                polite_sleep()
+            payload = _fetch_disclosure_list_page(params, session)
+            request_count += 1
+
+            status = dart_status_of(payload)
+            if status == "013":
+                # alotMatter 와 같은 관례입니다: 013 은 오류가 아니라 "그 구간에 0건".
+                # (total_count 필드 자체가 없습니다 — 실측.)
+                log(f"  · {detail_ty}: {bgn_de}~{end_de} 접수분 0건(status 013)")
+                break
+            if status != "000":
+                raise DartApiError(
+                    f"공시목록 status {status} "
+                    f"({DART_STATUS_MESSAGES.get(status, '알 수 없는 코드')}) — "
+                    f"pblntf_detail_ty={detail_ty}, page_no={page_no}")
+
+            rows = payload.get("list")
+            if not isinstance(rows, list):
+                raise DartApiError(
+                    f"공시목록 status 000 인데 `list` 가 리스트가 아닙니다"
+                    f"(pblntf_detail_ty={detail_ty}, page_no={page_no}) — 응답 규격이 "
+                    "바뀌었을 수 있습니다.")
+
+            total_page = _positive_int(payload.get("total_page"))
+            if total_page is None:
+                # 몇 페이지인지 모르는 채로 1페이지만 읽고 "그 구간 다 확인했다"고 기록하면
+                # 그 구간을 영영 놓칩니다(§0-1: 확인 못 한 것을 확인했다고 하지 않기).
+                raise DartApiError(
+                    f"공시목록 응답에 total_page 가 없거나 숫자가 아닙니다"
+                    f"(pblntf_detail_ty={detail_ty}, page_no={page_no}, "
+                    f"받은 값={payload.get('total_page')!r}) — 일부만 읽고 전부 확인한 것처럼 "
+                    "기록하지 않기 위해 여기서 멈춥니다.")
+            if total_page > DART_LIST_MAX_PAGES:
+                raise DartApiError(
+                    f"공시목록 total_page 가 {total_page:,}쪽입니다(상한 "
+                    f"{DART_LIST_MAX_PAGES:,}쪽) — 조회 구간이 지나치게 넓거나 응답이 "
+                    "이상합니다. 무한정 요청하지 않고 멈춥니다(§0-3-2).")
+
+            for row in rows:
+                if not isinstance(row, dict):
+                    continue
+                seen_pairs += 1
+                raw_code = row.get("stock_code")
+                if raw_code is None or str(raw_code).strip() == "":
+                    # 채권만 발행한 비상장 법인 등. 종목코드가 없으니 우리 유니버스에도 없습니다.
+                    skipped_no_stock_code += 1
+                    continue
+                code = normalize_stock_code(raw_code)
+                if not code:
+                    # 조용히 버리지 않습니다 — 처음 보는 표기라면 사람이 알아야 합니다.
+                    skipped_bad_stock_code.append(str(raw_code))
+                    continue
+                entry = {
+                    "corp_code": row.get("corp_code"),
+                    "report_nm": row.get("report_nm"),
+                    "rcept_no": row.get("rcept_no"),
+                    "rcept_dt": row.get("rcept_dt"),
+                }
+                previous = found.get(code)
+                if previous is None:
+                    found[code] = entry
+                    continue
+                # 같은 종목이 두 번 이상 — 더 나중에 접수된(=rcept_no 가 큰) 쪽만 남깁니다.
+                if str(entry.get("rcept_no") or "") > str(previous.get("rcept_no") or ""):
+                    found[code] = entry
+
+            if page_no >= total_page:
+                break
+            page_no += 1
+
+    if skipped_no_stock_code:
+        log(f"  · 종목코드가 없는 공시 {skipped_no_stock_code:,}건은 건너뛰었습니다"
+            "(채권만 발행한 비상장 법인 등 — 우리 유니버스에 없는 회사입니다).")
+    if skipped_bad_stock_code:
+        log(f"  ⚠️ 종목코드를 6자리로 정규화하지 못한 공시 {len(skipped_bad_stock_code):,}건을 "
+            f"건너뛰었습니다: {_format_code_list(set(skipped_bad_stock_code))} "
+            "— 처음 보는 표기라면 normalize_stock_code() 를 확인하세요.")
+    log(f"  → 공시목록 {request_count:,}페이지 조회, 항목 {seen_pairs:,}건 중 "
+        f"종목코드 기준 {len(found):,}종목(중복 제거 후)")
+    return found
+
+
 # =============================================================================
 # 9. 유니버스 입력 / 체크포인트 / 저장
 # =============================================================================
@@ -2110,6 +2323,535 @@ def merge_delta_output(main_out_dir, delta_out_dir, bsns_year, force=False, log=
     return merged_records, merged_summary
 
 
+# =============================================================================
+# 13. 공시목록 감시(daily watch) 결과 반영
+#
+# ⚠️⚠️ 위 `merge_delta_output()` 과 생김새는 닮았지만 **정책이 정반대**입니다.
+#
+#   merge_delta_output() : "기존에 없던 신규 종목만 더한다."
+#       → 종목이 하나라도 겹치면 force=True 로도 **무조건 거부**합니다. 겹침은 "어느 쪽 값이
+#         맞는지 우리가 판정할 수 없는 문제"라, 자동 해소하면 반드시 한쪽을 조용히 버립니다.
+#
+#   apply_watch_update() : "방금 새 보고서를 낸 회사의 값을 최신으로 바꾼다."
+#       → 겹치는 것이 **정상이고 원하는 동작**입니다. 그래서 거부하지 않고 델타 쪽 값으로
+#         교체합니다. 이게 왜 안전한가:
+#           ① 델타는 언제나 "list.json 이 '새 정기보고서를 냈다'고 알려 준 회사"만 대상으로
+#              `run_collection()` 을 돌린 결과입니다(임의의 회사가 섞일 수 없습니다).
+#           ② `collect_one()` 의 우선순위 탐색(3분기→반기→1분기, 먼저 되는 것에서 멈춤)은
+#              **그 회사의 현재 시점 최신 보고서**를 고릅니다. 옛날 값으로 되돌아가는 경로가
+#              구조적으로 없습니다.
+#         그래도 ②가 어긋나는 일이 생기면(이론상 없어야 합니다) 값을 임의로 지키거나 버리지
+#         않고 **그대로 교체하되 눈에 띄게 경고**합니다 — merge_delta_output() 의
+#         "우리가 판정하지 않는다" 와 같은 결입니다(§0-1).
+#
+#   raw.jsonl 은 여기서도 **이어붙이기만** 합니다. append-only 감사 기록이라 옛 응답도 그대로
+#   남는 것이 맞습니다("교체"라는 개념 자체가 없습니다).
+# =============================================================================
+def watch_log_path(out_dir, bsns_year):
+    """감시 실행 이력 파일 경로. (언제 어느 구간을 확인해 무엇을 바꿨는지 남기는 감사 로그)"""
+    return os.path.join(out_dir, f"dividend_kr_{bsns_year}_watch_log.json")
+
+
+def _read_watch_log(path):
+    """감시 이력 읽기. 없거나 깨졌으면 빈 이력으로 시작합니다(`_read_merge_log` 와 같은 결)."""
+    if not os.path.exists(path):
+        return {"watches": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  ⚠️ 감시 이력 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
+              f"이력 없이 진행합니다: {path}")
+        return {"watches": []}
+    if not isinstance(data, dict) or not isinstance(data.get("watches"), list):
+        print(f"  ⚠️ 감시 이력 파일의 형태가 예상과 다릅니다 — 이력 없이 진행합니다: {path}")
+        return {"watches": []}
+    return data
+
+
+def _reprt_priority_index(reprt_code):
+    """
+    REPRT_CODE_PRIORITY 안에서의 위치(작을수록 '더 나중 기간을 덮는' 보고서). 모르는 코드면 None.
+
+    ⚠️ 모르는 코드를 끝에 있는 것처럼 취급하지 않습니다 — 그러면 "더 과거로 바뀌었다"는
+       잘못된 경고를 만들어 냅니다(§0-1: 모르면 모른다고 합니다).
+    """
+    if not reprt_code:
+        return None
+    try:
+        return REPRT_CODE_PRIORITY.index(reprt_code)
+    except ValueError:
+        return None
+
+
+def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
+                       date_range_checked=None, matched_stock_codes=None):
+    """
+    daily watch 델타(새 보고서를 낸 회사만 다시 돌린 별도 out_dir)를 기존 전체 결과에 반영합니다.
+
+    · 이미 있는 종목 → **교체**(merge_delta_output 과 정반대. 위 섹션 주석 참고)
+    · 없는 종목      → 추가
+    · raw.jsonl      → 이어붙이기만(append-only)
+
+    date_range_checked / matched_stock_codes 는 감사 로그에 남길 실행 맥락입니다(선택).
+    주지 않으면 델타 산출물에서 알 수 있는 만큼만 기록합니다 — 지어내지 않습니다.
+
+    ⚠️ 델타 산출물이 아예 없으면(그날 매칭 0건이라 `run_collection()` 을 안 돌린 경우) 이
+       함수를 부르지 마세요. 그 판단은 호출부(CLI)가 합니다.
+
+    반환: (merged_records, merged_summary)
+    """
+    # ── ① 두 실행 결과 읽기 (읽기만 — 아직 아무것도 쓰지 않습니다) ───────────────
+    main_path, main_summary, main_records = _read_run_output(
+        main_out_dir, bsns_year, "기존 전체 결과")
+    delta_path, delta_summary, delta_records = _read_run_output(
+        delta_out_dir, bsns_year, "감시 델타 실행 결과")
+
+    main_codes = _stock_code_set(main_records)
+    delta_codes = _stock_code_set(delta_records)
+
+    log("─" * 78)
+    log("① 감시 델타를 읽었습니다")
+    log(f"   기존: {main_path} — {len(main_records):,}레코드 / {len(main_codes):,}종목")
+    log(f"   델타: {delta_path} — {len(delta_records):,}레코드 / {len(delta_codes):,}종목")
+
+    # ── ② 델타 raw.jsonl 을 미리 다 읽어 둡니다 ───────────────────────────────
+    #    (merge_delta_output ④ 와 같은 순서: 검증을 전부 끝낸 뒤에야 첫 바이트를 씁니다)
+    delta_raw_path = os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
+    main_raw_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
+    delta_raw_lines = []
+    if not os.path.exists(delta_raw_path):
+        log(f"  ⚠️ 델타 raw 파일이 없습니다: {delta_raw_path} — "
+            "원본 응답 없이 가공본만 반영합니다(요청이 0건이었다면 정상입니다).")
+    else:
+        with open(delta_raw_path, "r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    json.loads(line)        # 형태 확인만 — 원문 줄을 그대로 이어붙입니다
+                except Exception as e:
+                    raise ValueError(
+                        f"델타 raw 파일 {lineno}번째 줄이 JSON 이 아닙니다: {delta_raw_path} "
+                        f"({type(e).__name__}: {e}). 원본 보관 파일이 깨진 채로 이어붙이지 "
+                        "않습니다 — 파일을 확인하고 다시 시도하세요.")
+                delta_raw_lines.append(line)
+
+    # ── ③ 교체/추가 ───────────────────────────────────────────────────────────
+    #    기존 순서를 그대로 지킵니다(같은 자리에서 값만 바뀝니다). 새 종목만 뒤에 붙습니다.
+    index_by_code = {}
+    for position, rec in enumerate(main_records):
+        code = rec.get("stock_code")
+        if code and code not in index_by_code:
+            index_by_code[code] = position
+
+    merged_records = list(main_records)
+    replaced_codes, added_codes, regression_notes = [], [], []
+
+    for new_rec in delta_records:
+        code = new_rec.get("stock_code")
+        if not code:
+            # 종목코드가 없는 레코드는 '교체 대상'을 특정할 수 없습니다. 버리지 않고 뒤에 붙입니다.
+            log("  ⚠️ 델타에 종목코드가 없는 레코드가 있어 교체 대상을 특정할 수 없습니다 "
+                "— 버리지 않고 그대로 덧붙입니다.")
+            merged_records.append(new_rec)
+            continue
+        position = index_by_code.get(code)
+        if position is None:
+            merged_records.append(new_rec)
+            index_by_code[code] = len(merged_records) - 1
+            added_codes.append(code)
+            log(f"  + 종목코드 {code}: 기존 결과에 없던 종목이라 새로 추가했습니다 "
+                f"({new_rec.get('reprt_name') or '(보고서 미상)'}"
+                f"/{new_rec.get('stlm_dt') or '결산일 미상'}).")
+            continue
+
+        old_rec = merged_records[position]
+        # §0-1: 조용히 덮어쓰지 않습니다 — 무엇이 무엇으로 바뀌었는지 한 줄씩 남깁니다.
+        log(f"  ↻ 종목코드 {code}: "
+            f"{old_rec.get('reprt_name') or '(보고서 미상)'}"
+            f"({old_rec.get('stlm_dt') or '결산일 미상'}) → "
+            f"{new_rec.get('reprt_name') or '(보고서 미상)'}"
+            f"({new_rec.get('stlm_dt') or '결산일 미상'})로 갱신 "
+            f"[주당배당금 {old_rec.get('dps_cash_common')} → "
+            f"{new_rec.get('dps_cash_common')}]")
+
+        # 안전장치: 새 보고서가 기존보다 '더 과거'를 가리키는가? (이론상 없어야 합니다)
+        old_idx = _reprt_priority_index(old_rec.get("reprt_code"))
+        new_idx = _reprt_priority_index(new_rec.get("reprt_code"))
+        if old_idx is not None and new_idx is not None and new_idx > old_idx:
+            note = (f"⚠️ 예상 밖: {code} 의 새 보고서가 기존보다 더 과거"
+                    f"({old_rec.get('reprt_name') or old_rec.get('reprt_code')}"
+                    f"→{new_rec.get('reprt_name') or new_rec.get('reprt_code')}) — "
+                    "그대로 교체했으나 원인 확인 필요")
+            # 값을 임의로 지키거나 버리지 않습니다. 교체는 그대로 하고, 사실만 크게 남깁니다.
+            log(f"  {note}")
+            regression_notes.append(note)
+
+        merged_records[position] = new_rec
+        replaced_codes.append(code)
+
+    # ── ④ 리포트 재계산 — 손으로 더하지 않고 summarize_results() 에 다시 먹입니다 ──
+    merged_unmapped = (list(main_summary.get("unmapped_detail") or [])
+                       + list(delta_summary.get("unmapped_detail") or []))
+
+    def _num_add(a, b):
+        """숫자 둘을 더합니다. 한쪽이라도 숫자가 아니면 '더할 수 없다'(None)."""
+        if isinstance(a, bool) or isinstance(b, bool):
+            return None
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return a + b
+        return None
+
+    main_completed = bool(main_summary.get("completed"))
+    delta_completed = bool(delta_summary.get("completed"))
+    both_completed = main_completed and delta_completed
+    if both_completed:
+        stopped_reason = None
+    else:
+        parts = []
+        if not main_completed:
+            parts.append(f"기존 실행 미완료({main_summary.get('stopped_reason') or '사유 미기록'})")
+        if not delta_completed:
+            parts.append(f"감시 델타 미완료({delta_summary.get('stopped_reason') or '사유 미기록'})")
+        stopped_reason = " / ".join(parts)
+
+    checked_at = _now_kst().isoformat()
+    merged_summary = summarize_results(merged_records, merged_unmapped, extra={
+        "bsns_year": str(bsns_year),
+        # 유니버스는 **새로 추가된 종목 수만큼만** 늘어납니다(교체는 크기를 바꾸지 않습니다).
+        "universe_size_input": _num_add(main_summary.get("universe_size_input"),
+                                        len(added_codes)),
+        "universe_size": _num_add(main_summary.get("universe_size"), len(added_codes)),
+        "requests_used": _num_add(main_summary.get("requests_used"),
+                                  delta_summary.get("requests_used")),
+        "elapsed_sec": _num_add(main_summary.get("elapsed_sec"),
+                                delta_summary.get("elapsed_sec")),
+        "completed": both_completed,
+        "stopped_reason": stopped_reason,
+        # corp_code 캐시 상태는 **나중에 돈 쪽**(델타)이 최신입니다.
+        "corpcode_source": delta_summary.get("corpcode_source",
+                                             main_summary.get("corpcode_source")),
+        "corpcode_stats": delta_summary.get("corpcode_stats",
+                                            main_summary.get("corpcode_stats")),
+        # ── 이번 감시 실행이 실제로 무엇을 했는지 ──────────────────────────────
+        "watch_update_performed_at_kst": checked_at,
+        "watch_date_range_checked": date_range_checked,
+        "watch_replaced_stock_codes": replaced_codes,
+        "watch_added_stock_codes": added_codes,
+        "watch_unexpected_report_regressions": regression_notes,
+        # 델타 실행의 원래 리포트를 원문 그대로 남깁니다(merged_from 과 같은 취지).
+        # ⚠️ 여기 남는 건 **가장 최근 감시 1회분**입니다. 누적 이력은 watch_log 파일입니다.
+        "watch_delta_summary": delta_summary,
+        "verification_status": (
+            "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 "
+            f"**부분 갱신**된 결과입니다 — 이번 실행에서 {len(replaced_codes):,}종목을 최신 "
+            f"보고서로 교체하고 {len(added_codes):,}종목을 새로 추가했습니다. 나머지 종목의 "
+            "값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 "
+            "갱신됐는지는 summary.watch_* 필드와 "
+            f"{os.path.basename(watch_log_path(main_out_dir, bsns_year))} 에 남아 있습니다."),
+    })
+
+    # ── ⑤ 저장 — 여기서부터가 첫 쓰기입니다(tmp → os.replace 원자적 교체) ──────
+    out_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_latest.json")
+    tmp = f"{out_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"summary": merged_summary, "records": merged_records},
+                  f, ensure_ascii=False, indent=2)
+    os.replace(tmp, out_path)
+
+    # ── ⑥ raw.jsonl 이어붙이기 (append-only, 줄 순서 그대로) ─────────────────
+    if delta_raw_lines:
+        os.makedirs(os.path.dirname(os.path.abspath(main_raw_path)) or ".", exist_ok=True)
+        with open(main_raw_path, "a", encoding="utf-8") as f:
+            f.write("".join(line + "\n" for line in delta_raw_lines))
+
+    # ── ⑦ 감시 이력 남기기 ────────────────────────────────────────────────────
+    log_path = watch_log_path(main_out_dir, bsns_year)
+    watch_log = _read_watch_log(log_path)
+    watch_log["watches"].append({
+        "checked_at_kst": checked_at,
+        "date_range_checked": date_range_checked,
+        # list.json 이 찾아준 것 중 우리 유니버스에 있던 종목(호출부가 알려 준 값).
+        # 안 알려 줬으면 델타가 실제로 돌린 종목으로 대신합니다 — 지어내지 않습니다.
+        "matched_stock_codes": (sorted(matched_stock_codes)
+                                if matched_stock_codes is not None
+                                else sorted(delta_codes)),
+        "matched_stock_codes_source": ("호출부가 전달한 list.json 매칭 결과"
+                                       if matched_stock_codes is not None
+                                       else "미전달 — 델타 산출물의 종목으로 대신 기록"),
+        "replaced_stock_codes": list(replaced_codes),
+        "added_stock_codes": list(added_codes),
+        "delta_raw_lines_appended": len(delta_raw_lines),
+        "unexpected_report_regressions": list(regression_notes),
+        "delta_out_dir": delta_out_dir,
+    })
+    log_tmp = f"{log_path}.tmp"
+    with open(log_tmp, "w", encoding="utf-8") as f:
+        json.dump(watch_log, f, ensure_ascii=False, indent=2)
+    os.replace(log_tmp, log_path)
+
+    # ── ⑧ 완료 보고 ───────────────────────────────────────────────────────────
+    log("─" * 78)
+    log("② 감시 반영 완료")
+    log(f"   교체 {len(replaced_codes):,}종목 / 추가 {len(added_codes):,}종목 → "
+        f"총 {merged_summary['total_records']:,}레코드 / 상태별 {merged_summary['by_status']}")
+    if regression_notes:
+        log(f"   ⚠️ 예상 밖(더 과거 보고서로 교체) {len(regression_notes):,}건 — "
+            "summary.watch_unexpected_report_regressions 참고")
+    log(f"   raw 이어붙인 줄 수: {len(delta_raw_lines):,}")
+    log(f"   가공본: {out_path}")
+    log(f"   raw   : {main_raw_path}")
+    log(f"   이력  : {log_path}")
+    log("   ⚠️ 이 파일은 전수 수집 결과가 아니라 **부분 갱신**된 결과입니다 "
+        "(summary.verification_status 참고).")
+    return merged_records, merged_summary
+
+
+# ── 13-2. 감시 상태 파일 — "어느 접수일까지 확인했나" ────────────────────────────
+def watch_state_path(cache_dir, bsns_year):
+    """감시 진행 상태 파일 경로(마지막으로 확인을 끝낸 접수일)."""
+    return os.path.join(cache_dir, f"dividend_kr_{bsns_year}_watch_state.json")
+
+
+def _read_watch_state(path):
+    """
+    상태 파일 읽기. 없거나 깨졌으면 빈 상태({})로 시작합니다.
+
+    ⚠️ 빈 상태 = "어디까지 확인했는지 모른다" 입니다. 그때는 `--watch-lookback-days` 만큼
+       거슬러 올라가 다시 확인합니다 — 모르는 구간을 확인한 셈 치지 않습니다(§0-1).
+    """
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  ⚠️ 감시 상태 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
+              f"'어디까지 확인했는지 모른다'로 보고 lookback 부터 다시 확인합니다: {path}")
+        return {}
+    if not isinstance(data, dict):
+        print(f"  ⚠️ 감시 상태 파일의 형태가 예상과 다릅니다 — lookback 부터 다시 "
+              f"확인합니다: {path}")
+        return {}
+    return data
+
+
+def _write_watch_state(path, last_checked_de):
+    """
+    "이 접수일까지는 확인을 끝냈다"를 기록합니다(tmp → os.replace 원자적 교체).
+
+    ⚠️ 호출 시점이 중요합니다 — **반영이 성공한 뒤에만** 부르세요. 실패했는데 '확인 끝'으로
+       적어 두면 그 구간은 영원히 다시 확인되지 않습니다(§0-1).
+    """
+    os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
+    payload = {"last_checked_de": str(last_checked_de),
+               "updated_at_kst": _now_kst().isoformat()}
+    tmp = f"{path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(tmp, path)
+    return payload
+
+
+def _parse_de(text):
+    """'YYYYMMDD' → date. 해석 못 하면 None(넘겨짚지 않습니다)."""
+    if not text:
+        return None
+    try:
+        return datetime.strptime(str(text).strip(), "%Y%m%d").date()
+    except (TypeError, ValueError):
+        return None
+
+
+def _reset_watch_delta_workspace(delta_out_dir, delta_cache_dir, bsns_year, log=print):
+    """
+    감시 델타 작업공간을 **매번 깨끗한 상태로** 만듭니다.
+
+    왜 지우는가: `run_collection()` 의 raw.jsonl 은 append 입니다. 같은 임시 디렉터리를
+    재사용하면 어제 델타의 raw 줄이 그대로 남아 있다가 오늘 반영 때 **다시** 본 파일에
+    이어붙습니다(같은 응답이 두 번 쌓임). 체크포인트도 같이 지워 "이 실행이 만든 것만"
+    반영되도록 합니다 — 감시 델타는 종목 수가 적어 처음부터 다시 도는 비용이 작습니다.
+
+    ⚠️ corp_code 캐시(dart_corpcode_cache.json)는 **지우지 않습니다** — 지우면 매번
+       corpCode.xml 을 다시 받게 되어 §0-3-2 에 어긋납니다.
+    """
+    targets = [
+        os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_latest.json"),
+        os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl"),
+        os.path.join(delta_cache_dir, f"dividend_kr_{bsns_year}_checkpoint.json"),
+    ]
+    removed = []
+    for path in targets:
+        try:
+            if os.path.exists(path):
+                os.remove(path)
+                removed.append(os.path.basename(path))
+        except Exception as e:
+            raise DartFatalError(
+                f"감시 델타 작업공간을 정리하지 못했습니다: {path} "
+                f"({type(e).__name__}: {e}). 지난 실행의 잔재가 남은 채로 진행하면 같은 "
+                "원본 응답이 본 파일에 두 번 쌓입니다 — 진행하지 않습니다.")
+    if removed:
+        log(f"  ℹ️ 지난 감시 델타 잔재를 정리했습니다: {', '.join(removed)} "
+            "(임시 작업공간이라 정상입니다)")
+
+
+def _seed_watch_delta_corpcode_cache(main_cache_dir, delta_cache_dir, log=print):
+    """
+    본 캐시의 corp_code 매핑 캐시를 감시 델타 작업공간으로 **복사**해 둡니다(읽기 전용 공유).
+
+    왜 복사인가: 감시 델타는 본 수집과 **다른 cache_dir** 을 씁니다. 같은 cache_dir 을 쓰면
+    체크포인트 파일 이름이 같아, 전수 수집이 중간에 멈춰 남겨 둔 체크포인트를 감시 실행이
+    덮거나 완주하면서 지워 버립니다(= 수천 건을 다시 요청하게 만듭니다, §0-3-2 위반).
+    그래서 디렉터리는 분리하되, corpCode.xml 을 매일 다시 받지 않도록 캐시 파일만 복사합니다.
+    실패해도 수집은 계속합니다(그 경우 corpCode.xml 을 한 번 더 받을 뿐입니다).
+    """
+    src = os.path.join(main_cache_dir, "dart_corpcode_cache.json")
+    dst = os.path.join(delta_cache_dir, "dart_corpcode_cache.json")
+    if not os.path.exists(src) or os.path.abspath(src) == os.path.abspath(dst):
+        return False
+    try:
+        os.makedirs(delta_cache_dir, exist_ok=True)
+        if os.path.exists(dst) and os.path.getmtime(dst) >= os.path.getmtime(src):
+            return False
+        shutil.copy2(src, dst)
+        log(f"  ℹ️ corp_code 캐시를 감시 작업공간으로 복사했습니다({src} → {dst}) "
+            "— corpCode.xml 을 매일 다시 받지 않기 위한 읽기 전용 공유입니다(§0-3-2).")
+        return True
+    except Exception as e:
+        log(f"  ⚠️ corp_code 캐시 복사에 실패했습니다({type(e).__name__}: {e}) — "
+            "수집은 그대로 진행합니다(corpCode.xml 을 한 번 더 받게 됩니다).")
+        return False
+
+
+def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
+                          lookback_days=3, api_key=None, session=None, log=print,
+                          today=None):
+    """
+    `--watch-disclosures` 모드의 본체. (main() 은 인자만 넘깁니다 — 테스트하기 쉽도록 분리)
+
+    흐름:
+      ① 상태 파일에서 "어디까지 확인했나"를 읽어 이번에 확인할 접수일 구간을 정합니다.
+         (끝은 **어제 KST** — 오늘은 아직 하루가 안 끝나 접수가 더 들어올 수 있습니다)
+      ② list.json 으로 그 구간의 새 정기보고서를 훑습니다.
+      ③ 우리 유니버스에 있는 종목만 남깁니다.
+      ④ 그 종목만 담은 작은 유니버스로 `run_collection()` 을 돌립니다(별도 임시 out_dir).
+      ⑤ `apply_watch_update()` 로 본 산출물에 반영합니다.
+      ⑥ **성공한 뒤에야** 상태 파일을 갱신합니다.
+
+    반환: 프로세스 종료코드(0=정상, 2=사람이 손봐야 하는 중단).
+    """
+    cache_dir = cache_dir or out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    # ── ① 확인할 구간 정하기 ─────────────────────────────────────────────────
+    state_path = watch_state_path(cache_dir, bsns_year)
+    state = _read_watch_state(state_path)
+    last_checked_de = state.get("last_checked_de")
+
+    today = today or _now_kst().date()
+    end_date = today - timedelta(days=1)        # 어제까지(오늘은 다음 실행에서 확인)
+
+    start_date = None
+    if last_checked_de:
+        parsed = _parse_de(last_checked_de)
+        if parsed is None:
+            log(f"  ⚠️ 상태 파일의 last_checked_de 를 날짜로 읽지 못했습니다"
+                f"({last_checked_de!r}) — 확인한 셈 치지 않고 lookback "
+                f"{lookback_days}일부터 다시 확인합니다.")
+        else:
+            start_date = parsed + timedelta(days=1)
+    if start_date is None:
+        start_date = today - timedelta(days=max(1, int(lookback_days)))
+
+    if start_date > end_date:
+        # 조용히 스킵하지 않습니다 — 왜 아무 일도 안 했는지 사람이 알아야 합니다(§0-1).
+        log(f"ℹ️ 확인할 새 구간이 없습니다"
+            f"(이미 {last_checked_de or '(상태 없음)'}까지 확인함 — 다음 확인 시작일 "
+            f"{start_date:%Y-%m-%d} 가 확인 종료일 {end_date:%Y-%m-%d}(어제)보다 "
+            "뒤입니다). 상태 파일은 건드리지 않습니다.")
+        return 0
+
+    bgn_de = start_date.strftime("%Y%m%d")
+    end_de = end_date.strftime("%Y%m%d")
+    date_range_checked = f"{bgn_de}~{end_de}"
+    log("─" * 78)
+    log(f"📡 공시목록 감시 — 접수일 {start_date:%Y-%m-%d} ~ {end_date:%Y-%m-%d} 구간에 "
+        f"새로 접수된 정기보고서를 확인합니다(정기공시 {', '.join(PERIODIC_DETAIL_TYPES)}).")
+
+    key = get_api_key(api_key)
+    if not key:
+        raise DartFatalError(
+            f"환경변수 {DART_API_KEY_ENV} 가 없습니다. 인증키를 코드에 적지 말고 "
+            "GitHub Actions Secret / 로컬 환경변수로 넣으세요.")
+
+    # ── ② 새로 접수된 정기보고서 훑기 ────────────────────────────────────────
+    filings = fetch_new_periodic_filings(bgn_de, end_de, key, session=session, log=log)
+
+    # ── ③ 우리 유니버스로 거르기 ─────────────────────────────────────────────
+    #    유니버스 파일의 **원문 코드**를 그대로 run_collection 에 넘겨야 회사명 2차 매칭
+    #    (`universe_name_map` 은 원문 코드 키)이 그대로 동작합니다. 그래서 비교만 정규화합니다.
+    universe = load_universe(universe_path)
+    universe_by_norm = {}
+    for raw_code in universe:
+        norm = normalize_stock_code(raw_code)
+        if norm:
+            universe_by_norm.setdefault(norm, raw_code)
+
+    matched_norm = sorted(code for code in filings if code in universe_by_norm)
+    matched_input_codes = [universe_by_norm[code] for code in matched_norm]
+
+    log(f"  → 새 정기보고서 {len(filings):,}종목 중 우리 유니버스"
+        f"({len(universe_by_norm):,}종목)에 있는 종목: {len(matched_norm):,}건")
+
+    if not matched_norm:
+        log("ℹ️ 새로 접수된 정기보고서 중 우리 유니버스에 해당하는 종목 없음 — "
+            "수집할 것이 없습니다.")
+        # 그래도 "이 구간은 확인했다"는 사실 자체는 기록합니다. 안 그러면 다음 실행이
+        # 같은 구간을 또 훑어 DART 에 헛요청을 반복합니다(§0-3-2).
+        _write_watch_state(state_path, end_de)
+        log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de})")
+        return 0
+
+    log("  대상 종목: " + _format_code_list(set(matched_norm)))
+    for code in matched_norm[:20]:
+        info = filings[code]
+        log(f"    · {code} {info.get('report_nm')} "
+            f"(접수 {info.get('rcept_dt')}, rcept_no={info.get('rcept_no')})")
+
+    # ── ④ 그 종목만 다시 수집 ────────────────────────────────────────────────
+    delta_out_dir = os.path.join(cache_dir, "watch_delta")
+    os.makedirs(delta_out_dir, exist_ok=True)
+    _reset_watch_delta_workspace(delta_out_dir, delta_out_dir, bsns_year, log=log)
+    _seed_watch_delta_corpcode_cache(cache_dir, delta_out_dir, log=log)
+
+    run_collection(
+        matched_input_codes, bsns_year, delta_out_dir,
+        cache_dir=delta_out_dir,
+        api_key=api_key, session=session,
+        # 이 모드의 목적은 "지금 최신 보고서 확인"뿐이라 사업보고서 프로브까지 갈 필요가
+        # 없습니다(오너 지시 순서: 3분기→반기→1분기).
+        priority=REPRT_CODE_PRIORITY_OWNER_ORDER,
+        # watch_delta 는 매번 새로 쓰는 임시 작업공간이라 덮어쓰기 가드가 필요 없습니다.
+        allow_overwrite=True,
+        universe_name_map=load_universe_name_map(universe_path),
+        history_baseline_path=None,     # 교차검증은 이번 범위 밖입니다.
+        log=log)
+
+    # ── ⑤ 본 산출물에 반영 ───────────────────────────────────────────────────
+    apply_watch_update(out_dir, delta_out_dir, bsns_year, log=log,
+                       date_range_checked=date_range_checked,
+                       matched_stock_codes=matched_norm)
+
+    # ── ⑥ 여기까지 왔을 때만 "확인 끝"으로 기록합니다 ────────────────────────
+    _write_watch_state(state_path, end_de)
+    log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de})")
+    return 0
+
+
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="DART alotMatter 기반 한국 상장사 배당 수집기 (visible_hand 배당금 모듈)")
@@ -2157,6 +2899,11 @@ def main(argv=None):
                         help="[병합 모드 전용] 이미 병합한 적 있는 델타여도 강제로 다시 "
                              "병합합니다(병합 이력에 forced 로 남습니다). 종목이 실제로 "
                              "겹치는 경우는 이 옵션으로도 통과하지 못합니다.")
+    parser.add_argument("--watch-disclosures", action="store_true",
+                        help="[watch 모드] --universe 의 종목 중 어제 이후 새로 접수된 정기보고서만 "
+                             "확인해 그 종목만 갱신합니다. 전체 재수집을 하지 않습니다.")
+    parser.add_argument("--watch-lookback-days", type=int, default=3,
+                        help="watch 상태 파일이 아직 없을 때(최초 실행) 며칠 전부터 확인할지")
     args = parser.parse_args(argv)
 
     # ── 병합 모드: 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──────────────
@@ -2172,6 +2919,27 @@ def main(argv=None):
 
     if args.force_merge:
         parser.error("--force-merge 는 --merge-delta 와 함께 쓸 때만 의미가 있습니다.")
+
+    # ── 공시목록 감시 모드: 이것도 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──
+    #    (평소 수집은 유니버스 전체를 다시 훑지만, 이 모드는 "어제 새 보고서를 낸 회사"만
+    #     콕 집어 다시 돕니다 — 아래 run_watch_disclosures() 참고.)
+    if args.watch_disclosures:
+        if not args.universe:
+            parser.error("--universe 가 필요합니다 (watch 모드). 어제 새로 접수된 정기보고서 "
+                         "중 '우리 유니버스에 있는 종목'만 골라내야 하기 때문입니다.")
+        try:
+            return run_watch_disclosures(
+                args.universe, args.year, args.out_dir, cache_dir=args.cache_dir,
+                lookback_days=args.watch_lookback_days, log=print)
+        except (DartFatalError, DartCorpCodeError, DartApiError) as e:
+            # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로. 다만 '조용히 성공'하지 않습니다.
+            # ⚠️ 상태 파일은 갱신되지 않은 상태입니다 — 다음 실행이 같은 구간을 다시 확인합니다.
+            print(f"🛑 공시목록 감시를 중단했습니다 — {e}")
+            return 2
+        except (FileNotFoundError, ValueError) as e:
+            print(f"🛑 감시 결과를 반영하지 못했습니다 — {e}")
+            return 2
+
     if not args.universe:
         parser.error("--universe 가 필요합니다 (수집 모드). "
                      "델타 병합만 하려면 --merge-delta DELTA_OUT_DIR 을 쓰세요.")

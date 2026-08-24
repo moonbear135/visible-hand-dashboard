@@ -214,15 +214,35 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
      무제한)으로 처리하도록 짜여 있어 **코드 수정은 필요 없었고 워크플로우 YAML만
      추가**했습니다. YAML 파싱 검증(PyYAML)만 했고, 실제 자동 실행 여부는 다음
      예정일(5/16~17)에 GitHub Actions 탭에서 오너가 직접 확인 필요.
-   - 🔵 **"매일 가볍게 신규 접수만 확인" 방식으로 업그레이드 검토 중 (2026-08-25).**
-     오너 요청 — 지금(마감일마다 전체 유니버스 재조회) 대신, DART `list.json`
-     ("공시검색") API로 매일 "어제 새로 접수된 정기보고서"만 가볍게 확인하고, 우리
-     유니버스에 있는 회사가 새로 냈으면 그 회사만 `alotMatter.json`으로 콕 집어
-     가져오는 방식. 공식 문서상 가능해 보이지만(§0-1 — 문서만 보고 코드 짜지 않음)
-     **아직 실측 미확인**이라 `probe_dart_disclosure_list.py` +
-     `.github/workflows/probe_dart_disclosure_list.yml`(둘 다 임시, 확인 끝나면
-     삭제 예정)로 실제 호출 결과를 기다리는 중. 확인되면 진짜 기능(오푸스 높음)으로
-     넘어갈 예정.
+   - ✅ **"매일 가볍게 신규 접수만 확인"(daily watch) — 완료(2026-08-25, 오푸스 높음).**
+     `probe_dart_disclosure_list.py` + 짝 워크플로우로 GitHub Actions 실서버에서 실측
+     확인(§0-1 — 문서만 보고 짜지 않음)한 뒤 진짜 기능으로 전환. **실측으로 확인된 것**:
+     ① `list.json`("공시검색")이 `bgn_de`/`end_de` 접수일 범위 + `pblntf_ty=A`(정기공시) +
+     `pblntf_detail_ty`(A001/A002/A003)로 정확히 필터링됨(삼성전자·서암기계공업 기존
+     확인 건 그대로 재현). ② **A003(분기보고서)은 1분기·3분기를 이름으로 구분 안
+     함**(`report_nm`이 둘 다 "분기보고서", `(YYYY.MM)` 접미사로만 구분) — 그래서 새 기능은
+     이름을 파싱하지 않고 "이 회사가 새로 냈다"는 신호만 받아 기존 `collect_one()`의
+     우선순위 탐색에 맡김. ③ 빈 결과는 `status="013"`(오류 아님, 기존 alotMatter 관례와
+     동일). ④ ⚠️ **실제 접수 몰림 날짜가 기존 가정(법정 마감일 근처)보다 약 2주씩 늦음**
+     (2026-05-29 vs 가정 5/15경, 2025-11-28 vs 가정 11/14경) — 원인은 미확인이지만, 그래서
+     "마감일 며칠 뒤 1회" 방식보다 매일 감시가 구조적으로 더 안전하다는 근거가 됨(이미
+     만든 8-cron 자동 재수집은 안전망으로 그대로 둠, 삭제 안 함).
+     신규: `fetch_new_periodic_filings()`(list.json 페이지네이션 + `stock_code` 빈 항목
+     제외 + `rcept_no` 최댓값 기준 중복 제거) · `apply_watch_update()`(기존
+     `merge_delta_output()`과 **정반대 정책** — 겹치면 거부가 아니라 **교체(upsert)**,
+     이유는 델타가 항상 "새로 낸 회사"만 대상으로 우선순위 탐색을 다시 돌린 결과라
+     구조적으로 과거로 못 돌아감; `merge_delta_output()` 본체는 전혀 안 건드림, 바로 위
+     주석 블록에 두 함수 정책 차이를 명시) · `run_watch_disclosures()`(접수일 어제까지
+     조회, 상태파일 `dividend_kr_2026_watch_state.json`로 "어디까지 확인했는지" 추적,
+     **반영 성공했을 때만** 상태 갱신 — 실패하면 같은 구간 다음 실행에서 재시도) · CLI
+     `--watch-disclosures`/`--watch-lookback-days`(기본 3일) · 신규 워크플로우
+     `.github/workflows/watch_dividend_disclosures.yml`(매일 KST 05:00 자동 실행,
+     `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유로 동시쓰기 방지, 반영 실패
+     시 `if: always()` 없이 커밋 스텝 자체를 건너뛰어 상태파일이 잘못된 "확인 완료"로
+     남지 않게 함). 테스트 188 → **267개 전부 통과**(신규 79건 — pagination·013·
+     403/429 처리·중복제거·교체/추가/raw append-only/원자적 쓰기/감사로그·CLI 배선까지).
+     `probe_dart_disclosure_list.py`와 짝 워크플로우는 "확인 끝나면 지우는" 임시
+     스크립트 관례대로 이제 삭제해도 됩니다.
    - 🟡 **화면(`/dividend`) 정보 밀도 재구성 — 완료, 오너 재확인 대기 (2026-08-24).**
      Render 실배포 후 오너가 "정보량이 너무 많다, 달력이 먼저 보이는 단순한 구조를
      원했다"고 피드백. 문구는 한 글자도 안 지우고 배경 설명을 달력 아래 접이식 패널로
@@ -298,7 +318,8 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `.github/workflows/keep_awake.yml` | (2026-08-09 신설) Streamlit 무료 호스팅이 **12시간 무방문 시 앱을 재우는 정책** 대응 — 8시간마다 실제 Streamlit 앱 URL(커스텀 도메인 아님)을 방문해 타이머 리셋. 데이터 수집과 무관, 실패해도 영향 없음 |
 | `collector_dividend_kr.py` | (2026-08-23 신설) 💰 **배당금 모듈(6번째 모듈)** 수집기. DART OpenAPI `alotMatter.json`("배당에 관한 사항")을 종목별로 불러 **당해 사업연도의 가장 최근 확정 누적치**(사업보고서→3분기→반기→1분기 순으로 찾아 첫 번째 쓸 수 있는 것에서 멈춤)를 수집 → `data/dividend_kr_2026_latest.json`(가공) + `data/dividend_kr_2026_raw.jsonl`(원본, §0-3-3). 파싱은 전부 `se` 라벨 **키워드 매칭**(위치 인덱스 없음, §0-1). 실패·무데이터 종목도 **같은 스키마의 레코드로** 남김 |
 | `corp_code_mapper.py` | (2026-08-23 신설) 종목코드(6자리) ↔ DART 고유번호(`corp_code` 8자리) 매핑. `corpCode.xml` ZIP 을 받아 `data/cache/` 에 캐시 |
-| `.github/workflows/collect_dividend_kr.yml` | (2026-08-23 신설) 💰 **배당 수집 워크플로우.** DART 정기보고서는 1년에 4번만 갱신되므로 **수동(`workflow_dispatch`) 전용** — 매일 돌리면 같은 값을 다시 받는 §0-3-2 위반. 5시간 예산에서 스스로 멈추고 체크포인트를 남김(job timeout 340분) |
+| `.github/workflows/collect_dividend_kr.yml` | (2026-08-23 신설) 💰 **배당 수집 워크플로우.** DART 정기보고서는 1년에 4번만 갱신되므로 원칙은 수동(`workflow_dispatch`) — 2026-08-25부터 분기 마감일 8-cron 안전망 추가(§0 참고). 5시간 예산에서 스스로 멈추고 체크포인트를 남김(job timeout 340분) |
+| `.github/workflows/watch_dividend_disclosures.yml` | (2026-08-25 신설) 💰 **배당 일일 공시감시 워크플로우.** DART `list.json`(공시검색)으로 매일 KST 05:00 "새로 정기보고서 낸 회사"만 가볍게 확인 후 그 회사만 재수집·반영(`--watch-disclosures`). `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유(동시 쓰기 방지), 반영 실패 시 상태파일을 커밋하지 않음(§0-1) |
 | `web/pages/dividend_page.py` | (2026-08-24 신설) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py` |
 | `market_history.csv` | 날짜별 종합 위험 점수 이력 |
 | `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json` | 종목별 최신 데이터 + **시장 전체** 요약 이력 (⚠️ `*summary_history.json` 은 중앙값 요약이지 종목별 이력이 아닙니다 — 종목별 이력은 2026-08-09 신설된 `*_stock_history.csv`) |
@@ -339,6 +360,20 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-25 — 배당금 "매일 공시감시(daily watch)" 완료(오푸스 높음, §0-1 실측 확인
+  선행).** 오너 요청("매일매일 올라와있는 공시자료를 꾸준하게 본다거나…")으로 시작.
+  이 세션이 opendart.fss.or.kr에 직접 못 붙는 샌드박스 제약 때문에, 조사용 스크립트
+  (`probe_dart_disclosure_list.py`) + 임시 워크플로우를 GitHub Actions에서 실제로
+  실행해 받은 실측 로그를 스펙으로 삼아 진짜 기능을 만듦(추측 금지). 상세 결과·신규
+  함수·신규 워크플로우는 §0 위 항목 참고. 핵심 요약만: `list.json` 실측 확인 →
+  `fetch_new_periodic_filings()`/`apply_watch_update()`/`run_watch_disclosures()` 신설 →
+  `--watch-disclosures` CLI → `watch_dividend_disclosures.yml`(매일 KST 05:00) → 테스트
+  188 → 267개 전부 통과. `apply_watch_update()`는 기존 `merge_delta_output()`과 정반대
+  정책(겹치면 거부 대신 교체)이라 완전히 새 함수로 분리했고, `merge_delta_output()` 본체는
+  직접 재확인 결과 전혀 안 바뀜. `collector_dividend_kr.py`·
+  `tests/test_dividend_collector.py`·`watch_dividend_disclosures.yml`(신규) 3개 파일
+  변경, `PROJECT_STATUS.md` 갱신 포함. 임시 조사 스크립트(`probe_dart_disclosure_list.py` +
+  짝 워크플로우)는 관례대로 삭제 대상으로 남음(오너 삭제 대기).
 - **2026-08-24 (계속 이어서, 델타 유니버스 파일 완성)** — 오너 지시로 실제 델타 유니버스
   파일을 만들었습니다(`data/dividend_kr_2026_universe_delta.json`, 네트워크 요청 0건 —
   이미 있는 `kr_ticker_master.json`·`dividend_history_kr_2023_2025.json` 두 파일만 대조).

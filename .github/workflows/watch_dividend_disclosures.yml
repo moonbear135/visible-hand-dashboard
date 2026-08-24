@@ -1,0 +1,155 @@
+# .github/workflows/watch_dividend_disclosures.yml
+# =============================================================================
+# 📡 배당금 모듈 — DART 공시목록 감시(daily watch)
+#
+#   하는 일:
+#     DART OpenAPI `list.json`("공시검색")으로 **어제 하루치 새로 접수된 정기보고서만**
+#     가볍게 훑고, 그중 우리 유니버스(data/dividend_history_kr_2023_2025.json)에 있는
+#     종목이 있으면 **그 종목만** alotMatter 로 다시 받아 data/dividend_kr_2026_latest.json
+#     을 부분 갱신합니다. 유니버스 전체(약 2,700종목)를 다시 훑지 않습니다.
+#
+#   왜 이게 필요한가 (2026-08-24 실측으로 알게 된 사실):
+#     `collect_dividend_kr.yml` 의 자동 스케줄 8개는 "법정 제출기한 = 기간 종료 후 45일"
+#     (1분기보고서 = 3/31 + 45일 ≒ 5/15) 을 근거로 날짜를 잡아 뒀습니다. 그런데 list.json
+#     으로 실제 접수 몰림을 세어 보니
+#       · 1분기보고서(3/31 기준) 몰림 = 5/29
+#       · 3분기보고서(9/30 기준) 몰림 = 2025년 기준 11/28
+#     이었습니다 — 우리가 잡아 둔 날짜와 2주 가까이 차이가 납니다. 정확한 이유는 확인하지
+#     못했고(영업일 기준 산정 등 여러 가능성이 있으나 이 워크플로우의 범위 밖입니다)
+#     **여기서 추측하지 않습니다.** 대신 구조를 바꿉니다: 특정 날짜를 맞히려 애쓰는 대신
+#     매일 어제치만 확인하면, 어느 날 몰리든 그 다음 날 아침에 반드시 잡힙니다.
+#
+#   왜 매일 돌려도 §0-3-2("외부 서버에 무리 주지 않기")에 어긋나지 않는가:
+#     · 평소(정기보고서 시즌이 아닌 날)에는 list.json 조회 몇 건이 전부입니다. 해당 종목이
+#       없으면 alotMatter 는 **한 건도** 부르지 않고 끝납니다.
+#     · 접수가 몰리는 날에만 그날 새로 낸 종목 수만큼 요청이 늘어납니다. 전수 재수집(약
+#       5,000건 이상)보다 훨씬 적습니다.
+#     · 휴장일·주말에는 list.json 이 그냥 0건(status 013)을 돌려주고 조용히 끝납니다.
+#       그래서 요일 제한 없이 매일 돌립니다.
+#     · 어디까지 확인했는지는 data/cache/dividend_kr_2026_watch_state.json 에 남으므로,
+#       같은 구간을 두 번 훑지 않습니다(실행이 실패하면 상태 파일을 **일부러 갱신하지
+#       않아** 다음 실행이 같은 구간을 다시 확인합니다).
+#
+#   ⚠️ 이 워크플로우는 `collect_dividend_kr.yml`(전수 수집)을 대체하지 않습니다.
+#     그쪽 스케줄 8개는 안전망으로 그대로 둡니다 — 감시가 놓친 것이 있어도 전수 수집이
+#     한 번 더 훑어 줍니다. 두 워크플로우가 같은 data/dividend_kr_2026_latest.json 을
+#     건드리므로 **아래 `concurrency.group` 을 그쪽과 똑같이** 맞춰 뒀습니다.
+#
+#   ⚠️ GitHub 공식 제약 — 저장소에 60일 넘게 아무 커밋도 없으면 GitHub 이 예정된 schedule 을
+#     자동으로 비활성화합니다. 자동 실행이 오래 안 됐다 싶으면 저장소 Actions 탭에서 이
+#     워크플로우가 여전히 "Active" 인지 확인하세요(한 번 수동 실행하면 다시 켜집니다).
+#
+#   비밀키:
+#     DART_API_KEY 를 저장소 Settings → Secrets and variables → Actions 에 등록해야
+#     합니다(전수 수집 워크플로우와 같은 시크릿). 코드 어디에도 하드코딩돼 있지 않습니다.
+# =============================================================================
+
+name: Dividend KR Disclosure Watch
+
+on:
+  workflow_dispatch: {}
+
+  # 매일 1번, KST 05:00. "어제 하루치 접수분"을 확인하는 구조라 아침에 한 번이면 충분합니다
+  # (§0-3-2 — 매일이지만 평소엔 list.json 조회 몇 건뿐인 가벼운 작업입니다). cron 은 항상
+  # UTC 이므로 20:00 UTC = 다음 날 05:00 KST 입니다. 요일 제한은 두지 않습니다 — 휴장일에는
+  # list.json 이 0건을 돌려주고 스크립트가 상태만 남기고 조용히 끝냅니다.
+  schedule:
+    - cron: '0 20 * * *'
+
+# 산출물(data/dividend_kr_2026_*, data/cache/*)을 저장소에 커밋해야 하므로 쓰기 권한.
+permissions:
+  contents: write
+
+# 🔴 collect_dividend_kr.yml 과 **완전히 같은 그룹 이름**입니다(글자 하나까지).
+#    두 워크플로우가 같은 data/dividend_kr_2026_latest.json 을 쓰기 때문에, 같은 그룹으로
+#    묶어야 GitHub 이 자동으로 줄을 세워 줍니다. 이름이 다르면 전수 수집과 이 감시 작업이
+#    동시에 같은 파일을 써서 파일이 깨질 수 있습니다.
+concurrency:
+  group: dividend-kr-collector
+  cancel-in-progress: false
+
+jobs:
+  watch:
+    runs-on: ubuntu-latest
+    # 평소엔 몇 분이면 끝납니다. 접수가 몰린 날(수백 종목)에도 종목당 2~3초 딜레이를 감안해
+    # 넉넉히 잡되, 전수 수집(340분)처럼 길게 둘 이유는 없습니다.
+    timeout-minutes: 120
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 공시목록 감시 실행
+        env:
+          # 🔴 이 저장소 Settings → Secrets and variables → Actions 에 등록 필요.
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          # 이 워크플로우는 외부 입력(workflow_dispatch inputs)을 받지 않습니다 —
+          # 인자가 전부 이 파일에 적힌 고정 문자열이라 script injection 여지가 없습니다
+          # (§0-3-9). 나중에 입력을 추가한다면 collect_dividend_kr.yml 처럼 반드시
+          # env 로 받아 쓰세요.
+          python collector_dividend_kr.py \
+            --universe data/dividend_history_kr_2023_2025.json \
+            --year 2026 \
+            --out-dir data \
+            --cache-dir data/cache \
+            --watch-disclosures
+
+      - name: 산출물 커밋
+        # ⚠️ 여기에는 `if: always()` 를 **일부러 넣지 않습니다.**
+        #    전수 수집 워크플로우는 중간 체크포인트를 건져야 해서 always() 가 필요했지만,
+        #    이 모드는 실패하면 상태 파일(dividend_kr_2026_watch_state.json)을 일부러
+        #    갱신하지 않습니다 — "확인 끝"으로 잘못 기록되면 그 구간이 영원히 스킵되기
+        #    때문입니다. 실패한 실행의 어중간한 산출물을 커밋하면 그 안전장치가 무너집니다.
+        #    따라서 기본값(success())대로, 성공했을 때만 커밋합니다.
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # ⚠️ git add 대상을 **명시적으로 열거**합니다. `git add data/` 로 뭉뚱그리면
+          #    임시 작업공간인 data/cache/watch_delta/ 의 중간 산출물까지 저장소에 들어갑니다
+          #    (그건 매 실행마다 지워지고 다시 쓰이는 작업 파일이라 커밋 대상이 아닙니다).
+          for f in \
+            data/dividend_kr_2026_latest.json \
+            data/dividend_kr_2026_raw.jsonl \
+            data/dividend_kr_2026_watch_log.json \
+            data/cache/dividend_kr_2026_watch_state.json \
+            data/cache/dart_corpcode_cache.json \
+          ; do
+            if [ -f "$f" ]; then
+              git add "$f"
+            fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "변경 없음 — 커밋하지 않습니다(그날 새 정기보고서가 없었다면 정상입니다)."
+            exit 0
+          fi
+
+          git commit -m "chore(dividend): 공시목록 감시 결과 반영 [skip ci]"
+
+          # 다른 워크플로우(전수 수집·코스피 수집 등)도 같은 data/ 폴더를 커밋하므로
+          # push 가 거절될 수 있습니다. 기존 워크플로우들과 같은 재시도 패턴.
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "push 성공 (시도 $attempt)"
+              exit 0
+            fi
+            echo "push 거절 — fetch 후 rebase 재시도 ($attempt/3)"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || exit 1
+          done
+          echo "❌ 3회 시도 후에도 push 하지 못했습니다."
+          exit 1

@@ -2937,3 +2937,1275 @@ def test_cli_passes_universe_name_map_without_a_new_flag(tmp_path, monkeypatch):
     assert cdk.main(["--universe", str(plain), "--year", "2026",
                      "--out-dir", str(tmp_path)]) == 0
     assert seen["universe_name_map"] == {}
+
+
+# =============================================================================
+# 16. 공시목록 감시 (list.json watch) — fetch_new_periodic_filings /
+#     apply_watch_update / --watch-disclosures
+#
+# 배경(2026-08-24 실측): DART `list.json`("공시검색")으로 접수 몰림을 실제로 보니,
+#   · 1분기보고서(3/31 기준) 접수 몰림 = 5/29
+#   · 3분기보고서(9/30 기준) 접수 몰림 = 2025년 기준 11/28
+# 이었습니다. 이 프로젝트가 앞서 가정한 "법정기한 = 마감 후 45일"(1분기 ~5/15) 과 실제
+# 몰림 날짜 사이에 2주 가까운 차이가 있습니다(이유는 확인하지 못했고 여기서 추측하지
+# 않습니다). 그래서 "마감일 근처에 전체를 다시 훑기" 대신 **매일 어제치만 가볍게 확인**
+# 하는 경로를 더했습니다 — 날짜를 못 맞혀도 다음 날 잡힙니다.
+#
+# 여기 테스트가 못 박는 것:
+#   · list.json 은 **전 페이지**를 다 돈다(정렬 순서에 기대지 않는다).
+#   · status 013 은 오류가 아니라 "그 구간 0건"이다.
+#   · 종목코드 없는 항목(채권만 발행한 비상장 법인 등)은 건너뛴다.
+#   · 같은 종목이 여러 번 나오면 **가장 나중에 접수된(rcept_no 최대)** 것만 남긴다.
+#   · apply_watch_update 는 merge_delta_output 과 **정반대로** 겹침을 교체한다 —
+#     다만 조용히 덮어쓰지 않고 무엇이 무엇으로 바뀌었는지 한 줄씩 남긴다(§0-1).
+#   · 실패하면 상태 파일을 갱신하지 않는다(= 그 구간을 다음 실행이 다시 확인한다).
+# =============================================================================
+from datetime import datetime as _dt      # noqa: E402
+
+# 실측 응답 원문(2026-08-24, GitHub Actions 에서 실제 DART_API_KEY 로 호출).
+# ⚠️ 결과가 없을 때는 `total_count` 필드 자체가 없습니다 — alotMatter 와 같은 013 관례.
+REAL_LIST_NO_DATA = {"status": "013", "message": "조회된 데이타가 없습니다."}
+
+
+def _filing_row(stock_code, rcept_no, report_nm="분기보고서 (2026.03)",
+                corp_code="01267967", rcept_dt="20260529", corp_name="테스트회사"):
+    """list.json `list` 항목 한 건(실측 응답과 같은 키 구성)."""
+    return {"corp_cls": "K", "corp_name": corp_name, "corp_code": corp_code,
+            "stock_code": stock_code, "report_nm": report_nm, "rcept_no": rcept_no,
+            "flr_nm": corp_name, "rcept_dt": rcept_dt, "rm": ""}
+
+
+def _list_page(rows, page_no=1, total_page=1, total_count=None):
+    """list.json 한 페이지 응답(실측 형태 그대로)."""
+    return {"status": "000", "message": "정상", "page_no": page_no,
+            "page_count": 100,
+            "total_count": len(rows) if total_count is None else total_count,
+            "total_page": total_page, "list": list(rows)}
+
+
+@pytest.fixture
+def fake_list_api(monkeypatch):
+    """
+    list.json 만 가짜로 바꿉니다(소켓은 열지 않습니다). 반환: (calls, pages)
+
+      pages[(detail_ty, page_no)] = 응답 dict  또는  (http_status, 응답)
+      등록되지 않은 (detail_ty, page_no) 는 실측 013(0건) 응답을 돌려줍니다.
+    """
+    class _Calls(list):
+        """호출 목록 + 딜레이 호출 횟수를 한 객체로 들고 다니기 위한 얇은 껍데기."""
+        slept = None
+
+    calls = _Calls()
+    pages = {}
+
+    def fake_get(url, params, timeout, session):
+        assert url == cdk.DART_DISCLOSURE_LIST_URL
+        calls.append(dict(params))
+        key = (params.get("pblntf_detail_ty"), int(params.get("page_no")))
+        payload = pages.get(key, REAL_LIST_NO_DATA)
+        if isinstance(payload, tuple):
+            return payload
+        return 200, payload
+
+    monkeypatch.setattr(cdk, "_http_get_json", fake_get)
+    # §0-3-2 딜레이는 진짜로 자면 테스트가 느려지므로 호출 여부만 셉니다.
+    slept = []
+    monkeypatch.setattr(cdk, "polite_sleep", lambda *a, **k: slept.append(1) or 0.0)
+    calls.slept = slept          # 테스트에서 같이 볼 수 있게 얹어 둡니다.
+    return calls, pages
+
+
+# ── 16-1. fetch_new_periodic_filings ─────────────────────────────────────────
+def test_fetch_filings_reads_single_page(fake_list_api):
+    """가장 단순한 경우: A003 한 페이지, 나머지 유형은 0건."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([
+        _filing_row("305090", "20260529002369"),
+        _filing_row("005930", "20260529002370", corp_code="00126380"),
+    ])
+    found = cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY",
+                                           log=lambda *a: None)
+    assert sorted(found) == ["005930", "305090"]
+    assert found["305090"] == {"corp_code": "01267967",
+                               "report_nm": "분기보고서 (2026.03)",
+                               "rcept_no": "20260529002369",
+                               "rcept_dt": "20260529"}
+
+
+def test_fetch_filings_sends_documented_parameters(fake_list_api):
+    """실측으로 확인한 파라미터를 그대로 보내야 합니다(pblntf_ty=A, page_count=100)."""
+    calls, pages = fake_list_api
+    cdk.fetch_new_periodic_filings("20260501", "20260531", "KEY", log=lambda *a: None)
+    assert [c["pblntf_detail_ty"] for c in calls] == ["A001", "A002", "A003"]
+    for call in calls:
+        assert call["crtfc_key"] == "KEY"
+        assert call["pblntf_ty"] == "A"
+        assert call["bgn_de"] == "20260501"
+        assert call["end_de"] == "20260531"
+        assert call["page_count"] == "100"
+        assert call["page_no"] == "1"
+
+
+def test_fetch_filings_walks_every_page_not_just_the_first(fake_list_api):
+    """
+    ⚠️ 정렬 순서는 문서화돼 있지 않습니다 — 첫 페이지만 읽고 끝내면 조용히 놓칩니다.
+    total_page 까지 page_no 를 올려가며 전부 돌아야 합니다.
+    """
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("000001", "20260529000001")],
+                                    page_no=1, total_page=3, total_count=3)
+    pages[("A003", 2)] = _list_page([_filing_row("000002", "20260529000002")],
+                                    page_no=2, total_page=3, total_count=3)
+    pages[("A003", 3)] = _list_page([_filing_row("000003", "20260529000003")],
+                                    page_no=3, total_page=3, total_count=3)
+
+    found = cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY",
+                                           log=lambda *a: None)
+    assert sorted(found) == ["000001", "000002", "000003"]
+    a003_pages = [int(c["page_no"]) for c in calls if c["pblntf_detail_ty"] == "A003"]
+    assert a003_pages == [1, 2, 3]
+
+
+def test_fetch_filings_treats_013_as_zero_results_not_an_error(fake_list_api):
+    """013 은 실패가 아니라 '그 구간 0건' 입니다(alotMatter 와 같은 관례 — 실측)."""
+    calls, pages = fake_list_api
+    found = cdk.fetch_new_periodic_filings("20260101", "20260101", "KEY",
+                                           log=lambda *a: None)
+    assert found == {}
+    # 013 이 온 유형은 다음 페이지를 더 묻지 않습니다(1페이지씩 3유형 = 3회).
+    assert len(calls) == 3
+
+
+def test_fetch_filings_keeps_going_after_one_detail_type_is_empty(fake_list_api):
+    """한 유형이 0건이어도 나머지 유형은 계속 확인해야 합니다."""
+    calls, pages = fake_list_api
+    pages[("A002", 1)] = _list_page([_filing_row("005930", "20260814003699",
+                                                 report_nm="반기보고서 (2026.06)")])
+    found = cdk.fetch_new_periodic_filings("20260814", "20260814", "KEY",
+                                           log=lambda *a: None)
+    assert list(found) == ["005930"]
+    assert found["005930"]["report_nm"] == "반기보고서 (2026.06)"
+
+
+def test_fetch_filings_skips_rows_without_stock_code(fake_list_api):
+    """
+    실측: 일부 항목은 `stock_code` 가 빈 문자열입니다(채권만 발행한 비상장 법인 등).
+    우리 유니버스에 있을 수 없는 회사이므로 건너뜁니다 — 지어내서 코드를 만들지 않습니다.
+    """
+    calls, pages = fake_list_api
+    rows = [
+        _filing_row("", "20260529000001", corp_name="비상장채권법인"),
+        _filing_row("305090", "20260529000002"),
+    ]
+    rows.append({"corp_code": "00000001", "corp_name": "키자체가없음",
+                 "report_nm": "분기보고서 (2026.03)", "rcept_no": "20260529000003",
+                 "rcept_dt": "20260529"})            # stock_code 키 자체가 없는 경우
+    pages[("A003", 1)] = _list_page(rows)
+
+    found = cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY",
+                                           log=lambda *a: None)
+    assert list(found) == ["305090"]
+
+
+def test_fetch_filings_reports_skipped_rows_instead_of_dropping_silently(fake_list_api):
+    """§0-1: 건너뛴 건수를 로그로 남깁니다 — 조용히 사라지면 안 됩니다."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("", "20260529000001"),
+                                     _filing_row("305090", "20260529000002")])
+    lines = []
+    cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lines.append)
+    blob = "\n".join(lines)
+    assert "종목코드가 없는 공시 1건" in blob
+
+
+def test_fetch_filings_warns_on_unnormalizable_stock_code(fake_list_api):
+    """정규화조차 안 되는 종목코드는 버리되 **크게 알립니다**(처음 보는 표기일 수 있음)."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("한글코드", "20260529000001"),
+                                     _filing_row("305090", "20260529000002")])
+    lines = []
+    found = cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lines.append)
+    assert list(found) == ["305090"]
+    assert any("정규화하지 못한" in line and "한글코드" in line for line in lines)
+
+
+def test_fetch_filings_keeps_latest_rcept_no_for_duplicate_stock(fake_list_api):
+    """
+    같은 종목이 여러 번 나오는 경우(예: "[기재정정]" 으로 같은 분기에 두 번 접수).
+    DART rcept_no 는 접수순으로 증가하므로 **가장 큰 값**이 가장 최근 것입니다.
+    """
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([
+        _filing_row("305090", "20260529002369"),
+        _filing_row("305090", "20260530001111", report_nm="[기재정정]분기보고서 (2026.03)"),
+    ])
+    found = cdk.fetch_new_periodic_filings("20260529", "20260531", "KEY",
+                                           log=lambda *a: None)
+    assert found["305090"]["rcept_no"] == "20260530001111"
+    assert found["305090"]["report_nm"] == "[기재정정]분기보고서 (2026.03)"
+
+
+def test_fetch_filings_dedupes_across_detail_types(fake_list_api):
+    """같은 종목이 A002 와 A003 양쪽에 나와도 최신 rcept_no 하나만 남습니다."""
+    calls, pages = fake_list_api
+    pages[("A002", 1)] = _list_page([_filing_row("005930", "20260814003699",
+                                                 report_nm="반기보고서 (2026.06)")])
+    pages[("A003", 1)] = _list_page([_filing_row("005930", "20260515002181",
+                                                 report_nm="분기보고서 (2026.03)")])
+    found = cdk.fetch_new_periodic_filings("20260101", "20261231", "KEY",
+                                           log=lambda *a: None)
+    assert list(found) == ["005930"]
+    assert found["005930"]["rcept_no"] == "20260814003699"
+
+
+def test_fetch_filings_dedupes_across_pages(fake_list_api):
+    """페이지가 갈려서 같은 종목이 두 번 나와도 최신 하나만 남습니다."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("305090", "20260529002369")],
+                                    page_no=1, total_page=2, total_count=2)
+    pages[("A003", 2)] = _list_page(
+        [_filing_row("305090", "20260601009999", report_nm="[첨부추가]분기보고서 (2026.03)")],
+        page_no=2, total_page=2, total_count=2)
+    found = cdk.fetch_new_periodic_filings("20260529", "20260601", "KEY",
+                                           log=lambda *a: None)
+    assert found["305090"]["rcept_no"] == "20260601009999"
+
+
+def test_fetch_filings_normalizes_stock_code_to_six_digits(fake_list_api):
+    """유니버스 쪽과 같은 기준으로 비교할 수 있도록 6자리로 정규화해 담습니다."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("5930", "20260529000001"),
+                                     _filing_row("03473k", "20260529000002")])
+    found = cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY",
+                                           log=lambda *a: None)
+    assert sorted(found) == ["005930", "03473K"]
+
+
+def test_fetch_filings_sleeps_between_requests_but_not_before_the_first(fake_list_api):
+    """§0-3-2: 이 API 도 같은 DART 서버입니다 — 요청 사이에 딜레이를 둡니다."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("305090", "1")],
+                                    page_no=1, total_page=2, total_count=2)
+    pages[("A003", 2)] = _list_page([_filing_row("305091", "2")],
+                                    page_no=2, total_page=2, total_count=2)
+    cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    # 요청 4회(A001 1 + A002 1 + A003 2) → 딜레이는 그 사이 3회.
+    assert len(calls) == 4
+    assert len(calls.slept) == 3
+
+
+def test_fetch_filings_raises_fatal_on_http_429(fake_list_api):
+    """차단당하면 재시도하지 않고 실행 전체를 멈춥니다(§0-3-2)."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = (429, {"status": "020"})
+    with pytest.raises(cdk.DartFatalError) as e:
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    assert "429" in str(e.value)
+
+
+def test_fetch_filings_raises_fatal_on_http_403(fake_list_api):
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = (403, None)
+    with pytest.raises(cdk.DartFatalError):
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+
+
+def test_fetch_filings_raises_fatal_on_bad_api_key(fake_list_api):
+    """인증키 오류(010)는 종목 하나의 문제가 아니라 실행 전체가 못 도는 상태입니다."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = REAL_BAD_KEY
+    with pytest.raises(cdk.DartFatalError) as e:
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    assert "010" in str(e.value)
+
+
+def test_fetch_filings_never_leaks_api_key_in_error_message(fake_list_api):
+    """§보안: 예외 메시지에 인증키가 섞이면 Actions 로그에 그대로 남습니다."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = (403, None)
+    with pytest.raises(cdk.DartFatalError) as e:
+        cdk.fetch_new_periodic_filings("20260529", "20260529",
+                                       "SUPER-SECRET-KEY", log=lambda *a: None)
+    assert "SUPER-SECRET-KEY" not in str(e.value)
+
+
+def test_fetch_filings_raises_api_error_on_unknown_status(fake_list_api):
+    """치명 목록에 없는 낯선 status 는 그 조회만 실패로 봅니다(조용히 0건으로 넘기지 않음)."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = {"status": "999", "message": "처음 보는 코드"}
+    with pytest.raises(cdk.DartApiError) as e:
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    assert "999" in str(e.value)
+
+
+def test_fetch_filings_refuses_to_guess_when_total_page_is_missing(fake_list_api):
+    """
+    §0-1: 몇 페이지인지 모르는 채로 1페이지만 읽고 '그 구간 다 봤다'고 기록하면
+    그 구간을 영영 놓칩니다. 지어내지 않고 크게 실패합니다.
+    """
+    calls, pages = fake_list_api
+    broken = _list_page([_filing_row("305090", "1")])
+    broken.pop("total_page")
+    pages[("A001", 1)] = broken
+    with pytest.raises(cdk.DartApiError) as e:
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    assert "total_page" in str(e.value)
+
+
+def test_fetch_filings_refuses_absurd_total_page(fake_list_api):
+    """무한정 요청하지 않기 위한 상한(§0-3-2)."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = _list_page([_filing_row("305090", "1")],
+                                    total_page=cdk.DART_LIST_MAX_PAGES + 1)
+    with pytest.raises(cdk.DartApiError):
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+
+
+def test_fetch_filings_raises_when_list_is_not_a_list(fake_list_api):
+    """status 000 인데 list 가 리스트가 아니면 응답 규격이 바뀐 것입니다."""
+    calls, pages = fake_list_api
+    pages[("A001", 1)] = {"status": "000", "message": "정상", "total_page": 1,
+                          "list": {"corp_code": "x"}}
+    with pytest.raises(cdk.DartApiError):
+        cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+
+
+def test_fetch_filings_accepts_custom_detail_types(fake_list_api):
+    """유형 목록은 인자로 좁힐 수 있습니다(기본은 A001/A002/A003)."""
+    calls, pages = fake_list_api
+    cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY",
+                                   detail_types=("A003",), log=lambda *a: None)
+    assert [c["pblntf_detail_ty"] for c in calls] == ["A003"]
+
+
+def test_fetch_filings_writes_no_files(tmp_path, fake_list_api, monkeypatch):
+    """순수 조회 함수입니다 — 파일을 하나도 만들지 않습니다."""
+    calls, pages = fake_list_api
+    pages[("A003", 1)] = _list_page([_filing_row("305090", "1")])
+    monkeypatch.chdir(tmp_path)
+    cdk.fetch_new_periodic_filings("20260529", "20260529", "KEY", log=lambda *a: None)
+    assert list(tmp_path.iterdir()) == []
+
+
+# ── 16-2. apply_watch_update ─────────────────────────────────────────────────
+def _watch_record(code, reprt_code="11012", dps=100, stlm_dt="2026-06-30",
+                  status="OK", corp_name=None):
+    """감시 테스트용 레코드(실제 스키마의 부분집합 — 교체 판정에 쓰는 필드 포함)."""
+    return {
+        "stock_code": code,
+        "corp_name": corp_name or f"테스트{code}",
+        "bsns_year": "2026",
+        "reprt_code": reprt_code,
+        "reprt_name": cdk.REPRT_CODE_NAMES.get(reprt_code),
+        "stlm_dt": stlm_dt,
+        "dps_cash_common": dps if status == "OK" else None,
+        "status": status,
+        "status_reason": "" if status == "OK" else "데이터 없음",
+        "parse_notes": [],
+        "unknown_se_labels": [],
+        "unit_mismatch_notes": [],
+        "cross_source_notes": [],
+    }
+
+
+@pytest.fixture
+def watch_dirs(tmp_path):
+    """
+    기존 전체 결과(2종목: 005930 반기 / 000660 1분기) + 감시 델타(005930 3분기) 한 쌍.
+    ⚠️ merge_delta_output 이라면 '겹친다'며 거부할 구성입니다 — 여기서는 그게 정상입니다.
+    """
+    main_dir = tmp_path / "main"
+    delta_dir = tmp_path / "delta"
+    _write_run_output(
+        main_dir,
+        [_watch_record("005930", "11012", dps=746, stlm_dt="2026-06-30"),
+         _watch_record("000660", "11013", dps=300, stlm_dt="2026-03-31")],
+        requests_used=8, elapsed_sec=100.0, corpcode_source="cache",
+        raw_entries=[_merge_raw_entry("005930"), _merge_raw_entry("000660")])
+    _write_run_output(
+        delta_dir,
+        [_watch_record("005930", "11014", dps=1118, stlm_dt="2026-09-30")],
+        requests_used=1, elapsed_sec=3.0, corpcode_source="network",
+        raw_entries=[_merge_raw_entry("005930", reprt_code="11014")])
+    return main_dir, delta_dir
+
+
+def test_watch_update_replaces_existing_stock_instead_of_refusing(watch_dirs):
+    """
+    ⚠️ 여기가 merge_delta_output 과 정반대입니다: 겹치면 거부가 아니라 **교체**입니다.
+    (델타는 언제나 '방금 새 보고서를 낸 회사'만 다시 돌린 결과라 늘 더 최신입니다.)
+    """
+    main_dir, delta_dir = watch_dirs
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+    by_code = {r["stock_code"]: r for r in records}
+    assert len(records) == 2                       # 늘지 않았습니다 — 교체입니다.
+    assert by_code["005930"]["reprt_code"] == "11014"
+    assert by_code["005930"]["dps_cash_common"] == 1118
+    assert by_code["000660"]["dps_cash_common"] == 300     # 건드리지 않은 종목은 그대로
+    assert summary["watch_replaced_stock_codes"] == ["005930"]
+    assert summary["watch_added_stock_codes"] == []
+
+
+def test_watch_update_same_input_would_be_refused_by_merge_delta_output(watch_dirs):
+    """
+    두 함수의 정책 차이를 한 테스트로 못 박습니다 — 같은 입력에 대해
+    merge_delta_output 은 거부하고, apply_watch_update 는 교체합니다.
+    """
+    main_dir, delta_dir = watch_dirs
+    with pytest.raises(ValueError) as e:
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                               force=True, log=lambda *a: None)
+    assert "겹칩니다" in str(e.value)
+    # 같은 입력을 감시 경로로 넣으면 정상 동작합니다.
+    records, _ = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert len(records) == 2
+
+
+def test_watch_update_logs_what_changed_into_what(watch_dirs):
+    """§0-1: 조용히 덮어쓰지 않습니다 — 옛 보고서 → 새 보고서를 한 줄로 남깁니다."""
+    main_dir, delta_dir = watch_dirs
+    lines = []
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lines.append)
+    blob = "\n".join(str(x) for x in lines)
+    assert "종목코드 005930" in blob
+    assert "반기보고서" in blob and "3분기보고서" in blob
+    assert "2026-06-30" in blob and "2026-09-30" in blob
+    assert "갱신" in blob
+
+
+def test_watch_update_keeps_record_position_when_replacing(tmp_path):
+    """교체는 **제자리에서** 일어납니다(순서가 뒤바뀌면 사람이 diff 를 못 봅니다)."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("111111"), _watch_record("222222"),
+                                 _watch_record("333333")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("222222", "11014", dps=999)],
+                      raw_entries=[])
+    records, _ = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert [r["stock_code"] for r in records] == ["111111", "222222", "333333"]
+    assert records[1]["dps_cash_common"] == 999
+
+
+def test_watch_update_adds_stock_that_was_not_in_main(tmp_path):
+    """유니버스에 없던 종목이 새 보고서를 냈다면 추가합니다(뒤에 붙습니다)."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("999999", "11014", dps=55)],
+                      raw_entries=[])
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+    assert [r["stock_code"] for r in records] == ["005930", "999999"]
+    assert summary["watch_added_stock_codes"] == ["999999"]
+    assert summary["watch_replaced_stock_codes"] == []
+
+
+def test_watch_update_handles_mix_of_replaced_and_added(tmp_path):
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930"), _watch_record("000660")],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("000660", "11014", dps=777),
+                                  _watch_record("123456", "11014", dps=11)],
+                      raw_entries=[])
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+    assert [r["stock_code"] for r in records] == ["005930", "000660", "123456"]
+    assert summary["watch_replaced_stock_codes"] == ["000660"]
+    assert summary["watch_added_stock_codes"] == ["123456"]
+    assert summary["total_records"] == 3
+
+
+def test_watch_update_recomputes_summary_instead_of_hand_editing(tmp_path):
+    """리포트 숫자는 손으로 고치지 않고 summarize_results() 가 다시 계산합니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir,
+                      [_watch_record("005930"), _watch_record("000660", status="NO_DATA")],
+                      requests_used=8, elapsed_sec=100.0, raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("000660", "11014", dps=500)],
+                      requests_used=2, elapsed_sec=5.0, raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    # NO_DATA 였던 종목이 OK 로 바뀌었으니 상태 집계가 실제로 다시 계산돼야 합니다.
+    assert summary["by_status"] == {"OK": 2}
+    assert summary["requests_used"] == 10
+    assert summary["elapsed_sec"] == 105.0
+    # 교체는 유니버스 크기를 바꾸지 않습니다(추가만 늘립니다).
+    assert summary["universe_size"] == 2
+    assert summary["bsns_year"] == "2026"
+    assert summary["watch_update_performed_at_kst"]
+
+
+def test_watch_update_universe_size_grows_only_by_added_stocks(tmp_path):
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930"), _watch_record("000660")],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014"),
+                                  _watch_record("999999", "11014")], raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["universe_size"] == 3            # 2 + 추가 1건(교체는 안 셉니다)
+    assert summary["universe_size_input"] == 3
+
+
+def test_watch_update_says_the_report_is_only_partially_refreshed(watch_dirs):
+    """§0-1: 부분 갱신 결과를 전수 수집인 척하지 않습니다."""
+    main_dir, delta_dir = watch_dirs
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert "부분 갱신" in summary["verification_status"]
+    assert "watch" in summary["verification_status"]
+    assert summary["watch_delta_summary"]["universe_size"] == 1
+
+
+def test_watch_update_appends_raw_without_replacing_old_lines(watch_dirs):
+    """raw.jsonl 은 append-only 감사 기록입니다 — 옛 응답도 그대로 남습니다."""
+    main_dir, delta_dir = watch_dirs
+    raw_path = main_dir / "dividend_kr_2026_raw.jsonl"
+    before = raw_path.read_text(encoding="utf-8").splitlines()
+    assert len(before) == 2
+
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    after = raw_path.read_text(encoding="utf-8").splitlines()
+    assert after[:2] == before                      # 기존 줄은 한 글자도 안 바뀝니다
+    assert len(after) == 3
+    assert json.loads(after[2])["reprt_code"] == "11014"
+
+
+def test_watch_update_tolerates_missing_delta_raw_file(tmp_path):
+    """요청이 0건이면 델타 raw 가 없을 수 있습니다 — 실패가 아니지만 로그엔 남깁니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014")])   # raw 없음
+    lines = []
+    records, _ = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lines.append)
+    assert records[0]["reprt_code"] == "11014"
+    assert any("raw 파일이 없습니다" in str(x) for x in lines)
+
+
+def test_watch_update_refuses_broken_delta_raw_and_writes_nothing(tmp_path):
+    """검증이 끝나기 전엔 한 바이트도 쓰지 않습니다(merge_delta_output 과 같은 순서)."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")],
+                      raw_entries=[_merge_raw_entry("005930")])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014")], raw_entries=[])
+    (delta_dir / "dividend_kr_2026_raw.jsonl").write_text(
+        "{이건 JSON 이 아닙니다\n", encoding="utf-8")
+
+    before = _snapshot(str(main_dir / "dividend_kr_2026_latest.json"),
+                       str(main_dir / "dividend_kr_2026_raw.jsonl"),
+                       str(main_dir / "dividend_kr_2026_watch_log.json"))
+    with pytest.raises(ValueError) as e:
+        cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    assert "JSON 이 아닙니다" in str(e.value)
+    assert _snapshot(*before) == before             # 아무것도 안 건드렸습니다
+
+
+def test_watch_update_raises_when_delta_output_is_missing(tmp_path):
+    """델타 산출물이 없으면 사람이 읽을 메시지로 실패합니다(호출부가 부르지 말았어야 함)."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    os.makedirs(delta_dir, exist_ok=True)
+    with pytest.raises(FileNotFoundError):
+        cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+
+def test_watch_update_writes_atomically_via_tmp_then_replace(watch_dirs, monkeypatch):
+    """tmp 파일에 쓰고 os.replace 로 바꿔치기합니다(중간에 깨진 파일이 남지 않도록)."""
+    main_dir, delta_dir = watch_dirs
+    seen = []
+    real_replace = os.replace
+
+    def spy(src, dst):
+        seen.append((src, dst))
+        return real_replace(src, dst)
+
+    monkeypatch.setattr(cdk.os, "replace", spy)
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    latest = str(main_dir / "dividend_kr_2026_latest.json")
+    log_file = str(main_dir / "dividend_kr_2026_watch_log.json")
+    assert (f"{latest}.tmp", latest) in seen
+    assert (f"{log_file}.tmp", log_file) in seen
+    # tmp 파일이 남아 있으면 안 됩니다.
+    assert not [p for p in os.listdir(str(main_dir)) if p.endswith(".tmp")]
+
+
+def test_watch_update_creates_watch_log_with_audit_fields(watch_dirs):
+    """감사 로그 신설 — 언제 어느 구간을 확인해 무엇을 바꿨는지 남습니다."""
+    main_dir, delta_dir = watch_dirs
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None,
+                           date_range_checked="20260930~20261001",
+                           matched_stock_codes=["005930"])
+    log_file = main_dir / "dividend_kr_2026_watch_log.json"
+    data = json.loads(log_file.read_text(encoding="utf-8"))
+    assert len(data["watches"]) == 1
+    entry = data["watches"][0]
+    assert entry["checked_at_kst"]
+    assert entry["date_range_checked"] == "20260930~20261001"
+    assert entry["matched_stock_codes"] == ["005930"]
+    assert entry["replaced_stock_codes"] == ["005930"]
+    assert entry["added_stock_codes"] == []
+    assert entry["delta_raw_lines_appended"] == 1
+
+
+def test_watch_update_appends_to_existing_watch_log(watch_dirs):
+    """두 번째 감시 실행은 기존 이력에 **이어붙입니다**(덮어쓰지 않습니다)."""
+    main_dir, delta_dir = watch_dirs
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None,
+                           date_range_checked="20261001~20261001")
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None,
+                           date_range_checked="20261002~20261002")
+    data = json.loads(
+        (main_dir / "dividend_kr_2026_watch_log.json").read_text(encoding="utf-8"))
+    assert [w["date_range_checked"] for w in data["watches"]] == [
+        "20261001~20261001", "20261002~20261002"]
+
+
+def test_watch_update_records_where_matched_codes_came_from(watch_dirs):
+    """§0-1: 매칭 목록을 호출부가 줬는지, 델타로 대신 채웠는지 구분해 적습니다."""
+    main_dir, delta_dir = watch_dirs
+    cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    entry = json.loads(
+        (main_dir / "dividend_kr_2026_watch_log.json").read_text(encoding="utf-8")
+    )["watches"][0]
+    assert entry["matched_stock_codes"] == ["005930"]
+    assert "델타 산출물" in entry["matched_stock_codes_source"]
+
+
+def test_watch_update_does_not_block_an_older_report_but_shouts_about_it(tmp_path):
+    """
+    ⚠️ 이론상 없어야 하는 경우(새 보고서가 기존보다 더 과거).
+    §0-1: 값을 임의로 지키지도 버리지도 않습니다 — **그대로 교체하되 크게 알립니다.**
+    """
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir,
+                      [_watch_record("005930", "11014", dps=1118, stlm_dt="2026-09-30")],
+                      raw_entries=[])
+    _write_run_output(delta_dir,
+                      [_watch_record("005930", "11013", dps=372, stlm_dt="2026-03-31")],
+                      raw_entries=[])
+    lines = []
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lines.append)
+    # 막지 않았습니다 — 교체는 그대로 일어납니다.
+    assert records[0]["reprt_code"] == "11013"
+    assert records[0]["dps_cash_common"] == 372
+    assert summary["watch_replaced_stock_codes"] == ["005930"]
+    # 그러나 조용히 넘어가지 않습니다.
+    blob = "\n".join(str(x) for x in lines)
+    assert "예상 밖" in blob and "005930" in blob and "원인 확인 필요" in blob
+    assert len(summary["watch_unexpected_report_regressions"]) == 1
+    entry = json.loads(
+        (main_dir / "dividend_kr_2026_watch_log.json").read_text(encoding="utf-8")
+    )["watches"][0]
+    assert len(entry["unexpected_report_regressions"]) == 1
+
+
+def test_watch_update_does_not_warn_on_normal_forward_replacement(watch_dirs):
+    """정상 방향(1분기→3분기)의 교체에는 경고가 붙지 않아야 합니다(경고 인플레 방지)."""
+    main_dir, delta_dir = watch_dirs
+    lines = []
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lines.append)
+    assert summary["watch_unexpected_report_regressions"] == []
+    assert "예상 밖" not in "\n".join(str(x) for x in lines)
+
+
+def test_watch_update_does_not_warn_when_report_code_is_unknown(tmp_path):
+    """모르는 reprt_code 로는 앞뒤를 판정할 수 없습니다 — 넘겨짚어 경고하지 않습니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    main_rec = _watch_record("005930", "11014")
+    delta_rec = _watch_record("005930", "11014")
+    delta_rec["reprt_code"] = None                  # UNMAPPED/NO_DATA 레코드의 실제 모습
+    _write_run_output(main_dir, [main_rec], raw_entries=[])
+    _write_run_output(delta_dir, [delta_rec], raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["watch_unexpected_report_regressions"] == []
+
+
+def test_watch_update_carries_over_unmapped_detail_from_both_runs(tmp_path):
+    """매핑 실패 목록도 합쳐집니다 — 한쪽 것이 조용히 사라지면 안 됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")],
+                      unmapped=[{"stock_code_input": "AAA", "reason": "형식 오류"}],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014")],
+                      unmapped=[{"stock_code_input": "BBB", "reason": "corp_code 없음"}],
+                      raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["unmapped_stock_codes"] == 2
+    assert {u["stock_code_input"] for u in summary["unmapped_detail"]} == {"AAA", "BBB"}
+
+
+def test_watch_update_marks_run_incomplete_when_delta_was_cut_short(tmp_path):
+    """델타가 예산 초과로 멈췄다면 그 사실이 리포트에 남아야 합니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014")],
+                      completed=False, stopped_reason="요청 예산 초과", raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["completed"] is False
+    assert "요청 예산 초과" in summary["stopped_reason"]
+
+
+def test_watch_update_keeps_delta_record_without_stock_code(tmp_path):
+    """종목코드가 없는 델타 레코드는 교체 대상을 특정할 수 없습니다 — 버리지 않고 덧붙입니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    orphan = _watch_record("005930", "11014")
+    orphan["stock_code"] = None
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [orphan], raw_entries=[])
+    lines = []
+    records, _ = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lines.append)
+    assert len(records) == 2
+    assert any("종목코드가 없는 레코드" in str(x) for x in lines)
+
+
+# ── 16-3. --watch-disclosures CLI 모드 ───────────────────────────────────────
+@pytest.fixture
+def watch_cli(tmp_path, monkeypatch):
+    """
+    CLI 감시 모드를 소켓 없이 돌리기 위한 장치.
+
+    반환 dict:
+      universe / out_dir / cache_dir / state_path : 경로들
+      filings   : fetch_new_periodic_filings 가 돌려줄 값(테스트가 채웁니다)
+      run_calls / apply_calls / order : 어떤 함수가 어떤 순서로 불렸는지
+    """
+    monkeypatch.setenv("DART_API_KEY", "TEST-KEY")
+    # 오늘을 2026-08-24(KST)로 고정합니다 — 어제는 2026-08-23.
+    fixed_now = _dt(2026, 8, 24, 5, 0, 0, tzinfo=ccm.KST)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: fixed_now)
+
+    out_dir = tmp_path / "data"
+    cache_dir = tmp_path / "data" / "cache"
+    os.makedirs(str(cache_dir), exist_ok=True)
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps(
+        [{"stock_code": "005930", "company_name": "삼성전자"},
+         {"stock_code": "000660", "company_name": "SK하이닉스"}]), encoding="utf-8")
+
+    ctx = {
+        "universe": str(universe),
+        "out_dir": str(out_dir),
+        "cache_dir": str(cache_dir),
+        "state_path": str(cache_dir / "dividend_kr_2026_watch_state.json"),
+        "filings": {},
+        "fetch_calls": [],
+        "run_calls": [],
+        "apply_calls": [],
+        "order": [],
+        "today": fixed_now.date(),
+    }
+
+    def fake_fetch(bgn_de, end_de, api_key, session=None, detail_types=None, log=print):
+        ctx["fetch_calls"].append((bgn_de, end_de))
+        ctx["order"].append("fetch")
+        return dict(ctx["filings"])
+
+    def fake_run(universe_codes, year, delta_out_dir, **kwargs):
+        ctx["run_calls"].append({"universe": list(universe_codes), "year": year,
+                                 "out_dir": delta_out_dir, "kwargs": kwargs})
+        ctx["order"].append("run_collection")
+        return [], {}
+
+    def fake_apply(main_out_dir, delta_out_dir, year, **kwargs):
+        ctx["apply_calls"].append({"main": main_out_dir, "delta": delta_out_dir,
+                                   "year": year, "kwargs": kwargs})
+        ctx["order"].append("apply_watch_update")
+        return [], {}
+
+    monkeypatch.setattr(cdk, "fetch_new_periodic_filings", fake_fetch)
+    monkeypatch.setattr(cdk, "run_collection", fake_run)
+    monkeypatch.setattr(cdk, "apply_watch_update", fake_apply)
+    return ctx
+
+
+def _watch_argv(ctx, *extra):
+    return ["--universe", ctx["universe"], "--year", "2026",
+            "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+            "--watch-disclosures", *extra]
+
+
+def test_cli_watch_uses_lookback_when_no_state_file(watch_cli):
+    """최초 실행(상태 파일 없음) → 오늘-lookback ~ 어제 구간을 확인합니다."""
+    ctx = watch_cli
+    assert cdk.main(_watch_argv(ctx)) == 0
+    # 기본 lookback 3일: 2026-08-21 ~ 2026-08-23(어제)
+    assert ctx["fetch_calls"] == [("20260821", "20260823")]
+
+
+def test_cli_watch_respects_custom_lookback_days(watch_cli):
+    ctx = watch_cli
+    assert cdk.main(_watch_argv(ctx, "--watch-lookback-days", "7")) == 0
+    assert ctx["fetch_calls"] == [("20260817", "20260823")]
+
+
+def test_cli_watch_never_includes_today(watch_cli):
+    """오늘은 아직 하루가 안 끝났습니다 — 접수가 더 들어올 수 있어 제외합니다."""
+    ctx = watch_cli
+    cdk.main(_watch_argv(ctx))
+    assert ctx["fetch_calls"][0][1] == "20260823"        # 어제까지
+
+
+def test_cli_watch_continues_from_state_file(watch_cli):
+    """상태 파일이 있으면 그 다음 날부터 이어서 확인합니다(같은 구간을 또 훑지 않음)."""
+    ctx = watch_cli
+    cdk._write_watch_state(ctx["state_path"], "20260820")
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert ctx["fetch_calls"] == [("20260821", "20260823")]
+
+
+def test_cli_watch_skips_loudly_when_range_is_empty(watch_cli, capsys):
+    """
+    이미 어제까지 확인했다면 할 일이 없습니다. **조용히 끝내지 않고** 이유를 말합니다(§0-1).
+    이때 상태 파일은 손대지 않습니다.
+    """
+    ctx = watch_cli
+    cdk._write_watch_state(ctx["state_path"], "20260823")
+    before = open(ctx["state_path"], "rb").read()
+
+    assert cdk.main(_watch_argv(ctx)) == 0
+    out = capsys.readouterr().out
+    assert "확인할 새 구간이 없습니다" in out
+    assert "20260823" in out
+    assert ctx["fetch_calls"] == []                      # DART 를 부르지도 않았습니다
+    assert open(ctx["state_path"], "rb").read() == before
+
+
+def test_cli_watch_updates_state_even_when_nothing_matched(watch_cli, capsys):
+    """
+    매칭 0건이어도 '그 구간은 확인했다'는 사실은 남깁니다 — 안 그러면 다음 날 같은
+    구간을 또 훑어 DART 에 헛요청을 반복합니다(§0-3-2).
+    """
+    ctx = watch_cli
+    ctx["filings"] = {"999999": {"corp_code": "x", "report_nm": "분기보고서 (2026.06)",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    assert cdk.main(_watch_argv(ctx)) == 0
+    out = capsys.readouterr().out
+    assert "우리 유니버스에 해당하는 종목 없음" in out
+    assert ctx["run_calls"] == []                        # 수집은 아예 안 돌립니다
+    state = json.loads(open(ctx["state_path"], encoding="utf-8").read())
+    assert state["last_checked_de"] == "20260823"
+    assert state["updated_at_kst"]
+
+
+def test_cli_watch_runs_collection_then_applies_update_in_that_order(watch_cli):
+    """매칭이 있으면 run_collection → apply_watch_update 순서로 이어져야 합니다."""
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380",
+                                 "report_nm": "반기보고서 (2026.06)",
+                                 "rcept_no": "20260814003699", "rcept_dt": "20260814"}}
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert ctx["order"] == ["fetch", "run_collection", "apply_watch_update"]
+    assert ctx["run_calls"][0]["universe"] == ["005930"]
+    assert ctx["apply_calls"][0]["main"] == ctx["out_dir"]
+    assert ctx["apply_calls"][0]["delta"] == ctx["run_calls"][0]["out_dir"]
+
+
+def test_cli_watch_collects_only_matched_stocks_not_whole_universe(watch_cli):
+    """이 모드의 존재 이유 — 전체 2,700종목을 다시 훑지 않습니다."""
+    ctx = watch_cli
+    ctx["filings"] = {"000660": {"corp_code": "00164779", "report_nm": "분기보고서",
+                                 "rcept_no": "2", "rcept_dt": "20260823"},
+                      "111111": {"corp_code": "z", "report_nm": "분기보고서",
+                                 "rcept_no": "3", "rcept_dt": "20260823"}}
+    cdk.main(_watch_argv(ctx))
+    assert ctx["run_calls"][0]["universe"] == ["000660"]     # 유니버스 밖 111111 은 제외
+
+
+def test_cli_watch_passes_owner_order_and_isolated_workspace(watch_cli):
+    """
+    오너 지시 순서(3분기→반기→1분기) 고정 + 임시 작업공간(watch_delta) + 덮어쓰기 허용.
+    ⚠️ cache_dir 을 본 캐시와 분리하는 이유: 같은 폴더면 체크포인트 파일 이름이 겹쳐
+       전수 수집이 남겨 둔 체크포인트를 감시 실행이 지워 버립니다(§0-3-2).
+    """
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    cdk.main(_watch_argv(ctx))
+    call = ctx["run_calls"][0]
+    kwargs = call["kwargs"]
+    assert kwargs["priority"] == cdk.REPRT_CODE_PRIORITY_OWNER_ORDER
+    assert kwargs["allow_overwrite"] is True
+    assert kwargs["history_baseline_path"] is None
+    assert call["out_dir"] == os.path.join(ctx["cache_dir"], "watch_delta")
+    assert kwargs["cache_dir"] == call["out_dir"]
+    # 유니버스에 회사명이 있으면 2차 매칭도 그대로 켜집니다(새 플래그 없이).
+    assert kwargs["universe_name_map"]["005930"] == "삼성전자"
+
+
+def test_cli_watch_passes_universe_original_code_spelling(tmp_path, watch_cli):
+    """
+    유니버스 파일의 **원문 코드**를 그대로 넘겨야 회사명 2차 매칭(원문 코드 키)이 맞물립니다.
+    비교만 6자리로 정규화합니다.
+    """
+    ctx = watch_cli
+    uni = tmp_path / "int_universe.json"
+    uni.write_text(json.dumps([{"stock_code": 5930, "name": "삼성전자"}]), encoding="utf-8")
+    ctx["universe"] = str(uni)
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    cdk.main(_watch_argv(ctx))
+    assert ctx["run_calls"][0]["universe"] == [5930]     # 정규화된 "005930" 이 아닙니다
+
+
+def test_cli_watch_updates_state_after_success(watch_cli):
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    assert cdk.main(_watch_argv(ctx)) == 0
+    state = json.loads(open(ctx["state_path"], encoding="utf-8").read())
+    assert state["last_checked_de"] == "20260823"
+
+
+def test_cli_watch_does_not_update_state_when_collection_fails(watch_cli, monkeypatch,
+                                                               capsys):
+    """
+    §0-1: 실패했는데 '확인 끝'으로 기록하면 그 구간은 **영원히** 다시 확인되지 않습니다.
+    """
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+
+    def boom(*a, **k):
+        raise cdk.DartFatalError("DART 가 HTTP 429 로 차단했습니다.")
+
+    monkeypatch.setattr(cdk, "run_collection", boom)
+    assert cdk.main(_watch_argv(ctx)) == 2
+    assert "🛑" in capsys.readouterr().out
+    assert not os.path.exists(ctx["state_path"])
+
+
+def test_cli_watch_does_not_update_state_when_apply_fails(watch_cli, monkeypatch):
+    """반영 단계에서 실패해도 마찬가지입니다."""
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+
+    def boom(*a, **k):
+        raise ValueError("델타 raw 파일이 깨졌습니다")
+
+    monkeypatch.setattr(cdk, "apply_watch_update", boom)
+    assert cdk.main(_watch_argv(ctx)) == 2
+    assert not os.path.exists(ctx["state_path"])
+
+
+def test_cli_watch_does_not_update_state_when_list_api_fails(watch_cli, monkeypatch):
+    """공시목록 조회 자체가 실패한 경우에도 상태 파일은 그대로입니다."""
+    ctx = watch_cli
+
+    def boom(*a, **k):
+        raise cdk.DartApiError("공시목록 조회 HTTP 400")
+
+    monkeypatch.setattr(cdk, "fetch_new_periodic_filings", boom)
+    assert cdk.main(_watch_argv(ctx)) == 2
+    assert not os.path.exists(ctx["state_path"])
+
+
+def test_cli_watch_stops_without_api_key(watch_cli, monkeypatch, capsys):
+    ctx = watch_cli
+    monkeypatch.delenv("DART_API_KEY", raising=False)
+    assert cdk.main(_watch_argv(ctx)) == 2
+    assert cdk.DART_API_KEY_ENV in capsys.readouterr().out
+    assert not os.path.exists(ctx["state_path"])
+
+
+def test_cli_watch_requires_universe(watch_cli):
+    """watch 모드도 '우리 유니버스'를 알아야 걸러낼 수 있습니다."""
+    ctx = watch_cli
+    with pytest.raises(SystemExit) as e:
+        cdk.main(["--year", "2026", "--out-dir", ctx["out_dir"],
+                  "--watch-disclosures"])
+    assert e.value.code == 2
+
+
+def test_cli_watch_recovers_from_corrupt_state_file(watch_cli, capsys):
+    """
+    상태 파일이 깨져 '어디까지 확인했는지 모른다'면 확인한 셈 치지 않고 lookback 부터
+    다시 봅니다(§0-1: 모르는 것을 안다고 넘겨짚지 않기).
+    """
+    ctx = watch_cli
+    open(ctx["state_path"], "w", encoding="utf-8").write("{깨진 JSON")
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert ctx["fetch_calls"] == [("20260821", "20260823")]
+
+
+def test_cli_watch_recovers_from_unparseable_last_checked_de(watch_cli, capsys):
+    ctx = watch_cli
+    with open(ctx["state_path"], "w", encoding="utf-8") as f:
+        json.dump({"last_checked_de": "어제쯤"}, f, ensure_ascii=False)
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert ctx["fetch_calls"] == [("20260821", "20260823")]
+    assert "날짜로 읽지 못했습니다" in capsys.readouterr().out
+
+
+def test_cli_watch_never_falls_through_to_the_normal_collection_path(watch_cli):
+    """
+    ⚠️ 이 모드는 평소 수집 경로(유니버스 전체 run_collection)로 절대 흘러들면 안 됩니다.
+    매칭 0건이면 run_collection 이 **한 번도** 불리지 않아야 합니다.
+    """
+    ctx = watch_cli
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert ctx["run_calls"] == []
+    assert ctx["apply_calls"] == []
+
+
+def test_cli_normal_collection_is_unaffected_by_the_new_flags(tmp_path, monkeypatch):
+    """회귀: --watch-disclosures 를 안 주면 예전과 똑같이 수집 경로로 갑니다."""
+    seen = {}
+
+    def fake_run(universe, year, out_dir, **kwargs):
+        seen["universe"] = list(universe)
+        seen["kwargs"] = kwargs
+        return [], {}
+
+    monkeypatch.setattr(cdk, "run_collection", fake_run)
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert seen["universe"] == ["005930", "000660"]
+    assert "priority" in seen["kwargs"]
+
+
+# ── 16-4. 감시 델타 작업공간 · 상태 파일 저수준 ───────────────────────────────
+def test_watch_delta_workspace_is_reset_so_raw_is_not_double_counted(tmp_path):
+    """
+    ⚠️ run_collection 의 raw.jsonl 은 append 입니다. 임시 작업공간을 재사용하면서 지우지
+    않으면 어제 델타의 원본 응답이 오늘 다시 본 파일에 이어붙어 **같은 응답이 두 번** 쌓입니다.
+    """
+    workspace = tmp_path / "watch_delta"
+    os.makedirs(str(workspace))
+    (workspace / "dividend_kr_2026_raw.jsonl").write_text("{}\n", encoding="utf-8")
+    (workspace / "dividend_kr_2026_latest.json").write_text("{}", encoding="utf-8")
+    (workspace / "dividend_kr_2026_checkpoint.json").write_text("{}", encoding="utf-8")
+    (workspace / "dart_corpcode_cache.json").write_text("{}", encoding="utf-8")
+
+    cdk._reset_watch_delta_workspace(str(workspace), str(workspace), "2026",
+                                     log=lambda *a: None)
+    left = sorted(p.name for p in workspace.iterdir())
+    # corp_code 캐시는 남습니다(지우면 corpCode.xml 을 매일 다시 받게 됩니다 — §0-3-2).
+    assert left == ["dart_corpcode_cache.json"]
+
+
+def test_watch_delta_workspace_reset_is_fine_when_nothing_exists(tmp_path):
+    workspace = tmp_path / "watch_delta"
+    os.makedirs(str(workspace))
+    cdk._reset_watch_delta_workspace(str(workspace), str(workspace), "2026",
+                                     log=lambda *a: None)
+    assert list(workspace.iterdir()) == []
+
+
+def test_watch_delta_seeds_corpcode_cache_from_main_cache(tmp_path):
+    """corpCode.xml 을 매일 다시 받지 않도록 캐시 파일만 복사합니다(읽기 전용 공유)."""
+    main_cache = tmp_path / "cache"
+    delta_cache = tmp_path / "cache" / "watch_delta"
+    os.makedirs(str(main_cache))
+    (main_cache / "dart_corpcode_cache.json").write_text('{"entries": []}',
+                                                         encoding="utf-8")
+    assert cdk._seed_watch_delta_corpcode_cache(str(main_cache), str(delta_cache),
+                                                log=lambda *a: None) is True
+    assert (delta_cache / "dart_corpcode_cache.json").read_text(
+        encoding="utf-8") == '{"entries": []}'
+
+
+def test_watch_delta_seed_is_a_no_op_without_a_main_cache(tmp_path):
+    """캐시가 없으면 그냥 넘어갑니다(수집은 그대로 진행됩니다)."""
+    main_cache = tmp_path / "cache"
+    os.makedirs(str(main_cache))
+    assert cdk._seed_watch_delta_corpcode_cache(
+        str(main_cache), str(tmp_path / "wd"), log=lambda *a: None) is False
+
+
+def test_watch_state_round_trips(tmp_path):
+    path = str(tmp_path / "state.json")
+    written = cdk._write_watch_state(path, "20260823")
+    assert written["last_checked_de"] == "20260823"
+    assert cdk._read_watch_state(path)["last_checked_de"] == "20260823"
+
+
+def test_watch_state_write_is_atomic(tmp_path, monkeypatch):
+    path = str(tmp_path / "state.json")
+    seen = []
+    real_replace = os.replace
+    monkeypatch.setattr(cdk.os, "replace",
+                        lambda s, d: (seen.append((s, d)), real_replace(s, d))[1])
+    cdk._write_watch_state(path, "20260823")
+    assert seen == [(f"{path}.tmp", path)]
+    assert not [p for p in os.listdir(str(tmp_path)) if p.endswith(".tmp")]
+
+
+def test_parse_de_refuses_to_guess(tmp_path):
+    assert cdk._parse_de("20260823") == _dt(2026, 8, 23).date()
+    assert cdk._parse_de("2026-08-23") is None
+    assert cdk._parse_de("") is None
+    assert cdk._parse_de(None) is None
+
+
+def test_reprt_priority_index_says_unknown_instead_of_guessing():
+    """모르는 코드를 '맨 뒤'로 취급하면 있지도 않은 '더 과거' 경고가 생깁니다."""
+    assert cdk._reprt_priority_index("11011") == 0
+    assert cdk._reprt_priority_index("11013") == 3
+    assert cdk._reprt_priority_index("99999") is None
+    assert cdk._reprt_priority_index(None) is None
+
+
+# ── 16-5. 배선 검증 — CLI 한 번 실행으로 실제 파일이 갱신되는가 ────────────────
+#    (여기서만 `_http_get_json` 하나만 가짜로 두고 나머지는 전부 진짜 코드로 돕니다 —
+#     list.json → 유니버스 필터 → run_collection → apply_watch_update → 상태 파일까지.)
+@pytest.fixture
+def watch_end_to_end(tmp_path, monkeypatch):
+    """소켓만 막고 나머지는 실제 경로로 도는 감시 모드 한 판."""
+    monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
+    monkeypatch.setattr(cdk, "polite_sleep", lambda rng=None: 0.0)
+    monkeypatch.setattr(ccm, "_http_get_bytes",
+                        lambda url, params, timeout, session:
+                        (200, _make_corpcode_zip(SAMPLE_XML)))
+    fixed_now = _dt(2026, 8, 24, 5, 0, 0, tzinfo=ccm.KST)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: fixed_now)
+
+    def fake_get(url, params, timeout, session):
+        if url == cdk.DART_DISCLOSURE_LIST_URL:
+            if params["pblntf_detail_ty"] != "A002":
+                return 200, REAL_LIST_NO_DATA
+            return 200, _list_page([
+                _filing_row("005930", "20260814003699", report_nm="반기보고서 (2026.06)",
+                            corp_code="00126380", rcept_dt="20260814",
+                            corp_name="삼성전자"),
+                _filing_row("", "20260814000001", corp_name="채권만발행법인"),
+                _filing_row("999999", "20260814000002", corp_name="유니버스밖회사"),
+            ])
+        # alotMatter — 반기보고서(11012)만 값이 있고 나머지는 013.
+        return 200, (REAL_SAMSUNG_2026_H1_PARTIAL
+                     if params.get("reprt_code") == "11012" else REAL_NO_DATA)
+
+    monkeypatch.setattr(cdk, "_http_get_json", fake_get)
+
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    os.makedirs(str(cache_dir), exist_ok=True)
+    universe = tmp_path / "universe.json"
+    universe.write_text(json.dumps(
+        [{"stock_code": "005930", "company_name": "삼성전자"},
+         {"stock_code": "000660", "company_name": "SK하이닉스"}]), encoding="utf-8")
+
+    # 직전 전수 수집 결과(005930 은 1분기 값, 000660 은 무배당)를 흉내 냅니다.
+    _write_run_output(
+        out_dir,
+        [_watch_record("005930", "11013", dps=372, stlm_dt="2026-03-31",
+                       corp_name="삼성전자"),
+         _watch_record("000660", status="NO_DATA", corp_name="SK하이닉스")],
+        requests_used=8, elapsed_sec=100.0,
+        raw_entries=[_merge_raw_entry("005930", reprt_code="11013")])
+
+    return {"universe": str(universe), "out_dir": str(out_dir),
+            "cache_dir": str(cache_dir),
+            "state_path": str(cache_dir / "dividend_kr_2026_watch_state.json")}
+
+
+def test_watch_end_to_end_updates_only_the_stock_that_filed(watch_end_to_end):
+    """
+    행복 경로 전체: list.json 이 알려 준 삼성전자만 다시 수집돼 1분기 → 반기 값으로
+    바뀌고, 나머지 종목(000660)은 손대지 않습니다.
+    """
+    ctx = watch_end_to_end
+    assert cdk.main(["--universe", ctx["universe"], "--year", "2026",
+                     "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+                     "--watch-disclosures"]) == 0
+
+    payload = json.loads(
+        open(os.path.join(ctx["out_dir"], "dividend_kr_2026_latest.json"),
+             encoding="utf-8").read())
+    by_code = {r["stock_code"]: r for r in payload["records"]}
+    assert by_code["005930"]["reprt_code"] == "11012"
+    assert by_code["005930"]["dps_cash_common"] == 746        # 372 → 746 (실측 누적값)
+    assert by_code["000660"]["status"] == "NO_DATA"           # 건드리지 않았습니다
+    summary = payload["summary"]
+    assert summary["watch_replaced_stock_codes"] == ["005930"]
+    assert summary["watch_added_stock_codes"] == []
+    assert "부분 갱신" in summary["verification_status"]
+
+
+def test_watch_end_to_end_leaves_an_audit_trail(watch_end_to_end):
+    """감사 로그·상태 파일·raw 이어붙임이 모두 남아야 합니다."""
+    ctx = watch_end_to_end
+    cdk.main(["--universe", ctx["universe"], "--year", "2026",
+              "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+              "--watch-disclosures"])
+
+    watch_log = json.loads(
+        open(os.path.join(ctx["out_dir"], "dividend_kr_2026_watch_log.json"),
+             encoding="utf-8").read())
+    entry = watch_log["watches"][0]
+    assert entry["date_range_checked"] == "20260821~20260823"
+    assert entry["matched_stock_codes"] == ["005930"]         # 999999 는 유니버스 밖
+    assert entry["replaced_stock_codes"] == ["005930"]
+
+    state = json.loads(open(ctx["state_path"], encoding="utf-8").read())
+    assert state["last_checked_de"] == "20260823"
+
+    raw_lines = open(os.path.join(ctx["out_dir"], "dividend_kr_2026_raw.jsonl"),
+                     encoding="utf-8").read().splitlines()
+    assert len(raw_lines) >= 2                                # 기존 1줄 + 이번 응답
+    assert json.loads(raw_lines[0])["reprt_code"] == "11013"  # 옛 줄은 그대로 남습니다
+
+
+def test_watch_end_to_end_does_not_commit_workspace_into_main_outputs(watch_end_to_end):
+    """임시 작업공간은 cache_dir 밑에만 생깁니다(본 산출물 폴더를 어지럽히지 않습니다)."""
+    ctx = watch_end_to_end
+    cdk.main(["--universe", ctx["universe"], "--year", "2026",
+              "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+              "--watch-disclosures"])
+    assert os.path.isdir(os.path.join(ctx["cache_dir"], "watch_delta"))
+    top = sorted(p for p in os.listdir(ctx["out_dir"]) if p != "cache")
+    assert top == ["dividend_kr_2026_latest.json",
+                   "dividend_kr_2026_raw.jsonl",
+                   "dividend_kr_2026_watch_log.json"]
+
+
+def test_watch_end_to_end_second_run_same_day_does_nothing(watch_end_to_end, capsys):
+    """같은 날 두 번 돌아도 DART 를 두 번 훑지 않습니다(§0-3-2)."""
+    ctx = watch_end_to_end
+    argv = ["--universe", ctx["universe"], "--year", "2026",
+            "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+            "--watch-disclosures"]
+    assert cdk.main(argv) == 0
+    first = open(os.path.join(ctx["out_dir"], "dividend_kr_2026_latest.json"), "rb").read()
+    capsys.readouterr()
+
+    assert cdk.main(argv) == 0
+    assert "확인할 새 구간이 없습니다" in capsys.readouterr().out
+    # 산출물도 한 바이트도 안 바뀝니다(감시 이력도 늘지 않습니다).
+    assert open(os.path.join(ctx["out_dir"],
+                             "dividend_kr_2026_latest.json"), "rb").read() == first
+    watch_log = json.loads(
+        open(os.path.join(ctx["out_dir"], "dividend_kr_2026_watch_log.json"),
+             encoding="utf-8").read())
+    assert len(watch_log["watches"]) == 1
+
+
+def test_watch_end_to_end_does_not_disturb_the_main_checkpoint(watch_end_to_end):
+    """
+    ⚠️ 전수 수집이 중간에 멈춰 남겨 둔 체크포인트를 감시 실행이 지우면, 다음 전수 실행이
+    수천 건을 처음부터 다시 요청합니다(§0-3-2). 그래서 cache_dir 을 분리했습니다.
+    """
+    ctx = watch_end_to_end
+    main_ckpt = os.path.join(ctx["cache_dir"], "dividend_kr_2026_checkpoint.json")
+    with open(main_ckpt, "w", encoding="utf-8") as f:
+        json.dump({"run_key": "2026|2734|11011", "records": [], "done_codes": [],
+                   "request_count": 4200}, f)
+    before = open(main_ckpt, "rb").read()
+
+    cdk.main(["--universe", ctx["universe"], "--year", "2026",
+              "--out-dir", ctx["out_dir"], "--cache-dir", ctx["cache_dir"],
+              "--watch-disclosures"])
+    assert os.path.exists(main_ckpt)
+    assert open(main_ckpt, "rb").read() == before
