@@ -1,4 +1,2505 @@
 {
-  "last_rebalance_date": null,
-  "members": {}
+  "last_rebalance_date": "2026-08-25",
+  "members": {
+    "005930": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000660": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005935": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "402340": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009150": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005380": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "373220": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "207940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "028260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "105560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "032830": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "012450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "055550": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "329180": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034020": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "012330": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "068270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034730": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "086790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "035420": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "066570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010130": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "298040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "267260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "042660": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009540": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "316140": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "096770": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "015760": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "042700": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "138040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "051910": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "033780": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010140": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "018260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000150": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003550": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "267250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "024110": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010950": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "035720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "079550": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "278470": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "086280": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "064350": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "272210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "030200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "047810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "307950": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005830": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "078930": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003230": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "259960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "323410": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "071050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "047050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "443060": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "0126Z0": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "028050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "161390": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "090430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "180640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "016360": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "352820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007660": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009830": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "039490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "064400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "128940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "021240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005387": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "326030": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000100": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "047040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "032640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "267270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "377300": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000880": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "241560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "029780": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001440": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "353200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "175330": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "271560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "062040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010060": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "066970": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "036570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034220": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "051900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000500": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "088980": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005385": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "088350": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "454910": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "138930": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002380": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "008930": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000990": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004170": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "082740": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004020": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "018880": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "085620": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "052690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "161890": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "028670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "036460": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "111770": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "192820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "103590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "251270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "022100": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009420": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "035250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011780": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "012750": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "302440": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "031210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "483650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006360": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "097950": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007340": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004370": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "023530": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "139130": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "375500": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "450080": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "026960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "336260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "489790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "282330": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005850": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "383220": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "204320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011170": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "103140": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004990": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "181710": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "279570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "081660": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009970": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "014680": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "030000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "018670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005440": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "073240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "069960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "139480": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "112610": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "051600": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "457190": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "462870": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "439260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "475150": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "395400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "071970": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "020150": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "089860": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "008770": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "023590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000155": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006280": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "097230": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "00680K": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "120110": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "020560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "069620": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "294870": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "322000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "298020": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001740": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009155": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007310": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "229640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "093370": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "082640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "281820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "012630": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "361610": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "192080": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "415640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003540": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000815": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "280360": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "300720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "066575": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "030610": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "330590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000080": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003530": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "032350": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006340": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "192400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "451800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003090": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "185750": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "051915": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "077970": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "030190": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005300": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "195870": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006110": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005090": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003470": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034230": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "079160": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "071055": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "285130": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "071320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000370": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005180": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "100090": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "137310": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "499790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003850": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "214320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "365550": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "298050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "036530": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "456040": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "064960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "093050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005880": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "317450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "094800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "268280": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "069260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "033240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "293940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003160": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001060": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002350": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001680": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "014820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "383800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "453340": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000640": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "248070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006380": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001510": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "108320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002840": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "075580": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "114090": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "00088K": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "058650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003300": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "025540": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002990": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "019170": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "100840": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007700": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "178920": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "090460": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "016380": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003620": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001530": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "00104K": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "336370": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "284740": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "377740": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "039130": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "448730": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003545": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010780": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034310": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "008060": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001500": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "079900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "249420": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "090435": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009410": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "145990": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "161000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "0120G0": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "460860": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002240": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005389": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005945": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "072710": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "417310": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004700": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003280": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "014830": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "403550": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003030": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "357120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005420": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "092230": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "484870": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "029530": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "317400": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "344820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002030": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "016610": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "016590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "306200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "029460": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "271940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "015360": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "027410": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "452260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "008730": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "194370": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "170900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "950210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "105630": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "104700": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "183190": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "031430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004710": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "060980": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "130660": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "126560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006220": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "02826K": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "024720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "097520": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "089590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "015860": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005610": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011760": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "006405": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "020000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "200880": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011930": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "026890": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "091810": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009160": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "145720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005950": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002020": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "123890": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "016800": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "192650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "108670": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "092790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009290": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002310": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001230": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "018250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "126720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "096760": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "272450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "078520": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "381970": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "244920": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001750": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000157": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "025860": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "012030": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "033270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001390": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "475560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034830": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003960": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "037710": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "286940": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "058430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "084690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002710": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "217590": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "010955": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017390": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "122900": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "084010": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003350": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "334890": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "008490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "298690": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004360": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "136490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000430": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003070": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "007160": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005680": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003920": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001790": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "105840": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "900140": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005500": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "134380": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "025000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "404990": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "092200": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001460": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "002320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "348950": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "030210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "298000": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000680": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "051905": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "034120": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "0030R0": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "226320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "044450": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000050": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001340": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "044820": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003720": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000540": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "009680": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003520": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000490": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "033920": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "432320": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000650": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "000480": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "035150": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "003555": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "017860": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "005010": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "037270": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "03473K": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "011500": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "088260": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "025560": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "100250": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "004980": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "013580": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001130": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "095570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "039570": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "001630": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "028100": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    },
+    "053210": {
+      "joined_date": "2026-08-25",
+      "left_date": null,
+      "is_visible": true
+    }
+  }
 }
