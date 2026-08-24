@@ -1405,8 +1405,8 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
 | `tests/fixtures/dividend_payment_decision_*.html` | 실측 DART 원문 픽스처 5건(롯데케미칼 1 + 리츠 4: SK리츠·코람코더원리츠·롯데리츠·NH올원리츠) — 지어내지 않고 실제 공시 원문 그대로 |
 | `data/dividend_kr_2026_payment_events.json` / `_raw.jsonl` / `data/cache/dividend_kr_2026_payment_state.json` | 지급일정 수집기의 가공본/원본/증분 상태 파일(§0-3-3) |
 | `.github/workflows/watch_dividend_payment_events.yml` | **매일 KST 05:30 자동 실행**(cron `30 20 * * *`) — 감시 모드로 `collector_dividend_payment_kr.py` 무옵션 실행, `data/dividend_kr_2026_payment_events*`·상태파일 자동 커밋. **이 모듈에서 유일하게 스케줄이 걸린 워크플로우** |
-| `.github/workflows/backfill_dividend_payment_events_2026_08.yml` | 🗑️ **1회성, 이미 실행 완료(2026-08-25) — 삭제해도 됨.** 8월 누락분 백필 전용, 스케줄 없음 |
-| `probe_reit_disclosure_document.py` / `.github/workflows/probe_reit_disclosure_document.yml` | 🗑️ **1회성 조사용, 이미 목적 달성(리츠 파싱 구멍 원인 확인) — 삭제해도 됨** |
+| ~~`.github/workflows/backfill_dividend_payment_events_2026_08.yml`~~ | ✅ **삭제·커밋·push 완료(2026-08-25 밤, `656c325`→`98f1567`).** 8월 누락분 백필 전용, 1회성 실행 완료 후 정리됨 |
+| ~~`probe_reit_disclosure_document.py` / `.github/workflows/probe_reit_disclosure_document.yml`~~ | ✅ **삭제·커밋·push 완료(2026-08-25 밤, `656c325`→`98f1567`).** 1회성 조사용, 목적 달성(리츠 파싱 구멍 원인 확인) 후 정리됨 |
 | ~~`probe_dart_disclosure_document.py`/`.yml`, `probe_dart_disclosure_list.py`/`.yml`~~ | ✅ **정정(2026-08-25 저녁, 오너 실기기 확인) — 이미 삭제·커밋 완료된 상태였습니다.** 이 표에 "삭제해도 됨"으로 남아있던 건 압축된 대화 요약 과정에서 놓친 오래된 기록입니다 — 실제로는 이 세션 안에서 더 일찍(§3 로그 "배당금 '매일 공시감시' 완료" 항목 참고) 이미 지워져 있었습니다. 지금 저장소엔 존재하지 않습니다(오너가 파일 탐색기로 직접 확인, 2026-08-25) — 더 손댈 것 없음 |
 | `web/pages/dividend_page.py` | 배당 캘린더 화면. 정기보고서 기반 확정/폴백 배당 **+** 지급일정 기반 배당락일·기준일·지급일 3색 달력 **+** 매수 마감 경고 배너까지 전부 이 파일 하나가 그림 |
 
@@ -1596,26 +1596,29 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
     저장소 표준(`sys.path.append(str(REPO_ROOT))`, `test_dividend_payment_collector.py`는
     이미 표준을 따름)과 달라 `python -m` 없이 단독 실행하면 `ModuleNotFoundError`로 죽음.
     둘 다 사소하고 급하지 않음.
-13. ✅ **[정정 완료, 명령 대기] 1회성 조사/백필 파일 정리 — 실제 대상은 2쌍뿐이었음이
-    확인됨(2026-08-25 저녁).** 처음 `git rm`으로 4쌍을 한 번에 지우려다
-    `probe_dart_disclosure_document.py`가 "pathspec did not match"로 걸려 명령 전체가
-    실패(git rm은 원자적 — 하나라도 없으면 아무것도 안 지움). `git status`·오너 실기기
-    파일탐색기로 직접 재확인한 결과: `probe_dart_disclosure_document.py`/`.yml`·
+13. ✅ **[완료] 1회성 조사/백필 파일 정리 — 실제 대상 3개(2쌍) 전부 삭제·커밋·push
+    완료(2026-08-25 밤, 커밋 `656c325` → 원격 `98f1567`).** 처음 `git rm`으로 4쌍을
+    한 번에 지우려다 `probe_dart_disclosure_document.py`가 "pathspec did not match"로
+    걸려 명령 전체가 실패(git rm은 원자적 — 하나라도 없으면 아무것도 안 지움). `git
+    status`·오너 실기기 파일탐색기로 직접 재확인한 결과: `probe_dart_disclosure_document.py`/`.yml`·
     `probe_dart_disclosure_list.py`/`.yml`은 **이미 훨씬 전에 삭제·커밋된 상태**(§11-2
-    표 정정 참고, 대화 압축 요약 과정에서 놓친 오래된 기록이었을 뿐 문제 없음) —
-    진짜 남은 대상은 `probe_reit_disclosure_document.py`(아직 있음)·
-    `.github/workflows/probe_reit_disclosure_document.yml`(이미 디스크에서 사라짐,
-    커밋만 안 됨 — 원인 불명이나 위험하지 않음)·
-    `.github/workflows/backfill_dividend_payment_events_2026_08.yml`(아직 있음)
-    **딱 3개(2쌍)**뿐. 올바른 명령을 다시 안내함 — 오너가 실행하면 완료.
-    (부수적으로 `.github/workflows/새 텍스트 문서.txt`라는 빈 파일이 어쩌다 생겼는데
-    git이 추적하지 않는 파일이라 무해함 — 지워도 그만 안 지워도 그만.)
+    표 정정 참고, 대화 압축 요약 과정에서 놓친 오래된 기록이었을 뿐 문제 없음) — 진짜
+    남은 대상은 `probe_reit_disclosure_document.py`·
+    `.github/workflows/probe_reit_disclosure_document.yml`(이미 디스크에서 사라져있었음,
+    커밋만 안 된 상태 — 원인 불명이나 위험하지 않았음)·
+    `.github/workflows/backfill_dividend_payment_events_2026_08.yml` 딱 3개(2쌍)였고,
+    정정된 명령(`git rm probe_reit_disclosure_document.py
+    .github\workflows\probe_reit_disclosure_document.yml
+    .github\workflows\backfill_dividend_payment_events_2026_08.yml`)으로 오너가 실행 →
+    커밋 → push까지 전부 성공 확인. (부수적으로 `.github/workflows/새 텍스트 문서.txt`라는
+    빈 파일이 어쩌다 생겼는데 git이 추적하지 않는 파일이라 무해함 — 오너가 원하면 탐색기에서
+    직접 지우면 됨, 아니어도 무방.)
 14. ⏸️ **PEGY 페이지 연동 — 여전히 "나중 과제"로 보류.** 오너가 명시적으로 미룸, 지금
     세션에서 손 안 댐.
 
 **요약 — 오너가 다음에 결정할 것(우선순위순):** ① ETF 분배금을 다시 시도할지, 시도한다면
-어떤 방식으로(11번) ② 1회성 파일 정리를 실제 상태 확인 후 마저 끝낼지(13번). 나머지
-(1·8~10·12번)는 이미 끝났거나 사소한 정리 항목이라 오너 판단이 급하지 않습니다.
+어떤 방식으로(11번). 나머지(1·8~10·12·13번)는 이미 끝났거나 사소한 정리 항목이라 오너
+판단이 급하지 않습니다.
 
 ### 11-5. 화면(`/dividend`) 설계 요약 (2026-08-24, 오푸스 높음으로 구현)
 
