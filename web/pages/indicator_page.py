@@ -17,6 +17,8 @@ web/pages/indicator_page.py
    `unavailable_reasons`(수집기가 남긴 사유)를 그대로 보여줍니다.
 """
 
+import math
+
 from nicegui import ui
 
 from utils.constants import DERIVED_INDICATOR_BADGE
@@ -32,7 +34,9 @@ from web.components import (
     error_banner,
     esc,
     fmt_num,
+    holdings_table_html,
     info_banner,
+    pager,
     render_stock_download_tool,
     warning_banner,
 )
@@ -44,6 +48,10 @@ from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS, data_path, load_json_file_a
 # 상수
 # =============================================================================
 LATEST_FILENAME = 'indicator_kr_latest.json'
+
+#: 오너 요청(2026-08-25) — 검색만 시키지 말고 전체 목록을 페이지네이션으로 죽 보여줄 것.
+#: `web/components/widgets.py::pager()`(dividend/pegy 와 같은 페이지네이션 위젯) 재사용.
+ITEMS_PER_PAGE = 20
 
 COMING_SOON_TEXT = (
     '🚧 "여기서부터는 신앙입니다"(보조지표)는 아직 준비중입니다.\n\n'
@@ -94,7 +102,7 @@ def _search_matches(stock, query):
 @ui.page('/indicator', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
 async def indicator_page() -> None:
     """관리자 전용으로 시작(§0-3-6 2단계). 로그인 불필요 — 사용자별 데이터가 없습니다(§0-3-8)."""
-    with layout('🙏 여기서부터는 신앙입니다', width_class='max-w-4xl'):
+    with layout('🙏 여기서부터는 신앙입니다', width_class='max-w-6xl'):
         ui.markdown('## 🙏 여기서부터는 신앙입니다 — RSI·MACD·볼린저밴드')
 
         # 🚧 이중 방어 — 메뉴(web/layout.py)와 **같은 상수**를 보고 판단합니다.
@@ -143,50 +151,66 @@ async def _render_body() -> None:
 
     ui.separator()
 
-    # ── 검색 → 카드 (state 는 이 함수의 지역 변수만 씁니다, §0-3-8) ──
-    state = {'query': '', 'picked': 0}
+    # ── 전체 목록(페이지네이션) + 검색 필터 (state 는 이 함수의 지역 변수만 씁니다, §0-3-8) ──
+    # 2026-08-25 오너 요청 — 검색으로만 찾게 하지 말고 목록을 20개씩 죽 보여줄 것.
+    # 정렬은 시가총액 내림차순(수집기가 만든 stocks 배열 순서 그대로) — 지표값으로 다시
+    # 줄 세우는 랭킹 기능은 만들지 않습니다(오너가 이미 "필요 없다"고 판단한 항목,
+    # TECHNICAL_INDICATOR_WORK_ORDER.md §6 항목 7 참고).
+    state = {'query': '', 'page': 1}
 
     def _on_query(event) -> None:
         state['query'] = (event.value or '').strip()
-        state['picked'] = 0
-        _results.refresh()
+        state['page'] = 1
+        _list_section.refresh()
 
-    ui.input('🔍 종목명 / 종목코드 검색', placeholder='예: 삼성전자, 005930',
+    ui.input('🔍 종목명 / 종목코드 검색 (비워두면 전체 목록)', placeholder='예: 삼성전자, 005930',
               on_change=_on_query).props('clearable').classes('w-full')
 
     @ui.refreshable
-    def _results() -> None:
+    def _list_section() -> None:
         query = state['query']
-        if not query:
-            ui.markdown(
-                '종목명이나 6자리 종목코드를 입력하면 그 종목의 RSI·MACD·볼린저밴드 원값과 '
-                f'종합판정을 보여드립니다. (오늘 기준 {len(stocks)}종목 조회 가능 — 시가총액 '
-                '상위 500종목, 3개월마다 재선정)'
-            ).classes('vh-muted')
-            return
-
-        found = [s for s in stocks if _search_matches(s, query)]
-        if not found:
+        filtered = [s for s in stocks if not query or _search_matches(s, query)]
+        if not filtered:
             warning_banner(f"🔎 '{query}' 검색 결과가 없습니다. 종목명이나 6자리 종목코드로 다시 검색해 주세요.")
             return
 
-        if len(found) > 1:
-            options = {i: f"{s.get('name')} ({s.get('code')})" for i, s in enumerate(found)}
-            index = state['picked'] if state['picked'] in options else 0
+        total_pages = max(1, math.ceil(len(filtered) / ITEMS_PER_PAGE))
+        page = min(max(1, state['page']), total_pages)
+        start = (page - 1) * ITEMS_PER_PAGE
+        page_items = filtered[start:start + ITEMS_PER_PAGE]
 
-            def _on_pick(event) -> None:
-                state['picked'] = event.value or 0
-                _results.refresh()
+        ui.markdown(
+            f'총 **{len(filtered)}종목** 중 {start + 1}~{min(start + ITEMS_PER_PAGE, len(filtered))}번째 '
+            f'(페이지 {page}/{total_pages}, 시가총액 순)'
+        ).classes('vh-muted')
 
-            ui.select(options, value=index, on_change=_on_pick,
-                      label=f'📋 검색 결과 {len(found)}개 — 종목을 선택하세요').classes('w-full')
-            target = found[index]
-        else:
-            target = found[0]
+        headers = ['종목명 (코드)', '종합판정', 'RSI(14)', 'RSI 판독', 'MACD 크로스', '볼린저 위치']
+        rows = [
+            [
+                f"{esc(s.get('name'))} ({esc(s.get('code'))})",
+                esc(s.get('verdict_label') or '산출 불가'),
+                esc(fmt_num(s.get('rsi'), '', 2)),
+                esc(s.get('rsi_signal') or '—'),
+                esc(s.get('macd_cross') or '없음'),
+                esc(s.get('bb_position') or '—'),
+            ]
+            for s in page_items
+        ]
+        ui.html(holdings_table_html(headers, rows)).classes('w-full')
 
-        _render_stock_card(target)
+        def _on_page_change(new_page: int) -> None:
+            state['page'] = new_page
+            _list_section.refresh()
 
-    _results()
+        pager(total_pages, page, _on_page_change)
+
+        # 검색으로 정확히 한 종목만 남으면, 표 아래에 지표 원값이 전부 보이는 상세 카드도 함께.
+        if len(filtered) == 1:
+            ui.separator()
+            ui.markdown('#### 🔍 상세 보기').classes('vh-muted')
+            _render_stock_card(filtered[0])
+
+    _list_section()
 
     ui.separator()
 
