@@ -1166,24 +1166,35 @@ def test_public_screens_are_hidden_by_default():
                 if p.startswith("/scorecard/")]
 
 
-def test_public_screens_start_admin_only():
+def test_public_screens_are_fully_public_now():
     """
-    ⏳ 2026-08-23 — 두 화면 모두 **2단계(관리자 전용)에서 시작**합니다. 전체 공개 전환은
-    오너가 이 값을 False 로 바꾸는 것으로만 일어납니다(결투 공개 계층이 밟았던 순서 그대로).
-    이 검사가 실패한다면 그건 실수로 전체 공개된 것이거나, 오너가 전환하면서 여기를 함께
-    갱신하지 않은 것입니다 — 어느 쪽이든 사람이 봐야 합니다.
+    ⏳ 2026-08-23 — 두 화면 모두 **2단계(관리자 전용)에서 시작**했었습니다.
+
+    ✅ 오너 확정 (2026-08-23, 같은 날) — 실 데이터 검증(동의 6개 항목·순위표 8개 컬럼·
+    페이지 바로가기)을 마친 뒤 **3단계(전체 공개)로 전환**했습니다. 최소 인원(500명) 문턱에
+    못 미쳐 "참가자가 부족합니다" 안내만 뜨는 상태라도 먼저 열어 관심을 모으는 쪽을 택한
+    것입니다(결투 공개 계층이 2026-08-22 에 밟았던 것과 같은 절차). 이전엔 여기서
+    `is True` 를 확인했었습니다 — 이 검사가 실패한다면 그건 실수로 다시 관리자 전용으로
+    돌아간 것이거나, 오너가 전환하면서 여기를 함께 갱신하지 않은 것입니다 — 어느 쪽이든
+    사람이 봐야 합니다.
     """
     import web.layout as layout_module
 
     layout_module = importlib.reload(layout_module)
-    assert layout_module.SCORECARD_CONSENT_MENU_ADMIN_ONLY is True
-    assert layout_module.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY is True
+    assert layout_module.SCORECARD_CONSENT_MENU_ADMIN_ONLY is False
+    assert layout_module.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY is False
 
 
-def test_public_screens_appear_one_at_a_time_inside_the_scorecard_group():
+def test_public_screens_appear_one_at_a_time_inside_the_duel_group():
     """
     동의 화면과 순위표 화면은 **따로** 열 수 있어야 합니다(동의 화면을 먼저 열어 참가자를
-    모으는 것이 원래 순서). 그리고 두 항목은 `/scorecard` 와 **같은 메뉴 그룹**에 붙습니다.
+    모으는 것이 원래 순서).
+
+    🔁 2026-08-23 (오너 요청, 같은 날 재정리) — 두 항목이 붙는 메뉴 그룹이
+    `📊 보유종목` → `⚔️ 내 밑으로 눈 깔어`(구 `⚔️ 결투다!`)로 바뀌었습니다. 사이드바를
+    트래시토크 톤으로 다시 정리하려는 순전한 UX 결정이고, 켜고 끄는 스위치(§0-3-6 기본
+    숨김 · 결투와 무관하게 독립)는 하나도 안 바뀌었습니다 — 이 테스트 이름도 그 자리를
+    따라 바꿨습니다.
     """
     only_consent = _menu_with(SCORECARD_CONSENT_ENABLED="true")
     assert "/scorecard/consent" in only_consent
@@ -1193,15 +1204,28 @@ def test_public_screens_appear_one_at_a_time_inside_the_scorecard_group():
     assert {"/scorecard", "/scorecard/consent", "/scorecard/leaderboard"} <= set(both)
 
     # 🔴 결투 스위치와 무관합니다 — `DUEL_ENABLED` 없이도 켜집니다(공개되는 것은 결투
-    #    가상계좌가 아니라 "내 성적표"이기 때문).
+    #    가상계좌가 아니라 "내 성적표"이기 때문). 그룹 자체는 셋 중 하나만 켜져도 생기므로,
+    #    아래에서 `/duel` 없이 그룹이 만들어지는 것으로 그 독립성을 함께 확인합니다.
     assert "/duel" not in both
 
-    # 두 항목이 붙는 자리는 `/scorecard` 와 **같은 그룹**입니다(공개되는 데이터가 바로
-    # 그 화면의 보유종목이라, 다른 그룹에 두면 사용자가 무엇을 공개하는지 헷갈립니다).
-    with_flags = _menu_group_items("📊 보유종목", SCORECARD_CONSENT_ENABLED="true",
+    import web.layout as layout_module
+
+    # 두 항목이 붙는 자리는 `⚔️ 내 밑으로 눈 깔어` 그룹이고, 라벨도 오너 지정 문구
+    # ("공개 동의 관리(= 다 덤벼 신청서)" / "다 덤벼!")로 바뀌었습니다. 관리자전용 플래그는
+    # 그 화면 자신의 스위치(`SCORECARD_*_MENU_ADMIN_ONLY`)를 그대로 따라갑니다.
+    with_flags = _menu_group_items("⚔️ 내 밑으로 눈 깔어", SCORECARD_CONSENT_ENABLED="true",
                                    SCORECARD_LEADERBOARD_ENABLED="true")
-    assert [path for path, _l, _a in with_flags] == [
-        "/scorecard", "/report", "/scorecard/consent", "/scorecard/leaderboard"]
+    assert with_flags == [
+        ("/scorecard/consent", "🔓 공개 동의 관리(= 다 덤벼 신청서)",
+         layout_module.SCORECARD_CONSENT_MENU_ADMIN_ONLY),
+        ("/scorecard/leaderboard", "🏆 다 덤벼!",
+         layout_module.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY),
+    ]
+
+    # `📊 보유종목` 은 이제 이 두 항목 없이 `/scorecard`·`/report` 만 남습니다.
+    scorecard_group = _menu_group_items("📊 보유종목", SCORECARD_CONSENT_ENABLED="true",
+                                        SCORECARD_LEADERBOARD_ENABLED="true")
+    assert [path for path, _l, _a in scorecard_group] == ["/scorecard", "/report"]
 
 
 def _menu_group_items(group_label, **env):

@@ -313,41 +313,51 @@ onerror=alert(1)>', ...})`를 호출한 결과와 `holdings_table()`이 만든 �
    전부 주석(경위 설명)이거나 "삭제됐음을 확인하는 테스트 코드"뿐이고, 실제 import·호출은
    0건.
 
-## 아직 안 끝난 것
+## 아직 안 끝난 것 → 전부 완료 (2026-08-23 같은 날, 후속 라운드)
 
-1. 🔴 **마이그레이션 실행(오너)** — Supabase SQL Editor에 저장소 루트의
-   `MIGRATION_2026-08-23_holding_details.sql`을 **통째로 붙여넣어 한 번 실행**.
-   (원본 `sql/scorecard_public_schema.sql` §1~§3은 **이미 실행 완료** — 다시 돌리지 마세요.)
-   이걸 하기 전까지는 6번째 동의 저장과 상세지표 발행이 DB에서 실패합니다. 두 번 돌려도
-   안전하고, 실제 Postgres 16에서 미리 돌려 확인해 뒀습니다(Phase C 검증 4번).
-   실행 후 눈으로 확인할 것: `scorecard_public_consent`에 `consent_holding_details` 컬럼이
-   생기고 기존 1행이 `true`인지, `scorecard_public_holdings`에 새 컬럼 5개가 생겼는지.
-2. **Render 환경변수** — `SCORECARD_CONSENT_ENABLED`/`SCORECARD_LEADERBOARD_ENABLED`를
-   오너가 직접 설정(기본 꺼짐 — 결투 때와 같은 절차, Render 대시보드에서만 가능).
-3. **`.github/workflows/scorecard_publish_daily.yml` 반영** — `device_commit_files`가
-   `.github/workflows/` 경로를 막으므로, 결투 USD 트랙 워크플로우 파일들을 전달했던 것과
-   같은 대체 방식(오너 컴퓨터에 직접 쓰기 등)이 필요합니다. 파일 내용 자체는 완성돼 있고
-   YAML 파싱까지 확인했습니다.
-4. **6단계(실검증)** — 이 새 모듈에 대해 처음부터: 성적표 등록 → **6개** 동의 + 최종 확인 →
-   (배치를 dry-run/직접 실행으로 앞당겨) → 순위표에서 본인 닉네임 확인 → 철회 → 순위표에서
-   사라짐 확인. Supabase SQL Editor에서 부분 유니크 인덱스·RLS 정책·트리거도 수동 확인.
-5. **git 반영** — 삭제된 파일(`web/pages/duel_consent_page.py`·
-   `web/pages/duel_leaderboard_page.py`·`tests/test_duel_consent_page_usd.py`·
-   `tests/test_duel_leaderboard_page_usd.py`)을 `git add -A`(또는 `git rm`)로 새 파일과
-   함께 커밋해야 합니다 — 새 파일만 add하면 저장소에 죽은 코드가 남습니다.
-6. 초기 배포는 관리자 전용으로 열고, 오너가 직접 눈으로 확인 후 결투 때와 같은 절차(코드
-   상수 `MENU_ADMIN_ONLY`를 `True → False` 한 글자만 바꾸는 3단계 공개 전환)를 따릅니다.
+아래 1~6번은 전부 그날 안에 끝났습니다. 이력을 지우지 않고 완료 표시만 남깁니다.
+
+1. ✅ **마이그레이션 실행(오너)** — `MIGRATION_2026-08-23_holding_details.sql` 실행 완료.
+   `consent_holding_details` 백필(`true`)과 `scorecard_public_holdings` 신규 컬럼 5개 생성을
+   오너가 직접 SQL로 조회해 확인했습니다.
+2. ✅ **Render 환경변수** — `SCORECARD_CONSENT_ENABLED`/`SCORECARD_LEADERBOARD_ENABLED`
+   둘 다 오너가 `true`로 설정 완료(Render 대시보드 스크린샷으로 확인).
+3. ✅ **`.github/workflows/scorecard_publish_daily.yml` 반영** — 배포 완료, `workflow_dispatch`로
+   여러 차례 수동 실행해 정상 동작(발행 대상·체급·최소인원 게이팅) 확인.
+4. ✅ **6단계(실검증)** — 오너 본인의 실제 계정으로 동의 6개 항목 + 최종 확인 → 배치 실행
+   (real GitHub Actions) → 임시로 참가자를 채워 순위표에서 본인 닉네임 + 8개 컬럼(종목·수량·
+   매입금액·평균매입가·현재가·평가손익·수익률·비중) 실제 렌더링까지 확인 → 정리(배치
+   재실행으로 원복) 완료.
+5. ✅ **git 반영** — 삭제 파일 포함 커밋·푸시 완료(commit `8187a2f` 등).
+6. ✅ **3단계(전체 공개) 전환** — 2026-08-23 같은 날, 오너가 Render 환경변수를 전부 `true`로
+   맞춘 것을 보고 "전체 공개된 게 맞다"고 물었다가, `MENU_ADMIN_ONLY` 두 값은 환경변수가
+   아니라 **코드에 박힌 상수**라 Render 설정과 무관하다는 걸 확인 → "안내만 보이더라도
+   열어놓자, 사람들 관심을 받기라도 할 것 같다"며 그 자리에서 전체 공개를 확정.
+   `SCORECARD_CONSENT_MENU_ADMIN_ONLY`/`SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY`를
+   `True → False`로 변경(결투 `/duel`이 2026-08-22에 밟은 것과 같은 마지막 단계).
+
+**같은 라운드에 함께 처리한 사이드바 재정리(오너 요청)**: `web/layout.py`의 메뉴 그룹
+"⚔️ 결투다!"를 "⚔️ 내 밑으로 눈 깔어"로 개명하고, `/scorecard/consent`·
+`/scorecard/leaderboard` 두 항목을 `📊 보유종목` 그룹에서 이 그룹으로 옮겼습니다(공개 여부
+스위치와는 무관한 순전한 UX 결정). 라벨도 오너 지정 문구로 바꿨습니다: "참전하기"→
+"나 자신과의 싸움이니라", "공개 동의 관리"→"공개 동의 관리(= 다 덤벼 신청서)",
+"공개 순위표 (내 밑으로 눈 깔어)"→"다 덤벼!". `tests/test_scorecard_public_ui.py`의 관련
+검사(그룹 소속·라벨·admin_only 값)를 전부 새 상태 기준으로 갱신했고, 전체 스위트(1293개)가
+이 세션 이전부터 있던 것과 같은 5개의 nicegui 렌더 순서 flaky 항목만 남기고 통과합니다.
+
+🧹 **정리해도 되는 것(급하지 않음)**: Render 환경변수에 `DUEL_CONSENT_ENABLED`·
+`DUEL_LEADERBOARD_ENABLED`가 남아있는데, 이 두 값은 결투 공개 계층이 은퇴하며
+`web/layout.py`에서 이미 빠졌으므로(`tests/test_duel_public_ui.py`가 그 은퇴를 고정) 지금은
+코드 어디에서도 읽지 않는 죽은 값입니다. 지워도 아무 영향 없고, 안 지워도 해가 없습니다.
 
 ## 다음에 이 문서를 다시 열 때
 
-**2026-08-23 기준 진행 상황**: Phase 0(SQL 작성) ✅ 완료 · **오너가 원본 스키마를 실제로
-실행하고 실사용 검증까지 마침** · Phase A(규칙·DB·배치) ✅ 완료·AI 직접 재검증 완료 ·
-Phase B(화면·배선·삭제) ✅ 완료·AI 직접 재검증 완료 · **Phase C(종목별 상세지표 전면 공개 +
-6번째 동의 항목) ✅ 완료·AI 직접 재검증 완료**(위 "Phase C 검증" 절 전부 — 실제 Postgres에
-마이그레이션을 돌려 본 것 포함). **코드 쪽은 이것으로 다 끝났습니다.** 남은 것은 위 "아직 안
-끝난 것" 1~6번뿐이고, 그중 1~3번은 오너만 할 수 있는 수동 단계(**마이그레이션 실행** ·
-Render 환경변수 · workflow 파일 반영)라 AI가 다음에 대신 진행할 수 있는 건 4번(실검증 준비)과
-5번(git 정리) 정도입니다.
+**2026-08-23 기준 진행 상황**: Phase 0~D 전부 ✅ 완료·AI 직접 재검증 완료, 그리고 위 "아직 안
+끝난 것" 1~6번(마이그레이션·Render 환경변수·workflow 반영·실검증·git 반영·3단계 전체 공개
+전환)까지 **전부 같은 날 안에 끝났습니다.** 사이드바 재정리도 함께 반영됐습니다. **이 모듈은
+지금 코드·설정·실검증 전부 완료 상태입니다.** 남은 건 순전히 데이터가 쌓이는 것뿐입니다 —
+체급(구간)마다 500명 이상 모여야 순위표에 실제로 뭔가 뜨는데, 이건 사람이 더 할 일이 없고
+시간이 해결할 문제입니다.
 
 ⚠️ **다음 사람에게** — 이 문서에는 2026-08-23 이전에 쓰인 "동의 항목은 5개"·"6번째는 없다"는
 서술이 있었고, Phase C에서 사실에 맞게 고쳤습니다. 혹시 저장소 어딘가에서 아직 "5개"라고
