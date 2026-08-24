@@ -385,7 +385,7 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `.github/workflows/watch_dividend_disclosures.yml` | (2026-08-25 신설) 💰 **배당 일일 공시감시 워크플로우.** DART `list.json`(공시검색)으로 매일 KST 05:00 "새로 정기보고서 낸 회사"만 가볍게 확인 후 그 회사만 재수집·반영(`--watch-disclosures`). `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유(동시 쓰기 방지), 반영 실패 시 상태파일을 커밋하지 않음(§0-1) |
 | `collector_dividend_payment_kr.py` | (2026-08-25 신설) 💰 **배당 지급일정 수집기(완전히 독립된 새 파이프라인).** 기존 배당 수집기와 데이터·파일이 전혀 안 겹침. DART 수시공시("현금ㆍ현물배당결정" 등, `pblntf_ty="I"`)의 원본문서(`document.xml`)를 받아 **진짜 배당기준일·배당금지급 예정일자**를 파싱 → `data/dividend_kr_2026_payment_events.json`(append-only). `--universe` 없음(유니버스 밖 신규 배당회사도 잡힘) |
 | `.github/workflows/watch_dividend_payment_events.yml` | (2026-08-25 신설) 💰 **배당 지급일정 감시 워크플로우.** 매일 KST 05:30(기존 05:00 워크플로우와 30분 띄움) 자동 실행, 세 배당 워크플로우 전부 같은 `concurrency` 그룹 공유 |
-| `web/pages/dividend_page.py` | (2026-08-24 신설, 2026-08-25 배지 추가) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py`. 2026-08-25 — `dividend_kr_2026_payment_events.json`을 종목코드로 색인해(`build_payment_event_index`) "💰 실제 지급일정 확인됨" 배지(`payment_badge_html`) 추가 — 파일이 없어도 조용히 배지만 안 붙고 나머지는 그대로 동작. 첫 실행 실측에서 확정 표에만 달면 안 되는 사례(스튜디오삼익 — 정기보고서는 미확정)가 바로 나와, **확정 표(`confirmed_row_cells`) + 미확정 목록(`pending_row_cells`) 양쪽 모두**에 붙임 |
+| `web/pages/dividend_page.py` | (2026-08-24 신설, 2026-08-25 지급일정 표시 3단계 추가) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py`. 2026-08-25 지급일정 표시 — ① `dividend_kr_2026_payment_events.json`을 종목코드로 색인(`build_payment_event_index`)해 확정 표(`confirmed_row_cells`)·미확정 목록(`pending_row_cells`) 양쪽에 "💰 실제 지급일정 확인됨" 배지(`payment_badge_html`) ② 같은 파일을 **날짜 축**으로도 색인(`build_payment_date_index`)해 달력 격자에 🟡 배당기준일ㆍ🟢 지급예정일 표시를 직접 붙이고, 날짜를 누르면 툴팁 없이 바로 펼쳐짐(`payment_date_block_html`, 오너 요청 "툴팁 말고 달력에 표시"). 파일이 없어도 조용히 표시만 안 붙고 나머지는 그대로 동작. "배당기준일"은 원문 라벨 그대로이며 **배당락일이 아님**(거래일 계산을 안 하므로) — `PAYMENT_NOTICE`에 명시 |
 | `market_history.csv` | 날짜별 종합 위험 점수 이력 |
 | `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json` | 종목별 최신 데이터 + **시장 전체** 요약 이력 (⚠️ `*summary_history.json` 은 중앙값 요약이지 종목별 이력이 아닙니다 — 종목별 이력은 2026-08-09 신설된 `*_stock_history.csv`) |
 | `views/pegy_view.py` | **공개** PEGY 밸류에이션 화면. Forward 데이터 없으면 해당 섹션만 마스킹 처리 |
@@ -425,6 +425,24 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-25 — 지급일정을 달력 격자에 직접 표시(툴팁 아님).** 오너가 실제 배포화면에서
+  "실제 지급일정 확인됨" 배지를 확인하고 "이게 언제야?"라고 물음 — 날짜가 툴팁 안에만
+  있어 마우스를 안 올리면 안 보이는 사용성 문제. 처음엔 "지급예정일자만 달력에 표시"로
+  가려다 오너가 직접 "둘 다 표시하자! 배당락일 하고 지급예정일!"로 정정. 🔴 다만 수집기가
+  실제로 갖고 있는 건 **배당기준일**이지 **배당락일**이 아닙니다 — 배당락일(배당받을 자격이
+  없어지는 거래일, 보통 배당기준일 전 거래일)은 거래일 계산이 필요한데 이 프로젝트는 그
+  계산을 하지 않고 DART 원문에 실제로 적힌 날짜만 씁니다(§0-1). 그래서 화면·문구는 "배당
+  기준일"이라고 정확히 부르고, `PAYMENT_NOTICE`에 이 차이를 명시했습니다(오너에게도 채팅으로
+  안내). 신규: `build_payment_date_index()`(종목코드 축 대신 **날짜 축**으로 재색인,
+  `{날짜: {record:[...], pay:[...]}}`) · `payment_date_block_html()`(선택한 날짜 → 바로
+  보이는 HTML, 배당기준일🟡·지급예정일🟢 구분) · 공통 조각 `_payment_event_notes_html()`로
+  분리해 기존 `payment_badge_html()`과 중복 없이 재사용(§0-3-10). 달력 격자: 결산기준일
+  건수가 없어도 지급일정 이벤트만 있으면 그 날짜를 눌러서 볼 수 있게 버튼 처리(있는 정보를
+  숨기지 않기). `_render_selected_day()`가 결산기준일 종목 유무와 무관하게 지급일정 블록을
+  항상 먼저 보여주도록 재구성 — 확정 종목이 0건인 날에도 지급일정만 있으면 그 사실을 그대로
+  안내. 검증: 겹치는 배당기준일(두 회사가 같은 날) · 파싱 실패 날짜 제외 · 결산기준일 0건+
+  지급일정만 있는 날 렌더링까지 실함수 재실행으로 확인. 수정 파일은 여전히
+  `web/pages/dividend_page.py` 1개.
 - **2026-08-25 — 배당 지급일정 첫 프로덕션 실행 → "미확정" 목록에도 배지 추가.**
   오너가 `watch_dividend_payment_events.yml`을 GitHub Actions에서 수동 실행 → 실제로
   배당결정 공시 1건(스튜디오삼익 415380, 기준일 2026-08-14·지급예정일 2026-08-31·

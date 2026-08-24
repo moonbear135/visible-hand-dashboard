@@ -253,6 +253,12 @@ PREFERRED_NOTICE = (
 #: 않도록).
 PAYMENT_BADGE_LABEL = '💰 실제 지급일정 확인됨'
 
+#: 🟢 2026-08-25 — 달력 격자에 배당기준일ㆍ지급예정일을 **직접 표시**할 때 쓰는 색.
+#: 오너 요청: "툴팁 말고 달력에 표시해달라". 결산기준일(파란·기존 색과 무관)과 헷갈리지
+#: 않도록, 이미 쓰던 앰버(경고)·블루(정보) 배지 색과도 겹치지 않는 새 색 두 개를 씁니다.
+PAYMENT_RECORD_COLOR = '#fcd34d'   # 🟡 배당기준일(원문 라벨 그대로 — 배당락일이 아님)
+PAYMENT_DATE_COLOR = '#4ade80'     # 🟢 지급예정일(실제 돈이 들어오는 날짜)
+
 #: 배지 툴팁 맨 앞에 항상 붙는 문구 — 이 표의 "결산기준일"과 이 배지의 "배당기준일"이
 #: **서로 다른 공시에서 온 서로 다른 날짜**임을 매번 밝힙니다. 같은 배당을 가리키는지는
 #: 이 화면이 판정하지 않습니다(정기보고서와 수시공시를 서로 잇는 근거가 없습니다).
@@ -265,18 +271,25 @@ PAYMENT_BADGE_TOOLTIP_INTRO = (
 #: 접이식 패널에 싣는 배경 설명 — 배지 자체가 없는 화면에서도 "왜 어떤 종목에만 이 배지가
 #: 붙는지"를 미리 답해 둡니다(PREFERRED_NOTICE 와 같은 취지).
 PAYMENT_NOTICE = (
-    '💰 "실제 지급일정" 배지 — 위 달력 상세 표와 아래 "미확정" 목록 양쪽 모두, 일부 종목에는 '
-    '배당기준일ㆍ지급예정일자를 보여주는 배지가 함께 붙어 있습니다. 이건 정기보고서가 아니라 '
-    'DART 수시공시("현금ㆍ현물배당결정")를 매일 감시해 따로 모은 정보로, 표의 결산기준일'
-    '(정기보고서 기준)과는 서로 다른 공시입니다 — 같은 배당을 가리키는지는 이 화면이 판정하지 '
-    '않고, 그 종목에 그런 공시가 있었다는 사실만 그대로 보여드립니다.\n'
-    '🔴 "미확정" 목록에 배지가 붙는 경우도 있습니다 — 정기보고서 기준으로는 아직 2026년 배당이 '
-    '확정되지 않았어도, DART 수시공시로 실제 배당기준일ㆍ지급예정일자가 먼저 나오는 경우가 '
-    '실제로 있었습니다(2026-08-25 첫 실행에서 실측). 그래서 두 목록 모두에 같은 배지를 답니다.\n'
-    '아직 모든 종목을 다 확인한 것이 아니라서, 배지가 없다고 지급일정이 없다는 뜻은 '
+    '💰 "실제 지급일정" 표시 — 위 달력 격자에서 🟡 배당기준일ㆍ🟢 지급예정일이 있는 날짜에는 '
+    '작은 표시가 붙고, 그 날짜를 누르면 아래에 회사명ㆍ금액ㆍ원문 링크가 **바로(툴팁 없이)** '
+    '펼쳐집니다. 달력 상세 표와 아래 "미확정" 목록의 종목명 옆에도 같은 정보를 담은 배지가 '
+    '붙습니다. 이건 정기보고서가 아니라 DART 수시공시("현금ㆍ현물배당결정")를 매일 감시해 '
+    '따로 모은 정보로, 달력의 날짜(결산기준일, 정기보고서 기준)와는 **서로 다른 공시**입니다 '
+    '— 같은 배당을 가리키는지는 이 화면이 판정하지 않고, 그런 공시가 있었다는 사실만 그대로 '
+    '보여드립니다.\n'
+    '🔴 "배당기준일"은 원문 라벨 그대로이며 **배당락일이 아닙니다.** 배당락일(배당받을 자격이 '
+    '없어지는 거래일, 보통 배당기준일의 전 거래일)은 거래일 계산이 필요한데, 이 화면은 그 '
+    '계산을 하지 않고 DART 원문에 실제로 적힌 두 날짜만 그대로 씁니다 — 값을 새로 만들어내지 '
+    '않기 위해서입니다.\n'
+    '🔴 "미확정" 목록에도 이 표시가 붙는 경우가 있습니다 — 정기보고서 기준으로는 아직 2026년 '
+    '배당이 확정되지 않았어도, DART 수시공시로 실제 배당기준일ㆍ지급예정일자가 먼저 나오는 '
+    '경우가 실제로 있었습니다(2026-08-25 첫 실행에서 실측). 그래서 확정 표ㆍ미확정 목록ㆍ달력 '
+    '격자 세 곳 모두에 같은 정보를 담습니다.\n'
+    '아직 모든 종목을 다 확인한 것이 아니라서, 표시가 없다고 지급일정이 없다는 뜻은 '
     '아닙니다 — 매일 새 공시를 확인하며 채워지는 중입니다. "지급예정일자"는 법적으로 확정 '
     '지급일이 아니라 상법상 지급 기한(통상 1개월 이내)이라는 점도 DART 원문에 그대로 '
-    '적혀 있어, 배지 안 원문 링크로 직접 확인할 수 있게 해 두었습니다.'
+    '적혀 있어, 원문 링크로 직접 확인할 수 있게 해 두었습니다.'
 )
 
 COMING_SOON_TEXT = (
@@ -388,6 +401,35 @@ def payment_event_summary_text(event) -> str:
     if data.get('is_correction'):
         text = '[기재정정] ' + text
     return text
+
+
+def build_payment_date_index(payload):
+    """`dividend_kr_2026_payment_events.json` → `{'YYYY-MM-DD': {'record': [...], 'pay': [...]}}`.
+
+    2026-08-25 — 오너가 "배지를 툴팁 말고 달력에 바로 표시해달라"고 요청해 추가.
+    `build_payment_event_index()`(종목코드 기준)와는 축이 다른 **날짜 기준** 색인입니다 —
+    달력 격자에서 "이 날짜에 걸리는 이벤트가 있는가"를 바로 찾으려고 만들었습니다.
+
+    🔴 `record`는 원문 라벨 그대로 **배당기준일**입니다 — "배당락일"이 아닙니다. 배당락일
+       (배당받을 자격이 없어지는 거래일, 보통 배당기준일의 전 거래일)은 거래소 휴장일을
+       감안한 거래일 계산이 필요한데, 이 프로젝트는 그 계산을 하지 않고 DART 원문에 실제로
+       적힌 날짜(배당기준일·지급예정일자)만 그대로 씁니다(§0-1 — 없는 값을 계산해 만들지
+       않기). 화면 문구도 "배당기준일"이라고만 부릅니다.
+    한 이벤트가 두 축(배당기준일·지급예정일) 모두에 들어갈 수 있고(서로 다른 날짜라면
+    서로 다른 칸에), 한 날짜에 여러 이벤트가 겹칠 수도 있어(여러 회사가 같은 날) 전부
+    리스트로 담습니다. 날짜가 없거나 형식이 이상하면(파싱 실패) 그 축에는 안 넣습니다.
+
+    :return: 함수 지역 dict (모듈 전역이 아닙니다 — §0-3-8).
+    """
+    index = {}
+    for record in (payload or {}).get('records') or []:
+        for field, kind in (('record_date', 'record'), ('pay_date_expected', 'pay')):
+            date_str = str((record or {}).get(field) or '').strip()
+            if not date_str or parse_iso_date(date_str) is None:
+                continue
+            bucket = index.setdefault(date_str, {'record': [], 'pay': []})
+            bucket[kind].append(record)
+    return index
 
 
 def market_group(label) -> str:
@@ -765,6 +807,29 @@ def parse_note_badge_html(entry) -> str:
     return warn_badge(f'📝 파싱 메모 {len(notes)}건', body)
 
 
+def _payment_event_notes_html(event) -> str:
+    """이벤트 1건의 부가 안내(정정 여부는 `payment_event_summary_text`가 이미 앞에 붙이므로
+    여기서는 다루지 않음) — 자회사 대리공시ㆍ파싱 일부 실패ㆍ원문 링크. 없으면 빈 문자열.
+
+    `payment_badge_html()`·`payment_date_block_html()` 둘 다 쓰는 공통 조각입니다(§0-3-10
+    — 같은 안내를 두 곳에서 각자 다시 만들지 않기).
+    """
+    parts = []
+    if event.get('is_subsidiary_notice'):
+        parts.append('⚠️ 이 공시는 "자회사의 주요경영사항"으로 접수됐습니다 — 공시 주체와 '
+                     '실제 배당하는 회사가 다를 수 있습니다.')
+    status = event.get('parse_status')
+    if status and status != 'OK':
+        parts.append(f'⚠️ 공시 원문에서 일부 항목을 확실히 읽지 못했습니다'
+                     f'(parse_status={esc(status)}).')
+    url = event.get('dart_document_url')
+    if url:
+        parts.append(dart_link_html(url))
+    if not parts:
+        return ''
+    return '<br>' + '<br>'.join(parts)
+
+
 def payment_badge_html(entry, payment_index) -> str:
     """🟢 "실제 지급일정" 배지 한 조각. 이 종목에 해당 이벤트가 없으면 **빈 문자열**
     (없는데 배지 자리만 비워 두면 "곧 채워질 값"처럼 보이므로, 아예 아무것도 그리지
@@ -779,25 +844,52 @@ def payment_badge_html(entry, payment_index) -> str:
     if not events:
         return ''
 
-    lines = []
-    for event in events:
-        line = esc(payment_event_summary_text(event))
-        if event.get('is_subsidiary_notice'):
-            line += ('<br>⚠️ 이 공시는 "자회사의 주요경영사항"으로 접수됐습니다 — 공시 '
-                     '주체와 실제 배당하는 회사가 다를 수 있습니다.')
-        status = event.get('parse_status')
-        if status and status != 'OK':
-            line += (f'<br>⚠️ 공시 원문에서 일부 항목을 확실히 읽지 못했습니다'
-                     f'(parse_status={esc(status)}).')
-        url = event.get('dart_document_url')
-        if url:
-            line += '<br>' + dart_link_html(url)
-        lines.append(line)
+    lines = [esc(payment_event_summary_text(event)) + _payment_event_notes_html(event)
+             for event in events]
 
     count = len(events)
     label = PAYMENT_BADGE_LABEL if count == 1 else f'{PAYMENT_BADGE_LABEL} {count}건'
     body = esc(PAYMENT_BADGE_TOOLTIP_INTRO) + '<br><br>' + '<br><br>'.join(lines)
     return info_badge(label, body)
+
+
+def payment_date_block_html(key, payment_date_index) -> str:
+    """선택한 날짜(`key`, 'YYYY-MM-DD') → 그 날짜에 걸리는 지급일정 이벤트를 **바로 보이는
+    HTML**로(툴팁 아님 — 2026-08-25 오너 요청: "툴팁 말고 달력에 바로 표시해달라").
+
+    배당기준일로 걸린 이벤트와 지급예정일로 걸린 이벤트를 **구분**해서 보여줍니다(색·라벨
+    다름) — 같은 이벤트가 두 날짜 모두 이 날일 수도 있어(드묾) 그럴 땐 두 번 나오는데,
+    그때도 "이 줄이 어느 날짜 자격으로 여기 있는지"를 라벨로 밝힙니다(§0-1). 아무 이벤트도
+    없으면 **빈 문자열**(빈 카드를 그리지 않습니다 — 배지와 같은 원칙).
+    """
+    bucket = (payment_date_index or {}).get(key) or {}
+    record_events = bucket.get('record') or ()
+    pay_events = bucket.get('pay') or ()
+    if not record_events and not pay_events:
+        return ''
+
+    def _row(event, kind_label, color):
+        name = esc(event.get('corp_name') or '회사명 없음')
+        code = esc(event.get('stock_code') or event.get('stock_code_raw') or NA_TEXT)
+        detail = esc(payment_event_summary_text(event)) + _payment_event_notes_html(event)
+        return (
+            f'<div style="margin: 6px 0; padding: 8px 10px; border-left: 3px solid {color}; '
+            f'background: rgba(255,255,255,0.03); border-radius: 4px;">'
+            f'<span style="color:{color};font-weight:800;">{esc(kind_label)}</span> '
+            f'<b>{name}</b>({code})<br>{detail}</div>'
+        )
+
+    rows = [_row(event, '🟡 배당기준일', PAYMENT_RECORD_COLOR) for event in record_events]
+    rows += [_row(event, '🟢 지급예정일', PAYMENT_DATE_COLOR) for event in pay_events]
+
+    return (
+        '<div style="margin: 8px 0;">'
+        '<div style="font-weight:800;margin-bottom:4px;">💰 이 날짜에 걸리는 실제 지급일정 '
+        '공시</div>'
+        f'<div class="vh-muted" style="margin-bottom:6px;">{esc(PAYMENT_BADGE_TOOLTIP_INTRO)}'
+        '</div>'
+        + ''.join(rows) + '</div>'
+    )
 
 
 def confirmed_row_cells(entry, payment_index=None):
@@ -934,6 +1026,12 @@ async def _render_body() -> None:
         build_payment_event_index(payment_payload)
         if isinstance(payment_payload, dict) else {}
     )
+    # 🟢 2026-08-25 — 같은 파일을 **날짜 기준**으로도 색인합니다(달력 격자에 배당기준일ㆍ
+    #    지급예정일을 직접 표시하기 위함, 오너 요청: "툴팁 말고 달력에 표시해달라").
+    payment_date_index = (
+        build_payment_date_index(payment_payload)
+        if isinstance(payment_payload, dict) else {}
+    )
 
     # ── §0-1 회귀 지점 — 2026 수집분이 없으면 숫자를 하나도 그리지 않습니다 ──
     if payload is None or not isinstance(payload, dict):
@@ -1046,13 +1144,13 @@ async def _render_body() -> None:
 
     @ui.refreshable
     def _calendar_section() -> None:
-        _render_calendar(view, _visible_confirmed(), len(confirmed),
+        _render_calendar(view, _visible_confirmed(), len(confirmed), payment_date_index,
                          on_changed=_calendar_section.refresh,
                          on_day_changed=lambda: _day_section.refresh())
 
     @ui.refreshable
     def _day_section() -> None:
-        _render_selected_day(view, _visible_confirmed(), payment_index,
+        _render_selected_day(view, _visible_confirmed(), payment_index, payment_date_index,
                              on_changed=_day_section.refresh)
 
     _calendar_section()
@@ -1243,11 +1341,22 @@ def _render_raw_downloads() -> None:
 # =============================================================================
 # 5. 달력 — 월 이동 + 요일 7열 격자
 # =============================================================================
-def _render_calendar(view, entries, total_confirmed, on_changed, on_day_changed) -> None:
+def _render_calendar(view, entries, total_confirmed, payment_date_index,
+                     on_changed, on_day_changed) -> None:
     """월 이동 줄 + 달력 격자.
 
     ⚠️ 칸의 숫자는 **지금 필터를 통과한 종목만** 셉니다. 필터가 걸려 있으면 그 사실을 바로
        아래 줄에 적습니다 — 안 적으면 "어제는 154건이었는데 오늘은 3건"으로 보입니다(§0-1).
+
+    🟢 2026-08-25 — `payment_date_index`(날짜 기준 지급일정 색인)가 있으면 칸에 🟡 배당기준일
+       ㆍ🟢 지급예정일 표시를 **결산기준일 건수와 별도로** 덧붙입니다. 이 화면이 이미 필터
+       (검색어·시장)를 지원하는데 지급일정 이벤트에는 시장·검색 매칭 대상 필드가 통일돼
+       있지 않아, 지급일정 표시는 **필터와 무관하게 항상** 그대로 보여줍니다 — 필터링해서
+       숨기는 대신 있는 그대로 밝히는 편이 안전합니다(§0-1).
+
+    ⚠️ 확정 배당이 0건이면(`view['year'] is None`) 이 함수 자체가 안 불립니다(호출부
+       `_render_body()`) — 그 경우 지급일정 데이터가 있어도 달력이 아예 안 그려지는
+       한계가 아직 남아 있습니다(드문 경우 — 확정 목록이 통째로 비어야 발생).
     """
     if view['year'] is None or view['month'] is None:
         info_banner(
@@ -1352,17 +1461,43 @@ def _render_calendar(view, entries, total_confirmed, on_changed, on_day_changed)
                     continue
                 key = date_key(year, month, day)
                 count = len(grouped.get(key, ()))
-                if not count:
+                date_bucket = (payment_date_index or {}).get(key) or {}
+                record_count = len(date_bucket.get('record') or ())
+                pay_count = len(date_bucket.get('pay') or ())
+                if not count and not record_count and not pay_count:
                     ui.label(str(day)).classes('text-center vh-muted py-2')
                     continue
                 selected = view['selected_date'] == key
-                button = ui.button(f'{day}일 · {count:,}건', on_click=_pick(key)).classes('w-full')
-                button.props('unelevated no-caps dense color=primary' if selected
-                             else 'flat no-caps dense')
+                with ui.column().classes('w-full gap-0 items-stretch'):
+                    if count:
+                        button = ui.button(f'{day}일 · {count:,}건', on_click=_pick(key)) \
+                            .classes('w-full')
+                        button.props('unelevated no-caps dense color=primary' if selected
+                                     else 'flat no-caps dense')
+                    else:
+                        # 🟢 결산기준일(확정배당)은 없지만 지급일정 이벤트만 있는 날 — 있는
+                        # 정보를 숨기지 않기 위해 그래도 눌러서 아래에서 볼 수 있게 둡니다.
+                        button = ui.button(f'{day}일', on_click=_pick(key)).classes('w-full')
+                        button.props('unelevated no-caps dense color=primary' if selected
+                                     else 'flat no-caps dense outline')
+                    if record_count:
+                        ui.label(f'🟡 기준일 {record_count}건') \
+                            .classes('text-center text-xs') \
+                            .style(f'color:{PAYMENT_RECORD_COLOR};font-weight:700;')
+                    if pay_count:
+                        ui.label(f'🟢 지급일 {pay_count}건') \
+                            .classes('text-center text-xs') \
+                            .style(f'color:{PAYMENT_DATE_COLOR};font-weight:700;')
 
 
-def _render_selected_day(view, entries, payment_index, on_changed) -> None:
-    """고른 날짜의 종목 목록(없으면 안내만). 표는 페이지로 나눠 그립니다."""
+def _render_selected_day(view, entries, payment_index, payment_date_index, on_changed) -> None:
+    """고른 날짜의 종목 목록(없으면 안내만). 표는 페이지로 나눠 그립니다.
+
+    🟢 2026-08-25 — `payment_date_index`로 이 날짜에 걸리는 지급일정 이벤트(배당기준일ㆍ
+    지급예정일)를 **결산기준일 종목 유무와 상관없이** 먼저 보여줍니다. 결산기준일 종목이
+    하나도 없는 날(달력에서 "N일" 만 눌러 들어온 경우)도 지급일정만 있으면 여기서 그대로
+    보이게 하려는 의도입니다 — 있는 정보를 화면 구조 때문에 숨기지 않기 위함(§0-1).
+    """
     key = view.get('selected_date')
     if not key:
         if view['year'] is not None:
@@ -1372,15 +1507,26 @@ def _render_selected_day(view, entries, payment_index, on_changed) -> None:
 
     grouped = group_by_settle_date(entries)
     day_entries = grouped.get(key, [])
+
+    date_block = payment_date_block_html(key, payment_date_index)
+    if date_block:
+        ui.html(date_block).classes('w-full')
+
+    if not day_entries:
+        if date_block:
+            ui.label(
+                f'ℹ️ {key}에 결산기준일이 걸린 확정 배당 종목은 없습니다 — 위 지급일정 '
+                '공시만 있습니다.'
+            ).classes('vh-muted')
+        else:
+            info_banner('ℹ️ 지금 걸린 필터로는 이 날짜에 표시할 종목이 없습니다.')
+        return
+
     ui.markdown(f'#### 📅 {key} 실적 마감 — {len(day_entries):,}개 종목')
     ui.label(
         '이 날짜에 배당금이 들어오는 건 아니에요 — 이 날짜까지의 실적을 기준으로 '
         '"배당을 이만큼 하겠다"고 발표한 회사들이에요.'
     ).classes('vh-muted vh-keep-all')
-
-    if not day_entries:
-        info_banner('ℹ️ 지금 걸린 필터로는 이 날짜에 표시할 종목이 없습니다.')
-        return
 
     total_pages = max(1, (len(day_entries) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     current_page = min(view['day_page'], total_pages)
