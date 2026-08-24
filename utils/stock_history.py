@@ -50,9 +50,11 @@ from utils import data_source
 # =============================================================================
 KOSPI_HISTORY_FILENAME = "kospi200_stock_history.csv"
 US_HISTORY_FILENAME = "us_stocks_history.csv"
+INDICATOR_HISTORY_FILENAME = "indicator_kr_history.csv"  # 「여기서부터는 신앙입니다」(7번째 모듈)
 
 KOSPI_KEY_FIELD = "code"      # 코스피는 6자리 종목코드가 식별자
 US_KEY_FIELD = "symbol"       # 미국은 티커가 식별자
+INDICATOR_KEY_FIELD = "code"  # 보조지표도 코스피와 같은 6자리 종목코드
 
 DATE_FIELD = "date"
 DATE_LABEL = "날짜"
@@ -167,6 +169,34 @@ US_HISTORY_FIELDS = [
     ("floor_price",        "PBR 기준 바닥가(USD)",          "num"),
     ("f_target",           "모델 목표주가(USD)",            "num"),
 ]
+
+
+INDICATOR_HISTORY_FIELDS = [
+    (DATE_FIELD,             DATE_LABEL,           "text"),
+    ("code",                 "종목코드",             "text"),
+    ("name",                 "종목명",               "text"),
+    ("rsi",                  "RSI(14)",             "num"),
+    ("rsi_signal",           "RSI 판독",             "text"),   # overbought/oversold/neutral
+    ("macd",                 "MACD",                "num"),
+    ("macd_signal_line",     "MACD 시그널선",         "num"),
+    ("macd_histogram",       "MACD 히스토그램",       "num"),
+    ("macd_cross",           "MACD 크로스",           "text"),  # golden/dead/(빈칸)
+    ("bb_upper",             "볼린저 상단",           "num"),
+    ("bb_lower",             "볼린저 하단",           "num"),
+    ("bb_mid",               "볼린저 중심선",         "num"),
+    ("bb_percent_b",         "볼린저 %B",            "num"),
+    ("bb_position",          "볼린저 위치",           "text"),  # above_upper/below_lower/inside
+    ("verdict_score",        "종합판정 점수",         "num"),
+    ("verdict_label",        "종합판정",             "text"),
+    ("bars_used",            "사용 종가 봉 수",       "num"),
+    ("warmup_insufficient",  "워밍업 부족",           "bool"),
+    ("unavailable_reasons",  "산출 불가 사유",         "text"),
+]
+# ⚠️ 이 필드셋은 utils/indicators.py 의 calculate_rsi/calculate_macd/calculate_bollinger/
+#    combine_verdict 반환값을 그대로 옮긴 것입니다. RSI/MACD/볼린저 원값 자체는 "지어낸
+#    계산값"(🧮)이 아니라 실측 종가로부터의 결정론적 파생값(📐)이라 §0-1 예외 없이 그대로
+#    기록합니다 — 산출 불가한 지표는 이 함수들이 이미 None을 돌려주므로 빈 칸으로 남습니다
+#    (to_storage_cell이 None -> "" 처리). 작업 지시서: TECHNICAL_INDICATOR_WORK_ORDER.md.
 
 
 def field_keys(fields):
