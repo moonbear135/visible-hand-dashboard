@@ -119,6 +119,7 @@ from web.components import (
     esc,
     fmt_num,
     holdings_table_html,
+    info_badge,
     info_banner,
     metric_card,
     pager,
@@ -139,6 +140,14 @@ from web.state import (
 DATA_FILENAME = 'dividend_kr_2026_latest.json'
 RAW_FILENAME = 'dividend_kr_2026_raw.jsonl'
 HISTORY_FILENAME = 'dividend_history_kr_2023_2025.json'
+
+#: 🟢 2026-08-25 추가 — DART 수시공시("현금ㆍ현물배당결정")를 매일 감시해 모은 **진짜
+#: 지급일정**(배당기준일·지급예정일자). `collector_dividend_payment_kr.py` 가 만드는 파일로,
+#: 위 세 파일(정기보고서 기반)과는 데이터 출처·수집 코드가 **완전히 분리**돼 있습니다.
+#: 이 파일이 아직 없거나(첫 실행 전) 읽기 실패해도 달력 자체는 예전과 똑같이 그려집니다 —
+#: 있으면 "실제 지급일정" 배지만 추가로 붙는, 순수하게 덧붙는 정보입니다(아래
+#: `build_payment_event_index` · `payment_badge_html`).
+PAYMENT_EVENTS_FILENAME = 'dividend_kr_2026_payment_events.json'
 
 #: 한 페이지에 그릴 표 행 수(달력 상세·미확정 목록 공통).
 ITEMS_PER_PAGE = 50
@@ -238,6 +247,35 @@ PREFERRED_NOTICE = (
     '— 그중 하나만 골라 대표인 척 보여주지 않습니다.'
 )
 
+#: 🟢 "실제 지급일정" 배지 제목. 우려·경고가 아니라 **긍정적인 추가 정보**라 파란(정보)
+#: 배지(`info_badge`)를 씁니다 — 다만 안에는 아래 `PAYMENT_BADGE_TOOLTIP_INTRO` 로
+#: "결산기준일과는 다른 별개 공시"라는 사실을 먼저 밝힙니다(§0-1 — 두 날짜를 섞어 읽지
+#: 않도록).
+PAYMENT_BADGE_LABEL = '💰 실제 지급일정 확인됨'
+
+#: 배지 툴팁 맨 앞에 항상 붙는 문구 — 이 표의 "결산기준일"과 이 배지의 "배당기준일"이
+#: **서로 다른 공시에서 온 서로 다른 날짜**임을 매번 밝힙니다. 같은 배당을 가리키는지는
+#: 이 화면이 판정하지 않습니다(정기보고서와 수시공시를 서로 잇는 근거가 없습니다).
+PAYMENT_BADGE_TOOLTIP_INTRO = (
+    '이 종목에 대해 DART에 접수된 "배당 지급일정" 수시공시(현금ㆍ현물배당결정)입니다. '
+    '표의 "결산기준일"(정기보고서 기준)과는 다른 별개의 공시라서, 아래 배당기준일이 '
+    '같은 줄의 결산기준일과 반드시 같은 배당을 가리키는 것은 아닙니다.'
+)
+
+#: 접이식 패널에 싣는 배경 설명 — 배지 자체가 없는 화면에서도 "왜 어떤 종목에만 이 배지가
+#: 붙는지"를 미리 답해 둡니다(PREFERRED_NOTICE 와 같은 취지).
+PAYMENT_NOTICE = (
+    '💰 "실제 지급일정" 배지 — 위 표에서 일부 종목에는 배당기준일ㆍ지급예정일자를 보여주는 '
+    '배지가 함께 붙어 있습니다. 이건 정기보고서가 아니라 DART 수시공시'
+    '("현금ㆍ현물배당결정")를 매일 감시해 따로 모은 정보로, 이 표의 결산기준일(정기보고서 '
+    '기준)과는 서로 다른 공시입니다 — 같은 배당을 가리키는지는 이 화면이 판정하지 않고, '
+    '그 종목에 그런 공시가 있었다는 사실만 그대로 보여드립니다.\n'
+    '아직 모든 종목을 다 확인한 것이 아니라서, 배지가 없다고 지급일정이 없다는 뜻은 '
+    '아닙니다 — 매일 새 공시를 확인하며 채워지는 중입니다. "지급예정일자"는 법적으로 확정 '
+    '지급일이 아니라 상법상 지급 기한(통상 1개월 이내)이라는 점도 DART 원문에 그대로 '
+    '적혀 있어, 배지 안 원문 링크로 직접 확인할 수 있게 해 두었습니다.'
+)
+
 COMING_SOON_TEXT = (
     '🚧 "투자 감사합니다!"(배당 캘린더)는 아직 준비중입니다.\n\n'
     '데이터 검수가 끝나고 오너 승인이 나면 열립니다. 그때까지는 아무 수치도 그리지 않습니다.'
@@ -305,6 +343,48 @@ def preferred_cash_values(record):
 def count_with_preferred(entries) -> int:
     """표시용 dict 목록 중 **우선주 배당 줄이 실제로 붙는** 건수(요약 줄에 그대로 씁니다)."""
     return sum(1 for entry in entries or [] if entry.get('dps_preferred_all'))
+
+
+def build_payment_event_index(payload):
+    """`dividend_kr_2026_payment_events.json` → `{종목코드: [이벤트, ...]}`.
+
+    🔴 `stock_code` 가 없는 이벤트(수집기가 6자리로 정규화하지 못한 건)는 이 화면의 어느
+       종목과도 이을 수 없어 색인에 넣지 않습니다 — 산출물 파일 자체에는 `stock_code_raw`
+       로 그대로 남아 있으니(수집기 §0-1), 사라지는 것이 아니라 이 화면만 못 씁니다.
+    한 종목에 이벤트가 여러 건(분기배당을 여러 번 했거나 `[기재정정]` 정정이 있는 경우)이면
+    **전부** 담습니다 — 하나만 골라 대표인 척 보여주지 않습니다(`preferred_cash_values` 와
+    같은 원칙). 접수일ㆍ접수번호 오름차순(먼저 있었던 공시가 먼저 나오도록)으로 정렬합니다.
+
+    :return: 함수 지역 dict (모듈 전역이 아닙니다 — §0-3-8). 파일이 없거나 형식이 예상과
+        다르면(`payload` 가 dict 가 아니면) 빈 dict — 호출부가 "배지를 그릴 수 없을 뿐,
+        달력 자체는 그대로 그린다"는 뜻으로 씁니다.
+    """
+    index = {}
+    for record in (payload or {}).get('records') or []:
+        code = str((record or {}).get('stock_code') or '').strip()
+        if not code:
+            continue
+        index.setdefault(code, []).append(record)
+    for code, events in index.items():
+        events.sort(key=lambda item: (str(item.get('rcept_dt') or ''),
+                                      str(item.get('rcept_no') or '')))
+    return index
+
+
+def payment_event_summary_text(event) -> str:
+    """지급일정 이벤트 1건 → 사람이 읽는 한 줄 요약(이스케이프 전, 순수 텍스트).
+
+    `[기재정정]` 이면 맨 앞에 그대로 밝힙니다 — 정정 공시라는 사실을 지우고 원본인 척
+    보여주지 않습니다(§0-1).
+    """
+    data = event or {}
+    record_date = data.get('record_date') or NA_TEXT
+    pay_date = data.get('pay_date_expected') or NA_TEXT
+    dps_text = fmt_num(to_float(data.get('dps_common')), '원', 0)
+    text = f'배당기준일 {record_date} · 지급예정일 {pay_date} · 1주당 {dps_text}'
+    if data.get('is_correction'):
+        text = '[기재정정] ' + text
+    return text
 
 
 def market_group(label) -> str:
@@ -682,10 +762,51 @@ def parse_note_badge_html(entry) -> str:
     return warn_badge(f'📝 파싱 메모 {len(notes)}건', body)
 
 
-def confirmed_row_cells(entry):
-    """달력에서 고른 날짜의 표 한 행(7칸). 모든 칸이 이스케이프를 마친 HTML 조각입니다."""
+def payment_badge_html(entry, payment_index) -> str:
+    """🟢 "실제 지급일정" 배지 한 조각. 이 종목에 해당 이벤트가 없으면 **빈 문자열**
+    (없는데 배지 자리만 비워 두면 "곧 채워질 값"처럼 보이므로, 아예 아무것도 그리지
+    않습니다 — 우선주 줄이 없을 때와 같은 원칙).
+
+    여러 건이면 전부 나열합니다(`build_payment_event_index` 와 같은 이유). `[기재정정]`ㆍ
+    자회사 대리공시ㆍ원문 일부 파싱 실패는 감추지 않고 각 건 밑에 그대로 덧붙입니다(§0-1).
+    """
+    payment_index = payment_index or {}
+    code = str(entry.get('stock_code') or '').strip()
+    events = payment_index.get(code) or ()
+    if not events:
+        return ''
+
+    lines = []
+    for event in events:
+        line = esc(payment_event_summary_text(event))
+        if event.get('is_subsidiary_notice'):
+            line += ('<br>⚠️ 이 공시는 "자회사의 주요경영사항"으로 접수됐습니다 — 공시 '
+                     '주체와 실제 배당하는 회사가 다를 수 있습니다.')
+        status = event.get('parse_status')
+        if status and status != 'OK':
+            line += (f'<br>⚠️ 공시 원문에서 일부 항목을 확실히 읽지 못했습니다'
+                     f'(parse_status={esc(status)}).')
+        url = event.get('dart_document_url')
+        if url:
+            line += '<br>' + dart_link_html(url)
+        lines.append(line)
+
+    count = len(events)
+    label = PAYMENT_BADGE_LABEL if count == 1 else f'{PAYMENT_BADGE_LABEL} {count}건'
+    body = esc(PAYMENT_BADGE_TOOLTIP_INTRO) + '<br><br>' + '<br><br>'.join(lines)
+    return info_badge(label, body)
+
+
+def confirmed_row_cells(entry, payment_index=None):
+    """달력에서 고른 날짜의 표 한 행(7칸). 모든 칸이 이스케이프를 마친 HTML 조각입니다.
+
+    :param payment_index: `build_payment_event_index()` 가 만든 색인. 없으면(None·빈 dict)
+        "실제 지급일정" 배지를 그냥 안 그립니다 — 이 매개변수를 안 주는 기존 호출부가
+        있어도 예전과 똑같이 동작합니다(하위 호환).
+    """
     return [
-        name_cell_html(entry) + parse_note_badge_html(entry),
+        name_cell_html(entry) + parse_note_badge_html(entry)
+        + payment_badge_html(entry, payment_index),
         esc(entry.get('market_text') or MARKET_UNKNOWN),
         dps_cell_html(entry),
         yield_cell_html(entry),
@@ -789,6 +910,16 @@ async def _render_body() -> None:
     """
     payload, load_error = await load_json_file_async(data_path(DATA_FILENAME))
     history_payload, history_error = await load_json_file_async(data_path(HISTORY_FILENAME))
+
+    # 🟢 "실제 지급일정" 배지용 — 완전히 별도 수집기(`collector_dividend_payment_kr.py`)가
+    #    만드는 파일입니다. 위 두 파일과 달리 **못 읽어도 에러 배너를 띄우지 않습니다** —
+    #    이 파일은 덧붙는 정보일 뿐이라, 없으면 배지만 안 붙고 달력은 예전과 똑같이
+    #    그려집니다(첫 수집이 아직 안 돈 상태에서도 화면이 정상 동작해야 하므로).
+    payment_payload, _payment_error = await load_json_file_async(data_path(PAYMENT_EVENTS_FILENAME))
+    payment_index = (
+        build_payment_event_index(payment_payload)
+        if isinstance(payment_payload, dict) else {}
+    )
 
     # ── §0-1 회귀 지점 — 2026 수집분이 없으면 숫자를 하나도 그리지 않습니다 ──
     if payload is None or not isinstance(payload, dict):
@@ -907,7 +1038,8 @@ async def _render_body() -> None:
 
     @ui.refreshable
     def _day_section() -> None:
-        _render_selected_day(view, _visible_confirmed(), on_changed=_day_section.refresh)
+        _render_selected_day(view, _visible_confirmed(), payment_index,
+                             on_changed=_day_section.refresh)
 
     _calendar_section()
     _day_section()
@@ -1025,6 +1157,10 @@ def _render_notice_panel(summary, confirmed, pending) -> None:
                 '보통주이며, 우선주 값이 있다고 확정으로 올리지 않았습니다.'
             )
         ui.label(preferred_line).classes('vh-notice-text vh-keep-all')
+
+        # 🟢 "실제 지급일정" 배지 배경 설명 — 배지가 붙은 종목이 아직 하나도 없어도
+        #    보여줍니다(UNIVERSE_NOTICE 와 같은 취지 — 왜 이런 게 있는지는 늘 밝혀 둡니다).
+        ui.label(PAYMENT_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
 
         _render_known_limitations(summary)
 
@@ -1211,7 +1347,7 @@ def _render_calendar(view, entries, total_confirmed, on_changed, on_day_changed)
                              else 'flat no-caps dense')
 
 
-def _render_selected_day(view, entries, on_changed) -> None:
+def _render_selected_day(view, entries, payment_index, on_changed) -> None:
     """고른 날짜의 종목 목록(없으면 안내만). 표는 페이지로 나눠 그립니다."""
     key = view.get('selected_date')
     if not key:
@@ -1239,7 +1375,8 @@ def _render_selected_day(view, entries, on_changed) -> None:
     page_entries = day_entries[start:start + ITEMS_PER_PAGE]
 
     ui.html(holdings_table_html(
-        list(CONFIRMED_HEADERS), [confirmed_row_cells(entry) for entry in page_entries],
+        list(CONFIRMED_HEADERS),
+        [confirmed_row_cells(entry, payment_index) for entry in page_entries],
     )).classes('w-full')
 
     if total_pages > 1:
