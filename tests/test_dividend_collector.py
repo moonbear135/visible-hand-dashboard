@@ -972,3 +972,1184 @@ def test_real_raw_corpus_classifies_every_se_label():
             if isinstance(rows, list):
                 unknown.update(cdk.parse_alot_rows(rows)["unknown_se_labels"])
     assert unknown == set(), f"분류하지 못한 se 라벨: {sorted(unknown)}"
+
+
+# =============================================================================
+# 11. 체크포인트 run_key — "다음 날 이어하기"가 되어야 합니다 (§0-3-2)
+#
+# 배경(고쳐진 버그): run_key 에 `_now_kst().strftime('%Y-%m-%d')` 이 들어 있어서,
+#   점심시간·야간 중단·GitHub Actions 타임아웃 등으로 **날이 바뀐 뒤 재개**하면 키가 달라져
+#   체크포인트 전체가 버려지고 수천 건을 DART 에 다시 요청했습니다. 이 절은 그 회귀를 막습니다.
+#   날짜를 뺀 대신 `saved_at_kst` 기반 신선도 검사(max_age_days)가 '아주 오래된 잔재'를 거릅니다.
+# =============================================================================
+def _write_checkpoint_file(path, run_key, saved_at, done_codes=("005930",),
+                           request_count=4):
+    """테스트용 체크포인트 파일 직접 작성(저장 시각을 마음대로 정하기 위함)."""
+    payload = {"run_key": run_key,
+               "records": [{"stock_code": c, "status": "OK"} for c in done_codes],
+               "done_codes": list(done_codes),
+               "request_count": request_count}
+    if saved_at is not _NO_FIELD:
+        payload["saved_at_kst"] = saved_at
+    path.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+    return path
+
+
+_NO_FIELD = object()      # "그 키 자체가 없음"을 None 과 구분하기 위한 표식
+
+
+def _iso_days_ago(days, hours=0):
+    from datetime import timedelta
+    return (ccm._now_kst() - timedelta(days=days, hours=hours)).isoformat()
+
+
+def test_build_run_key_is_identical_on_different_days(monkeypatch):
+    """
+    ⭐ 이 파일의 핵심 회귀 테스트.
+    같은 (사업연도, 유니버스 크기, 보고서 우선순위)면 **실행 날짜가 달라도 run_key 는 같아야**
+    합니다. 달라지면 다음 날 재개가 전량 재수집이 됩니다(§0-3-2 위반).
+    """
+    from datetime import datetime
+
+    def _fixed(dt):
+        return lambda: dt
+
+    monkeypatch.setattr(cdk, "_now_kst", _fixed(datetime(2026, 8, 24, 23, 50, tzinfo=ccm.KST)))
+    day1 = cdk.build_run_key("2026", 2734, cdk.REPRT_CODE_PRIORITY)
+
+    monkeypatch.setattr(cdk, "_now_kst", _fixed(datetime(2026, 8, 25, 0, 10, tzinfo=ccm.KST)))
+    day2 = cdk.build_run_key("2026", 2734, cdk.REPRT_CODE_PRIORITY)
+
+    monkeypatch.setattr(cdk, "_now_kst", _fixed(datetime(2026, 12, 31, 9, 0, tzinfo=ccm.KST)))
+    much_later = cdk.build_run_key("2026", 2734, cdk.REPRT_CODE_PRIORITY)
+
+    assert day1 == day2 == much_later
+    # 날짜 조각이 키에 남아 있지 않은지 문자열로도 못 박습니다.
+    assert "2026-08-24" not in day1 and "2026-08-25" not in day1
+    assert day1 == "2026|2734|11011,11014,11012,11013"
+
+
+def test_build_run_key_still_separates_genuinely_different_runs():
+    """날짜를 뺐다고 해서 '다른 실행'까지 같아지면 안 됩니다(섞이면 §0-1 위반)."""
+    base = cdk.build_run_key("2026", 2734, cdk.REPRT_CODE_PRIORITY)
+    assert base != cdk.build_run_key("2025", 2734, cdk.REPRT_CODE_PRIORITY)       # 연도 다름
+    assert base != cdk.build_run_key("2026", 100, cdk.REPRT_CODE_PRIORITY)        # 크기 다름
+    assert base != cdk.build_run_key("2026", 2734,
+                                     cdk.REPRT_CODE_PRIORITY_OWNER_ORDER)         # 우선순위 다름
+
+
+def test_load_checkpoint_resumes_recent_checkpoint(tmp_path):
+    """(회귀) 조건이 같고 최근에 저장된 체크포인트는 지금까지처럼 그대로 이어받아야 합니다."""
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    path = _write_checkpoint_file(tmp_path / "ckpt.json", run_key, _iso_days_ago(0, hours=1))
+
+    ckpt = cdk.load_checkpoint(str(path), run_key)
+    assert ckpt["done_codes"] == ["005930"]
+    assert ckpt["request_count"] == 4
+    assert len(ckpt["records"]) == 1
+
+
+def test_load_checkpoint_resumes_after_a_multi_day_pause(tmp_path):
+    """
+    ⭐ 버그의 실제 시나리오: 어제(또는 사흘 전) 저장된 체크포인트를 오늘 이어받을 수 있어야
+    합니다. 기본 신선도 기준(14일) 안이므로 버려지면 안 됩니다.
+    """
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    for days in (1, 3, 13):
+        path = _write_checkpoint_file(tmp_path / f"ckpt_{days}.json", run_key,
+                                      _iso_days_ago(days))
+        ckpt = cdk.load_checkpoint(str(path), run_key)
+        assert ckpt["done_codes"] == ["005930"], f"{days}일 전 체크포인트가 버려졌습니다"
+
+
+def test_load_checkpoint_discards_stale_checkpoint(tmp_path, capsys):
+    """30일 전 체크포인트는 조건이 같아도 '너무 오래됨'으로 버리고 사유를 출력해야 합니다."""
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    path = _write_checkpoint_file(tmp_path / "ckpt.json", run_key, _iso_days_ago(30))
+
+    ckpt = cdk.load_checkpoint(str(path), run_key)
+    assert ckpt == {"run_key": run_key, "records": [], "done_codes": [], "request_count": 0}
+    out = capsys.readouterr().out
+    assert "오래" in out and "14" in out          # 왜 버렸는지 사람이 읽을 수 있어야 합니다
+
+
+def test_load_checkpoint_max_age_is_configurable(tmp_path):
+    """기준일수는 인자로 조절 가능해야 하고, None 이면 신선도 검사를 하지 않습니다."""
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    path = _write_checkpoint_file(tmp_path / "ckpt.json", run_key, _iso_days_ago(30))
+
+    assert cdk.load_checkpoint(str(path), run_key, max_age_days=60)["done_codes"] == ["005930"]
+    assert cdk.load_checkpoint(str(path), run_key, max_age_days=None)["done_codes"] == ["005930"]
+    assert cdk.load_checkpoint(str(path), run_key, max_age_days=1)["done_codes"] == []
+
+
+def test_load_checkpoint_discards_when_saved_at_is_missing(tmp_path, capsys):
+    """
+    이 수정 이전에 만들어진 체크포인트에는 검증이 적용된 적이 없습니다.
+    `saved_at_kst` 가 아예 없으면 **나이를 확인할 수 없으므로** 크래시 없이 버려야 합니다
+    (§0-1: 확인 못 한 것을 '괜찮다'고 넘겨짚지 않습니다).
+    """
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    path = _write_checkpoint_file(tmp_path / "ckpt.json", run_key, _NO_FIELD)
+
+    ckpt = cdk.load_checkpoint(str(path), run_key)
+    assert ckpt["done_codes"] == [] and ckpt["records"] == []
+    assert "확인할 수 없" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize("bad", ["", "어제", "2026-13-45T99:99", 12345, None, [], {"a": 1}])
+def test_load_checkpoint_survives_malformed_saved_at(tmp_path, bad):
+    """저장 시각이 망가져 있어도 예외로 죽지 않고 '버리고 새로 시작'이어야 합니다."""
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    path = _write_checkpoint_file(tmp_path / "ckpt.json", run_key, bad)
+    ckpt = cdk.load_checkpoint(str(path), run_key)
+    assert ckpt == {"run_key": run_key, "records": [], "done_codes": [], "request_count": 0}
+
+
+def test_load_checkpoint_still_rejects_different_run_key(tmp_path, capsys):
+    """(회귀) 실행조건이 다른 체크포인트를 재사용하지 않는 기존 보호장치는 그대로여야 합니다."""
+    path = _write_checkpoint_file(tmp_path / "ckpt.json",
+                                  cdk.build_run_key("2025", 2, cdk.REPRT_CODE_PRIORITY),
+                                  _iso_days_ago(0))
+    wanted = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    ckpt = cdk.load_checkpoint(str(path), wanted)
+    assert ckpt["done_codes"] == []
+    assert "다른 실행조건" in capsys.readouterr().out
+
+
+def test_load_checkpoint_returns_empty_when_file_absent(tmp_path):
+    """파일이 없으면 (예외가 아니라) 빈 체크포인트 형태여야 합니다."""
+    run_key = cdk.build_run_key("2026", 2, cdk.REPRT_CODE_PRIORITY)
+    ckpt = cdk.load_checkpoint(str(tmp_path / "nope.json"), run_key)
+    assert ckpt == {"run_key": run_key, "records": [], "done_codes": [], "request_count": 0}
+
+
+def _counting_alot_calls(monkeypatch):
+    """
+    faked_network 위에 얹어 **실제로 나간 alotMatter 요청 수**를 셉니다.
+    (`requests_used` 는 체크포인트에서 이어받은 누적값이라, 재수집 여부를 구분하지 못합니다.
+     "DART 를 몇 번 더 두드렸는가"가 이 버그의 본질이므로 그 숫자를 직접 셉니다.)
+    """
+    calls = {"n": 0}
+    inner = cdk._http_get_json
+
+    def counting(url, params, timeout, session):
+        calls["n"] += 1
+        return inner(url, params, timeout, session)
+
+    monkeypatch.setattr(cdk, "_http_get_json", counting)
+    return calls
+
+
+def test_run_collection_resumes_when_the_date_changes_midrun(tmp_path, faked_network,
+                                                             monkeypatch):
+    """
+    ⭐ 실제 코드 경로로 확인하는 버그 회귀 테스트.
+    1일차에 요청 예산으로 중단 → **날짜를 하루 넘긴 뒤** 재개했을 때 체크포인트를 이어받아
+    **이미 끝낸 종목을 다시 요청하지 않아야** 합니다.
+    (예전 run_key 였다면 날짜가 달라 체크포인트가 통째로 버려지고 전량 재수집됐습니다 —
+     실운영 2,700종목 기준으로 수천 건의 불필요한 DART 요청입니다. §0-3-2)
+    """
+    from datetime import datetime, timedelta
+
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+    universe = cdk.load_universe(str(uni))
+
+    day1 = datetime(2026, 8, 24, 23, 40, tzinfo=ccm.KST)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: day1)
+    _, first = cdk.run_collection(universe, "2026", str(tmp_path),
+                                  max_requests=4, log=lambda *a: None)
+    assert first["completed"] is False
+    assert (tmp_path / "dividend_kr_2026_checkpoint.json").exists()
+
+    # ── 하루가 지났습니다(그리고 다음 날 아침에 재개) ──
+    calls = _counting_alot_calls(monkeypatch)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: day1 + timedelta(hours=9))
+    _, second = cdk.run_collection(universe, "2026", str(tmp_path),
+                                   max_requests=100, log=lambda *a: None)
+
+    assert second["completed"] is True
+    assert second["by_status"] == {"OK": 2}
+    # 남은 1종목 × 우선순위 4단계 = 4건만 나갔어야 합니다. 8건이면 전량 재수집(=버그 재발).
+    assert calls["n"] == 4, f"재개 시 요청이 {calls['n']}건 나갔습니다 — 체크포인트를 못 이어받았습니다."
+    assert second["requests_used"] == 8      # 누적(1일차 4 + 2일차 4)
+
+
+def test_run_collection_ignores_a_months_old_checkpoint(tmp_path, faked_network, monkeypatch):
+    """
+    날짜를 run_key 에서 뺀 대가로 생긴 위험(몇 달 전 잔재가 조건만 같아 되살아남)을
+    신선도 검사가 막는지 실제 경로로 확인합니다 — 이어받지 않고 처음부터 다시 돌아야 합니다.
+    """
+    from datetime import datetime, timedelta
+
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+    universe = cdk.load_universe(str(uni))
+
+    long_ago = datetime(2026, 1, 5, 10, 0, tzinfo=ccm.KST)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: long_ago)
+    cdk.run_collection(universe, "2026", str(tmp_path), max_requests=4, log=lambda *a: None)
+
+    calls = _counting_alot_calls(monkeypatch)
+    monkeypatch.setattr(cdk, "_now_kst", lambda: long_ago + timedelta(days=120))
+    _, second = cdk.run_collection(universe, "2026", str(tmp_path),
+                                   max_requests=100, log=lambda *a: None)
+
+    assert second["completed"] is True
+    assert second["by_status"] == {"OK": 2}
+    # 120일 전 체크포인트는 버려졌으므로 2종목 × 4단계 = 8건이 다시 나갑니다.
+    assert calls["n"] == 8
+    assert second["requests_used"] == 8       # 이어받은 누적이 없으므로 8에서 시작
+
+
+# =============================================================================
+# 12. 2개 출처 교차검증 (§0-3-3) — DART 전기·전전기 ↔ KIND 2023~2025 기준선
+#
+# 배경: DART 응답에는 당기 말고도 전기(frmtrm)·전전기(lwfr)가 공짜로 실려 오고, 우리는 이미
+#       `prev_*`/`prev2_*` 로 저장해 왔지만 **아무 데도 대조하지 않았습니다**. 한편 프로젝트에는
+#       KIND 출처의 독립적인 2023~2025 연간 배당 집계가 이미 있습니다. 둘을 맞대보면 요청 한 건
+#       더 쓰지 않고 2개 출처 교차검증이 됩니다.
+#
+# ⚠️ `unit_mismatch_notes` 와 같은 **감지 전용** 기능입니다. 이 절의 테스트는
+#    "불일치를 기록하는가"만 검증하며, 어느 쪽이 옳은지 판정하거나 값을 고치지 않습니다(§0-1).
+# =============================================================================
+REAL_LATEST_JSON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "dividend_kr_2026_latest.json")
+REAL_HISTORY_JSON = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "dividend_history_kr_2023_2025.json")
+
+# (합성) KIND 파일과 같은 모양의 최소 페이로드. 실파일의 행 구조를 그대로 본떴습니다.
+SYNTHETIC_HISTORY = {
+    "source": "KIND_annual_dividend_summary",
+    "record_count": 3,
+    "records": [
+        {"stock_code": "005930", "company_name": "삼성전자", "fiscal_year": 2025,
+         "dps_krw": 1668, "payout_ratio_pct": 25.10},
+        {"stock_code": "005930", "company_name": "삼성전자", "fiscal_year": 2024,
+         "dps_krw": 1446, "payout_ratio_pct": 29.20},
+        {"stock_code": "000660", "company_name": "SK하이닉스", "fiscal_year": 2025,
+         "dps_krw": 1500, "payout_ratio_pct": None},
+    ],
+}
+
+
+def test_build_kind_baseline_index_keys_by_code_and_year():
+    """(종목코드, 사업연도int) → {dps_krw, payout_ratio_pct} 색인이 나와야 합니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    assert set(idx) == {("005930", 2025), ("005930", 2024), ("000660", 2025)}
+    assert idx[("005930", 2025)] == {"dps_krw": 1668, "payout_ratio_pct": 25.10}
+    # 값이 없는 칸은 지어내지 않고 None 그대로 둡니다.
+    assert idx[("000660", 2025)]["payout_ratio_pct"] is None
+
+
+def test_build_kind_baseline_index_skips_malformed_rows_without_crashing():
+    """(합성) 못 쓰는 행 하나 때문에 색인 전체가 죽으면 안 됩니다."""
+    payload = {"records": [
+        {"stock_code": "005930", "fiscal_year": 2025, "dps_krw": 1668},   # 정상
+        {"fiscal_year": 2025, "dps_krw": 100},                            # 종목코드 없음
+        {"stock_code": "000660", "dps_krw": 100},                         # 연도 없음
+        {"stock_code": "000700", "fiscal_year": "연도미상", "dps_krw": 1},  # 연도가 숫자가 아님
+        {"stock_code": "", "fiscal_year": 2025},                          # 빈 종목코드
+        "이건 dict 도 아님",
+        None,
+    ]}
+    idx = cdk.build_kind_baseline_index(payload)
+    assert set(idx) == {("005930", 2025)}
+
+
+def test_build_kind_baseline_index_handles_odd_top_level_input():
+    """records 가 없거나 최상위가 dict 가 아니어도 빈 색인이지 예외가 아닙니다."""
+    assert cdk.build_kind_baseline_index({}) == {}
+    assert cdk.build_kind_baseline_index({"records": None}) == {}
+    assert cdk.build_kind_baseline_index([]) == {}
+    assert cdk.build_kind_baseline_index(None) == {}
+
+
+def test_build_kind_baseline_index_keeps_first_on_duplicate_key():
+    """(합성·방어) 같은 (종목, 연도)가 두 번 오면 먼저 나온 값을 유지합니다."""
+    payload = {"records": [
+        {"stock_code": "005930", "fiscal_year": 2025, "dps_krw": 1668},
+        {"stock_code": "005930", "fiscal_year": 2025, "dps_krw": 9999},
+    ]}
+    assert cdk.build_kind_baseline_index(payload)[("005930", 2025)]["dps_krw"] == 1668
+
+
+def test_build_kind_baseline_index_accepts_string_years_from_real_file_shape():
+    """연도가 문자열 "2025" 로 와도 int 키로 정규화돼야 합니다(파일 형식 변화 방어)."""
+    idx = cdk.build_kind_baseline_index(
+        {"records": [{"stock_code": "005930", "fiscal_year": "2025", "dps_krw": 1668}]})
+    assert idx[("005930", 2025)]["dps_krw"] == 1668
+
+
+# ── check_cross_source ────────────────────────────────────────────────────────
+def test_check_cross_source_says_nothing_when_two_sources_agree():
+    """
+    실데이터 기반: 삼성전자 2026 1분기 응답의 전기/전전기 주당현금배당금은 1,668 / 1,446 이고
+    같은 값이 KIND 기준선에도 있습니다 → 불일치 note 는 하나도 없어야 합니다.
+    """
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    prev = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="frmtrm")
+    prev2 = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="lwfr")
+    notes = cdk.check_cross_source(
+        "005930", "2026",
+        prev["dps_cash_common"], prev2["dps_cash_common"],
+        prev["payout_ratio"], prev2["payout_ratio"], idx)
+    assert notes == []
+
+
+def test_check_cross_source_flags_dps_mismatch_with_both_numbers():
+    """(합성) 주당배당금이 다르면 두 숫자와 두 연도가 모두 담긴 사유가 나와야 합니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    notes = cdk.check_cross_source("005930", "2026",
+                                   1500.0, None,      # DART 전기 1,500 (기준선은 1,668)
+                                   None, None, idx)
+    assert len(notes) == 1
+    note = notes[0]
+    assert "005930" in note and "2025" in note and "전기" in note
+    assert "1,500" in note and "1,668" in note
+    assert "고치지 않" in note                      # 감지 전용임이 문장에 드러나야 합니다
+
+
+def test_check_cross_source_checks_the_year_before_last_too():
+    """전전기(=사업연도-2)도 함께 대조해야 합니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    notes = cdk.check_cross_source("005930", "2026",
+                                   1668.0, 999.0,     # 전기는 일치, 전전기만 불일치
+                                   None, None, idx)
+    assert len(notes) == 1
+    assert "2024" in notes[0] and "전전기" in notes[0] and "1,446" in notes[0]
+
+
+def test_check_cross_source_flags_payout_ratio_mismatch():
+    """(합성) 현금배당성향도 대조 대상입니다 — 허용 오차를 넘으면 사유를 남깁니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    notes = cdk.check_cross_source("005930", "2026",
+                                   1668.0, 1446.0,    # 주당배당금은 일치
+                                   30.0, None, idx)   # 성향만 25.10 → 30.0
+    assert len(notes) == 1
+    assert "현금배당성향" in notes[0] and "30.000" in notes[0] and "25.100" in notes[0]
+
+
+def test_check_cross_source_tolerates_payout_rounding_difference():
+    """
+    성향은 계산된 백분율이라 출처마다 반올림 자리가 다릅니다.
+    허용 오차(0.05%p) 이내면 불일치로 부풀리지 않습니다.
+    """
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    assert cdk.CROSS_SOURCE_PAYOUT_TOLERANCE_PCT == 0.05
+    assert cdk.check_cross_source("005930", "2026", 1668.0, 1446.0,
+                                  25.13, 29.20, idx) == []      # 25.10 과 0.03%p 차이
+    assert cdk.check_cross_source("005930", "2026", 1668.0, 1446.0,
+                                  25.30, 29.20, idx) != []      # 0.20%p 차이 → 불일치
+
+
+def test_check_cross_source_is_silent_when_baseline_has_no_such_row():
+    """
+    ⭐ '기준선에 그 종목·연도가 없음'은 불일치가 **아닙니다**.
+    (무배당·신규상장 종목이 전부 경고로 뜨면 경고가 무의미해집니다 — §0-1 은 지어내지 말라는
+     것이지, 모르는 것을 문제로 만들라는 것이 아닙니다.)
+    """
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    assert cdk.check_cross_source("999999", "2026", 500.0, 500.0, 10.0, 10.0, idx) == []
+    # 기준선이 2023~2025 뿐이라 2030년 실행의 전기(2029)는 대조할 짝이 없습니다.
+    assert cdk.check_cross_source("005930", "2030", 500.0, 500.0, 10.0, 10.0, idx) == []
+
+
+def test_check_cross_source_is_silent_when_dart_value_is_missing():
+    """DART 쪽 값이 None 이면(무배당·미기재) 대조 대상이 아니라 불일치가 아닙니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    assert cdk.check_cross_source("005930", "2026", None, None, None, None, idx) == []
+
+
+def test_check_cross_source_is_silent_when_baseline_value_is_missing():
+    """기준선 행은 있지만 그 칸이 None 인 경우도 대조 불가 → note 없음."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    # 000660 의 2025 payout_ratio_pct 는 None 입니다. DART 가 값을 줘도 비교하지 않습니다.
+    notes = cdk.check_cross_source("000660", "2026", 1500.0, None, 33.3, None, idx)
+    assert notes == []
+
+
+def test_check_cross_source_never_raises_on_bad_inputs():
+    """순수 함수이므로 어떤 쓰레기 입력에도 예외 대신 빈 리스트여야 합니다."""
+    idx = cdk.build_kind_baseline_index(SYNTHETIC_HISTORY)
+    assert cdk.check_cross_source("005930", "연도미상", 1, 1, 1, 1, idx) == []
+    assert cdk.check_cross_source(None, "2026", 1, 1, 1, 1, idx) == []
+    assert cdk.check_cross_source("005930", "2026", 1, 1, 1, 1, None) == []
+    assert cdk.check_cross_source("005930", "2026", 1, 1, 1, 1, {}) == []
+    assert cdk.check_cross_source("005930", "2026", "값없음", "-", None, None, idx) == []
+
+
+# ── build_dividend_record 배선 ────────────────────────────────────────────────
+def test_build_record_cross_source_notes_are_empty_without_baseline():
+    """
+    ⭐ 하위호환 회귀 테스트. 새 인자를 넘기지 않는 기존 호출부는 **동작이 달라지면 안 되고**,
+    `cross_source_notes` 는 항상 존재하되 빈 리스트여야 합니다(화면이 분기하기 쉽도록).
+    """
+    parsed = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"])
+    prev = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="frmtrm")
+    prev2 = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="lwfr")
+    rec = cdk.build_dividend_record("005930", {"corp_code": "00126380"}, "2026", "11013",
+                                    REAL_SAMSUNG_2026_Q1, parsed_now=parsed,
+                                    parsed_prev=prev, parsed_prev2=prev2)
+    assert rec["cross_source_notes"] == []
+    # 실패 레코드도 같은 스키마여야 합니다.
+    fail = cdk.build_dividend_record("005930", None, "2026", None, None, status="NO_DATA")
+    assert fail["cross_source_notes"] == []
+    # 기존 전기·전전기 필드가 그대로인지도 함께 못 박습니다(필드 삭제·개명 방지).
+    assert rec["prev_dps_cash_common"] == 1668.0
+    assert rec["prev2_dps_cash_common"] == 1446.0
+    assert rec["prev_payout_ratio"] == 25.10
+
+
+def test_build_record_populates_cross_source_notes_when_baseline_given():
+    """(합성) 어긋나는 기준선을 넘기면 레코드에 사유가 실려야 합니다."""
+    mismatching = cdk.build_kind_baseline_index({"records": [
+        {"stock_code": "005930", "fiscal_year": 2025, "dps_krw": 1, "payout_ratio_pct": 1.0},
+    ]})
+    parsed = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"])
+    prev = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="frmtrm")
+    prev2 = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period="lwfr")
+    rec = cdk.build_dividend_record("005930", {"corp_code": "00126380"}, "2026", "11013",
+                                    REAL_SAMSUNG_2026_Q1, parsed_now=parsed,
+                                    parsed_prev=prev, parsed_prev2=prev2,
+                                    kind_baseline_index=mismatching)
+    assert len(rec["cross_source_notes"]) == 2       # 주당배당금 + 배당성향
+    assert any("1,668" in n for n in rec["cross_source_notes"])
+    # ⭐ 감지만 합니다 — 저장된 값은 DART 원문 그대로여야 합니다(자동 보정 금지, §0-1).
+    assert rec["prev_dps_cash_common"] == 1668.0
+    assert rec["prev_payout_ratio"] == 25.10
+    assert rec["dps_cash_common"] == 372.0
+    # 다른 사유 리스트로 새지 않아야 합니다(각 관심사는 전용 필드에만).
+    assert rec["parse_notes"] == [] and rec["unit_mismatch_notes"] == []
+
+
+# ── summarize_results 집계 ────────────────────────────────────────────────────
+def test_summary_aggregates_unit_and_cross_source_mismatches():
+    """
+    레코드마다 흩어진 감지 결과를 리포트에서 한눈에 볼 수 있어야 합니다
+    (없으면 2,700종목 파일을 손으로 grep 해야만 알 수 있습니다).
+    """
+    clean = cdk.build_dividend_record("000001", None, "2026", "11012", None, status="OK")
+    unit_bad = cdk.build_dividend_record(
+        "000002", None, "2026", "11012", None, status="OK",
+        parsed_now={"unit_mismatch_notes": ["단위 불일치: …"]})
+    cross_bad = cdk.build_dividend_record(
+        "000003", None, "2026", "11012", None, status="OK",
+        parsed_prev={"dps_cash_common": 500.0},
+        kind_baseline_index={("000003", 2025): {"dps_krw": 100, "payout_ratio_pct": None}})
+    both_bad = cdk.build_dividend_record(
+        "000004", None, "2026", "11012", None, status="OK",
+        parsed_now={"unit_mismatch_notes": ["단위 확인 불가: …"]},
+        parsed_prev={"dps_cash_common": 700.0},
+        kind_baseline_index={("000004", 2025): {"dps_krw": 100, "payout_ratio_pct": None}})
+
+    summary = cdk.summarize_results([clean, unit_bad, cross_bad, both_bad], unmapped=[])
+    assert summary["records_with_unit_mismatch"] == 2
+    assert summary["stock_codes_with_unit_mismatch"] == ["000002", "000004"]
+    assert summary["records_with_cross_source_mismatch"] == 2
+    assert summary["stock_codes_with_cross_source_mismatch"] == ["000003", "000004"]
+    # 기존 집계는 그대로 있어야 합니다.
+    assert summary["by_status"] == {"OK": 4}
+    assert summary["total_records"] == 4
+
+
+def test_summary_reports_zero_when_nothing_was_detected():
+    """검출 0건도 필드가 존재해야 합니다(키가 없는 것과 0건은 다른 사실입니다)."""
+    summary = cdk.summarize_results([], unmapped=[])
+    assert summary["records_with_unit_mismatch"] == 0
+    assert summary["stock_codes_with_unit_mismatch"] == []
+    assert summary["records_with_cross_source_mismatch"] == 0
+    assert summary["stock_codes_with_cross_source_mismatch"] == []
+
+
+# ── run_collection 배선 ───────────────────────────────────────────────────────
+def test_run_collection_does_not_cross_check_by_default(tmp_path, faked_network):
+    """
+    ⭐ 하위호환: 현재 GitHub Actions 워크플로는 이 옵션을 모릅니다.
+    옵션 없이 돌리면 예전과 똑같이 동작하고, "대조하지 않았다"는 사실이 리포트에 남아야 합니다.
+    """
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    records, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path), log=lambda *a: None)
+    assert summary["cross_source_checked"] is False
+    assert summary["cross_source_baseline_path"] is None
+    assert summary["records_with_cross_source_mismatch"] == 0
+    assert all(r["cross_source_notes"] == [] for r in records)
+
+
+def test_run_collection_cross_checks_when_baseline_path_given(tmp_path, faked_network):
+    """(합성 기준선) 경로를 주면 레코드와 리포트에 불일치가 실려야 합니다."""
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    baseline = tmp_path / "history.json"
+    baseline.write_text(json.dumps({"records": [
+        {"stock_code": "005930", "fiscal_year": 2025, "dps_krw": 1, "payout_ratio_pct": 1.0},
+    ]}), encoding="utf-8")
+
+    records, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path),
+        history_baseline_path=str(baseline), log=lambda *a: None)
+
+    assert summary["cross_source_checked"] is True
+    assert summary["cross_source_baseline_entries"] == 1
+    assert summary["records_with_cross_source_mismatch"] == 1
+    assert summary["stock_codes_with_cross_source_mismatch"] == ["005930"]
+    assert records[0]["cross_source_notes"]
+    # 값은 그대로 — 교차검증은 절대 데이터를 고치지 않습니다.
+    assert records[0]["prev_dps_cash_common"] == 1668.0
+    # 파일로도 남아야 사람이 나중에 볼 수 있습니다.
+    saved = json.loads((tmp_path / "dividend_kr_2026_latest.json").read_text(encoding="utf-8"))
+    assert saved["records"][0]["cross_source_notes"]
+
+
+def test_run_collection_refuses_to_proceed_when_baseline_unreadable(tmp_path, faked_network):
+    """
+    §0-1: 교차검증을 **해달라고 명시한** 실행에서 파일을 못 읽었다면, 조용히 검증 없이
+    진행해선 안 됩니다(그러면 '불일치 0건'이 '검증 통과'처럼 보입니다). 크게 실패해야 합니다.
+    """
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    universe = cdk.load_universe(str(uni))
+
+    with pytest.raises(cdk.DartFatalError, match="기준선"):
+        cdk.run_collection(universe, "2026", str(tmp_path),
+                           history_baseline_path=str(tmp_path / "없는파일.json"),
+                           log=lambda *a: None)
+
+    broken = tmp_path / "broken.json"
+    broken.write_text("{이건 JSON 이 아닙니다", encoding="utf-8")
+    with pytest.raises(cdk.DartFatalError, match="기준선"):
+        cdk.run_collection(universe, "2026", str(tmp_path),
+                           history_baseline_path=str(broken), log=lambda *a: None)
+
+    empty = tmp_path / "empty.json"
+    empty.write_text(json.dumps({"records": []}), encoding="utf-8")
+    with pytest.raises(cdk.DartFatalError, match="하나도"):
+        cdk.run_collection(universe, "2026", str(tmp_path),
+                           history_baseline_path=str(empty), log=lambda *a: None)
+
+
+def test_cli_exposes_new_optional_flags_without_breaking_existing_usage(tmp_path, monkeypatch):
+    """
+    새 플래그는 **선택**이어야 합니다 — 기존 워크플로 YAML 은 이 옵션들을 모릅니다.
+    (run_collection 을 가짜로 갈아끼워 argparse 배선만 확인합니다)
+    """
+    seen = {}
+
+    def fake_run(universe, year, out_dir, **kwargs):
+        seen.update(kwargs)
+        return [], {}
+
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    monkeypatch.setattr(cdk, "run_collection", fake_run)
+
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert seen["history_baseline_path"] is None            # 기본은 교차검증 안 함
+    assert seen["checkpoint_max_age_days"] == cdk.DEFAULT_CHECKPOINT_MAX_AGE_DAYS == 14
+
+    seen.clear()
+    assert cdk.main(["--universe", str(uni), "--year", "2026", "--out-dir", str(tmp_path),
+                     "--history-baseline", "data/history.json",
+                     "--checkpoint-max-age-days", "3"]) == 0
+    assert seen["history_baseline_path"] == "data/history.json"
+    assert seen["checkpoint_max_age_days"] == 3
+
+
+# ── 실데이터 전수 교차검증 ────────────────────────────────────────────────────
+def test_real_production_records_cross_check_against_real_kind_baseline():
+    """
+    **실제 산출물 전수 교차검증** (네트워크 불필요 — 저장된 두 파일만 읽습니다).
+
+    data/dividend_kr_2026_latest.json (DART 수집 결과 2,734레코드)의 전기·전전기 값을
+    data/dividend_history_kr_2023_2025.json (KIND, 독립 출처 8,202행)과 맞대봅니다.
+
+    ⚠️ 단위 검증과 달리 **여기서 불일치 0건을 기대할 이유가 없습니다.** 두 출처는 산정 방식이
+       다르고(연결/별도 기준, 순이익 분모), 액면분할·재작성도 있습니다. 그래서 정확한 기대
+       건수를 못 박지 않고, **① 전 레코드에서 함수가 예외 없이 돌 것 ② 불일치가 전체의
+       절반을 넘지 않을 것**만 확인합니다. ②는 "모든 레코드가 다 불일치로 뜨는 체계적 버그"를
+       잡기 위한 하한선이지, 데이터 품질 기준이 아닙니다.
+
+    [2026-08-24 실측 관측치 — 참고용, 단정적 기대값이 아닙니다]
+      · 대조할 짝이 하나라도 있는 레코드 971건 중 불일치 522건
+      · 주당현금배당금 쌍 1,790건 중 어긋난 것 70건(53종목) — 대부분 액면분할·중간배당 차이로
+        보이나 **와이엔텍(067900)** 처럼 DART 원문의 '주당 현금배당금(원)'에 배당총액
+        (1,809,965,900원)이 적혀 있는 회사 기재 오류도 잡혔습니다(단위 라벨은 '(원)'이라
+        단위 검증으로는 절대 잡히지 않는 종류의 오류입니다 — 교차검증만이 잡습니다).
+      · 현금배당성향 쌍 1,663건 중 어긋난 것 943건. 차이가 매우 커(중앙값 0.14%p, 상위 10%는
+        16%p 이상) 단순 반올림 문제가 아니라 **두 출처의 산정 기준 자체가 다를 가능성**이
+        큽니다 — 사람(오너) 판단이 필요한 사안이라 여기서 단정하지 않습니다.
+    """
+    for path in (REAL_LATEST_JSON, REAL_HISTORY_JSON):
+        if not os.path.exists(path):
+            pytest.skip(f"실데이터가 없습니다: {path} (수집 후에만 검증 가능)")
+
+    with open(REAL_HISTORY_JSON, encoding="utf-8") as fh:
+        history = json.load(fh)
+    with open(REAL_LATEST_JSON, encoding="utf-8") as fh:
+        latest = json.load(fh)
+
+    index = cdk.build_kind_baseline_index(history)
+    records = latest.get("records") or []
+
+    # 파일이 잘려 있는데 "0건 통과"로 착각하지 않도록 규모부터 확인합니다(§0-1).
+    assert len(index) >= 8000, f"기준선 색인이 예상보다 작습니다({len(index)}건)."
+    assert len(records) >= 2500, f"산출물이 예상보다 작습니다({len(records)}건)."
+
+    comparable = mismatched = 0
+    examples = []
+    for rec in records:
+        prev_dps = rec.get("prev_dps_cash_common")
+        prev2_dps = rec.get("prev2_dps_cash_common")
+        if prev_dps is None and prev2_dps is None:
+            continue
+        comparable += 1
+        notes = cdk.check_cross_source(          # 예외 없이 전 레코드를 통과해야 합니다
+            rec.get("stock_code"), rec.get("bsns_year"),
+            prev_dps, prev2_dps,
+            rec.get("prev_payout_ratio"), rec.get("prev2_payout_ratio"), index)
+        assert isinstance(notes, list)
+        assert all(isinstance(n, str) and n for n in notes)
+        if notes:
+            mismatched += 1
+            if len(examples) < 5:
+                examples.append((rec.get("stock_code"), notes[0]))
+
+    assert comparable >= 500, f"대조 가능한 레코드가 {comparable}건뿐입니다 — 배선이 끊겼을 수 있습니다."
+    # 체계적 버그(전 레코드가 다 불일치)에 대한 하한선. 품질 기준이 아닙니다.
+    assert mismatched < len(records) / 2, (
+        f"불일치가 {mismatched}/{len(records)}건으로 지나치게 많습니다 — 우리 대조 로직이 "
+        f"정상값을 오탐하고 있을 가능성이 큽니다. 예시: {examples}")
+
+
+def test_real_production_dps_mismatches_are_the_rare_case():
+    """
+    같은 실데이터에서 **주당현금배당금만** 따로 봅니다.
+    성향(%)은 산정 기준 차이로 많이 어긋나지만, 주당배당금은 원 단위 사실값이라 대부분
+    일치해야 정상입니다(2026-08-24 실측: 대조쌍 1,790건 중 불일치 70건 ≈ 3.9%).
+    비율이 크게 튀면 우리 대조 로직이나 어느 한쪽 출처가 망가진 것입니다.
+    """
+    for path in (REAL_LATEST_JSON, REAL_HISTORY_JSON):
+        if not os.path.exists(path):
+            pytest.skip(f"실데이터가 없습니다: {path} (수집 후에만 검증 가능)")
+
+    with open(REAL_HISTORY_JSON, encoding="utf-8") as fh:
+        index = cdk.build_kind_baseline_index(json.load(fh))
+    with open(REAL_LATEST_JSON, encoding="utf-8") as fh:
+        records = json.load(fh).get("records") or []
+
+    pairs = mismatched = 0
+    for rec in records:
+        year = int(rec["bsns_year"])
+        for offset, dart_dps in ((1, rec.get("prev_dps_cash_common")),
+                                 (2, rec.get("prev2_dps_cash_common"))):
+            base = index.get((rec.get("stock_code"), year - offset))
+            if not base or base.get("dps_krw") is None or dart_dps is None:
+                continue
+            pairs += 1
+            if abs(float(dart_dps) - float(base["dps_krw"])) >= 1:
+                mismatched += 1
+
+    assert pairs >= 1000, f"대조쌍이 {pairs}건뿐입니다 — 배선이 끊겼을 수 있습니다."
+    assert mismatched / pairs < 0.25, (
+        f"주당배당금 불일치율이 {mismatched}/{pairs} 로 지나치게 높습니다 — "
+        "대조 로직이나 한쪽 출처를 확인해야 합니다.")
+
+
+# =============================================================================
+# 13. 델타 실행 결과 병합 (merge_delta_output)
+#
+# 배경: 2026 전수 수집은 "2023~2025 중 한 번이라도 배당한 2,734종목" 유니버스로 돌았고,
+#       그 뒤에 생긴 신규 상장·신규 배당 종목은 통째로 빠져 있습니다. 나중에 신규 종목만
+#       따로 돌린 뒤(= 델타 수집) 같은 out_dir 로 저장하면 기존 2,734종목이 조용히
+#       사라집니다 — 그래서 델타는 별도 out_dir 로 돌리고 여기서 합칩니다.
+#
+# 여기 테스트가 못 박는 것:
+#   · 겹치면 합치지 않고 크게 실패한다(자동 해소·중복 저장 금지).
+#   · **실패한 병합은 단 한 바이트도 쓰지 않는다** — 입력 두 파일이 그대로 남아야 합니다.
+#   · 원래 두 실행의 리포트가 merged_from 에 원문 그대로 살아 있다.
+#   · 리포트 숫자는 손으로 더하지 않고 summarize_results() 가 다시 계산한다.
+#
+# ⚠️ 실산출물(6.8MB/9.4MB)은 쓰지 않습니다 — tmp_path 에 같은 스키마의 작은 파일을 만듭니다.
+# =============================================================================
+def _merge_fake_record(code, status="OK", dps=100):
+    """병합 테스트용 최소 레코드. 실제 스키마의 부분집합입니다."""
+    return {
+        "stock_code": code,
+        "corp_name": f"테스트{code}",
+        "bsns_year": "2026",
+        "reprt_name": "반기보고서" if status == "OK" else None,
+        "dps_cash_common": dps if status == "OK" else None,
+        "status": status,
+        "status_reason": "" if status == "OK" else "데이터 없음",
+        "parse_notes": [],
+        "unknown_se_labels": [],
+        "unit_mismatch_notes": [],
+        "cross_source_notes": [],
+    }
+
+
+def _merge_raw_entry(code, reprt_code="11012"):
+    """병합 테스트용 raw JSONL 한 줄(실제 raw 파일과 같은 키 구성)."""
+    return {"stock_code": code, "corp_code": "00" + code, "bsns_year": "2026",
+            "reprt_code": reprt_code, "fetched_at_kst": "2026-08-23T23:27:33+09:00",
+            "response": {"status": "000", "message": "정상", "list": []}}
+
+
+def _write_run_output(out_dir, records, unmapped=None, *, year="2026",
+                      completed=True, stopped_reason=None, requests_used=4,
+                      elapsed_sec=10.0, raw_entries=None, corpcode_source=None):
+    """한 실행의 산출물(latest.json [+ raw.jsonl])을 실제와 같은 형태로 만듭니다."""
+    out_dir = str(out_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    summary = cdk.summarize_results(records, unmapped or [], extra={
+        "bsns_year": year,
+        "universe_size_input": len(records),
+        "universe_size": len(records),
+        "requests_used": requests_used,
+        "elapsed_sec": elapsed_sec,
+        "completed": completed,
+        "stopped_reason": stopped_reason,
+        "corpcode_source": corpcode_source,
+        "corpcode_stats": {"total": len(records)} if corpcode_source else None,
+    })
+    path = os.path.join(out_dir, f"dividend_kr_{year}_latest.json")
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump({"summary": summary, "records": records}, f, ensure_ascii=False, indent=2)
+    if raw_entries is not None:
+        raw_path = os.path.join(out_dir, f"dividend_kr_{year}_raw.jsonl")
+        with open(raw_path, "w", encoding="utf-8") as f:
+            for entry in raw_entries:
+                f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+    return path
+
+
+def _snapshot(*paths):
+    """파일들의 바이트 스냅샷. 실패한 병합이 '아무것도 안 건드렸는지' 확인용."""
+    return {p: (open(p, "rb").read() if os.path.exists(p) else None) for p in paths}
+
+
+@pytest.fixture
+def merge_dirs(tmp_path):
+    """기존 전체 결과(2종목) + 델타 결과(1종목, 겹치지 않음) 한 쌍을 만들어 줍니다."""
+    main_dir = tmp_path / "main"
+    delta_dir = tmp_path / "delta"
+    _write_run_output(main_dir,
+                      [_merge_fake_record("005930"), _merge_fake_record("000660", "NO_DATA")],
+                      unmapped=[{"stock_code_input": "AAA", "stock_code": None,
+                                 "reason": "형식 오류"}],
+                      requests_used=8, elapsed_sec=100.0, corpcode_source="cache",
+                      raw_entries=[_merge_raw_entry("005930"), _merge_raw_entry("000660")])
+    _write_run_output(delta_dir, [_merge_fake_record("123456", dps=50)],
+                      requests_used=2, elapsed_sec=5.0, corpcode_source="network",
+                      raw_entries=[_merge_raw_entry("123456")])
+    return main_dir, delta_dir
+
+
+def test_merge_delta_combines_records_and_recomputes_summary(merge_dirs):
+    """행복 경로: 2 + 1 → 3레코드, 리포트는 summarize_results 가 다시 계산합니다."""
+    main_dir, delta_dir = merge_dirs
+    records, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+
+    assert [r["stock_code"] for r in records] == ["005930", "000660", "123456"]
+    assert summary["total_records"] == 3
+    assert summary["by_status"] == {"OK": 2, "NO_DATA": 1}
+    # 손으로 더한 숫자가 아니라 재계산된 값이어야 합니다.
+    assert summary["requests_used"] == 10
+    assert summary["elapsed_sec"] == 105.0
+    assert summary["universe_size"] == 3
+    assert summary["universe_size_input"] == 3
+    assert summary["bsns_year"] == "2026"
+    assert "병합" in summary["verification_status"]
+    assert summary["merge_performed_at_kst"]
+    # 최신 corp_code 캐시 상태는 나중에 돈 델타 쪽을 따릅니다.
+    assert summary["corpcode_source"] == "network"
+
+    # 디스크에도 그대로 있어야 합니다.
+    on_disk = json.loads((main_dir / "dividend_kr_2026_latest.json").read_text(encoding="utf-8"))
+    assert len(on_disk["records"]) == 3
+    assert on_disk["summary"]["total_records"] == 3
+
+
+def test_merge_delta_keeps_both_original_summaries_verbatim(merge_dirs):
+    """§0-1: 두 실행을 하나인 척 뭉개면 어느 쪽이 언제 돌았는지가 사라집니다."""
+    main_dir, delta_dir = merge_dirs
+    before_main = json.loads(
+        (main_dir / "dividend_kr_2026_latest.json").read_text(encoding="utf-8"))["summary"]
+    before_delta = json.loads(
+        (delta_dir / "dividend_kr_2026_latest.json").read_text(encoding="utf-8"))["summary"]
+
+    _, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["merged_from"] == [before_main, before_delta]
+
+
+def test_merge_delta_carries_over_unmapped_detail_from_both_runs(tmp_path):
+    """매핑 실패 목록도 합쳐져야 합니다 — 한쪽 것이 조용히 사라지면 안 됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")],
+                      unmapped=[{"stock_code_input": "AAA", "reason": "형식 오류"}],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_merge_fake_record("123456")],
+                      unmapped=[{"stock_code_input": "BBB", "reason": "corp_code 없음"}],
+                      raw_entries=[])
+    _, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["unmapped_stock_codes"] == 2
+    assert [u["stock_code_input"] for u in summary["unmapped_detail"]] == ["AAA", "BBB"]
+
+
+def test_merge_delta_appends_raw_jsonl_in_order(merge_dirs):
+    """raw 는 append-only 입니다 — 기존 줄 뒤에 델타 줄이 순서 그대로 붙어야 합니다."""
+    main_dir, delta_dir = merge_dirs
+    raw_path = main_dir / "dividend_kr_2026_raw.jsonl"
+    before = raw_path.read_text(encoding="utf-8").splitlines()
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    after = raw_path.read_text(encoding="utf-8").splitlines()
+    assert len(after) == len(before) + 1 == 3
+    assert after[:2] == before                       # 기존 줄은 손대지 않습니다
+    assert json.loads(after[-1])["stock_code"] == "123456"
+    # 마지막 줄에도 개행이 있어야 다음 델타가 이어붙어도 줄이 뭉치지 않습니다.
+    assert raw_path.read_text(encoding="utf-8").endswith("\n")
+
+
+def test_merge_delta_writes_merge_log_manifest(merge_dirs):
+    """감사 로그: 무엇을 언제 합쳤는지 남아야 두 번 합치는 사고를 잡을 수 있습니다."""
+    main_dir, delta_dir = merge_dirs
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    log_path = main_dir / "dividend_kr_2026_merge_log.json"
+    assert log_path.exists()
+    entries = json.loads(log_path.read_text(encoding="utf-8"))["merges"]
+    assert len(entries) == 1
+    assert entries[0]["delta_out_dir"] == str(delta_dir)
+    assert entries[0]["delta_stock_codes"] == ["123456"]
+    assert entries[0]["delta_record_count"] == 1
+    assert entries[0]["merged_at_kst"]
+
+
+# ── 실패 경로 — 실패한 병합은 단 한 바이트도 쓰지 않아야 합니다 ─────────────────
+def test_merge_delta_refuses_when_stock_codes_overlap(tmp_path):
+    """
+    §0-1: 겹치는 종목이 있으면 이건 '델타'가 아닙니다. 중복 저장도, 한쪽 임의 폐기도
+    하지 않고 겹친 코드를 알려 주며 크게 실패해야 합니다.
+    """
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930"), _merge_fake_record("000660")],
+                      raw_entries=[_merge_raw_entry("005930")])
+    _write_run_output(delta_dir, [_merge_fake_record("000660"), _merge_fake_record("123456")],
+                      raw_entries=[_merge_raw_entry("000660")])
+
+    watched = _snapshot(str(main_dir / "dividend_kr_2026_latest.json"),
+                        str(main_dir / "dividend_kr_2026_raw.jsonl"),
+                        str(delta_dir / "dividend_kr_2026_latest.json"),
+                        str(delta_dir / "dividend_kr_2026_raw.jsonl"),
+                        str(main_dir / "dividend_kr_2026_merge_log.json"))
+    before = _snapshot(*watched)
+
+    with pytest.raises(ValueError, match="겹칩니다"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    assert _snapshot(*watched) == before, "실패한 병합이 파일을 건드렸습니다"
+
+
+def test_merge_delta_overlap_message_lists_codes_but_caps_the_list(tmp_path):
+    """겹친 종목이 수백 건이어도 메시지가 터미널을 도배하면 안 됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    codes = [f"{i:06d}" for i in range(50)]
+    _write_run_output(main_dir, [_merge_fake_record(c) for c in codes], raw_entries=[])
+    _write_run_output(delta_dir, [_merge_fake_record(c) for c in codes], raw_entries=[])
+
+    with pytest.raises(ValueError) as exc:
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    msg = str(exc.value)
+    assert "50건 겹칩니다" in msg
+    assert "외 30건" in msg              # 앞 20개만 보여주고 나머지는 건수로
+    assert "000049" not in msg
+
+
+def test_merge_delta_errors_clearly_when_main_output_missing(tmp_path):
+    """전수 수집을 아직 안 한 디렉터리에 병합하려 하면 사람이 읽을 문장으로 막아야 합니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    os.makedirs(str(main_dir))
+    _write_run_output(delta_dir, [_merge_fake_record("123456")], raw_entries=[])
+
+    with pytest.raises(FileNotFoundError) as exc:
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    assert "기존 전체 결과" in str(exc.value)
+    assert "전수 수집" in str(exc.value)
+    assert not (main_dir / "dividend_kr_2026_merge_log.json").exists()
+
+
+def test_merge_delta_errors_clearly_when_delta_output_missing(tmp_path):
+    """델타 out_dir 을 잘못 짚었을 때도 마찬가지입니다 — 조용히 성공하면 안 됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")], raw_entries=[])
+    os.makedirs(str(delta_dir))
+    before = _snapshot(str(main_dir / "dividend_kr_2026_latest.json"))
+
+    with pytest.raises(FileNotFoundError) as exc:
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    assert "델타 실행 결과" in str(exc.value)
+    assert _snapshot(str(main_dir / "dividend_kr_2026_latest.json")) == before
+
+
+def test_merge_delta_errors_on_malformed_main_output(tmp_path):
+    """깨진 JSON 을 만나면 혼란스러운 트레이스백 대신 어떤 파일이 문제인지 말해야 합니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    os.makedirs(str(main_dir))
+    (main_dir / "dividend_kr_2026_latest.json").write_text("{이건 JSON 이", encoding="utf-8")
+    _write_run_output(delta_dir, [_merge_fake_record("123456")], raw_entries=[])
+
+    with pytest.raises(ValueError, match="읽지 못했습니다"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+
+# ── 두 번 합치기 방지 ────────────────────────────────────────────────────────
+def test_merge_delta_rejects_merging_the_same_delta_twice(merge_dirs):
+    """같은 델타를 두 번 합치면 레코드가 중복됩니다 — 이력을 보고 막아야 합니다."""
+    main_dir, delta_dir = merge_dirs
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    after_first = _snapshot(str(main_dir / "dividend_kr_2026_latest.json"),
+                            str(main_dir / "dividend_kr_2026_raw.jsonl"))
+    with pytest.raises(ValueError, match="이미 병합된 델타"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    assert _snapshot(*after_first) == after_first, "거부된 재병합이 파일을 건드렸습니다"
+
+    entries = json.loads(
+        (main_dir / "dividend_kr_2026_merge_log.json").read_text(encoding="utf-8"))["merges"]
+    assert len(entries) == 1, "거부된 병합이 이력에 남으면 안 됩니다"
+
+
+def test_merge_delta_matches_the_manifest_by_code_set_not_by_path(tmp_path):
+    """
+    운영 편의상 델타마다 같은 임시 디렉터리를 재사용하는 경우가 있습니다.
+    경로만 보고 막으면 **정당한 새 델타**까지 거부됩니다 — 종목 구성으로 판단해야 합니다.
+    """
+    main_dir, scratch = tmp_path / "m", tmp_path / "scratch"
+    _write_run_output(main_dir, [_merge_fake_record("005930")],
+                      raw_entries=[_merge_raw_entry("005930")])
+
+    _write_run_output(scratch, [_merge_fake_record("111111")],
+                      raw_entries=[_merge_raw_entry("111111")])
+    cdk.merge_delta_output(str(main_dir), str(scratch), "2026", log=lambda *a: None)
+
+    # 같은 경로를 재사용하지만 **내용이 다른** 2차 델타 → 막히면 안 됩니다.
+    _write_run_output(scratch, [_merge_fake_record("222222")],
+                      raw_entries=[_merge_raw_entry("222222")])
+    records, summary = cdk.merge_delta_output(str(main_dir), str(scratch), "2026",
+                                              log=lambda *a: None)
+    assert [r["stock_code"] for r in records] == ["005930", "111111", "222222"]
+    assert summary["total_records"] == 3
+
+    entries = json.loads(
+        (main_dir / "dividend_kr_2026_merge_log.json").read_text(encoding="utf-8"))["merges"]
+    assert [e["delta_stock_codes"] for e in entries] == [["111111"], ["222222"]]
+    # raw 도 두 번 모두 이어붙었어야 합니다.
+    raw = (main_dir / "dividend_kr_2026_raw.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(l)["stock_code"] for l in raw] == ["005930", "111111", "222222"]
+
+
+def test_merge_delta_force_overrides_the_manifest_guard(merge_dirs):
+    """
+    force=True 는 **이력 가드만** 무르는 탈출구입니다.
+    (기존 결과를 백업본으로 되돌린 뒤 이력만 남아 있는 상황을 재현합니다)
+    """
+    main_dir, delta_dir = merge_dirs
+    main_latest = main_dir / "dividend_kr_2026_latest.json"
+    backup = main_latest.read_bytes()
+
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    main_latest.write_bytes(backup)              # 가공본만 롤백 — 이력은 그대로 남습니다
+
+    with pytest.raises(ValueError, match="이미 병합된 델타"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+
+    lines = []
+    records, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                              force=True, log=lines.append)
+    assert summary["total_records"] == 3
+    assert any("강제 재병합" in l for l in lines), "강제 재병합은 조용히 지나가면 안 됩니다"
+
+    entries = json.loads(
+        (main_dir / "dividend_kr_2026_merge_log.json").read_text(encoding="utf-8"))["merges"]
+    assert len(entries) == 2
+    assert entries[1]["forced"] is True
+
+
+def test_merge_delta_force_does_not_override_the_overlap_guard(merge_dirs):
+    """
+    force 로도 겹침은 통과하지 못합니다 — 어느 쪽 값이 맞는지 우리가 판정할 수 없으므로
+    자동 해소하면 반드시 한쪽을 조용히 버리게 됩니다(§0-1).
+    """
+    main_dir, delta_dir = merge_dirs
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    with pytest.raises(ValueError, match="겹칩니다"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                               force=True, log=lambda *a: None)
+
+
+# ── raw 없는 델타 ────────────────────────────────────────────────────────────
+def test_merge_delta_survives_a_delta_run_with_no_raw_file(tmp_path):
+    """
+    델타 종목이 전부 UNMAPPED 였다면 요청이 0건이라 raw 파일이 아예 없습니다.
+    그건 오류가 아니라 정상 시나리오입니다 — 경고만 남기고 병합은 성공해야 합니다.
+    """
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")],
+                      raw_entries=[_merge_raw_entry("005930")])
+    _write_run_output(delta_dir, [_merge_fake_record("123456", "UNMAPPED")],
+                      unmapped=[{"stock_code_input": "123456", "reason": "corp_code 없음"}],
+                      requests_used=0, raw_entries=None)          # raw 파일을 만들지 않음
+    raw_path = main_dir / "dividend_kr_2026_raw.jsonl"
+    before = raw_path.read_bytes()
+
+    lines = []
+    records, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                              log=lines.append)
+    assert summary["total_records"] == 2
+    assert summary["by_status"] == {"OK": 1, "UNMAPPED": 1}
+    assert raw_path.read_bytes() == before, "기존 raw 가 손상됐습니다"
+    assert any("델타 raw 파일이 없습니다" in l for l in lines)
+
+    entries = json.loads(
+        (main_dir / "dividend_kr_2026_merge_log.json").read_text(encoding="utf-8"))["merges"]
+    assert entries[0]["delta_raw_lines_appended"] == 0
+
+
+def test_merge_delta_creates_main_raw_when_it_does_not_exist(tmp_path):
+    """기존 raw 가 없더라도(비정상이지만 가능) 델타 raw 를 잃어버리면 안 됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")], raw_entries=None)
+    _write_run_output(delta_dir, [_merge_fake_record("123456")],
+                      raw_entries=[_merge_raw_entry("123456")])
+
+    cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    raw = (main_dir / "dividend_kr_2026_raw.jsonl").read_text(encoding="utf-8").splitlines()
+    assert [json.loads(l)["stock_code"] for l in raw] == ["123456"]
+
+
+def test_merge_delta_refuses_a_corrupted_delta_raw_file(tmp_path):
+    """깨진 raw 를 그대로 이어붙이면 원본 보관 파일 전체가 오염됩니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")],
+                      raw_entries=[_merge_raw_entry("005930")])
+    _write_run_output(delta_dir, [_merge_fake_record("123456")],
+                      raw_entries=[_merge_raw_entry("123456")])
+    with open(delta_dir / "dividend_kr_2026_raw.jsonl", "a", encoding="utf-8") as f:
+        f.write("이건 JSON 이 아닙니다\n")
+
+    watched = (str(main_dir / "dividend_kr_2026_latest.json"),
+               str(main_dir / "dividend_kr_2026_raw.jsonl"))
+    before = _snapshot(*watched)
+    with pytest.raises(ValueError, match="2번째 줄"):
+        cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026", log=lambda *a: None)
+    assert _snapshot(*watched) == before
+
+
+# ── completed / stopped_reason 조합 ──────────────────────────────────────────
+def test_merge_delta_reports_completed_only_when_both_runs_completed(merge_dirs):
+    """둘 다 전수 완료여야 완료입니다."""
+    main_dir, delta_dir = merge_dirs
+    _, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["completed"] is True
+    assert summary["stopped_reason"] is None
+
+
+@pytest.mark.parametrize("main_ok,delta_ok,expect_in_reason", [
+    (True, False, ["델타 실행 미완료"]),
+    (False, True, ["기존 실행 미완료"]),
+    (False, False, ["기존 실행 미완료", "델타 실행 미완료"]),
+])
+def test_merge_delta_combines_incomplete_reasons(tmp_path, main_ok, delta_ok, expect_in_reason):
+    """
+    §0-1: 한쪽이라도 중단됐으면 병합본을 '완료'라고 말하면 안 되고, **어느 쪽이 왜**
+    중단됐는지가 사유에 남아야 합니다.
+    """
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_merge_fake_record("005930")], raw_entries=[],
+                      completed=main_ok,
+                      stopped_reason=None if main_ok else "요청 예산 소진")
+    _write_run_output(delta_dir, [_merge_fake_record("123456")], raw_entries=[],
+                      completed=delta_ok,
+                      stopped_reason=None if delta_ok else "실행시간 예산 소진")
+
+    _, summary = cdk.merge_delta_output(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["completed"] is False
+    for fragment in expect_in_reason:
+        assert fragment in summary["stopped_reason"]
+    if not main_ok:
+        assert "요청 예산 소진" in summary["stopped_reason"]
+    if not delta_ok:
+        assert "실행시간 예산 소진" in summary["stopped_reason"]
+
+
+# ── CLI 배선 ────────────────────────────────────────────────────────────────
+def test_cli_merge_delta_mode_does_not_require_universe(tmp_path, monkeypatch):
+    """--merge-delta 는 수집을 하지 않으므로 --universe 가 필요 없어야 합니다."""
+    seen = {}
+
+    def fake_merge(main_out_dir, delta_out_dir, bsns_year, force=False, log=print):
+        seen.update(dict(main_out_dir=main_out_dir, delta_out_dir=delta_out_dir,
+                         bsns_year=bsns_year, force=force))
+        return [], {}
+
+    def must_not_run(*a, **kw):                    # 병합 모드가 수집으로 흘러들면 실패
+        raise AssertionError("병합 모드에서 run_collection 이 호출됐습니다")
+
+    monkeypatch.setattr(cdk, "merge_delta_output", fake_merge)
+    monkeypatch.setattr(cdk, "run_collection", must_not_run)
+
+    assert cdk.main(["--year", "2026", "--out-dir", str(tmp_path),
+                     "--merge-delta", str(tmp_path / "delta")]) == 0
+    assert seen == {"main_out_dir": str(tmp_path), "delta_out_dir": str(tmp_path / "delta"),
+                    "bsns_year": "2026", "force": False}
+
+    seen.clear()
+    assert cdk.main(["--year", "2026", "--out-dir", str(tmp_path),
+                     "--merge-delta", str(tmp_path / "delta"), "--force-merge"]) == 0
+    assert seen["force"] is True
+
+
+def test_cli_still_requires_universe_for_a_collection_run(tmp_path, monkeypatch):
+    """반대로 수집 모드에서 --universe 가 빠지면 분명히 막아야 합니다."""
+    monkeypatch.setattr(cdk, "run_collection",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("유니버스 없이 수집이 시작됐습니다")))
+    with pytest.raises(SystemExit):
+        cdk.main(["--year", "2026", "--out-dir", str(tmp_path)])
+
+
+def test_cli_rejects_force_merge_without_merge_delta(tmp_path, monkeypatch):
+    """--force-merge 만 단독으로 주면 아무 효과 없이 수집이 돌아가선 안 됩니다."""
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    monkeypatch.setattr(cdk, "run_collection",
+                        lambda *a, **kw: (_ for _ in ()).throw(
+                            AssertionError("--force-merge 가 조용히 무시됐습니다")))
+    with pytest.raises(SystemExit):
+        cdk.main(["--universe", str(uni), "--year", "2026",
+                  "--out-dir", str(tmp_path), "--force-merge"])
+
+
+def test_cli_merge_failure_exits_nonzero_without_traceback(tmp_path, capsys):
+    """§0-3-4: 병합 실패는 트레이스백이 아니라 사람이 읽을 문장 + 종료코드 2 로 끝납니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    os.makedirs(str(main_dir))
+    _write_run_output(delta_dir, [_merge_fake_record("123456")], raw_entries=[])
+
+    assert cdk.main(["--year", "2026", "--out-dir", str(main_dir),
+                     "--merge-delta", str(delta_dir)]) == 2
+    out = capsys.readouterr().out
+    assert "병합하지 않았습니다" in out
+    assert "Traceback" not in out

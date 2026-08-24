@@ -44,10 +44,22 @@ visible_hand 의 신규 "배당금 모듈"이 쓸 **당해연도(진행 중인 �
 
  (다) 증권사/포털 크롤링 → 출처가 2차 가공이고 약관 문제도 있어 1차 출처로 쓰지 않습니다.
       다만 §0-3-3(다중 출처 교차검증) 관점에서 **검증용 2차 출처**로는 유효합니다.
-      → 이번 단계에서는 DART 응답에 함께 오는 `frmtrm`(전기)·`lwfr`(전전기) 값을
-        **이미 보유한 2023~2025 KIND 데이터와 대조**하는 것으로 교차검증을 대신합니다.
+      → 이 수집기는 DART 응답에 함께 오는 `frmtrm`(전기)·`lwfr`(전전기) 값을
+        **이미 보유한 2023~2025 KIND 데이터와 대조**하는 것으로 교차검증을 합니다.
         (그래서 이 수집기는 당기뿐 아니라 전기·전전기 값도 같이 보존합니다 — 공짜로 오는
          데이터이고, 우리 과거 데이터가 맞는지 검산할 수 있는 유일한 무료 수단입니다.)
+
+      ✅ **교차검증은 구현돼 있고, 옵트인입니다** (`--history-baseline` / `run_collection(
+         history_baseline_path=...)`). 경로를 주면 KIND 연간 배당 파일을 읽어
+         `build_kind_baseline_index()` 로 (종목코드, 사업연도) 색인을 만들고,
+         각 레코드의 전기(=사업연도-1)·전전기(=사업연도-2) 주당현금배당금·현금배당성향을
+         `check_cross_source()` 로 대조해 **불일치를 `cross_source_notes` 에 기록**합니다.
+         · 경로를 주지 않으면(기본값) `cross_source_notes` 는 항상 `[]` 입니다 — 기존 동작 그대로.
+         · ⚠️ `unit_mismatch_notes` 와 **완전히 같은 철학**입니다: **감지만 하고 값은 절대
+           고치지 않습니다**(§0-1). 두 출처가 다르다는 사실 자체를 데이터에 남겨 사람이
+           판단하게 합니다(액면분할·재작성 등으로 정당하게 다를 수 있습니다).
+         · 리포트에는 `records_with_cross_source_mismatch` /
+           `stock_codes_with_cross_source_mismatch` 로 집계됩니다.
 
 ================================================================================
 📌 API 규격 (2026-08-23 이 개발 세션에서 실제 호출로 확인)
@@ -457,6 +469,132 @@ def check_unit_token(metric, label):
             "(사람 확인 필요).")
 
 
+# ── 2개 출처 교차검증 (§0-3-3) ────────────────────────────────────────────────
+# DART 응답에는 당기(thstrm)뿐 아니라 전기(frmtrm)·전전기(lwfr)가 함께 실려 옵니다.
+# 우리는 그 값을 이미 `prev_*`/`prev2_*` 로 저장하고 있지만, 지금까지 **아무 데도 대조하지
+# 않았습니다**. 한편 프로젝트에는 KIND(한국거래소 공시채널) 출처의 독립적인 2023~2025
+# 연간 배당 집계(data/dividend_history_kr_2023_2025.json)가 이미 있습니다.
+# → 같은 종목·같은 사업연도에 대해 **DART 가 말하는 과거값**과 **KIND 가 말하는 과거값**을
+#   맞대보면, 돈 한 푼·요청 한 건 더 쓰지 않고 2개 출처 교차검증이 됩니다(§0-3-3).
+#
+# ⚠️ `unit_mismatch_notes` 와 **동일한 철학**입니다 — **감지만** 합니다.
+#    · 값을 자동 보정하지 않습니다. 어느 쪽이 '맞다'고 단정하지도 않습니다(§0-1).
+#    · 불일치는 정당한 사유(액면분할, 재무제표 재작성, 중간배당 반영 시점 차이, 우선주
+#      종류 차이 등)로도 생길 수 있습니다. 우리가 판정할 수 없으므로 **사실만 적습니다**.
+#    · 대조할 짝이 없으면(기준선에 그 종목·연도가 없거나 DART 값이 None) **불일치가 아닙니다**
+#      — 조용히 '문제 없음'으로도, '문제 있음'으로도 만들지 않고 아무 note 도 남기지 않습니다.
+
+# 현금배당성향(%)은 계산된 백분율이라 출처마다 반올림 자리가 다릅니다.
+# 이 값보다 크게 벌어질 때만 '다르다'고 말합니다(반올림 차이를 불일치로 부풀리지 않기).
+CROSS_SOURCE_PAYOUT_TOLERANCE_PCT = 0.05
+
+
+def build_kind_baseline_index(history_payload):
+    """
+    KIND 연간 배당 파일(`{"records": [...]}`) → `{(종목코드, 사업연도int): {...}}` 색인.
+    (순수 함수 — 파일 입출력 없음. 호출측이 json.load 한 dict 를 넘깁니다.)
+
+    반환 값의 각 항목: {"dps_krw": …, "payout_ratio_pct": …}  (없으면 None)
+
+    · `stock_code` 나 `fiscal_year` 가 없거나 정수로 볼 수 없는 행은 **건너뜁니다**
+      (교차검증용 색인이라, 못 쓰는 행 하나 때문에 전체가 죽으면 안 됩니다).
+    · 같은 (종목, 연도) 가 두 번 나오면 **먼저 나온 것을 유지**합니다. 뒤엣것으로 덮으면
+      어느 값이 쓰였는지 설명할 수 없게 됩니다(§0-1: 임의 선택 금지 — 여기서는 순서라는
+      명시적 규칙을 둡니다).
+    · `records` 외의 최상위 키(source, record_count …)는 보지 않습니다.
+    """
+    index = {}
+    if not isinstance(history_payload, dict):
+        return index
+    for row in history_payload.get("records") or []:
+        if not isinstance(row, dict):
+            continue
+        code = row.get("stock_code")
+        year = row.get("fiscal_year")
+        if code in (None, "") or year in (None, ""):
+            continue
+        try:
+            year_int = int(year)
+        except (TypeError, ValueError):
+            continue
+        key = (str(code).strip(), year_int)
+        if key in index:
+            continue                       # 첫 값 유지
+        index[key] = {"dps_krw": row.get("dps_krw"),
+                      "payout_ratio_pct": row.get("payout_ratio_pct")}
+    return index
+
+
+def _cross_source_number(value):
+    """교차검증용 숫자 변환. 숫자로 볼 수 없으면 None(=대조 대상 아님)."""
+    if value is None or isinstance(value, bool):
+        return None
+    if isinstance(value, (int, float)):
+        f = float(value)
+        return None if f != f else f
+    return to_number(value)
+
+
+def check_cross_source(stock_code, bsns_year,
+                       prev_dps_cash_common, prev2_dps_cash_common,
+                       prev_payout_ratio, prev2_payout_ratio,
+                       baseline_index):
+    """
+    DART 의 전기·전전기 값 ↔ KIND 기준선(2023~2025)을 대조합니다. (순수 함수)
+
+    반환: 사람이 읽는 불일치 사유 문자열 리스트. **빈 리스트 = 불일치 없음 또는 대조 불가**.
+          (둘을 구분하지 않는 이유: 어느 쪽이든 "우리가 잡아낸 문제는 없다" 이고, 대조 불가를
+           불일치로 세면 무배당·미상장 종목이 전부 경고로 뜹니다.)
+
+    · 전기  = bsns_year - 1  / 전전기 = bsns_year - 2
+    · DART 값과 기준선 값이 **둘 다 있을 때만** 비교합니다. 한쪽이라도 없으면 note 없음.
+    · 주당현금배당금(원)은 정수 원 단위라 1원 이상 벌어지면 불일치로 봅니다.
+    · 현금배당성향(%)은 계산된 백분율이라 반올림 차이를 감안해
+      `CROSS_SOURCE_PAYOUT_TOLERANCE_PCT`(0.05%p) 를 넘을 때만 불일치로 봅니다.
+    · 값을 고치지 않습니다. 어느 출처가 맞다고 단정하지도 않습니다(§0-1).
+    """
+    notes = []
+    if not isinstance(baseline_index, dict) or not baseline_index:
+        return notes
+    try:
+        year = int(bsns_year)
+    except (TypeError, ValueError):
+        return notes
+    code = str(stock_code).strip() if stock_code not in (None, "") else None
+    if not code:
+        return notes
+
+    checks = (
+        ("전기", year - 1, prev_dps_cash_common, prev_payout_ratio),
+        ("전전기", year - 2, prev2_dps_cash_common, prev2_payout_ratio),
+    )
+    for period_label, target_year, dart_dps, dart_payout in checks:
+        baseline = baseline_index.get((code, target_year))
+        if not isinstance(baseline, dict):
+            continue                        # 기준선에 그 종목·연도가 없음 → 대조 불가
+
+        base_dps = _cross_source_number(baseline.get("dps_krw"))
+        dps = _cross_source_number(dart_dps)
+        if base_dps is not None and dps is not None and abs(dps - base_dps) >= 1:
+            notes.append(
+                f"{code}: DART 응답의 {target_year}년({period_label}) 주당현금배당금(보통주) "
+                f"{dps:,.0f}원이 KIND 2023~2025 기준선의 {base_dps:,.0f}원과 다릅니다"
+                f"(차이 {dps - base_dps:+,.0f}원). 두 출처가 어긋난 사실만 기록하며 값은 "
+                "고치지 않았습니다 — 액면분할·재작성 등 정당한 사유일 수 있어 사람 확인이 필요합니다.")
+
+        base_payout = _cross_source_number(baseline.get("payout_ratio_pct"))
+        payout = _cross_source_number(dart_payout)
+        if (base_payout is not None and payout is not None
+                and abs(payout - base_payout) > CROSS_SOURCE_PAYOUT_TOLERANCE_PCT):
+            notes.append(
+                f"{code}: DART 응답의 {target_year}년({period_label}) 현금배당성향 "
+                f"{payout:.3f}%가 KIND 2023~2025 기준선의 {base_payout:.3f}%와 다릅니다"
+                f"(차이 {payout - base_payout:+.3f}%p, 허용 {CROSS_SOURCE_PAYOUT_TOLERANCE_PCT}%p). "
+                "두 출처가 어긋난 사실만 기록하며 값은 고치지 않았습니다 — 연결/별도 기준 차이나 "
+                "재작성일 수 있어 사람 확인이 필요합니다.")
+    return notes
+
+
 # =============================================================================
 # 5. 응답 판정 · 보고서 선택 — 순수 함수 (오프라인 테스트 대상)
 # =============================================================================
@@ -730,16 +868,31 @@ def market_from_corp_cls(corp_cls):
 # =============================================================================
 def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
                           parsed_now=None, parsed_prev=None, parsed_prev2=None,
-                          collected_at=None, status="OK", status_reason=""):
+                          collected_at=None, status="OK", status_reason="",
+                          kind_baseline_index=None):
     """
     최종 출력 스키마 한 건을 만듭니다. (순수 함수 — 네트워크 결과를 넣기만 하면 됩니다)
 
     ⚠️ 실패 레코드도 **같은 스키마로** 만듭니다. 성공한 종목만 파일에 넣으면 "2,700개 중
        2,431개만 있는 이유"를 나중에 아무도 설명할 수 없습니다(§0-1).
+
+    kind_baseline_index : `build_kind_baseline_index()` 결과(§0-3-3 교차검증용, 선택).
+        None(기본)이면 교차검증을 하지 않고 `cross_source_notes` 는 **항상 `[]`** 입니다
+        — 이 인자를 넘기지 않는 기존 호출부의 동작은 한 글자도 달라지지 않습니다.
     """
     parsed_now = parsed_now or {}
     meta = parsed_now.get("meta") or {}
     rcept_no = meta.get("rcept_no")
+
+    prev_dps = (parsed_prev or {}).get("dps_cash_common")
+    prev_payout = (parsed_prev or {}).get("payout_ratio")
+    prev2_dps = (parsed_prev2 or {}).get("dps_cash_common")
+    prev2_payout = (parsed_prev2 or {}).get("payout_ratio")
+    cross_source_notes = []
+    if kind_baseline_index:
+        cross_source_notes = check_cross_source(
+            stock_code, bsns_year, prev_dps, prev2_dps, prev_payout, prev2_payout,
+            kind_baseline_index)
 
     record = {
         # ── 식별 ──────────────────────────────────────────────────────────────
@@ -782,12 +935,17 @@ def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
         # ── 전기·전전기 (교차검증용 — §0-3-3) ────────────────────────────────
         # 같은 응답에 공짜로 실려 오는 값입니다. 이미 보유한 2023~2025 KIND 데이터와
         # 대조해 우리 과거 데이터가 맞는지 검산하는 데 씁니다. 화면에 쓰려면 별도 판단 필요.
-        "prev_dps_cash_common": (parsed_prev or {}).get("dps_cash_common"),
+        "prev_dps_cash_common": prev_dps,
         "prev_cash_yield_common": (parsed_prev or {}).get("cash_yield_common"),
-        "prev_payout_ratio": (parsed_prev or {}).get("payout_ratio"),
-        "prev2_dps_cash_common": (parsed_prev2 or {}).get("dps_cash_common"),
+        "prev_payout_ratio": prev_payout,
+        "prev2_dps_cash_common": prev2_dps,
         "prev2_cash_yield_common": (parsed_prev2 or {}).get("cash_yield_common"),
-        "prev2_payout_ratio": (parsed_prev2 or {}).get("payout_ratio"),
+        "prev2_payout_ratio": prev2_payout,
+        # 위 전기·전전기 값을 독립 출처(KIND 2023~2025)와 대조한 결과(§0-3-3).
+        # 비어 있으면 "불일치 없음 또는 대조할 짝이 없음". **값은 절대 고치지 않습니다**
+        # — `unit_mismatch_notes` 와 같은 감지 전용 필드입니다(§0-1).
+        # `kind_baseline_index` 를 넘기지 않으면(기본) 항상 [] 입니다.
+        "cross_source_notes": cross_source_notes,
 
         # ── 수집 상태 · 품질 메모 ─────────────────────────────────────────────
         "status": status,                     # "OK" / "NO_DATA" / "ERROR" / "UNMAPPED"
@@ -822,6 +980,10 @@ def summarize_results(records, unmapped, extra=None):
     by_status = {}
     unknown_labels = []
     conflict_records = []
+    unit_mismatch_codes = []
+    cross_source_codes = []
+    unit_mismatch_count = 0
+    cross_source_count = 0
     for rec in records or []:
         st = rec.get("status") or "UNKNOWN"
         by_status[st] = by_status.get(st, 0) + 1
@@ -832,6 +994,18 @@ def summarize_results(records, unmapped, extra=None):
             conflict_records.append({"stock_code": rec.get("stock_code"),
                                      "corp_name": rec.get("corp_name"),
                                      "notes": rec.get("parse_notes")})
+        # 단위 검증(§2-4)·교차검증(§0-3-3) 결과는 레코드마다 흩어져 있어, 집계해 두지 않으면
+        # 전 종목 파일을 일일이 뒤져야만 알 수 있습니다. 건수와 종목코드를 리포트에 올립니다.
+        if rec.get("unit_mismatch_notes"):
+            unit_mismatch_count += 1
+            code = rec.get("stock_code")
+            if code not in unit_mismatch_codes:
+                unit_mismatch_codes.append(code)
+        if rec.get("cross_source_notes"):
+            cross_source_count += 1
+            code = rec.get("stock_code")
+            if code not in cross_source_codes:
+                cross_source_codes.append(code)
 
     ok_records = [r for r in records or [] if r.get("status") == "OK"]
     by_report = {}
@@ -852,6 +1026,15 @@ def summarize_results(records, unmapped, extra=None):
         "unmapped_detail": unmapped or [],
         "unknown_se_labels": unknown_labels,
         "records_with_parse_notes": conflict_records,
+        # ── 감지 전용 지표 두 가지 (값을 고친 적은 없습니다) ────────────────────
+        # ① 단위 검증(§2-4): 라벨의 단위 토큰이 기대와 달랐던 레코드 수
+        "records_with_unit_mismatch": unit_mismatch_count,
+        "stock_codes_with_unit_mismatch": unit_mismatch_codes,
+        # ② 2개 출처 교차검증(§0-3-3): DART 전기·전전기 값이 KIND 기준선과 달랐던 레코드 수.
+        #    ⚠️ `--history-baseline` 을 주지 않은 실행에서는 교차검증 자체를 하지 않았으므로
+        #       이 값이 0 이라고 해서 "두 출처가 일치했다"는 뜻이 아닙니다.
+        "records_with_cross_source_mismatch": cross_source_count,
+        "stock_codes_with_cross_source_mismatch": cross_source_codes,
         # ⚠️ 반드시 읽어야 하는 한계 — 리포트에 늘 붙여 다닙니다.
         "known_limitations": [
             "DART 는 '존재하지 않는 corp_code' 와 '배당 데이터 없음' 을 똑같이 status 013 으로 "
@@ -1011,11 +1194,43 @@ def _extract_codes(data, path):
     return codes
 
 
-def load_checkpoint(path, run_key):
+DEFAULT_CHECKPOINT_MAX_AGE_DAYS = 14
+
+
+def build_run_key(bsns_year, universe_size, priority):
     """
-    같은 run_key(사업연도+유니버스 크기+실행일)일 때만 이어합니다.
+    체크포인트 재개 조건을 나타내는 키를 만듭니다. (순수 함수)
+
+    구성: 사업연도 | 유니버스 크기 | 보고서 우선순위
+
+    ⚠️ **실행일(날짜)은 일부러 넣지 않습니다.** 예전에는 `_now_kst()` 날짜가 키에 들어
+       있었는데, 이 수집은 5시간까지 걸려서 점심시간·야간 중단·GitHub Actions 타임아웃 등으로
+       **다음 날 이어 돌리는 일이 아주 흔합니다**. 그때마다 키가 달라져 체크포인트가 통째로
+       버려지고 수천 건을 DART 에 다시 요청했습니다 — §0-3-2(상대 서버에 무리를 주지 않는다)
+       정면 위반입니다. 날짜를 뺀 대신, "너무 오래된 체크포인트"는 `load_checkpoint()` 의
+       `max_age_days` 신선도 검사로 거릅니다.
+    """
+    return f"{bsns_year}|{universe_size}|{','.join(priority)}"
+
+
+def load_checkpoint(path, run_key, max_age_days=DEFAULT_CHECKPOINT_MAX_AGE_DAYS):
+    """
+    같은 run_key(**사업연도 + 유니버스 크기 + 보고서 우선순위**)이고, 저장 시각이
+    `max_age_days` 이내로 충분히 최근일 때만 이어합니다.
+
     다른 조건의 체크포인트는 절대 재사용하지 않습니다(collector_us_stocks.py 와 같은 원칙 —
     서로 다른 기준의 값이 한 파일에 섞이면 그 자체가 §0-1 위반).
+
+    ⚠️ run_key 에는 **실행 날짜가 들어가지 않습니다**(`build_run_key()` 주석 참고).
+       날짜를 빼야 다음 날 이어하기가 되지만, 그것만으로는 "몇 달 전에 잊고 놔둔 체크포인트"가
+       조건만 우연히 같으면 되살아날 수 있습니다. 그래서 `save_checkpoint()` 가 적어 두는
+       `saved_at_kst` 로 신선도를 함께 봅니다.
+
+    · `saved_at_kst` 가 `max_age_days` 보다 오래됨  → 버리고 새로 시작(사유를 출력).
+    · `saved_at_kst` 가 없거나 해석 불가            → **나이를 확인할 수 없으므로** 버립니다.
+      (§0-1: 확인할 수 없는 것을 '괜찮다'고 넘겨짚지 않습니다. 이 필드가 없던 시절의 낡은
+       파일일 수 있고, 그런 파일이야말로 오래됐을 가능성이 큽니다.)
+    · `max_age_days=None` 이면 신선도 검사를 하지 않습니다(검사 없이 이어하겠다는 명시적 선택).
     """
     empty = {"run_key": run_key, "records": [], "done_codes": [], "request_count": 0}
     if not os.path.exists(path):
@@ -1026,6 +1241,21 @@ def load_checkpoint(path, run_key):
         if data.get("run_key") != run_key:
             print(f"  ℹ️ 체크포인트가 다른 실행조건({data.get('run_key')})이라 새로 시작합니다.")
             return empty
+
+        if max_age_days is not None:
+            saved_at = data.get("saved_at_kst")
+            age_days = _checkpoint_age_days(saved_at)
+            if age_days is None:
+                print("  ℹ️ 체크포인트의 저장 시각(saved_at_kst)이 없거나 해석할 수 없어 "
+                      f"({saved_at!r}) 얼마나 오래된 것인지 확인할 수 없습니다 — "
+                      "실행조건은 같지만 안전하게 버리고 새로 시작합니다.")
+                return empty
+            if age_days > max_age_days:
+                print(f"  ℹ️ 체크포인트가 {age_days:.1f}일 전({saved_at})에 저장돼 기준"
+                      f"({max_age_days}일)보다 오래됐습니다 — 실행조건은 같지만 다른 실행의 "
+                      "잔재일 수 있어 이어하지 않고 새로 시작합니다.")
+                return empty
+
         return {"run_key": run_key,
                 "records": data.get("records") or [],
                 "done_codes": data.get("done_codes") or [],
@@ -1033,6 +1263,26 @@ def load_checkpoint(path, run_key):
     except Exception as e:
         print(f"  ⚠️ 체크포인트 로드 실패(새로 시작): {type(e).__name__}: {e}")
         return empty
+
+
+def _checkpoint_age_days(saved_at):
+    """
+    `saved_at_kst`(ISO 문자열) → 지금까지 며칠 지났는가(float). 해석 불가면 None.
+
+    (corp_code_mapper 의 캐시 신선도 검사와 같은 방식입니다. tzinfo 가 없는 옛 형식은
+     KST 로 간주합니다 — 이 프로젝트의 시각은 전부 KST 로 적히므로 지어내는 게 아닙니다.)
+    """
+    if not saved_at or not isinstance(saved_at, str):
+        return None
+    try:
+        from datetime import datetime as _dt
+        from corp_code_mapper import KST as _KST
+        dt = _dt.fromisoformat(saved_at)
+        if dt.tzinfo is None:
+            dt = dt.replace(tzinfo=_KST)
+        return (_now_kst() - dt).total_seconds() / 86400.0
+    except Exception:
+        return None
 
 
 def save_checkpoint(path, run_key, records, done_codes, request_count):
@@ -1074,7 +1324,7 @@ def append_raw(raw_path, entry):
 # =============================================================================
 def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
                 priority=REPRT_CODE_PRIORITY, raw_path=None, sleep_fn=polite_sleep,
-                request_counter=None):
+                request_counter=None, kind_baseline_index=None):
     """
     한 종목의 배당 레코드를 만듭니다.
 
@@ -1084,6 +1334,9 @@ def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
     반환: (record, probe_log)
       probe_log: [{reprt_code, status, usable, why}, …] — 어떤 보고서를 왜 건너뛰었는지 기록
     DartFatalError 는 잡지 않고 위로 올립니다(실행 전체 중단).
+
+    kind_baseline_index : §0-3-3 교차검증용 색인(선택). None(기본)이면 교차검증을 하지 않고
+        `cross_source_notes` 는 `[]` 로 남습니다 — 기존 호출부 동작 그대로입니다.
     """
     probe_log = []
     corp_code = (corp_info or {}).get("corp_code")
@@ -1133,7 +1386,8 @@ def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
             stock_code, corp_info, bsns_year, reprt_code, payload,
             parsed_now=parsed_now, parsed_prev=parsed_prev, parsed_prev2=parsed_prev2,
             status="OK",
-            status_reason=f"{REPRT_CODE_NAMES.get(reprt_code, reprt_code)} 기준 누적치")
+            status_reason=f"{REPRT_CODE_NAMES.get(reprt_code, reprt_code)} 기준 누적치",
+            kind_baseline_index=kind_baseline_index)
         record["probe_log"] = probe_log
         return record, probe_log
 
@@ -1157,13 +1411,22 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
                    priority=REPRT_CODE_PRIORITY, skip_not_yet_due=False,
                    max_requests=DEFAULT_MAX_REQUESTS, max_runtime_sec=DEFAULT_MAX_RUNTIME_SEC,
                    corpcode_max_age_days=7, force_corpcode_refresh=False,
-                   limit=None, log=print):
+                   limit=None, log=print, history_baseline_path=None,
+                   checkpoint_max_age_days=DEFAULT_CHECKPOINT_MAX_AGE_DAYS):
     """
     전 종목 배당 수집. 산출물:
       {out_dir}/dividend_kr_{year}_latest.json   가공본 + 리포트
       {out_dir}/dividend_kr_{year}_raw.jsonl     원본 응답 (§0-3-3 분리 보관)
       {cache_dir}/dart_corpcode_cache.json       corp_code 매핑 캐시
       {cache_dir}/dividend_kr_{year}_checkpoint.json  이어하기용
+
+    history_baseline_path : KIND 연간 배당 파일(2023~2025) 경로(선택, §0-3-3 교차검증).
+        주면 DART 의 전기·전전기 값을 그 파일과 대조해 불일치를 `cross_source_notes` 에
+        남깁니다. 주지 않으면(기본) 교차검증을 하지 않고 기존과 완전히 동일하게 동작합니다.
+        ⚠️ 경로를 줬는데 읽지 못하면 **조용히 넘어가지 않고 예외를 던집니다** — 교차검증을
+           해달라고 명시한 사람에게 "검증 안 된 결과"를 검증된 것처럼 돌려주면 §0-1 위반입니다.
+
+    checkpoint_max_age_days : 체크포인트 신선도 기준(기본 14일). `load_checkpoint()` 참고.
 
     반환: (records, summary)
     """
@@ -1193,6 +1456,28 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             "(⚠️ 12월 결산법인 전제 — 3월/6월 결산법인을 놓칠 수 있습니다)")
         effective_priority = narrowed or effective_priority
 
+    # ── ⓪ 교차검증 기준선(§0-3-3, 선택) ──────────────────────────────────────
+    kind_baseline_index = None
+    if history_baseline_path:
+        try:
+            with open(history_baseline_path, "r", encoding="utf-8") as f:
+                history_payload = json.load(f)
+        except Exception as e:
+            # 조용히 index=None 으로 계속 가면 "교차검증했는데 불일치 0건" 처럼 보입니다(§0-1).
+            raise DartFatalError(
+                f"교차검증 기준선 파일을 읽지 못했습니다: {history_baseline_path} "
+                f"({type(e).__name__}: {e}). --history-baseline 을 지정한 실행은 교차검증 없이 "
+                "진행하지 않습니다 — 경로를 고치거나 옵션을 빼고 다시 실행하세요.")
+        kind_baseline_index = build_kind_baseline_index(history_payload)
+        if not kind_baseline_index:
+            raise DartFatalError(
+                f"교차검증 기준선 파일에서 (종목코드, 사업연도) 항목을 하나도 만들지 "
+                f"못했습니다: {history_baseline_path}. 파일 형식이 "
+                '{"records": [{"stock_code": …, "fiscal_year": …}, …]} 인지 확인하세요.')
+        log(f"  ℹ️ §0-3-3 교차검증 기준선 {len(kind_baseline_index):,}건 로드 "
+            f"({history_baseline_path}) — DART 의 전기·전전기 값과 대조해 불일치만 "
+            "`cross_source_notes` 로 기록합니다(값은 고치지 않습니다).")
+
     # ── ① corp_code 매핑 ────────────────────────────────────────────────────
     log("① DART 고유번호(corp_code) 매핑표 준비")
     cache_path = os.path.join(cache_dir, "dart_corpcode_cache.json")
@@ -1206,10 +1491,13 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         f"{len(unmapped):,}종목 실패(목록은 리포트에 그대로 남깁니다)")
 
     # ── ② 수집 루프 ─────────────────────────────────────────────────────────
-    run_key = f"{bsns_year}|{len(universe)}|{_now_kst().strftime('%Y-%m-%d')}|{','.join(effective_priority)}"
+    # ⚠️ run_key 에 실행 날짜를 넣지 않습니다 — 넣으면 다음 날 이어할 때 체크포인트가
+    #    통째로 버려져 수천 건을 다시 요청하게 됩니다(§0-3-2). 대신 신선도는
+    #    checkpoint_max_age_days 로 봅니다. 자세한 사정은 build_run_key() 주석 참고.
+    run_key = build_run_key(bsns_year, len(universe), effective_priority)
     ckpt_path = os.path.join(cache_dir, f"dividend_kr_{bsns_year}_checkpoint.json")
     raw_path = os.path.join(out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
-    ckpt = load_checkpoint(ckpt_path, run_key)
+    ckpt = load_checkpoint(ckpt_path, run_key, max_age_days=checkpoint_max_age_days)
     records = list(ckpt["records"])
     done = set(ckpt["done_codes"])
     counter = {"count": ckpt["request_count"]}
@@ -1223,7 +1511,8 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             continue
         records.append(build_dividend_record(
             code, None, bsns_year, None, None,
-            status="UNMAPPED", status_reason=item.get("reason", "corp_code 매핑 실패")))
+            status="UNMAPPED", status_reason=item.get("reason", "corp_code 매핑 실패"),
+            kind_baseline_index=kind_baseline_index))
         done.add(code)
 
     targets = [c for c in (normalize_stock_code(x) for x in universe)
@@ -1248,7 +1537,8 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             record, _probe = collect_one(
                 code, corp_info, bsns_year, key, session=session,
                 priority=effective_priority, raw_path=raw_path,
-                sleep_fn=polite_sleep, request_counter=counter)
+                sleep_fn=polite_sleep, request_counter=counter,
+                kind_baseline_index=kind_baseline_index)
         except DartFatalError as e:
             # 실행 전체 중단. 지금까지의 결과는 반드시 저장합니다.
             save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"])
@@ -1286,6 +1576,13 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         "corpcode_source": corp_info_meta.get("source"),
         "corpcode_stats": corp_info_meta.get("stats"),
         "limit_applied": int(limit) if limit else None,
+        # 교차검증을 실제로 했는지 여부를 리포트에 남깁니다 — 안 했는데 불일치 0건인 것과
+        # 했는데 0건인 것은 전혀 다른 사실입니다(§0-1).
+        "cross_source_baseline_path": history_baseline_path,
+        "cross_source_baseline_entries": (len(kind_baseline_index)
+                                          if kind_baseline_index else 0),
+        "cross_source_checked": bool(kind_baseline_index),
+        "checkpoint_max_age_days": checkpoint_max_age_days,
         "verification_status": (
             "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. "
             "첫 GitHub Actions 실행 로그로 반드시 확인하세요."),
@@ -1314,14 +1611,295 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
     log(f"   raw   : {raw_path}")
     if summary["unknown_se_labels"]:
         log(f"   ⚠️ 처음 보는 se 라벨: {summary['unknown_se_labels']}")
+    if summary["records_with_unit_mismatch"]:
+        log(f"   ⚠️ 단위 검증 미통과 레코드: {summary['records_with_unit_mismatch']:,}건 "
+            "(값은 원문 그대로 두었습니다 — 각 레코드의 unit_mismatch_notes 참고)")
+    if kind_baseline_index:
+        log(f"   §0-3-3 교차검증: 기준선 {len(kind_baseline_index):,}건과 대조 → 불일치 "
+            f"{summary['records_with_cross_source_mismatch']:,}건 "
+            "(값은 고치지 않았습니다 — 각 레코드의 cross_source_notes 참고)")
+    else:
+        log("   §0-3-3 교차검증: 실행하지 않았습니다(--history-baseline 미지정) — "
+            "cross_source_notes 가 비어 있는 것은 '일치'가 아니라 '대조 안 함'입니다.")
     return records, summary
+
+
+# =============================================================================
+# 12. 델타 실행 결과 병합
+#
+# 배경: 2026 전수 수집은 "2023~2025 중 한 번이라도 배당한 2,734종목" 유니버스로 돌았습니다.
+#       그 뒤에 생긴 신규 상장·신규 배당 종목을 나중에 따로 돌리려면(= 델타 수집),
+#       같은 out_dir 로 `run_collection()` 을 다시 돌릴 수 없습니다 — 산출물 파일을
+#       **통째로 덮어써서** 기존 2,734종목이 조용히 사라지기 때문입니다(§0-1 정면 위반).
+#       그래서 델타는 **별도 out_dir** 로 돌리고, 그 결과를 여기서 합칩니다.
+#
+# 이 함수의 원칙:
+#   · 겹치면 합치지 않습니다. 자동으로 한쪽을 고르거나 중복을 눈감지 않고 **크게 실패**합니다.
+#   · 리포트를 손으로 더하지 않습니다. 병합 레코드를 `summarize_results()` 에 다시 먹입니다
+#     (이 파일에서 리포트 스키마의 유일한 출처는 그 함수 하나입니다).
+#   · 원래 두 실행의 리포트를 `merged_from` 에 **원문 그대로** 남깁니다. 두 실행을 하나인 척
+#     매끄럽게 뭉개면, 어느 쪽이 중단됐는지·언제 돌았는지가 사라집니다.
+#   · 실패하면 **아무것도 쓰지 않습니다**. 검증을 전부 끝낸 뒤에야 첫 바이트를 씁니다.
+# =============================================================================
+def merge_log_path(out_dir, bsns_year):
+    """병합 이력 파일 경로. (delta 를 두 번 합치는 사고를 막는 감사 로그)"""
+    return os.path.join(out_dir, f"dividend_kr_{bsns_year}_merge_log.json")
+
+
+def _read_run_output(out_dir, bsns_year, role):
+    """
+    한 실행의 산출물({'summary':..., 'records':...})을 읽습니다.
+
+    role : 오류 메시지에 쓸 사람말 이름("기존 전체 결과" / "델타 실행 결과").
+    반환 : (path, summary, records)
+    """
+    path = os.path.join(out_dir, f"dividend_kr_{bsns_year}_latest.json")
+    if not os.path.exists(path):
+        raise FileNotFoundError(
+            f"{role} 파일이 없습니다: {path}\n"
+            f"  → 병합은 이미 존재하는 두 실행 결과를 합치는 작업입니다. "
+            f"{'먼저 전수 수집(run_collection)을 끝내고 다시 시도하세요.' if role.startswith('기존') else '델타 수집을 먼저 끝내고 그 out_dir 을 지정하세요.'}")
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            payload = json.load(f)
+    except Exception as e:
+        raise ValueError(f"{role} 파일을 읽지 못했습니다: {path} ({type(e).__name__}: {e})")
+    if not isinstance(payload, dict) or "records" not in payload or "summary" not in payload:
+        raise ValueError(
+            f"{role} 파일의 형태가 예상과 다릅니다: {path} "
+            "(기대: {'summary': {...}, 'records': [...]})")
+    summary = payload.get("summary") or {}
+    records = list(payload.get("records") or [])
+    return path, summary, records
+
+
+def _stock_code_set(records):
+    """레코드 목록에서 종목코드 집합. (코드가 비어 있는 레코드는 겹침 판정 대상이 아닙니다)"""
+    return {r.get("stock_code") for r in records if r.get("stock_code")}
+
+
+def _format_code_list(codes, cap=20):
+    """오류 메시지용. 너무 길면 앞 cap 개만 보여주고 나머지는 건수로 말합니다."""
+    codes = sorted(codes)
+    if len(codes) <= cap:
+        return ", ".join(codes)
+    return ", ".join(codes[:cap]) + f" ...외 {len(codes) - cap}건"
+
+
+def _read_merge_log(path):
+    """병합 이력 읽기. 없거나 깨졌으면 빈 이력으로 시작합니다(이력이 없다고 병합을 막진 않습니다)."""
+    if not os.path.exists(path):
+        return {"merges": []}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"  ⚠️ 병합 이력 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
+              f"이력 없이 진행합니다: {path}")
+        return {"merges": []}
+    if not isinstance(data, dict) or not isinstance(data.get("merges"), list):
+        print(f"  ⚠️ 병합 이력 파일의 형태가 예상과 다릅니다 — 이력 없이 진행합니다: {path}")
+        return {"merges": []}
+    return data
+
+
+def merge_delta_output(main_out_dir, delta_out_dir, bsns_year, force=False, log=print):
+    """
+    델타 실행(신규 종목만 돌린 별도 out_dir) 결과를 기존 전체 결과에 합칩니다.
+
+    반환: (merged_records, merged_summary)
+    """
+    # ── ① 두 실행 결과 읽기 (읽기만 — 아직 아무것도 쓰지 않습니다) ───────────────
+    main_path, main_summary, main_records = _read_run_output(
+        main_out_dir, bsns_year, "기존 전체 결과")
+    delta_path, delta_summary, delta_records = _read_run_output(
+        delta_out_dir, bsns_year, "델타 실행 결과")
+
+    main_codes = _stock_code_set(main_records)
+    delta_codes = _stock_code_set(delta_records)
+
+    log("─" * 78)
+    log(f"① 병합 대상을 읽었습니다")
+    log(f"   기존: {main_path} — {len(main_records):,}레코드 / {len(main_codes):,}종목")
+    log(f"   델타: {delta_path} — {len(delta_records):,}레코드 / {len(delta_codes):,}종목")
+
+    # ── ② 이미 합친 델타인가? (감사 로그 대조) ────────────────────────────────
+    # 경로 문자열이 아니라 **종목코드 집합**으로 봅니다 — 운영 편의상 같은 임시 디렉터리를
+    # 델타마다 재사용하는 경우가 있어, 경로만 보면 정당한 새 델타까지 막아 버립니다.
+    log_path = merge_log_path(main_out_dir, bsns_year)
+    merge_log = _read_merge_log(log_path)
+    already = None
+    for entry in merge_log["merges"]:
+        if not isinstance(entry, dict):
+            continue
+        if set(entry.get("delta_stock_codes") or []) == delta_codes and delta_codes:
+            already = entry
+            break
+    if already is not None:
+        if not force:
+            raise ValueError(
+                "이미 병합된 델타입니다 — 같은 종목 구성의 델타가 "
+                f"{already.get('merged_at_kst')} 에 "
+                f"'{already.get('delta_out_dir')}' 에서 병합된 기록이 있습니다.\n"
+                f"  이력 파일: {log_path}\n"
+                f"  → 정말 다시 합쳐야 한다면 force=True (CLI: --force-merge) 를 주세요. "
+                "그 경우에도 레코드가 실제로 겹치면 병합은 여전히 거부됩니다.")
+        log(f"  ⚠️⚠️ 강제 재병합(force=True): 같은 종목 구성의 델타가 이미 "
+            f"{already.get('merged_at_kst')} 에 병합된 기록이 있는데도 진행합니다. "
+            "중복 레코드가 생길 수 있는 작업이며, 이 사실은 병합 이력에 그대로 남습니다.")
+
+    # ── ③ 겹침 검사 — 겹치면 이건 '델타'가 아닙니다 (§0-1: 조용히 넘어가지 않기) ──
+    # force 로도 이 검사는 통과할 수 없습니다. 겹침은 "어느 쪽이 맞는지" 우리가 판정할 수
+    # 없는 문제라, 자동 해소하면 반드시 한쪽 값을 조용히 버리게 됩니다.
+    overlap = main_codes & delta_codes
+    if overlap:
+        raise ValueError(
+            f"델타와 기존 결과의 종목이 {len(overlap):,}건 겹칩니다 — 병합하지 않았습니다.\n"
+            f"  겹친 종목코드: {_format_code_list(overlap)}\n"
+            "  → 델타 유니버스에 이미 수집된 종목이 섞여 있거나, 이 델타를 이미 합친 "
+            "뒤일 수 있습니다. 어느 쪽 값이 맞는지는 자동으로 판정할 수 없으므로 "
+            "중복 저장도, 한쪽 임의 폐기도 하지 않습니다. 델타 유니버스를 "
+            "'기존에 없는 종목'만 남기고 다시 만들어 수집하세요.")
+
+    # ── ④ 델타 raw.jsonl 을 미리 다 읽어 둡니다 ───────────────────────────────
+    # (쓰기는 검증이 전부 끝난 뒤에 몰아서 합니다 — 중간에 실패해 반쪽만 쓰이는 일이 없도록)
+    delta_raw_path = os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
+    main_raw_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
+    delta_raw_lines = []
+    delta_raw_missing = not os.path.exists(delta_raw_path)
+    if delta_raw_missing:
+        # 실패가 아닙니다: 델타 종목이 전부 UNMAPPED 였다면 요청 자체가 0건이라 raw 가
+        # 안 생깁니다. 다만 '없었다'는 사실은 조용히 넘기지 않고 로그에 남깁니다.
+        log(f"  ⚠️ 델타 raw 파일이 없습니다: {delta_raw_path} — "
+            "원본 응답 없이 가공본만 병합합니다(요청이 0건이었다면 정상입니다).")
+    else:
+        with open(delta_raw_path, "r", encoding="utf-8") as f:
+            for lineno, line in enumerate(f, 1):
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    json.loads(line)        # 형태 확인만 — 원문 줄을 그대로 이어붙입니다
+                except Exception as e:
+                    raise ValueError(
+                        f"델타 raw 파일 {lineno}번째 줄이 JSON 이 아닙니다: {delta_raw_path} "
+                        f"({type(e).__name__}: {e}). 원본 보관 파일이 깨진 채로 이어붙이지 "
+                        "않습니다 — 파일을 확인하고 다시 시도하세요.")
+                delta_raw_lines.append(line)
+
+    # ── ⑤ 병합 ────────────────────────────────────────────────────────────────
+    merged_records = list(main_records) + list(delta_records)     # 순서: 기존 → 델타
+    merged_unmapped = (list(main_summary.get("unmapped_detail") or [])
+                       + list(delta_summary.get("unmapped_detail") or []))
+
+    main_completed = bool(main_summary.get("completed"))
+    delta_completed = bool(delta_summary.get("completed"))
+    both_completed = main_completed and delta_completed
+    if both_completed:
+        stopped_reason = None
+    else:
+        parts = []
+        if not main_completed:
+            parts.append(f"기존 실행 미완료({main_summary.get('stopped_reason') or '사유 미기록'})")
+        if not delta_completed:
+            parts.append(f"델타 실행 미완료({delta_summary.get('stopped_reason') or '사유 미기록'})")
+        stopped_reason = " / ".join(parts)
+
+    # corp_code 캐시 상태는 **나중에 돈 쪽**(델타)이 최신입니다. 없으면 기존 것을 씁니다.
+    corpcode_source = delta_summary.get("corpcode_source", main_summary.get("corpcode_source"))
+    corpcode_stats = delta_summary.get("corpcode_stats", main_summary.get("corpcode_stats"))
+
+    def _num(a, b):
+        """두 리포트의 숫자를 더합니다. 한쪽이라도 숫자가 아니면 더할 수 없다고 말합니다(None)."""
+        if isinstance(a, bool) or isinstance(b, bool):
+            return None
+        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+            return a + b
+        return None
+
+    # ⚠️ universe 크기 합산은 **두 유니버스가 겹치지 않는다**는 전제 위에서만 맞습니다.
+    #    그 전제는 위 ③ 겹침 검사가 이미 보장합니다(겹치면 여기까지 오지 못합니다).
+    merged_summary = summarize_results(merged_records, merged_unmapped, extra={
+        "bsns_year": str(bsns_year),
+        "universe_size_input": _num(main_summary.get("universe_size_input"),
+                                    delta_summary.get("universe_size_input")),
+        "universe_size": _num(main_summary.get("universe_size"),
+                              delta_summary.get("universe_size")),
+        "requests_used": _num(main_summary.get("requests_used"),
+                              delta_summary.get("requests_used")),
+        "elapsed_sec": _num(main_summary.get("elapsed_sec"),
+                            delta_summary.get("elapsed_sec")),
+        "completed": both_completed,
+        "stopped_reason": stopped_reason,
+        "corpcode_source": corpcode_source,
+        "corpcode_stats": corpcode_stats,
+        # 원래 두 실행의 리포트를 **원문 그대로** 보관합니다. 병합본 숫자만 남기면
+        # "언제 돌았는지 / 어느 쪽이 중단됐는지 / --limit 이 걸렸는지" 가 전부 사라집니다.
+        "merged_from": [main_summary, delta_summary],
+        "merge_performed_at_kst": _now_kst().isoformat(),
+        "verification_status": (
+            "⚠️ 이 리포트는 단일 수집 실행의 결과가 아니라 merge_delta_output() 으로 "
+            f"합친 **병합 결과**입니다(기존: {main_out_dir} + 델타: {delta_out_dir}). "
+            "generated_at_kst 는 병합 시각이며, 각 실행의 원래 리포트는 merged_from 에 "
+            "원문 그대로 들어 있습니다."),
+    })
+
+    # ── ⑥ 저장 — 여기서부터가 첫 쓰기입니다 ───────────────────────────────────
+    out_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_latest.json")
+    tmp = f"{out_path}.tmp"
+    with open(tmp, "w", encoding="utf-8") as f:
+        json.dump({"summary": merged_summary, "records": merged_records},
+                  f, ensure_ascii=False, indent=2)
+    os.replace(tmp, out_path)
+
+    # ── ⑦ raw.jsonl 이어붙이기 (append-only, 줄 순서 그대로) ─────────────────
+    if delta_raw_lines:
+        os.makedirs(os.path.dirname(os.path.abspath(main_raw_path)) or ".", exist_ok=True)
+        with open(main_raw_path, "a", encoding="utf-8") as f:
+            f.write("".join(line + "\n" for line in delta_raw_lines))
+
+    # ── ⑧ 병합 이력 남기기 ────────────────────────────────────────────────────
+    merge_log["merges"].append({
+        "merged_at_kst": _now_kst().isoformat(),
+        "delta_out_dir": delta_out_dir,
+        "delta_stock_codes": sorted(delta_codes),
+        "delta_record_count": len(delta_records),
+        "delta_raw_lines_appended": len(delta_raw_lines),
+        "forced": bool(already is not None and force),
+    })
+    log_tmp = f"{log_path}.tmp"
+    with open(log_tmp, "w", encoding="utf-8") as f:
+        json.dump(merge_log, f, ensure_ascii=False, indent=2)
+    os.replace(log_tmp, log_path)
+
+    # ── ⑨ 완료 보고 ───────────────────────────────────────────────────────────
+    log("─" * 78)
+    log("② 병합 완료")
+    log(f"   레코드 {len(main_records):,} + {len(delta_records):,} → "
+        f"{merged_summary['total_records']:,}건 / 상태별 {merged_summary['by_status']}")
+    log(f"   완료 여부: {'양쪽 모두 전수 완료' if both_completed else '일부 미완료'}")
+    if stopped_reason:
+        log(f"   미완료 사유: {stopped_reason}")
+    log(f"   사용 요청 합계 {merged_summary['requests_used']:,}건"
+        if isinstance(merged_summary.get("requests_used"), (int, float))
+        else "   사용 요청 합계: 계산 불가(원 리포트에 숫자가 없습니다 — merged_from 참고)")
+    log(f"   raw 이어붙인 줄 수: {len(delta_raw_lines):,}")
+    log(f"   가공본: {out_path}")
+    log(f"   raw   : {main_raw_path}")
+    log(f"   이력  : {log_path}")
+    log("   ⚠️ 이 파일은 단일 실행 결과가 아니라 병합 결과입니다 "
+        "(원래 두 실행의 리포트는 summary.merged_from 에 그대로 있습니다).")
+    return merged_records, merged_summary
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
         description="DART alotMatter 기반 한국 상장사 배당 수집기 (visible_hand 배당금 모듈)")
-    parser.add_argument("--universe", required=True,
-                        help="종목코드 목록 JSON 경로(리스트/딕셔너리 형태 모두 허용)")
+    # ⚠️ required=True 가 아닙니다 — --merge-delta 모드에서는 유니버스가 필요 없습니다.
+    #    수집 모드에서 빠졌는지는 파싱 뒤에 직접 확인해 parser.error() 로 알려 줍니다.
+    parser.add_argument("--universe", default=None,
+                        help="종목코드 목록 JSON 경로(리스트/딕셔너리 형태 모두 허용). "
+                             "--merge-delta 를 쓸 때는 필요 없습니다.")
     parser.add_argument("--year", required=True, help="사업연도 4자리 (예: 2026)")
     parser.add_argument("--out-dir", required=True, help="산출물 디렉터리")
     parser.add_argument("--cache-dir", default=None,
@@ -1336,7 +1914,43 @@ def main(argv=None):
     parser.add_argument("--force-corpcode-refresh", action="store_true")
     parser.add_argument("--limit", type=int, default=None,
                         help="앞의 N종목만 수집(시범 실행용). 전수 수집이 아님이 리포트에 기록됩니다.")
+    parser.add_argument("--history-baseline", default=None,
+                        help="§0-3-3 교차검증용 KIND 연간 배당 파일 경로"
+                             "(예: data/dividend_history_kr_2023_2025.json). 지정하면 DART 의 "
+                             "전기·전전기 값과 대조해 불일치를 cross_source_notes 에 기록합니다"
+                             "(감지만 하고 값은 고치지 않습니다). 미지정이 기본입니다.")
+    parser.add_argument("--checkpoint-max-age-days", type=int,
+                        default=DEFAULT_CHECKPOINT_MAX_AGE_DAYS,
+                        help=f"이 일수보다 오래된 체크포인트는 이어받지 않습니다"
+                             f"(기본 {DEFAULT_CHECKPOINT_MAX_AGE_DAYS}일). 실행이 며칠에 걸쳐 "
+                             "중단·재개돼도 이어지도록 run_key 에는 날짜를 넣지 않습니다.")
+    parser.add_argument("--merge-delta", default=None, metavar="DELTA_OUT_DIR",
+                        help="[병합 모드] 델타 수집(신규 종목만 별도 out_dir 로 돌린 실행)의 "
+                             "산출물 디렉터리. 지정하면 수집을 하지 않고 그 결과를 "
+                             "--out-dir 의 기존 전체 결과에 합칩니다. 두 실행의 종목이 "
+                             "하나라도 겹치면 병합을 거부합니다.")
+    parser.add_argument("--force-merge", action="store_true",
+                        help="[병합 모드 전용] 이미 병합한 적 있는 델타여도 강제로 다시 "
+                             "병합합니다(병합 이력에 forced 로 남습니다). 종목이 실제로 "
+                             "겹치는 경우는 이 옵션으로도 통과하지 못합니다.")
     args = parser.parse_args(argv)
+
+    # ── 병합 모드: 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──────────────
+    if args.merge_delta:
+        try:
+            merge_delta_output(args.out_dir, args.merge_delta, args.year,
+                               force=args.force_merge)
+        except (FileNotFoundError, ValueError) as e:
+            # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로 끝내되, 조용히 성공하지 않습니다.
+            print(f"🛑 병합하지 않았습니다 — {e}")
+            return 2
+        return 0
+
+    if args.force_merge:
+        parser.error("--force-merge 는 --merge-delta 와 함께 쓸 때만 의미가 있습니다.")
+    if not args.universe:
+        parser.error("--universe 가 필요합니다 (수집 모드). "
+                     "델타 병합만 하려면 --merge-delta DELTA_OUT_DIR 을 쓰세요.")
 
     universe = load_universe(args.universe)
     priority = REPRT_CODE_PRIORITY_OWNER_ORDER if args.owner_order else REPRT_CODE_PRIORITY
@@ -1345,7 +1959,9 @@ def main(argv=None):
             universe, args.year, args.out_dir, cache_dir=args.cache_dir,
             priority=priority, skip_not_yet_due=args.skip_not_yet_due,
             max_requests=args.max_requests, max_runtime_sec=args.max_runtime_sec,
-            force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit)
+            force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit,
+            history_baseline_path=args.history_baseline,
+            checkpoint_max_age_days=args.checkpoint_max_age_days)
     except (DartFatalError, DartCorpCodeError) as e:
         # §0-3-4: 스택트레이스를 그대로 뿌리지 않고 사람이 읽을 문장으로 끝냅니다.
         # (⚠️ 그래도 '조용히 성공'하지는 않습니다 — 종료코드 2 로 Actions 를 빨간불로 만듭니다.)
