@@ -30,6 +30,8 @@ from utils.stock_history import (
     stock_history_path,
 )
 
+from utils.indicator_ai import IndicatorAIError, get_or_create_commentary
+
 from web.auth import is_admin
 from web.blocking import run_blocking
 from web.components import (
@@ -306,7 +308,7 @@ async def _render_body() -> None:
         # 2026-08-25 오너 요청 — 표(딱딱함) 대신 카드형으로. 나중에 AI 해설(4단계)을 종목별로
         # 붙일 자리도 카드 쪽이 훨씬 자연스럽습니다(표 칸 안에 문단을 넣기는 어려움).
         for s in page_items:
-            _render_stock_card(s, history_by_code.get(s.get('code')))
+            _render_stock_card(s, history_by_code.get(s.get('code')), data_date=payload.get('date'))
 
         def _on_page_change(new_page: int) -> None:
             state['page'] = new_page
@@ -465,10 +467,12 @@ def _build_recent_trend_html(recent_rows: list) -> str:
     )
 
 
-def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
+def _render_stock_card(stock: dict, recent_rows: list = None, data_date: str = None) -> None:
     """:param recent_rows: 이 종목의 최근 이력(최신이 먼저), `_load_recent_history_by_code()`
         가 만든 것. 없거나 1건뿐이면 "전일 대비"는 표시하지 않습니다(§0-1 — 없는 비교를
-        지어내지 않음)."""
+        지어내지 않음).
+    :param data_date: 이 카드가 보여주는 지표의 기준일(YYYY-MM-DD) — AI 해설 캐시 키로
+        그대로 넘깁니다(§4-2, `_render_ai_panel` 참고)."""
     name = stock.get('name')
     code = stock.get('code')
     reasons = _parse_unavailable_reasons(stock.get('unavailable_reasons'))
@@ -564,3 +568,71 @@ def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
             </div>
         </div>
     """)).classes('w-full')
+
+    # ── 4단계: 종목별 온디맨드 AI 해설(§4-2) — 카드 아래 이어지는 얇은 패널 ──
+    _render_ai_panel(stock, data_date)
+
+
+def _render_ai_panel(stock: dict, data_date: str) -> None:
+    """"🤖 AI 해설 보기" 버튼 — 눌렀을 때만 생성/조회합니다(500종목 전부 자동 호출 금지, §4-2).
+
+    §1 — "AI 해설이 붙는 자리에는 그 옆에 축소판 경고를 한 번 더": 버튼 옆 작은 경고
+    문구와, 해설이 나온 뒤 그 아래 또 한 번의 축소판 경고 두 곳에 넣습니다.
+    """
+    state = {'loaded': False}
+
+    with ui.column().classes('w-full').style('margin-top: -8px; margin-bottom: 10px;'):
+        with ui.row().classes('items-center gap-2').style(
+            'background: rgba(15, 23, 42, 0.4); border: 1px dashed #334155; '
+            'border-top: none; border-radius: 0 0 12px 12px; padding: 8px 22px; width: 100%;'
+        ):
+            button = ui.button('🤖 AI 해설 보기', icon='auto_awesome').props('flat dense no-caps size=sm')
+            ui.html(
+                '<span style="font-size: 10.5px; color: #64748b;">⚠️ AI가 쓴 참고용 설명입니다 — '
+                '매매 판단 근거로 쓰지 마세요.</span>'
+            )
+        output = ui.html('').classes('w-full').style('padding: 0 22px;')
+
+    async def _on_click() -> None:
+        if state['loaded']:
+            return
+        button.props('loading')
+        output.content = (
+            '<div style="font-size: 12.5px; color: #94a3b8; padding: 6px 0;">'
+            '🤖 AI 해설을 불러오는 중입니다...</div>'
+        )
+        try:
+            result = await run_blocking(get_or_create_commentary, stock, data_date)
+        except IndicatorAIError as exc:
+            output.content = (
+                f'<div style="font-size: 12.5px; color: #f87171; padding: 6px 0;">⚠️ {esc(str(exc))}</div>'
+            )
+            button.props(remove='loading')
+            return
+        except Exception as exc:  # noqa: BLE001 — §0-3-4: 예외 원문은 로그로만, 화면엔 정해진 문구
+            print(f'⚠️ [indicator_page] AI 해설 처리 중 예기치 못한 오류: {type(exc).__name__}: {exc}')
+            output.content = (
+                '<div style="font-size: 12.5px; color: #f87171; padding: 6px 0;">'
+                '⚠️ AI 해설을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'
+            )
+            button.props(remove='loading')
+            return
+
+        state['loaded'] = True
+        text_html = esc(result['text']).replace('\n', '<br>')
+        source_note = '(캐시된 해설 — 오늘 다른 사용자가 먼저 조회함)' if result.get('from_cache') else '(방금 새로 생성됨)'
+        generated = result.get('generated_at') or '—'
+        output.content = compact(f"""
+            <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.7; padding: 10px 0 4px;
+                        border-top: 1px solid #334155; margin-top: 6px;">
+                {text_html}
+            </div>
+            <div style="font-size: 10.5px; color: #64748b; margin-top: 2px; line-height: 1.6;">
+                🤖 AI가 자동 생성한 참고용 설명입니다 {esc(source_note)} · 생성 시각: {esc(generated)}<br>
+                매수·매도 판단의 근거로 쓰지 마세요 — 이 화면 상단의 경고와 같은 내용입니다.
+            </div>
+        """)
+        button.props(remove='loading')
+        button.set_text('🤖 AI 해설 (표시됨)')
+
+    button.on_click(_on_click)
