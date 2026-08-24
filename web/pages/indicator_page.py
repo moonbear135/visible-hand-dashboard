@@ -26,9 +26,12 @@ from utils.stock_history import (
     INDICATOR_HISTORY_FIELDS,
     INDICATOR_HISTORY_FILENAME,
     INDICATOR_KEY_FIELD,
+    read_history_rows,
+    stock_history_path,
 )
 
 from web.auth import is_admin
+from web.blocking import run_blocking
 from web.components import (
     disclaimer_footer,
     error_banner,
@@ -36,6 +39,7 @@ from web.components import (
     fmt_num,
     info_banner,
     pager,
+    pct_html,
     render_stock_download_tool,
     warning_banner,
 )
@@ -92,6 +96,39 @@ _BB_POSITION_LABELS = {
     'inside': '밴드 안쪽 (Inside Band)',
 }
 
+# 오너 요청(2026-08-25) — "글자가 작아서 눈에 안 띈다": 판독값을 색 있는 배지(알약 모양)로
+# 눈에 띄게 키웁니다. 기존 화면들의 배지 팔레트(web/components/html.py::quality_badge /
+# warn_badge / info_badge)와 같은 색 관례를 그대로 재사용합니다(§0-3-10) — 새 색을
+# 발명하지 않습니다: 주의(과매수/상단 돌파)=호박색, 참고(과매도/하단 이탈)=파란색,
+# 중립/밴드 안쪽=회색, 골든크로스=초록, 데드크로스=빨강.
+# ⚠️ 이건 "종합판정"에 매수=초록/매도=빨강을 입히지 않기로 한 결정과 다른 자리입니다 —
+#    여기 색은 "지표가 지금 어떤 상태인가"를 구분하는 것이지 "사라/팔아라"가 아닙니다.
+#    (background, text color, border)
+_STATE_BADGE_STYLES = {
+    'overbought':   ('#78350f', '#fbbf24', '#facc15'),
+    'oversold':     ('#1e3a5f', '#7dd3fc', '#38bdf8'),
+    'neutral':      ('#334155', '#cbd5e1', '#64748b'),
+    'golden':       ('#14532d', '#86efac', '#4ade80'),
+    'dead':         ('#7f1d1d', '#fca5a5', '#f87171'),
+    'above_upper':  ('#78350f', '#fbbf24', '#facc15'),
+    'below_lower':  ('#1e3a5f', '#7dd3fc', '#38bdf8'),
+    'inside':       ('#334155', '#cbd5e1', '#64748b'),
+}
+_STATE_BADGE_DEFAULT_STYLE = ('#334155', '#cbd5e1', '#64748b')
+
+
+def _state_badge_html(value, labels, none_text):
+    """판독값을 색 있는 배지로. 값이 없으면 배지 없이 평범한 텍스트만(§0-1 — 지어내지 않음)."""
+    if value is None:
+        return f'<span style="color: #64748b; font-size: 13px; font-weight: 600;">{esc(none_text)}</span>'
+    label = _translate(value, labels, none_text)
+    bg, color, border = _STATE_BADGE_STYLES.get(value, _STATE_BADGE_DEFAULT_STYLE)
+    return (
+        f'<span style="display: inline-block; background: {bg}; color: {color}; '
+        f'border: 1px solid {border}; border-radius: 8px; padding: 4px 12px; '
+        f'font-size: 14px; font-weight: 800; white-space: nowrap;">{esc(label)}</span>'
+    )
+
 
 def _translate(value, labels, none_text):
     """`utils/indicators.py`가 돌려주는 영어 원문 값을 "한글 (English)" 표시용 문구로.
@@ -124,6 +161,50 @@ def _parse_unavailable_reasons(text):
 def _search_matches(stock, query):
     q = query.lower()
     return q in (stock.get('name') or '').lower() or query in (stock.get('code') or '')
+
+
+def _to_float(value):
+    """이력 CSV 셀(전부 문자열)을 float 로. 못 읽으면 None(0으로 때우지 않음, §0-1)."""
+    if value is None or value == '':
+        return None
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
+
+
+def _index_recent_history_by_code(rows, days=2):
+    """이력 행 목록(전 종목·전 날짜)을 종목코드별로 묶고, **최근 N일치만** 남깁니다.
+
+    카드마다 파일을 따로 읽지 않도록 페이지 진입 시 한 번만 호출합니다(§0-3-10).
+    날짜 오름차순이 아니라 **최신이 먼저** 오도록 정렬합니다 — "오늘 대 어제" 비교가
+    목적이라 이 순서가 더 다루기 쉽습니다.
+    """
+    by_code = {}
+    for row in rows:
+        code = row.get('code')
+        if not code:
+            continue
+        by_code.setdefault(code, []).append(row)
+    for code, code_rows in by_code.items():
+        code_rows.sort(key=lambda r: r.get('date') or '', reverse=True)
+        by_code[code] = code_rows[:days]
+    return by_code
+
+
+async def _load_recent_history_by_code(days=2):
+    """전일 대비 비교용 — 이력 CSV 전체를 한 번 읽어 종목코드별 최근 N일치로 인덱싱합니다.
+
+    오너 결정(초기 논의) — "-1일 정보는 뒤로 넘겨보기 정도로" 볼 수 있으면 된다고 했고,
+    2026-08-25 재확인 요청으로 카드에 "전일 대비"를 직접 보여줍니다. 장기 이력은 여전히
+    아래 다운로드 도구로 받는 몫입니다(§6-2 확정 — 화면은 최근 며칠만, 장기는 다운로드).
+
+    ⚠️ 파일 읽기는 스레드로 넘깁니다(§0-3-4/web/blocking.py 관례 — 이벤트 루프를 붙잡지
+       않기 위함). `read_history_rows()`는 파일이 없거나 깨졌으면 빈 목록을 돌려주므로
+       (§0-1), 아직 하루치뿐인 지금 상태에서도 안전하게 빈 결과로 처리됩니다.
+    """
+    rows = await run_blocking(read_history_rows, stock_history_path(INDICATOR_HISTORY_FILENAME))
+    return _index_recent_history_by_code(rows, days=days)
 
 
 # =============================================================================
@@ -181,6 +262,9 @@ async def _render_body() -> None:
 
     ui.separator()
 
+    # ── 전일 대비 비교용 이력 인덱스 — 페이지 진입 시 한 번만 읽습니다(§0-3-10) ──
+    history_by_code = await _load_recent_history_by_code(days=2)
+
     # ── 전체 목록(페이지네이션) + 검색 필터 (state 는 이 함수의 지역 변수만 씁니다, §0-3-8) ──
     # 2026-08-25 오너 요청 — 검색으로만 찾게 하지 말고 목록을 20개씩 죽 보여줄 것.
     # 정렬은 시가총액 내림차순(수집기가 만든 stocks 배열 순서 그대로) — 지표값으로 다시
@@ -217,7 +301,7 @@ async def _render_body() -> None:
         # 2026-08-25 오너 요청 — 표(딱딱함) 대신 카드형으로. 나중에 AI 해설(4단계)을 종목별로
         # 붙일 자리도 카드 쪽이 훨씬 자연스럽습니다(표 칸 안에 문단을 넣기는 어려움).
         for s in page_items:
-            _render_stock_card(s)
+            _render_stock_card(s, history_by_code.get(s.get('code')))
 
         def _on_page_change(new_page: int) -> None:
             state['page'] = new_page
@@ -286,12 +370,57 @@ def _render_data_timestamp(payload) -> None:
     )
 
 
-def _render_stock_card(stock: dict) -> None:
+def _build_day_over_day_html(stock: dict, recent_rows: list) -> str:
+    """"전일 대비" 한 줄. 비교할 전일 데이터가 없으면 지어내지 않고 그 사실을 그대로 밝힙니다.
+
+    RSI 변화량은 `pct_html()`(기존 등락률 색 함수, §0-3-10 재사용)로 표시합니다 —
+    오르면 빨강/내리면 파랑은 "숫자가 커졌다/작아졌다"는 사실 색일 뿐, 종합판정에는
+    일부러 안 쓴 매수/매도 색과는 다른 자리입니다(RSI 자체는 매수·매도 신호가 아니라
+    하나의 계산값이므로).
+    """
+    recent_rows = recent_rows or []
+    if len(recent_rows) < 2:
+        return (
+            '<div style="font-size: 11.5px; color: #64748b; margin-top: 6px;">'
+            '📅 전일 데이터가 아직 없습니다 — 비교 가능한 어제 값이 쌓이면 여기 표시됩니다.'
+            '</div>'
+        )
+
+    today_row, prev_row = recent_rows[0], recent_rows[1]
+    prev_date = prev_row.get('date') or '—'
+    today_rsi = _to_float(today_row.get('rsi'))
+    prev_rsi = _to_float(prev_row.get('rsi'))
+    prev_verdict = prev_row.get('verdict_label')
+    today_verdict = stock.get('verdict_label')
+
+    if today_rsi is not None and prev_rsi is not None:
+        rsi_delta_html = pct_html(today_rsi - prev_rsi, digits=2, suffix='p')
+    else:
+        rsi_delta_html = '—'
+
+    change_line = ''
+    if prev_verdict and today_verdict and prev_verdict != today_verdict:
+        change_line = (
+            f'<div style="font-size: 12px; color: #cbd5e1; margin-top: 2px;">'
+            f'종합판정 변화: {esc(prev_verdict)} → {esc(today_verdict)}</div>'
+        )
+
+    return (
+        f'<div style="font-size: 12.5px; color: #94a3b8; margin-top: 6px;">'
+        f'전일({esc(prev_date)}) 대비 RSI {rsi_delta_html}</div>{change_line}'
+    )
+
+
+def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
+    """:param recent_rows: 이 종목의 최근 이력(최신이 먼저), `_load_recent_history_by_code()`
+        가 만든 것. 없거나 1건뿐이면 "전일 대비"는 표시하지 않습니다(§0-1 — 없는 비교를
+        지어내지 않음)."""
     name = stock.get('name')
     code = stock.get('code')
     reasons = _parse_unavailable_reasons(stock.get('unavailable_reasons'))
     warmup = bool(stock.get('warmup_insufficient'))
     bars_used = stock.get('bars_used')
+    day_over_day_html = _build_day_over_day_html(stock, recent_rows)
 
     def _block(label_key, available_html):
         """지표 하나(RSI/MACD/Bollinger) — 산출 가능하면 값, 아니면 사유를 그대로 보여줍니다(§0-1)."""
@@ -313,8 +442,8 @@ def _render_stock_card(stock: dict) -> None:
     rsi_html = (
         f'<div style="font-size: 20px; color: #f8fafc; font-weight: 800; margin-top: 3px;">'
         f'{esc(fmt_num(stock.get("rsi"), "", 2))}</div>'
-        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">판독: '
-        f'{esc(_translate(stock.get("rsi_signal"), _RSI_SIGNAL_LABELS, "—"))}</div>'
+        f'<div style="margin-top: 5px;">판독: '
+        f'{_state_badge_html(stock.get("rsi_signal"), _RSI_SIGNAL_LABELS, "—")}</div>'
     )
 
     macd_html = (
@@ -322,8 +451,8 @@ def _render_stock_card(stock: dict) -> None:
         f'MACD <b>{esc(fmt_num(stock.get("macd"), "", 2))}</b> · '
         f'시그널선 <b>{esc(fmt_num(stock.get("macd_signal_line"), "", 2))}</b> · '
         f'히스토그램 <b>{esc(fmt_num(stock.get("macd_histogram"), "", 2))}</b></div>'
-        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">크로스: '
-        f'{esc(_translate(stock.get("macd_cross"), _MACD_CROSS_LABELS, "없음"))}</div>'
+        f'<div style="margin-top: 5px;">크로스: '
+        f'{_state_badge_html(stock.get("macd_cross"), _MACD_CROSS_LABELS, "없음")}</div>'
     )
 
     bb_html = (
@@ -331,9 +460,10 @@ def _render_stock_card(stock: dict) -> None:
         f'상단 <b>{esc(fmt_num(stock.get("bb_upper"), "", 2))}</b> · '
         f'중심선 <b>{esc(fmt_num(stock.get("bb_mid"), "", 2))}</b> · '
         f'하단 <b>{esc(fmt_num(stock.get("bb_lower"), "", 2))}</b></div>'
-        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">'
-        f'%B {esc(fmt_num(stock.get("bb_percent_b"), "", 4))} · 위치: '
-        f'{esc(_translate(stock.get("bb_position"), _BB_POSITION_LABELS, "—"))}</div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 2px;">'
+        f'%B {esc(fmt_num(stock.get("bb_percent_b"), "", 4))}</div>'
+        f'<div style="margin-top: 5px;">위치: '
+        f'{_state_badge_html(stock.get("bb_position"), _BB_POSITION_LABELS, "—")}</div>'
     )
 
     verdict_score = stock.get('verdict_score')
@@ -367,6 +497,7 @@ def _render_stock_card(stock: dict) -> None:
                         border-radius: 10px;">
                 <div style="font-size: 12px; color: #94a3b8; font-weight: 700;">종합판정</div>
                 {verdict_html}
+                {day_over_day_html}
             </div>
             {_block('RSI', rsi_html)}
             {_block('MACD', macd_html)}
