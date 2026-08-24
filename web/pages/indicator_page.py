@@ -72,6 +72,37 @@ STRONG_WARNING_TEXT = (
 
 _INDICATOR_LABELS = {'RSI': 'RSI(14)', 'MACD': 'MACD', 'Bollinger': '볼린저밴드'}
 
+# 오너 요청(2026-08-25) — "neutral"/"golden"/"inside" 같은 영어 원문만 보여주면 처음 보는
+# 사람은 무슨 뜻인지 모릅니다. 한글 설명 + 영어 원문을 함께 보여줍니다(전문 용어 학습도
+# 겸하도록 — 영어만 쓰면 있어 보이지만 초보자는 못 읽음). 값의 출처는
+# `utils/indicators.py`의 실제 반환 문자열 그대로이고(단일 출처, §0-3-10), 여기서는
+# 화면 표시용 한글 라벨만 얹습니다.
+_RSI_SIGNAL_LABELS = {
+    'overbought': '과매수 (Overbought)',
+    'oversold': '과매도 (Oversold)',
+    'neutral': '중립 (Neutral)',
+}
+_MACD_CROSS_LABELS = {
+    'golden': '골든크로스 — 상승 전환 신호 (Golden Cross)',
+    'dead': '데드크로스 — 하락 전환 신호 (Dead Cross)',
+}
+_BB_POSITION_LABELS = {
+    'above_upper': '상단 밴드 돌파 (Above Upper Band)',
+    'below_lower': '하단 밴드 이탈 (Below Lower Band)',
+    'inside': '밴드 안쪽 (Inside Band)',
+}
+
+
+def _translate(value, labels, none_text):
+    """`utils/indicators.py`가 돌려주는 영어 원문 값을 "한글 (English)" 표시용 문구로.
+
+    사전에 없는 값(예: 새 상태가 나중에 추가됐는데 여기 라벨을 안 넣은 경우)은 값을
+    그대로 보여줍니다 — 모르는 값을 숨기거나 엉뚱한 라벨로 덮어씌우지 않습니다(§0-1).
+    """
+    if value is None:
+        return none_text
+    return labels.get(value, str(value))
+
 
 # =============================================================================
 # 순수 함수 (nicegui 위젯을 만들지 않습니다 — 오프라인 검증 가능)
@@ -282,7 +313,8 @@ def _render_stock_card(stock: dict) -> None:
     rsi_html = (
         f'<div style="font-size: 20px; color: #f8fafc; font-weight: 800; margin-top: 3px;">'
         f'{esc(fmt_num(stock.get("rsi"), "", 2))}</div>'
-        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">판독: {esc(stock.get("rsi_signal") or "—")}</div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">판독: '
+        f'{esc(_translate(stock.get("rsi_signal"), _RSI_SIGNAL_LABELS, "—"))}</div>'
     )
 
     macd_html = (
@@ -290,7 +322,8 @@ def _render_stock_card(stock: dict) -> None:
         f'MACD <b>{esc(fmt_num(stock.get("macd"), "", 2))}</b> · '
         f'시그널선 <b>{esc(fmt_num(stock.get("macd_signal_line"), "", 2))}</b> · '
         f'히스토그램 <b>{esc(fmt_num(stock.get("macd_histogram"), "", 2))}</b></div>'
-        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">크로스: {esc(stock.get("macd_cross") or "없음")}</div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">크로스: '
+        f'{esc(_translate(stock.get("macd_cross"), _MACD_CROSS_LABELS, "없음"))}</div>'
     )
 
     bb_html = (
@@ -299,7 +332,8 @@ def _render_stock_card(stock: dict) -> None:
         f'중심선 <b>{esc(fmt_num(stock.get("bb_mid"), "", 2))}</b> · '
         f'하단 <b>{esc(fmt_num(stock.get("bb_lower"), "", 2))}</b></div>'
         f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">'
-        f'%B {esc(fmt_num(stock.get("bb_percent_b"), "", 4))} · 위치: {esc(stock.get("bb_position") or "—")}</div>'
+        f'%B {esc(fmt_num(stock.get("bb_percent_b"), "", 4))} · 위치: '
+        f'{esc(_translate(stock.get("bb_position"), _BB_POSITION_LABELS, "—"))}</div>'
     )
 
     verdict_score = stock.get('verdict_score')
