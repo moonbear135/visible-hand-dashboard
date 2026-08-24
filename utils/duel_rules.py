@@ -1,6 +1,6 @@
 # utils/duel_rules.py
 """
-⚔️ "결투다!" (모의투자 대결 · 4번째 모듈) — **순수 규칙 계산 계층**
+⚔️ "결투다!" (모의투자 대결 · 5번째 모듈, 2026-08-24 재번호) — **순수 규칙 계산 계층**
 
 DUEL_MODULE_WORK_ORDER.md 2단계의 파일 계획에 따라 만든 모듈입니다. 이 파일에는
 **계산 규칙만** 있습니다. Supabase 접근(`utils/duel_db.py`), 화면(`web/pages/duel_page.py`),

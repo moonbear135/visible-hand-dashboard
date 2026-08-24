@@ -1,6 +1,6 @@
 # utils/duel_db.py
 """
-⚔️ "결투다!" (모의투자 대결 · 4번째 모듈) — **Supabase 접근 계층**
+⚔️ "결투다!" (모의투자 대결 · 5번째 모듈, 2026-08-24 재번호) — **Supabase 접근 계층**
 
 DUEL_MODULE_WORK_ORDER.md 2단계의 파일 계획에 따라 만든 모듈입니다. 이 파일은
 `utils/duel_rules.py`(순수 계산)와 `sql/duel_schema.sql`(표·RLS·트리거) 사이를 잇는

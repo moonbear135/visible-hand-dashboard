@@ -114,7 +114,7 @@ except Exception as _scorecard_import_exc:  # noqa: BLE001
     render_scorecard_page = None
     SCORECARD_IMPORT_ERROR = str(_scorecard_import_exc)
 
-# 📈 "리포트"(5번째 모듈)는 2026-08-12 신설된 **스테이징 상태** 화면입니다(§0-3-6).
+# 📈 "리포트"(4번째 모듈, 2026-08-24 재번호)는 2026-08-12 신설된 **스테이징 상태** 화면입니다(§0-3-6).
 # "내 성적표"와 완전히 같은 패턴 — import 실패해도 기존 화면은 그대로 살아있어야 합니다.
 try:
     from views.report_view import is_report_visible, render_report_page

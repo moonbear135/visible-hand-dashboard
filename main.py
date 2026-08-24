@@ -30,6 +30,8 @@ import web.theme
 #                                 동의 관리, SCORECARD_CONSENT_ENABLED · 기본 관리자 전용)
 #   scorecard_leaderboard_page → '/scorecard/leaderboard'  (로그인 필요 · "내 성적표" 공개
 #                                 순위표 열람, SCORECARD_LEADERBOARD_ENABLED · 기본 관리자 전용)
+#   dividend_page  → '/dividend'    (공개 화면 · "투자 감사합니다!" 배당 캘린더,
+#                                    DIVIDEND_ENABLED 로 단계적 공개, 2026-08-24 추가)
 #
 # (2026-08-23 전환) `duel_consent_page → '/duel/consent'` 와
 #   `duel_leaderboard_page → '/duel/leaderboard'` 두 화면을 **성적표 공개 계층으로 전환**
@@ -42,6 +44,7 @@ import web.theme
 #   (`web/auth.py` 의 데모 카운터 두 함수도 함께 — ENGINEERING_SPEC.md §0-3-10).
 from web.pages import (  # noqa: F401
     admin_page,
+    dividend_page,
     duel_page,
     macro_page,
     pegy_page,
