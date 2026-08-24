@@ -34,7 +34,6 @@ from web.components import (
     error_banner,
     esc,
     fmt_num,
-    holdings_table_html,
     info_banner,
     pager,
     render_stock_download_tool,
@@ -184,31 +183,16 @@ async def _render_body() -> None:
             f'(페이지 {page}/{total_pages}, 시가총액 순)'
         ).classes('vh-muted')
 
-        headers = ['종목명 (코드)', '종합판정', 'RSI(14)', 'RSI 판독', 'MACD 크로스', '볼린저 위치']
-        rows = [
-            [
-                f"{esc(s.get('name'))} ({esc(s.get('code'))})",
-                esc(s.get('verdict_label') or '산출 불가'),
-                esc(fmt_num(s.get('rsi'), '', 2)),
-                esc(s.get('rsi_signal') or '—'),
-                esc(s.get('macd_cross') or '없음'),
-                esc(s.get('bb_position') or '—'),
-            ]
-            for s in page_items
-        ]
-        ui.html(holdings_table_html(headers, rows)).classes('w-full')
+        # 2026-08-25 오너 요청 — 표(딱딱함) 대신 카드형으로. 나중에 AI 해설(4단계)을 종목별로
+        # 붙일 자리도 카드 쪽이 훨씬 자연스럽습니다(표 칸 안에 문단을 넣기는 어려움).
+        for s in page_items:
+            _render_stock_card(s)
 
         def _on_page_change(new_page: int) -> None:
             state['page'] = new_page
             _list_section.refresh()
 
         pager(total_pages, page, _on_page_change)
-
-        # 검색으로 정확히 한 종목만 남으면, 표 아래에 지표 원값이 전부 보이는 상세 카드도 함께.
-        if len(filtered) == 1:
-            ui.separator()
-            ui.markdown('#### 🔍 상세 보기').classes('vh-muted')
-            _render_stock_card(filtered[0])
 
     _list_section()
 
