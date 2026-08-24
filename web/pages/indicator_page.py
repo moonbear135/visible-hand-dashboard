@@ -581,15 +581,18 @@ def _render_ai_panel(stock: dict, data_date: str) -> None:
     """
     state = {'loaded': False}
 
+    # 오너 요청(2026-08-25) — "글자가 너무 작아, 좀 많이 키워줘": 버튼·경고·해설 본문 전부
+    # 카드 본문(RSI 큰 숫자 20px, MACD·볼린저 본문 13.5px) 급으로 눈에 띄게 키웠습니다.
     with ui.column().classes('w-full').style('margin-top: -8px; margin-bottom: 10px;'):
-        with ui.row().classes('items-center gap-2').style(
+        with ui.row().classes('items-center gap-3').style(
             'background: rgba(15, 23, 42, 0.4); border: 1px dashed #334155; '
-            'border-top: none; border-radius: 0 0 12px 12px; padding: 8px 22px; width: 100%;'
+            'border-top: none; border-radius: 0 0 12px 12px; padding: 12px 22px; width: 100%;'
         ):
-            button = ui.button('🤖 AI 해설 보기', icon='auto_awesome').props('flat dense no-caps size=sm')
+            button = ui.button('🤖 AI 해설 보기', icon='auto_awesome').props('no-caps')
+            button.style('font-size: 15px; font-weight: 700; padding: 8px 18px;')
             ui.html(
-                '<span style="font-size: 10.5px; color: #64748b;">⚠️ AI가 쓴 참고용 설명입니다 — '
-                '매매 판단 근거로 쓰지 마세요.</span>'
+                '<span style="font-size: 13px; color: #94a3b8; font-weight: 600;">⚠️ AI가 쓴 '
+                '참고용 설명입니다 — 매매 판단 근거로 쓰지 마세요.</span>'
             )
         output = ui.html('').classes('w-full').style('padding: 0 22px;')
 
@@ -598,21 +601,22 @@ def _render_ai_panel(stock: dict, data_date: str) -> None:
             return
         button.props('loading')
         output.content = (
-            '<div style="font-size: 12.5px; color: #94a3b8; padding: 6px 0;">'
+            '<div style="font-size: 15px; color: #cbd5e1; font-weight: 600; padding: 8px 0;">'
             '🤖 AI 해설을 불러오는 중입니다...</div>'
         )
         try:
             result = await run_blocking(get_or_create_commentary, stock, data_date)
         except IndicatorAIError as exc:
             output.content = (
-                f'<div style="font-size: 12.5px; color: #f87171; padding: 6px 0;">⚠️ {esc(str(exc))}</div>'
+                f'<div style="font-size: 15px; color: #f87171; font-weight: 600; padding: 8px 0;">'
+                f'⚠️ {esc(str(exc))}</div>'
             )
             button.props(remove='loading')
             return
         except Exception as exc:  # noqa: BLE001 — §0-3-4: 예외 원문은 로그로만, 화면엔 정해진 문구
             print(f'⚠️ [indicator_page] AI 해설 처리 중 예기치 못한 오류: {type(exc).__name__}: {exc}')
             output.content = (
-                '<div style="font-size: 12.5px; color: #f87171; padding: 6px 0;">'
+                '<div style="font-size: 15px; color: #f87171; font-weight: 600; padding: 8px 0;">'
                 '⚠️ AI 해설을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요.</div>'
             )
             button.props(remove='loading')
@@ -623,11 +627,11 @@ def _render_ai_panel(stock: dict, data_date: str) -> None:
         source_note = '(캐시된 해설 — 오늘 다른 사용자가 먼저 조회함)' if result.get('from_cache') else '(방금 새로 생성됨)'
         generated = result.get('generated_at') or '—'
         output.content = compact(f"""
-            <div style="font-size: 13.5px; color: #e2e8f0; line-height: 1.7; padding: 10px 0 4px;
+            <div style="font-size: 17px; color: #f1f5f9; font-weight: 500; line-height: 1.8; padding: 14px 0 6px;
                         border-top: 1px solid #334155; margin-top: 6px;">
                 {text_html}
             </div>
-            <div style="font-size: 10.5px; color: #64748b; margin-top: 2px; line-height: 1.6;">
+            <div style="font-size: 13px; color: #94a3b8; margin-top: 4px; line-height: 1.7; font-weight: 600;">
                 🤖 AI가 자동 생성한 참고용 설명입니다 {esc(source_note)} · 생성 시각: {esc(generated)}<br>
                 매수·매도 판단의 근거로 쓰지 마세요 — 이 화면 상단의 경고와 같은 내용입니다.
             </div>
