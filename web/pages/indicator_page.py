@@ -262,8 +262,13 @@ async def _render_body() -> None:
 
     ui.separator()
 
-    # ── 전일 대비 비교용 이력 인덱스 — 페이지 진입 시 한 번만 읽습니다(§0-3-10) ──
-    history_by_code = await _load_recent_history_by_code(days=2)
+    # ── 전일 대비 + 최근 며칠 흐름용 이력 인덱스 — 페이지 진입 시 한 번만 읽습니다(§0-3-10) ──
+    # 오너 요청(2026-08-25) — "-1일 -2일 -3일 정도는 뒤로 넘겨보기"(§6-2 원 결정)를 이제
+    # 카드에 직접 반영: 오늘 포함 최근 4일(오늘 + 최대 3일 전)을 가져옵니다. 이력이 아직
+    # 하루치뿐이면(막 도입 직후) 그만큼만 채워지고 나머지는 자연히 안 보입니다 — 없는 날짜를
+    # 지어내지 않습니다(§0-1). 데이터는 매일 수집이 돌 때마다 그대로 쌓이므로 며칠 지나면
+    # 자동으로 4일 전부 채워집니다.
+    history_by_code = await _load_recent_history_by_code(days=4)
 
     # ── 전체 목록(페이지네이션) + 검색 필터 (state 는 이 함수의 지역 변수만 씁니다, §0-3-8) ──
     # 2026-08-25 오너 요청 — 검색으로만 찾게 하지 말고 목록을 20개씩 죽 보여줄 것.
@@ -411,6 +416,55 @@ def _build_day_over_day_html(stock: dict, recent_rows: list) -> str:
     )
 
 
+def _format_short_date(date_str) -> str:
+    """"2026-08-25" → "08/25". 형식이 예상과 다르면 원문을 그대로 돌려줍니다(지어내지 않음)."""
+    text = str(date_str or '').strip()
+    parts = text.split('-')
+    if len(parts) == 3 and len(parts[1]) == 2 and len(parts[2]) == 2:
+        return f'{parts[1]}/{parts[2]}'
+    return text or '—'
+
+
+def _build_recent_trend_html(recent_rows: list) -> str:
+    """최근 며칠 흐름을 작은 칩으로 나열합니다 — "-1일 -2일 -3일은 뒤로 넘겨보기 정도로"
+    (§6-2 원 결정, 2026-08-25 오너 재확인: "데이터는 쌓일 거니까 3일치는 볼 수 있게").
+
+    표(table) 대신 카드 톤에 맞는 작은 칩으로 — 오너가 이미 "표는 딱딱하다"고 반려한 바 있어
+    (이번 3단계 리스트↔카드 논의), 여기서도 같은 톤을 유지합니다. 오래된 날짜가 왼쪽,
+    오늘이 오른쪽(가장 눈에 띄는 자리)에 오도록 시간순으로 배치합니다.
+
+    이력이 1건뿐이면(비교할 "며칠"이 없음) 아무것도 그리지 않습니다 — 그 경우는
+    `_build_day_over_day_html()`의 "전일 데이터가 아직 없습니다" 문구 하나로 충분하고,
+    칩을 하나만 덜렁 보여주면 오히려 헷갈립니다.
+    """
+    recent_rows = recent_rows or []
+    if len(recent_rows) < 2:
+        return ''
+
+    chips = []
+    # recent_rows 는 최신이 먼저(내림차순) — 칩은 과거→오늘 순으로 보여주려 뒤집습니다.
+    for i, row in enumerate(reversed(recent_rows)):
+        is_today = (i == len(recent_rows) - 1)
+        date_label = '오늘' if is_today else _format_short_date(row.get('date'))
+        rsi_val = _to_float(row.get('rsi'))
+        rsi_text = f'{rsi_val:.1f}' if rsi_val is not None else '—'
+        verdict = row.get('verdict_label') or '—'
+        border = '#38bdf8' if is_today else '#334155'
+        bg = 'rgba(56, 189, 248, 0.12)' if is_today else 'rgba(15, 23, 42, 0.6)'
+        chips.append(
+            f'<div style="flex: 1 1 0; min-width: 64px; border: 1px solid {border}; '
+            f'background: {bg}; border-radius: 8px; padding: 6px 8px; text-align: center;">'
+            f'<div style="font-size: 10.5px; color: #94a3b8; font-weight: 700;">{esc(date_label)}</div>'
+            f'<div style="font-size: 14px; color: #f1f5f9; font-weight: 800; margin-top: 2px;">RSI {esc(rsi_text)}</div>'
+            f'<div style="font-size: 10px; color: #cbd5e1; margin-top: 1px;">{esc(verdict)}</div>'
+            f'</div>'
+        )
+
+    return (
+        '<div style="display: flex; gap: 6px; margin-top: 8px;">' + ''.join(chips) + '</div>'
+    )
+
+
 def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
     """:param recent_rows: 이 종목의 최근 이력(최신이 먼저), `_load_recent_history_by_code()`
         가 만든 것. 없거나 1건뿐이면 "전일 대비"는 표시하지 않습니다(§0-1 — 없는 비교를
@@ -421,6 +475,7 @@ def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
     warmup = bool(stock.get('warmup_insufficient'))
     bars_used = stock.get('bars_used')
     day_over_day_html = _build_day_over_day_html(stock, recent_rows)
+    recent_trend_html = _build_recent_trend_html(recent_rows)
 
     def _block(label_key, available_html):
         """지표 하나(RSI/MACD/Bollinger) — 산출 가능하면 값, 아니면 사유를 그대로 보여줍니다(§0-1)."""
@@ -498,6 +553,7 @@ def _render_stock_card(stock: dict, recent_rows: list = None) -> None:
                 <div style="font-size: 12px; color: #94a3b8; font-weight: 700;">종합판정</div>
                 {verdict_html}
                 {day_over_day_html}
+                {recent_trend_html}
             </div>
             {_block('RSI', rsi_html)}
             {_block('MACD', macd_html)}
