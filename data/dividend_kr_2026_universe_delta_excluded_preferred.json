@@ -1,0 +1,885 @@
+{
+  "excluded_preferred_shares": [
+    {
+      "code": "005935",
+      "name": "삼성전자우",
+      "market": "KOSPI",
+      "parent_name": "삼성전자",
+      "parent_code": "005930",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005387",
+      "name": "현대차2우B",
+      "market": "KOSPI",
+      "parent_name": "현대차",
+      "parent_code": "005380",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005385",
+      "name": "현대차우",
+      "market": "KOSPI",
+      "parent_name": "현대차",
+      "parent_code": "005380",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000155",
+      "name": "두산우",
+      "market": "KOSPI",
+      "parent_name": "두산",
+      "parent_code": "000150",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00680K",
+      "name": "미래에셋증권2우B",
+      "market": "KOSPI",
+      "parent_name": "미래에셋증권",
+      "parent_code": "006800",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "009155",
+      "name": "삼성전기우",
+      "market": "KOSPI",
+      "parent_name": "삼성전기",
+      "parent_code": "009150",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000815",
+      "name": "삼성화재우",
+      "market": "KOSPI",
+      "parent_name": "삼성화재",
+      "parent_code": "000810",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "066575",
+      "name": "LG전자우",
+      "market": "KOSPI",
+      "parent_name": "LG전자",
+      "parent_code": "066570",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "051915",
+      "name": "LG화학우",
+      "market": "KOSPI",
+      "parent_name": "LG화학",
+      "parent_code": "051910",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "071055",
+      "name": "한국금융지주우",
+      "market": "KOSPI",
+      "parent_name": "한국금융지주",
+      "parent_code": "071050",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00088K",
+      "name": "한화3우B",
+      "market": "KOSPI",
+      "parent_name": "한화",
+      "parent_code": "000880",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00104K",
+      "name": "CJ4우(전환)",
+      "market": "KOSPI",
+      "parent_name": "CJ",
+      "parent_code": "001040",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003545",
+      "name": "대신증권우",
+      "market": "KOSPI",
+      "parent_name": "대신증권",
+      "parent_code": "003540",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "090435",
+      "name": "아모레퍼시픽우",
+      "market": "KOSPI",
+      "parent_name": "아모레퍼시픽",
+      "parent_code": "090430",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005945",
+      "name": "NH투자증권우",
+      "market": "KOSPI",
+      "parent_name": "NH투자증권",
+      "parent_code": "005940",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005389",
+      "name": "현대차3우B",
+      "market": "KOSPI",
+      "parent_name": "현대차",
+      "parent_code": "005380",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "02826K",
+      "name": "삼성물산우B",
+      "market": "KOSPI",
+      "parent_name": "삼성물산",
+      "parent_code": "028260",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "006405",
+      "name": "삼성SDI우",
+      "market": "KOSPI",
+      "parent_name": "삼성SDI",
+      "parent_code": "006400",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000157",
+      "name": "두산2우B",
+      "market": "KOSPI",
+      "parent_name": "두산",
+      "parent_code": "000150",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "010955",
+      "name": "S-Oil우",
+      "market": "KOSPI",
+      "parent_name": "S-Oil",
+      "parent_code": "010950",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "051905",
+      "name": "LG생활건강우",
+      "market": "KOSPI",
+      "parent_name": "LG생활건강",
+      "parent_code": "051900",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "03473K",
+      "name": "SK우",
+      "market": "KOSPI",
+      "parent_name": "SK",
+      "parent_code": "034730",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003555",
+      "name": "LG우",
+      "market": "KOSPI",
+      "parent_name": "LG",
+      "parent_code": "003550",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003547",
+      "name": "대신증권2우B",
+      "market": "KOSPI",
+      "parent_name": "대신증권",
+      "parent_code": "003540",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "006805",
+      "name": "미래에셋증권우",
+      "market": "KOSPI",
+      "parent_name": "미래에셋증권",
+      "parent_code": "006800",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001045",
+      "name": "CJ우",
+      "market": "KOSPI",
+      "parent_name": "CJ",
+      "parent_code": "001040",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "011785",
+      "name": "금호석유화학우",
+      "market": "KOSPI",
+      "parent_name": "금호석유화학",
+      "parent_code": "011780",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00279K",
+      "name": "아모레퍼시픽홀딩스3우C",
+      "market": "KOSPI",
+      "parent_name": "아모레퍼시픽홀딩스",
+      "parent_code": "002790",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "078935",
+      "name": "GS우",
+      "market": "KOSPI",
+      "parent_name": "GS",
+      "parent_code": "078930",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "37550L",
+      "name": "DL이앤씨2우(전환)",
+      "market": "KOSPI",
+      "parent_name": "DL이앤씨",
+      "parent_code": "375500",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001275",
+      "name": "부국증권우",
+      "market": "KOSPI",
+      "parent_name": "부국증권",
+      "parent_code": "001270",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "096775",
+      "name": "SK이노베이션우",
+      "market": "KOSPI",
+      "parent_name": "SK이노베이션",
+      "parent_code": "096770",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000105",
+      "name": "유한양행우",
+      "market": "KOSPI",
+      "parent_name": "유한양행",
+      "parent_code": "000100",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002795",
+      "name": "아모레퍼시픽홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "아모레퍼시픽홀딩스",
+      "parent_code": "002790",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "33626K",
+      "name": "두산퓨얼셀1우",
+      "market": "KOSPI",
+      "parent_name": "두산퓨얼셀",
+      "parent_code": "336260",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "120115",
+      "name": "코오롱인더우",
+      "market": "KOSPI",
+      "parent_name": "코오롱인더",
+      "parent_code": "120110",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001465",
+      "name": "BYC우",
+      "market": "KOSPI",
+      "parent_name": "BYC",
+      "parent_code": "001460",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003925",
+      "name": "남양유업우",
+      "market": "KOSPI",
+      "parent_name": "남양유업",
+      "parent_code": "003920",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000725",
+      "name": "현대건설우",
+      "market": "KOSPI",
+      "parent_name": "현대건설",
+      "parent_code": "000720",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003475",
+      "name": "유안타증권우",
+      "market": "KOSPI",
+      "parent_name": "유안타증권",
+      "parent_code": "003470",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003465",
+      "name": "유화증권우",
+      "market": "KOSPI",
+      "parent_name": "유화증권",
+      "parent_code": "003460",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "37550K",
+      "name": "DL이앤씨우",
+      "market": "KOSPI",
+      "parent_name": "DL이앤씨",
+      "parent_code": "375500",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005305",
+      "name": "롯데칠성우",
+      "market": "KOSPI",
+      "parent_name": "롯데칠성",
+      "parent_code": "005300",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "28513K",
+      "name": "SK케미칼우",
+      "market": "KOSPI",
+      "parent_name": "SK케미칼",
+      "parent_code": "285130",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "006125",
+      "name": "SK디스커버리우",
+      "market": "KOSPI",
+      "parent_name": "SK디스커버리",
+      "parent_code": "006120",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "35320K",
+      "name": "대덕전자1우",
+      "market": "KOSPI",
+      "parent_name": "대덕전자",
+      "parent_code": "353200",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "009835",
+      "name": "한화솔루션우",
+      "market": "KOSPI",
+      "parent_name": "한화솔루션",
+      "parent_code": "009830",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000215",
+      "name": "DL우",
+      "market": "KOSPI",
+      "parent_name": "DL",
+      "parent_code": "000210",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004365",
+      "name": "세방우",
+      "market": "KOSPI",
+      "parent_name": "세방",
+      "parent_code": "004360",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003535",
+      "name": "한화투자증권우",
+      "market": "KOSPI",
+      "parent_name": "한화투자증권",
+      "parent_code": "003530",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "006345",
+      "name": "대원전선우",
+      "market": "KOSPI",
+      "parent_name": "대원전선",
+      "parent_code": "006340",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002355",
+      "name": "넥센타이어1우B",
+      "market": "KOSPI",
+      "parent_name": "넥센타이어",
+      "parent_code": "002350",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "33637K",
+      "name": "솔루스첨단소재1우",
+      "market": "KOSPI",
+      "parent_name": "솔루스첨단소재",
+      "parent_code": "336370",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "019175",
+      "name": "신풍제약우",
+      "market": "KOSPI",
+      "parent_name": "신풍제약",
+      "parent_code": "019170",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003495",
+      "name": "대한항공우",
+      "market": "KOSPI",
+      "parent_name": "대한항공",
+      "parent_code": "003490",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "008775",
+      "name": "호텔신라우",
+      "market": "KOSPI",
+      "parent_name": "호텔신라",
+      "parent_code": "008770",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "33626L",
+      "name": "두산퓨얼셀2우B",
+      "market": "KOSPI",
+      "parent_name": "두산퓨얼셀",
+      "parent_code": "336260",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001685",
+      "name": "대상우",
+      "market": "KOSPI",
+      "parent_name": "대상",
+      "parent_code": "001680",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00499K",
+      "name": "롯데지주우",
+      "market": "KOSPI",
+      "parent_name": "롯데지주",
+      "parent_code": "004990",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "108675",
+      "name": "LX하우시스우",
+      "market": "KOSPI",
+      "parent_name": "LX하우시스",
+      "parent_code": "108670",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "18064K",
+      "name": "한진칼우",
+      "market": "KOSPI",
+      "parent_name": "한진칼",
+      "parent_code": "180640",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005725",
+      "name": "넥센우",
+      "market": "KOSPI",
+      "parent_name": "넥센",
+      "parent_code": "005720",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002025",
+      "name": "코오롱우",
+      "market": "KOSPI",
+      "parent_name": "코오롱",
+      "parent_code": "002020",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000087",
+      "name": "하이트진로2우B",
+      "market": "KOSPI",
+      "parent_name": "하이트진로",
+      "parent_code": "000080",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005257",
+      "name": "녹십자홀딩스2우",
+      "market": "KOSPI",
+      "parent_name": "녹십자홀딩스",
+      "parent_code": "005250",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001795",
+      "name": "대한제당우",
+      "market": "KOSPI",
+      "parent_name": "대한제당",
+      "parent_code": "001790",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00806K",
+      "name": "대덕1우",
+      "market": "KOSPI",
+      "parent_name": "대덕",
+      "parent_code": "008060",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "145995",
+      "name": "삼양사우",
+      "market": "KOSPI",
+      "parent_name": "삼양사",
+      "parent_code": "145990",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "45226K",
+      "name": "한화갤러리아우",
+      "market": "KOSPI",
+      "parent_name": "한화갤러리아",
+      "parent_code": "452260",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "019685",
+      "name": "대교우B",
+      "market": "KOSPI",
+      "parent_name": "대교",
+      "parent_code": "019680",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "38380K",
+      "name": "LX홀딩스1우",
+      "market": "KOSPI",
+      "parent_name": "LX홀딩스",
+      "parent_code": "383800",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "084695",
+      "name": "대상홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "대상홀딩스",
+      "parent_code": "084690",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "00781K",
+      "name": "코리아써키트2우B",
+      "market": "KOSPI",
+      "parent_name": "코리아써키트",
+      "parent_code": "007810",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "003075",
+      "name": "코오롱글로벌우",
+      "market": "KOSPI",
+      "parent_name": "코오롱글로벌",
+      "parent_code": "003070",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001515",
+      "name": "SK증권우",
+      "market": "KOSPI",
+      "parent_name": "SK증권",
+      "parent_code": "001510",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004255",
+      "name": "NPC우",
+      "market": "KOSPI",
+      "parent_name": "NPC",
+      "parent_code": "004250",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001067",
+      "name": "JW중외제약2우B",
+      "market": "KOSPI",
+      "parent_name": "JW중외제약",
+      "parent_code": "001060",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004105",
+      "name": "태양금속우",
+      "market": "KOSPI",
+      "parent_name": "태양금속",
+      "parent_code": "004100",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001755",
+      "name": "한양증권우",
+      "market": "KOSPI",
+      "parent_name": "한양증권",
+      "parent_code": "001750",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "33637L",
+      "name": "솔루스첨단소재2우B",
+      "market": "KOSPI",
+      "parent_name": "솔루스첨단소재",
+      "parent_code": "336370",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "03481K",
+      "name": "해성산업1우",
+      "market": "KOSDAQ",
+      "parent_name": "해성산업",
+      "parent_code": "034810",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000225",
+      "name": "유유제약1우",
+      "market": "KOSPI",
+      "parent_name": "유유제약",
+      "parent_code": "000220",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001065",
+      "name": "JW중외제약우",
+      "market": "KOSPI",
+      "parent_name": "JW중외제약",
+      "parent_code": "001060",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "012205",
+      "name": "계양전기우",
+      "market": "KOSPI",
+      "parent_name": "계양전기",
+      "parent_code": "012200",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000325",
+      "name": "노루홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "노루홀딩스",
+      "parent_code": "000320",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002995",
+      "name": "금호건설우",
+      "market": "KOSPI",
+      "parent_name": "금호건설",
+      "parent_code": "002990",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004835",
+      "name": "덕성우",
+      "market": "KOSPI",
+      "parent_name": "덕성",
+      "parent_code": "004830",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "26490K",
+      "name": "크라운제과우",
+      "market": "KOSPI",
+      "parent_name": "크라운제과",
+      "parent_code": "264900",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004985",
+      "name": "성신양회우",
+      "market": "KOSPI",
+      "parent_name": "성신양회",
+      "parent_code": "004980",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "090355",
+      "name": "노루페인트우",
+      "market": "KOSPI",
+      "parent_name": "노루페인트",
+      "parent_code": "090350",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000145",
+      "name": "하이트진로홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "하이트진로홀딩스",
+      "parent_code": "000140",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "009415",
+      "name": "태영건설우",
+      "market": "KOSPI",
+      "parent_name": "태영건설",
+      "parent_code": "009410",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000545",
+      "name": "흥국화재우",
+      "market": "KOSPI",
+      "parent_name": "흥국화재",
+      "parent_code": "000540",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005965",
+      "name": "동부건설우",
+      "market": "KOSPI",
+      "parent_name": "동부건설",
+      "parent_code": "005960",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "014825",
+      "name": "동원시스템즈우",
+      "market": "KOSPI",
+      "parent_name": "동원시스템즈",
+      "parent_code": "014820",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "007575",
+      "name": "일양약품우",
+      "market": "KOSPI",
+      "parent_name": "일양약품",
+      "parent_code": "007570",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "014285",
+      "name": "금강공업우",
+      "market": "KOSPI",
+      "parent_name": "금강공업",
+      "parent_code": "014280",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "005745",
+      "name": "크라운해태홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "크라운해태홀딩스",
+      "parent_code": "005740",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "36328K",
+      "name": "티와이홀딩스우",
+      "market": "KOSPI",
+      "parent_name": "티와이홀딩스",
+      "parent_code": "363280",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "014915",
+      "name": "성문전자우",
+      "market": "KOSPI",
+      "parent_name": "성문전자",
+      "parent_code": "014910",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001525",
+      "name": "동양우",
+      "market": "KOSPI",
+      "parent_name": "동양",
+      "parent_code": "001520",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "000227",
+      "name": "유유제약2우B",
+      "market": "KOSPI",
+      "parent_name": "유유제약",
+      "parent_code": "000220",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "021045",
+      "name": "대호특수강우",
+      "market": "KOSDAQ",
+      "parent_name": "대호특수강",
+      "parent_code": "021040",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004545",
+      "name": "깨끗한나라우",
+      "market": "KOSPI",
+      "parent_name": "깨끗한나라",
+      "parent_code": "004540",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "011155",
+      "name": "CJ씨푸드1우",
+      "market": "KOSPI",
+      "parent_name": "CJ씨푸드",
+      "parent_code": "011150",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "001527",
+      "name": "동양2우B",
+      "market": "KOSPI",
+      "parent_name": "동양",
+      "parent_code": "001520",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "004415",
+      "name": "서울식품우",
+      "market": "KOSPI",
+      "parent_name": "서울식품",
+      "parent_code": "004410",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002785",
+      "name": "진흥기업우B",
+      "market": "KOSPI",
+      "parent_name": "진흥기업",
+      "parent_code": "002780",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "002787",
+      "name": "진흥기업2우B",
+      "market": "KOSPI",
+      "parent_name": "진흥기업",
+      "parent_code": "002780",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    },
+    {
+      "code": "032685",
+      "name": "소프트센우",
+      "market": "KOSDAQ",
+      "parent_name": "소프트센",
+      "parent_code": "032680",
+      "reason": "우선주로 추정 — 본주가 이미 유니버스에 있어 배당 데이터가 그 레코드의 dps_cash_preferred 필드에 이미 포함돼 있을 가능성이 높음(2026-08-24 실측 확인)"
+    }
+  ],
+  "count": 110
+}

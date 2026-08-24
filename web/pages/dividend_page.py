@@ -807,10 +807,20 @@ async def _render_body() -> None:
     confirmed, pending = build_entries(records, history_index)
     grouped = group_by_settle_date(confirmed)
 
+    # ── 화면 순서 (2026-08-24 오너 피드백: "열자마자 한숨부터 나온다") ──────
+    #    달력이 이 화면의 본체입니다. 예전에는 달력 앞에 큰 경고 배너 2개(UNIVERSE_NOTICE·
+    #    CALENDAR_DATE_NOTICE)와 0.85rem 회색 문단 3개(YIELD_SOURCE_NOTICE·PREFERRED_NOTICE·
+    #    우선주 건수 줄)가 쌓여 있어, 스크롤을 한참 내려야 달력이 나왔습니다.
+    #    🔴 문구는 **한 글자도 지우지 않았습니다**(§0-1 — 정직성 문구 삭제 금지). 대신
+    #       "언제 읽어야 하는가"로 자리를 나눴습니다:
+    #         · 수치를 보기 전에 반드시 알아야 하는 것 → 위에 그대로 상시 노출
+    #           (데이터 기준 시각 · 요약 카드 · 정합성 경고 · CALENDAR_DATE_NOTICE)
+    #         · 배경 설명(수집 범위·수익률 산정 방식·우선주 표기 규칙·알려진 한계) →
+    #           달력 **아래** 접이식 패널 하나로(`_render_notice_panel`).
+    #    ⚠️ CALENDAR_DATE_NOTICE 만은 예외입니다 — 이 파일 머리말 ① 의 제품 결정대로
+    #       접이식에 넣지 않고 달력 바로 위 상시 배너로 그대로 둡니다.
     _render_data_timestamp(summary)
     _render_summary(summary, confirmed, pending, grouped)
-    _render_known_limitations(summary)
-    _render_raw_downloads()
 
     # ── 상태는 전부 이 함수의 지역 변수입니다 (§0-3-8) ───────────────────
     default_month = busiest_month(grouped)
@@ -876,6 +886,9 @@ async def _render_body() -> None:
 
     ui.separator()
 
+    # ── 배경 설명 · 알려진 한계 · 원본 다운로드 (기본 접힘) ───────────────
+    _render_notice_panel(summary, confirmed, pending)
+
     @ui.refreshable
     def _pending_section() -> None:
         _render_pending(view, _visible_pending(), len(pending),
@@ -886,7 +899,9 @@ async def _render_body() -> None:
 
 
 # =============================================================================
-# 4. 상단 — 데이터 기준 시각 · 요약 · 알려진 한계
+# 4. 데이터 기준 시각 · 요약 카드 · 안내 패널(달력 아래, 접이식) · 원본 다운로드
+#    ⚠️ 그리는 자리는 함수마다 다릅니다 — 기준 시각/요약은 달력 **위**, 안내 패널과
+#       다운로드는 달력 **아래**입니다. 순서의 단일 출처는 `_render_body()` 입니다.
 # =============================================================================
 def _render_data_timestamp(summary) -> None:
     """§0-3-1 — "실시간"이라는 말을 쓰지 않고 **수집 시각**을 그대로 밝힙니다."""
@@ -906,9 +921,15 @@ def _render_data_timestamp(summary) -> None:
 
 
 def _render_summary(summary, confirmed, pending, grouped) -> None:
-    """유니버스 정직성 고지 + 요약 카드 5장 (§0-1)."""
-    warning_banner(UNIVERSE_NOTICE)
+    """요약 카드 5장 + 수치가 어긋날 때의 정합성 경고 (§0-1).
 
+    2026-08-24 — 예전에는 이 함수가 맨 앞에서 `warning_banner(UNIVERSE_NOTICE)` 를 띄우고
+    맨 뒤에서 `YIELD_SOURCE_NOTICE` · `PREFERRED_NOTICE` · 우선주 건수 줄까지 그렸습니다.
+    그 넷은 **문구 그대로** `_render_notice_panel()`(달력 아래 접이식)로 옮겼습니다 —
+    삭제가 아니라 이동입니다(§0-1 정직성 문구 삭제 금지).
+    반대로 아래 두 경고는 "이 화면의 숫자가 서로 안 맞는다"는 **지금 보고 있는 수치에 대한
+    경고**라 접으면 안 됩니다. 요약 카드 바로 아래 상시 노출로 남깁니다.
+    """
     with ui.row().classes('w-full gap-3 items-stretch'):
         for label, value, note in summary_cards(summary, len(confirmed), len(pending)):
             metric_card(label, value, note)
@@ -931,40 +952,72 @@ def _render_summary(summary, confirmed, pending, grouped) -> None:
             '사라진 것이 아니라 놓을 날짜가 없는 것입니다.'
         )
 
-    ui.label(YIELD_SOURCE_NOTICE).classes('vh-muted vh-keep-all whitespace-pre-line')
 
-    # 🟣 우선주 배당 안내 — **요약 카드 아래**에 둡니다(알려진 한계 섹션이 아니라).
-    #    바로 위 `_render_known_limitations()` 는 `summary.known_limitations` 를 **수집기 원문
-    #    그대로** 싣는 자리라, 우리가 쓴 화면 설명 문장을 섞으면 어디까지가 수집기 말인지
-    #    구분이 사라집니다. 반대로 이 자리는 이미 우리가 쓴 설명(`YIELD_SOURCE_NOTICE`)이
-    #    사는 곳이고, 수치를 보기 **전에** 읽어야 오해가 안 생기는 종류의 안내입니다.
-    ui.label(PREFERRED_NOTICE).classes('vh-muted vh-keep-all whitespace-pre-line')
+def _render_notice_panel(summary, confirmed, pending) -> None:
+    """달력 아래 접이식 패널 하나 — 배경 설명 · 알려진 한계 · 원본 다운로드.
 
-    shown = count_with_preferred(confirmed)
-    preferred_only = count_with_preferred(pending)
-    preferred_line = (
-        f'🟣 이번 수집에서 우선주 현금배당이 함께 확인된 확정 종목: {shown:,}건 '
-        f'(확정 {len(confirmed):,}건 중) — 달력에서 날짜를 누르면 나오는 표의 '
-        '"주당 현금배당금"·"배당수익률" 칸 아래에 우선주 줄이 함께 붙습니다.'
-    )
-    if preferred_only:
-        preferred_line += (
-            f' · 그 밖에 {preferred_only:,}건은 2026년 우선주 배당만 확인되고 보통주 배당은 아직 '
-            '확정되지 않아, 아래 "미확정" 목록에 그대로 있습니다 — 확정 판정 기준은 예전과 같이 '
-            '보통주이며, 우선주 값이 있다고 확정으로 올리지 않았습니다.'
+    2026-08-24 (오너 피드백: "정보량이 너무 많아서 열자마자 한숨부터 나온다") — 예전에는
+    아래 문구들이 전부 **달력 앞에** 색깔 배너·회색 문단으로 흩어져 있었습니다. 문구는
+    한 글자도 지우지 않고(§0-1), "지금 보이는 수치를 오해하지 않기 위해 먼저 읽어야 하는
+    것"만 위에 남기고 배경 설명은 여기 한 곳으로 모았습니다.
+
+    🔴 `default-opened` 를 **일부러 주지 않습니다** — 기본은 접힘입니다(이 프로젝트의 다른
+       `ui.expansion` 사용례와 같은 규칙). 문구가 사라진 것이 아니라 한 번 눌러 펼치는
+       자리로 옮겨졌을 뿐이며, 열자마자 눈에 들어와야 하는 CALENDAR_DATE_NOTICE 는
+       이 패널에 **넣지 않고** 달력 바로 위 상시 배너로 그대로 둡니다(머리말 ①).
+
+    글자 크기: 예전 `.vh-muted`(0.85rem · #94a3b8)는 "작고 흐려 읽기 피곤하다"는 지적을
+    받아 이 패널 안에서만 `.vh-notice-text`(0.95rem · #cbd5e1 · line-height 1.8)로 바꿉니다.
+    `.vh-muted` 자체는 다른 화면이 함께 쓰므로 건드리지 않았습니다(§0-3-10).
+    """
+    with ui.expansion(
+        '📋 데이터 안내 및 알려진 한계 — 수집 범위 · 배당수익률 산정 방식 · '
+        '우선주 표시 방식 (누르면 펼치기)'
+    ).classes('w-full vh-card'):
+        # 🔴 유니버스 정직성 고지 — "전체 상장사"라고 말하지 않습니다(머리말 ②).
+        ui.label(UNIVERSE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+        ui.label(YIELD_SOURCE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+
+        # 🟣 우선주 배당 안내 — 아래 `_render_known_limitations()` 가 싣는 **수집기 원문**과
+        #    우리가 쓴 화면 설명이 섞여 보이지 않도록, 우리 설명을 먼저 두고 수집기 원문은
+        #    자기 제목(📋 …)을 달고 뒤에 옵니다.
+        ui.label(PREFERRED_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+
+        shown = count_with_preferred(confirmed)
+        preferred_only = count_with_preferred(pending)
+        preferred_line = (
+            f'🟣 이번 수집에서 우선주 현금배당이 함께 확인된 확정 종목: {shown:,}건 '
+            f'(확정 {len(confirmed):,}건 중) — 달력에서 날짜를 누르면 나오는 표의 '
+            '"주당 현금배당금"·"배당수익률" 칸 아래에 우선주 줄이 함께 붙습니다.'
         )
-    ui.label(preferred_line).classes('vh-muted vh-keep-all')
+        if preferred_only:
+            preferred_line += (
+                f' · 그 밖에 {preferred_only:,}건은 2026년 우선주 배당만 확인되고 보통주 배당은 아직 '
+                '확정되지 않아, 아래 "미확정" 목록에 그대로 있습니다 — 확정 판정 기준은 예전과 같이 '
+                '보통주이며, 우선주 값이 있다고 확정으로 올리지 않았습니다.'
+            )
+        ui.label(preferred_line).classes('vh-notice-text vh-keep-all')
+
+        _render_known_limitations(summary)
+
+        ui.separator()
+        _render_raw_downloads()
 
 
 def _render_known_limitations(summary) -> None:
-    """`summary.known_limitations` **원문 그대로**. 요약·의역하지 않습니다(§0-1)."""
+    """`summary.known_limitations` **원문 그대로**. 요약·의역하지 않습니다(§0-1).
+
+    2026-08-24 — 예전에는 이 함수가 스스로 `ui.expansion` 을 하나 더 만들었습니다. 이제는
+    `_render_notice_panel()` 의 접이식 패널 **안에서** 불리므로 접이식을 이중으로 만들지
+    않고 제목 한 줄 + 원문 줄들만 그립니다. `known_limitations` 가 비어 있으면 제목까지
+    통째로 그리지 않는 동작은 예전과 같습니다.
+    """
     limitations = (summary or {}).get('known_limitations') or []
     if not limitations:
         return
-    with ui.expansion(f'📋 이 데이터의 알려진 한계 {len(limitations)}가지 (수집기 원문)') \
-            .classes('w-full vh-card'):
-        for line in limitations:
-            ui.label(str(line)).classes('vh-muted vh-keep-all')
+    ui.markdown(f'**📋 이 데이터의 알려진 한계 {len(limitations)}가지 (수집기 원문)**')
+    for line in limitations:
+        ui.label(str(line)).classes('vh-notice-text vh-keep-all')
 
 
 def _render_raw_downloads() -> None:

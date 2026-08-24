@@ -333,6 +333,17 @@ body.body--dark,
     border: none;
     border-top: 1px solid rgba(148, 163, 184, 0.25);
 }
+
+/* 2026-08-24 (오너 피드백: "/dividend 정보량이 너무 많고 글자가 작다") — 배당 페이지의
+   접이식 안내 문단(UNIVERSE_NOTICE 등)에 쓰던 .vh-muted(0.85rem, #94a3b8)가 너무 작고
+   흐려 읽기 피곤하다는 지적. 이 클래스는 그 안내 문단 전용이며 .vh-muted 자체는 다른
+   화면(pegy·us_stocks·macro 등)이 함께 쓰므로 건드리지 않는다(§0-3-10 공유 컴포넌트
+   주의) — 대신 배당 페이지에서만 쓸 새 클래스를 추가한다. */
+.vh-notice-text {
+    color: #cbd5e1;
+    font-size: 0.95rem;
+    line-height: 1.8;
+}
 """
 
 

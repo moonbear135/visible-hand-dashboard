@@ -1,0 +1,166 @@
+{
+  "metadata": {
+    "generated_at": "2026-08-24",
+    "generated_by": "Claude (Cowork) — data/kr_ticker_master.json + data/dividend_history_kr_2023_2025.json 대조로 생성, 네트워크 요청 0건",
+    "purpose": "전 상장사 유니버스 확장을 위한 \"델타\"(신규) 종목 목록입니다. data/dividend_history_kr_2023_2025.json(2,734종목, 2026년 수집에 이미 쓰인 유니버스)에 없는 kr_ticker_master.json 의 STOCK 타입 종목만 담았습니다. GitHub Actions에서 collector_dividend_kr.py --universe 이 파일 --out-dir (기존과 다른 폴더) 로 실행한 뒤, --merge-delta 로 기존 data/ 결과에 합치는 용도입니다.",
+    "source_files": [
+      "data/kr_ticker_master.json",
+      "data/dividend_history_kr_2023_2025.json"
+    ],
+    "kr_ticker_master_stock_type_count": 2873,
+    "already_covered_count": 2734,
+    "excluded_as_probable_preferred_share_count": 110,
+    "excluded_as_probable_preferred_share_note": [
+      "본주가 이미 유니버스에 있는 우선주로 추정되는 종목은 뺐습니다 — DART 보고서 하나에 보통주·우선주 배당이 같이 실리므로, 본주 레코드의 dps_cash_preferred 필드에 이미 데이터가 있을 가능성이 높습니다(2026-08-24 실측: SK/아모레퍼시픽 등 20건 확인). 이 판단은 종목명 패턴(정규식)에 의한 추정이라 100% 확실하지 않습니다 — 전체 목록은 data/dividend_kr_2026_universe_delta_excluded_preferred.json 에 감사 기록으로 남겨뒀습니다. 애매한 3건(패턴은 우선주 같지만 본주를 이름으로 못 찾은 경우 — 097955 CJ제일제당 우, 007815 코리아써우, 008355 남선알미우)은 확신이 없어 빼지 않고 델타에 그대로 포함했습니다."
+    ],
+    "final_delta_count": 29,
+    "warning": "이 목록의 종목이 DART 고유번호 표에 실제로 있는지, 배당을 실제로 하는지는 이 파일 생성 시점에 확인되지 않았습니다(§0-1) — 실제 수집을 돌려봐야 압니다."
+  },
+  "stocks": [
+    {
+      "code": "088980",
+      "name": "맥쿼리인프라",
+      "market": "KOSPI"
+    },
+    {
+      "code": "395400",
+      "name": "SK리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "415640",
+      "name": "KB발해인프라",
+      "market": "KOSPI"
+    },
+    {
+      "code": "330590",
+      "name": "롯데리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "451800",
+      "name": "한화리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "365550",
+      "name": "ESR켄달스퀘어리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "094800",
+      "name": "맵스리얼티",
+      "market": "KOSPI"
+    },
+    {
+      "code": "293940",
+      "name": "신한알파리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "448730",
+      "name": "삼성FN리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "417310",
+      "name": "코람코더원리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "357120",
+      "name": "코람코라이프인프라리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "334890",
+      "name": "이지스밸류플러스리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "404990",
+      "name": "신한서부티엔디리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "348950",
+      "name": "제이알글로벌리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "0030R0",
+      "name": "대신밸류리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "432320",
+      "name": "KB스타리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "088260",
+      "name": "이리츠코크렙",
+      "market": "KOSPI"
+    },
+    {
+      "code": "377190",
+      "name": "디앤디플랫폼리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "097955",
+      "name": "CJ제일제당 우",
+      "market": "KOSPI"
+    },
+    {
+      "code": "400760",
+      "name": "NH올원리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "350520",
+      "name": "이지스레지던스리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "338100",
+      "name": "NH프라임리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "396690",
+      "name": "미래에셋글로벌리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "007815",
+      "name": "코리아써우",
+      "market": "KOSPI"
+    },
+    {
+      "code": "357250",
+      "name": "미래에셋맵스리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "481850",
+      "name": "신한글로벌액티브리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "145270",
+      "name": "케이탑리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "357430",
+      "name": "마스턴프리미어리츠",
+      "market": "KOSPI"
+    },
+    {
+      "code": "008355",
+      "name": "남선알미우",
+      "market": "KOSPI"
+    }
+  ]
+}
