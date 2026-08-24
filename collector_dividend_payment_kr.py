@@ -100,6 +100,15 @@ list.json(`pblntf_ty="I"`) 3일치 표본에서 "배당"이 들어간 report_nm 
       - 라벨을 다 찾음                             → `parse_status="OK"`
       - 일부 라벨을 못 찾음/값을 해석 못 함        → `"PARTIAL"`
       - 핵심 라벨(배당기준일·배당금지급 예정일자) 둘 다 못 찾음 → `"FAILED"`
+  · 리츠 공시("부동산투자회사 금전배당 결정")는 **표 구조가 다릅니다**(실측 4건 확인).
+      - "배당금지급 예정일자"(일반) ↔ "배당금지급 예정일"(리츠) — 끝 "자" 한 글자 차이라
+        두 표기를 모두 `LABEL_SPECS` 에 두고 같은 필드로 받습니다.
+      - "배당구분"·"배당종류"는 리츠 서식에 **애초에 없는 항목**입니다. `report_prefix` 로
+        리츠임을 알려 주면 이 둘을 `missing_labels` 에 넣지 않습니다("못 찾음"과 "원래
+        없음"은 다른 사실입니다). 값은 여전히 `None` — 지어내지 않습니다.
+      - 실측 4건 모두 지급예정일 값이 "정기주주총회일로부터 1개월 이내" 라는 자유 텍스트라
+        `pay_date_expected` 는 `None` 이고 원문이 `unparsed_values` 에 남습니다(형식을
+        추측해 날짜로 바꾸지 않습니다).
 
 ================================================================================
 📌 산출물 (기존 배당 파일과 이름이 하나도 겹치지 않습니다)
@@ -318,6 +327,13 @@ def classify_report_nm(report_nm):
 # 라벨은 "위치"가 아니라 "키워드"로 찾습니다(§0-1). 아래는
 #   (필드 접두어, 정규화된 라벨 키, 사람이 읽는 라벨명)
 # 이고, 정규화 키는 `_normalize_label()` 을 통과한 형태입니다("6. 배당기준일" → "배당기준일").
+#
+# ⚠️ 한 필드에 항목이 **여러 개** 있을 수 있습니다(같은 항목을 공시 서식마다 다르게 적기
+#    때문). 실측 확인된 것: 일반 공시("현금ㆍ현물배당 결정")는 "7. 배당금지급 예정일자",
+#    리츠 공시("부동산투자회사 금전배당 결정")는 "5. 배당금지급 예정일" — 끝의 "자" 한 글자
+#    차이라 정규화해도 서로 다른 키가 됩니다. 두 표기 모두 같은 `pay_date_expected` 필드로
+#    들어갑니다(라벨 앞 번호는 `_normalize_label()` 이 이미 떼므로 번호 차이는 무관합니다).
+#    첫 항목의 라벨명이 그 필드의 대표 표기입니다(못 찾았을 때 등 대조군이 없을 때 씀).
 LABEL_SPECS = (
     ("dividend_class",        "배당구분",                   "1. 배당구분"),
     ("dividend_type",         "배당종류",                   "2. 배당종류"),
@@ -326,9 +342,18 @@ LABEL_SPECS = (
     ("total_amount",          "배당금총액(원)",             "5. 배당금총액(원)"),
     ("record_date",           "배당기준일",                 "6. 배당기준일"),
     ("pay_date_expected",     "배당금지급예정일자",         "7. 배당금지급 예정일자"),
+    # 리츠 공시 표기("자" 없음) — 실측 4건(롯데리츠·SK리츠·코람코더원리츠·NH올원리츠) 확인.
+    ("pay_date_expected",     "배당금지급예정일",           "5. 배당금지급 예정일"),
     ("board_resolution_date", "이사회결의일(결정일)",       "10. 이사회결의일(결정일)"),
     ("notes",                 "기타투자판단과관련한중요사항", "11. 기타 투자판단과 관련한 중요사항"),
 )
+
+# 리츠 공시("부동산투자회사 금전배당 결정")에는 **구조적으로 없는** 항목입니다 — 리츠는
+# 부동산투자회사법에 따른 금전배당이라 상법 기반의 "중간/결산 배당구분"·"현금/현물 배당종류"
+# 개념 자체가 서식에 없습니다(실측 4건 전부 없음). 그러므로 이 문서 종류에서 이 라벨이
+# 안 보이는 것은 "파싱 실패"가 아니라 "원래 없는 것"이고, missing_labels 에 넣지 않습니다.
+# ⚠️ 값을 지어내지는 않습니다 — 값은 그대로 None 입니다(§0-1).
+REIT_ABSENT_FIELDS = ("dividend_class", "dividend_type")
 
 # 주식 종류 서브 라벨(rowspan 라벨 옆에 오는 것). 정기보고서 파서의
 # dps_cash_common / dps_cash_preferred 관례를 그대로 따라 common/preferred 로 씁니다.
@@ -551,9 +576,16 @@ def _to_iso_date(text):
     return value
 
 
-def parse_dividend_decision_document(html_text, log=print):
+def parse_dividend_decision_document(html_text, log=print, report_prefix=None):
     """
-    "현금ㆍ현물배당 결정" 원문 HTML 에서 배당 항목을 뽑습니다. **순수 함수(네트워크 없음).**
+    배당결정 공시 원문 HTML 에서 배당 항목을 뽑습니다. **순수 함수(네트워크 없음).**
+
+    report_prefix : 이 공시가 어떤 서식인지(`classify_report_nm()` 의 `matched_prefix`).
+        `REIT_CASH_DIVIDEND_PREFIX` 이면 리츠 서식에 **원래 없는** 항목
+        (`REIT_ABSENT_FIELDS` — 배당구분·배당종류)을 missing_labels 에서 제외합니다.
+        None 이거나 `CASH_PROPERTY_DIVIDEND_PREFIX`(또는 모르는 값)면 종전과 똑같이
+        동작합니다 — 모르는 서식을 리츠라고 넘겨짚지 않습니다(§0-1).
+        ⚠️ 제외해도 값을 채우지는 않습니다. 값은 그대로 None 입니다.
 
     반환 dict (값을 못 찾으면 그 필드는 None 이고 사실이 그대로 남습니다):
         dividend_class, dividend_type,
@@ -576,9 +608,12 @@ def parse_dividend_decision_document(html_text, log=print):
 
     rows = _logical_rows(parser.rows)
 
+    # 한 필드에 라벨 표기가 여러 개일 수 있습니다(위 LABEL_SPECS 주석 참고). 정규화 키는
+    # 표기마다 다르므로 이 dict 는 그대로 유일하고, 어느 표기로 잡히든 같은 field 로 들어갑니다.
     label_by_key = {key: (field, display) for field, key, display in LABEL_SPECS}
     found_values = {}       # field(또는 (field, kind)) → 원문 텍스트
     found_labels = set()    # 라벨 자체를 발견한 field
+    found_displays = {}     # field → 이 문서에서 **실제로** 잡힌 라벨 표기
     parse_notes = []
 
     for row_index, row in enumerate(rows):
@@ -588,6 +623,9 @@ def parse_dividend_decision_document(html_text, log=print):
                 continue
             field, display = spec
             found_labels.add(field)
+            # 별칭이 여러 개인 필드는 "이 문서에 실제로 적혀 있던 표기"를 남깁니다 —
+            # unparsed_values 에 남길 때 문서에 없는 라벨명을 적지 않기 위함입니다.
+            found_displays.setdefault(field, display)
             rest = row[cell_index + 1:]
 
             # ① 보통주식/종류주식으로 갈리는 항목 (rowspan 라벨)
@@ -651,7 +689,12 @@ def parse_dividend_decision_document(html_text, log=print):
             unparsed.append({"label": f"{display}({kind})", "raw": raw})
         return value
 
-    display_of = {field: display for field, _key, display in LABEL_SPECS}
+    # 대표 표기(LABEL_SPECS 의 첫 항목)를 기본값으로 두고, 문서에서 실제로 잡힌 표기가
+    # 있으면 그것을 씁니다. 별칭이 없는 필드는 종전과 완전히 동일합니다.
+    display_of = {}
+    for field, _key, display in LABEL_SPECS:
+        display_of.setdefault(field, display)
+    display_of.update(found_displays)
 
     parsed = {
         "dividend_class": _take("dividend_class"),
@@ -671,8 +714,15 @@ def parse_dividend_decision_document(html_text, log=print):
         "notes": _take("notes"),
     }
 
+    # 이 서식에는 원래 없는 항목 → "못 찾았다"고 보고하지 않습니다(리츠만 해당).
+    # 모르는 report_prefix 는 아무것도 면제하지 않습니다(넘겨짚지 않기, §0-1).
+    absent_by_form = (frozenset(REIT_ABSENT_FIELDS)
+                      if report_prefix == REIT_CASH_DIVIDEND_PREFIX else frozenset())
+
+    # 한 필드에 별칭이 여러 개면, 어느 쪽으로든 잡혔을 때 그 필드의 항목은 전부 빠집니다
+    # (`found_labels` 가 field 단위이므로 자동으로 그렇게 됩니다).
     missing_labels = [display for field, _key, display in LABEL_SPECS
-                      if field not in found_labels]
+                      if field not in found_labels and field not in absent_by_form]
 
     if all(field not in found_labels for field in CORE_FIELDS):
         status = PARSE_FAILED
@@ -1669,7 +1719,10 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
             "document_html": html_text,
         })
 
-        parsed = parse_dividend_decision_document(html_text, log=log)
+        # matched_prefix 는 fetch_dividend_decision_disclosures() 가 classify_report_nm()
+        # 판정 그대로 이벤트에 넣어 둔 값입니다(리츠 서식이면 REIT_CASH_DIVIDEND_PREFIX).
+        parsed = parse_dividend_decision_document(
+            html_text, log=log, report_prefix=item.get("matched_prefix"))
         record = build_payment_event_record(item, parsed)
         new_records.append(record)
 

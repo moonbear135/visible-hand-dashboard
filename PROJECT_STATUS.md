@@ -427,6 +427,68 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-25 — 리츠(REIT) 배당 지급일정 파싱 구멍 수리 완료 + 실측 4건 재검증, 배송 완료.**
+  바로 위 항목(리츠 파싱 구멍 실측 확인)에서 이어짐. 오너가 조사용 워크플로우를 실행해
+  준 실제 4건(SK리츠·코람코더원리츠·롯데리츠·NH올원리츠) 원문 로그를 그대로 픽스처
+  파일로 저장(`tests/fixtures/dividend_payment_decision_{sk,koramco_one,lotte,nh_allone}
+  _reit_*.html`, 실측 그대로 — 지어내지 않음, §0-1)해 두고 오푸스로 근본원인 조사·수정을
+  위임, **작업 완료 후 제가 직접 코드·픽스처·테스트를 전부 재확인**(기존 검증 습관 유지 —
+  오푸스 자기보고를 그대로 믿지 않음).
+  **근본원인 (실제 4건 원문 대조로 확인, 짐작 아님):**
+  1) 리츠 서식("부동산투자회사금전배당결정")에는 **"배당구분"·"배당종류" 항목이 원래
+     없습니다**(4건 전부 없음 확인) — 일반 서식(1.배당구분·2.배당종류·…)과 항목 자체가
+     다른 구조라, 리츠에서 이 라벨이 안 보이는 건 "파싱 실패"가 아니라 "원래 없는
+     것"입니다.
+  2) 진짜 문자 불일치는 딱 하나 — 지급예정일 라벨이 리츠 서식에선 **"5. 배당금지급
+     예정일"**(끝에 "자" 없음)인데, 기존 파서는 일반 서식 표기 **"7. 배당금지급
+     예정일자"**("자" 있음)만 알고 있었습니다. 글자 하나 차이로 못 찾았던 것.
+  3) 참고로 4건 전부 이 항목의 실제 값은 **"정기주주총회일로부터 1개월 이내"**(날짜가
+     아닌 자유 텍스트)라, 라벨을 찾아도 ISO 날짜로는 못 바꿉니다 — 다만 이제는
+     "라벨을 아예 못 찾음"(`missing_labels`)이 아니라 "라벨은 찾았는데 값이 날짜가
+     아님"(`unparsed_values`)으로 더 정확하게 분류됩니다(§0-1 — 모르는 걸 안다고 안 함).
+  **수정 내용** (`collector_dividend_payment_kr.py`):
+  - `LABEL_SPECS`에 `pay_date_expected` 필드의 리츠 표기("배당금지급예정일", "자" 없음)를
+    별칭으로 추가 — 한 필드에 서식별 표기가 여러 개 있을 수 있게.
+  - `REIT_ABSENT_FIELDS = ("dividend_class", "dividend_type")` 신설 — 리츠 서식에
+    구조적으로 없는 항목 목록.
+  - `parse_dividend_decision_document()`에 `report_prefix=None` 매개변수 추가.
+    `REIT_CASH_DIVIDEND_PREFIX`일 때만 위 두 항목을 `missing_labels`에서 뺍니다(값은
+    여전히 `None`— 지어내지 않음). `report_prefix`가 `None`이거나 모르는 값이면 리츠로
+    넘겨짚지 않고 종전과 100% 동일하게 동작(§0-1).
+  - 호출부(`_collect_payment_events_in_range`)에서 이미 이벤트에 실려 있던
+    `matched_prefix`(`classify_report_nm()` 판정값)를 그대로 넘기도록 연결 — 새 API
+    호출·새 데이터 배관 불필요.
+  **제가 직접 재확인한 것** (오푸스 보고를 그대로 믿지 않고):
+  - 코드를 직접 읽어 위 5개 변경이 실제로 있는지, `missing_labels`/`display_of` 로직이
+    설명대로 동작하는지 확인.
+  - `python3 -m py_compile collector_dividend_payment_kr.py` — 클린.
+  - `python3 -m pytest tests/test_dividend_payment_collector.py -q` — **112 통과**(기존
+    86 + 신규 26, 오푸스 보고와 일치).
+  - `python3 -m pytest tests/ -q --ignore=tests/test_web_session_isolation.py` — **379
+    통과**(제외한 그 파일은 다른(기술지표) 세션이 만들고 있는 `scorecard_page.py`/
+    `duel_page.py` 부재로 인한 것으로, 이 작업과 무관 — 이미 알려진 별개 이슈).
+  - 실제 4개 리츠 픽스처를 `report_prefix=REIT_CASH_DIVIDEND_PREFIX`로 직접 파싱해
+    제가 원문에서 눈으로 읽은 값과 대조: SK리츠(기준일 2026-06-30·1주당 68·총액
+    20,469,198,160·시가배당률 1.21·이사회결의일 2026-08-05), 코람코더원리츠(기준일
+    2026-05-31·1주당 114·총액 4,642,202,554·시가배당률 1.1·이사회결의일 2026-08-06),
+    롯데리츠(기준일 2026-10-06·1주당 139·총액 40,166,674,876·시가배당률 3.6·이사회결의일
+    2026-08-13), NH올원리츠(기준일 2026-06-30·1주당 150·총액 8,239,391,250·시가배당률
+    4.9·이사회결의일 2026-08-21) — **4건 전부 `missing_labels=[]`,
+    `unparsed_values=[{"label": "5. 배당금지급 예정일", "raw": "정기주주총회일로부터
+    1개월 이내"}]`, `parse_status=PARTIAL`(정직하게 여전히 미완전 표시)**, 원문 값과
+    정확히 일치.
+  - `report_prefix`를 안 넘겼을 때(=모르는 서식) 같은 리츠 문서를 파싱하면 "배당구분"·
+    "배당종류"가 여전히 `missing_labels`에 남는지 직접 재확인 — 남습니다(넘겨짚지
+    않는 안전장치 정상 작동).
+  - 롯데케미칼(일반 서식) 픽스처를 `report_prefix=CASH_PROPERTY_DIVIDEND_PREFIX`로
+    재파싱 — 기준일 2026-09-03·지급예정일 2026-09-18·배당구분 "중간배당"·배당종류
+    "현금배당"·`parse_status=OK`·`missing_labels=[]`, 프로덕션 로그와 완전히 동일(회귀
+    없음 확인).
+  **변경 파일**: `collector_dividend_payment_kr.py`, `tests/test_dividend_payment_collector.py`,
+  신규 픽스처 4개(`tests/fixtures/dividend_payment_decision_{sk,koramco_one,lotte,
+  nh_allone}_reit_*.html`). 아직 오너 기기로 전달·커밋 전(다음 세션 첫 할 일). 전달 후
+  `probe_reit_disclosure_document.py`/`.yml`은 조사용 1회성 파일이라 커밋 확인되면
+  삭제해도 됩니다(백필 워크플로우와 같은 원칙).
 - **2026-08-25 — 8월 백필 실제 실행 완료(91건 확보) + 리츠 파싱 구멍 실측 확인, 조사 착수.**
   오너가 `backfill_dividend_payment_events_2026_08.yml`을 실제로 수동 실행 →
   **성공**(6분 59초, 접수일 2026-08-01~08-24 구간, 거래소공시 2,999건 중 배당결정
