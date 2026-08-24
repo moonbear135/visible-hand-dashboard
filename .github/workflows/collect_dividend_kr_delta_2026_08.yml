@@ -1,0 +1,122 @@
+# .github/workflows/collect_dividend_kr_delta_2026_08.yml
+# =============================================================================
+# 💰 배당금 모듈 — "전 상장사" 유니버스 델타(29종목, 그중 23개가 리츠) 1회성 수집
+#
+#   왜 있는가:
+#     기존 2026년 배당 수집(`collect_dividend_kr.yml`)은 2023~2025년에 배당 이력이
+#     있던 2,734종목만 대상이었습니다. `data/kr_ticker_master.json`(전 상장 2,873종목)과
+#     대조해 거기 없는 신규 29종목을 `data/dividend_kr_2026_universe_delta.json`으로
+#     미리 뽑아뒀고(2026-08-24), 그중 23개(79%)가 리츠(REITs)입니다 — 기존 유니버스에는
+#     리츠가 단 하나도 없었습니다. 이 워크플로우는 그 29종목만 콕 집어 수집한 뒤,
+#     이미 완성돼 있는 `merge_delta_output()`(`--merge-delta`)으로 기존
+#     `data/dividend_kr_2026_latest.json`에 합칩니다. 종목이 하나라도 겹치면 병합
+#     자체가 거부되므로(§0-1), 기존 2,734종목 결과를 실수로 덮어쓸 위험은 없습니다.
+#
+#   1회성입니다 — 스케줄 없음(workflow_dispatch만). 이 델타를 한 번 병합하고 나면
+#   그 29종목은 이제 병합 이력(`data/dividend_kr_2026_merge_log.json`)에 남고, 다음
+#   정기 실행부터는 유니버스 파일 자체를 바꾸기 전까지는 `collect_dividend_kr.yml`이
+#   계속 기존 2,734종목만 갱신합니다(이번 병합은 "한 번 더해주는" 것이지 유니버스
+#   파일 자체를 영구히 확장하는 것은 아닙니다 — 앞으로 상장하는 종목을 계속 잡으려면
+#   유니버스 파일 교체가 별도로 필요합니다. PROJECT_STATUS.md §11-4 참고).
+#
+#   같은 data/ 를 쓰는 다른 배당 워크플로우와 동시에 못 돌게 concurrency 그룹을
+#   공유합니다(아래 참고).
+#
+#   비밀키: DART_API_KEY (저장소 Settings → Secrets and variables → Actions, 이미 등록됨)
+# =============================================================================
+
+name: Dividend KR Collector (Universe Delta, 2026-08 1회성)
+
+on:
+  workflow_dispatch: {}
+  # 스케줄 없음 — 손으로 한 번만 돌립니다.
+
+permissions:
+  contents: write
+
+# 같은 data/ 를 쓰는 배당 워크플로우들과 이름을 맞춰 동시 실행을 막습니다
+# (collect_dividend_kr.yml 도 정확히 이 이름을 씁니다).
+concurrency:
+  group: dividend-kr-collector
+  cancel-in-progress: false
+
+jobs:
+  collect-and-merge:
+    runs-on: ubuntu-latest
+    # 29종목뿐이라 몇 분이면 끝나지만(기존 2,734종목=4.8시간 기준 비례), 넉넉히 잡습니다.
+    timeout-minutes: 30
+
+    steps:
+      - name: 저장소 체크아웃
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 파이썬 준비
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: ① 델타 29종목만 별도 out-dir 에 수집
+        env:
+          DART_API_KEY: ${{ secrets.DART_API_KEY }}
+        run: |
+          python collector_dividend_kr.py \
+            --universe data/dividend_kr_2026_universe_delta.json \
+            --year 2026 \
+            --out-dir data/dividend_kr_2026_delta_run \
+            --cache-dir data/dividend_kr_2026_delta_run \
+            --owner-order
+
+      - name: ② 델타 결과를 기존 전체 결과에 병합
+        # 위 ① 이 실패했으면(기본값 success()) 이 스텝은 건너뜁니다 — 부분 수집
+        # 결과를 병합하지 않습니다. merge_delta_output() 자체도 검증을 전부 마친
+        # 뒤에야 쓰기 시작하므로(§0-1), 겹침이 있으면 여기서 그냥 실패하고 끝납니다
+        # (기존 data/ 는 전혀 안 건드려집니다).
+        run: |
+          python collector_dividend_kr.py \
+            --merge-delta data/dividend_kr_2026_delta_run \
+            --year 2026 \
+            --out-dir data
+
+      - name: 산출물 커밋
+        # ①이 실패해 ②가 건너뛰어졌다면 아래 git add 는 그냥 "변경 없음"으로
+        # 조용히 끝납니다(커밋 안 함) — 실패를 감추지 않습니다, job 자체는 빨간불로 남음.
+        if: always()
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          for f in \
+            data/dividend_kr_2026_latest.json \
+            data/dividend_kr_2026_raw.jsonl \
+            data/dividend_kr_2026_merge_log.json \
+          ; do
+            if [ -f "$f" ]; then
+              git add "$f"
+            fi
+          done
+
+          if git diff --cached --quiet; then
+            echo "변경 없음 — 커밋하지 않습니다."
+            exit 0
+          fi
+
+          git commit -m "chore(dividend): 전 상장사 유니버스 델타(29종목, 리츠 23개 포함) 병합 [skip ci]"
+
+          for attempt in 1 2 3; do
+            if git push; then
+              echo "push 성공 (시도 $attempt)"
+              exit 0
+            fi
+            echo "push 거절 — fetch 후 rebase 재시도 ($attempt/3)"
+            git fetch origin "${GITHUB_REF_NAME}"
+            git rebase "origin/${GITHUB_REF_NAME}" || exit 1
+          done
+          echo "❌ 3회 시도 후에도 push 하지 못했습니다."
+          exit 1
