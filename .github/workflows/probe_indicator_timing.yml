@@ -1,0 +1,48 @@
+name: (진단 전용) 보조지표 모듈 0단계 실측
+
+# ⚠️ 이건 실전 배치가 아니라 착수 전 1회성 진단용입니다. 자동 스케줄 없음 — 수동 실행만.
+# 데이터를 저장·커밋하지 않고, 결과는 이 실행 로그에만 남습니다.
+# 착수 여부가 결정되면 이 워크플로우는 지워도 됩니다.
+on:
+  workflow_dispatch:
+    inputs:
+      limit:
+        description: '테스트할 종목 수'
+        required: false
+        default: '500'
+      days:
+        description: '요청할 과거 기간(일)'
+        required: false
+        default: '400'
+      delay:
+        description: '종목별 요청 사이 딜레이(초)'
+        required: false
+        default: '0.5'
+
+permissions:
+  contents: read   # 진단 전용이라 쓰기 권한 불필요
+
+jobs:
+  probe:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 저장소 코드 체크아웃
+        uses: actions/checkout@v3
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 필수 의존 라이브러리 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: 0단계 실측 진단 실행
+        env:
+          LIMIT: ${{ inputs.limit }}
+          DAYS: ${{ inputs.days }}
+          DELAY: ${{ inputs.delay }}
+        run: |
+          python probe_indicator_universe_timing.py --limit "$LIMIT" --days "$DAYS" --delay "$DELAY"
