@@ -85,6 +85,7 @@
 """
 
 import calendar as calendar_module
+import os
 from datetime import date
 
 from nicegui import ui
@@ -93,6 +94,7 @@ from web.auth import is_admin
 from web.components import (
     NA_TEXT,
     disclaimer_footer,
+    download_button,
     error_banner,
     esc,
     fmt_num,
@@ -104,12 +106,18 @@ from web.components import (
     warning_banner,
 )
 from web.layout import DIVIDEND_ENABLED, DIVIDEND_MENU_ADMIN_ONLY, layout
-from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS, data_path, load_json_file_async
+from web.state import (
+    PAGE_RESPONSE_TIMEOUT_SECONDS,
+    data_path,
+    load_json_file_async,
+    read_download_bytes,
+)
 
 # =============================================================================
 # 상수 — 전부 문자열/튜플(불변)입니다. 가변 전역(dict/list/set)은 하나도 두지 않습니다(§0-3-8).
 # =============================================================================
 DATA_FILENAME = 'dividend_kr_2026_latest.json'
+RAW_FILENAME = 'dividend_kr_2026_raw.jsonl'
 HISTORY_FILENAME = 'dividend_history_kr_2023_2025.json'
 
 #: 한 페이지에 그릴 표 행 수(달력 상세·미확정 목록 공통).
@@ -652,6 +660,7 @@ async def _render_body() -> None:
     _render_data_timestamp(summary)
     _render_summary(summary, confirmed, pending, grouped)
     _render_known_limitations(summary)
+    _render_raw_downloads()
 
     # ── 상태는 전부 이 함수의 지역 변수입니다 (§0-3-8) ───────────────────
     default_month = busiest_month(grouped)
@@ -784,6 +793,48 @@ def _render_known_limitations(summary) -> None:
             .classes('w-full vh-card'):
         for line in limitations:
             ui.label(str(line)).classes('vh-muted vh-keep-all')
+
+
+def _render_raw_downloads() -> None:
+    """원본(raw)·가공·기준선 파일 전부 다운로드 가능하게 합니다.
+
+    `DIVIDEND_MODULE_WORK_ORDER.md` §3 "§0-3-3 raw/가공 분리" 표가 지적한 미충족 절반
+    ("raw·가공 둘 다 사용자 다운로드 가능")을 채웁니다. 화면이 이미 읽은 파일을 그대로
+    내보낼 뿐 새로 가공하지 않습니다 — 화면에 보이는 값과 다운로드 파일이 어긋날 일이
+    없습니다. 종목 하나만 골라 받는 도구는 이 지시서에 없어(오너 확인, 2026-08-24)
+    **넣지 않았습니다** — 전부(raw + 가공 + 기준선) 파일째 받는 것만 지원합니다.
+    """
+    today = date.today().strftime('%Y%m%d')
+    latest_path = data_path(DATA_FILENAME)
+    raw_path = data_path(RAW_FILENAME)
+    history_path = data_path(HISTORY_FILENAME)
+
+    with ui.row().classes('w-full gap-3 items-center flex-wrap'):
+        ui.label('📥 데이터 다운로드:').classes('vh-muted font-bold')
+        if os.path.exists(latest_path):
+            download_button(
+                '2026년 수집 결과 (가공, JSON)',
+                f'dividend_kr_2026_latest_{today}.json',
+                lambda: read_download_bytes(latest_path),
+                media_type='application/json',
+                failure_text='2026년 수집 결과 파일을 읽지 못했습니다.',
+            )
+        if os.path.exists(raw_path):
+            download_button(
+                '2026년 수집 원본 (raw, JSONL)',
+                f'dividend_kr_2026_raw_{today}.jsonl',
+                lambda: read_download_bytes(raw_path),
+                media_type='application/x-ndjson',
+                failure_text='2026년 원본 파일을 읽지 못했습니다.',
+            )
+        if os.path.exists(history_path):
+            download_button(
+                '2023~2025년 배당 기준선 (JSON)',
+                f'dividend_history_kr_2023_2025_{today}.json',
+                lambda: read_download_bytes(history_path),
+                media_type='application/json',
+                failure_text='기준선 파일을 읽지 못했습니다.',
+            )
 
 
 # =============================================================================
