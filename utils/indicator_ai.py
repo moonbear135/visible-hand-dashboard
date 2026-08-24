@@ -39,7 +39,14 @@ from utils.scorecard_db import ScorecardError, create_supabase_client
 # 단일 출처(§0-3-10) — 테이블 이름이 여기와 SQL 두 곳에서 어긋나면 조용히 실패하므로,
 # SQL 쪽 주석에도 이 이름을 그대로 적어 짝을 맞춰 둡니다.
 TABLE = 'indicator_ai_commentary'
-MODEL_NAME = 'gemini-2.5-flash'  # macro_ai.py 와 같은 저비용 고효율 모델(§0-3-10 관례 재사용)
+# ⚠️ 2026-08-25 — 'gemini-2.5-flash'(macro_ai.py 가 쓰던 모델)로 실서비스에서 호출했더니
+#    Render 로그에 404 NOT_FOUND: "This model models/gemini-2.5-flash is no longer
+#    available to new users. Please update your code to use models/gemini-3.6-flash" 가
+#    떴습니다 — 이 프로젝트가 API 키를 새로 발급/등록한 시점 기준으로 "신규 사용자"로
+#    분류돼 구모델이 아예 막힌 것으로 보입니다. 구글이 로그에서 직접 알려준 대체 모델로
+#    교체합니다. (macro_ai.py 는 이 커밋의 범위 밖이라 그대로 두었습니다 — 거기도 같은
+#    오류가 날 수 있으니 오너에게 별도로 확인을 요청했습니다.)
+MODEL_NAME = 'gemini-3.6-flash'
 
 # §5-1 — AI 응답에 이 표현이 하나라도 섞여 있으면 해설을 버립니다(지어낸 투자 조언 방지).
 # 프롬프트에도 같은 금지 목록의 취지를 명시하지만, "프롬프트로 지시했으니 안전하다"고
