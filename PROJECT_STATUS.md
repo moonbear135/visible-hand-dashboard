@@ -243,6 +243,38 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
      403/429 처리·중복제거·교체/추가/raw append-only/원자적 쓰기/감사로그·CLI 배선까지).
      `probe_dart_disclosure_list.py`와 짝 워크플로우는 "확인 끝나면 지우는" 임시
      스크립트 관례대로 이제 삭제해도 됩니다.
+   - 🟢 **배당 "지급일정"(진짜 배당기준일·지급예정일자) 수집 — 백엔드 완료, 화면 노출은
+     아직 (2026-08-25, 오푸스 높음).** 오너가 DART에서 롯데케미칼 "현금ㆍ현물배당결정"
+     공시(수시공시, 배당기준일·지급예정일자 있음)를 직접 발견 — 지금까지의 배당 데이터
+     (정기보고서 기반)에는 이 날짜 정보가 원천적으로 없다는 게 재확인됐습니다. **완전히
+     새로운 독립 파이프라인**으로 만들었습니다(오너 지시: "유지보수, 데이터가 섞이지 않게").
+     기존 `collector_dividend_kr.py`·`corp_code_mapper.py`·`web/pages/dividend_page.py`·
+     `tests/test_dividend_collector.py`·기존 워크플로우 2개는 **한 줄도 안 건드림**(md5
+     동일 확인). **실측 확인**(오너가 GitHub Actions로 직접 실행): DART 공식 개발가이드
+     검색 결과 이 수시공시(`pblntf_ty="I"` 거래소공시)의 배당기준일·지급일자를 구조화된
+     필드로 주는 API가 DART에 없음을 먼저 확인 → 유일한 방법인 원본문서(`document.xml`)를
+     실제로 받아 열어보니 **깔끔한 라벨식 HTML 표**(zip 안에 xml 파일 1개, "6. 배당기준일"
+     "7. 배당금지급 예정일자" 등 번호 매겨진 라벨+값 구조)였음 — 파싱 가능 확인. 3일치
+     표본으로 report_nm 표기 6종 카탈로그화("현금ㆍ현물배당결정"/리츠 전용
+     "부동산투자회사금전배당결정"/"[기재정정]"/"(자회사의 주요경영사항)" 부수공시/제외
+     대상인 "…주주명부폐쇄(기준일)결정"). 신규 `collector_dividend_payment_kr.py`(독립
+     파일, `--universe` 없음 — 유니버스 밖 신규 배당회사도 이 경로로 잡히는 게 설계
+     의도) — `classify_report_nm()`(실측 6종 표본 밖은 전부 `UNRECOGNIZED_REPORT_TYPE`으로
+     남기고 추측 안 함) · `parse_dividend_decision_document()`(rowspan 인지 HTML 파서,
+     보통주식/종류주식 분리) · `run_watch_payment_events()`(rcept_no 기준 append-only,
+     실패한 공시가 있으면 그 날 **전날까지만** 상태 전진 — 성공분 재수집 없이 실패분만
+     재시도). 산출물은 기존 배당 파일과 이름이 전혀 안 겹침 — `dividend_kr_2026_payment_
+     events.json`/`..._raw.jsonl`/`data/cache/..._payment_state.json`. 신규 워크플로우
+     `watch_dividend_payment_events.yml`(매일 KST 05:30 — 기존 05:00 워크플로우와 30분
+     띄움, 같은 `concurrency` 그룹 공유). 파서 정확도는 실제 롯데케미칼 원문(전체 그대로
+     `tests/fixtures/`에 저장)으로 **직접 재실행해 검증** — 1주당 배당금 500원, 배당기준일
+     2026-09-03, 지급예정일자 2026-09-18, 배당금총액 21,074,903,000원 등 오너가 화면에서
+     읽은 값과 정확히 일치. 테스트 신규 70개 전부 통과(기존 267개 회귀 없음, 합계 337개).
+     ⚠️ **아직 화면(`/dividend`)에 이 데이터를 보여주지 않습니다** — 이번 스코프는 수집·
+     저장까지이고, 화면 노출은 다음 작업입니다. 리츠 전용 표기("부동산투자회사금전배당결정")
+     는 report_nm 인식만 실측됐고 그 문서의 실제 표 라벨 구조는 아직 확인 전입니다(코드에
+     그렇게 명시돼 있음 — 첫 실제 실행에서 파싱 실패로 나오면 그때 라벨을 추가로 확인해야
+     함).
    - 🟡 **화면(`/dividend`) 정보 밀도 재구성 — 완료, 오너 재확인 대기 (2026-08-24).**
      Render 실배포 후 오너가 "정보량이 너무 많다, 달력이 먼저 보이는 단순한 구조를
      원했다"고 피드백. 문구는 한 글자도 안 지우고 배경 설명을 달력 아래 접이식 패널로
@@ -320,6 +352,8 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `corp_code_mapper.py` | (2026-08-23 신설) 종목코드(6자리) ↔ DART 고유번호(`corp_code` 8자리) 매핑. `corpCode.xml` ZIP 을 받아 `data/cache/` 에 캐시 |
 | `.github/workflows/collect_dividend_kr.yml` | (2026-08-23 신설) 💰 **배당 수집 워크플로우.** DART 정기보고서는 1년에 4번만 갱신되므로 원칙은 수동(`workflow_dispatch`) — 2026-08-25부터 분기 마감일 8-cron 안전망 추가(§0 참고). 5시간 예산에서 스스로 멈추고 체크포인트를 남김(job timeout 340분) |
 | `.github/workflows/watch_dividend_disclosures.yml` | (2026-08-25 신설) 💰 **배당 일일 공시감시 워크플로우.** DART `list.json`(공시검색)으로 매일 KST 05:00 "새로 정기보고서 낸 회사"만 가볍게 확인 후 그 회사만 재수집·반영(`--watch-disclosures`). `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유(동시 쓰기 방지), 반영 실패 시 상태파일을 커밋하지 않음(§0-1) |
+| `collector_dividend_payment_kr.py` | (2026-08-25 신설) 💰 **배당 지급일정 수집기(완전히 독립된 새 파이프라인).** 기존 배당 수집기와 데이터·파일이 전혀 안 겹침. DART 수시공시("현금ㆍ현물배당결정" 등, `pblntf_ty="I"`)의 원본문서(`document.xml`)를 받아 **진짜 배당기준일·배당금지급 예정일자**를 파싱 → `data/dividend_kr_2026_payment_events.json`(append-only). `--universe` 없음(유니버스 밖 신규 배당회사도 잡힘) |
+| `.github/workflows/watch_dividend_payment_events.yml` | (2026-08-25 신설) 💰 **배당 지급일정 감시 워크플로우.** 매일 KST 05:30(기존 05:00 워크플로우와 30분 띄움) 자동 실행, 세 배당 워크플로우 전부 같은 `concurrency` 그룹 공유 |
 | `web/pages/dividend_page.py` | (2026-08-24 신설) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py` |
 | `market_history.csv` | 날짜별 종합 위험 점수 이력 |
 | `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json` | 종목별 최신 데이터 + **시장 전체** 요약 이력 (⚠️ `*summary_history.json` 은 중앙값 요약이지 종목별 이력이 아닙니다 — 종목별 이력은 2026-08-09 신설된 `*_stock_history.csv`) |
@@ -360,6 +394,17 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-25 — 배당 "지급일정"(진짜 배당기준일·지급예정일자) 수집 백엔드 완료(오푸스
+  높음).** 오너가 DART에서 직접 발견한 "현금ㆍ현물배당결정" 수시공시(정기보고서 기반
+  기존 데이터에는 없는 진짜 날짜 정보)를 완전히 독립된 새 파이프라인으로 수집하기
+  시작. §0-1 실측(오너가 GitHub Actions로 직접 확인) — 구조화 API는 없고 원본문서
+  (`document.xml`)를 받아야 하는데, 실제로 열어보니 깔끔한 라벨식 HTML 표라 파싱
+  가능함을 확인. 3일치 표본으로 report_nm 6종 카탈로그화 후 오푸스 서브에이전트로
+  `collector_dividend_payment_kr.py`(신규 독립 파일) + 테스트 70개 +
+  `watch_dividend_payment_events.yml`(매일 KST 05:30) 제작 — 기존 배당 파일 6개는 md5
+  동일 확인(0줄 변경). 실제 롯데케미칼 원문으로 파서를 직접 재실행해 오너가 화면에서
+  읽은 값(500원/2026-09-03/2026-09-18 등)과 정확히 일치함을 재검증. 상세는 §0 위 항목
+  참고. ⚠️ 화면 노출은 다음 작업 — 이번엔 수집·저장까지만.
 - **2026-08-25 — 배당금 "매일 공시감시(daily watch)" 완료(오푸스 높음, §0-1 실측 확인
   선행).** 오너 요청("매일매일 올라와있는 공시자료를 꾸준하게 본다거나…")으로 시작.
   이 세션이 opendart.fss.or.kr에 직접 못 붙는 샌드박스 제약 때문에, 조사용 스크립트
