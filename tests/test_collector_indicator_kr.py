@@ -8,12 +8,15 @@ FDR 실제 호출(fetch_and_calculate)은 네트워크가 필요해 여기서 �
 실행: python -m pytest tests/test_collector_indicator_kr.py -v
 """
 
+import csv
 import json
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+import collector_indicator_kr
+from utils import stock_history
 from collector_indicator_kr import (
     build_history_row,
     cross_check_last_close,
@@ -166,3 +169,110 @@ def test_get_price_list_generated_date_corrupt_file_returns_none(tmp_path):
     p = tmp_path / "corrupt.json"
     p.write_text("not json", encoding="utf-8")
     assert get_price_list_generated_date(str(p)) is None
+
+
+# ---------------------------------------------------------------------------
+# run() 전체 흐름 — FDR 호출만 가짜로 바꾸고 나머지는 실제 코드 경로를 그대로 태웁니다.
+#
+# ⚠️ 2026-08-25 실제 GitHub Actions 첫 실행에서 이 경로(이력 기록 직후 결과 출력)가
+#    KeyError('reason')로 죽었습니다 — append_daily_history()가 돌려주는 dict에 없는
+#    키를 읽으려 한 실수였는데, 오프라인 테스트가 build_history_row()까지만 확인하고
+#    run() 전체를 통째로 실행해보지는 않아서 못 잡았습니다. 이 테스트는 그 구멍을
+#    메우는 회귀테스트입니다 — 같은 종류의 "함수가 실제로 돌려주는 값과 다른 키를
+#    읽는" 실수를 다음엔 로컬에서 pytest만 돌려도 바로 잡히게 합니다.
+# ---------------------------------------------------------------------------
+
+def _fake_fetch_and_calculate(code, days=None):
+    """FDR 네트워크 호출 없이, 종목코드마다 살짝 다른 값의 '산출 가능' 결과를 돌려줍니다."""
+    rsi = {"available": True, "bars_used": 60, "warmup_insufficient": False, "rsi": 55.0, "signal": "neutral", "reason": None}
+    macd = {"available": True, "bars_used": 60, "warmup_insufficient": False, "macd": 10.0, "signal_line": 8.0, "histogram": 2.0, "cross": None, "reason": None}
+    bb = {"available": True, "bars_used": 60, "warmup_insufficient": False, "upper": 11000.0, "lower": 9000.0, "mid": 10000.0, "percent_b": 0.5, "position": "inside", "reason": None}
+    verdict = {"score": 0, "label": "중립", "contributing": [], "skipped": []}
+    return rsi, macd, bb, verdict, 10000.0
+
+
+def test_run_end_to_end_with_mocked_fetch_writes_history_and_snapshot(tmp_path, monkeypatch):
+    price_path = tmp_path / "kr_all_market_prices.json"
+    ticker_path = tmp_path / "kr_ticker_master.json"
+    universe_path = tmp_path / "indicator_universe_kr.json"
+    latest_path = tmp_path / "indicator_kr_latest.json"
+    history_path = tmp_path / "indicator_kr_history.csv"
+
+    price_path.write_text(json.dumps({
+        "metadata": {"generated_at": "2026-08-25 17:00"},
+        "stocks": [
+            {"code": "A1", "name": "가짜전자", "price": 10000.0},
+            {"code": "A2", "name": "가짜하이닉스", "price": 20000.0},
+        ],
+    }), encoding="utf-8")
+    ticker_path.write_text(json.dumps({
+        "stocks": [{"code": "A1", "type": "STOCK"}, {"code": "A2", "type": "STOCK"}],
+    }), encoding="utf-8")
+
+    monkeypatch.setattr(collector_indicator_kr, "PRICE_LIST_PATH", str(price_path))
+    monkeypatch.setattr(collector_indicator_kr, "TICKER_MASTER_PATH", str(ticker_path))
+    monkeypatch.setattr(collector_indicator_kr, "UNIVERSE_PATH", str(universe_path))
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH", str(latest_path))
+    monkeypatch.setattr(collector_indicator_kr, "fetch_and_calculate", _fake_fetch_and_calculate)
+    monkeypatch.setattr(stock_history, "stock_history_path", lambda filename: str(history_path))
+    # today_str이 price_path의 generated_at(2026-08-25)과 어긋나 신선도 경고가 뜨지 않도록
+    monkeypatch.setattr(collector_indicator_kr, "_now_kst",
+                         lambda: __import__("datetime").datetime(2026, 8, 25, 17, 10))
+
+    collector_indicator_kr.run(limit=2, days=400, delay=0)  # delay=0: 테스트가 느려지지 않게
+
+    assert history_path.exists()
+    with open(history_path, encoding="utf-8-sig", newline="") as f:
+        rows = list(csv.DictReader(f))
+    assert len(rows) == 2
+    assert {r["code"] for r in rows} == {"A1", "A2"}
+    assert rows[0]["date"] == "2026-08-25"
+    assert rows[0]["rsi"] == "55.0"
+
+    assert latest_path.exists()
+    snapshot = json.loads(latest_path.read_text(encoding="utf-8"))
+    assert snapshot["success_count"] == 2
+    assert snapshot["failed_count"] == 0
+    assert len(snapshot["stocks"]) == 2
+
+    assert universe_path.exists()
+    universe = json.loads(universe_path.read_text(encoding="utf-8"))
+    assert set(universe["members"].keys()) == {"A1", "A2"}
+
+
+def test_run_continues_when_one_stock_fetch_fails(tmp_path, monkeypatch):
+    """§5-3: 종목 하나 실패해도 나머지는 정상 기록되어야 합니다."""
+    price_path = tmp_path / "kr_all_market_prices.json"
+    ticker_path = tmp_path / "kr_ticker_master.json"
+    universe_path = tmp_path / "indicator_universe_kr.json"
+    latest_path = tmp_path / "indicator_kr_latest.json"
+    history_path = tmp_path / "indicator_kr_history.csv"
+
+    price_path.write_text(json.dumps({
+        "metadata": {"generated_at": "2026-08-25 17:00"},
+        "stocks": [{"code": "GOOD", "name": "정상"}, {"code": "BAD", "name": "실패"}],
+    }), encoding="utf-8")
+    ticker_path.write_text(json.dumps({
+        "stocks": [{"code": "GOOD", "type": "STOCK"}, {"code": "BAD", "type": "STOCK"}],
+    }), encoding="utf-8")
+
+    def flaky_fetch(code, days=None):
+        if code == "BAD":
+            raise RuntimeError("가짜 네트워크 실패")
+        return _fake_fetch_and_calculate(code, days)
+
+    monkeypatch.setattr(collector_indicator_kr, "PRICE_LIST_PATH", str(price_path))
+    monkeypatch.setattr(collector_indicator_kr, "TICKER_MASTER_PATH", str(ticker_path))
+    monkeypatch.setattr(collector_indicator_kr, "UNIVERSE_PATH", str(universe_path))
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH", str(latest_path))
+    monkeypatch.setattr(collector_indicator_kr, "fetch_and_calculate", flaky_fetch)
+    monkeypatch.setattr(stock_history, "stock_history_path", lambda filename: str(history_path))
+    monkeypatch.setattr(collector_indicator_kr, "_now_kst",
+                         lambda: __import__("datetime").datetime(2026, 8, 25, 17, 10))
+
+    collector_indicator_kr.run(limit=2, days=400, delay=0)
+
+    snapshot = json.loads(latest_path.read_text(encoding="utf-8"))
+    assert snapshot["success_count"] == 1
+    assert snapshot["failed_count"] == 1
+    assert {s["code"] for s in snapshot["stocks"]} == {"GOOD"}

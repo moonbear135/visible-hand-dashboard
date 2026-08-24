@@ -60,13 +60,18 @@ TICKER_MASTER_PATH = _data_path("kr_ticker_master.json")
 # =============================================================================
 # 1. 입력 로드
 # =============================================================================
-def load_price_entries_and_names(path=PRICE_LIST_PATH):
+def load_price_entries_and_names(path=None):
     """
     반환: (price_entries, name_map)
       price_entries: kr_all_market_prices.json 의 stocks 배열(시가총액 순서 보존)
       name_map: {code: name}
     파일이 없거나 깨졌으면 빈 값 반환(지어내지 않음) — 호출부가 "오늘 스킵"을 판단합니다.
     """
+    # ⚠️ path=PRICE_LIST_PATH를 기본값으로 두면 함수 정의 시점에 값이 고정되어버려
+    #    (파이썬 mutable-default-argument 함정) 나중에 모듈 전역을 바꿔도(테스트의
+    #    monkeypatch 등) 반영되지 않습니다 — 그래서 None으로 받고 여기서 매번 새로 읽습니다.
+    if path is None:
+        path = PRICE_LIST_PATH
     if not os.path.exists(path):
         return [], {}
     try:
@@ -80,7 +85,7 @@ def load_price_entries_and_names(path=PRICE_LIST_PATH):
     return stocks, name_map
 
 
-def get_price_list_generated_date(path=PRICE_LIST_PATH):
+def get_price_list_generated_date(path=None):
     """
     data/kr_all_market_prices.json 의 metadata.generated_at 앞 10글자(YYYY-MM-DD)만
     돌려줍니다. 오늘 날짜와 다르면 유니버스 후보 목록이 며칠 지난 것일 수 있다는 뜻이라
@@ -88,6 +93,8 @@ def get_price_list_generated_date(path=PRICE_LIST_PATH):
     받으므로 이 파일이 며칠 지나도 안전하고, 영향은 분기 리밸런싱 후보 목록의 신선도뿐).
     못 읽으면 None(경고를 못 찍을 뿐, 별도 에러로 취급하지 않음).
     """
+    if path is None:
+        path = PRICE_LIST_PATH
     if not os.path.exists(path):
         return None
     try:
@@ -99,8 +106,10 @@ def get_price_list_generated_date(path=PRICE_LIST_PATH):
         return None
 
 
-def load_ticker_types(path=TICKER_MASTER_PATH):
+def load_ticker_types(path=None):
     """반환: {code: "STOCK"|"ETF"|...}. 파일이 없으면 빈 dict(→ 전부 걸러짐, 안전한 쪽으로)."""
+    if path is None:
+        path = TICKER_MASTER_PATH
     if not os.path.exists(path):
         return {}
     try:
@@ -112,7 +121,9 @@ def load_ticker_types(path=TICKER_MASTER_PATH):
     return {s["code"]: s.get("type") for s in data.get("stocks", []) if s.get("code")}
 
 
-def load_universe(path=UNIVERSE_PATH):
+def load_universe(path=None):
+    if path is None:
+        path = UNIVERSE_PATH
     if not os.path.exists(path):
         return {"last_rebalance_date": None, "members": {}}
     try:
@@ -123,7 +134,9 @@ def load_universe(path=UNIVERSE_PATH):
         return {"last_rebalance_date": None, "members": {}}
 
 
-def save_universe(universe, path=UNIVERSE_PATH):
+def save_universe(universe, path=None):
+    if path is None:
+        path = UNIVERSE_PATH
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(universe, f, ensure_ascii=False, indent=2)
@@ -282,7 +295,12 @@ def run(limit=500, days=INDICATOR_FETCH_DAYS, delay=INDICATOR_REQUEST_DELAY_SECO
     result = stock_history.append_daily_history(
         history_path, rows, today_str, stock_history.INDICATOR_HISTORY_FIELDS
     )
-    print(f"  이력 기록: {result['reason']}")
+    # ⚠️ append_daily_history()는 {"row_count","replaced","total_rows"}만 돌려줍니다
+    #    ("reason" 키는 record_daily_history()에만 있음 — 2026-08-25 실제 실행에서
+    #    KeyError로 잡힌 버그, §5-4 스파게티 코드 방지 원칙대로 여기서 바로 고침).
+    replaced_note = f" (같은 날짜 기존 {result['replaced']}행 교체)" if result["replaced"] else ""
+    print(f"  이력 기록: {today_str} 기준 {result['row_count']}종목 기록{replaced_note} "
+          f"/ 파일 총 {result['total_rows']}행")
 
     with open(LATEST_SNAPSHOT_PATH, "w", encoding="utf-8") as f:
         json.dump({
