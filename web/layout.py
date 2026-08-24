@@ -177,7 +177,10 @@ DIVIDEND_MENU_ADMIN_ONLY = True
 INDICATOR_ENABLED = (os.environ.get("INDICATOR_ENABLED") or "").strip().lower() == "true"
 
 #: 2단계(관리자 전용) ↔ 3단계(전체 공개)를 가르는 **단 하나의 불리언**.
-INDICATOR_MENU_ADMIN_ONLY = True
+#: ✅ 2026-08-25 — 오너가 관리자 화면으로 3~4단계(카드·배지·전일비교·AI 해설)까지 전부
+#:    실기기로 확인 완료 후 "공개하자"고 확정. 3단계(전체 공개)로 전환합니다
+#:    (TECHNICAL_INDICATOR_WORK_ORDER.md §7 로드맵 5단계 완료).
+INDICATOR_MENU_ADMIN_ONLY = False
 
 # (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
 # 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.
