@@ -2153,3 +2153,198 @@ def test_cli_merge_failure_exits_nonzero_without_traceback(tmp_path, capsys):
     out = capsys.readouterr().out
     assert "병합하지 않았습니다" in out
     assert "Traceback" not in out
+
+
+# =============================================================================
+# 13. 기존 산출물 덮어쓰기 방지 (run_collection 의 allow_overwrite 가드)
+#
+# 배경: run_collection() 은 마지막에 {out_dir}/dividend_kr_{year}_latest.json 을 통째로
+#       새로 씁니다. 실서비스 data/ 를 --out-dir 로 준 채 작은 델타 유니버스로 한 번 더
+#       돌리면 기존 2,700여 건이 조용히 사라지고 새 실행의 몇 건만 남습니다
+#       (merge_delta_output() 이 반대 방향에서 막던 바로 그 사고).
+#
+# 이어하기와 다른 실행을 가르는 신호 = **체크포인트에 적힌 run_key**.
+#   · 같은 run_key  → 같은 실행을 이어서/다시 도는 것 → 가드 없음(기존 동작 그대로).
+#   · 없음/깨짐/다름 → 이 산출물을 만든 실행이라고 확인할 수 없음 → 요청 0건으로 중단.
+#
+# 여기 테스트가 못 박는 것:
+#   · **막힌 실행은 단 한 바이트도 쓰지 않고, 요청도 한 건 나가지 않는다.**
+#   · 진짜 이어하기(같은 run_key)는 이 변경으로 조금도 달라지지 않는다(하위호환 회귀).
+# =============================================================================
+def _forbid_all_network(monkeypatch):
+    """
+    DART 로 나가는 모든 통로(alotMatter JSON · corpCode ZIP)를 '부르면 실패'로 막습니다.
+    가드가 **요청을 한 건이라도 쓰기 전에** 멈추는지 확인하는 용도입니다.
+    """
+    def boom(*a, **kw):
+        raise AssertionError("가드가 막았어야 할 실행에서 DART 요청이 나갔습니다")
+
+    monkeypatch.setattr(cdk, "_http_get_json", boom)
+    monkeypatch.setattr(ccm, "_http_get_bytes", boom)
+
+
+def _guard_paths(tmp_path, year="2026"):
+    """가드가 지켜야 할 파일 3종의 경로(가공본 · raw · 체크포인트)."""
+    return [str(tmp_path / f"dividend_kr_{year}_latest.json"),
+            str(tmp_path / f"dividend_kr_{year}_raw.jsonl"),
+            str(tmp_path / f"dividend_kr_{year}_checkpoint.json")]
+
+
+@pytest.mark.parametrize("allow_overwrite", [False, True])
+def test_run_collection_first_run_into_a_fresh_dir_is_never_guarded(
+        tmp_path, faked_network, allow_overwrite):
+    """
+    산출물이 아직 없으면 덮어쓸 것도 없습니다 — allow_overwrite 와 무관하게 그냥 돌아야 합니다.
+    (가드가 '처음 수집'까지 막으면 그게 더 큰 사고입니다.)
+    """
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+
+    _, summary = cdk.run_collection(cdk.load_universe(str(uni)), "2026", str(tmp_path),
+                                    allow_overwrite=allow_overwrite, log=lambda *a: None)
+
+    assert summary["completed"] is True
+    assert summary["by_status"] == {"OK": 2}
+    assert (tmp_path / "dividend_kr_2026_latest.json").exists()
+
+
+def test_run_collection_genuine_resume_is_not_guarded(tmp_path, faked_network, monkeypatch):
+    """
+    ⭐ 하위호환 회귀. 실운영 워크플로는 --allow-overwrite 를 **모릅니다**: 같은 유니버스로
+    같은 data/ 에 이어 돌 뿐입니다. 1차 실행이 남긴 latest.json 이 있어도, run_key 가 같은
+    이어하기라면 가드가 걸리지 않고 예전과 똑같이 이어받아야 합니다.
+    """
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930", "000660"]), encoding="utf-8")
+    universe = cdk.load_universe(str(uni))
+
+    _, first = cdk.run_collection(universe, "2026", str(tmp_path),
+                                  max_requests=4, log=lambda *a: None)
+    assert first["completed"] is False
+    # 1차 실행이 이미 산출물과 체크포인트를 남겼습니다 — 2차 실행이 마주칠 상황.
+    assert (tmp_path / "dividend_kr_2026_latest.json").exists()
+    assert (tmp_path / "dividend_kr_2026_checkpoint.json").exists()
+
+    calls = _counting_alot_calls(monkeypatch)
+    _, second = cdk.run_collection(universe, "2026", str(tmp_path),      # allow_overwrite 기본 False
+                                   max_requests=100, log=lambda *a: None)
+
+    assert second["completed"] is True
+    assert second["by_status"] == {"OK": 2}
+    # 남은 1종목 × 4단계 = 4건. 가드 도입 전과 완전히 같은 숫자입니다.
+    assert calls["n"] == 4
+    assert second["requests_used"] == 8
+
+
+def test_run_collection_refuses_to_overwrite_another_runs_output(tmp_path, monkeypatch):
+    """
+    ⭐ 이 변경의 핵심 회귀 테스트.
+    체크포인트가 아예 없는 디렉터리에 남의 산출물만 있는 상황(= 예전 실행이 전수 완료돼
+    체크포인트가 지워진 실서비스 data/ 가 딱 이 모양입니다)에서 새 실행을 걸면,
+    **요청 0건 · 디스크 0바이트 변경**으로 멈춰야 합니다.
+    """
+    _write_run_output(tmp_path,
+                      [_merge_fake_record("005930"), _merge_fake_record("000660")],
+                      raw_entries=[_merge_raw_entry("005930"), _merge_raw_entry("000660")])
+    assert not (tmp_path / "dividend_kr_2026_checkpoint.json").exists()
+
+    monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
+    monkeypatch.setattr(cdk, "polite_sleep", lambda rng=None: 0.0)
+    _forbid_all_network(monkeypatch)
+
+    before = _snapshot(*_guard_paths(tmp_path))
+    with pytest.raises(cdk.DartFatalError) as excinfo:
+        cdk.run_collection(["123456"], "2026", str(tmp_path), log=lambda *a: None)
+    after = _snapshot(*_guard_paths(tmp_path))
+
+    msg = str(excinfo.value)
+    assert "dividend_kr_2026_latest.json" in msg          # 어떤 파일이 걸렸는지
+    assert "--allow-overwrite" in msg                     # 정말 덮어쓰려면 어떻게 하는지
+    assert "--merge-delta" in msg                         # 델타라면 어떻게 해야 하는지
+    assert "덮어써" in msg
+    # 한 바이트도 건드리지 않았어야 합니다(가장 중요한 단언).
+    assert after == before
+    assert after[_guard_paths(tmp_path)[0]] is not None    # 기존 파일은 그대로 남아 있고
+    assert after[_guard_paths(tmp_path)[2]] is None        # 체크포인트를 새로 만들지도 않았습니다
+
+
+def test_run_collection_refuses_when_checkpoint_belongs_to_other_parameters(
+        tmp_path, monkeypatch):
+    """
+    체크포인트가 있어도 **다른 실행조건**(여기서는 유니버스 크기가 다름)이면 이어하기가
+    아닙니다 — 처음부터 도는 다른 실행이므로 똑같이 막아야 합니다.
+    """
+    _write_run_output(tmp_path, [_merge_fake_record("005930")])
+    other_key = cdk.build_run_key("2026", 2734, cdk.REPRT_CODE_PRIORITY)
+    cdk.save_checkpoint(str(tmp_path / "dividend_kr_2026_checkpoint.json"),
+                        other_key, [], ["005930"], 4)
+
+    monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
+    _forbid_all_network(monkeypatch)
+
+    before = _snapshot(*_guard_paths(tmp_path))
+    with pytest.raises(cdk.DartFatalError) as excinfo:
+        cdk.run_collection(["123456"], "2026", str(tmp_path), log=lambda *a: None)
+
+    assert other_key in str(excinfo.value)       # 어느 실행의 체크포인트였는지 그대로 보여 줍니다
+    assert _snapshot(*_guard_paths(tmp_path)) == before
+
+
+def test_run_collection_overwrites_when_the_operator_asks_for_it(tmp_path, faked_network):
+    """
+    allow_overwrite=True 는 '알고 덮어쓴다'는 명시적 선택입니다 — 막지 않고 진행해야 합니다.
+    (이 경우 기존 레코드가 사라지는 것은 사고가 아니라 요청한 결과입니다.)
+    """
+    _write_run_output(tmp_path, [_merge_fake_record("123456")])
+
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    _, summary = cdk.run_collection(cdk.load_universe(str(uni)), "2026", str(tmp_path),
+                                    allow_overwrite=True, log=lambda *a: None)
+
+    assert summary["completed"] is True
+    saved = json.loads((tmp_path / "dividend_kr_2026_latest.json").read_text(encoding="utf-8"))
+    assert [r["stock_code"] for r in saved["records"]] == ["005930"]     # 새 실행 결과로 교체됨
+
+
+# ── CLI 배선 ────────────────────────────────────────────────────────────────
+def test_cli_allow_overwrite_is_optional_and_defaults_to_false(tmp_path, monkeypatch):
+    """
+    기존 워크플로 YAML 은 이 플래그를 모릅니다 — 빠지면 False 로 run_collection 에 가야 합니다.
+    (run_collection 을 가짜로 갈아끼워 argparse 배선만 확인합니다)
+    """
+    seen = {}
+
+    def fake_run(universe, year, out_dir, **kwargs):
+        seen.update(kwargs)
+        return [], {}
+
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+    monkeypatch.setattr(cdk, "run_collection", fake_run)
+
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 0
+    assert seen["allow_overwrite"] is False
+
+    seen.clear()
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path), "--allow-overwrite"]) == 0
+    assert seen["allow_overwrite"] is True
+
+
+def test_cli_overwrite_guard_exits_nonzero_without_traceback(tmp_path, capsys, monkeypatch):
+    """§0-3-4: 가드에 막힌 실행도 트레이스백이 아니라 사람이 읽을 문장 + 종료코드 2 로 끝납니다."""
+    _write_run_output(tmp_path, [_merge_fake_record("005930")])
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["123456"]), encoding="utf-8")
+
+    monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
+    _forbid_all_network(monkeypatch)
+
+    assert cdk.main(["--universe", str(uni), "--year", "2026",
+                     "--out-dir", str(tmp_path)]) == 2
+    out = capsys.readouterr().out
+    assert "수집을 중단했습니다" in out
+    assert "--allow-overwrite" in out
+    assert "Traceback" not in out

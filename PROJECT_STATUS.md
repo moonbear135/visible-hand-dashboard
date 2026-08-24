@@ -196,13 +196,23 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
      `--merge-delta`/`--force-merge` CLI, 오푸스 높음으로 신설, 테스트 25개 포함)는
      이번에 완성**했습니다 — 병합 시 종목코드 중복이면 무조건 거부(§0-1), 같은 델타를
      두 번 합치면 매니페스트로 걸러냄, 실패 시 원본 파일은 절대 부분쓰기 안 함까지 검증
-     완료. 남은 건 ① 79종목 처리 방침(우선주 코드 형식 수용 여부는 오너 승인 필요)과
-     ② 실제 델타 수집 실행(오너가 GitHub Actions로 트리거) 뿐입니다.
+     완료. 델타 수집을 별도 `--out-dir`로 돌릴 때 실수로 기존 완주본 위에 바로 덮어쓰는
+     사고도 별도 가드(`--allow-overwrite` 없으면 거부, 아래 항목)로 막아뒀습니다. 남은 건
+     ① 79종목 처리 방침(우선주 코드 형식 수용 여부는 오너 승인 필요)과 ② 실제 델타 수집
+     실행(오너가 GitHub Actions로 트리거) 뿐입니다.
    - ✅ **체크포인트 이어하기 날짜 버그 — 완료(2026-08-24, 오푸스 높음).**
      `run_key`에서 실행 날짜를 뺐습니다(`build_run_key()`로 분리) — 하루 넘겨 재실행해도
      이제 체크포인트를 버리지 않고 이어받습니다. 대신 `load_checkpoint()`에
      `max_age_days=14`(기본값) 신선도 검사를 추가해, 정말 오래된(2주 초과) 체크포인트는
      여전히 "다른 실행"으로 간주해 새로 시작합니다(무한정 옛 상태를 이어받는 사고 방지).
+   - ✅ **기존 산출물 덮어쓰기 방지 가드 — 완료(2026-08-24, 오푸스 높음).** 델타 병합 도구
+     작업 중 발견된 반대 방향 구멍 — `latest.json`이 이미 있는데 체크포인트가 없거나
+     다른 실행조건이면 `run_collection()`이 그냥 덮어썼습니다. `--allow-overwrite` 없이는
+     거부하도록 막았고(진짜 이어하기는 영향 없음), 이 프로젝트 자체 워크플로우
+     (`.github/workflows/collect_dividend_kr.yml`)는 완주 때마다 체크포인트를 지우는
+     구조라 다음 분기 갱신이 이 가드에 막힐 뻔한 것도 같이 발견해 워크플로우에
+     `--allow-overwrite`를 추가로 반영했습니다(안전 — 이 워크플로우는 항상 같은
+     out-dir·universe만 쓰도록 고정돼 있어 가드가 막으려는 사고 자체가 날 수 없음).
    - ✅ **§0-3-3 — 완료(2026-08-24).** raw/가공 분리 ✅, 사용자 다운로드 ✅
      (`web/pages/dividend_page.py`, `4b8f000`), **2개 출처 교차검증도 ✅ 신설**
      (`build_kind_baseline_index()`/`check_cross_source()`, DART 응답에 공짜로 오는
@@ -302,6 +312,20 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-24 (한 번 더 이어서)** — 델타 병합 도구 작업 중 발견된 구멍 하나를 오푸스
+  높음으로 마저 메움: `run_collection()`이 기존 `latest.json`이 있는데도(체크포인트가
+  없거나 다른 실행조건이면) 그냥 덮어써버리는 경로가 있었음 — `merge_delta_output()`이
+  막는 "델타 결과를 잘못 합치는" 사고와는 반대 방향의, "애초에 다른 실행이 기존 완주본
+  위에 그냥 덮어써버리는" 사고. `peek_checkpoint_run_key()` + `--allow-overwrite` 플래그로
+  가드 신설(§0-1 — 조용히 덮어쓰지 않고 멈춤) — 진짜 이어하기(같은 run_key)는 전혀
+  영향 없음, 뮤테이션 테스트로 가드가 실제로 작동하는지까지 확인(테스트 148 → **156개
+  전부 통과**). ⚠️ 부작용 하나 발견해서 같이 고침: 이 워크플로우는 완주할 때마다
+  체크포인트를 지우므로, 다음 분기 갱신 때 파라미터가 완전히 같아도 "체크포인트가 없다"는
+  이유만으로 새 가드에 막힐 뻔했음 — `.github/workflows/collect_dividend_kr.yml`에
+  `--allow-overwrite`를 추가해 해결(이 워크플로우는 항상 같은 out-dir·같은 universe
+  파일만 쓰도록 하드코딩돼 있어 가드가 막으려는 사고 자체가 날 수 없는 구조라 안전).
+  `collector_dividend_kr.py`·`tests/test_dividend_collector.py`·
+  `.github/workflows/collect_dividend_kr.yml` 3개 파일만 수정.
 - **2026-08-24 (더 이어서)** — 배당금 모듈 "기초 작업" 3건을 오푸스 높음 서브에이전트 2건으로
   처리: ① 체크포인트 `run_key` 날짜 버그 수정(`build_run_key()`로 날짜 제거 +
   `load_checkpoint(max_age_days=14)` 신선도 검사 추가) — 하루 넘겨 재실행해도 이제
@@ -913,7 +937,7 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
 |---|---|
 | `collector_dividend_kr.py` | DART `alotMatter.json` 기반 수집기 본체. 보고서 우선순위 탐색·`se` 라벨 키워드 파싱·체크포인트·예산 종료·raw 분리 저장 |
 | `corp_code_mapper.py` | 종목코드 ↔ DART `corp_code` 매핑 (+ `corpCode.xml` ZIP 캐시) |
-| `tests/test_dividend_collector.py` | 오프라인 검증 **148개**(69 → §2-4 단위검증 +12 → 교차검증·체크포인트 +42 → 델타 병합 +25, 2026-08-24). 네트워크는 `monkeypatch` 로 갈아끼워 실제 소켓을 열지 않음. 픽스처는 삼성전자 실제 응답 원문 |
+| `tests/test_dividend_collector.py` | 오프라인 검증 **156개**(69 → §2-4 단위검증 +12 → 교차검증·체크포인트 +42 → 델타 병합 +25 → 덮어쓰기 방지 가드 +8, 2026-08-24). 네트워크는 `monkeypatch` 로 갈아끼워 실제 소켓을 열지 않음. 픽스처는 삼성전자 실제 응답 원문 |
 | `.github/workflows/collect_dividend_kr.yml` | 수동 실행 워크플로우 (수집 → `data/` 커밋·푸시). 워크플로우 입력값은 `env:`로 받아 셸 인젝션 방어(2026-08-24 외부 검토 반영) |
 | `data/dividend_kr_2026_latest.json` | 가공본 + `summary` 리포트 (실측 6.8MB) |
 | `data/dividend_kr_2026_raw.jsonl` | DART 원본 응답 그대로 (§0-3-3, append-only, 실측 9.4MB) |
@@ -964,6 +988,12 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
    `run_key`에서 실행 날짜를 빼고(`build_run_key()`로 분리) 대신 `load_checkpoint()`에
    `max_age_days=14`(기본값) 신선도 검사를 추가했습니다 — 하루 넘겨 재실행해도 정상
    이어받고, 2주 넘게 방치된 체크포인트만 "다른 실행"으로 간주해 새로 시작합니다.
+2-1. ✅ **기존 산출물 덮어쓰기 방지 가드 — 완료(2026-08-24, 오푸스 높음).** 반대 방향
+   구멍 — `latest.json`이 이미 있는데 체크포인트가 없거나 다른 실행조건이면 그냥
+   덮어쓰던 것을 `--allow-overwrite` 없이는 거부하도록 막음(진짜 이어하기는 무관).
+   부작용으로 이 모듈 자체 워크플로우(완주 때마다 체크포인트를 지움)가 다음 분기 갱신
+   때 막힐 뻔한 것도 함께 발견해 `.github/workflows/collect_dividend_kr.yml`에
+   `--allow-overwrite`를 반영(안전 — 이 워크플로우는 항상 같은 out-dir·universe만 씀).
 3. ✅ **§0-3-3 — 완료(2026-08-24).** raw/가공 분리 ✅, 사용자 다운로드 ✅(`4b8f000`),
    **2개 출처 교차검증도 신설**(`build_kind_baseline_index()`/`check_cross_source()`,
    `--history-baseline` 옵트인 플래그, 기존 워크플로우는 안 건드림). DART 응답에 공짜로

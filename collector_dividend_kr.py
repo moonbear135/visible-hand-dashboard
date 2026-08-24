@@ -1285,6 +1285,30 @@ def _checkpoint_age_days(saved_at):
         return None
 
 
+def peek_checkpoint_run_key(path):
+    """
+    체크포인트 파일에 **적혀 있는 run_key 만** 살짝 들여다봅니다. 파일이 없거나 읽지 못하면 None.
+
+    `load_checkpoint()` 과 묻는 질문이 다릅니다 — 섞지 않으려고 함수를 따로 둡니다.
+      · `load_checkpoint()` : "지금 이어할 수 있는 상태인가?"
+        (조건 일치 + **신선도**까지 봐서, 오래된 체크포인트는 조건이 같아도 버립니다)
+      · 이 함수            : "디스크에 남은 체크포인트가 **같은 실행조건의 것인가**?"
+        (신선도는 보지 않습니다 — 조건이 같으면 오래됐더라도 '같은 실행을 다시 도는 것'이지
+         '다른 실행이 남의 산출물을 덮어쓰는 것'은 아니기 때문입니다.)
+
+    후자는 `run_collection()` 의 덮어쓰기 방지 가드가 씁니다. `load_checkpoint()` 의
+    반환 형태·계약은 **건드리지 않습니다**(기존 호출부·테스트가 그대로 돌아야 합니다).
+    """
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        return data.get("run_key")
+    except Exception:
+        # 파일이 없거나 깨졌으면 "같은 실행조건임을 확인할 수 없음" = None.
+        # (§0-1: 확인 못 한 것을 '같다'고 넘겨짚지 않습니다 — 가드 입장에선 위험 쪽입니다.)
+        return None
+
+
 def save_checkpoint(path, run_key, records, done_codes, request_count):
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
@@ -1412,7 +1436,8 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
                    max_requests=DEFAULT_MAX_REQUESTS, max_runtime_sec=DEFAULT_MAX_RUNTIME_SEC,
                    corpcode_max_age_days=7, force_corpcode_refresh=False,
                    limit=None, log=print, history_baseline_path=None,
-                   checkpoint_max_age_days=DEFAULT_CHECKPOINT_MAX_AGE_DAYS):
+                   checkpoint_max_age_days=DEFAULT_CHECKPOINT_MAX_AGE_DAYS,
+                   allow_overwrite=False):
     """
     전 종목 배당 수집. 산출물:
       {out_dir}/dividend_kr_{year}_latest.json   가공본 + 리포트
@@ -1427,6 +1452,10 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
            해달라고 명시한 사람에게 "검증 안 된 결과"를 검증된 것처럼 돌려주면 §0-1 위반입니다.
 
     checkpoint_max_age_days : 체크포인트 신선도 기준(기본 14일). `load_checkpoint()` 참고.
+
+    allow_overwrite : out_dir 에 **다른 실행의** 산출물이 이미 있어도 덮어쓰기를 허용할지.
+        기본 False — 이어하기(같은 실행조건)가 아닌데 기존 `..._latest.json` 이 있으면
+        요청을 한 건도 쓰지 않고 `DartFatalError` 로 멈춥니다. 아래 '⓪-2' 참고.
 
     반환: (records, summary)
     """
@@ -1478,6 +1507,40 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             f"({history_baseline_path}) — DART 의 전기·전전기 값과 대조해 불일치만 "
             "`cross_source_notes` 로 기록합니다(값은 고치지 않습니다).")
 
+    # ── ⓪-2 기존 산출물 덮어쓰기 방지 (§0-1) ─────────────────────────────────
+    # 배경: 이 함수는 마지막에 {out_dir}/dividend_kr_{year}_latest.json 을 **통째로**
+    #       새로 씁니다. 그래서 실서비스 data/ 를 --out-dir 로 준 채 작은 델타 유니버스로
+    #       한 번 더 돌리면, 기존 2,700여 건이 조용히 사라지고 새 실행의 몇 건만 남습니다.
+    #       (merge_delta_output() 이 반대 방향에서 막던 바로 그 사고입니다.)
+    #
+    # "이어하기"와 "다른 실행"을 가르는 신호는 체크포인트의 run_key 하나면 충분합니다.
+    #   · 체크포인트의 run_key == 지금 run_key → 같은 사업연도·같은 유니버스 크기·같은
+    #     보고서 우선순위, 즉 **같은 실행을 이어서/다시** 도는 것 → 막지 않습니다.
+    #     (신선도는 여기서 보지 않습니다. 오래된 체크포인트는 load_checkpoint() 가
+    #      '이어받지 않고 처음부터'로 처리하지만, 그것도 여전히 같은 실행조건이라
+    #      자기 산출물을 자기가 다시 쓰는 것뿐입니다.)
+    #   · 체크포인트가 없거나 · 깨졌거나 · run_key 가 다르면 → 지금 실행이 저 파일을 만든
+    #     실행이라고 **확인할 수 없습니다**. 확인 못 한 것을 괜찮다고 넘겨짚지 않습니다(§0-1).
+    #
+    # ⚠️ 이 검사는 **요청을 한 건이라도 쓰기 전**(corp_code 다운로드보다도 먼저)에 합니다.
+    run_key = build_run_key(bsns_year, len(universe), effective_priority)
+    ckpt_path = os.path.join(cache_dir, f"dividend_kr_{bsns_year}_checkpoint.json")
+    out_path = os.path.join(out_dir, f"dividend_kr_{bsns_year}_latest.json")
+    if os.path.exists(out_path) and not allow_overwrite:
+        existing_run_key = peek_checkpoint_run_key(ckpt_path)
+        if existing_run_key != run_key:
+            raise DartFatalError(
+                f"이미 다른 실행의 산출물이 있습니다: {out_path}\n"
+                f"   이번 실행조건: {run_key}\n"
+                f"   체크포인트({ckpt_path})의 실행조건: "
+                f"{existing_run_key if existing_run_key is not None else '없음(체크포인트 파일이 없거나 읽을 수 없음)'}\n"
+                "   → 이어하기가 아니라 **처음부터 도는 다른 실행**이므로, 이대로 두면 위 파일을 "
+                "통째로 덮어써 기존 결과가 사라집니다.\n"
+                "   · 정말 덮어써도 되는 실행이면 --allow-overwrite (함수 인자: "
+                "allow_overwrite=True) 를 주세요. (예: 잃어도 되는 소규모 시험 유니버스 재수집)\n"
+                "   · 나중에 합칠 델타 수집이라면 --out-dir 을 **다른 디렉터리**로 주고, "
+                "끝난 뒤 --merge-delta 로 합치세요.")
+
     # ── ① corp_code 매핑 ────────────────────────────────────────────────────
     log("① DART 고유번호(corp_code) 매핑표 준비")
     cache_path = os.path.join(cache_dir, "dart_corpcode_cache.json")
@@ -1494,8 +1557,7 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
     # ⚠️ run_key 에 실행 날짜를 넣지 않습니다 — 넣으면 다음 날 이어할 때 체크포인트가
     #    통째로 버려져 수천 건을 다시 요청하게 됩니다(§0-3-2). 대신 신선도는
     #    checkpoint_max_age_days 로 봅니다. 자세한 사정은 build_run_key() 주석 참고.
-    run_key = build_run_key(bsns_year, len(universe), effective_priority)
-    ckpt_path = os.path.join(cache_dir, f"dividend_kr_{bsns_year}_checkpoint.json")
+    #    (run_key / ckpt_path 는 위 ⓪-2 에서 이미 만들었습니다 — 같은 값을 씁니다.)
     raw_path = os.path.join(out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
     ckpt = load_checkpoint(ckpt_path, run_key, max_age_days=checkpoint_max_age_days)
     records = list(ckpt["records"])
@@ -1588,7 +1650,7 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             "첫 GitHub Actions 실행 로그로 반드시 확인하세요."),
     })
 
-    out_path = os.path.join(out_dir, f"dividend_kr_{bsns_year}_latest.json")
+    # out_path 는 ⓪-2(덮어쓰기 가드)에서 이미 만들어 둔 그 경로입니다.
     tmp = f"{out_path}.tmp"
     with open(tmp, "w", encoding="utf-8") as f:
         json.dump({"summary": summary, "records": records}, f, ensure_ascii=False, indent=2)
@@ -1924,6 +1986,12 @@ def main(argv=None):
                         help=f"이 일수보다 오래된 체크포인트는 이어받지 않습니다"
                              f"(기본 {DEFAULT_CHECKPOINT_MAX_AGE_DAYS}일). 실행이 며칠에 걸쳐 "
                              "중단·재개돼도 이어지도록 run_key 에는 날짜를 넣지 않습니다.")
+    parser.add_argument("--allow-overwrite", action="store_true",
+                        help="--out-dir 에 **다른 실행조건의** 산출물(dividend_kr_YYYY_latest.json)이 "
+                             "이미 있어도 덮어쓰기를 허용합니다. 기본은 막습니다 — 실서비스 data/ 를 "
+                             "작은 델타 유니버스로 다시 돌려 기존 결과를 통째로 날리는 사고를 "
+                             "방지하기 위한 것입니다. 이어하기(같은 실행조건)는 이 옵션 없이도 "
+                             "그대로 됩니다.")
     parser.add_argument("--merge-delta", default=None, metavar="DELTA_OUT_DIR",
                         help="[병합 모드] 델타 수집(신규 종목만 별도 out_dir 로 돌린 실행)의 "
                              "산출물 디렉터리. 지정하면 수집을 하지 않고 그 결과를 "
@@ -1961,7 +2029,8 @@ def main(argv=None):
             max_requests=args.max_requests, max_runtime_sec=args.max_runtime_sec,
             force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit,
             history_baseline_path=args.history_baseline,
-            checkpoint_max_age_days=args.checkpoint_max_age_days)
+            checkpoint_max_age_days=args.checkpoint_max_age_days,
+            allow_overwrite=args.allow_overwrite)
     except (DartFatalError, DartCorpCodeError) as e:
         # §0-3-4: 스택트레이스를 그대로 뿌리지 않고 사람이 읽을 문장으로 끝냅니다.
         # (⚠️ 그래도 '조용히 성공'하지는 않습니다 — 종료코드 2 로 Actions 를 빨간불로 만듭니다.)

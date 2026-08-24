@@ -105,7 +105,7 @@ jobs:
           MAX_RUNTIME_MINUTES: ${{ github.event.inputs.max_runtime_minutes }}
           LIMIT: ${{ github.event.inputs.limit }}
         run: |
-          ARGS="--universe data/dividend_history_kr_2023_2025.json --year 2026 --out-dir data --cache-dir data/cache"
+          ARGS="--universe data/dividend_history_kr_2023_2025.json --year 2026 --out-dir data  --cache-dir data/cache --allow-overwrite"
           if [ "${OWNER_ORDER:-}" != "false" ]; then
             ARGS="$ARGS --owner-order"
           fi
