@@ -32,6 +32,9 @@ import web.theme
 #                                 순위표 열람, SCORECARD_LEADERBOARD_ENABLED · 기본 관리자 전용)
 #   dividend_page  → '/dividend'    (공개 화면 · "투자 감사합니다!" 배당 캘린더,
 #                                    DIVIDEND_ENABLED 로 단계적 공개, 2026-08-24 추가)
+#   indicator_page → '/indicator'   (관리자 전용 시작 · "여기서부터는 신앙입니다" 보조지표
+#                                    RSI/MACD/볼린저밴드, INDICATOR_ENABLED 로 단계적 공개,
+#                                    2026-08-25 추가)
 #
 # (2026-08-23 전환) `duel_consent_page → '/duel/consent'` 와
 #   `duel_leaderboard_page → '/duel/leaderboard'` 두 화면을 **성적표 공개 계층으로 전환**
@@ -46,6 +49,7 @@ from web.pages import (  # noqa: F401
     admin_page,
     dividend_page,
     duel_page,
+    indicator_page,
     macro_page,
     pegy_page,
     report_page,

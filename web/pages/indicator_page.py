@@ -1,0 +1,337 @@
+"""
+web/pages/indicator_page.py
+
+🙏 "여기서부터는 신앙입니다"(7번째 모듈) — RSI·MACD·볼린저밴드 종목별 조회 화면.
+
+작업 지시서: TECHNICAL_INDICATOR_WORK_ORDER.md
+  §1  이름·경고 문구 — 이 화면의 상하단 배너(`STRONG_WARNING_TEXT`)가 그 확정 문구입니다.
+  §4-1 판정은 100% 파이썬 결정론(utils/indicators.py::combine_verdict), AI는 아직 없음
+       (4단계에서 종목별 온디맨드 해설을 추가할 예정 — 이 화면은 그 전 단계입니다).
+  §7  로드맵 "3단계: 화면 구현" — 결정론적 판정 + 3지표 원값 + 경고 배너(상하단) + 다운로드.
+
+이 화면이 읽는 데이터: data/indicator_kr_latest.json (collector_indicator_kr.py 가 매일 갱신).
+다운로드(종목별 날짜 이력)는 `render_stock_download_tool()`(pegy·us_stocks 와 동일한 공용
+도구)을 그대로 재사용합니다 — 새 포맷을 만들지 않습니다(ENGINEERING_SPEC.md §0-3-10).
+
+⚠️ §0-1 — 지표가 산출 불가한 경우 값을 0이나 '중립' 같은 그럴듯한 기본값으로 채우지 않고,
+   `unavailable_reasons`(수집기가 남긴 사유)를 그대로 보여줍니다.
+"""
+
+from nicegui import ui
+
+from utils.constants import DERIVED_INDICATOR_BADGE
+from utils.stock_history import (
+    INDICATOR_HISTORY_FIELDS,
+    INDICATOR_HISTORY_FILENAME,
+    INDICATOR_KEY_FIELD,
+)
+
+from web.auth import is_admin
+from web.components import (
+    disclaimer_footer,
+    error_banner,
+    esc,
+    fmt_num,
+    info_banner,
+    render_stock_download_tool,
+    warning_banner,
+)
+from web.components.html import compact
+from web.layout import INDICATOR_ENABLED, INDICATOR_MENU_ADMIN_ONLY, layout
+from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS, data_path, load_json_file_async
+
+# =============================================================================
+# 상수
+# =============================================================================
+LATEST_FILENAME = 'indicator_kr_latest.json'
+
+COMING_SOON_TEXT = (
+    '🚧 "여기서부터는 신앙입니다"(보조지표)는 아직 준비중입니다.\n\n'
+    '데이터 검수가 끝나고 오너 승인이 나면 열립니다. 그때까지는 아무 수치도 그리지 않습니다.'
+)
+
+# 🙏 이 모듈 전용 강한 경고 — TECHNICAL_INDICATOR_WORK_ORDER.md §1 확정 문구.
+# 다른 모듈의 "참고용입니다" 수준보다 확실히 강하게, 문장마다 줄을 바꿔서(§0-3-13 배치
+# 규칙 위에 얹는 이 모듈만의 예외적으로 강한 버전). error_banner 는 \n 을 <br> 로 바꿔
+# 문장 단위 줄바꿈을 그대로 지킵니다 (web/components/widgets.py::_plain 참고 — 새 배너
+# 색을 만들지 않고 기존 error 팔레트를 그대로 재사용합니다, §0-3-10).
+STRONG_WARNING_TEXT = (
+    '🙏 여기서부터는 신앙입니다\n'
+    '이 화면의 숫자는 전부 과거 종가를 계산한 결과입니다.\n'
+    '미래 주가를 맞히지 않습니다.\n'
+    '매수·매도 판단의 근거로 쓰지 마세요.\n'
+    '이 정보로 인한 어떤 손실도 개발자와 이 프로젝트는 책임지지 않습니다.'
+)
+
+_INDICATOR_LABELS = {'RSI': 'RSI(14)', 'MACD': 'MACD', 'Bollinger': '볼린저밴드'}
+
+
+# =============================================================================
+# 순수 함수 (nicegui 위젯을 만들지 않습니다 — 오프라인 검증 가능)
+# =============================================================================
+def _parse_unavailable_reasons(text):
+    """수집기가 남긴 "RSI:사유;MACD:사유" 형태 문자열을 {라벨: 사유} 로 쪼갭니다."""
+    result = {}
+    if not text:
+        return result
+    for part in str(text).split(';'):
+        part = part.strip()
+        if not part or ':' not in part:
+            continue
+        label, reason = part.split(':', 1)
+        result[label.strip()] = reason.strip()
+    return result
+
+
+def _search_matches(stock, query):
+    q = query.lower()
+    return q in (stock.get('name') or '').lower() or query in (stock.get('code') or '')
+
+
+# =============================================================================
+# 페이지 (공개 플래그 게이트 → 본문) — dividend_page.py 와 같은 패턴(§0-3-10)
+# =============================================================================
+@ui.page('/indicator', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
+async def indicator_page() -> None:
+    """관리자 전용으로 시작(§0-3-6 2단계). 로그인 불필요 — 사용자별 데이터가 없습니다(§0-3-8)."""
+    with layout('🙏 여기서부터는 신앙입니다', width_class='max-w-4xl'):
+        ui.markdown('## 🙏 여기서부터는 신앙입니다 — RSI·MACD·볼린저밴드')
+
+        # 🚧 이중 방어 — 메뉴(web/layout.py)와 **같은 상수**를 보고 판단합니다.
+        if not INDICATOR_ENABLED:
+            warning_banner(COMING_SOON_TEXT)
+            return
+        if INDICATOR_MENU_ADMIN_ONLY and not is_admin():
+            warning_banner(COMING_SOON_TEXT)
+            return
+
+        await _render_body()
+
+
+async def _render_body() -> None:
+    payload, error = await load_json_file_async(data_path(LATEST_FILENAME))
+
+    # ── §0-1 회귀 지점 — 수집 결과가 없으면 숫자를 하나도 그리지 않습니다 ──
+    if payload is None or not isinstance(payload, dict):
+        error_banner(
+            '🚨 보조지표 수집 결과를 불러오지 못했습니다. '
+            f'({error or "파일 형식이 예상과 다릅니다."})\n\n'
+            '가짜 값으로 채우지 않기 위해 아무 수치도 표시하지 않습니다.'
+        )
+        return
+
+    stocks = payload.get('stocks') or []
+    if not stocks:
+        error_banner(
+            '🚨 보조지표 수집 결과에 종목이 0건입니다.\n\n'
+            '수집이 정상적으로 끝났는지 확인이 필요합니다. 값을 지어내지 않고 여기서 멈춥니다.'
+        )
+        return
+
+    # ── 데이터 기준 시각 (§0-3-1 — "실시간"이라 말하지 않고 수집 시각을 그대로) ──
+    _render_data_timestamp(payload)
+
+    # ── 🔴 최상단 강한 경고 배너 (TECHNICAL_INDICATOR_WORK_ORDER.md §1) ──
+    error_banner(STRONG_WARNING_TEXT)
+
+    if payload.get('failed_count'):
+        warning_banner(
+            f"⚠️ 오늘 수집에서 {payload['failed_count']}개 종목은 계산에 실패해 이 목록에 "
+            '없습니다. 실패한 종목은 다음 수집을 기다려 주세요 (§5-3 — 종목 하나 실패해도 '
+            '나머지는 정상 기록되므로, 지금 보이는 값들은 실패와 무관합니다).'
+        )
+
+    ui.separator()
+
+    # ── 검색 → 카드 (state 는 이 함수의 지역 변수만 씁니다, §0-3-8) ──
+    state = {'query': '', 'picked': 0}
+
+    def _on_query(event) -> None:
+        state['query'] = (event.value or '').strip()
+        state['picked'] = 0
+        _results.refresh()
+
+    ui.input('🔍 종목명 / 종목코드 검색', placeholder='예: 삼성전자, 005930',
+              on_change=_on_query).props('clearable').classes('w-full')
+
+    @ui.refreshable
+    def _results() -> None:
+        query = state['query']
+        if not query:
+            ui.markdown(
+                '종목명이나 6자리 종목코드를 입력하면 그 종목의 RSI·MACD·볼린저밴드 원값과 '
+                f'종합판정을 보여드립니다. (오늘 기준 {len(stocks)}종목 조회 가능 — 시가총액 '
+                '상위 500종목, 3개월마다 재선정)'
+            ).classes('vh-muted')
+            return
+
+        found = [s for s in stocks if _search_matches(s, query)]
+        if not found:
+            warning_banner(f"🔎 '{query}' 검색 결과가 없습니다. 종목명이나 6자리 종목코드로 다시 검색해 주세요.")
+            return
+
+        if len(found) > 1:
+            options = {i: f"{s.get('name')} ({s.get('code')})" for i, s in enumerate(found)}
+            index = state['picked'] if state['picked'] in options else 0
+
+            def _on_pick(event) -> None:
+                state['picked'] = event.value or 0
+                _results.refresh()
+
+            ui.select(options, value=index, on_change=_on_pick,
+                      label=f'📋 검색 결과 {len(found)}개 — 종목을 선택하세요').classes('w-full')
+            target = found[index]
+        else:
+            target = found[0]
+
+        _render_stock_card(target)
+
+    _results()
+
+    ui.separator()
+
+    # ── 종목별 데이터 다운로드 (pegy·us_stocks 와 같은 공용 도구 재사용, §0-3-10) ──
+    await render_stock_download_tool(
+        stocks,
+        fields=INDICATOR_HISTORY_FIELDS,
+        history_filename=INDICATOR_HISTORY_FILENAME,
+        key_field=INDICATOR_KEY_FIELD,
+        key_of=lambda s: s.get('code'),
+        name_of=lambda s: s.get('name'),
+        subtitle_of=lambda s: s.get('code'),
+        price_text_of=lambda s: s.get('verdict_label') or '데이터 없음',
+        matches=_search_matches,
+        search_label='🔍 종목명 / 종목코드 검색 (다운로드용)',
+        search_placeholder='예: 삼성전자, 005930',
+        empty_hint='검색어를 입력하면 그 종목의 날짜별 지표 이력을 CSV/JSON으로 받을 수 있습니다.',
+        no_match_hint='종목명이나 6자리 종목코드로 다시 검색해 주세요.',
+        price_label='종합판정',
+        caption=(
+            '한 종목을 검색해 고르면 그 종목의 **날짜별 RSI·MACD·볼린저밴드·종합판정 이력**을 '
+            'CSV/JSON으로 받을 수 있습니다. 이력은 이 모듈이 도입된 날부터 쌓이므로, 초기에는 '
+            '줄 수가 적은 게 정상입니다(소급 생성하지 않음, §0-1).'
+        ),
+    )
+
+    # ── 🔴 최하단 강한 경고 배너 (상단과 완전히 같은 문구 — §0-3-13 상하단 배치 규칙) ──
+    error_banner(STRONG_WARNING_TEXT)
+    disclaimer_footer()
+
+
+def _render_data_timestamp(payload) -> None:
+    generated = payload.get('generated_at')
+    date_str = payload.get('date')
+    tracked = payload.get('universe_tracked_count')
+    visible = payload.get('universe_visible_count')
+    success = payload.get('success_count')
+
+    if not generated:
+        warning_banner(
+            '⚠️ 데이터 기준 시각(generated_at)이 수집 결과에 없습니다. '
+            '아래 값이 언제 수집된 것인지 이 화면에서는 확인할 수 없습니다.'
+        )
+        return
+
+    counts_line = ''
+    if tracked is not None:
+        counts_line = (
+            f"\n\n추적 대상 {tracked}종목(그중 화면 노출 {visible if visible is not None else '—'}종목) "
+            f"중 오늘 {success if success is not None else '—'}종목 계산 성공."
+        )
+
+    info_banner(
+        f'🕒 데이터 기준 (KST): {generated} (기준일 {date_str or "—"})\n\n'
+        '이 화면의 모든 값은 그 시각에 계산된 결과이며, 실시간 시세가 아닙니다. '
+        'RSI·MACD·볼린저밴드는 매일 새로 받은 종가로 매번 다시 계산합니다(누적 저장된 원본 '
+        '시계열을 재사용하지 않음).' + counts_line
+    )
+
+
+def _render_stock_card(stock: dict) -> None:
+    name = stock.get('name')
+    code = stock.get('code')
+    reasons = _parse_unavailable_reasons(stock.get('unavailable_reasons'))
+    warmup = bool(stock.get('warmup_insufficient'))
+    bars_used = stock.get('bars_used')
+
+    def _block(label_key, available_html):
+        """지표 하나(RSI/MACD/Bollinger) — 산출 가능하면 값, 아니면 사유를 그대로 보여줍니다(§0-1)."""
+        reason = reasons.get(label_key)
+        if reason:
+            return (
+                f'<div style="padding: 8px 0; border-top: 1px solid #334155;">'
+                f'<div style="font-size: 12px; color: #94a3b8; font-weight: 700;">{esc(_INDICATOR_LABELS[label_key])}</div>'
+                f'<div style="font-size: 13px; color: #fbbf24; font-weight: 600; margin-top: 2px;">'
+                f'⚠️ 산출 불가 — {esc(reason)}</div></div>'
+            )
+        return (
+            f'<div style="padding: 8px 0; border-top: 1px solid #334155;">'
+            f'<div style="font-size: 12px; color: #94a3b8; font-weight: 700;">{esc(_INDICATOR_LABELS[label_key])} '
+            f'<span style="font-size: 10px; font-weight: 800; color: #7dd3fc;">{esc(DERIVED_INDICATOR_BADGE)}</span></div>'
+            f'{available_html}</div>'
+        )
+
+    rsi_html = (
+        f'<div style="font-size: 20px; color: #f8fafc; font-weight: 800; margin-top: 3px;">'
+        f'{esc(fmt_num(stock.get("rsi"), "", 2))}</div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">판독: {esc(stock.get("rsi_signal") or "—")}</div>'
+    )
+
+    macd_html = (
+        f'<div style="font-size: 13.5px; color: #e2e8f0; margin-top: 3px; line-height: 1.6;">'
+        f'MACD <b>{esc(fmt_num(stock.get("macd"), "", 2))}</b> · '
+        f'시그널선 <b>{esc(fmt_num(stock.get("macd_signal_line"), "", 2))}</b> · '
+        f'히스토그램 <b>{esc(fmt_num(stock.get("macd_histogram"), "", 2))}</b></div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">크로스: {esc(stock.get("macd_cross") or "없음")}</div>'
+    )
+
+    bb_html = (
+        f'<div style="font-size: 13.5px; color: #e2e8f0; margin-top: 3px; line-height: 1.6;">'
+        f'상단 <b>{esc(fmt_num(stock.get("bb_upper"), "", 2))}</b> · '
+        f'중심선 <b>{esc(fmt_num(stock.get("bb_mid"), "", 2))}</b> · '
+        f'하단 <b>{esc(fmt_num(stock.get("bb_lower"), "", 2))}</b></div>'
+        f'<div style="font-size: 12.5px; color: #cbd5e1; margin-top: 1px;">'
+        f'%B {esc(fmt_num(stock.get("bb_percent_b"), "", 4))} · 위치: {esc(stock.get("bb_position") or "—")}</div>'
+    )
+
+    verdict_score = stock.get('verdict_score')
+    verdict_label = stock.get('verdict_label')
+    # ⚠️ 매수=초록/매도=빨강 같은 방향성 색을 일부러 쓰지 않습니다 — 이 화면 자체가
+    #    "매수·매도 판단 근거로 쓰지 말라"는 강한 경고 위에 서 있는데, 판정에 색을 입히면
+    #    그 경고와 정면으로 배치되는 신호를 주게 됩니다(§0-1 취지 확장 적용).
+    verdict_html = (
+        f'<div style="font-size: 26px; color: #f8fafc; font-weight: 900; margin-top: 4px;">'
+        f'{esc(verdict_label or "산출 불가")}</div>'
+        f'<div style="font-size: 12.5px; color: #94a3b8; margin-top: 2px;">'
+        f'합산 점수: {esc(fmt_num(verdict_score, "", 0)) if verdict_score is not None else "산출 불가"} '
+        f'(3개 지표 중 산출 가능한 것만 합산 — §4-1)</div>'
+    )
+
+    warmup_note = (
+        '<div style="font-size: 12px; color: #fbbf24; font-weight: 600; margin-top: 8px;">'
+        '⚠️ 이 종목은 아직 충분한 데이터가 쌓이지 않아(워밍업 부족) 지표 값이 안정되지 않았을 '
+        '수 있습니다. 값이 없다는 뜻이 아니라, 시간이 더 지나야 신뢰도가 올라간다는 뜻입니다.'
+        '</div>'
+    ) if warmup else ''
+
+    ui.html(compact(f"""
+        <div style="background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155;
+                    border-radius: 14px; padding: 18px 22px; margin: 10px 0;">
+            <div style="display: flex; align-items: baseline; gap: 8px; flex-wrap: wrap;">
+                <span style="font-size: 20px; font-weight: 800; color: #e2e8f0;">{esc(name)}</span>
+                <span style="font-size: 13px; color: #94a3b8; font-weight: 600;">({esc(code)})</span>
+            </div>
+            <div style="margin-top: 6px; padding: 10px 14px; background: rgba(15, 23, 42, 0.6);
+                        border-radius: 10px;">
+                <div style="font-size: 12px; color: #94a3b8; font-weight: 700;">종합판정</div>
+                {verdict_html}
+            </div>
+            {_block('RSI', rsi_html)}
+            {_block('MACD', macd_html)}
+            {_block('Bollinger', bb_html)}
+            {warmup_note}
+            <div style="font-size: 11px; color: #64748b; margin-top: 10px;">
+                사용 종가 봉 수: {esc(bars_used) if bars_used is not None else '—'}봉
+            </div>
+        </div>
+    """)).classes('w-full')

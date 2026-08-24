@@ -157,6 +157,28 @@ DIVIDEND_ENABLED = (os.environ.get("DIVIDEND_ENABLED") or "").strip().lower() ==
 # 오너가 실 데이터로 직접 확인하기 전에는 일반 사용자에게 열지 않습니다(§0-3-6).
 DIVIDEND_MENU_ADMIN_ONLY = True
 
+# =============================================================================
+# 🙏 "여기서부터는 신앙입니다" 공개 스위치 (보조지표 모듈, 7번째 모듈, 2026-08-25 추가)
+# =============================================================================
+#  위 배당금 모듈(DIVIDEND_ENABLED)이 밟은 것과 **완전히 같은 3단계 공개 절차·판정 관례**
+#  입니다(§0-3-6 기본 숨김, 환경변수 값이 정확히 "true"일 때만 켜짐).
+#
+#    1단계 (전체 숨김)   : INDICATOR_ENABLED=false ← **기본값, 지금 여기입니다.** 메뉴에
+#                          항목이 아예 안 생기고, URL 로 /indicator 를 직접 쳐도 화면이
+#                          "준비중" 안내만 그립니다(`web/pages/indicator_page.py` 가 같은
+#                          값을 보고 판단 — 이중 방어).
+#    2단계 (관리자 전용) : 서버 환경변수 INDICATOR_ENABLED=true + 아래 True 유지.
+#    3단계 (전체 공개)   : 아래 값을 **False 로 한 글자만** 바꿉니다.
+#
+#  ⚠️ 이 모듈은 특히 신중하게 단계를 밟습니다 — TECHNICAL_INDICATOR_WORK_ORDER.md §1 대로
+#     "매수·매도 판단으로 오독될 위험"이 이 프로젝트에서 가장 큰 화면이라, 오너가 실 데이터로
+#     직접 확인하기 전에는 일반 사용자에게 열지 않습니다(§0-3-6, DIVIDEND_MENU_ADMIN_ONLY 와
+#     같은 이유·같은 절차).
+INDICATOR_ENABLED = (os.environ.get("INDICATOR_ENABLED") or "").strip().lower() == "true"
+
+#: 2단계(관리자 전용) ↔ 3단계(전체 공개)를 가르는 **단 하나의 불리언**.
+INDICATOR_MENU_ADMIN_ONLY = True
+
 # (경로, 라벨, 관리자전용) — 실제로 이전이 끝난 화면만 넣습니다. "곧 생길 메뉴"를 미리 만들어
 # 두면 사용자가 눌렀을 때 404 가 나므로, 화면이 완성된 단계에서 한 줄씩 추가합니다.
 # ⚠️ 관리자 콘솔 링크는 **관리자로 인증된 접속에만** 보여줍니다. 화면 자체는 어차피 비밀번호
@@ -234,6 +256,14 @@ if DUEL_ENABLED or SCORECARD_CONSENT_ENABLED or SCORECARD_LEADERBOARD_ENABLED:
 if DIVIDEND_ENABLED:
     _MENU_GROUPS.insert(-1, ('💰 투자 감사합니다!', [
         ('/dividend', '💰 투자 감사합니다!', DIVIDEND_MENU_ADMIN_ONLY),
+    ]))
+
+# 🙏 여기서부터는 신앙입니다 (보조지표 모듈, 2026-08-25 추가) — 위 배당금 그룹과 **같은
+#    자리·같은 방식**입니다. `insert(-1)` = 마지막 '⚙️ 관리자' 그룹 바로 앞(관리자 그룹은
+#    항상 맨 끝). 꺼져 있으면 메뉴 데이터에 아예 존재하지 않습니다(§0-3-6).
+if INDICATOR_ENABLED:
+    _MENU_GROUPS.insert(-1, ('🙏 여기서부터는 신앙입니다', [
+        ('/indicator', '🙏 여기서부터는 신앙입니다', INDICATOR_MENU_ADMIN_ONLY),
     ]))
 
 # 하위호환용 평평한 목록 — `_MENU_GROUPS` 를 펼친 것뿐이라 항목(경로·라벨·관리자전용) 값은
