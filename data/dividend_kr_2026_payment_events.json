@@ -1,0 +1,67 @@
+{
+  "summary": {
+    "generated_at_kst": "2026-08-25T04:49:29.392205+09:00",
+    "source": "DART 수시공시(거래소공시 pblntf_ty=I) 원문 document.xml",
+    "total_records": 1,
+    "by_parse_status": {
+      "OK": 1
+    },
+    "records_without_record_date": 0,
+    "records_without_pay_date_expected": 0,
+    "records_with_correction_flag": 1,
+    "records_with_subsidiary_notice_flag": 0,
+    "missing_label_counts": {},
+    "known_limitations": [
+      "이 파일은 '현재 배당 상태'가 아니라 '접수된 배당결정 공시 이벤트의 로그'입니다. [기재정정] 공시는 원본과 별개 레코드로 함께 남습니다(rcept_no 가 다르므로) — 어느 것이 최종본인지는 이 파일이 판단하지 않습니다.",
+      "is_subsidiary_notice=true 인 레코드는 공시 주체(corp_name/stock_code)와 실제 배당하는 회사가 다를 수 있습니다. 어느 자회사인지 자동으로 추론하지 않았습니다.",
+      "report_nm 판정 규칙은 2026-08 실측 표본 6종에서만 도출했습니다. 규칙 밖의 표기는 UNRECOGNIZED_REPORT_TYPE 으로 아래 scan_stats 에 남고, 이벤트로 만들지 않았습니다(추측해서 넓히지 않았습니다).",
+      "파일 이름의 연도는 '접수일이 그 해'라는 뜻일 뿐, 회사의 사업연도와 다를 수 있습니다(list.json 에는 사업연도로 거르는 조건이 없습니다)."
+    ],
+    "date_range_checked": "20260822~20260824",
+    "new_records_this_run": 1,
+    "documents_failed_this_run": 0,
+    "document_failures": [],
+    "scan_stats": {
+      "pages": 2,
+      "seen_rows": 174,
+      "dividend_decisions": 1,
+      "shareholder_register_close": 0,
+      "unrecognized": 0,
+      "skipped_no_stock_code": 0,
+      "skipped_bad_stock_code": 0,
+      "unrecognized_samples": []
+    }
+  },
+  "records": [
+    {
+      "rcept_no": "20260824900610",
+      "rcept_dt": "20260824",
+      "corp_code": "01540815",
+      "corp_name": "스튜디오삼익",
+      "stock_code": "415380",
+      "stock_code_raw": "415380",
+      "report_nm": "[기재정정]현금ㆍ현물배당결정              (분기배당)",
+      "report_nm_extra": "(분기배당)",
+      "matched_prefix": "현금ㆍ현물배당결정",
+      "is_correction": true,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260824900610",
+      "collected_at_kst": "2026-08-25T04:49:29.392184+09:00",
+      "dividend_class": "분기배당",
+      "dividend_type": "현금배당",
+      "dps_common": 50,
+      "dps_preferred": null,
+      "yield_common": 2.7,
+      "yield_preferred": null,
+      "total_amount": 555734350,
+      "record_date": "2026-08-14",
+      "pay_date_expected": "2026-08-31",
+      "board_resolution_date": "2026-07-28",
+      "notes": "- 상기 '5. 배당금총액'은 이사회결의일(결정일)의 발행주식총수에서 신탁계약을 통한 자기주식 보유분을 제외한 배당대상주식수를 기준으로 산정되었으며, 자기주식 추가 취득 여부에 따라 실제 지급될 배당금총액은 배당기준일의 유통주식수 기준으로 변경될 수 있습니다.\n\n- 상기 '7.배당금지급 예정일자'는 자본시장과 금융투자업에 관한 법률 제165조의12 제3항에 근거하여 이사회에서 지급일을 결정하였습니다. 본 배당금지급 예정일은 관련기관과의 협의 중 변경될 수 있습니다.\n\n- 상기 배당금 재원은 지난 2025년 3월 28일 정기주주총회 결의(자본준비금의 이익잉여금 전입의 건)를 통해 자본준비금에서 이익잉여금으로 전환한 65억원의 일부에 해당합니다. 따라서 관련 법령(*)에 의거하여 해당 배당금은 비과세 대상입니다.\n다만, 대주주 및 법인주주(내국법인)의 경우 보유한 주식의 장부가액을 한도로 각각 비과세 및 법인세법상 익금불산입이 적용됩니다.\n* 소득세법 시행령 제26조의3 제6항 및 법인세법 제18조 제8호",
+      "missing_labels": [],
+      "unparsed_values": [],
+      "parse_notes": [],
+      "parse_status": "OK"
+    }
+  ]
+}
