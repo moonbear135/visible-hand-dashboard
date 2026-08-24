@@ -1,0 +1,19 @@
+{
+  "watches": [
+    {
+      "checked_at_kst": "2026-08-25T02:58:01.746206+09:00",
+      "date_range_checked": "20260822~20260824",
+      "matched_stock_codes": [
+        "371950"
+      ],
+      "matched_stock_codes_source": "호출부가 전달한 list.json 매칭 결과",
+      "replaced_stock_codes": [
+        "371950"
+      ],
+      "added_stock_codes": [],
+      "delta_raw_lines_appended": 2,
+      "unexpected_report_regressions": [],
+      "delta_out_dir": "data/cache/watch_delta"
+    }
+  ]
+}
