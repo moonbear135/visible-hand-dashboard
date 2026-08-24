@@ -13,7 +13,18 @@
 #     물어봐도 같은 값만 돌아옵니다 — 매일 자동 실행하면 §0-3-2("외부 서버에 무리 주지
 #     않기")를 정면으로 어깁니다. 그래서 지금은 최초 전체 수집(catch-up)용으로 수동
 #     트리거만 두고, 각 분기보고서 마감일 전후 2주 구간에만 자동 스케줄을 켜는 건
-#     다음 단계 과제로 남겨둡니다(README_상황보고.md §8).
+#     다음 단계 과제로 남겨둡니다.
+#     ↳ 그 "마감일"은 12월 결산법인 기준 법정 제출기한입니다(자본시장법: 분기·반기는
+#       기간 종료 후 45일, 사업보고서는 90일 — collector_dividend_kr.py 의
+#       `_REPRT_PERIOD_END` 와 같은 근거):
+#         · 1분기보고서 = 3/31 + 45일 → 5월 15일경
+#         · 반기보고서   = 6/30 + 45일 → 8월 14일경
+#         · 3분기보고서 = 9/30 + 45일 → 11월 14일경
+#         · 사업보고서   = 12/31 + 90일 → 이듬해 3월 31일경
+#       즉 자동화한다면 이 네 시점 전후 2주에만 켜면 되고, 나머지 기간에 매일 돌리는 것은
+#       같은 값을 다시 받아오는 낭비입니다(§0-3-2).
+#       ⚠️ 3월·6월 결산법인은 기준일이 달라 이 날짜가 맞지 않습니다 — 자동 스케줄을
+#         켜더라도 "이 날짜 밖에는 조회하지 않는다"는 식으로 좁히면 안 됩니다.
 #
 #   왜 한 번에 안 끝날 수 있는가:
 #     대상 종목이 약 2,700여개라 정중한 딜레이(종목당 2~3초, §0-3-2)를 다 더하면
@@ -84,24 +95,58 @@ jobs:
         env:
           # 🔴 이 저장소 Settings → Secrets and variables → Actions 에 등록 필요.
           DART_API_KEY: ${{ secrets.DART_API_KEY }}
+          # 🔒 §0-3-9 (알려진 공격기법 방어) — 워크플로우 입력값은 **반드시 env 로 받습니다.**
+          #    `${{ github.event.inputs.* }}` 를 run 스크립트 본문에 직접 적으면, GitHub 이
+          #    셸을 실행하기 **전에** 그 자리에 입력 문자열을 그대로 끼워 넣습니다. 즉 입력에
+          #    적힌 글자가 명령문 자체가 됩니다(GitHub Actions script injection — 공식
+          #    보안 가이드가 첫 번째로 경고하는 항목이고 자동 스캐너에도 그대로 잡힙니다).
+          #    env 로 받으면 값은 '환경변수의 내용'일 뿐 명령문이 되지 않습니다.
+          OWNER_ORDER: ${{ github.event.inputs.owner_order }}
+          MAX_RUNTIME_MINUTES: ${{ github.event.inputs.max_runtime_minutes }}
+          LIMIT: ${{ github.event.inputs.limit }}
         run: |
           ARGS="--universe data/dividend_history_kr_2023_2025.json --year 2026 --out-dir data --cache-dir data/cache"
-          if [ "${{ github.event.inputs.owner_order }}" != "false" ]; then
+          if [ "${OWNER_ORDER:-}" != "false" ]; then
             ARGS="$ARGS --owner-order"
           fi
-          MAX_MIN="${{ github.event.inputs.max_runtime_minutes }}"
+
+          MAX_MIN="${MAX_RUNTIME_MINUTES:-}"
           if [ -z "$MAX_MIN" ]; then MAX_MIN=300; fi
+          # 숫자인지 직접 확인합니다. $((...)) 안의 산술 평가도 문자열을 그대로 먹으면
+          # 위험하므로, 숫자가 아니면 조용히 넘어가지 않고 여기서 실패시킵니다(§0-1).
+          case "$MAX_MIN" in
+            *[!0-9]*|"")
+              echo "❌ max_runtime_minutes 에는 숫자만 넣어야 합니다(받은 값: '$MAX_MIN')."
+              exit 1
+              ;;
+          esac
           ARGS="$ARGS --max-runtime-sec $((MAX_MIN * 60))"
-          if [ -n "${{ github.event.inputs.limit }}" ]; then
-            ARGS="$ARGS --limit ${{ github.event.inputs.limit }}"
+
+          if [ -n "${LIMIT:-}" ]; then
+            case "$LIMIT" in
+              *[!0-9]*)
+                echo "❌ limit 에는 숫자만 넣어야 합니다(받은 값: '$LIMIT')."
+                exit 1
+                ;;
+            esac
+            ARGS="$ARGS --limit $LIMIT"
           fi
+
           echo "실행: python collector_dividend_kr.py $ARGS"
+          # $ARGS 를 일부러 인용하지 않습니다(인자 여러 개로 쪼개져야 하므로). 위에서 모든
+          # 외부 입력이 '숫자뿐'임을 확인했고 나머지는 이 파일에 적힌 고정 문자열입니다.
           python collector_dividend_kr.py $ARGS
 
       - name: 산출물 커밋
-        # 실패(비정상 종료)하면 여기까지 오지 않아, 실패한 실행의 반쪽짜리 산출물이
-        # 커밋되는 일은 없습니다. 정상 종료(완주 또는 예산 소진 후 체크포인트 저장)
-        # 했을 때만 커밋합니다.
+        # ⚠️ `if:` 를 생략하면 기본값이 `success()` 라, 앞 스텝이 실패하거나 job 이
+        #    timeout-minutes 로 강제 종료되는 순간 이 스텝이 **통째로 건너뛰어집니다.**
+        #    그러면 러너 디스크에 이미 저장돼 있던 체크포인트(25종목마다 저장됨)가
+        #    러너와 함께 사라지고, 다음 실행은 처음부터 다시 5,000건 넘게 요청해야 합니다
+        #    — 정확히 §0-3-2(외부 서버에 무리 주지 않기)가 막으려는 상황입니다.
+        #    그래서 `always()` 로 "어떻게 끝났든 지금까지 모은 것은 반드시 저장"합니다.
+        #    ⚠️ 이건 실패를 감추는 장치가 아닙니다 — 수집 스텝이 실패했다면 job 은
+        #    그대로 빨간불로 남고, 여기서는 중간 산출물만 건져 올립니다(§0-1).
+        if: always()
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"

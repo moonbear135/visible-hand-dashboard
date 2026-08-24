@@ -16,7 +16,15 @@ dividend_module/test_dividend_collector.py
    않습니다.
 
 ⚠️ 이 테스트가 전부 통과해도 "DART 실서버와 잘 통신한다"는 뜻은 아닙니다.
-   실통신 검증은 GitHub Actions 첫 실행 로그로만 가능합니다(README_상황보고.md 참고).
+   실통신 검증은 GitHub Actions 실행 로그와 산출물로만 가능합니다. 확인 방법:
+     · `data/dividend_kr_2026_latest.json` 의 `summary` 에서
+       `completed`(전수 완주 여부) / `stopped_reason`(왜 멈췄는지) /
+       `requests_used`(총 요청 수) / `elapsed_sec`(소요 시간) /
+       `by_status`(OK·NO_DATA·ERROR·UNMAPPED 각 몇 건인지) 를 봅니다.
+     · `universe_size_input` 과 `universe_size` 가 다르면 `--limit` 이 걸린
+       시범 실행이라는 뜻입니다(전수 수집이 아님).
+     · `unknown_se_labels` 가 비어있지 않으면 DART 가 항목을 추가·개명한 것이므로
+       `classify_se()` 를 손봐야 합니다.
 """
 import io
 import json
@@ -26,7 +34,15 @@ import zipfile
 
 import pytest
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# ⚠️ 검사 대상 모듈(collector_dividend_kr.py / corp_code_mapper.py)은 저장소 **루트**에
+#    있고 이 파일은 tests/ 안에 있습니다. 그래서 넣어야 하는 경로는 이 파일의 폴더가
+#    아니라 그 **부모(저장소 루트)** 입니다. tests/ 만 넣으면
+#    `pytest tests/test_dividend_collector.py`(python -m 없이 직접 실행)가
+#    `ModuleNotFoundError: No module named 'corp_code_mapper'` 로 죽습니다 —
+#    `python -m pytest` 는 현재 디렉터리가 자동으로 경로에 들어가서 우연히 통과할 뿐입니다.
+#    tests/test_web_session_isolation.py 가 쓰는 REPO_ROOT 관례와 같게 맞춥니다.
+REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, REPO_ROOT)
 
 import corp_code_mapper as ccm                       # noqa: E402
 import collector_dividend_kr as cdk                  # noqa: E402
