@@ -256,8 +256,26 @@ PAYMENT_BADGE_LABEL = '💰 실제 지급일정 확인됨'
 #: 🟢 2026-08-25 — 달력 격자에 배당기준일ㆍ지급예정일을 **직접 표시**할 때 쓰는 색.
 #: 오너 요청: "툴팁 말고 달력에 표시해달라". 결산기준일(파란·기존 색과 무관)과 헷갈리지
 #: 않도록, 이미 쓰던 앰버(경고)·블루(정보) 배지 색과도 겹치지 않는 새 색 두 개를 씁니다.
-PAYMENT_RECORD_COLOR = '#fcd34d'   # 🟡 배당기준일(원문 라벨 그대로 — 배당락일이 아님)
+PAYMENT_RECORD_COLOR = '#fcd34d'   # 🟡 배당기준일(원문 라벨 그대로)
 PAYMENT_DATE_COLOR = '#4ade80'     # 🟢 지급예정일(실제 돈이 들어오는 날짜)
+PAYMENT_EX_COLOR = '#f87171'       # 🔴 배당락일 — 이 화면이 직접 계산한 값(아래 참고)
+
+#: 🔴 2026-08-25 — 오너가 "배당락일 하고 지급예정일 둘 다 표시하자"고 요청. 배당락일은
+#: DART 원문에 없는 값이라(배당기준일만 있음) **이 화면이 직접 계산**합니다 — 값을 만드는
+#: 자리라 "🧮 계산값" 배지(§0-1 예시2-보충 — 계산값은 허용하되 반드시 표시)를 붙입니다.
+#: 실제 검증한 연도 목록은 `KRX_VERIFIED_YEARS`(아래 "1. 순수 함수" 절)에 있습니다 —
+#: 이 문구는 그 상수를 가리키기만 하고 직접 나열하지 않습니다(같은 사실을 두 곳에 따로
+#: 적으면 나중에 한쪽만 갱신해 어긋날 수 있으므로, §0-3-10과 같은 취지).
+#: 🔴 이 문자열은 우리가 직접 쓴 신뢰된 HTML입니다(외부 값 아님) — 그래서 `<br>`을 그대로
+#: 넣습니다. 호출부에서 `esc()`를 씌우지 않습니다(다른 배지 본문들과 같은 관례 —
+#: `preferred_dps_html()`의 `PREFERRED_MULTI_LABEL` 배지 본문 참고).
+EX_DATE_CALC_NOTE = (
+    '배당락일은 DART 원문에 없는 값이라 이 화면이 직접 계산합니다 — 배당기준일의 '
+    '1영업일 전(한국거래소 휴장일 제외)입니다. 배당기준일 자체가 개장일이 아니면 그 '
+    '직전 개장일을 실제 기준일로 보정한 뒤 다시 1영업일을 뺍니다.<br>'
+    '⚠️ 휴장일 표는 확인된 연도만 있습니다 — 그 밖의 연도는 계산하지 않고 값을 비웁니다'
+    '(추측 금지).'
+)
 
 #: 배지 툴팁 맨 앞에 항상 붙는 문구 — 이 표의 "결산기준일"과 이 배지의 "배당기준일"이
 #: **서로 다른 공시에서 온 서로 다른 날짜**임을 매번 밝힙니다. 같은 배당을 가리키는지는
@@ -387,48 +405,163 @@ def build_payment_event_index(payload):
     return index
 
 
+# =============================================================================
+# 🔴 KRX 휴장일 표 — 배당락일 계산용
+# =============================================================================
+#: 2026-08-25 조사(오너 요청: "배당락일도 계산해서 넣어줘 — 이건 추측이 아니라 계산").
+#:
+#: 방법: 먼저 `exchange_calendars`(XKRX 캘린더) 라이브러리로 정기 휴장일(설날·추석·
+#: 대체공휴일 등)을 뽑았습니다. 그런데 **라이브러리를 그대로 믿지 않고** 뉴스 검색으로
+#: 교차확인했더니, 2026년 실제 휴장일 중 라이브러리에 **빠진 게 2건** 있었습니다:
+#: 6월 3일(전국동시지방선거)ㆍ7월 17일(제헌절 — "관공서의 공휴일에 관한 규정" 개정으로
+#: 2026년부터 법정 공휴일 부활, 그래서 라이브러리가 만들어질 때는 반영이 안 됐던 것으로
+#: 보임). 이 두 건은 아래 표에 수동으로 더했습니다.
+#:
+#: 출처:
+#:   · 정기 휴장일(15일) — `exchange_calendars` XKRX 캘린더(v4.13.2) 산출값
+#:   · 6/3 지방선거 휴장 — https://v.daum.net/v/20260520202735219 ,
+#:     https://news.nate.com/view/20260520n12457
+#:   · 7/17 제헌절 휴장(2026년 신설) — 위 두 기사와 동일 출처
+#:   · 배당락일=배당기준일의 1영업일 전 규칙, 배당기준일이 휴장일일 때의 보정(직전
+#:     개장일로 대체 후 다시 1영업일) — https://kbthink.com/investment/101/dividend-date.html ,
+#:     https://blog.koreainvestment.com (두 곳 모두 같은 규칙·같은 예시로 확인)
+#:
+#: ⚠️ **이 표는 2025년 12월ㆍ2026년만 검증했습니다.** 다른 해에 이 계산이 필요해지면
+#: 반드시 같은 방식(라이브러리 + 뉴스 교차확인)으로 다시 조사해서 채워야 합니다 — 채우지
+#: 않은 해에 대한 계산은 `is_krx_trading_day()`가 **일부러 예외를 던져** 조용히 틀린 값을
+#: 내지 않습니다(§0-1 — 확인 안 된 걸 확인한 척하지 않기).
+KRX_VERIFIED_YEARS = (2025, 2026)
+
+KRX_HOLIDAYS_2025_2026 = frozenset((
+    # 2025년 12월 — 2026년 초 배당기준일의 역산 여유분으로만 확보(2025년 전체 표는 아님)
+    '2025-12-25', '2025-12-31',
+    # 2026년 (정기 휴장일 15일 + 뉴스로 별도 확인한 2일 = 17일)
+    '2026-01-01',
+    '2026-02-16', '2026-02-17', '2026-02-18',
+    '2026-03-02',
+    '2026-05-01', '2026-05-05', '2026-05-25',
+    '2026-06-03',   # 전국동시지방선거 — 라이브러리엔 없었음, 뉴스로 별도 확인
+    '2026-07-17',   # 제헌절(2026년 부활) — 라이브러리엔 없었음, 뉴스로 별도 확인
+    '2026-08-17',
+    '2026-09-24', '2026-09-25',
+    '2026-10-05', '2026-10-09',
+    '2026-12-25', '2026-12-31',
+))
+
+
+def is_krx_trading_day(d) -> bool:
+    """`date` → 그 날이 KRX 개장일인가(주말 아님 + 위 표에 없음).
+
+    :raises ValueError: `d`의 연도가 `KRX_VERIFIED_YEARS`에 없으면 — 확인 안 된 해를
+        "아마 열렸겠지"로 조용히 넘기지 않기 위해서입니다(§0-1).
+    """
+    if d.year not in KRX_VERIFIED_YEARS:
+        raise ValueError(
+            f'{d.year}년 KRX 휴장일 표가 아직 확인되지 않았습니다 — 배당락일을 계산할 수 '
+            '없습니다(값을 추측하지 않습니다).'
+        )
+    if d.weekday() >= 5:      # 5=토, 6=일 (`date.weekday()`: 월=0 … 일=6)
+        return False
+    return d.isoformat() not in KRX_HOLIDAYS_2025_2026
+
+
+def previous_krx_trading_day(d):
+    """`d` 바로 이전의 KRX 개장일. 최대 14일 앞까지만 찾습니다(무한 루프 방지 — 그 안에
+    개장일이 하나도 없다면 표 자체가 잘못됐다는 뜻이라 계속 찾지 않고 예외를 던집니다).
+
+    :raises ValueError: `is_krx_trading_day()`와 같은 이유로 확인 안 된 해거나, 14일 안에
+        개장일을 못 찾으면 예외를 던집니다.
+    """
+    cursor = d
+    for _ in range(14):
+        cursor = cursor - timedelta(days=1)
+        if is_krx_trading_day(cursor):
+            return cursor
+    raise ValueError(f'{d.isoformat()} 이전 14일 안에서 KRX 개장일을 찾지 못했습니다 — '
+                     '휴장일 표를 다시 확인해야 합니다.')
+
+
+def ex_dividend_date(record_date_str):
+    """배당기준일 문자열('YYYY-MM-DD') → `(배당락일, None)` 또는 계산 불가능하면
+    `(None, 사람이 읽는 이유)`.
+
+    규칙(2026-08-25, 2개 출처 교차확인 — 위 `KRX_HOLIDAYS_2025_2026` 주석 참고): 배당락일 =
+    배당기준일의 **1영업일 전**. 배당기준일 자체가 개장일이 아니면(옛 관행 — 12월 31일을
+    배당기준일로 쓰던 시절 등) 그 직전 개장일을 "실제 기준일"로 보정한 뒤 다시 1영업일을
+    뺍니다(실제 사례로 확인된 보정 규칙).
+
+    🔴 계산할 수 없으면(날짜 형식이 이상함, 확인 안 된 연도 등) **절대 아무 날짜나 돌려주지
+    않습니다** — `(None, 이유)`를 돌려주고, 호출부는 그 종목의 배당락일 칸을 그냥 비웁니다
+    (§0-1).
+    """
+    parsed = parse_iso_date(record_date_str)
+    if parsed is None:
+        return None, '배당기준일 형식을 읽지 못했습니다'
+    try:
+        effective = parsed if is_krx_trading_day(parsed) else previous_krx_trading_day(parsed)
+        return previous_krx_trading_day(effective), None
+    except ValueError as exc:
+        return None, str(exc)
+
+
 def payment_event_summary_text(event) -> str:
     """지급일정 이벤트 1건 → 사람이 읽는 한 줄 요약(이스케이프 전, 순수 텍스트).
 
     `[기재정정]` 이면 맨 앞에 그대로 밝힙니다 — 정정 공시라는 사실을 지우고 원본인 척
     보여주지 않습니다(§0-1).
+
+    🔴 2026-08-25 — "배당락일"을 맨 앞에 추가했습니다. DART 원문에는 없는, 이 화면이
+    직접 계산한 값입니다(`ex_dividend_date()`) — 계산에 실패하면(확인 안 된 연도 등)
+    조용히 "데이터 없음"으로 둡니다. 별도 "🧮 계산값" 배지는 HTML 렌더링 쪽
+    (`payment_badge_html`·`payment_date_block_html`)에서 붙입니다 — 이 함수는 순수
+    텍스트만 돌려줍니다.
     """
     data = event or {}
     record_date = data.get('record_date') or NA_TEXT
     pay_date = data.get('pay_date_expected') or NA_TEXT
     dps_text = fmt_num(to_float(data.get('dps_common')), '원', 0)
-    text = f'배당기준일 {record_date} · 지급예정일 {pay_date} · 1주당 {dps_text}'
+    ex_date, _reason = ex_dividend_date(data.get('record_date'))
+    ex_text = ex_date.isoformat() if ex_date is not None else NA_TEXT
+    text = (f'배당락일 {ex_text} · 배당기준일 {record_date} · 지급예정일 {pay_date} · '
+            f'1주당 {dps_text}')
     if data.get('is_correction'):
         text = '[기재정정] ' + text
     return text
 
 
 def build_payment_date_index(payload):
-    """`dividend_kr_2026_payment_events.json` → `{'YYYY-MM-DD': {'record': [...], 'pay': [...]}}`.
+    """`dividend_kr_2026_payment_events.json` → `{'YYYY-MM-DD': {'record': [...], 'pay': [...],
+    'ex': [...]}}`.
 
     2026-08-25 — 오너가 "배지를 툴팁 말고 달력에 바로 표시해달라"고 요청해 추가.
     `build_payment_event_index()`(종목코드 기준)와는 축이 다른 **날짜 기준** 색인입니다 —
     달력 격자에서 "이 날짜에 걸리는 이벤트가 있는가"를 바로 찾으려고 만들었습니다.
 
-    🔴 `record`는 원문 라벨 그대로 **배당기준일**입니다 — "배당락일"이 아닙니다. 배당락일
-       (배당받을 자격이 없어지는 거래일, 보통 배당기준일의 전 거래일)은 거래소 휴장일을
-       감안한 거래일 계산이 필요한데, 이 프로젝트는 그 계산을 하지 않고 DART 원문에 실제로
-       적힌 날짜(배당기준일·지급예정일자)만 그대로 씁니다(§0-1 — 없는 값을 계산해 만들지
-       않기). 화면 문구도 "배당기준일"이라고만 부릅니다.
-    한 이벤트가 두 축(배당기준일·지급예정일) 모두에 들어갈 수 있고(서로 다른 날짜라면
-    서로 다른 칸에), 한 날짜에 여러 이벤트가 겹칠 수도 있어(여러 회사가 같은 날) 전부
-    리스트로 담습니다. 날짜가 없거나 형식이 이상하면(파싱 실패) 그 축에는 안 넣습니다.
+    🔴 `record`는 원문 라벨 그대로 **배당기준일**입니다 — "배당락일"과는 다른 날짜입니다.
+       `ex`는 배당락일 축인데, 이건 DART 원문에 없어 `ex_dividend_date()`로 **직접
+       계산**합니다(오너 요청, 2026-08-25). 계산이 안 되는 이벤트(확인 안 된 연도 등)는
+       `ex` 축에만 조용히 빠집니다 — `record`ㆍ`pay` 축(원문 그대로)은 이미 그 위에서
+       담겼으니 정보 자체가 사라지는 건 아닙니다.
+    한 이벤트가 여러 축(배당락일·배당기준일·지급예정일)에 들어갈 수 있고(서로 다른
+    날짜라면 서로 다른 칸에), 한 날짜에 여러 이벤트가 겹칠 수도 있어(여러 회사가 같은 날)
+    전부 리스트로 담습니다. 날짜가 없거나 형식이 이상하면(파싱 실패) 그 축에는 안 넣습니다.
 
     :return: 함수 지역 dict (모듈 전역이 아닙니다 — §0-3-8).
     """
     index = {}
+
+    def _bucket(date_str):
+        return index.setdefault(date_str, {'record': [], 'pay': [], 'ex': []})
+
     for record in (payload or {}).get('records') or []:
         for field, kind in (('record_date', 'record'), ('pay_date_expected', 'pay')):
             date_str = str((record or {}).get(field) or '').strip()
             if not date_str or parse_iso_date(date_str) is None:
                 continue
-            bucket = index.setdefault(date_str, {'record': [], 'pay': []})
-            bucket[kind].append(record)
+            _bucket(date_str)[kind].append(record)
+        ex_date, _reason = ex_dividend_date((record or {}).get('record_date'))
+        if ex_date is not None:
+            _bucket(ex_date.isoformat())['ex'].append(record)
     return index
 
 
@@ -844,8 +977,14 @@ def payment_badge_html(entry, payment_index) -> str:
     if not events:
         return ''
 
-    lines = [esc(payment_event_summary_text(event)) + _payment_event_notes_html(event)
-             for event in events]
+    def _line(event):
+        text = esc(payment_event_summary_text(event))
+        ex_date, _reason = ex_dividend_date(event.get('record_date'))
+        if ex_date is not None:
+            text += warn_badge('🧮 계산값', EX_DATE_CALC_NOTE)
+        return text + _payment_event_notes_html(event)
+
+    lines = [_line(event) for event in events]
 
     count = len(events)
     label = PAYMENT_BADGE_LABEL if count == 1 else f'{PAYMENT_BADGE_LABEL} {count}건'
@@ -863,15 +1002,19 @@ def payment_date_block_html(key, payment_date_index) -> str:
     없으면 **빈 문자열**(빈 카드를 그리지 않습니다 — 배지와 같은 원칙).
     """
     bucket = (payment_date_index or {}).get(key) or {}
+    ex_events = bucket.get('ex') or ()
     record_events = bucket.get('record') or ()
     pay_events = bucket.get('pay') or ()
-    if not record_events and not pay_events:
+    if not ex_events and not record_events and not pay_events:
         return ''
 
-    def _row(event, kind_label, color):
+    def _row(event, kind_label, color, is_calculated=False):
         name = esc(event.get('corp_name') or '회사명 없음')
         code = esc(event.get('stock_code') or event.get('stock_code_raw') or NA_TEXT)
-        detail = esc(payment_event_summary_text(event)) + _payment_event_notes_html(event)
+        detail = esc(payment_event_summary_text(event))
+        if is_calculated:
+            detail += warn_badge('🧮 계산값', EX_DATE_CALC_NOTE)
+        detail += _payment_event_notes_html(event)
         return (
             f'<div style="margin: 6px 0; padding: 8px 10px; border-left: 3px solid {color}; '
             f'background: rgba(255,255,255,0.03); border-radius: 4px;">'
@@ -879,7 +1022,11 @@ def payment_date_block_html(key, payment_date_index) -> str:
             f'<b>{name}</b>({code})<br>{detail}</div>'
         )
 
-    rows = [_row(event, '🟡 배당기준일', PAYMENT_RECORD_COLOR) for event in record_events]
+    # 🔴 순서는 시간순(락일 → 기준일 → 지급일)입니다 — 배당락일이 실제로 가장 먼저
+    # 오는 날짜라 "이 날 이후로는 사도 소용없다"를 자연스럽게 먼저 보게 됩니다.
+    rows = [_row(event, '🔴 배당락일', PAYMENT_EX_COLOR, is_calculated=True)
+            for event in ex_events]
+    rows += [_row(event, '🟡 배당기준일', PAYMENT_RECORD_COLOR) for event in record_events]
     rows += [_row(event, '🟢 지급예정일', PAYMENT_DATE_COLOR) for event in pay_events]
 
     return (
@@ -1462,9 +1609,10 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
                 key = date_key(year, month, day)
                 count = len(grouped.get(key, ()))
                 date_bucket = (payment_date_index or {}).get(key) or {}
+                ex_count = len(date_bucket.get('ex') or ())
                 record_count = len(date_bucket.get('record') or ())
                 pay_count = len(date_bucket.get('pay') or ())
-                if not count and not record_count and not pay_count:
+                if not count and not record_count and not pay_count and not ex_count:
                     ui.label(str(day)).classes('text-center vh-muted py-2')
                     continue
                 selected = view['selected_date'] == key
@@ -1480,6 +1628,10 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
                         button = ui.button(f'{day}일', on_click=_pick(key)).classes('w-full')
                         button.props('unelevated no-caps dense color=primary' if selected
                                      else 'flat no-caps dense outline')
+                    if ex_count:
+                        ui.label(f'🔴 락일 {ex_count}건') \
+                            .classes('text-center text-xs') \
+                            .style(f'color:{PAYMENT_EX_COLOR};font-weight:700;')
                     if record_count:
                         ui.label(f'🟡 기준일 {record_count}건') \
                             .classes('text-center text-xs') \
