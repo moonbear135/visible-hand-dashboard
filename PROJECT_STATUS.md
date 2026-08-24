@@ -294,8 +294,18 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
      방식으로 검증했습니다. 리츠 전용 표기("부동산투자회사금전배당결정")는 report_nm
      인식만 실측됐고 그 문서의 실제 표 라벨 구조는 아직 확인 전입니다(코드에 그렇게
      명시돼 있음 — 첫 실제 실행에서 파싱 실패로 나오면 그때 라벨을 추가로 확인해야 함).
-     ⚠️ 이 워크플로우는 아직 프로덕션에서 한 번도 안 돌았습니다(다음 KST 05:30 정기
-     실행 또는 수동 `workflow_dispatch` 대기 중) — 실제 배지가 화면에 뜨는 건 그 이후.
+     ✅ **2026-08-25 첫 프로덕션 실행 성공**(오너가 수동 `workflow_dispatch`) — 접수일
+     2026-08-22~24 구간에서 배당결정 1건 실측 확인: 스튜디오삼익(415380) 기준일=
+     2026-08-14 지급예정일=2026-08-31 1주당=50원 [OK], `data/dividend_kr_2026_payment_
+     events.json` 커밋·푸시 성공. 🔴 그런데 이 실행이 곧바로 **화면 노출 설계의 빈틈을
+     실측으로 드러냈습니다** — 스튜디오삼익은 정기보고서 기준(`dividend_kr_2026_latest.
+     json`)으로는 `dps_cash_common`이 아직 `None`이라 **"미확정" 목록**에 있는 종목인데,
+     배지는 처음에 "확정" 표에만 달아놔서 데이터를 모아 놓고도 화면 어디에도 안 보이는
+     상태였습니다(직접 `data/dividend_kr_2026_latest.json`을 읽어 재현·확인).
+     `AskUserQuestion`으로 오너가 "미확정 목록에도 같은 배지 추가"를 선택해 즉시 반영
+     — `pending_row_cells()`에도 `payment_badge_html()`을 붙이고 `PAYMENT_NOTICE` 문구도
+     두 목록 모두를 언급하도록 수정. 스튜디오삼익 실제 레코드로 배지 HTML을 다시 직접
+     실행해 재검증(기준일 2026-08-14·지급예정일 2026-08-31·50원이 배지에 그대로 나옴).
    - 🟡 **화면(`/dividend`) 정보 밀도 재구성 — 완료, 오너 재확인 대기 (2026-08-24).**
      Render 실배포 후 오너가 "정보량이 너무 많다, 달력이 먼저 보이는 단순한 구조를
      원했다"고 피드백. 문구는 한 글자도 안 지우고 배경 설명을 달력 아래 접이식 패널로
@@ -375,7 +385,7 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `.github/workflows/watch_dividend_disclosures.yml` | (2026-08-25 신설) 💰 **배당 일일 공시감시 워크플로우.** DART `list.json`(공시검색)으로 매일 KST 05:00 "새로 정기보고서 낸 회사"만 가볍게 확인 후 그 회사만 재수집·반영(`--watch-disclosures`). `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유(동시 쓰기 방지), 반영 실패 시 상태파일을 커밋하지 않음(§0-1) |
 | `collector_dividend_payment_kr.py` | (2026-08-25 신설) 💰 **배당 지급일정 수집기(완전히 독립된 새 파이프라인).** 기존 배당 수집기와 데이터·파일이 전혀 안 겹침. DART 수시공시("현금ㆍ현물배당결정" 등, `pblntf_ty="I"`)의 원본문서(`document.xml`)를 받아 **진짜 배당기준일·배당금지급 예정일자**를 파싱 → `data/dividend_kr_2026_payment_events.json`(append-only). `--universe` 없음(유니버스 밖 신규 배당회사도 잡힘) |
 | `.github/workflows/watch_dividend_payment_events.yml` | (2026-08-25 신설) 💰 **배당 지급일정 감시 워크플로우.** 매일 KST 05:30(기존 05:00 워크플로우와 30분 띄움) 자동 실행, 세 배당 워크플로우 전부 같은 `concurrency` 그룹 공유 |
-| `web/pages/dividend_page.py` | (2026-08-24 신설, 2026-08-25 배지 추가) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py`. 2026-08-25 — `dividend_kr_2026_payment_events.json`을 종목코드로 색인해(`build_payment_event_index`) 종목상세 표에 "💰 실제 지급일정 확인됨" 배지(`payment_badge_html`) 추가 — 파일이 없어도 조용히 배지만 안 붙고 나머지는 그대로 동작 |
+| `web/pages/dividend_page.py` | (2026-08-24 신설, 2026-08-25 배지 추가) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py`. 2026-08-25 — `dividend_kr_2026_payment_events.json`을 종목코드로 색인해(`build_payment_event_index`) "💰 실제 지급일정 확인됨" 배지(`payment_badge_html`) 추가 — 파일이 없어도 조용히 배지만 안 붙고 나머지는 그대로 동작. 첫 실행 실측에서 확정 표에만 달면 안 되는 사례(스튜디오삼익 — 정기보고서는 미확정)가 바로 나와, **확정 표(`confirmed_row_cells`) + 미확정 목록(`pending_row_cells`) 양쪽 모두**에 붙임 |
 | `market_history.csv` | 날짜별 종합 위험 점수 이력 |
 | `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json` | 종목별 최신 데이터 + **시장 전체** 요약 이력 (⚠️ `*summary_history.json` 은 중앙값 요약이지 종목별 이력이 아닙니다 — 종목별 이력은 2026-08-09 신설된 `*_stock_history.csv`) |
 | `views/pegy_view.py` | **공개** PEGY 밸류에이션 화면. Forward 데이터 없으면 해당 섹션만 마스킹 처리 |
@@ -415,6 +425,22 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-25 — 배당 지급일정 첫 프로덕션 실행 → "미확정" 목록에도 배지 추가.**
+  오너가 `watch_dividend_payment_events.yml`을 GitHub Actions에서 수동 실행 → 실제로
+  배당결정 공시 1건(스튜디오삼익 415380, 기준일 2026-08-14·지급예정일 2026-08-31·
+  1주당 50원) 찾아 `data/dividend_kr_2026_payment_events.json`에 커밋·푸시 성공(로그
+  스크린샷으로 직접 확인). 그런데 이 종목을 실제 화면 데이터(`dividend_kr_2026_latest.
+  json`)에서 직접 찾아보니 `dps_cash_common=None` — 정기보고서 기준으로는 아직
+  "미확정" 목록에 있는 종목이었습니다. 방금 만든 배지는 "확정" 표에만 붙어 있어서, 이
+  실제 사례가 **화면 어디에도 안 뜨는 상태**임을 데이터를 직접 읽어 재현·확인 후 오너에게
+  그대로 보고. `AskUserQuestion` — 오너가 "미확정 목록에도 같은 배지 추가(추천)" 선택.
+  `pending_row_cells()`에 `payment_index` 매개변수(하위호환용 기본값 None) 추가해
+  같은 `payment_badge_html()`을 재사용, `_render_pending()`·호출부·`PAYMENT_NOTICE`
+  문구까지 일관되게 갱신. 스튜디오삼익 실제 데이터로 배지 HTML을 재실행해 재검증(이번에도
+  최소 스텁으로 앱 임포트 우회 후 실함수 실행). 수정 파일은 여전히
+  `web/pages/dividend_page.py` 1개뿐. **처음 배지를 "확정" 표에만 달았던 설계가
+  첫 실측 사례에서 바로 빗나간 사례** — §0-1이 강조하는 "실측 없이 넘겨짚지 않기"가
+  이번엔 기능 자체보다 **어디에 노출할지 범위 설정**에서 걸렸다는 점이 다름.
 - **2026-08-25 — 배당 "지급일정" 화면(`/dividend`) 노출 완료(오푸스 높음).** 오너가
   삭제 커밋(임시 조사 스크립트 `probe_dart_disclosure_document.py` + 워크플로우) 확인 후
   바로 이어서 요청("지우는 걸 먼저하고 화면 노출작업이어서 사자"). UI 방식은

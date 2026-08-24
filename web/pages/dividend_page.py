@@ -265,11 +265,14 @@ PAYMENT_BADGE_TOOLTIP_INTRO = (
 #: 접이식 패널에 싣는 배경 설명 — 배지 자체가 없는 화면에서도 "왜 어떤 종목에만 이 배지가
 #: 붙는지"를 미리 답해 둡니다(PREFERRED_NOTICE 와 같은 취지).
 PAYMENT_NOTICE = (
-    '💰 "실제 지급일정" 배지 — 위 표에서 일부 종목에는 배당기준일ㆍ지급예정일자를 보여주는 '
-    '배지가 함께 붙어 있습니다. 이건 정기보고서가 아니라 DART 수시공시'
-    '("현금ㆍ현물배당결정")를 매일 감시해 따로 모은 정보로, 이 표의 결산기준일(정기보고서 '
-    '기준)과는 서로 다른 공시입니다 — 같은 배당을 가리키는지는 이 화면이 판정하지 않고, '
-    '그 종목에 그런 공시가 있었다는 사실만 그대로 보여드립니다.\n'
+    '💰 "실제 지급일정" 배지 — 위 달력 상세 표와 아래 "미확정" 목록 양쪽 모두, 일부 종목에는 '
+    '배당기준일ㆍ지급예정일자를 보여주는 배지가 함께 붙어 있습니다. 이건 정기보고서가 아니라 '
+    'DART 수시공시("현금ㆍ현물배당결정")를 매일 감시해 따로 모은 정보로, 표의 결산기준일'
+    '(정기보고서 기준)과는 서로 다른 공시입니다 — 같은 배당을 가리키는지는 이 화면이 판정하지 '
+    '않고, 그 종목에 그런 공시가 있었다는 사실만 그대로 보여드립니다.\n'
+    '🔴 "미확정" 목록에 배지가 붙는 경우도 있습니다 — 정기보고서 기준으로는 아직 2026년 배당이 '
+    '확정되지 않았어도, DART 수시공시로 실제 배당기준일ㆍ지급예정일자가 먼저 나오는 경우가 '
+    '실제로 있었습니다(2026-08-25 첫 실행에서 실측). 그래서 두 목록 모두에 같은 배지를 답니다.\n'
     '아직 모든 종목을 다 확인한 것이 아니라서, 배지가 없다고 지급일정이 없다는 뜻은 '
     '아닙니다 — 매일 새 공시를 확인하며 채워지는 중입니다. "지급예정일자"는 법적으로 확정 '
     '지급일이 아니라 상법상 지급 기한(통상 1개월 이내)이라는 점도 DART 원문에 그대로 '
@@ -816,8 +819,18 @@ def confirmed_row_cells(entry, payment_index=None):
     ]
 
 
-def pending_row_cells(entry):
-    """"아직 2026년 배당 미확정 (작년 참고)" 표 한 행(6칸)."""
+def pending_row_cells(entry, payment_index=None):
+    """"아직 2026년 배당 미확정 (작년 참고)" 표 한 행(6칸).
+
+    🟢 2026-08-25 — 이 목록에도 "실제 지급일정" 배지를 붙입니다. 첫 프로덕션 실행에서
+    바로 실측된 사례(스튜디오삼익 415380)가 이 목록에 있었습니다 — 정기보고서 기준으로는
+    아직 "미확정"인데 DART 수시공시로는 이미 실제 배당기준일·지급예정일자가 나온
+    경우입니다. 확정 표에만 배지를 달면 이런 종목은 데이터를 모아 놓고도 화면 어디에도
+    안 보이므로(오너 확인, 2026-08-25), 같은 배지를 여기도 답니다.
+
+    :param payment_index: `build_payment_event_index()` 가 만든 색인. 없으면(None) 배지를
+        그냥 안 그립니다 — 하위 호환.
+    """
     reason = entry.get('status_reason')
     status_cell = esc(status_summary_text(entry))
     if reason:
@@ -831,7 +844,8 @@ def pending_row_cells(entry):
             '값을 지어내지 않고 "데이터 없음"으로 둡니다 — 0원이라는 뜻이 아닙니다.',
         )
     return [
-        name_cell_html(entry) + parse_note_badge_html(entry),
+        name_cell_html(entry) + parse_note_badge_html(entry)
+        + payment_badge_html(entry, payment_index),
         esc(entry.get('market_text') or MARKET_UNKNOWN),
         year_cell,
         esc(fmt_num(entry.get('dps_krw'), '원', 0)),
@@ -1051,7 +1065,7 @@ async def _render_body() -> None:
 
     @ui.refreshable
     def _pending_section() -> None:
-        _render_pending(view, _visible_pending(), len(pending),
+        _render_pending(view, _visible_pending(), len(pending), payment_index,
                         on_changed=_pending_section.refresh)
 
     _pending_section()
@@ -1390,7 +1404,7 @@ def _render_selected_day(view, entries, payment_index, on_changed) -> None:
 # =============================================================================
 # 6. 아직 2026년 배당 미확정 (작년 참고)
 # =============================================================================
-def _render_pending(view, entries, total_pending, on_changed) -> None:
+def _render_pending(view, entries, total_pending, payment_index, on_changed) -> None:
     """🔴 폴백 종목 목록 — **달력 칸에는 절대 들어가지 않는** 종목들입니다."""
     ui.markdown('### ⏳ 아직 2026년 배당 미확정 (작년 참고)')
     ui.label(PENDING_SECTION_NOTICE).classes('vh-muted vh-keep-all whitespace-pre-line')
@@ -1413,7 +1427,8 @@ def _render_pending(view, entries, total_pending, on_changed) -> None:
     page_entries = entries[start:start + ITEMS_PER_PAGE]
 
     ui.html(holdings_table_html(
-        list(PENDING_HEADERS), [pending_row_cells(entry) for entry in page_entries],
+        list(PENDING_HEADERS),
+        [pending_row_cells(entry, payment_index) for entry in page_entries],
     )).classes('w-full')
 
     def _on_page(page: int) -> None:
