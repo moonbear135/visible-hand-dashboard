@@ -650,12 +650,14 @@ def wired(monkeypatch, no_sleep, real_document_html):
             self.rows = []
             self.failures = set()
             self.document_calls = []
+            self.list_params = []      # 어떤 접수일 구간으로 조회했는지(백필 검증용)
             self.html = real_document_html
 
     wiring = Wiring()
     monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
 
     def fake_json(url, params, timeout, session):
+        wiring.list_params.append(dict(params))
         return 200, _list_payload(wiring.rows)
 
     def fake_bytes(url, params, timeout, session):
@@ -967,6 +969,205 @@ def test_module_level_containers_do_not_accumulate_state(tmp_path, wired):
 
 
 # =============================================================================
+# 5-2. 일회성 백필(--bgn-de/--end-de) — 🔴 상태 파일 안전성이 핵심
+#
+#   왜 있는가: 감시 모드는 "한 번 지나간 날짜는 다시 안 훑는" 구조라, 첫 실행의 lookback
+#   창보다 앞서 접수된 공시(실제 사례: 2026-08-20 롯데케미칼 rcept_no=20260820800655)는
+#   영영 들어오지 않습니다. 백필은 그 구간을 한 번 메우는 경로입니다.
+#
+#   🔴 여기서 가장 중요한 것은 "백필이 매일 도는 감시를 깨지 않는다"입니다 —
+#      상태 파일의 last_checked_de 가 백필 때문에 **뒤로 가면** 다음 정기 실행이 이미
+#      확인한 구간을 DART 에 다시 요청하게 됩니다(§0-3-2 위반).
+# =============================================================================
+def _state_of(cache_dir):
+    return _read_json(str(cache_dir / "dividend_kr_2026_payment_state.json"))
+
+
+def test_backfill_scans_exactly_the_requested_range_ignoring_the_state_file(tmp_path, wired):
+    """상태 파일이 이미 08-24 까지 확인 표시돼 있어도, 백필은 지정한 구간을 그대로 훑습니다."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    cp.write_payment_state(str(cache_dir / "dividend_kr_2026_payment_state.json"),
+                           "20260824")
+
+    wired.rows = [_row("현금ㆍ현물배당결정", "20260805800001", rcept_dt="20260805")]
+    code = cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                          cache_dir=str(cache_dir), log=lambda *_: None,
+                                          today=date(2026, 8, 25))
+    assert code == 0
+    # 감시 모드였다면 08-25(=state+1)부터 훑었을 구간을, 백필은 지정한 대로 훑습니다.
+    assert [(params["bgn_de"], params["end_de"]) for params in wired.list_params] == [
+        ("20260801", "20260819")]
+    payload = _read_json(str(out_dir / "dividend_kr_2026_payment_events.json"))
+    assert [record["rcept_no"] for record in payload["records"]] == ["20260805800001"]
+
+
+def test_backfill_never_moves_the_state_file_backwards(tmp_path, wired):
+    """
+    🔴 이 파일에서 가장 중요한 테스트.
+    기존 상태 08-24 → 08-01~08-19 백필 → 상태 파일은 **여전히 08-24** 여야 합니다.
+    08-19 로 되돌아가면 다음 정기 실행이 08-20 부터 다시 훑어 이미 확인한 닷새치를
+    DART 에 다시 요청합니다(§0-3-2 위반).
+    """
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    cp.write_payment_state(str(cache_dir / "dividend_kr_2026_payment_state.json"),
+                           "20260824")
+
+    wired.rows = [_row("현금ㆍ현물배당결정", "20260805800001", rcept_dt="20260805")]
+    cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                   cache_dir=str(cache_dir), log=lambda *_: None,
+                                   today=date(2026, 8, 25))
+    assert _state_of(cache_dir)["last_checked_de"] == "20260824"
+
+    # 그리고 다음 정기 실행은 여전히 08-25 부터 시작합니다(08-20 부터가 아니라).
+    wired.list_params.clear()
+    wired.rows = []
+    cp.run_watch_payment_events("2026", str(out_dir), cache_dir=str(cache_dir),
+                                log=lambda *_: None, today=date(2026, 8, 26))
+    assert [(params["bgn_de"], params["end_de"]) for params in wired.list_params] == [
+        ("20260825", "20260825")]
+
+
+def test_backfill_writes_the_state_file_when_there_was_none(tmp_path, wired):
+    """되돌릴 기존 값이 없으면(상태 파일 자체가 없으면) 이번 구간의 끝 날짜로 새로 씁니다."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    wired.rows = [_row("현금ㆍ현물배당결정", "20260805800001", rcept_dt="20260805")]
+
+    code = cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                          cache_dir=str(cache_dir), log=lambda *_: None,
+                                          today=date(2026, 8, 25))
+    assert code == 0
+    assert _state_of(cache_dir)["last_checked_de"] == "20260819"
+
+
+def test_backfill_advances_the_state_file_when_it_is_behind(tmp_path, wired):
+    """기존 값보다 뒤면 전진합니다(max 규칙의 반대쪽 — 되돌리지만 않으면 됩니다)."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    cp.write_payment_state(str(cache_dir / "dividend_kr_2026_payment_state.json"),
+                           "20260805")
+    wired.rows = []
+    cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                   cache_dir=str(cache_dir), log=lambda *_: None,
+                                   today=date(2026, 8, 25))
+    assert _state_of(cache_dir)["last_checked_de"] == "20260819"
+
+
+def test_backfill_does_not_refetch_documents_it_already_has(tmp_path, wired):
+    """백필 구간이 이미 수집된 날짜와 겹쳐도 원문을 다시 받지 않습니다(§0-3-2)."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    wired.rows = [_row("현금ㆍ현물배당결정", "20260820800655", rcept_dt="20260820")]
+    cp.run_watch_payment_events("2026", str(out_dir), cache_dir=str(cache_dir),
+                                log=lambda *_: None, today=date(2026, 8, 21))
+    assert wired.document_calls == ["20260820800655"]
+
+    # 같은 공시가 백필 구간에도 잡히지만 rcept_no 가 이미 파일에 있으므로 원문 재요청 없음.
+    cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260820",
+                                   cache_dir=str(cache_dir), log=lambda *_: None,
+                                   today=date(2026, 8, 25))
+    assert wired.document_calls == ["20260820800655"]
+    payload = _read_json(str(out_dir / "dividend_kr_2026_payment_events.json"))
+    assert payload["summary"]["total_records"] == 1
+
+
+def test_backfill_keeps_the_old_state_when_documents_fail(tmp_path, wired):
+    """원문 실패가 있어도 상태 파일이 뒤로 가지 않습니다(실패했다고 되돌리지도 않습니다)."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    cp.write_payment_state(str(cache_dir / "dividend_kr_2026_payment_state.json"),
+                           "20260824")
+    wired.rows = [_row("현금ㆍ현물배당결정", "20260805800001", rcept_dt="20260805")]
+    wired.failures = {"20260805800001"}
+
+    code = cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                          cache_dir=str(cache_dir), log=lambda *_: None,
+                                          today=date(2026, 8, 25))
+    assert code == 2                                    # 조용히 성공하지 않습니다
+    assert _state_of(cache_dir)["last_checked_de"] == "20260824"
+
+
+def test_backfill_without_a_state_file_stops_before_the_failed_day(tmp_path, wired):
+    """상태 파일이 없을 때는 '실패한 날의 전날'까지만 확인한 것으로 적습니다(§0-1)."""
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    wired.rows = [
+        _row("현금ㆍ현물배당결정", "20260805800001", rcept_dt="20260805"),
+        _row("현금ㆍ현물배당결정", "20260810800002", rcept_dt="20260810"),
+    ]
+    wired.failures = {"20260810800002"}
+
+    code = cp.run_backfill_payment_events("2026", str(out_dir), "20260801", "20260819",
+                                          cache_dir=str(cache_dir), log=lambda *_: None,
+                                          today=date(2026, 8, 25))
+    assert code == 2
+    assert _state_of(cache_dir)["last_checked_de"] == "20260809"
+
+
+def test_backfill_refuses_a_range_that_is_not_yyyymmdd(tmp_path, wired):
+    with pytest.raises(cp.DartPaymentFatalError):
+        cp.run_backfill_payment_events("2026", str(tmp_path / "data"), "2026-08-01",
+                                       "20260819", cache_dir=str(tmp_path / "cache"),
+                                       log=lambda *_: None, today=date(2026, 8, 25))
+    assert wired.list_params == []      # 구간을 모르는 채 DART 를 부르지 않습니다
+
+
+def test_backfill_refuses_a_reversed_range(tmp_path, wired):
+    with pytest.raises(cp.DartPaymentFatalError):
+        cp.run_backfill_payment_events("2026", str(tmp_path / "data"), "20260819",
+                                       "20260801", cache_dir=str(tmp_path / "cache"),
+                                       log=lambda *_: None, today=date(2026, 8, 25))
+    assert wired.list_params == []
+
+
+def test_backfill_refuses_to_mark_today_as_checked(tmp_path, wired):
+    """
+    오늘은 아직 하루가 끝나지 않아 접수가 더 들어올 수 있습니다. 오늘을 '확인 끝'으로
+    적으면 그날 나머지 공시를 영영 놓칩니다 — 감시 모드가 끝을 '어제'로 두는 이유와 같습니다.
+    """
+    with pytest.raises(cp.DartPaymentFatalError):
+        cp.run_backfill_payment_events("2026", str(tmp_path / "data"), "20260801",
+                                       "20260825", cache_dir=str(tmp_path / "cache"),
+                                       log=lambda *_: None, today=date(2026, 8, 25))
+    assert wired.list_params == []
+
+
+def test_merge_last_checked_de_never_goes_backwards():
+    """상태 병합 규칙 자체(순수 함수) — None 은 '상태 파일을 건드리지 않는다'는 뜻입니다."""
+    assert cp.merge_last_checked_de("20260824", "20260819", log=lambda *_: None) is None
+    assert cp.merge_last_checked_de("20260824", "20260824", log=lambda *_: None) is None
+    assert cp.merge_last_checked_de("20260819", "20260824",
+                                    log=lambda *_: None) == "20260824"
+    assert cp.merge_last_checked_de(None, "20260819", log=lambda *_: None) == "20260819"
+    # 기존 값을 못 읽으면 어느 쪽이 뒤인지 모릅니다 → 덮어쓰지 않습니다(§0-1).
+    assert cp.merge_last_checked_de("2026-08-24", "20260819", log=lambda *_: None) is None
+
+
+def test_backfill_warns_when_it_leaves_a_gap_behind(tmp_path, wired):
+    """
+    기존 상태(08-05) 다음 날 ~ 백필 시작일(08-10) 전날 구간은 아무도 확인하지 않았는데
+    상태가 08-19 로 전진합니다 — 조용히 넘기지 않고 로그로 알립니다(§0-1).
+    """
+    out_dir = tmp_path / "data"
+    cache_dir = out_dir / "cache"
+    cache_dir.mkdir(parents=True)
+    cp.write_payment_state(str(cache_dir / "dividend_kr_2026_payment_state.json"),
+                           "20260805")
+    wired.rows = []
+    messages = []
+    cp.run_backfill_payment_events("2026", str(out_dir), "20260810", "20260819",
+                                   cache_dir=str(cache_dir), log=messages.append,
+                                   today=date(2026, 8, 25))
+    assert any("확인하지 않았습니다" in message for message in messages)
+
+
+# =============================================================================
 # 6. CLI
 # =============================================================================
 def test_cli_defaults_match_the_workflow(monkeypatch):
@@ -1011,6 +1212,55 @@ def test_cli_has_no_universe_flag(monkeypatch):
     monkeypatch.setattr(cp, "run_watch_payment_events", lambda *a, **k: 0)
     with pytest.raises(SystemExit):
         cp.main(["--year", "2026", "--universe", "data/whatever.json"])
+
+
+def test_cli_without_backfill_flags_still_runs_watch(monkeypatch):
+    """회귀 방지 — 백필 옵션을 안 주면 기존 감시 모드 그대로입니다."""
+    called = []
+    monkeypatch.setattr(cp, "run_watch_payment_events",
+                        lambda *a, **k: called.append("watch") or 0)
+    monkeypatch.setattr(cp, "run_backfill_payment_events",
+                        lambda *a, **k: pytest.fail("백필로 새면 안 됩니다"))
+    assert cp.main(["--year", "2026"]) == 0
+    assert called == ["watch"]
+
+
+def test_cli_backfill_mode_passes_the_range_through(monkeypatch):
+    captured = {}
+
+    def fake_backfill(year, out_dir, bgn_de, end_de, cache_dir=None, api_key=None,
+                      log=print):
+        captured.update({"year": year, "out_dir": out_dir, "bgn_de": bgn_de,
+                         "end_de": end_de, "cache_dir": cache_dir})
+        return 0
+
+    monkeypatch.setattr(cp, "run_backfill_payment_events", fake_backfill)
+    monkeypatch.setattr(cp, "run_watch_payment_events",
+                        lambda *a, **k: pytest.fail("백필 모드에서 감시가 돌면 안 됩니다"))
+    assert cp.main(["--year", "2026", "--out-dir", "data", "--cache-dir", "data/cache",
+                    "--bgn-de", "20260801", "--end-de", "20260824"]) == 0
+    assert captured == {"year": "2026", "out_dir": "data", "bgn_de": "20260801",
+                        "end_de": "20260824", "cache_dir": "data/cache"}
+
+
+@pytest.mark.parametrize("argv", [
+    ["--year", "2026", "--bgn-de", "20260801"],
+    ["--year", "2026", "--end-de", "20260824"],
+])
+def test_cli_rejects_half_a_backfill_range(monkeypatch, capsys, argv):
+    """
+    한쪽만 주면 거의 확실히 실수입니다. 조용히 감시 모드로 돌면 사람이 의도한 구간이 아니라
+    '어제까지 3일'만 훑고 끝나 버립니다 — 무엇이 잘못됐는지 말하고 멈춥니다(§0-1).
+    """
+    monkeypatch.setattr(cp, "run_watch_payment_events",
+                        lambda *a, **k: pytest.fail("반쪽 구간으로 실행되면 안 됩니다"))
+    monkeypatch.setattr(cp, "run_backfill_payment_events",
+                        lambda *a, **k: pytest.fail("반쪽 구간으로 실행되면 안 됩니다"))
+    with pytest.raises(SystemExit):
+        cp.main(argv)
+    message = capsys.readouterr().err
+    assert "--bgn-de" in message and "--end-de" in message
+    assert "둘 다" in message
 
 
 def test_cli_returns_2_and_a_readable_message_on_fatal(monkeypatch, capsys):

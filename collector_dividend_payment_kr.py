@@ -123,6 +123,20 @@ list.json(`pblntf_ty="I"`) 3일치 표본에서 "배당"이 들어간 report_nm 
     (성공한 날까지만 상태를 전진시킵니다 — `run_watch_payment_events()` 참고).
 
 ================================================================================
+📌 실행 모드는 둘 — 매일 감시(기본) / 일회성 백필
+================================================================================
+  · **감시**(`run_watch_payment_events`, CLI 기본): 상태 파일을 보고 "지난번에 끝낸 날 +1
+    ~ 어제"만 훑습니다. 한 번 지나간 날짜는 다시 훑지 않습니다.
+  · **백필**(`run_backfill_payment_events`, CLI `--bgn-de`/`--end-de` 둘 다 지정):
+    사람이 지정한 구간을 상태 파일과 무관하게 한 번 훑습니다. 첫 실행의 lookback 창보다
+    앞서 접수돼 감시가 영영 못 보는 공시를 메우는 용도입니다(실제 사례: 2026-08-20 접수
+    롯데케미칼 rcept_no=20260820800655).
+    🔴 백필은 상태 파일의 `last_checked_de` 를 **절대 뒤로 되돌리지 않습니다** —
+       `max(기존 값, 이번 백필이 실제로 확인을 끝낸 날)` 로만 갱신합니다. 되돌리면 다음
+       정기 실행이 이미 확인한 구간을 DART 에 다시 요청하게 됩니다(§0-3-2 위반).
+    두 모드는 조회·중복방지·저장 본체(`_collect_payment_events_in_range`)를 **공유**합니다.
+
+================================================================================
 📌 아직 검증하지 못한 것 (첫 GitHub Actions 실행에서 확인해야 합니다)
 ================================================================================
   · 이 개발 샌드박스는 프록시 allowlist 때문에 opendart 에 직접 붙지 못합니다. 아래
@@ -1202,6 +1216,54 @@ def write_payment_state(path, last_checked_de):
     return payload
 
 
+def merge_last_checked_de(existing_de, candidate_de, log=print):
+    """
+    상태 파일의 `last_checked_de` 를 **절대 뒤로 되돌리지 않는** 병합 규칙(순수 함수).
+
+    백필(과거 구간을 한 번 훑는 실행)이 정기 감시의 진행 상태를 망가뜨리지 않게 하는
+    장치입니다. 예를 들어 상태가 이미 20260824 까지 확인된 상태에서 20260801~20260819 를
+    백필하면, 상태 파일은 **여전히 20260824** 여야 합니다. 20260819 로 되돌리면 다음 정기
+    실행이 20260820 부터 다시 훑어 **이미 확인한 닷새치를 DART 에 다시 요청**하게 됩니다
+    (§0-3-2 위반).
+
+    반환:
+      · 새로 적어야 할 'YYYYMMDD' 문자열
+      · **None** = "상태 파일을 건드리지 마세요"(되돌리게 되거나, 기존 값을 해석 못 해
+        어느 쪽이 앞인지 판단할 수 없는 경우)
+    """
+    candidate = _parse_de(candidate_de)
+    if candidate is None:
+        # 호출부의 버그입니다. 조용히 넘기면 엉뚱한 값이 상태 파일에 박힙니다(§0-1).
+        raise DartPaymentFatalError(
+            f"상태 파일에 적으려는 날짜를 YYYYMMDD 로 읽지 못했습니다: {candidate_de!r} "
+            "— 확인 범위를 알 수 없는 값을 '확인 끝'으로 적지 않습니다.")
+
+    if not existing_de:
+        return str(candidate_de)
+
+    existing = _parse_de(existing_de)
+    if existing is None:
+        # 기존 값을 못 읽으면 어디까지 확인됐는지 모릅니다 → 덮어쓰면 되돌리는 것일 수도
+        # 있습니다. 모를 때는 건드리지 않습니다(§0-1). 감시 모드는 이 깨진 값을 '상태 없음'
+        # 으로 보고 lookback 부터 다시 확인하므로 놓치는 구간은 생기지 않습니다.
+        log(f"  ⚠️ 기존 상태 파일의 last_checked_de 를 날짜로 읽지 못했습니다"
+            f"({existing_de!r}) — 어느 쪽이 더 뒤인지 판단할 수 없어 상태 파일을 "
+            "건드리지 않습니다.")
+        return None
+
+    if existing == candidate:
+        log(f"  ℹ️ 상태 파일이 이미 {existing_de} 입니다 — 같은 값을 다시 쓰지 않습니다"
+            "(내용이 같은 파일을 커밋하지 않기 위함).")
+        return None
+    if existing > candidate:
+        log(f"  ℹ️ 상태 파일은 이미 {existing_de} 까지 '확인 끝'입니다 — 이번 실행의 "
+            f"{candidate_de} 로 **되돌리지 않고** 그대로 둡니다(되돌리면 다음 정기 실행이 "
+            "이미 확인한 구간을 DART 에 다시 요청하게 됩니다 — §0-3-2).")
+        return None
+
+    return str(candidate_de)
+
+
 def _parse_de(text):
     """'YYYYMMDD' → date. 해석 못 하면 None(넘겨짚지 않습니다)."""
     if not text:
@@ -1317,6 +1379,10 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
     **실패한 것만** 다시 받습니다. "실패했는데 확인 끝으로 적어 영영 놓치는 일"도,
     "성공한 것까지 매일 다시 받는 일"도 생기지 않습니다.
 
+    ②~④는 `_collect_payment_events_in_range()` 에 있습니다 — 일회성 백필
+    (`run_backfill_payment_events()`)이 **같은 코드**를 씁니다(§0-3-10). 두 모드가 다른
+    것은 ①(구간을 어떻게 정하는가)과 ⑤(상태 파일을 어떻게 전진시키는가)뿐입니다.
+
     반환: 프로세스 종료코드(0=정상, 2=사람이 손봐야 하는 중단).
     """
     cache_dir = cache_dir or out_dir
@@ -1366,6 +1432,162 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
             f"환경변수 {DART_API_KEY_ENV} 가 없습니다. 인증키를 코드에 적지 말고 "
             "GitHub Actions Secret / 로컬 환경변수로 넣으세요.")
 
+    result = _collect_payment_events_in_range(
+        bgn_de, end_de, key, events_path, raw_path, start_date,
+        session=session, log=log)
+    failures = result["failures"]
+
+    # ── ⑤ 실제로 다 반영한 날짜까지만 상태를 전진시킵니다 ────────────────────
+    if not failures:
+        write_payment_state(state_path, end_de)
+        log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de}, "
+            f"총 {result['total']:,}건)")
+    else:
+        first_failed_date = result["first_failed_date"]
+        safe_end = (first_failed_date - timedelta(days=1)) if first_failed_date else None
+        if safe_end is not None and safe_end >= start_date:
+            safe_de = safe_end.strftime("%Y%m%d")
+            write_payment_state(state_path, safe_de)
+            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 상태 파일을 실패한 날의 전날까지만 "
+                f"전진시킵니다(last_checked_de={safe_de}). 다음 실행이 그 날부터 다시 "
+                "확인하고, 이미 받아 둔 건은 건너뜁니다.")
+        else:
+            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 이번 구간은 '확인 끝'으로 적지 "
+                "않습니다(상태 파일을 그대로 둡니다). 다음 실행이 같은 구간을 다시 "
+                "확인하고, 이미 받아 둔 건은 건너뜁니다.")
+
+    # 실패가 있으면 조용히 성공하지 않습니다 — Actions 를 빨간불로 만듭니다(§0-1).
+    return 0 if not failures else 2
+
+
+def run_backfill_payment_events(bsns_year, out_dir, bgn_de, end_de, cache_dir=None,
+                                api_key=None, session=None, log=print, today=None):
+    """
+    **일회성 백필** — 사람이 지정한 접수일 구간을 한 번 훑습니다(상태 파일 무관).
+
+    왜 필요했나: `run_watch_payment_events()` 는 "한 번 지나간 날짜는 다시 안 훑는" 구조라,
+    **첫 실행의 lookback 창보다 앞서 접수된 공시는 영영 들어오지 않습니다.** 실제로
+    2026-08-20 접수된 롯데케미칼 배당결정(rcept_no=20260820800655)이 첫 프로덕션 실행
+    (2026-08-25경, lookback 3일 → 08-22~08-24)보다 앞서 있어 누락됐고, 오너가 직접
+    발견했습니다. 그 구간을 한 번 메우기 위한 경로입니다.
+
+    감시 모드와 **같은 본체**(`_collect_payment_events_in_range`)를 씁니다 — 후보 조회,
+    "이미 가진 rcept_no 는 원문을 다시 받지 않기", append-only 저장이 전부 동일합니다.
+    따라서 백필 구간이 이미 수집된 날짜와 겹쳐도 DART 에 원문을 다시 요청하지 않습니다.
+
+    🔴 감시 모드와 **다른 점은 상태 파일 갱신 규칙 하나뿐**입니다:
+        `last_checked_de = max(기존 값, 이번 백필로 실제 확인을 끝낸 날)`
+       — 즉 **절대 뒤로 되돌리지 않습니다**(`merge_last_checked_de()` 참고). 되돌리면
+       다음 정기 실행이 이미 확인한 구간을 다시 훑어 DART 에 헛요청을 반복합니다(§0-3-2).
+       상태 파일이 아예 없으면(백필이 먼저 도는 경우) 되돌릴 기존 값이 없으므로 이번
+       구간의 끝 날짜로 새로 씁니다.
+
+    ⚠️ `end_de` 가 오늘(KST) 이후면 실행을 거부합니다. 오늘은 아직 하루가 안 끝나 접수가
+       더 들어올 수 있는데 '확인 끝'으로 적으면 그날 나머지 공시를 영영 놓칩니다(§0-1).
+
+    반환: 프로세스 종료코드(0=정상, 2=원문 실패가 있었음).
+    """
+    cache_dir = cache_dir or out_dir
+    os.makedirs(out_dir, exist_ok=True)
+    os.makedirs(cache_dir, exist_ok=True)
+
+    events_path = payment_events_path(out_dir, bsns_year)
+    raw_path = payment_events_raw_path(out_dir, bsns_year)
+    state_path = payment_state_path(cache_dir, bsns_year)
+
+    # ── 구간 검증 (지어내거나 조용히 보정하지 않습니다 — §0-1) ───────────────
+    start_date = _parse_de(bgn_de)
+    end_date = _parse_de(end_de)
+    if start_date is None or end_date is None:
+        raise DartPaymentFatalError(
+            f"백필 구간을 YYYYMMDD 로 읽지 못했습니다(--bgn-de={bgn_de!r}, "
+            f"--end-de={end_de!r}). 예: --bgn-de 20260801 --end-de 20260824")
+    if start_date > end_date:
+        raise DartPaymentFatalError(
+            f"백필 시작일({bgn_de})이 종료일({end_de})보다 뒤입니다 — 구간을 다시 확인하세요.")
+
+    today = today or _now_kst().date()
+    if end_date >= today:
+        raise DartPaymentFatalError(
+            f"백필 종료일({end_de})이 오늘(KST {today:%Y%m%d}) 이후입니다. 오늘은 아직 하루가 "
+            "끝나지 않아 접수가 더 들어올 수 있는데 '확인 끝'으로 적으면 그날 나머지 공시를 "
+            "영영 놓칩니다 — 어제 이전 날짜를 주세요.")
+
+    log("─" * 78)
+    log(f"🧹 배당결정 공시 **일회성 백필** — 접수일 {start_date:%Y-%m-%d} ~ "
+        f"{end_date:%Y-%m-%d} 구간을 상태 파일과 무관하게 한 번 훑습니다.")
+
+    key = get_api_key(api_key)
+    if not key:
+        raise DartPaymentFatalError(
+            f"환경변수 {DART_API_KEY_ENV} 가 없습니다. 인증키를 코드에 적지 말고 "
+            "GitHub Actions Secret / 로컬 환경변수로 넣으세요.")
+
+    state = read_payment_state(state_path, log=log)
+    existing_de = state.get("last_checked_de")
+    if existing_de:
+        log(f"  ℹ️ 기존 상태 파일: last_checked_de={existing_de} "
+            "(백필은 이 값을 **뒤로 되돌리지 않습니다**).")
+
+    result = _collect_payment_events_in_range(
+        bgn_de, end_de, key, events_path, raw_path, start_date,
+        session=session, log=log)
+    failures = result["failures"]
+
+    # ── 이번 백필로 "실제로 확인을 끝낸" 날짜 정하기 ─────────────────────────
+    if not failures:
+        completed_de = end_de
+    else:
+        first_failed_date = result["first_failed_date"]
+        safe_end = (first_failed_date - timedelta(days=1)) if first_failed_date else None
+        completed_de = (safe_end.strftime("%Y%m%d")
+                        if safe_end is not None and safe_end >= start_date else None)
+        if completed_de is None:
+            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 이번 백필로 '확인 끝'이라 말할 수 있는 "
+                "구간이 없습니다. 상태 파일을 건드리지 않습니다.")
+        else:
+            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 실패한 날의 전날({completed_de})까지만 "
+                "확인한 것으로 봅니다.")
+
+    # ── 상태 파일: max(기존, 이번 백필) — 절대 뒤로 가지 않습니다 ────────────
+    if completed_de is not None:
+        new_de = merge_last_checked_de(existing_de, completed_de, log=log)
+        if new_de is not None:
+            existing_date = _parse_de(existing_de) if existing_de else None
+            if existing_date is not None and start_date > existing_date + timedelta(days=1):
+                # 상태를 전진시키면 그 사이 구간은 정기 감시가 영영 안 훑습니다 —
+                # 조용히 넘기지 않고 사람이 보게 남깁니다(§0-1).
+                log(f"  ⚠️ 주의: 기존 상태({existing_de}) 다음 날부터 이번 백필 시작일"
+                    f"({bgn_de}) 전날까지의 구간은 이번 백필이 확인하지 않았습니다. "
+                    f"상태를 {new_de} 로 전진시키면 정기 감시는 그 구간을 훑지 않습니다 "
+                    "— 필요하면 그 구간으로 백필을 한 번 더 돌리세요.")
+            write_payment_state(state_path, new_de)
+            log(f"   상태 파일 갱신: {state_path} (last_checked_de={new_de}, "
+                f"총 {result['total']:,}건)")
+
+    log(f"🧹 백필 종료 — 이번 실행 추가 {result['new_records']:,}건, "
+        f"원문 실패 {len(failures):,}건.")
+    return 0 if not failures else 2
+
+
+def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_path,
+                                     range_start_date, session=None, log=print):
+    """
+    ②~④ **공통 본체** — 감시 모드와 백필 모드가 이 함수 하나를 같이 씁니다(§0-3-10:
+    같은 로직을 두 벌 두지 않습니다. 두 벌이면 한쪽만 고쳐지는 사고가 납니다).
+
+    하는 일: 접수일 `bgn_de`~`end_de` 구간의 배당결정 공시를 훑어, **아직 파일에 없는
+    rcept_no 만** 원문을 받아 파싱하고 append-only 로 저장합니다.
+
+    🔴 **상태 파일은 이 함수가 건드리지 않습니다.** 상태를 어떻게 전진시킬지는 호출부가
+       정합니다 — 감시는 `end_de` 로, 백필은 `max(기존, end_de)` 로 규칙이 다릅니다.
+
+    `range_start_date`: 이 구간의 시작일(date). 접수일을 못 읽은 실패가 생겼을 때
+       "이번 구간은 전진시키지 않는다"를 표현하기 위한 기준점입니다.
+
+    반환(dict): {"new_records": int, "failures": [...], "first_failed_date": date|None,
+                 "total": int}
+    """
     # ── 기존 산출물 읽기 (append-only 의 기준점) ─────────────────────────────
     existing_records, _existing_payload = read_payment_events(events_path, log=log)
     existing_ids = {str(rec.get("rcept_no")) for rec in existing_records
@@ -1374,7 +1596,7 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
     # ── ② 배당결정 공시 후보 찾기 ────────────────────────────────────────────
     scan_stats = {}
     candidates = fetch_dividend_decision_disclosures(
-        bgn_de, end_de, key, session=session, log=log, stats=scan_stats)
+        bgn_de, end_de, api_key, session=session, log=log, stats=scan_stats)
 
     # ── ③ 이미 가진 것은 원문을 받지 않습니다 ────────────────────────────────
     fresh = [item for item in candidates if str(item.get("rcept_no")) not in existing_ids]
@@ -1387,16 +1609,13 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
         log("ℹ️ 새로 추가할 배당결정 공시가 없습니다.")
         total = _flush_payment_output(events_path, existing_records, [], scan_stats,
                                       bgn_de, end_de, [], log=log)
-        # 그래도 "이 구간은 확인했다"는 사실은 기록합니다. 안 그러면 다음 실행이 같은
-        # 구간을 또 훑어 DART 에 헛요청을 반복합니다(§0-3-2).
-        write_payment_state(state_path, end_de)
-        log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de}, 총 {total:,}건)")
-        return 0
+        return {"new_records": 0, "failures": [], "first_failed_date": None,
+                "total": total}
 
     log(f"  → 이번에 원문을 받을 배당결정 공시: {len(fresh):,}건")
 
     # ── ④ 원문 받아서 파싱 → append-only 로 추가 ─────────────────────────────
-    # 접수일 순서대로 처리합니다(⑤에서 "어느 날까지 다 됐는지" 를 정확히 판단하기 위함).
+    # 접수일 순서대로 처리합니다(호출부가 "어느 날까지 다 됐는지" 를 정확히 판단하기 위함).
     fresh.sort(key=lambda item: (str(item.get("rcept_dt") or ""),
                                  str(item.get("rcept_no") or "")))
 
@@ -1410,7 +1629,8 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
         if document_requests:
             polite_sleep()      # §0-3-2 — 요청 사이 딜레이
         try:
-            html_text = fetch_disclosure_document(rcept_no, key, session=session, log=log)
+            html_text = fetch_disclosure_document(rcept_no, api_key, session=session,
+                                                  log=log)
         except DartPaymentFatalError:
             # 키·IP·한도·차단 — 지금까지 받은 것만 저장하고 실행을 중단합니다(재시도 금지).
             log(f"  🛑 치명적 응답을 받아 원문 수집을 여기서 멈춥니다(rcept_no={rcept_no}).")
@@ -1432,7 +1652,7 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
             elif item_date is None and first_failed_date is None:
                 # 접수일을 못 읽으면 "언제까지 안전한지" 판단할 수 없습니다 → 이번 구간은
                 # 전진시키지 않습니다(§0-1 — 모르면 확인한 셈 치지 않기).
-                first_failed_date = start_date
+                first_failed_date = range_start_date
             continue
 
         document_requests += 1
@@ -1469,25 +1689,8 @@ def run_watch_payment_events(bsns_year, out_dir, cache_dir=None, lookback_days=3
     log(f"   저장: {events_path} (총 {total:,}건, 이번 실행 추가 {len(new_records):,}건, "
         f"원문 실패 {len(failures):,}건)")
 
-    # ── ⑤ 실제로 다 반영한 날짜까지만 상태를 전진시킵니다 ────────────────────
-    if not failures:
-        write_payment_state(state_path, end_de)
-        log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de})")
-    else:
-        safe_end = (first_failed_date - timedelta(days=1)) if first_failed_date else None
-        if safe_end is not None and safe_end >= start_date:
-            safe_de = safe_end.strftime("%Y%m%d")
-            write_payment_state(state_path, safe_de)
-            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 상태 파일을 실패한 날의 전날까지만 "
-                f"전진시킵니다(last_checked_de={safe_de}). 다음 실행이 그 날부터 다시 "
-                "확인하고, 이미 받아 둔 건은 건너뜁니다.")
-        else:
-            log(f"  ⚠️ 원문 실패 {len(failures):,}건 — 이번 구간은 '확인 끝'으로 적지 "
-                "않습니다(상태 파일을 그대로 둡니다). 다음 실행이 같은 구간을 다시 "
-                "확인하고, 이미 받아 둔 건은 건너뜁니다.")
-
-    # 실패가 있으면 조용히 성공하지 않습니다 — Actions 를 빨간불로 만듭니다(§0-1).
-    return 0 if not failures else 2
+    return {"new_records": len(new_records), "failures": failures,
+            "first_failed_date": first_failed_date, "total": total}
 
 
 def _flush_payment_output(events_path, existing_records, new_records, scan_stats,
@@ -1536,7 +1739,16 @@ def main(argv=None):
     parser.add_argument("--cache-dir", default=os.path.join("data", "cache"),
                         help="상태 파일 디렉터리(기본: data/cache)")
     parser.add_argument("--lookback-days", type=int, default=3,
-                        help="상태 파일이 아직 없을 때(최초 실행) 며칠 전부터 확인할지(기본 3)")
+                        help="상태 파일이 아직 없을 때(최초 실행) 며칠 전부터 확인할지(기본 3). "
+                             "⚠️ 백필 모드(--bgn-de/--end-de)에서는 쓰이지 않습니다.")
+    # ── 일회성 백필 모드 ─────────────────────────────────────────────────────
+    # 둘 다 주면 백필, 둘 다 안 주면 기존 감시 모드입니다(하나만 주면 아래에서 거부).
+    parser.add_argument("--bgn-de", default=None,
+                        help="[백필] 훑을 접수일 시작(YYYYMMDD). --end-de 와 **함께** 줘야 "
+                             "합니다. 주면 상태 파일과 무관하게 이 구간을 한 번 훑습니다"
+                             "(상태 파일의 last_checked_de 는 뒤로 되돌아가지 않습니다).")
+    parser.add_argument("--end-de", default=None,
+                        help="[백필] 훑을 접수일 끝(YYYYMMDD, 어제 이전). --bgn-de 와 함께.")
     parser.add_argument("--api-key", default=None,
                         help=f"DART 인증키(기본: 환경변수 {DART_API_KEY_ENV}). "
                              "⚠️ 명령줄에 적으면 프로세스 목록에 노출될 수 있으니 되도록 "
@@ -1546,15 +1758,29 @@ def main(argv=None):
     #    통째로 사라집니다(설계 의도 — 파일 상단 주석 참고).
     args = parser.parse_args(argv)
 
+    # 한쪽만 준 것은 거의 확실히 실수입니다. 조용히 감시 모드로 돌면 사람이 의도한 구간이
+    # 아니라 "어제까지 3일"만 훑고 끝나 버립니다 — 무엇이 잘못됐는지 말하고 멈춥니다(§0-1).
+    if bool(args.bgn_de) != bool(args.end_de):
+        parser.error(
+            "--bgn-de 와 --end-de 는 **둘 다** 주거나 둘 다 주지 않아야 합니다"
+            f"(받은 값: --bgn-de={args.bgn_de!r}, --end-de={args.end_de!r}). "
+            "둘 다 주면 그 구간을 한 번 훑는 백필 모드, 둘 다 없으면 기존 감시 모드입니다.")
+
+    is_backfill = bool(args.bgn_de and args.end_de)
     try:
+        if is_backfill:
+            return run_backfill_payment_events(
+                args.year, args.out_dir, args.bgn_de, args.end_de,
+                cache_dir=args.cache_dir, api_key=args.api_key, log=print)
         return run_watch_payment_events(
             args.year, args.out_dir, cache_dir=args.cache_dir,
             lookback_days=args.lookback_days, api_key=args.api_key, log=print)
     except (DartPaymentFatalError, DartPaymentApiError) as e:
         # 스택트레이스 대신 사람이 읽을 문장으로 끝내되, '조용히 성공'하지 않습니다.
         # ⚠️ 상태 파일은 갱신되지 않았거나 성공한 날까지만 전진한 상태입니다 — 다음 실행이
-        #    남은 구간을 다시 확인합니다.
-        print(f"🛑 배당결정 공시 감시를 중단했습니다 — {e}")
+        #    남은 구간을 다시 확인합니다. 백필이 실패해도 기존 상태는 뒤로 가지 않습니다.
+        print(f"🛑 배당결정 공시 {'일회성 백필을' if is_backfill else '감시를'} "
+              f"중단했습니다 — {e}")
         return 2
 
 
