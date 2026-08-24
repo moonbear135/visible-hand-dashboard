@@ -16,15 +16,7 @@ dividend_module/test_dividend_collector.py
    않습니다.
 
 ⚠️ 이 테스트가 전부 통과해도 "DART 실서버와 잘 통신한다"는 뜻은 아닙니다.
-   실통신 검증은 GitHub Actions 실행 로그와 산출물로만 가능합니다. 확인 방법:
-     · `data/dividend_kr_2026_latest.json` 의 `summary` 에서
-       `completed`(전수 완주 여부) / `stopped_reason`(왜 멈췄는지) /
-       `requests_used`(총 요청 수) / `elapsed_sec`(소요 시간) /
-       `by_status`(OK·NO_DATA·ERROR·UNMAPPED 각 몇 건인지) 를 봅니다.
-     · `universe_size_input` 과 `universe_size` 가 다르면 `--limit` 이 걸린
-       시범 실행이라는 뜻입니다(전수 수집이 아님).
-     · `unknown_se_labels` 가 비어있지 않으면 DART 가 항목을 추가·개명한 것이므로
-       `classify_se()` 를 손봐야 합니다.
+   실통신 검증은 GitHub Actions 첫 실행 로그로만 가능합니다(README_상황보고.md 참고).
 """
 import io
 import json
@@ -34,15 +26,7 @@ import zipfile
 
 import pytest
 
-# ⚠️ 검사 대상 모듈(collector_dividend_kr.py / corp_code_mapper.py)은 저장소 **루트**에
-#    있고 이 파일은 tests/ 안에 있습니다. 그래서 넣어야 하는 경로는 이 파일의 폴더가
-#    아니라 그 **부모(저장소 루트)** 입니다. tests/ 만 넣으면
-#    `pytest tests/test_dividend_collector.py`(python -m 없이 직접 실행)가
-#    `ModuleNotFoundError: No module named 'corp_code_mapper'` 로 죽습니다 —
-#    `python -m pytest` 는 현재 디렉터리가 자동으로 경로에 들어가서 우연히 통과할 뿐입니다.
-#    tests/test_web_session_isolation.py 가 쓰는 REPO_ROOT 관례와 같게 맞춥니다.
-REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, REPO_ROOT)
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import corp_code_mapper as ccm                       # noqa: E402
 import collector_dividend_kr as cdk                  # noqa: E402
@@ -796,3 +780,195 @@ def test_run_collection_records_that_a_limit_was_applied(tmp_path, faked_network
     assert summary["limit_applied"] == 1
     assert summary["universe_size_input"] == 2      # 파일에는 2종목이 있었고
     assert summary["universe_size"] == 1            # 실제로 돈 것은 1종목
+
+
+# =============================================================================
+# 10. 단위 토큰 검증 (§2-4 "단위 변환 임의 적용 금지")
+#
+# 배경: `classify_se` 는 키워드만 보고 지표를 정하는데 출력 필드명(`cash_total_mkrw` 등)은
+#       단위를 이미 확정합니다. 라벨의 단위 토큰을 확인하지 않으면 회사가 "천원" 으로 적어
+#       보냈을 때 1000배 틀린 값이 조용히 정상값으로 저장됩니다.
+# 이 절의 테스트는 **감지**만 검증합니다. 우리는 값을 변환·보정하지 않습니다(§0-1).
+# =============================================================================
+REAL_RAW_JSONL = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    "data", "dividend_kr_2026_raw.jsonl")
+
+
+def test_extract_unit_token_reads_trailing_parenthesis():
+    """단위는 라벨 **맨 끝** 괄호에서만 뽑습니다 (실데이터에서 관측된 형태 전부)."""
+    assert cdk.extract_unit_token("현금배당금총액(백만원)") == "백만원"
+    assert cdk.extract_unit_token("주식배당금총액(백만원)") == "백만원"
+    assert cdk.extract_unit_token("주당 현금배당금(원)") == "원"
+    assert cdk.extract_unit_token("주당 주식배당(주)") == "주"
+    assert cdk.extract_unit_token("주당액면가액(원)") == "원"
+    assert cdk.extract_unit_token("현금배당수익률(%)") == "%"
+
+
+def test_extract_unit_token_ignores_leading_basis_parenthesis():
+    """
+    실제 라벨은 "(연결)당기순이익(백만원)" 처럼 기준과 단위가 **둘 다** 괄호입니다.
+    앞의 "(연결)"/"(별도)" 를 단위로 잘못 읽으면 안 됩니다.
+    """
+    assert cdk.extract_unit_token("(연결)당기순이익(백만원)") == "백만원"
+    assert cdk.extract_unit_token("(별도)당기순이익(백만원)") == "백만원"
+    assert cdk.extract_unit_token("(연결)주당순이익(원)") == "원"
+    assert cdk.extract_unit_token("(연결)현금배당성향(%)") == "%"
+
+
+def test_extract_unit_token_returns_none_when_not_determinable():
+    """(합성) 단위를 못 뽑으면 지어내지 말고 None(=확인 불가) 이어야 합니다."""
+    assert cdk.extract_unit_token("(연결)당기순이익") is None      # 단위 표기 자체가 없음
+    assert cdk.extract_unit_token("현금배당금총액 백만원") is None  # 괄호 형식이 아님
+    assert cdk.extract_unit_token("현금배당금총액(백만원) 주석") is None  # 끝이 괄호가 아님
+    assert cdk.extract_unit_token("당기순이익(연결)") is None      # 끝 괄호가 기준 표기뿐
+    assert cdk.extract_unit_token("당기순이익()") is None
+    assert cdk.extract_unit_token(None) is None
+
+
+def test_expected_unit_table_matches_units_observed_in_real_corpus():
+    """
+    기대 단위 표는 지어낸 게 아니라 실제 원본에서 관측된 토큰이어야 합니다.
+    (표를 손댈 때 실데이터 근거 없이 바꾸는 것을 막는 잠금장치)
+    """
+    assert cdk.EXPECTED_UNIT_TOKENS == {
+        "dps_cash": "원", "dps_stock": "주",
+        "cash_total": "백만원", "stock_total": "백만원",
+        "eps": "원", "net_income": "백만원", "par_value": "원",
+    }
+
+
+def test_parse_flags_unit_mismatch_instead_of_silently_converting():
+    """
+    (합성) "현금배당금총액(천원)" 처럼 기대와 다른 단위가 오면 조용히 넘기지 말고
+    `unit_mismatch_notes` 에 남겨야 합니다. **값은 변환하지 않고 원문 그대로** 둡니다.
+    """
+    rows = [{"se": "현금배당금총액(천원)", "stock_knd": "-", "thstrm": "2,453,316"},
+            {"se": "주당 현금배당금(원)", "stock_knd": "보통주", "thstrm": "500"}]
+    parsed = cdk.parse_alot_rows(rows)
+
+    assert len(parsed["unit_mismatch_notes"]) == 1
+    note = parsed["unit_mismatch_notes"][0]
+    assert "천원" in note and "백만원" in note and "현금배당금총액(천원)" in note
+
+    # 값은 우리가 손대지 않습니다(÷1000 같은 자동 보정 금지 — §0-1).
+    assert parsed["cash_total_mkrw"] == 2453316.0
+    # 단위가 맞는 다른 지표는 영향을 받지 않습니다.
+    assert parsed["dps_cash_common"] == 500.0
+    # 기존 필드의 의미를 바꾸지 않습니다 — 단위 문제는 notes 가 아닌 전용 리스트로만.
+    assert parsed["notes"] == []
+
+
+def test_parse_flags_undeterminable_unit_as_unverified():
+    """(합성) 단위를 뽑을 수 없는 라벨도 '확인 불가'로 남겨야 합니다(조용한 통과 금지 §0-1)."""
+    rows = [{"se": "주당 현금배당금", "stock_knd": "보통주", "thstrm": "500"},
+            {"se": "현금배당금총액 백만원", "stock_knd": "-", "thstrm": "1,000"}]
+    parsed = cdk.parse_alot_rows(rows)
+
+    assert len(parsed["unit_mismatch_notes"]) == 2
+    assert all("확인 불가" in n for n in parsed["unit_mismatch_notes"])
+    assert any("주당 현금배당금" in n for n in parsed["unit_mismatch_notes"])
+    # 분류 자체는 성공했으므로 unknown_se_labels 로 새지 않아야 합니다.
+    assert parsed["unknown_se_labels"] == []
+    assert parsed["dps_cash_common"] == 500.0
+
+
+def test_parse_reports_each_mismatched_label_once_even_across_stock_kinds():
+    """(합성) 같은 라벨이 보통주/우선주로 두 줄 와도 사유는 한 번만 적습니다(가독성)."""
+    rows = [{"se": "주당 현금배당금(천원)", "stock_knd": "보통주", "thstrm": "1"},
+            {"se": "주당 현금배당금(천원)", "stock_knd": "우선주", "thstrm": "2"}]
+    parsed = cdk.parse_alot_rows(rows)
+    assert len(parsed["unit_mismatch_notes"]) == 1
+
+
+def test_parse_accepts_real_samsung_response_with_no_unit_complaints():
+    """실제 DART 응답(삼성전자 2026 1분기)은 단위 검증을 전부 통과해야 합니다."""
+    for period in ("thstrm", "frmtrm", "lwfr"):
+        parsed = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"], period=period)
+        assert parsed["unit_mismatch_notes"] == []
+    # 같은 응답에서 기준(연결)과 단위(백만원)가 각각 옳게 뽑혔는지도 함께 확인합니다.
+    parsed = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"])
+    assert parsed["net_income_mkrw_basis"] == "연결"
+    assert parsed["net_income_mkrw"] == 47101190.0
+    assert parsed["eps_basis"] == "연결"
+
+
+def test_build_record_carries_unit_mismatch_notes_into_output():
+    """(합성) 단위 경고는 최종 레코드에도 실려야 파일만 보고도 알 수 있습니다."""
+    rows = [{"se": "현금배당금총액(천원)", "stock_knd": "-", "thstrm": "1,000",
+             "rcept_no": "20260515002181"}]
+    parsed = cdk.parse_alot_rows(rows)
+    rec = cdk.build_dividend_record("005930", {"corp_code": "00126380"}, "2026", "11013",
+                                    {"status": "000", "list": rows}, parsed_now=parsed)
+    assert rec["unit_mismatch_notes"] == parsed["unit_mismatch_notes"]
+    assert len(rec["unit_mismatch_notes"]) == 1
+    # 기존 필드는 그대로 있어야 합니다(§0-3-10 최소 변경).
+    assert rec["parse_notes"] == [] and rec["unknown_se_labels"] == []
+
+
+def test_build_record_has_empty_unit_notes_for_clean_response():
+    """정상 응답에서는 빈 리스트여야 합니다(필드가 항상 존재 = 화면이 분기하기 쉬움)."""
+    parsed = cdk.parse_alot_rows(REAL_SAMSUNG_2026_Q1["list"])
+    rec = cdk.build_dividend_record("005930", {"corp_code": "00126380"}, "2026", "11013",
+                                    REAL_SAMSUNG_2026_Q1, parsed_now=parsed)
+    assert rec["unit_mismatch_notes"] == []
+
+
+def test_real_raw_corpus_has_no_unit_mismatch_anywhere():
+    """
+    **실제 수집 원본 전수 회귀 테스트** (네트워크 불필요 — 저장된 raw jsonl 만 읽습니다).
+
+    2026-08-24 기준 data/dividend_kr_2026_raw.jsonl 5,484응답(배당표 34,903행)을 전부
+    돌려 단위 불일치가 **0건**임을 확인했습니다. 이 값이 0이 아니게 되면 둘 중 하나입니다:
+      ① DART 가 실제로 다른 단위 라벨을 쓰기 시작했다 → 사람이 확인해야 합니다.
+      ② 우리 단위 검증 로직이 정상 라벨을 오탐하고 있다 → 로직을 고쳐야 합니다.
+    어느 쪽이든 조용히 지나가면 안 되므로 여기서 잡습니다.
+    """
+    if not os.path.exists(REAL_RAW_JSONL):
+        pytest.skip(f"실제 수집 원본이 없습니다: {REAL_RAW_JSONL} (수집 후에만 검증 가능)")
+
+    lines = mismatched = parsed_responses = rows_seen = 0
+    offenders = []
+    with open(REAL_RAW_JSONL, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            lines += 1
+            entry = json.loads(line)
+            rows = (entry.get("response") or {}).get("list")
+            if not isinstance(rows, list):
+                continue
+            parsed_responses += 1
+            rows_seen += len(rows)
+            parsed = cdk.parse_alot_rows(rows)
+            if parsed["unit_mismatch_notes"]:
+                mismatched += 1
+                if len(offenders) < 5:
+                    offenders.append((entry.get("stock_code"),
+                                      parsed["unit_mismatch_notes"][0]))
+
+    # 파일이 비어 있는데 "0건 통과"로 착각하지 않도록 규모부터 확인합니다(§0-1).
+    assert lines >= 5000, f"원본이 예상보다 작습니다({lines}줄) — 잘린 파일일 수 있습니다."
+    assert parsed_responses >= 2500 and rows_seen >= 30000
+    assert mismatched == 0, f"단위 불일치 {mismatched}건 발생: {offenders}"
+
+
+def test_real_raw_corpus_classifies_every_se_label():
+    """
+    같은 전수 원본에서 `unknown_se_labels` 도 0건임을 함께 고정합니다.
+    (단위 검증을 넣다가 분류 로직을 건드려 라벨이 새는 회귀를 잡기 위한 짝 테스트)
+    """
+    if not os.path.exists(REAL_RAW_JSONL):
+        pytest.skip(f"실제 수집 원본이 없습니다: {REAL_RAW_JSONL} (수집 후에만 검증 가능)")
+
+    unknown = set()
+    with open(REAL_RAW_JSONL, encoding="utf-8") as fh:
+        for line in fh:
+            line = line.strip()
+            if not line:
+                continue
+            rows = (json.loads(line).get("response") or {}).get("list")
+            if isinstance(rows, list):
+                unknown.update(cdk.parse_alot_rows(rows)["unknown_se_labels"])
+    assert unknown == set(), f"분류하지 못한 se 라벨: {sorted(unknown)}"

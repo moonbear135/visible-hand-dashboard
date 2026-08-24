@@ -119,26 +119,8 @@ GET https://opendart.fss.or.kr/api/alotMatter.json
     **재시도하지 않고 실행 전체를 즉시 중단**합니다. 조용히 우회하지 않습니다.
   · 네트워크 오류·5xx 만 1회 재시도합니다.
   · `max_requests` / `max_runtime_sec` 예산을 넘으면 체크포인트를 저장하고 정상 종료합니다.
-
-  [요청량 산수 — 왜 한 번에 안 끝날 수 있는가]
-    한 종목에 드는 요청 수 = 우선순위 목록을 위에서부터 부르다가 **첫 번째 쓸 수 있는
-    응답에서 멈추므로** 1~len(priority)건입니다. 요청 사이·종목 사이에 2~3초(평균 2.5초)를
-    쉬므로 대략:
-      · 기본 우선순위(11011→11014→11012→11013, 4단계):
-        2,700종목 × 최대 4요청 × 2.5초 ≈ 7.5시간 (최악)
-      · --owner-order(11014→11012→11013, 3단계):
-        2,700종목 × 최대 3요청 × 2.5초 ≈ 5.6시간 (최악)
-    GitHub Actions 단일 job 한도는 6시간이라 **최악의 경우 한 번에 못 끝냅니다.**
-    그래서 예산에서 스스로 멈추고 체크포인트를 남깁니다.
-
-    [✅ 2026-08-24 실측 — 첫 전수 실행이 실제로 완주했습니다]
-      유니버스 2,734종목(2023~2025 배당 이력 파일) / --owner-order 사용
-      → requests_used 5,484건(종목당 평균 2.0건) / elapsed_sec 17,294초(약 4.8시간)
-      → completed true, stopped_reason 없음
-      → by_status: OK 2,572 / NO_DATA 107 / UNMAPPED 55
-    즉 실제 평균은 종목당 4요청이 아니라 **2요청**이었고(대부분 3분기·반기에서 바로
-    걸림), 4.8시간으로 6시간 한도 안에 들어왔습니다. 다만 여유가 1시간뿐이므로 유니버스가
-    커지면(전 상장사로 넓히면) 다시 한 번에 못 끝날 수 있습니다.
+    (⚠️ 2,700종목 × 최대 4요청 × 2.5초 ≈ 7.5시간 → GitHub Actions 단일 job 6시간 한도를
+     넘길 수 있습니다. README_상황보고.md "요청량 산수" 절 참고.)
 
 ================================================================================
 📌 §0-1 준수 요약 — 실패를 숨기지 않습니다
@@ -169,6 +151,7 @@ import argparse
 import json
 import os
 import random
+import re
 import sys
 import time
 from datetime import date, timedelta
@@ -390,6 +373,90 @@ def classify_se(label):
     return None, None
 
 
+# ── 단위 검증 (§2-4 "단위 변환 임의 적용 금지") ────────────────────────────────
+# `classify_se` 는 키워드만 보고 지표를 정하는데, 출력 필드명(`cash_total_mkrw` 등)은
+# 단위를 이미 확정해 버립니다. 라벨에 실제로 붙은 단위 토큰을 확인하지 않으면 회사가
+# "천원" 으로 적어 보냈을 때 1000배 틀린 값이 조용히 정상값으로 저장됩니다.
+# → 여기서는 **감지만** 합니다. 값을 자동 변환·보정하지 않습니다(§0-1: 우리가 값을
+#   고치지 않는다). 불일치는 `unit_mismatch_notes` 로 데이터에 남겨 사람이 보게 합니다.
+
+# 라벨 **맨 끝**의 괄호만 단위 후보로 봅니다.
+# 실제 라벨은 "(연결)당기순이익(백만원)" 처럼 기준과 단위가 둘 다 괄호로 옵니다.
+_UNIT_TOKEN_RE = re.compile(r"\(([^()]*)\)$")
+
+# 괄호 안이지만 단위가 아닌 것들(산출기준 표기). 끝 괄호가 이것뿐이면 "단위 확인 불가".
+_NON_UNIT_PAREN_TOKENS = ("연결", "별도")
+
+# 지표키 → 기대 단위 토큰.
+# ⚠️ 아래 값은 지어낸 것이 아니라 실제 수집 원본 data/dividend_kr_2026_raw.jsonl
+#    (5,484응답 · 배당표 34,903행) 을 전수 조사해 관측된 **유일한** 토큰입니다.
+#      dps_cash 4,212행 전부 "원"      / dps_stock  4,265행 전부 "주"
+#      cash_total 2,572행 전부 "백만원" / stock_total 2,572행 전부 "백만원"
+#      eps 2,572행 전부 "원"           / net_income 5,144행 전부 "백만원"
+#      par_value 2,572행 전부 "원"
+# 비율 지표(cash_yield / stock_yield / payout_ratio, 관측 토큰 전부 "%")는
+# 출력 필드명이 단위를 함의하지 않고 단위 변환 대상도 아니라 여기서 제외합니다.
+EXPECTED_UNIT_TOKENS = {
+    "dps_cash": "원",
+    "dps_stock": "주",
+    "cash_total": "백만원",
+    "stock_total": "백만원",
+    "eps": "원",
+    "net_income": "백만원",
+    "par_value": "원",
+}
+
+
+def extract_unit_token(label):
+    """
+    `se` 라벨에서 **맨 끝 괄호 안의 단위 토큰**만 뽑습니다. (순수 함수)
+
+    반환: 단위 토큰 문자열, 또는 None = **확인 불가**(괄호가 없거나, 끝에 없거나,
+          끝 괄호가 단위가 아닌 산출기준 표기인 경우)
+
+    · "현금배당금총액(백만원)"      → "백만원"
+    · "(연결)당기순이익(백만원)"    → "백만원"  (앞의 "(연결)" 은 기준이라 무시)
+    · "주당 주식배당(주)"           → "주"
+    · "(연결)당기순이익"            → None      (단위 표기가 아예 없음)
+    · "현금배당금총액 백만원"       → None      (괄호 형식이 아님)
+
+    None 을 '문제 없음'으로 취급하면 안 됩니다 — 호출측에서 "확인 불가"로 기록합니다(§0-1).
+    """
+    s = normalize_label(label)
+    if not s:
+        return None
+    match = _UNIT_TOKEN_RE.search(s)
+    if not match:
+        return None
+    token = match.group(1).strip()
+    if not token or token in _NON_UNIT_PAREN_TOKENS:
+        return None
+    return token
+
+
+def check_unit_token(metric, label):
+    """
+    한 행의 단위가 기대와 맞는지 판정합니다. (순수 함수)
+
+    반환: None(문제 없음 / 검증 대상 아님) 또는 사람이 읽는 사유 문자열.
+    """
+    expected = EXPECTED_UNIT_TOKENS.get(metric)
+    if expected is None:
+        return None                      # 단위 검증 대상이 아닌 지표(%(비율) 등)
+    actual = extract_unit_token(label)
+    if actual == expected:
+        return None
+    raw = label if label is not None else ""
+    if actual is None:
+        return (f"단위 확인 불가: `se` 라벨 '{raw}' 에서 단위 표기(끝 괄호)를 찾지 못했습니다 "
+                f"— 지표 {metric} 의 기대 단위는 '{expected}' 입니다. 값은 원문 그대로 "
+                "두었지만 단위 검증을 통과하지 못했습니다(사람 확인 필요).")
+    return (f"단위 불일치: `se` 라벨 '{raw}' 의 단위가 '{actual}' 입니다 — 지표 {metric} 의 "
+            f"기대 단위는 '{expected}' 입니다. 우리가 값을 변환하지 않고 원문 그대로 "
+            "두었으므로, 이 레코드의 해당 값은 필드명이 뜻하는 단위가 아닐 수 있습니다"
+            "(사람 확인 필요).")
+
+
 # =============================================================================
 # 5. 응답 판정 · 보고서 선택 — 순수 함수 (오프라인 테스트 대상)
 # =============================================================================
@@ -536,12 +603,16 @@ def parse_alot_rows(rows, period="thstrm"):
       *_all            후보값 전체(대표값을 못 정한 경우에도 데이터를 잃지 않도록)
       notes            애매했던 지점들의 사람이 읽을 사유 목록
       unknown_se_labels 우리가 분류하지 못한 `se` 라벨(원문)
+      unit_mismatch_notes 라벨의 단위 토큰이 기대 단위와 다르거나 확인 불가였던 사유 목록
+                       (§2-4). 비어 있지 않다면 그 레코드의 금액·주당값은 필드명이 뜻하는
+                       단위가 아닐 수 있습니다 — **우리는 값을 변환하지 않습니다**(§0-1).
       meta             rcept_no / stlm_dt / corp_name / corp_code / corp_cls (충돌 시 사유 기록)
       row_count        입력 행 수
     """
     buckets = {}          # (metric, kind, basis) -> [값…]
     unknown_labels = []
     notes = []
+    unit_mismatch_notes = []
     meta_values = {"rcept_no": set(), "stlm_dt": set(), "corp_name": set(),
                    "corp_code": set(), "corp_cls": set()}
 
@@ -559,6 +630,11 @@ def parse_alot_rows(rows, period="thstrm"):
             if raw_label and raw_label not in unknown_labels:
                 unknown_labels.append(raw_label)
             continue
+        # 단위 검증(§2-4) — 값은 그대로 담되, 통과 못 한 사실을 데이터에 남깁니다.
+        # 같은 라벨이 주식종류별로 여러 행 오므로 같은 사유는 한 번만 적습니다.
+        unit_note = check_unit_token(metric, row.get("se"))
+        if unit_note and unit_note not in unit_mismatch_notes:
+            unit_mismatch_notes.append(unit_note)
         kind = classify_stock_kind(row.get("stock_knd"))
         if kind.startswith("other:"):
             notes.append(f"알 수 없는 주식종류 '{row.get('stock_knd')}' (항목: {row.get('se')}) "
@@ -573,7 +649,8 @@ def parse_alot_rows(rows, period="thstrm"):
         return value, all_vals
 
     result = {"row_count": len(rows or []), "period": period,
-              "notes": notes, "unknown_se_labels": unknown_labels}
+              "notes": notes, "unknown_se_labels": unknown_labels,
+              "unit_mismatch_notes": unit_mismatch_notes}
 
     # ── 주식 종류별 지표 ──────────────────────────────────────────────────────
     for metric in _KIND_SPECIFIC_METRICS:
@@ -718,6 +795,9 @@ def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
         "collected_at_kst": (collected_at or _now_kst()).isoformat(),
         "parse_notes": parsed_now.get("notes") or [],
         "unknown_se_labels": parsed_now.get("unknown_se_labels") or [],
+        # 비어 있지 않다면 이 레코드의 금액·주당값은 **단위 검증을 통과하지 못한 값**입니다
+        # (§2-4). 우리가 변환하지 않았으므로 원문 단위 그대로입니다.
+        "unit_mismatch_notes": parsed_now.get("unit_mismatch_notes") or [],
         "yield_reliability_note": (
             "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 "
             "주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다"
