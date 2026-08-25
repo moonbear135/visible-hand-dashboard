@@ -489,5 +489,15 @@
     "f_per_sample_count": 161,
     "growth_sample_count": 148,
     "pegy_sample_count": 125
+  },
+  {
+    "date": "2026-08-25 17:28",
+    "f_per": 12.0,
+    "growth": 15.8,
+    "pegy": 0.62,
+    "total_count": 200,
+    "f_per_sample_count": 161,
+    "growth_sample_count": 148,
+    "pegy_sample_count": 122
   }
 ]
