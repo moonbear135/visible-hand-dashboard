@@ -36,6 +36,9 @@ import web.theme
 #   indicator_page → '/indicator'   (관리자 전용 시작 · "여기서부터는 신앙입니다" 보조지표
 #                                    RSI/MACD/볼린저밴드, INDICATOR_ENABLED 로 단계적 공개,
 #                                    2026-08-25 추가)
+#   privacy_page   → '/privacy'     (항상 공개 · 개인정보 처리방침. 구글 애드센스 승인
+#                                    조건 · 3단계 공개 절차 없음(법적 고지문이라 항상 켜짐),
+#                                    2026-08-25 추가)
 #
 # (2026-08-23 전환) `duel_consent_page → '/duel/consent'` 와
 #   `duel_leaderboard_page → '/duel/leaderboard'` 두 화면을 **성적표 공개 계층으로 전환**
@@ -53,6 +56,7 @@ from web.pages import (  # noqa: F401
     indicator_page,
     macro_page,
     pegy_page,
+    privacy_page,
     report_page,
     scorecard_consent_page,
     scorecard_leaderboard_page,

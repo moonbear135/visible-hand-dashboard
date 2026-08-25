@@ -354,6 +354,12 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
             # 📢 광고 자리 (web/ads.py) — 화면 맨 아래, 실제 본문 다음에만 그립니다.
             #    3단계 공개 절차가 꺼져 있으면(기본) ads.ad_slot() 이 아무것도 안 그립니다.
             ads.ad_slot()
+            # 🔒 개인정보처리방침 링크 — 모든 공개 화면 맨 아래에 항상 뜨는 작은 링크
+            #    하나(web/pages/privacy_page.py, 2026-08-25 추가). 구글 애드센스 승인
+            #    조건이자 실제로도 어느 화면에서든 찾을 수 있어야 하는 문서라, 화면마다
+            #    복붙하지 않고 여기 한 곳에 둡니다 (ENGINEERING_SPEC.md §0-3-10).
+            with ui.row().classes('w-full justify-center mt-2'):
+                ui.link('개인정보 처리방침', '/privacy').classes('text-xs opacity-50 no-underline')
             _render_staleness_banner(stale_slot)
         ads.ad_rail_right()
 
