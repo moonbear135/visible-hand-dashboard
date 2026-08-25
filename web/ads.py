@@ -70,12 +70,17 @@ def ad_slot() -> None:
     ⚠️ `web/layout.py` 의 공통 껍데기 한 곳에서만 부릅니다 — 화면 파일에서 직접 부르지
        마세요. 그래야 "공개된 화면 전부"에 자동으로 적용되고, 광고 자리가 실수로
        여러 개 생기는 일도 없습니다 (ENGINEERING_SPEC.md §0-3-10 공유 컴포넌트 관례와
-       같은 이유입니다).
+       같은 이유).
     """
     if not _READY:
         return
     if ADS_ADMIN_ONLY and not is_admin():
         return
+    # ⚠️ 2026-08-25 장애 — `ui.html(...)` 안에 <script> 태그를 같이 넣었더니 NiceGUI가
+    #    "HTML elements must not contain <script> tags" 로 **사이트 전체를 500 에러**로
+    #    떨어뜨렸습니다(공유 레이아웃에서 매 화면마다 부르는 함수라 전 화면이 죽었습니다).
+    #    <ins> 태그는 화면에 보이는 자리를 잡아야 하니 그대로 `ui.html()`로 그리고,
+    #    광고를 실제로 채우는 push 호출만 `ui.run_javascript()`로 따로 실행합니다.
     with ui.column().classes('w-full items-center gap-1 mt-4'):
         ui.label('광고').classes('vh-muted')
         ui.html(
@@ -84,5 +89,5 @@ def ad_slot() -> None:
             f'data-ad-slot="{ADS_SLOT_ID}" '
             'data-ad-format="auto" '
             'data-full-width-responsive="true"></ins>'
-            '<script>(adsbygoogle = window.adsbygoogle || []).push({});</script>'
         )
+    ui.run_javascript('(adsbygoogle = window.adsbygoogle || []).push({});')
