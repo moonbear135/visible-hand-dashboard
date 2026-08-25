@@ -38,6 +38,7 @@ from utils.constants_us import (
 )
 from utils.stock_history import US_HISTORY_FIELDS, US_HISTORY_FILENAME, US_KEY_FIELD
 
+from web import ads
 from web.auth import is_admin
 from web.components import (
     LEARNING_NOTICE_HTML,
@@ -933,6 +934,10 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
             markup = build_blocked_card_html(s, rank_num) if hard_block \
                 else build_stock_card_html(s, rank_num)
             ui.html(markup).classes('w-full')
+            if offset == 9:
+                # 📢 카드 목록 중간에 작은 배너 광고 한 번 (오너 요청 2026-08-25).
+                #    카드마다 부르지 않고 페이지당 딱 한 번만 — web/ads.py 의 ad_infeed() 참고.
+                ads.ad_infeed()
 
             if admin and (s.get("data_issues") or s.get("collect_errors")):
                 _render_admin_issues(s)

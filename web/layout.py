@@ -336,20 +336,26 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
                         'text-base no-underline pl-3 py-1 rounded-borders vh-menu-link'
                     )
 
-    with ui.column().classes(f'w-full {width_class} mx-auto p-4 gap-4 vh-page'):
-        # 🚨 "지금 보이는 값이 최신이 아닐 수 있음" 전역 배너 자리 (NICEGUI_MIGRATION_PLAN §8-5).
-        #    · **자리만 먼저 잡고**, 실제 판정은 본문을 다 그린 뒤에 합니다. 본문이 데이터를
-        #      읽는 도중에 실패가 확정되기 때문에, 본문보다 먼저 판정하면 "한 박자 늦은 배너"가
-        #      됩니다. NiceGUI 는 나중에 만든 요소도 지정한 컨테이너 안에 들어가므로, 화면에는
-        #      정상적으로 **맨 위**에 보입니다.
-        #    · 화면 5개(pegy/us_stocks/scorecard/report/macro)에 같은 코드를 복붙하지 않으려고
-        #      모든 페이지가 공유하는 이 한 곳에 둡니다 (ENGINEERING_SPEC.md §0-3-10).
-        stale_slot = ui.element('div').classes('w-full')
-        yield
-        # 📢 광고 자리 (web/ads.py) — 화면 맨 아래, 실제 본문 다음에만 그립니다.
-        #    3단계 공개 절차가 꺼져 있으면(기본) ads.ad_slot() 이 아무것도 안 그립니다.
-        ads.ad_slot()
-        _render_staleness_banner(stale_slot)
+    # 📢 좌우 사이드 배너 자리 (web/ads.py, 오너 요청 2026-08-25) — 본문 컬럼을 가운데 두고
+    #    양옆에 하나씩 붙입니다. 좁은 화면에서는 `ads.ad_rail_left/right()` 내부에서 아예
+    #    숨기므로(Tailwind `hidden xl:flex`), 이 바깥 row 자체는 폭 제약 없이 항상 둡니다.
+    with ui.row().classes('w-full justify-center items-start gap-4 flex-nowrap'):
+        ads.ad_rail_left()
+        with ui.column().classes(f'w-full {width_class} mx-auto p-4 gap-4 vh-page'):
+            # 🚨 "지금 보이는 값이 최신이 아닐 수 있음" 전역 배너 자리 (NICEGUI_MIGRATION_PLAN §8-5).
+            #    · **자리만 먼저 잡고**, 실제 판정은 본문을 다 그린 뒤에 합니다. 본문이 데이터를
+            #      읽는 도중에 실패가 확정되기 때문에, 본문보다 먼저 판정하면 "한 박자 늦은 배너"가
+            #      됩니다. NiceGUI 는 나중에 만든 요소도 지정한 컨테이너 안에 들어가므로, 화면에는
+            #      정상적으로 **맨 위**에 보입니다.
+            #    · 화면 5개(pegy/us_stocks/scorecard/report/macro)에 같은 코드를 복붙하지 않으려고
+            #      모든 페이지가 공유하는 이 한 곳에 둡니다 (ENGINEERING_SPEC.md §0-3-10).
+            stale_slot = ui.element('div').classes('w-full')
+            yield
+            # 📢 광고 자리 (web/ads.py) — 화면 맨 아래, 실제 본문 다음에만 그립니다.
+            #    3단계 공개 절차가 꺼져 있으면(기본) ads.ad_slot() 이 아무것도 안 그립니다.
+            ads.ad_slot()
+            _render_staleness_banner(stale_slot)
+        ads.ad_rail_right()
 
 
 def _render_staleness_banner(slot) -> None:
