@@ -2,6 +2,27 @@
 --  ⚔️ "결투다!" (모의투자 대결 · 5번째 모듈, 2026-08-24 재번호) — Supabase 스키마 + Row Level Security
 --  파일: sql/duel_schema.sql   (DUEL_MODULE_WORK_ORDER.md 1단계)
 -- =============================================================================
+-- #############################################################################
+-- 🔴 2026-08-25 추가 — 이 파일이 만드는 표 중 9개는 이미 은퇴했습니다 (읽고 실행하세요)
+-- #############################################################################
+--  2026-08-23, DUEL_MODULE_WORK_ORDER.md §5-20 오너 결정으로 아래 9개 표(원화 5 + 달러 4)는
+--  "내 성적표" 공개 계층(scorecard_public_*)으로 완전히 교체되어 은퇴했습니다:
+--    원화: duel_nicknames(§6) · duel_public_consent(§7) · duel_public_leaderboard(§8) ·
+--          duel_public_holdings(§8) · duel_bracket_assignments(§8-3)
+--    달러: duel_public_consent_usd · duel_bracket_assignments_usd ·
+--          duel_public_leaderboard_usd · duel_public_holdings_usd (§13)
+--
+--  이 파일은 히스토리 그대로 남겨 둡니다(이 모듈이 처음에 어떻게 설계됐는지의 기록 —
+--  ENGINEERING_SPEC.md §5 와 같은 방침) — 하지만 그대로 실행하면 방금 은퇴한 9개 표가
+--  **되살아납니다.** 아래 각 CREATE TABLE 문 바로 위에 🗑️ 표시를 달아 뒀습니다.
+--
+--  🔴 이 파일을 (예: 새 환경 세팅 등으로) 다시 실행해야 한다면, 반드시 그 직후에
+--  `sql/scorecard_public_schema.sql` §1 의 DROP 문까지 실행하세요 — 그래야 두 파일의
+--  최종 상태가 일치합니다. `duel_accounts`/`duel_positions`/`duel_orders`/
+--  `duel_cash_ledger`/스냅샷 표(§1~5, §13 의 _usd 대응 포함)는 은퇴와 무관하며
+--  `/duel` 화면이 지금도 그대로 씁니다 — 절대 건드리지 마세요.
+-- #############################################################################
+
 --
 --  ▶ 이건 앱이 실행하는 코드가 아닙니다. **오너가 Supabase 대시보드에서 1회 수동 실행**하는
 --    설정 스크립트입니다. (`sql/scorecard_schema.sql` · `sql/report_schema.sql` 과 같은 방식)
@@ -747,6 +768,8 @@ comment on column public.duel_holding_snapshots.priced is
 --    절대 실리지 않습니다(§8). 즉 닉네임 ↔ 사용자의 연결고리는 **이 표에만**, 그리고
 --    그 표를 읽는 배치(service_role)에만 존재합니다.
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_nicknames (
     user_id     uuid not null references auth.users (id) on delete cascade,
     window_type text not null check (window_type in ('M1', 'M3', 'M6')),
@@ -777,6 +800,8 @@ comment on table public.duel_nicknames is
 --     시각이 필요합니다. **삭제 대상은 "발행된 공개 기록"이지 "동의 상태 관리 기록"이
 --     아닙니다.** 이 구분이 §0-3-8 과 충돌하지 않는 이유이고, 그래서 이 표는 비공개입니다.
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_consent (
     account_id                     uuid primary key
                                    references public.duel_accounts (id) on delete cascade,
@@ -902,6 +927,8 @@ comment on column public.duel_public_consent.revoked_at is
 --    유일한 지점이고, 5-4-4 의 "그날 발행분 전량 재작성"과 5-8-1 의 "철회 시 영구 삭제"가
 --    둘 다 삭제를 필요로 하기 때문입니다.
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_leaderboard (
     id             bigserial primary key,
     published_date date not null,
@@ -992,6 +1019,8 @@ comment on column public.duel_public_leaderboard.twr_pct is
 --     안전합니다(report_schema.sql §8 이 price_as_of_kst 를 종목마다 반복해 넣은 것과 같은 판단).
 --     bracket_key 는 넣지 않았습니다 — 체급은 순위표의 축이지 보유종목의 속성이 아니고,
 --     중복 저장하면 두 표가 어긋날 여지만 생깁니다.
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_holdings (
     id             bigserial primary key,
     published_date date not null,
@@ -1053,6 +1082,8 @@ comment on table public.duel_public_holdings is
 --    값을 만드는 곳은 앱 한 곳뿐입니다(`duel_rules.season_key_for_date()`) — 경계 계산을
 --    SQL 에도 적으면 두 곳이 언젠가 어긋납니다(§0-3-10).
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_bracket_assignments (
     account_id  uuid not null references public.duel_accounts (id) on delete cascade,
     season_key  text not null check (length(btrim(season_key)) > 0),
@@ -2090,6 +2121,8 @@ comment on table public.duel_holding_snapshots_usd is
 --     한쪽만 동의하고 다른 쪽은 동의 안 해도 되고, 한쪽 철회가 다른 쪽에 영향을 주지
 --     않습니다. 공유되는 건 오직 duel_nicknames(§12)의 닉네임 문자열뿐입니다.
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_consent_usd (
     account_id                     uuid primary key
                                    references public.duel_accounts_usd (id) on delete cascade,
@@ -2140,6 +2173,8 @@ comment on table public.duel_public_consent_usd is
 -- -----------------------------------------------------------------------------
 --  경계값은 여기 저장하지 않습니다(원화 표와 같은 이유 — §0-3-8). 단일 출처는
 --  utils/duel_rules.py::BRACKET_TIERS_USD 입니다.
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_bracket_assignments_usd (
     account_id  uuid not null references public.duel_accounts_usd (id) on delete cascade,
     season_key  text not null check (length(btrim(season_key)) > 0),
@@ -2164,6 +2199,8 @@ comment on table public.duel_bracket_assignments_usd is
 --     "누가 더 잘했는지" 비교하는 UI 는 만들지 않습니다(환율 없이는 그 비교 자체가
 --     의미가 없습니다 — §0-1).
 -- -----------------------------------------------------------------------------
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_leaderboard_usd (
     id             bigserial primary key,
     published_date date not null,
@@ -2190,6 +2227,8 @@ comment on table public.duel_public_leaderboard_usd is
     '결투다! USD 트랙 발행 전용 공개 순위표(§5-11). duel_public_leaderboard(원화)와 물리적으로 완전히 분리 — 절대 병합·비교하지 않습니다(5-11-9). user_id/account_id 를 담지 않습니다. 배치(service_role)만 쓰고, 로그인 사용자 전체가 읽습니다.';
 
 
+-- 🗑️ 은퇴됨 (2026-08-23) — sql/scorecard_public_schema.sql §1 이 이 표를 DROP 합니다.
+--    이 CREATE 문을 실행하면 은퇴한 표가 되살아납니다. 위 파일 상단 배너 참고.
 create table if not exists public.duel_public_holdings_usd (
     id             bigserial primary key,
     published_date date not null,

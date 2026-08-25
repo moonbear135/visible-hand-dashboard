@@ -10,6 +10,16 @@ import time
 # 를 씁니다.
 from google import genai
 
+# ⚠️ 2026-08-25 — 'gemini-2.5-flash'는 이미 죽은 모델입니다. `utils/indicator_ai.py`가
+#    실서비스에서 먼저 이 모델로 호출했다가 Render 로그에 다음 404를 받았습니다:
+#      404 NOT_FOUND: "This model models/gemini-2.5-flash is no longer available to
+#      new users. Please update your code to use models/gemini-3.6-flash"
+#    이 파일(거시지표, 관리자 전용 + 개발 중단)은 아무도 최근에 안 밟아서 그동안
+#    안 드러났을 뿐 같은 모델을 그대로 쓰고 있었습니다. `indicator_ai.py`와 같은 모델로
+#    맞추고, 함수 안에 문자열로 박아 두지 않고(그래서 다음에 또 이렇게 놓치기 쉬웠던
+#    것) 모듈 상수로 올립니다 — `indicator_ai.py::MODEL_NAME`과 같은 관례.
+MODEL_NAME = 'gemini-3.6-flash'
+
 # 🔗 한글 이름 매핑 — **단일 출처는 `utils/constants.py`** (2026-08-17 통합)
 #
 # 예전에는 이 파일이 자기만의 `FRIENDLY_NAMES` 사전을 들고 있었고, 그 값이 화면
@@ -52,7 +62,6 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
     # 그대로 옮기지 않습니다. 실제 실패는 아래 반복문의 지표별 try/except가 그대로 잡아 그
     # 지표만 실패 문구로 남기고 나머지는 계속 진행합니다(기존 동작과 동일 — §0-1).
     client = genai.Client(api_key=api_key)
-    model_name = 'gemini-2.5-flash'  # 저비용 고효율 모델 사용
     
     data_dir = os.path.join(os.path.dirname(os.path.dirname(__file__)), "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -101,7 +110,7 @@ def generate_macro_commentary(metrics_dict, score, kospi_close, usd_close):
         
         try:
             print(f"   💬 [{key}] 코멘트 요청 중...")
-            response = client.models.generate_content(model=model_name, contents=prompt)
+            response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
             if response and response.text:
                 new_comments[key] = response.text.strip()
                 comment_dates[key] = today_str      # 실제 생성 성공 시에만 오늘 날짜 기록

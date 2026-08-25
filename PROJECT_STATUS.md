@@ -64,6 +64,8 @@ DNS 전환(컷오버)과 "내 성적표"·"사장님 보고서" 공개 전환, �
 | 내 성적표 | `/scorecard` | **공개** (2026-08-17 전환, 로그인 필요) |
 | 사장님 보고서 | `/report` | **공개** (2026-08-17 전환, 로그인 필요, 성적표와 로그인 공유) |
 | 배당 달력(투자 감사합니다!) | `/dividend` | **공개** (2026-08-25 전환, 로그인 불필요 — PEGY/US 주식과 같은 성격) |
+| 결투다! (원화·달러) | `/duel` | **공개** (원화는 2026-08-17 이전부터, 달러 트랙은 2026-08-21 코드 완료·전면 공개 — 2026-08-25 이 표에 반영, §12 참고) |
+| 여기서부터는 신앙입니다(보조지표) | `/indicator` | **공개** (2026-08-25 0단계~5단계를 하루 만에 완주 후 전면 공개, §13 참고) |
 | 매크로 방공망 | `/admin/macro` | 관리자 전용, **개발 중단 상태 유지**(§4 옛 지시 그대로 유효) |
 | 관리자 콘솔 | `/admin` | 관리자 전용 |
 
@@ -1693,3 +1695,162 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
   9번). 로그인 불필요, PEGY·미국주식과 같은 성격의 완전 공개 화면. 사이드바 상위섹터명도
   '💰 투자 감사합니다!' → '💰 배당 달력'으로 변경(항목 라벨·화면 안내문은 그대로 유지).
 
+
+## 12. ⚔️ "결투다!" (5번째 모듈) — 진행 상황 (2026-08-25 소급 정리, 상세 이력은 `DUEL_MODULE_WORK_ORDER.md`)
+
+> 이 절은 §9~§11처럼 실시간으로 갱신되지 못하고 8일치 공백(2026-08-17~08-25) 뒤에
+> 한 번에 정리됐습니다 — 그 자체가 §5의 "지금 열려있는 일" 항목입니다. 아래는 그
+> 공백 동안 실제로 있었던 일을 `DUEL_MODULE_WORK_ORDER.md`·`SCORECARD_PUBLIC_
+> LEADERBOARD_WORK_ORDER.md`·오늘 직접 확인한 저장소 상태를 근거로 재구성한 것입니다.
+
+### 12-1. 지금 상태 = 🔓 **전체 공개, 원화·달러 두 트랙 모두 운영 중**
+
+`web/layout.py`의 `DUEL_ENABLED`/`DUEL_MENU_ADMIN_ONLY` 둘 다 관리자 전용을 거쳐 이미
+전면 공개 상태(오늘 직접 코드 확인). `/duel` 화면은 원화 결투(창당 시드 1,000만원, 매월
+10일 80만원 입금)와 달러 결투(시드 $7,500, 매월 $500) 두 트랙을 한 화면에 병기하되
+**두 통화는 어디서도 합산하지 않습니다**(§5-11-2).
+
+### 12-2. 만든 것 (요약 — 상세는 `DUEL_MODULE_WORK_ORDER.md` 각 절)
+
+- **원화 트랙(Branch 1, "나와의 결투")** — 스키마·야간 체결 배치·`/duel` 화면. 2026-08-17
+  이전에 이미 완료, 이번 정리 범위 밖.
+- **달러 트랙 전체 신설(§5-11~§5-19, 2026-08-17~08-21)** — 스키마(§5-12, 오너가 실제
+  Supabase에 적용까지 완료) → `utils/duel_db_usd.py`(§5-14, 전용 테스트 133개) →
+  야간 체결 배치 `utils/duel_batch_usd.py`/`run_duel_daily_batch_us.py`(§5-15, 테스트
+  37개) → USD 거래일 버그 수정(§5-16) → `/duel` 화면에 달러 블록 추가(§5-18, 화면
+  1,112줄→2,093줄) → 동의·순위표 화면 확장(§5-19). 문서에 기록된 최종 결투 스위트
+  통과 수치는 **847개**(§5-19 시점, 원화 회귀 0건 — 원문 인용, 오늘 재실행하지는
+  않았습니다).
+- **"내 밑으로 눈 깔어" 공개 순위표 — Branch 2 → 전면 폐기 → "내 성적표" 기반으로
+  대체 (2026-08-23, §5-20)** — 결투 가상계좌 성적을 공개하던 원래 설계가 오너의 원래
+  의도(실제 보유 자산 공개)와 다르다는 게 확인되어, 공개 대상을 "내 성적표"로
+  전환했습니다. `web/pages/duel_consent_page.py`·`duel_leaderboard_page.py` 파일째
+  삭제(실제로 저장소에 없음, 오늘 확인) → `web/pages/scorecard_consent_page.py`·
+  `scorecard_leaderboard_page.py`(신규)로 교체, `sql/scorecard_public_schema.sql`이
+  결투 쪽 공개표 9개(§12-3 참고)를 DROP하고 성적표용 5개를 새로 CREATE. 문서 기록상
+  `test_scorecard_public_ui.py` 48개 전부 통과, 결투 스위트 886통과/365 deselected
+  (원문 인용).
+
+### 12-3. 🔴 2026-08-25 오늘 발견·처리 — "은퇴 선언"이 반만 실행돼 있었음
+
+§5-20 문서는 발행 배치(`run_duel_publish_batch.py`·`.github/workflows/duel_publish_
+daily.yml`, USD 대응)를 "삭제"라고 적었지만, **실제로는 삭제되지 않고 원화·달러 cron이
+2026-08-23 이후 매일 밤 그대로 돌고 있었습니다** — 게다가 그 배치가 쓰는
+`duel_public_leaderboard`/`duel_public_holdings`(+USD)는 `scorecard_public_schema.sql`이
+이미 DROP한 테이블입니다. `/duel` 화면 자체는 이 경로를 안 써서 사용자 피해는 없었지만,
+`SUPABASE_SERVICE_ROLE_KEY`를 쥔 배치가 매일 밤 존재하지 않는 표에 쓰기를 시도하고
+있었을 가능성이 높습니다. 오늘 처리:
+
+- `run_duel_publish_batch.py`·`_us.py`, `.github/workflows/duel_publish_daily.yml`·
+  `_us.yml`, `utils/duel_publish.py`·`_usd.py`, `tests/test_duel_publish.py`·
+  `_usd.py` 8개 파일을 `_to_delete_duel_publish/`로 이동(git이 삭제로 인식, 실제
+  커밋·푸시는 오너가 진행).
+- `tests/test_duel_public_ui.py` 안에 남아 있던 발행 배치·워크플로우 검증 테스트 2개
+  (`test_publish_runner_delegates_and_never_decides`,
+  `test_publish_workflow_runs_after_the_fill_batch`) 제거 — 검증 대상 파일 자체가
+  없어졌으므로.
+- `sql/duel_schema.sql`이 여전히 만드는 은퇴 테이블 9개(`duel_nicknames`,
+  `duel_public_consent`(+`_usd`), `duel_public_leaderboard`(+`_usd`),
+  `duel_public_holdings`(+`_usd`), `duel_bracket_assignments`(+`_usd`)) 각각 바로
+  위에 은퇴 표시 + 파일 최상단에 배너 추가(SQL 로직은 한 글자도 안 건드림, 순수 주석
+  추가 — `git diff`로 확인).
+- **부수 효과**: `DUEL_MODULE_WORK_ORDER.md` 🔴 미결정 항목 7번(USD 발행 배치 cron
+  `03:50 UTC` 오너 확인 요청)은 그 배치 자체가 은퇴하면서 **더 이상 유효하지 않습니다.**
+  미결정 항목 6번 중 발행 배치 관련 절반도 마찬가지. 단, 같은 6번 항목의 **체결(야간
+  정산) 배치** 쪽 — `duel_daily_us.yml`의 `--target-date`/`--today-date`/cron
+  `03:00 UTC` — 은 여전히 살아있는 배치라 오너 확인이 그대로 유효합니다.
+
+### 12-4. 지금 열려있는 일 (`DUEL_MODULE_WORK_ORDER.md` "🔴 미결정 항목 모아보기" 기준, 급하지 않음)
+
+1. 매수 창·이월 안내 등 일부 화면 문구의 정확한 문장이 아직 초안뿐 (항목 1).
+2. 야간 배치가 `needs_review`(판정 애매)로 남긴 주문을 관리자가 확인을 깜빡하면
+   영원히 대기 상태로 남는데, "N일 지나면 자동 취소" 안전장치를 넣을지 (항목 3).
+3. USD 야간 체결 배치의 `--target-date`=어제 기본값·`--today-date` 분리·cron
+   `03:00 UTC`(매일) — AI가 실제 수집 스케줄에서 역산한 값, 오너 확정 아님 (항목
+   4·6, 위 12-3에서 밝힌 대로 **체결 배치 쪽만** 여전히 유효).
+4. `duel_accounts`에 남아있는 "사용자 본인 직접 insert" 권한 — 실제 지급액에는 영향
+   없음을 검증 완료했지만, 화면에 보이는 `seed_amount`/`anchor_date` 값을 사용자가
+   조작해 넣을 여지가 있어 회수하고 `duel_opt_in()` RPC를 유일한 참여 경로로 만들지
+   여부(항목 2 마지막 문단).
+## 13. 📉 "여기서부터는 신앙입니다" 보조지표 모듈 (7번째 모듈) — 진행 상황 (2026-08-25 신설·완료, `TECHNICAL_INDICATOR_WORK_ORDER.md` 참고)
+
+### 13-1. 지금 상태 = 🔓 **전체 공개 완료 — 0단계부터 5단계까지 하루 만에 완주**
+
+`web/layout.py`의 `INDICATOR_ENABLED`/`INDICATOR_MENU_ADMIN_ONLY` 둘 다 관리자 전용을
+거쳐 전면 공개 상태(오늘 직접 코드 확인). RSI(14)·MACD·볼린저밴드 세 지표를 판정
+(숫자)과 AI 해설(문장) 두 층으로 분리해 제공, KOSPI200 유니버스 대상.
+
+⚠️ 참고 — `web/layout.py`의 §13 관련 주석 일부가 "지금 1단계(전체 숨김)입니다"라고
+적혀 있는데 실제 플래그값은 3단계(전면 공개)입니다. 코드 동작에는 영향 없는 **주석
+오기**이니, 다음에 이 파일을 열면 함께 바로잡아 주세요(코드 자체는 정확합니다).
+
+### 13-2. 만든 것
+
+- `utils/indicators.py` — RSI/MACD/볼린저밴드 순수 계산 함수(네트워크 불필요).
+- `collector_indicator_kr.py` — 수집기, `.github/workflows/indicator_kr.yml`(평일
+  KST 17:00) 로 매일 실행.
+- `web/pages/indicator_page.py` — 화면. 오늘(2026-08-25) 오너 요청으로 판정값에
+  한글 라벨 + 색 배지를 추가하면서 모듈 전역 5개(`_INDICATOR_LABELS` 등)가 새로
+  생겼고, 이게 §14(아래) 사고로 이어짐 — 이미 처리 완료.
+- `utils/indicator_ai.py` — Gemini 기반 AI 코멘터리. 실서비스에서 `gemini-2.5-flash`
+  404를 먼저 겪고 `gemini-3.6-flash`로 교체(이 발견이 §14에서 `macro_ai.py`의 같은
+  문제를 찾아내는 단서가 됨).
+
+### 13-3. 이 모듈에서 특별히 지킨 원칙
+
+- 판정(verdict)과 해설(commentary)을 반드시 두 층으로 분리 — AI 문장이 흔들려도
+  숫자·배지는 항상 `utils/indicators.py`의 순수 계산값 그대로.
+- AI 해설 캐싱 비용이 "접속자 수"가 아니라 "그날 실제로 열어본 서로 다른 종목 수"에
+  비례하도록 설계.
+- 금지어 필터로 AI 해설이 매매를 권유하는 문장을 만들지 않도록 방어(§13-4에 한계
+  기록).
+
+### 13-4. 지금 열려있는 일 (`TECHNICAL_INDICATOR_WORK_ORDER.md` §8 기준)
+
+1. ~~`utils/macro_ai.py`의 `gemini-2.5-flash` 단종 여부~~ → **✅ 2026-08-25 오늘
+   해소.** 같은 404를 확인하고 `gemini-3.6-flash`로 교체 완료(§14 참고).
+2. AI 금지어 필터가 키워드 목록 기반이라 완벽하지 않음 — 애매한 우회 표현이 눈에
+   띄면 `_FORBIDDEN_PHRASES`에 추가하기로 오너와 합의된 상태, 계속 관찰 필요.
+3. 화면 제목 글자 겹침 렌더링 현상 — 강력새로고침 후에도 재현되는 실제 버그로
+   확인됐으나 원인 미조사, 오너 판단으로 보류 중.
+4. 결과값 기반 필터링 — 화면·AI 해설까지 다 완성되고 공개까지 끝난 지금이 "다
+   완성된 뒤 최종 결정"하기로 했던 그 시점. 아직 실제로 필요한지 오너에게 재질문할
+   시점.
+
+## 14. 🔴 2026-08-25 — "기초공사 이후 생긴 실금" 6건 점검·수정 (오푸스 높음, 오너 요청)
+
+오너가 "기초공사(NiceGUI 이전 + 규칙 성문화 + 자동 강제 장치, §0 참고)는 끝났다"고
+판단한 뒤, 최근 8일(결투 USD·성적표 전환·배당·보조지표 4개 모듈이 한꺼번에 올라온
+기간) 사이에 생긴 크랙이 없는지 오푸스 높음으로 저장소 전체(문서 16개 전문 + 코드
+165개 파일)를 다시 읽고, 발견된 6건을 하나씩 처리했습니다. 상세 대화 로그는 이
+세션에만 있고, 실제 변경 결과만 여기 요약합니다.
+
+1. **세션격리 회귀 테스트(`tests/test_web_session_isolation.py::test_no_mutable_
+   globals`) 빨간불 복구** — `web/pages/indicator_page.py`가 오늘 추가한 전역 5개
+   (라벨·배지색 매핑, 전부 고정 문자열)가 `ALLOWED_MUTABLE_GLOBALS`에 미등록이라
+   테스트가 실패하고 있었음. 등록 + 사유 기록. pytest가 설치 안 된 환경이라 AST
+   검사 로직을 독립 스크립트로 재구현해 직접 실행, "발견 21건 = 화이트리스트 21건"
+   확인.
+2. **은퇴 선언됐지만 실제로 안 지워진 결투 발행 배치 8개 파일 정리** — §12-3 참고.
+3. **`sql/duel_schema.sql` ↔ `sql/scorecard_public_schema.sql` 모순 문서화** —
+   전자가 여전히 만드는(CREATE) 9개 표를 후자가 DROP하는 상황. RLS·트리거가 두
+   표 그룹(살아있는 계좌 표 vs 은퇴한 공개표)에 얽혀 있어 실제 SQL 삭제는 위험도가
+   높다고 판단, **SQL 로직은 한 글자도 안 건드리고** 파일 최상단 배너 + 9개
+   CREATE TABLE 문 각각 위에 은퇴 표시만 추가(순수 주석, `git diff`로 실제 SQL
+   무변경 확인).
+4. **`utils/macro_ai.py`의 죽은 Gemini 모델(`gemini-2.5-flash`) 교체** —
+   `gemini-3.6-flash`로 교체, 함수 안 지역 변수 대신 `indicator_ai.py`와 같은
+   모듈 상수(`MODEL_NAME`) 패턴으로 승격.
+5. **이 문서(§12·§13)와 `TASK_HISTORY.md` 8일치 공백 보강** — 바로 이 절.
+6. **배당락일 계산용 KRX 휴장일 표(`KRX_VERIFIED_YEARS = (2025, 2026)`) 만료 알람
+   신설** — 2027-01-01부터 `is_krx_trading_day()`가 의도적으로 `ValueError`를
+   던지는데(§11-5, §0-1 준수 설계), 그 전에 미리 알아챌 장치가 없었음. 신규
+   `utils/expiry_alarms.py::warn_if_expiring()`(datetime만 씀, 무거운 의존성 없음)를
+   만들어 마감 60일 전(2026-11-02)부터 ① `dividend_page.py` 모듈 로드 시(Render
+   서버 로그) ② `collector_dividend_payment_kr.py`(매일 도는 배치, 가장 확실한 채널)
+   양쪽에서 경고를 찍도록 배선.
+
+**검증**: 오늘 변경한 전체 파일 `python3 -m py_compile` 클린, `git diff`로 SQL·주요
+로직 파일에 의도치 않은 변경이 없는지 확인. 실제 pytest 전체 스위트는 이 세션에
+pytest가 설치돼 있지 않아 실행하지 못했음 — **오너가 다음에 저장소를 열면 `pytest -q`
+한 번 돌려서 회귀가 없는지 확인해 주세요.**

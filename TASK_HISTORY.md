@@ -2237,6 +2237,65 @@
      사고(#129 CSS f-string, 4단계 `run.io_bound`+`app.storage` 혼용, #127~130 표
      세로쌓임) 재발 0건 확인.
 
+143. **⚔️ 결투 달러 트랙 전체 구현 (2026-08-17~08-21, 소급 기록 — 2026-08-25).** 스키마
+     (§5-12, 오너가 실제 Supabase에 적용 확인) → `utils/duel_db_usd.py`(§5-14, 테스트
+     133개) → 야간 체결 배치 `utils/duel_batch_usd.py`/`run_duel_daily_batch_us.py`
+     (§5-15, 테스트 37개) → USD 거래일 버그 수정(§5-16) → `/duel` 화면에 달러 블록
+     추가(§5-18, `web/pages/duel_page.py` 1,112줄→2,093줄) → 동의·순위표 화면 확장
+     (§5-19). 문서에 기록된 결투 스위트 통과 수치는 847개(§5-19 시점, 원화 회귀
+     0건 — `DUEL_MODULE_WORK_ORDER.md` 원문 인용, 오늘 재실행하지는 않음). 이
+     항목은 실시간 기록이 아니라 `DUEL_MODULE_WORK_ORDER.md`를 근거로 오늘
+     재구성한 것 — 상세는 `PROJECT_STATUS.md` §12-2 참고.
+
+144. **⚔️ "결투 가상계좌 순위 공개" → "내 성적표 공개"로 전면 전환 (2026-08-23, 소급
+     기록).** 공개 대상이 오너의 원래 의도(실제 보유 자산)와 달랐던 것이 확인되어
+     Branch 2(결투 공개 순위표) 전체를 은퇴시키고 `scorecard_consent_page.py`·
+     `scorecard_leaderboard_page.py`(신규)로 교체. `sql/scorecard_public_schema.sql`이
+     결투 쪽 공개표 9개를 DROP, 성적표용 5개를 CREATE. `test_scorecard_public_ui.py`
+     48개 전부 통과(문서 원문 인용). 상세는 `PROJECT_STATUS.md` §12-2·
+     `SCORECARD_PUBLIC_LEADERBOARD_WORK_ORDER.md` 참고.
+
+145. **💰 배당금 모듈 전체 구현·마감 (2026-08-18~08-25, 소급 기록).** 이미
+     `PROJECT_STATUS.md` §11(2026-08-23 신설, 2026-08-25 마감)에 상세 기록이 있어
+     이 절에서는 되풀이하지 않음 — §11-1~§11-5 참고.
+
+146. **📉 "여기서부터는 신앙입니다" 보조지표 모듈 0~5단계 완주 + 전면 공개
+     (2026-08-25).** RSI(14)·MACD·볼린저밴드를 판정(숫자)·AI 해설(문장) 두 층으로
+     분리해 KOSPI200 유니버스에 제공. 착수부터 전면 공개까지 하루 만에 완주 —
+     `TECHNICAL_INDICATOR_WORK_ORDER.md` §7 로드맵 원문 기준. 상세는
+     `PROJECT_STATUS.md` §13 신설.
+
+147. **🔍 "기초공사 이후 생긴 실금" 6건 점검·수정 (2026-08-25, 오푸스 높음, 오너
+     요청 — "기초공사는 끝났는데 실금이 없는지 봐줘").** #142(2026-08-17 저장소
+     전수 감사) 이후 8일 사이 결투 USD·성적표 전환·배당·보조지표 4개 모듈이 한꺼번에
+     올라오면서 생긴 크랙을 다시 오푸스 높음으로 전수 재점검. 6건 중 5건 처리
+     (7번·작게 보류된 항목은 오너가 이미 알고 있어 이번 범위에서 제외):
+     ① 세션격리 회귀 테스트(`test_no_mutable_globals`) 빨간불 복구 —
+     `indicator_page.py`의 전역 5개(라벨·배지색, 전부 고정 문자열)를
+     `ALLOWED_MUTABLE_GLOBALS`에 등록.
+     ② 은퇴 선언(§5-20)됐지만 실제로는 안 지워지고 2026-08-23 이후 매일 밤 그대로
+     돌던 결투 발행 배치 8개 파일(`run_duel_publish_batch.py`·`_us.py`,
+     `.github/workflows/duel_publish_daily.yml`·`_us.yml`,
+     `utils/duel_publish.py`·`_usd.py`, `tests/test_duel_publish.py`·`_usd.py`)을
+     `_to_delete_duel_publish/`로 이동 + `test_duel_public_ui.py`의 관련 테스트
+     2개 제거.
+     ③ `sql/duel_schema.sql`이 여전히 만드는 은퇴 표 9개 각각에 은퇴 표시 추가(SQL
+     로직은 한 글자도 안 건드림, 순수 주석 — `git diff`로 확인).
+     ④ `utils/macro_ai.py`의 죽은 Gemini 모델(`gemini-2.5-flash`)을
+     `gemini-3.6-flash`로 교체, `indicator_ai.py`와 같은 모듈 상수(`MODEL_NAME`)
+     패턴으로 통일.
+     ⑤ 이 문서와 `PROJECT_STATUS.md`의 8일치 공백을 보강(바로 이 절 + §12·§13·
+     §14, #143~146).
+     ⑥ 배당락일 계산용 KRX 휴장일 표(`KRX_VERIFIED_YEARS = (2025, 2026)`) 만료
+     알람 신설 — 신규 `utils/expiry_alarms.py::warn_if_expiring()`을 만들어 마감
+     60일 전(2026-11-02)부터 `dividend_page.py` 모듈 로드 시(Render 로그)와
+     `collector_dividend_payment_kr.py`(매일 도는 배치)에서 경고를 찍도록 배선.
+     **검증**: 오늘 변경한 전체 파일 `python3 -m py_compile` 클린, `git diff`로
+     SQL·주요 로직 파일에 의도치 않은 변경이 없는지 확인. pytest는 이 세션에 설치돼
+     있지 않아 실행 못 함 — **다음에 저장소를 열면 `pytest -q` 한 번 돌려서 회귀가
+     없는지 확인 필요.** 상세는 `PROJECT_STATUS.md` §14 참고.
+
+
 
 ## 진행 예정 (백로그)
 

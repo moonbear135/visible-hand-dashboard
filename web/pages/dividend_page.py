@@ -440,6 +440,16 @@ def build_payment_event_index(payload):
 #: 내지 않습니다(§0-1 — 확인 안 된 걸 확인한 척하지 않기).
 KRX_VERIFIED_YEARS = (2025, 2026)
 
+# 🔴 2026-08-25 추가 — 위 표가 검증 안 된 연도로 넘어가기 전에 미리 시끄럽게 경고합니다
+#    (2027-01-01 부터는 is_krx_trading_day() 가 ValueError 를 던지며 멈추는데, 그 전까지
+#    아무도 미리 알려주지 않는 게 문제였습니다). 마감 60일 전부터 서버 로그(Render)에
+#    찍히기 시작합니다. 실제 매일 도는 배당 배치(`collector_dividend_payment_kr.py`)에도
+#    같은 알람을 별도로 걸어 뒀습니다(이 파일은 nicegui 를 물고 있어 배치가 직접
+#    import 할 수 없어서 `utils/expiry_alarms.py` 로 로직만 공유합니다).
+from utils.expiry_alarms import warn_if_expiring
+warn_if_expiring('배당락일 계산용 KRX 휴장일 표 (dividend_page.py: KRX_VERIFIED_YEARS)',
+                 max(KRX_VERIFIED_YEARS))
+
 KRX_HOLIDAYS_2025_2026 = frozenset((
     # 2025년 12월 — 2026년 초 배당기준일의 역산 여유분으로만 확보(2025년 전체 표는 아님)
     '2025-12-25', '2025-12-31',

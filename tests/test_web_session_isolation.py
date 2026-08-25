@@ -258,6 +258,23 @@ ALLOWED_MUTABLE_GLOBALS = {
         "`utils/scorecard_db.py` 의 CURRENCY_KRW/CURRENCY_USD 가 단일 출처이며, '지금 어느 "
         "통화를 보고 있는가'는 전부 `_render_body()` 안의 지역 dict(`view`)로만 흐릅니다 "
         "(§0-3-8 — 접속자끼리 선택 상태가 섞이지 않습니다).",
+    # ── 📈 보조지표 "여기서부터는 신앙입니다" 화면 — 2026-08-25 추가 ────────────────────
+    #    5개 전부 지표 내부 코드(RSI/MACD/Bollinger 종류, overbought/golden/inside 같은
+    #    상태값) → 화면 표시용 한글 라벨·배지 색(고정 문자열/색상 코드 튜플) 매핑입니다.
+    #    값의 출처는 `utils/indicators.py`의 반환값이고(단일 출처, §0-3-10), 여기서는
+    #    표시만 담당합니다. 5개 전부 `.get()`/인덱싱으로만 읽히고, 대입·update 하는 코드가
+    #    파일 안에 없습니다 — 사용자별 종목 상태는 매 렌더 호출의 지역 변수로만 흐릅니다.
+    ("web/pages/indicator_page.py", "_INDICATOR_LABELS"):
+        "지표 코드(RSI/MACD/Bollinger) → 화면 표기명(고정 문자열). 값이 대입되는 코드가 없음.",
+    ("web/pages/indicator_page.py", "_RSI_SIGNAL_LABELS"):
+        "RSI 판정값(overbought/oversold/neutral) → 한글 설명 라벨(고정 문자열).",
+    ("web/pages/indicator_page.py", "_MACD_CROSS_LABELS"):
+        "MACD 교차 판정값(golden/dead) → 한글 설명 라벨(고정 문자열).",
+    ("web/pages/indicator_page.py", "_BB_POSITION_LABELS"):
+        "볼린저밴드 위치 판정값(above_upper/below_lower/inside) → 한글 설명 라벨(고정 문자열).",
+    ("web/pages/indicator_page.py", "_STATE_BADGE_STYLES"):
+        "위 판정값들 → 배지 색상(배경·글자·테두리 헥스코드 튜플). 새 색을 발명하지 않고 "
+        "기존 배지 팔레트 관례를 재사용(§0-3-10). 값이 대입되는 코드가 없음.",
 }
 
 _MUTABLE_CALLS = {"dict", "list", "set", "defaultdict", "OrderedDict", "deque"}

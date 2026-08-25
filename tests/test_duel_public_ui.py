@@ -320,64 +320,19 @@ def test_public_reads_touch_only_the_two_publish_tables():
     assert {call.op for call in client.calls} == {"select"}, "읽기 경로는 select 뿐입니다"
 
 
-# =============================================================================
-# 2. 발행 배치 실행 스크립트 · 워크플로우
-# =============================================================================
-def test_publish_runner_delegates_and_never_decides():
-    """
-    루트 실행 스크립트는 **I/O 와 환경**만 다룹니다. 판단(누가 발행 대상인지 등)이 여기로
-    새어 들어오면 `tests/test_duel_publish.py` 가 검증하지 못하는 로직이 생깁니다
-    (`run_duel_daily_batch.py` 와 같은 분업).
-    """
-    import ast
-
-    source = (REPO_ROOT / "run_duel_publish_batch.py").read_text(encoding="utf-8")
-    tree = ast.parse(source)
-    called = {node.func.attr for node in ast.walk(tree)
-              if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)}
-    assert "run_publish_batch" in called
-    assert "create_service_client" in called
-    # 발행표를 직접 만지거나 규칙을 다시 계산하지 않습니다.
-    for forbidden in ("write_public_leaderboard", "write_public_holdings",
-                      "rank_participants", "assign_bracket", "compute_twr"):
-        assert forbidden not in source, f"실행 스크립트가 {forbidden} 를 직접 부릅니다"
-
-
-def test_publish_workflow_runs_after_the_fill_batch():
-    """
-    🔴 순서 — 발행 배치는 그날 스냅샷(→ TWR)을 읽으므로 **체결 배치보다 뒤**여야 합니다.
-    두 워크플로우의 cron 을 실제로 파싱해 비교합니다(주석이 아니라 값으로 고정).
-    """
-    yaml = pytest.importorskip("yaml", reason="pyyaml 이 없으면 이 검사만 건너뜁니다")
-    workflows = REPO_ROOT / ".github" / "workflows"
-    fill = yaml.safe_load((workflows / "duel_daily.yml").read_text(encoding="utf-8"))
-    publish = yaml.safe_load((workflows / "duel_publish_daily.yml").read_text(encoding="utf-8"))
-
-    def _cron_minutes(document):
-        # YAML 1.1 에서 `on:` 은 불리언 True 로 파싱됩니다(GitHub 은 정상 처리).
-        schedule = (document.get("on") or document.get(True))["schedule"]
-        minute, hour = schedule[0]["cron"].split()[:2]
-        return int(hour) * 60 + int(minute)
-
-    fill_at = _cron_minutes(fill)
-    publish_at = _cron_minutes(publish)
-    fill_timeout = fill["jobs"]["duel-batch"]["timeout-minutes"]
-    assert publish_at >= fill_at + fill_timeout, (
-        "발행 배치가 체결 배치의 타임아웃 상한보다 먼저 시작합니다"
-        f" (체결 {fill_at}분 + 타임아웃 {fill_timeout}분 vs 발행 {publish_at}분)"
-    )
-
-    job = publish["jobs"]["duel-publish"]
-    assert publish["permissions"] == {"contents": "read"}, \
-        "발행 배치는 저장소에 커밋하지 않으므로 쓰기 권한이 필요 없습니다(최소 권한)"
-    assert publish["concurrency"]["group"], "겹쳐 도는 실행을 막아야 합니다"
-    step_env = [step.get("env", {}) for step in job["steps"]]
-    assert any("SUPABASE_SERVICE_ROLE_KEY" in env for env in step_env), \
-        "배치 키를 실행 단계에만 넘겨야 합니다"
-    assert any(step.get("if") == "failure()" for step in job["steps"]), \
-        "실패했을 때 무엇을 확인해야 하는지 남겨야 합니다"
-
-
+# 🔴 2026-08-25 — 이 자리에 있던 「2. 발행 배치 실행 스크립트 · 워크플로우」
+#    (test_publish_runner_delegates_and_never_decides ·
+#    test_publish_workflow_runs_after_the_fill_batch) 두 테스트를 지웠습니다.
+#    검증 대상이던 run_duel_publish_batch.py · run_duel_publish_batch_us.py ·
+#    .github/workflows/duel_publish_daily(_us).yml · utils/duel_publish(_usd).py ·
+#    tests/test_duel_publish(_usd).py 8개 파일 자체를 은퇴시켰기 때문입니다
+#    (DUEL_MODULE_WORK_ORDER.md §5-20에서 2026-08-23에 이미 삭제 결정됐던 것을,
+#    이번에야 실제로 실행 — 그동안 살아서 매일 밤 존재하지 않는 표에 쓰기를
+#    시도하고 있었습니다). 이 파일들은 _to_delete_duel_publish/ 에 옮겨져 있고,
+#    git 커밋 시 삭제로 반영됩니다. `duel_db.py`의 fetch_public_leaderboard 계열
+#    함수·표 상수는 손대지 않았습니다 — tests/test_duel_db.py가 여전히 그것들을
+#    직접 검증하고 있고, 화면과 무관하게 그 자체로는 안전한 읽기 전용 코드라
+#    이번 정리 범위 밖입니다.
 # =============================================================================
 # 3. 🗑️ 은퇴 확인 (2026-08-23) — 정말로 사라졌는가, 그리고 /duel 은 그대로인가
 # =============================================================================

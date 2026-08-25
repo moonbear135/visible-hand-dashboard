@@ -165,6 +165,7 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
+from utils.expiry_alarms import warn_if_expiring
 from html.parser import HTMLParser
 
 try:
@@ -1810,6 +1811,14 @@ def main(argv=None):
     #    아직 없는 회사의 배당결정도 잡힌다"는 것이라, 유니버스로 미리 거르면 그 장점이
     #    통째로 사라집니다(설계 의도 — 파일 상단 주석 참고).
     args = parser.parse_args(argv)
+
+    # 🔴 2026-08-25 추가 — 이 스크립트는 매일 도는 감시 배치라(watch_dividend_payment_events.yml),
+    #    web/pages/dividend_page.py 의 배당락일 계산용 KRX 휴장일 표 만료를 가장 확실히
+    #    미리 알아챌 수 있는 자리입니다. last_verified_year 값은 그 파일의
+    #    KRX_VERIFIED_YEARS 를 손으로 미러링한 것이니, 그 표를 갱신할 때 이 숫자도
+    #    함께 올리세요(안 올려도 동작이 깨지진 않습니다 — 그냥 알람 시점만 어긋납니다).
+    warn_if_expiring('배당락일 계산용 KRX 휴장일 표 (web/pages/dividend_page.py)',
+                      last_verified_year=2026)
 
     # 한쪽만 준 것은 거의 확실히 실수입니다. 조용히 감시 모드로 돌면 사람이 의도한 구간이
     # 아니라 "어제까지 3일"만 훑고 끝나 버립니다 — 무엇이 잘못됐는지 말하고 멈춥니다(§0-1).
