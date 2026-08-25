@@ -15,6 +15,7 @@ import os
 from nicegui import app, ui
 
 from utils import data_source
+import web.ads
 import web.theme
 # @ui.page 등록을 위해 import 자체가 필요합니다 (모듈을 읽는 순간 경로가 등록됨).
 #   pegy_page      → '/'            (공개 기본 화면)
@@ -60,6 +61,19 @@ from web.pages import (  # noqa: F401
 )
 
 web.theme.register()
+web.ads.register_head()
+
+# 📢 구글 애드센스 켜짐/꺼짐도 데이터 소스와 같은 이유로 기동 로그 한 줄에 남깁니다
+#    (추측으로 확인하지 않기 — §0-1). 게시자 ID·슬롯 ID 값 자체는 비밀이 아니지만
+#    로그에는 켜짐/꺼짐과 단계만 남기고 값은 남기지 않습니다.
+if web.ads.ADS_ENABLED and web.ads.ADS_PUBLISHER_ID and web.ads.ADS_SLOT_ID:
+    _ads_stage = '2단계(관리자 전용)' if web.ads.ADS_ADMIN_ONLY else '3단계(전체 공개)'
+    print(f'📢 [광고] 애드센스 켜짐 — {_ads_stage}.')
+elif web.ads.ADS_ENABLED:
+    print('📢 [광고] ADS_ENABLED=true 이지만 ADS_PUBLISHER_ID/ADS_SLOT_ID 가 비어 있어 '
+          '실제로는 꺼진 상태입니다 (web/ads.py 참고).')
+else:
+    print('📢 [광고] 꺼짐 (기본값 — ADS_ENABLED 로 단계적 공개, web/ads.py 참고).')
 
 # 🌐 데이터 원격 로드(NICEGUI_MIGRATION_PLAN.md §8-5 B안)가 켜졌는지 **기동 로그 한 줄로** 확인할
 #    수 있게 합니다. 오너가 Render 대시보드에서 DATA_SOURCE_BASE_URL 을 넣은 뒤, 값이 실제로
@@ -80,6 +94,24 @@ else:
 def healthz():
     """Render 헬스체크 · 무료 인스턴스 깨우기용. UI를 그리지 않아 가볍습니다."""
     return {'ok': True}
+
+
+@app.get('/ads.txt')
+def ads_txt():
+    """구글 애드센스가 이 사이트의 광고 게재 권한을 확인하려고 크롤링하는 표준 경로.
+
+    ADS_PUBLISHER_ID 가 없으면(승인 전·환경변수 미설정) **404를 그대로 돌려줍니다** —
+    있지도 않은 게시자 ID로 잘못된 ads.txt 를 내보내는 것보다, 아예 없는 편이
+    안전합니다(ENGINEERING_SPEC.md §0-1 — 값을 지어내지 않습니다).
+    """
+    from fastapi.responses import PlainTextResponse
+
+    if not web.ads.ADS_PUBLISHER_ID:
+        from fastapi import Response
+        return Response(status_code=404)
+    return PlainTextResponse(
+        f'google.com, {web.ads.ADS_PUBLISHER_ID}, DIRECT, f08c47fec0942fa0\n'
+    )
 
 
 STORAGE_SECRET = os.environ.get('NICEGUI_STORAGE_SECRET')

@@ -20,6 +20,7 @@ from contextlib import contextmanager
 from nicegui import ui
 
 from utils import data_source
+from web import ads
 from web.auth import is_admin
 from web.components.widgets import error_banner
 
@@ -345,6 +346,9 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
         #      모든 페이지가 공유하는 이 한 곳에 둡니다 (ENGINEERING_SPEC.md §0-3-10).
         stale_slot = ui.element('div').classes('w-full')
         yield
+        # 📢 광고 자리 (web/ads.py) — 화면 맨 아래, 실제 본문 다음에만 그립니다.
+        #    3단계 공개 절차가 꺼져 있으면(기본) ads.ad_slot() 이 아무것도 안 그립니다.
+        ads.ad_slot()
         _render_staleness_banner(stale_slot)
 
 
