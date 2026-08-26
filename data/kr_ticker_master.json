@@ -1,8 +1,8 @@
 {
   "metadata": {
-    "generated_at": "2026-08-25 17:28",
+    "generated_at": "2026-08-26 17:18",
     "source": "FinanceDataReader StockListing('KRX') + StockListing('ETF/KR')",
-    "count": 1161,
+    "count": 1164,
     "description": "코스피+코스닥+국내ETF 전체 상장종목 코드↔이름 목록 — 가격/밸류에이션 없음, 이름 검색 보조용"
   },
   "stocks": [
@@ -67,14 +67,14 @@
       "type": "ETF"
     },
     {
-      "code": "122630",
-      "name": "KODEX 레버리지",
+      "code": "498400",
+      "name": "KODEX 200타겟위클리커버드콜",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "498400",
-      "name": "KODEX 200타겟위클리커버드콜",
+      "code": "122630",
+      "name": "KODEX 레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -133,20 +133,26 @@
       "type": "ETF"
     },
     {
-      "code": "395160",
-      "name": "KODEX AI반도체TOP2플러스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "360200",
       "name": "ACE 미국S&P500",
       "market": null,
       "type": "ETF"
     },
     {
+      "code": "395160",
+      "name": "KODEX AI반도체TOP2플러스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "381170",
       "name": "TIGER 미국테크TOP10 INDXX",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "233740",
+      "name": "KODEX 코스닥150레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -169,20 +175,8 @@
       "type": "ETF"
     },
     {
-      "code": "233740",
-      "name": "KODEX 코스닥150레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "367380",
       "name": "ACE 미국나스닥100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "273130",
-      "name": "KODEX 종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -193,20 +187,26 @@
       "type": "ETF"
     },
     {
+      "code": "273130",
+      "name": "KODEX 종합채권(AA-이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0043B0",
       "name": "TIGER 머니마켓액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "455890",
-      "name": "RISE 머니마켓액티브",
+      "code": "487240",
+      "name": "KODEX AI전력핵심설비",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "487240",
-      "name": "KODEX AI전력핵심설비",
+      "code": "455890",
+      "name": "RISE 머니마켓액티브",
       "market": null,
       "type": "ETF"
     },
@@ -247,6 +247,12 @@
       "type": "ETF"
     },
     {
+      "code": "278540",
+      "name": "KODEX MSCI Korea TR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "486290",
       "name": "TIGER 미국나스닥100타겟데일리커버드콜",
       "market": null,
@@ -255,12 +261,6 @@
     {
       "code": "0193T0",
       "name": "KODEX SK하이닉스단일종목레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "278540",
-      "name": "KODEX MSCI Korea TR",
       "market": null,
       "type": "ETF"
     },
@@ -307,20 +307,14 @@
       "type": "ETF"
     },
     {
-      "code": "442580",
-      "name": "PLUS 글로벌HBM반도체",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "441640",
       "name": "KODEX 미국배당커버드콜액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "305720",
-      "name": "KODEX 2차전지산업",
+      "code": "442580",
+      "name": "PLUS 글로벌HBM반도체",
       "market": null,
       "type": "ETF"
     },
@@ -331,8 +325,20 @@
       "type": "ETF"
     },
     {
+      "code": "305720",
+      "name": "KODEX 2차전지산업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "329200",
       "name": "TIGER 리츠부동산인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "446770",
+      "name": "ACE 글로벌반도체TOP4 Plus",
       "market": null,
       "type": "ETF"
     },
@@ -343,8 +349,8 @@
       "type": "ETF"
     },
     {
-      "code": "446770",
-      "name": "ACE 글로벌반도체TOP4 Plus",
+      "code": "0193W0",
+      "name": "KODEX 삼성전자단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -361,8 +367,8 @@
       "type": "ETF"
     },
     {
-      "code": "0193W0",
-      "name": "KODEX 삼성전자단일종목레버리지",
+      "code": "152100",
+      "name": "PLUS 200",
       "market": null,
       "type": "ETF"
     },
@@ -373,20 +379,8 @@
       "type": "ETF"
     },
     {
-      "code": "152100",
-      "name": "PLUS 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "379780",
       "name": "RISE 미국S&P500",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "487230",
-      "name": "KODEX 미국AI전력핵심인프라",
       "market": null,
       "type": "ETF"
     },
@@ -397,14 +391,20 @@
       "type": "ETF"
     },
     {
+      "code": "487230",
+      "name": "KODEX 미국AI전력핵심인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0195S0",
       "name": "TIGER SK하이닉스단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "436140",
-      "name": "SOL 종합채권(AA-이상)액티브",
+      "code": "226490",
+      "name": "KODEX 코스피",
       "market": null,
       "type": "ETF"
     },
@@ -415,14 +415,14 @@
       "type": "ETF"
     },
     {
-      "code": "091230",
-      "name": "TIGER 반도체",
+      "code": "436140",
+      "name": "SOL 종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "226490",
-      "name": "KODEX 코스피",
+      "code": "091230",
+      "name": "TIGER 반도체",
       "market": null,
       "type": "ETF"
     },
@@ -469,12 +469,6 @@
       "type": "ETF"
     },
     {
-      "code": "445290",
-      "name": "KODEX 로봇액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0139F0",
       "name": "TIGER 12월자동연장금융채(AA-이상)액티브",
       "market": null,
@@ -487,14 +481,20 @@
       "type": "ETF"
     },
     {
-      "code": "446720",
-      "name": "SOL 미국배당다우존스",
+      "code": "494890",
+      "name": "KODEX 200액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "494890",
-      "name": "KODEX 200액티브",
+      "code": "445290",
+      "name": "KODEX 로봇액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "446720",
+      "name": "SOL 미국배당다우존스",
       "market": null,
       "type": "ETF"
     },
@@ -523,20 +523,14 @@
       "type": "ETF"
     },
     {
-      "code": "451540",
-      "name": "TIGER 종합채권(AA-이상)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "449180",
       "name": "KODEX 미국S&P500(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "455850",
-      "name": "SOL AI반도체소부장",
+      "code": "451540",
+      "name": "TIGER 종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -547,14 +541,14 @@
       "type": "ETF"
     },
     {
-      "code": "295040",
-      "name": "SOL 200TR",
+      "code": "455850",
+      "name": "SOL AI반도체소부장",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "402970",
-      "name": "ACE 미국배당다우존스",
+      "code": "295040",
+      "name": "SOL 200TR",
       "market": null,
       "type": "ETF"
     },
@@ -565,14 +559,8 @@
       "type": "ETF"
     },
     {
-      "code": "494310",
-      "name": "KODEX 반도체레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "315930",
-      "name": "KODEX Top5PlusTR",
+      "code": "402970",
+      "name": "ACE 미국배당다우존스",
       "market": null,
       "type": "ETF"
     },
@@ -589,14 +577,26 @@
       "type": "ETF"
     },
     {
-      "code": "495050",
-      "name": "RISE 코리아밸류업",
+      "code": "315930",
+      "name": "KODEX Top5PlusTR",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "0117V0",
       "name": "TIGER 코리아AI전력기기TOP3플러스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "494310",
+      "name": "KODEX 반도체레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "495050",
+      "name": "RISE 코리아밸류업",
       "market": null,
       "type": "ETF"
     },
@@ -613,26 +613,26 @@
       "type": "ETF"
     },
     {
-      "code": "305540",
-      "name": "TIGER 2차전지테마",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0195R0",
       "name": "TIGER 삼성전자단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "487340",
-      "name": "ACE 머니마켓액티브",
+      "code": "305540",
+      "name": "TIGER 2차전지테마",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "498410",
       "name": "KODEX 금융고배당TOP10타겟위클리커버드콜",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "487340",
+      "name": "ACE 머니마켓액티브",
       "market": null,
       "type": "ETF"
     },
@@ -661,6 +661,18 @@
       "type": "ETF"
     },
     {
+      "code": "441800",
+      "name": "TIME Korea플러스배당액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "466940",
+      "name": "TIGER 은행고배당플러스TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0177R0",
       "name": "TIGER 반도체TOP10커버드콜액티브",
       "market": null,
@@ -673,26 +685,8 @@
       "type": "ETF"
     },
     {
-      "code": "114800",
-      "name": "KODEX 인버스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "441800",
-      "name": "TIME Korea플러스배당액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0025N0",
       "name": "TIGER TDF2045 적격",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "466940",
-      "name": "TIGER 은행고배당플러스TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -703,14 +697,20 @@
       "type": "ETF"
     },
     {
+      "code": "490590",
+      "name": "RISE 미국AI밸류체인데일리고정커버드콜",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "457480",
       "name": "ACE 테슬라밸류체인액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "490590",
-      "name": "RISE 미국AI밸류체인데일리고정커버드콜",
+      "code": "252670",
+      "name": "KODEX 200선물인버스2X",
       "market": null,
       "type": "ETF"
     },
@@ -721,8 +721,8 @@
       "type": "ETF"
     },
     {
-      "code": "272580",
-      "name": "TIGER 단기채권액티브",
+      "code": "114800",
+      "name": "KODEX 인버스",
       "market": null,
       "type": "ETF"
     },
@@ -733,8 +733,8 @@
       "type": "ETF"
     },
     {
-      "code": "252670",
-      "name": "KODEX 200선물인버스2X",
+      "code": "272580",
+      "name": "TIGER 단기채권액티브",
       "market": null,
       "type": "ETF"
     },
@@ -757,14 +757,14 @@
       "type": "ETF"
     },
     {
-      "code": "462330",
-      "name": "KODEX 2차전지산업레버리지",
+      "code": "434730",
+      "name": "HANARO 원자력iSelect",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "138540",
-      "name": "TIGER 현대차그룹플러스",
+      "code": "462330",
+      "name": "KODEX 2차전지산업레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -781,20 +781,14 @@
       "type": "ETF"
     },
     {
-      "code": "434730",
-      "name": "HANARO 원자력iSelect",
+      "code": "138540",
+      "name": "TIGER 현대차그룹플러스",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "495850",
       "name": "KODEX 코리아밸류업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "364980",
-      "name": "TIGER 2차전지TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -811,8 +805,8 @@
       "type": "ETF"
     },
     {
-      "code": "385560",
-      "name": "RISE KIS국고채30년Enhanced",
+      "code": "364980",
+      "name": "TIGER 2차전지TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -841,6 +835,12 @@
       "type": "ETF"
     },
     {
+      "code": "385560",
+      "name": "RISE KIS국고채30년Enhanced",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "434060",
       "name": "KODEX TDF2050액티브 적격",
       "market": null,
@@ -849,12 +849,6 @@
     {
       "code": "418660",
       "name": "TIGER 미국나스닥100레버리지(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0148J0",
-      "name": "TIGER 코리아휴머노이드로봇산업",
       "market": null,
       "type": "ETF"
     },
@@ -871,8 +865,26 @@
       "type": "ETF"
     },
     {
+      "code": "0148J0",
+      "name": "TIGER 코리아휴머노이드로봇산업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "489250",
       "name": "KODEX 미국배당다우존스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0101N0",
+      "name": "RISE AI전력인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0091P0",
+      "name": "TIGER 코리아원자력",
       "market": null,
       "type": "ETF"
     },
@@ -889,8 +901,8 @@
       "type": "ETF"
     },
     {
-      "code": "0101N0",
-      "name": "RISE AI전력인프라",
+      "code": "277630",
+      "name": "TIGER 코스피",
       "market": null,
       "type": "ETF"
     },
@@ -901,8 +913,8 @@
       "type": "ETF"
     },
     {
-      "code": "488080",
-      "name": "TIGER 반도체TOP10레버리지",
+      "code": "494670",
+      "name": "TIGER 조선TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -913,20 +925,8 @@
       "type": "ETF"
     },
     {
-      "code": "494670",
-      "name": "TIGER 조선TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "277630",
-      "name": "TIGER 코스피",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0091P0",
-      "name": "TIGER 코리아원자력",
+      "code": "488080",
+      "name": "TIGER 반도체TOP10레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -937,20 +937,14 @@
       "type": "ETF"
     },
     {
-      "code": "466950",
-      "name": "TIGER 글로벌AI액티브",
+      "code": "0019K0",
+      "name": "TIME 미국나스닥100채권혼합50액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "449190",
       "name": "KODEX 미국나스닥100(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0019K0",
-      "name": "TIME 미국나스닥100채권혼합50액티브",
       "market": null,
       "type": "ETF"
     },
@@ -967,14 +961,26 @@
       "type": "ETF"
     },
     {
-      "code": "0007F0",
-      "name": "KODEX 27-12 회사채(AA-이상)액티브",
+      "code": "466950",
+      "name": "TIGER 글로벌AI액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "491620",
       "name": "RISE 미국테크100데일리고정커버드콜",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0007F0",
+      "name": "KODEX 27-12 회사채(AA-이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0105E0",
+      "name": "SOL 코리아고배당",
       "market": null,
       "type": "ETF"
     },
@@ -991,20 +997,8 @@
       "type": "ETF"
     },
     {
-      "code": "0105E0",
-      "name": "SOL 코리아고배당",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "365780",
       "name": "ACE 국고채10년",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0190C0",
-      "name": "RISE 현대차고정피지컬AI",
       "market": null,
       "type": "ETF"
     },
@@ -1021,14 +1015,14 @@
       "type": "ETF"
     },
     {
-      "code": "496080",
-      "name": "TIGER 코리아밸류업",
+      "code": "444200",
+      "name": "SOL 코리아메가테크액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "444200",
-      "name": "SOL 코리아메가테크액티브",
+      "code": "496080",
+      "name": "TIGER 코리아밸류업",
       "market": null,
       "type": "ETF"
     },
@@ -1045,6 +1039,12 @@
       "type": "ETF"
     },
     {
+      "code": "0190C0",
+      "name": "RISE 현대차고정피지컬AI",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "251350",
       "name": "KODEX MSCI선진국",
       "market": null,
@@ -1057,26 +1057,14 @@
       "type": "ETF"
     },
     {
-      "code": "476800",
-      "name": "KODEX 한국부동산리츠인프라",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "361580",
       "name": "RISE 200TR",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "243880",
-      "name": "TIGER 200IT레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "499660",
-      "name": "TIGER CD금리플러스액티브(합성)",
+      "code": "476800",
+      "name": "KODEX 한국부동산리츠인프라",
       "market": null,
       "type": "ETF"
     },
@@ -1087,14 +1075,14 @@
       "type": "ETF"
     },
     {
-      "code": "471230",
-      "name": "KODEX 국고채10년액티브",
+      "code": "499660",
+      "name": "TIGER CD금리플러스액티브(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0163Y0",
-      "name": "KoAct 코스닥액티브",
+      "code": "471230",
+      "name": "KODEX 국고채10년액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1111,6 +1099,12 @@
       "type": "ETF"
     },
     {
+      "code": "0163Y0",
+      "name": "KoAct 코스닥액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "451000",
       "name": "PLUS 종합채권(AA-이상)액티브",
       "market": null,
@@ -1123,8 +1117,8 @@
       "type": "ETF"
     },
     {
-      "code": "293180",
-      "name": "HANARO 200",
+      "code": "243880",
+      "name": "TIGER 200IT레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -1135,14 +1129,14 @@
       "type": "ETF"
     },
     {
-      "code": "451060",
-      "name": "1Q 200액티브",
+      "code": "293180",
+      "name": "HANARO 200",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0016X0",
-      "name": "SOL 중단기회사채(A-이상)액티브",
+      "code": "451060",
+      "name": "1Q 200액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1153,8 +1147,8 @@
       "type": "ETF"
     },
     {
-      "code": "091180",
-      "name": "KODEX 자동차",
+      "code": "0016X0",
+      "name": "SOL 중단기회사채(A-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1167,6 +1161,12 @@
     {
       "code": "0023A0",
       "name": "SOL 미국양자컴퓨팅TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "091180",
+      "name": "KODEX 자동차",
       "market": null,
       "type": "ETF"
     },
@@ -1189,18 +1189,6 @@
       "type": "ETF"
     },
     {
-      "code": "471990",
-      "name": "KODEX AI반도체핵심장비",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0162M0",
-      "name": "KODEX 금융채1~2년(AA-이상)PLUS액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "426020",
       "name": "TIME 미국S&P500액티브",
       "market": null,
@@ -1213,8 +1201,8 @@
       "type": "ETF"
     },
     {
-      "code": "458250",
-      "name": "TIGER 미국30년국채스트립액티브(합성 H)",
+      "code": "471990",
+      "name": "KODEX AI반도체핵심장비",
       "market": null,
       "type": "ETF"
     },
@@ -1225,38 +1213,20 @@
       "type": "ETF"
     },
     {
+      "code": "458250",
+      "name": "TIGER 미국30년국채스트립액티브(합성 H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "462900",
       "name": "KoAct 바이오헬스케어액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "469070",
-      "name": "RISE AI&로봇",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0131V0",
-      "name": "1Q 미국우주항공테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "439870",
-      "name": "KODEX 국고채30년액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "496020",
-      "name": "WON 전단채플러스액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "132030",
-      "name": "KODEX 골드선물(H)",
+      "code": "302450",
+      "name": "RISE 코스피",
       "market": null,
       "type": "ETF"
     },
@@ -1267,20 +1237,38 @@
       "type": "ETF"
     },
     {
+      "code": "469070",
+      "name": "RISE AI&로봇",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0162M0",
+      "name": "KODEX 금융채1~2년(AA-이상)PLUS액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "132030",
+      "name": "KODEX 골드선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "496020",
+      "name": "WON 전단채플러스액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "439860",
       "name": "KODEX ESG종합채권(A-이상)액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0167Z0",
-      "name": "KODEX 미국우주항공",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0040Y0",
-      "name": "SOL 팔란티어커버드콜OTM채권혼합",
+      "code": "0131V0",
+      "name": "1Q 미국우주항공테크",
       "market": null,
       "type": "ETF"
     },
@@ -1291,8 +1279,26 @@
       "type": "ETF"
     },
     {
+      "code": "0040Y0",
+      "name": "SOL 팔란티어커버드콜OTM채권혼합",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "439870",
+      "name": "KODEX 국고채30년액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "310960",
       "name": "TIGER 200TR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0167Z0",
+      "name": "KODEX 미국우주항공",
       "market": null,
       "type": "ETF"
     },
@@ -1309,20 +1315,20 @@
       "type": "ETF"
     },
     {
+      "code": "453810",
+      "name": "KODEX 인도Nifty50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0046A0",
       "name": "TIGER 미국초단기(3개월이하)국채",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "448300",
-      "name": "TIGER 미국나스닥100(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "453810",
-      "name": "KODEX 인도Nifty50",
+      "code": "279530",
+      "name": "KODEX 고배당주",
       "market": null,
       "type": "ETF"
     },
@@ -1339,14 +1345,8 @@
       "type": "ETF"
     },
     {
-      "code": "279530",
-      "name": "KODEX 고배당주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "302450",
-      "name": "RISE 코스피",
+      "code": "448300",
+      "name": "TIGER 미국나스닥100(H)",
       "market": null,
       "type": "ETF"
     },
@@ -1363,14 +1363,14 @@
       "type": "ETF"
     },
     {
-      "code": "0026S0",
-      "name": "1Q 미국S&P500",
+      "code": "474590",
+      "name": "WON 반도체밸류체인액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "474590",
-      "name": "WON 반도체밸류체인액티브",
+      "code": "0026S0",
+      "name": "1Q 미국S&P500",
       "market": null,
       "type": "ETF"
     },
@@ -1381,14 +1381,20 @@
       "type": "ETF"
     },
     {
+      "code": "472170",
+      "name": "TIGER 미국테크TOP10채권혼합",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0182R0",
       "name": "1Q K반도체TOP2+",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "472170",
-      "name": "TIGER 미국테크TOP10채권혼합",
+      "code": "0228G0",
+      "name": "ACE 반도체Plus전략산업",
       "market": null,
       "type": "ETF"
     },
@@ -1399,8 +1405,8 @@
       "type": "ETF"
     },
     {
-      "code": "270810",
-      "name": "RISE 코스닥150",
+      "code": "385510",
+      "name": "KODEX 신재생에너지액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1411,14 +1417,20 @@
       "type": "ETF"
     },
     {
-      "code": "385510",
-      "name": "KODEX 신재생에너지액티브",
+      "code": "270810",
+      "name": "RISE 코스닥150",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "0119H0",
       "name": "KODEX 28-12 회사채(AA-이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "489030",
+      "name": "PLUS 고배당주위클리커버드콜",
       "market": null,
       "type": "ETF"
     },
@@ -1435,12 +1447,6 @@
       "type": "ETF"
     },
     {
-      "code": "489030",
-      "name": "PLUS 고배당주위클리커버드콜",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0008S0",
       "name": "TIGER 미국배당다우존스타겟데일리커버드콜",
       "market": null,
@@ -1453,14 +1459,14 @@
       "type": "ETF"
     },
     {
-      "code": "136340",
-      "name": "RISE 중기우량회사채",
+      "code": "190620",
+      "name": "ACE 단기통안채",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0228G0",
-      "name": "ACE 반도체Plus전략산업",
+      "code": "136340",
+      "name": "RISE 중기우량회사채",
       "market": null,
       "type": "ETF"
     },
@@ -1471,14 +1477,14 @@
       "type": "ETF"
     },
     {
-      "code": "190620",
-      "name": "ACE 단기통안채",
+      "code": "453870",
+      "name": "TIGER 인도니프티50",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "475300",
-      "name": "SOL 반도체전공정",
+      "code": "0098F0",
+      "name": "KODEX 원자력SMR",
       "market": null,
       "type": "ETF"
     },
@@ -1495,12 +1501,6 @@
       "type": "ETF"
     },
     {
-      "code": "453870",
-      "name": "TIGER 인도니프티50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "483320",
       "name": "ACE 엔비디아밸류체인액티브",
       "market": null,
@@ -1513,8 +1513,8 @@
       "type": "ETF"
     },
     {
-      "code": "473330",
-      "name": "SOL 미국30년국채커버드콜(합성)",
+      "code": "307520",
+      "name": "TIGER 지주회사",
       "market": null,
       "type": "ETF"
     },
@@ -1525,20 +1525,8 @@
       "type": "ETF"
     },
     {
-      "code": "0038A0",
-      "name": "KODEX 미국휴머노이드로봇",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "273140",
-      "name": "KODEX 단기변동금리부채권액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "481190",
-      "name": "SOL 미국테크TOP10",
+      "code": "473330",
+      "name": "SOL 미국30년국채커버드콜(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -1549,8 +1537,14 @@
       "type": "ETF"
     },
     {
-      "code": "0094K0",
-      "name": "TIGER 28-04 회사채(A+이상)액티브",
+      "code": "273140",
+      "name": "KODEX 단기변동금리부채권액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0038A0",
+      "name": "KODEX 미국휴머노이드로봇",
       "market": null,
       "type": "ETF"
     },
@@ -1561,14 +1555,26 @@
       "type": "ETF"
     },
     {
-      "code": "307520",
-      "name": "TIGER 지주회사",
+      "code": "481190",
+      "name": "SOL 미국테크TOP10",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0098F0",
-      "name": "KODEX 원자력SMR",
+      "code": "0094K0",
+      "name": "TIGER 28-04 회사채(A+이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "475300",
+      "name": "SOL 반도체전공정",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "213610",
+      "name": "KODEX 삼성그룹밸류",
       "market": null,
       "type": "ETF"
     },
@@ -1585,30 +1591,6 @@
       "type": "ETF"
     },
     {
-      "code": "213610",
-      "name": "KODEX 삼성그룹밸류",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0162Y0",
-      "name": "TIME 코스닥액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "196230",
-      "name": "RISE 단기통안채",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "228790",
-      "name": "TIGER 화장품",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0053L0",
       "name": "TIGER 차이나휴머노이드로봇",
       "market": null,
@@ -1621,14 +1603,38 @@
       "type": "ETF"
     },
     {
-      "code": "471040",
-      "name": "KoAct 글로벌AI&로봇액티브",
+      "code": "0162Y0",
+      "name": "TIME 코스닥액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "139230",
+      "name": "TIGER 200 중공업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "196230",
+      "name": "RISE 단기통안채",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "283580",
+      "name": "KODEX 차이나CSI300",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "423170",
       "name": "SOL 글로벌AI반도체탑픽액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "228790",
+      "name": "TIGER 화장품",
       "market": null,
       "type": "ETF"
     },
@@ -1645,26 +1651,20 @@
       "type": "ETF"
     },
     {
+      "code": "478150",
+      "name": "TIME 글로벌우주테크&방산액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "421320",
       "name": "PLUS 우주항공",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "283580",
-      "name": "KODEX 차이나CSI300",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "139230",
-      "name": "TIGER 200 중공업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "478150",
-      "name": "TIME 글로벌우주테크&방산액티브",
+      "code": "471040",
+      "name": "KoAct 글로벌AI&로봇액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1699,14 +1699,14 @@
       "type": "ETF"
     },
     {
-      "code": "388420",
-      "name": "RISE 비메모리반도체액티브",
+      "code": "363570",
+      "name": "KODEX 장기종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "363570",
-      "name": "KODEX 장기종합채권(AA-이상)액티브",
+      "code": "388420",
+      "name": "RISE 비메모리반도체액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1717,20 +1717,14 @@
       "type": "ETF"
     },
     {
-      "code": "363580",
-      "name": "KODEX 200IT TR",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "329650",
       "name": "KODEX TRF3070",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "452360",
-      "name": "SOL 미국배당다우존스(H)",
+      "code": "363580",
+      "name": "KODEX 200IT TR",
       "market": null,
       "type": "ETF"
     },
@@ -1747,14 +1741,14 @@
       "type": "ETF"
     },
     {
-      "code": "448540",
-      "name": "ACE 엔비디아채권혼합",
+      "code": "452360",
+      "name": "SOL 미국배당다우존스(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "472160",
-      "name": "TIGER 미국테크TOP10 INDXX(H)",
+      "code": "448540",
+      "name": "ACE 엔비디아채권혼합",
       "market": null,
       "type": "ETF"
     },
@@ -1765,38 +1759,14 @@
       "type": "ETF"
     },
     {
-      "code": "0092C0",
-      "name": "SOL 27-12 회사채(AA-이상)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "488980",
-      "name": "SOL 26-12 회사채(AA-이상)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "442320",
       "name": "RISE 글로벌원자력",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "458260",
-      "name": "TIGER 미국투자등급회사채액티브(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "486450",
-      "name": "SOL 미국AI전력인프라",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "244580",
-      "name": "KODEX 바이오",
+      "code": "0092C0",
+      "name": "SOL 27-12 회사채(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -1807,14 +1777,44 @@
       "type": "ETF"
     },
     {
+      "code": "433500",
+      "name": "ACE 원자력TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "458260",
+      "name": "TIGER 미국투자등급회사채액티브(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0089D0",
       "name": "KODEX 금융고배당TOP10",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "466930",
-      "name": "SOL 자동차TOP3플러스",
+      "code": "244580",
+      "name": "KODEX 바이오",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "488980",
+      "name": "SOL 26-12 회사채(AA-이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "486450",
+      "name": "SOL 미국AI전력인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "472160",
+      "name": "TIGER 미국테크TOP10 INDXX(H)",
       "market": null,
       "type": "ETF"
     },
@@ -1827,12 +1827,6 @@
     {
       "code": "305080",
       "name": "TIGER 미국채10년선물",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0204D0",
-      "name": "KODEX 현대차로보틱스밸류체인TOP3플러스",
       "market": null,
       "type": "ETF"
     },
@@ -1855,26 +1849,26 @@
       "type": "ETF"
     },
     {
+      "code": "466930",
+      "name": "SOL 자동차TOP3플러스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "422420",
       "name": "RISE 2차전지액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "433500",
-      "name": "ACE 원자력TOP10",
+      "code": "0204D0",
+      "name": "KODEX 현대차로보틱스밸류체인TOP3플러스",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "490090",
-      "name": "TIGER 미국AI빅테크10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "495060",
-      "name": "TIME 코리아밸류업액티브",
+      "code": "0233J0",
+      "name": "TIGER 삼성전자SK하이닉스미국채혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -1885,8 +1879,20 @@
       "type": "ETF"
     },
     {
-      "code": "394670",
-      "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+      "code": "495060",
+      "name": "TIME 코리아밸류업액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "490090",
+      "name": "TIGER 미국AI빅테크10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "267770",
+      "name": "TIGER 200선물레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -1897,8 +1903,8 @@
       "type": "ETF"
     },
     {
-      "code": "267770",
-      "name": "TIGER 200선물레버리지",
+      "code": "117700",
+      "name": "KODEX 건설",
       "market": null,
       "type": "ETF"
     },
@@ -1915,14 +1921,20 @@
       "type": "ETF"
     },
     {
-      "code": "0151S0",
-      "name": "KODEX 미국AI반도체TOP3플러스",
+      "code": "0005A0",
+      "name": "KODEX 미국S&P500데일리커버드콜OTM",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0005A0",
-      "name": "KODEX 미국S&P500데일리커버드콜OTM",
+      "code": "394670",
+      "name": "TIGER 글로벌리튬&2차전지SOLACTIVE(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0151S0",
+      "name": "KODEX 미국AI반도체TOP3플러스",
       "market": null,
       "type": "ETF"
     },
@@ -1945,8 +1957,8 @@
       "type": "ETF"
     },
     {
-      "code": "495550",
-      "name": "SOL 코리아밸류업TR",
+      "code": "0069M0",
+      "name": "1Q 미국나스닥100",
       "market": null,
       "type": "ETF"
     },
@@ -1957,26 +1969,20 @@
       "type": "ETF"
     },
     {
-      "code": "0069M0",
-      "name": "1Q 미국나스닥100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "117700",
-      "name": "KODEX 건설",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "480040",
-      "name": "ACE 미국반도체데일리타겟커버드콜(합성)",
+      "code": "495550",
+      "name": "SOL 코리아밸류업TR",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "433980",
       "name": "KODEX TDF2040액티브 적격",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "480040",
+      "name": "ACE 미국반도체데일리타겟커버드콜(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -1999,20 +2005,14 @@
       "type": "ETF"
     },
     {
-      "code": "463290",
-      "name": "1Q 단기금융채액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "122090",
       "name": "PLUS 코스피50",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "473460",
-      "name": "KODEX 미국서학개미",
+      "code": "463290",
+      "name": "1Q 단기금융채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2029,8 +2029,8 @@
       "type": "ETF"
     },
     {
-      "code": "0099L0",
-      "name": "ACE 우량회사채(AA-이상)액티브",
+      "code": "473460",
+      "name": "KODEX 미국서학개미",
       "market": null,
       "type": "ETF"
     },
@@ -2041,8 +2041,8 @@
       "type": "ETF"
     },
     {
-      "code": "0093A0",
-      "name": "RISE AI반도체TOP10",
+      "code": "0099L0",
+      "name": "ACE 우량회사채(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2053,20 +2053,20 @@
       "type": "ETF"
     },
     {
+      "code": "0051G0",
+      "name": "SOL 미국원자력SMR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0093A0",
+      "name": "RISE AI반도체TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0005G0",
       "name": "IBK K-AI반도체코어테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "412570",
-      "name": "TIGER 2차전지TOP10레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "490600",
-      "name": "RISE 미국배당100데일리고정커버드콜",
       "market": null,
       "type": "ETF"
     },
@@ -2077,14 +2077,14 @@
       "type": "ETF"
     },
     {
-      "code": "0190G0",
-      "name": "KODEX 반도체타겟위클리커버드콜",
+      "code": "160580",
+      "name": "TIGER 구리실물",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "480020",
-      "name": "ACE 미국빅테크7+데일리타겟커버드콜(합성)",
+      "code": "412570",
+      "name": "TIGER 2차전지TOP10레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -2095,20 +2095,14 @@
       "type": "ETF"
     },
     {
-      "code": "160580",
-      "name": "TIGER 구리실물",
+      "code": "490600",
+      "name": "RISE 미국배당100데일리고정커버드콜",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0051G0",
-      "name": "SOL 미국원자력SMR",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0064K0",
-      "name": "KODEX 금액티브",
+      "code": "480020",
+      "name": "ACE 미국빅테크7+데일리타겟커버드콜(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -2119,8 +2113,20 @@
       "type": "ETF"
     },
     {
+      "code": "0190G0",
+      "name": "KODEX 반도체타겟위클리커버드콜",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "332500",
       "name": "ACE 200TR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0064K0",
+      "name": "KODEX 금액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2131,26 +2137,26 @@
       "type": "ETF"
     },
     {
-      "code": "494220",
-      "name": "UNICORN SK하이닉스밸류체인액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "337160",
       "name": "KODEX 200ESG",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "480030",
-      "name": "ACE 미국500데일리타겟커버드콜(합성)",
+      "code": "143860",
+      "name": "TIGER 헬스케어",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "143860",
-      "name": "TIGER 헬스케어",
+      "code": "494220",
+      "name": "UNICORN SK하이닉스밸류체인액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "480030",
+      "name": "ACE 미국500데일리타겟커버드콜(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -2173,6 +2179,12 @@
       "type": "ETF"
     },
     {
+      "code": "491820",
+      "name": "HANARO 전력설비투자",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "354500",
       "name": "ACE 코스닥150",
       "market": null,
@@ -2185,14 +2197,8 @@
       "type": "ETF"
     },
     {
-      "code": "491820",
-      "name": "HANARO 전력설비투자",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0127M0",
-      "name": "ACE 미국대형가치주액티브",
+      "code": "0153K0",
+      "name": "KODEX 주주환원고배당주",
       "market": null,
       "type": "ETF"
     },
@@ -2203,38 +2209,26 @@
       "type": "ETF"
     },
     {
-      "code": "0153K0",
-      "name": "KODEX 주주환원고배당주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "458210",
       "name": "KIWOOM CD금리액티브(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0048K0",
-      "name": "KODEX 차이나휴머노이드로봇",
+      "code": "138520",
+      "name": "TIGER 삼성그룹",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0151P0",
-      "name": "RISE 코리아전략산업액티브",
+      "code": "0127M0",
+      "name": "ACE 미국대형가치주액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "152870",
       "name": "파워 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "138520",
-      "name": "TIGER 삼성그룹",
       "market": null,
       "type": "ETF"
     },
@@ -2251,14 +2245,32 @@
       "type": "ETF"
     },
     {
-      "code": "0104H0",
-      "name": "KoAct 미국나스닥채권혼합50액티브",
+      "code": "0048K0",
+      "name": "KODEX 차이나휴머노이드로봇",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0151P0",
+      "name": "RISE 코리아전략산업액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "457990",
       "name": "PLUS 태양광&ESS",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "271050",
+      "name": "KODEX WTI원유선물인버스(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0104H0",
+      "name": "KoAct 미국나스닥채권혼합50액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2275,20 +2287,14 @@
       "type": "ETF"
     },
     {
+      "code": "139220",
+      "name": "TIGER 200 건설",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0131W0",
       "name": "1Q 단기특수은행채액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "481180",
-      "name": "SOL 미국AI소프트웨어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "271050",
-      "name": "KODEX WTI원유선물인버스(H)",
       "market": null,
       "type": "ETF"
     },
@@ -2299,8 +2305,14 @@
       "type": "ETF"
     },
     {
-      "code": "0184L0",
-      "name": "PLUS 중기종합채권(A-이상)액티브",
+      "code": "0199C0",
+      "name": "ACE 고배당주Plus커버드콜액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "481180",
+      "name": "SOL 미국AI소프트웨어",
       "market": null,
       "type": "ETF"
     },
@@ -2317,14 +2329,26 @@
       "type": "ETF"
     },
     {
+      "code": "476030",
+      "name": "SOL 미국나스닥100",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "476450",
       "name": "KIWOOM 머니마켓액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0199C0",
-      "name": "ACE 고배당주Plus커버드콜액티브",
+      "code": "0184L0",
+      "name": "PLUS 중기종합채권(A-이상)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0092B0",
+      "name": "SOL 한국원자력SMR",
       "market": null,
       "type": "ETF"
     },
@@ -2341,8 +2365,8 @@
       "type": "ETF"
     },
     {
-      "code": "139220",
-      "name": "TIGER 200 건설",
+      "code": "182480",
+      "name": "TIGER 미국MSCI리츠(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -2353,26 +2377,8 @@
       "type": "ETF"
     },
     {
-      "code": "476030",
-      "name": "SOL 미국나스닥100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "182480",
-      "name": "TIGER 미국MSCI리츠(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "448100",
       "name": "WON 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "471760",
-      "name": "TIGER AI반도체핵심공정",
       "market": null,
       "type": "ETF"
     },
@@ -2383,14 +2389,26 @@
       "type": "ETF"
     },
     {
-      "code": "488720",
-      "name": "WON 종합채권(AA-이상)액티브",
+      "code": "325010",
+      "name": "KODEX 성장주",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "325010",
-      "name": "KODEX 성장주",
+      "code": "471760",
+      "name": "TIGER AI반도체핵심공정",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0123G0",
+      "name": "TIGER 미국AI전력SMR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "488720",
+      "name": "WON 종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2401,8 +2419,8 @@
       "type": "ETF"
     },
     {
-      "code": "0092B0",
-      "name": "SOL 한국원자력SMR",
+      "code": "463680",
+      "name": "KODEX 미국S&P500테크놀로지",
       "market": null,
       "type": "ETF"
     },
@@ -2413,14 +2431,8 @@
       "type": "ETF"
     },
     {
-      "code": "463680",
-      "name": "KODEX 미국S&P500테크놀로지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0123G0",
-      "name": "TIGER 미국AI전력SMR",
+      "code": "377990",
+      "name": "TIGER Fn신재생에너지",
       "market": null,
       "type": "ETF"
     },
@@ -2443,12 +2455,6 @@
       "type": "ETF"
     },
     {
-      "code": "377990",
-      "name": "TIGER Fn신재생에너지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0191W0",
       "name": "HANARO 중기종합채권(A-이상)액티브",
       "market": null,
@@ -2457,6 +2463,12 @@
     {
       "code": "367770",
       "name": "RISE 수소경제테마",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0000J0",
+      "name": "PLUS 한화그룹주",
       "market": null,
       "type": "ETF"
     },
@@ -2473,8 +2485,8 @@
       "type": "ETF"
     },
     {
-      "code": "464930",
-      "name": "TIGER 글로벌혁신블루칩TOP10",
+      "code": "328370",
+      "name": "PLUS 코스피TR",
       "market": null,
       "type": "ETF"
     },
@@ -2485,8 +2497,8 @@
       "type": "ETF"
     },
     {
-      "code": "0000J0",
-      "name": "PLUS 한화그룹주",
+      "code": "464930",
+      "name": "TIGER 글로벌혁신블루칩TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -2503,8 +2515,8 @@
       "type": "ETF"
     },
     {
-      "code": "328370",
-      "name": "PLUS 코스피TR",
+      "code": "372330",
+      "name": "KODEX 차이나항셍테크",
       "market": null,
       "type": "ETF"
     },
@@ -2515,26 +2527,8 @@
       "type": "ETF"
     },
     {
-      "code": "372330",
-      "name": "KODEX 차이나항셍테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "332940",
       "name": "HANARO MSCI Korea TR",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0122W0",
-      "name": "RISE 26-11 회사채(AA-이상)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "464310",
-      "name": "TIGER 글로벌AI&로보틱스 INDXX",
       "market": null,
       "type": "ETF"
     },
@@ -2545,8 +2539,14 @@
       "type": "ETF"
     },
     {
-      "code": "266370",
-      "name": "KODEX IT",
+      "code": "491230",
+      "name": "PLUS 국공채머니마켓액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0122W0",
+      "name": "RISE 26-11 회사채(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2557,14 +2557,14 @@
       "type": "ETF"
     },
     {
-      "code": "491230",
-      "name": "PLUS 국공채머니마켓액티브",
+      "code": "464310",
+      "name": "TIGER 글로벌AI&로보틱스 INDXX",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0209D0",
-      "name": "KODEX 전고체배터리ESS TOP2플러스",
+      "code": "266370",
+      "name": "KODEX IT",
       "market": null,
       "type": "ETF"
     },
@@ -2575,8 +2575,8 @@
       "type": "ETF"
     },
     {
-      "code": "304940",
-      "name": "KODEX 미국나스닥100선물(H)",
+      "code": "0209D0",
+      "name": "KODEX 전고체배터리ESS TOP2플러스",
       "market": null,
       "type": "ETF"
     },
@@ -2593,14 +2593,20 @@
       "type": "ETF"
     },
     {
-      "code": "251340",
-      "name": "KODEX 코스닥150선물인버스",
+      "code": "304940",
+      "name": "KODEX 미국나스닥100선물(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0132K0",
-      "name": "PLUS 테슬라위클리커버드콜채권혼합",
+      "code": "203780",
+      "name": "TIGER 미국나스닥바이오",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "168580",
+      "name": "ACE 중국본토CSI300",
       "market": null,
       "type": "ETF"
     },
@@ -2617,24 +2623,6 @@
       "type": "ETF"
     },
     {
-      "code": "0138Y0",
-      "name": "PLUS 금채권혼합",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "168580",
-      "name": "ACE 중국본토CSI300",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0177X0",
-      "name": "ACE K휴머노이드로봇산업TOP2+",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "455860",
       "name": "SOL 2차전지소부장Fn",
       "market": null,
@@ -2647,26 +2635,26 @@
       "type": "ETF"
     },
     {
+      "code": "0132K0",
+      "name": "PLUS 테슬라위클리커버드콜채권혼합",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0091M0",
       "name": "HANARO 27-06 회사채(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "203780",
-      "name": "TIGER 미국나스닥바이오",
+      "code": "0138Y0",
+      "name": "PLUS 금채권혼합",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "0036R0",
       "name": "RISE 미국휴머노이드로봇",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0137V0",
-      "name": "KIWOOM 미국S&P500모멘텀",
       "market": null,
       "type": "ETF"
     },
@@ -2683,26 +2671,26 @@
       "type": "ETF"
     },
     {
+      "code": "0177X0",
+      "name": "ACE K휴머노이드로봇산업TOP2+",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0137V0",
+      "name": "KIWOOM 미국S&P500모멘텀",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "496090",
       "name": "KIWOOM 코리아밸류업",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "261270",
-      "name": "KODEX 미국달러선물인버스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "465780",
-      "name": "마이티 26-09 특수채(AAA)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "475280",
-      "name": "ACE 8월만기자동연장회사채AA-이상액티브",
+      "code": "0233A0",
+      "name": "ACE 삼성전자SK하이닉스플러스채권혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -2713,20 +2701,50 @@
       "type": "ETF"
     },
     {
+      "code": "465780",
+      "name": "마이티 26-09 특수채(AAA)액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "261270",
+      "name": "KODEX 미국달러선물인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "475280",
+      "name": "ACE 8월만기자동연장회사채AA-이상액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "465610",
       "name": "ACE 미국빅테크TOP7 Plus레버리지(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "114100",
-      "name": "RISE 국고채3년",
+      "code": "0008T0",
+      "name": "SOL 화장품TOP3플러스",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0008T0",
-      "name": "SOL 화장품TOP3플러스",
+      "code": "251340",
+      "name": "KODEX 코스닥150선물인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "475050",
+      "name": "ACE KPOP포커스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "114100",
+      "name": "RISE 국고채3년",
       "market": null,
       "type": "ETF"
     },
@@ -2743,14 +2761,8 @@
       "type": "ETF"
     },
     {
-      "code": "475050",
-      "name": "ACE KPOP포커스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "473440",
-      "name": "ACE 11월만기자동연장회사채AA-이상액티브",
+      "code": "308620",
+      "name": "KODEX 미국10년국채선물",
       "market": null,
       "type": "ETF"
     },
@@ -2761,20 +2773,14 @@
       "type": "ETF"
     },
     {
-      "code": "308620",
-      "name": "KODEX 미국10년국채선물",
+      "code": "473440",
+      "name": "ACE 11월만기자동연장회사채AA-이상액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "195980",
       "name": "PLUS 신흥국MSCI(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0035T0",
-      "name": "PLUS 글로벌휴머노이드로봇액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2791,6 +2797,12 @@
       "type": "ETF"
     },
     {
+      "code": "0035T0",
+      "name": "PLUS 글로벌휴머노이드로봇액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "211900",
       "name": "KODEX 코리아배당성장",
       "market": null,
@@ -2803,26 +2815,8 @@
       "type": "ETF"
     },
     {
-      "code": "0066W0",
-      "name": "SOL 국제금",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "143850",
-      "name": "TIGER 미국S&P500선물(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "485690",
-      "name": "RISE 미국AI밸류체인TOP3Plus",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "486240",
-      "name": "DAISHIN AI반도체&인프라액티브",
+      "code": "204480",
+      "name": "TIGER 차이나CSI300레버리지(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -2833,14 +2827,44 @@
       "type": "ETF"
     },
     {
-      "code": "204480",
-      "name": "TIGER 차이나CSI300레버리지(합성)",
+      "code": "454320",
+      "name": "HANARO CAPEX설비투자iSelect",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "485690",
+      "name": "RISE 미국AI밸류체인TOP3Plus",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0066W0",
+      "name": "SOL 국제금",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "269540",
       "name": "PLUS 미국S&P500(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "298770",
+      "name": "KODEX 한국대만IT프리미어",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "143850",
+      "name": "TIGER 미국S&P500선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "486240",
+      "name": "DAISHIN AI반도체&인프라액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2857,26 +2881,14 @@
       "type": "ETF"
     },
     {
-      "code": "454320",
-      "name": "HANARO CAPEX설비투자iSelect",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "444490",
       "name": "WON 미국S&P500",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "298770",
-      "name": "KODEX 한국대만IT프리미어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "292770",
-      "name": "KODEX 국채선물3년인버스",
+      "code": "108450",
+      "name": "ACE 삼성그룹섹터가중",
       "market": null,
       "type": "ETF"
     },
@@ -2893,8 +2905,8 @@
       "type": "ETF"
     },
     {
-      "code": "108450",
-      "name": "ACE 삼성그룹섹터가중",
+      "code": "292770",
+      "name": "KODEX 국채선물3년인버스",
       "market": null,
       "type": "ETF"
     },
@@ -2935,18 +2947,6 @@
       "type": "ETF"
     },
     {
-      "code": "0162L0",
-      "name": "KODEX 차이나AI반도체TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "449770",
-      "name": "KIWOOM 미국S&P500",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0017Y0",
       "name": "1Q 종합채권(AA-이상)액티브",
       "market": null,
@@ -2959,8 +2959,8 @@
       "type": "ETF"
     },
     {
-      "code": "0057H0",
-      "name": "PLUS 미국S&P500미국채혼합50액티브",
+      "code": "0162L0",
+      "name": "KODEX 차이나AI반도체TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -2971,20 +2971,8 @@
       "type": "ETF"
     },
     {
-      "code": "490480",
-      "name": "SOL K방산",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "364960",
-      "name": "TIGER BBIG",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "157490",
-      "name": "TIGER 소프트웨어",
+      "code": "0057H0",
+      "name": "PLUS 미국S&P500미국채혼합50액티브",
       "market": null,
       "type": "ETF"
     },
@@ -2995,14 +2983,38 @@
       "type": "ETF"
     },
     {
-      "code": "0049M0",
-      "name": "ACE 미국배당퀄리티+커버드콜액티브",
+      "code": "364960",
+      "name": "TIGER BBIG",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "492500",
-      "name": "1Q 현대차그룹채권(A+이상)&국고통안",
+      "code": "449770",
+      "name": "KIWOOM 미국S&P500",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "490480",
+      "name": "SOL K방산",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "157490",
+      "name": "TIGER 소프트웨어",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "337140",
+      "name": "KODEX 코스피대형주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0049M0",
+      "name": "ACE 미국배당퀄리티+커버드콜액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3013,14 +3025,8 @@
       "type": "ETF"
     },
     {
-      "code": "495750",
-      "name": "HANARO 코리아밸류업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "337140",
-      "name": "KODEX 코스피대형주",
+      "code": "492500",
+      "name": "1Q 현대차그룹채권(A+이상)&국고통안",
       "market": null,
       "type": "ETF"
     },
@@ -3033,6 +3039,12 @@
     {
       "code": "210780",
       "name": "TIGER 코스피고배당",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "495750",
+      "name": "HANARO 코리아밸류업",
       "market": null,
       "type": "ETF"
     },
@@ -3055,6 +3067,12 @@
       "type": "ETF"
     },
     {
+      "code": "228810",
+      "name": "TIGER 미디어컨텐츠",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "434960",
       "name": "DAISHIN K200",
       "market": null,
@@ -3073,38 +3091,14 @@
       "type": "ETF"
     },
     {
-      "code": "412770",
-      "name": "TIGER 글로벌AI플랫폼액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "228810",
-      "name": "TIGER 미디어컨텐츠",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "475310",
-      "name": "SOL 반도체후공정",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "441540",
       "name": "HANARO Fn조선해운",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0022T0",
-      "name": "SOL 국제금커버드콜액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0113D0",
-      "name": "TIME 글로벌탑픽액티브",
+      "code": "412770",
+      "name": "TIGER 글로벌AI플랫폼액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3115,8 +3109,14 @@
       "type": "ETF"
     },
     {
-      "code": "0102A0",
-      "name": "TIGER 미국AI소프트웨어TOP4Plus",
+      "code": "475310",
+      "name": "SOL 반도체후공정",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0022T0",
+      "name": "SOL 국제금커버드콜액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3127,14 +3127,14 @@
       "type": "ETF"
     },
     {
-      "code": "292190",
-      "name": "KODEX KRX300",
+      "code": "0113D0",
+      "name": "TIME 글로벌탑픽액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "475350",
-      "name": "RISE 버크셔포트폴리오TOP10",
+      "code": "292190",
+      "name": "KODEX KRX300",
       "market": null,
       "type": "ETF"
     },
@@ -3145,26 +3145,14 @@
       "type": "ETF"
     },
     {
-      "code": "0225V0",
-      "name": "KODEX 미국CPU반도체TOP10",
+      "code": "0102A0",
+      "name": "TIGER 미국AI소프트웨어TOP4Plus",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "458750",
-      "name": "TIGER 미국배당다우존스타겟커버드콜1호",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0098Z0",
-      "name": "FOCUS 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "440640",
-      "name": "ACE 단기채권알파액티브",
+      "code": "475350",
+      "name": "RISE 버크셔포트폴리오TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -3175,14 +3163,26 @@
       "type": "ETF"
     },
     {
-      "code": "0190Y0",
-      "name": "TIGER 구글밸류체인",
+      "code": "0098Z0",
+      "name": "FOCUS 200",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "278620",
-      "name": "PLUS 단기채권액티브",
+      "code": "0225V0",
+      "name": "KODEX 미국CPU반도체TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "440640",
+      "name": "ACE 단기채권알파액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "458750",
+      "name": "TIGER 미국배당다우존스타겟커버드콜1호",
       "market": null,
       "type": "ETF"
     },
@@ -3193,8 +3193,20 @@
       "type": "ETF"
     },
     {
-      "code": "433880",
-      "name": "PLUS TDF2060액티브 적격",
+      "code": "0190Y0",
+      "name": "TIGER 구글밸류체인",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "298340",
+      "name": "PLUS 국채선물3년",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "278620",
+      "name": "PLUS 단기채권액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3211,8 +3223,8 @@
       "type": "ETF"
     },
     {
-      "code": "298340",
-      "name": "PLUS 국채선물3년",
+      "code": "433880",
+      "name": "PLUS TDF2060액티브 적격",
       "market": null,
       "type": "ETF"
     },
@@ -3247,14 +3259,14 @@
       "type": "ETF"
     },
     {
-      "code": "419890",
-      "name": "KIWOOM 단기채권ESG액티브",
+      "code": "0000D0",
+      "name": "TIGER 엔비디아미국채커버드콜밸런스(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0000D0",
-      "name": "TIGER 엔비디아미국채커버드콜밸런스(합성)",
+      "code": "419890",
+      "name": "KIWOOM 단기채권ESG액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3265,8 +3277,8 @@
       "type": "ETF"
     },
     {
-      "code": "0040S0",
-      "name": "HANARO 글로벌피지컬AI액티브",
+      "code": "261070",
+      "name": "TIGER 코스닥150바이오테크",
       "market": null,
       "type": "ETF"
     },
@@ -3277,8 +3289,8 @@
       "type": "ETF"
     },
     {
-      "code": "261070",
-      "name": "TIGER 코스닥150바이오테크",
+      "code": "275980",
+      "name": "TIGER 글로벌4차산업혁신기술(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -3289,32 +3301,8 @@
       "type": "ETF"
     },
     {
-      "code": "275980",
-      "name": "TIGER 글로벌4차산업혁신기술(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "479730",
       "name": "TIGER 인도빌리언컨슈머",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "476750",
-      "name": "ACE 미국30년국채엔화노출액티브(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "150460",
-      "name": "TIGER 중국소비테마",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "261240",
-      "name": "KODEX 미국달러선물",
       "market": null,
       "type": "ETF"
     },
@@ -3325,14 +3313,20 @@
       "type": "ETF"
     },
     {
-      "code": "278240",
-      "name": "RISE 코스닥150선물레버리지",
+      "code": "150460",
+      "name": "TIGER 중국소비테마",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0181L0",
-      "name": "SOL 미국우주항공TOP10",
+      "code": "0040S0",
+      "name": "HANARO 글로벌피지컬AI액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "476750",
+      "name": "ACE 미국30년국채엔화노출액티브(H)",
       "market": null,
       "type": "ETF"
     },
@@ -3343,32 +3337,26 @@
       "type": "ETF"
     },
     {
-      "code": "495940",
-      "name": "RISE 미국AI테크액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0166S0",
-      "name": "PLUS K제조업핵심기업액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0198A0",
       "name": "KIWOOM 코스닥150커버드콜액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0111J0",
-      "name": "HANARO 증권고배당TOP3플러스",
+      "code": "261240",
+      "name": "KODEX 미국달러선물",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "491220",
-      "name": "PLUS 200TR",
+      "code": "278240",
+      "name": "RISE 코스닥150선물레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "495940",
+      "name": "RISE 미국AI테크액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3379,14 +3367,38 @@
       "type": "ETF"
     },
     {
+      "code": "0181L0",
+      "name": "SOL 미국우주항공TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0166S0",
+      "name": "PLUS K제조업핵심기업액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "491220",
+      "name": "PLUS 200TR",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0111J0",
+      "name": "HANARO 증권고배당TOP3플러스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "401470",
       "name": "KODEX 메타버스액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0194T0",
-      "name": "ACE SK하이닉스단일종목레버리지",
+      "code": "140700",
+      "name": "KODEX 보험",
       "market": null,
       "type": "ETF"
     },
@@ -3397,14 +3409,14 @@
       "type": "ETF"
     },
     {
-      "code": "225040",
-      "name": "TIGER 미국S&P500레버리지(합성 H)",
+      "code": "440910",
+      "name": "WON 미국우주항공방산",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "440910",
-      "name": "WON 미국우주항공방산",
+      "code": "225040",
+      "name": "TIGER 미국S&P500레버리지(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -3415,14 +3427,8 @@
       "type": "ETF"
     },
     {
-      "code": "0046Y0",
-      "name": "ACE 미국배당퀄리티",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "140700",
-      "name": "KODEX 보험",
+      "code": "0194T0",
+      "name": "ACE SK하이닉스단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -3439,14 +3445,8 @@
       "type": "ETF"
     },
     {
-      "code": "0226A0",
-      "name": "PLUS SK하이닉스샌디스크채권혼합50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "261220",
-      "name": "KODEX WTI원유선물(H)",
+      "code": "0046Y0",
+      "name": "ACE 미국배당퀄리티",
       "market": null,
       "type": "ETF"
     },
@@ -3457,32 +3457,26 @@
       "type": "ETF"
     },
     {
-      "code": "445150",
-      "name": "KODEX 친환경조선해운액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0113P0",
       "name": "HK 머니마켓액티브",
       "market": null,
       "type": "ETF"
     },
     {
+      "code": "0226A0",
+      "name": "PLUS SK하이닉스샌디스크채권혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "445150",
+      "name": "KODEX 친환경조선해운액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0197W0",
       "name": "SOL SK하이닉스단일종목레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0185L0",
-      "name": "TIME 글로벌휴머노이드로봇산업액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "428510",
-      "name": "KODEX 차이나AI테크액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3499,8 +3493,26 @@
       "type": "ETF"
     },
     {
+      "code": "0185L0",
+      "name": "TIME 글로벌휴머노이드로봇산업액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "275300",
+      "name": "KODEX 우량주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "114470",
       "name": "KIWOOM 국고채3년",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0139P0",
+      "name": "ACE 고배당주",
       "market": null,
       "type": "ETF"
     },
@@ -3517,32 +3529,26 @@
       "type": "ETF"
     },
     {
-      "code": "275300",
-      "name": "KODEX 우량주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0139P0",
-      "name": "ACE 고배당주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "480310",
       "name": "TIGER 글로벌온디바이스AI",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "218420",
-      "name": "KODEX 미국S&P500에너지(합성)",
+      "code": "0132H0",
+      "name": "KODEX 미국원자력SMR",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0118S0",
-      "name": "SOL 미국넥스트테크TOP10액티브",
+      "code": "261220",
+      "name": "KODEX WTI원유선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "253150",
+      "name": "PLUS 200선물레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -3553,8 +3559,44 @@
       "type": "ETF"
     },
     {
-      "code": "253150",
-      "name": "PLUS 200선물레버리지",
+      "code": "218420",
+      "name": "KODEX 미국S&P500에너지(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "360140",
+      "name": "KODEX 200롱코스닥150숏선물",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0118S0",
+      "name": "SOL 미국넥스트테크TOP10액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "152500",
+      "name": "ACE 레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "336160",
+      "name": "RISE 금융채액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "447430",
+      "name": "ACE 주주환원가치주액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "371470",
+      "name": "TIGER 차이나바이오테크SOLACTIVE",
       "market": null,
       "type": "ETF"
     },
@@ -3571,56 +3613,8 @@
       "type": "ETF"
     },
     {
-      "code": "0132H0",
-      "name": "KODEX 미국원자력SMR",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "336160",
-      "name": "RISE 금융채액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "360140",
-      "name": "KODEX 200롱코스닥150숏선물",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "418670",
-      "name": "TIGER 글로벌AI사이버보안",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "447430",
-      "name": "ACE 주주환원가치주액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "152500",
-      "name": "ACE 레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "371470",
-      "name": "TIGER 차이나바이오테크SOLACTIVE",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "316670",
       "name": "KIWOOM 코스닥150",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "256750",
-      "name": "KODEX 차이나심천ChiNext(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -3631,26 +3625,20 @@
       "type": "ETF"
     },
     {
+      "code": "256750",
+      "name": "KODEX 차이나심천ChiNext(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0086B0",
       "name": "TIGER 리츠부동산인프라TOP10액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "287180",
-      "name": "PLUS 미국나스닥테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "473590",
-      "name": "ACE 미국주식베스트셀러",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0020H0",
-      "name": "KoAct 글로벌양자컴퓨팅액티브",
+      "code": "418670",
+      "name": "TIGER 글로벌AI사이버보안",
       "market": null,
       "type": "ETF"
     },
@@ -3661,14 +3649,20 @@
       "type": "ETF"
     },
     {
-      "code": "0178H0",
-      "name": "IBK 미국AI TOP10국채혼합50",
+      "code": "287180",
+      "name": "PLUS 미국나스닥테크",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "461340",
-      "name": "HANARO 글로벌생성형AI액티브",
+      "code": "0020H0",
+      "name": "KoAct 글로벌양자컴퓨팅액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0178H0",
+      "name": "IBK 미국AI TOP10국채혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -3679,8 +3673,8 @@
       "type": "ETF"
     },
     {
-      "code": "276990",
-      "name": "KODEX 글로벌로봇(합성)",
+      "code": "461340",
+      "name": "HANARO 글로벌생성형AI액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3691,8 +3685,20 @@
       "type": "ETF"
     },
     {
-      "code": "475270",
-      "name": "ACE 5월만기자동연장회사채AA-이상액티브",
+      "code": "276990",
+      "name": "KODEX 글로벌로봇(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "429760",
+      "name": "PLUS 미국S&P500",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "473590",
+      "name": "ACE 미국주식베스트셀러",
       "market": null,
       "type": "ETF"
     },
@@ -3703,14 +3709,8 @@
       "type": "ETF"
     },
     {
-      "code": "453650",
-      "name": "KODEX 미국S&P500금융",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "261120",
-      "name": "TIGER 미국달러선물인버스2X",
+      "code": "475270",
+      "name": "ACE 5월만기자동연장회사채AA-이상액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3721,20 +3721,8 @@
       "type": "ETF"
     },
     {
-      "code": "0189B0",
-      "name": "TIGER 은액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "473490",
       "name": "KIWOOM 글로벌AI반도체",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "139320",
-      "name": "TIGER 금은선물(H)",
       "market": null,
       "type": "ETF"
     },
@@ -3745,20 +3733,20 @@
       "type": "ETF"
     },
     {
-      "code": "401170",
-      "name": "RISE 메타버스",
+      "code": "261120",
+      "name": "TIGER 미국달러선물인버스2X",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "476260",
-      "name": "HANARO 반도체핵심공정주도주",
+      "code": "453650",
+      "name": "KODEX 미국S&P500금융",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "238720",
-      "name": "ACE 일본Nikkei225(H)",
+      "code": "0189B0",
+      "name": "TIGER 은액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3769,8 +3757,26 @@
       "type": "ETF"
     },
     {
-      "code": "494840",
-      "name": "TIGER 미국방산TOP10",
+      "code": "401170",
+      "name": "RISE 메타버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "139320",
+      "name": "TIGER 금은선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "238720",
+      "name": "ACE 일본Nikkei225(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "476260",
+      "name": "HANARO 반도체핵심공정주도주",
       "market": null,
       "type": "ETF"
     },
@@ -3781,8 +3787,26 @@
       "type": "ETF"
     },
     {
+      "code": "494840",
+      "name": "TIGER 미국방산TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "305050",
       "name": "ACE 코스피",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0007G0",
+      "name": "PLUS 글로벌원자력밸류체인",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0141T0",
+      "name": "SOL 중기종합채권(AA-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3799,38 +3823,20 @@
       "type": "ETF"
     },
     {
-      "code": "0141T0",
-      "name": "SOL 중기종합채권(AA-이상)액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0191M0",
       "name": "마이티 5월만기자동연장특수채(AAA)액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0007G0",
-      "name": "PLUS 글로벌원자력밸류체인",
+      "code": "0186S0",
+      "name": "1Q 코스닥150채권혼합50액티브",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "0220B0",
       "name": "DS 코스닥액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "429760",
-      "name": "PLUS 미국S&P500",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0186S0",
-      "name": "1Q 코스닥150채권혼합50액티브",
       "market": null,
       "type": "ETF"
     },
@@ -3847,8 +3853,20 @@
       "type": "ETF"
     },
     {
+      "code": "428510",
+      "name": "KODEX 차이나AI테크액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "183700",
       "name": "RISE 200채권혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "472840",
+      "name": "IBK 200",
       "market": null,
       "type": "ETF"
     },
@@ -3865,26 +3883,8 @@
       "type": "ETF"
     },
     {
-      "code": "472840",
-      "name": "IBK 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0207G0",
       "name": "SOL 우주항공밸류체인",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "352540",
-      "name": "KODEX 일본부동산리츠(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "322410",
-      "name": "HANARO K고배당",
       "market": null,
       "type": "ETF"
     },
@@ -3895,8 +3895,14 @@
       "type": "ETF"
     },
     {
-      "code": "195930",
-      "name": "TIGER 유로스탁스50(합성 H)",
+      "code": "322410",
+      "name": "HANARO K고배당",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "352540",
+      "name": "KODEX 일본부동산리츠(H)",
       "market": null,
       "type": "ETF"
     },
@@ -3913,20 +3919,8 @@
       "type": "ETF"
     },
     {
-      "code": "275280",
-      "name": "KODEX 모멘텀주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "276970",
-      "name": "KODEX 미국S&P500배당귀족커버드콜(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "365000",
-      "name": "TIGER 인터넷TOP10",
+      "code": "195930",
+      "name": "TIGER 유로스탁스50(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -3937,20 +3931,8 @@
       "type": "ETF"
     },
     {
-      "code": "452250",
-      "name": "ACE 미국30년국채선물레버리지(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "498860",
-      "name": "RISE 코리아금융고배당",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0100K0",
-      "name": "KODEX 방산TOP10레버리지",
+      "code": "275280",
+      "name": "KODEX 모멘텀주",
       "market": null,
       "type": "ETF"
     },
@@ -3961,8 +3943,38 @@
       "type": "ETF"
     },
     {
-      "code": "450910",
-      "name": "SOL 코스닥150",
+      "code": "276970",
+      "name": "KODEX 미국S&P500배당귀족커버드콜(합성 H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "452250",
+      "name": "ACE 미국30년국채선물레버리지(합성 H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "365000",
+      "name": "TIGER 인터넷TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0100K0",
+      "name": "KODEX 방산TOP10레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "104530",
+      "name": "KIWOOM 코리아고배당",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "498860",
+      "name": "RISE 코리아금융고배당",
       "market": null,
       "type": "ETF"
     },
@@ -3973,8 +3985,32 @@
       "type": "ETF"
     },
     {
-      "code": "104530",
-      "name": "KIWOOM 코리아고배당",
+      "code": "322400",
+      "name": "HANARO e커머스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "450910",
+      "name": "SOL 코스닥150",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "449690",
+      "name": "TIGER 한중반도체(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "138910",
+      "name": "KODEX 구리선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "153270",
+      "name": "KIWOOM 코스피100",
       "market": null,
       "type": "ETF"
     },
@@ -3991,26 +4027,8 @@
       "type": "ETF"
     },
     {
-      "code": "449690",
-      "name": "TIGER 한중반도체(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "322400",
-      "name": "HANARO e커머스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "415920",
       "name": "PLUS 글로벌희토류&전략자원생산기업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "385520",
-      "name": "KODEX 자율주행액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4021,50 +4039,8 @@
       "type": "ETF"
     },
     {
-      "code": "153270",
-      "name": "KIWOOM 코스피100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "138910",
-      "name": "KODEX 구리선물(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "469050",
-      "name": "RISE 미국반도체NYSE(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "407830",
       "name": "에셋플러스 글로벌플랫폼액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "295020",
-      "name": "RISE 국채선물10년인버스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "380340",
-      "name": "ACE 코리아AI테크핵심산업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "276650",
-      "name": "RISE 글로벌테크놀로지(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "475070",
-      "name": "KoAct 글로벌친환경전력인프라액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4075,38 +4051,32 @@
       "type": "ETF"
     },
     {
-      "code": "449780",
-      "name": "KIWOOM 미국S&P500(H)",
+      "code": "469050",
+      "name": "RISE 미국반도체NYSE(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "474800",
-      "name": "KIWOOM 미국원유에너지기업",
+      "code": "385520",
+      "name": "KODEX 자율주행액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0023B0",
-      "name": "PLUS 미국양자컴퓨팅TOP10",
+      "code": "475070",
+      "name": "KoAct 글로벌친환경전력인프라액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "122260",
-      "name": "KIWOOM 통안채1년",
+      "code": "276650",
+      "name": "RISE 글로벌테크놀로지(합성 H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "099140",
-      "name": "KODEX 차이나H",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "105780",
-      "name": "RISE 5대그룹주",
+      "code": "295020",
+      "name": "RISE 국채선물10년인버스",
       "market": null,
       "type": "ETF"
     },
@@ -4117,8 +4087,68 @@
       "type": "ETF"
     },
     {
+      "code": "0023B0",
+      "name": "PLUS 미국양자컴퓨팅TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "227540",
+      "name": "TIGER 200 헬스케어",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "380340",
+      "name": "ACE 코리아AI테크핵심산업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "099140",
+      "name": "KODEX 차이나H",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "449780",
+      "name": "KIWOOM 미국S&P500(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "122260",
+      "name": "KIWOOM 통안채1년",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "105780",
+      "name": "RISE 5대그룹주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "496770",
+      "name": "PLUS 글로벌방산",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "261140",
       "name": "TIGER 우선주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "474800",
+      "name": "KIWOOM 미국원유에너지기업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "174360",
+      "name": "RISE 중국본토대형주CSI100",
       "market": null,
       "type": "ETF"
     },
@@ -4135,44 +4165,8 @@
       "type": "ETF"
     },
     {
-      "code": "227540",
-      "name": "TIGER 200 헬스케어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "496770",
-      "name": "PLUS 글로벌방산",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "174360",
-      "name": "RISE 중국본토대형주CSI100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "459560",
-      "name": "KODEX 테슬라밸류체인FactSet",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "491090",
       "name": "KODEX 미국테크TOP3플러스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "266360",
-      "name": "KODEX K콘텐츠",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "426150",
-      "name": "WON 대한민국국고채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4183,38 +4177,26 @@
       "type": "ETF"
     },
     {
-      "code": "0192T0",
-      "name": "SOL 코스닥TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "245350",
-      "name": "TIGER 유로스탁스배당30",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0138T0",
       "name": "RISE 미국S&P500데일리고정커버드콜",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0089B0",
-      "name": "PLUS 미국나스닥100미국채혼합50",
+      "code": "266360",
+      "name": "KODEX K콘텐츠",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0085N0",
-      "name": "ACE 미국10년국채액티브(H)",
+      "code": "459560",
+      "name": "KODEX 테슬라밸류체인FactSet",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0204S0",
-      "name": "TIGER 코스닥액티브",
+      "code": "426150",
+      "name": "WON 대한민국국고채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4225,14 +4207,8 @@
       "type": "ETF"
     },
     {
-      "code": "494410",
-      "name": "PLUS 미국S&P500성장주",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0155N0",
-      "name": "HANARO K휴머노이드테마TOP10",
+      "code": "0192T0",
+      "name": "SOL 코스닥TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -4243,32 +4219,32 @@
       "type": "ETF"
     },
     {
-      "code": "248270",
-      "name": "TIGER S&P글로벌헬스케어(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "271060",
-      "name": "KODEX 3대농산물선물(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "395170",
-      "name": "KODEX Top10동일가중",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "139270",
       "name": "TIGER 200 금융",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "468630",
-      "name": "KODEX iShares미국투자등급회사채액티브",
+      "code": "248270",
+      "name": "TIGER S&P글로벌헬스케어(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "245350",
+      "name": "TIGER 유로스탁스배당30",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0085N0",
+      "name": "ACE 미국10년국채액티브(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "494410",
+      "name": "PLUS 미국S&P500성장주",
       "market": null,
       "type": "ETF"
     },
@@ -4279,14 +4255,26 @@
       "type": "ETF"
     },
     {
-      "code": "464920",
-      "name": "PLUS 일본반도체소부장",
+      "code": "395170",
+      "name": "KODEX Top10동일가중",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "275290",
-      "name": "KODEX 가치주",
+      "code": "0089B0",
+      "name": "PLUS 미국나스닥100미국채혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "271060",
+      "name": "KODEX 3대농산물선물(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0204S0",
+      "name": "TIGER 코스닥액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4297,14 +4285,38 @@
       "type": "ETF"
     },
     {
+      "code": "468630",
+      "name": "KODEX iShares미국투자등급회사채액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0150K0",
       "name": "KoAct 수소전력ESS인프라액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "117680",
-      "name": "KODEX 철강",
+      "code": "275290",
+      "name": "KODEX 가치주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0155M0",
+      "name": "ACE 미국SMR원자력TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "464920",
+      "name": "PLUS 일본반도체소부장",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0155N0",
+      "name": "HANARO K휴머노이드테마TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -4321,6 +4333,12 @@
       "type": "ETF"
     },
     {
+      "code": "261250",
+      "name": "KODEX 미국달러선물레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "252710",
       "name": "TIGER 200선물인버스2X",
       "market": null,
@@ -4333,20 +4351,8 @@
       "type": "ETF"
     },
     {
-      "code": "117460",
-      "name": "KODEX 에너지화학",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "446690",
       "name": "KODEX 아시아AI반도체exChina액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0203S0",
-      "name": "WON 삼성전자현대차채권혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -4357,26 +4363,38 @@
       "type": "ETF"
     },
     {
-      "code": "0107F0",
-      "name": "KIWOOM 미국고배당&AI테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "387270",
       "name": "TIGER 글로벌이노베이션액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0155M0",
-      "name": "ACE 미국SMR원자력TOP10",
+      "code": "117680",
+      "name": "KODEX 철강",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0107F0",
+      "name": "KIWOOM 미국고배당&AI테크",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "415340",
       "name": "KODEX 차이나과창판STAR50(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "117460",
+      "name": "KODEX 에너지화학",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0203S0",
+      "name": "WON 삼성전자현대차채권혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -4393,26 +4411,8 @@
       "type": "ETF"
     },
     {
-      "code": "261250",
-      "name": "KODEX 미국달러선물레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0184E0",
       "name": "1Q 200채권혼합50액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "494340",
-      "name": "ACE 글로벌AI맞춤형반도체",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "223190",
-      "name": "KODEX 200가치저변동",
       "market": null,
       "type": "ETF"
     },
@@ -4423,14 +4423,20 @@
       "type": "ETF"
     },
     {
-      "code": "475380",
-      "name": "RISE 글로벌리얼티인컴",
+      "code": "223190",
+      "name": "KODEX 200가치저변동",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0166N0",
-      "name": "PLUS 코스닥150액티브",
+      "code": "494340",
+      "name": "ACE 글로벌AI맞춤형반도체",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "475380",
+      "name": "RISE 글로벌리얼티인컴",
       "market": null,
       "type": "ETF"
     },
@@ -4441,26 +4447,14 @@
       "type": "ETF"
     },
     {
+      "code": "0166N0",
+      "name": "PLUS 코스닥150액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "493420",
       "name": "SOL 미국배당다우존스2호",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "225130",
-      "name": "ACE 골드선물 레버리지(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0137W0",
-      "name": "KIWOOM 미국S&P500&GOLD",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "261060",
-      "name": "TIGER 코스닥150IT",
       "market": null,
       "type": "ETF"
     },
@@ -4471,14 +4465,38 @@
       "type": "ETF"
     },
     {
+      "code": "419430",
+      "name": "KODEX 차이나2차전지MSCI(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "479850",
       "name": "HANARO K-뷰티",
       "market": null,
       "type": "ETF"
     },
     {
+      "code": "0137W0",
+      "name": "KIWOOM 미국S&P500&GOLD",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "225130",
+      "name": "ACE 골드선물 레버리지(합성 H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "459790",
       "name": "KIWOOM 미국성장기업30액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "456680",
+      "name": "TIGER 차이나전기차레버리지(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -4495,26 +4513,8 @@
       "type": "ETF"
     },
     {
-      "code": "419430",
-      "name": "KODEX 차이나2차전지MSCI(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "456680",
-      "name": "TIGER 차이나전기차레버리지(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0115C0",
-      "name": "RISE 미국고배당다우존스TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0223R0",
-      "name": "TIGER 미국테크NYSE100액티브",
+      "code": "167860",
+      "name": "KIWOOM 국고채10년레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -4525,8 +4525,8 @@
       "type": "ETF"
     },
     {
-      "code": "167860",
-      "name": "KIWOOM 국고채10년레버리지",
+      "code": "261060",
+      "name": "TIGER 코스닥150IT",
       "market": null,
       "type": "ETF"
     },
@@ -4537,8 +4537,14 @@
       "type": "ETF"
     },
     {
-      "code": "0103T0",
-      "name": "1Q K소버린AI",
+      "code": "0223R0",
+      "name": "TIGER 미국테크NYSE100액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "185680",
+      "name": "KODEX 미국S&P바이오(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -4549,8 +4555,26 @@
       "type": "ETF"
     },
     {
+      "code": "0164G0",
+      "name": "RISE 차이나AI반도체TOP4Plus",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0115C0",
+      "name": "RISE 미국고배당다우존스TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0049K0",
       "name": "ACE 미국배당퀄리티채권혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0103T0",
+      "name": "1Q K소버린AI",
       "market": null,
       "type": "ETF"
     },
@@ -4567,8 +4591,8 @@
       "type": "ETF"
     },
     {
-      "code": "185680",
-      "name": "KODEX 미국S&P바이오(합성)",
+      "code": "368190",
+      "name": "HANARO Fn K-뉴딜디지털플러스",
       "market": null,
       "type": "ETF"
     },
@@ -4579,26 +4603,14 @@
       "type": "ETF"
     },
     {
-      "code": "0164G0",
-      "name": "RISE 차이나AI반도체TOP4Plus",
+      "code": "277540",
+      "name": "ACE 아시아TOP50",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "414270",
       "name": "ACE 글로벌자율주행액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "368190",
-      "name": "HANARO Fn K-뉴딜디지털플러스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "277540",
-      "name": "ACE 아시아TOP50",
       "market": null,
       "type": "ETF"
     },
@@ -4627,14 +4639,8 @@
       "type": "ETF"
     },
     {
-      "code": "411540",
-      "name": "SOL 200 Top10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0093D0",
-      "name": "KoAct 팔란티어밸류체인액티브",
+      "code": "292500",
+      "name": "SOL KRX300",
       "market": null,
       "type": "ETF"
     },
@@ -4645,38 +4651,8 @@
       "type": "ETF"
     },
     {
-      "code": "292500",
-      "name": "SOL KRX300",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0206G0",
-      "name": "1Q 현대차기아채권혼합50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "481340",
-      "name": "RISE 미국30년국채액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "280930",
-      "name": "KODEX 미국러셀2000(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "269420",
-      "name": "KODEX S&P글로벌인프라(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "292160",
-      "name": "TIGER KRX300",
+      "code": "411540",
+      "name": "SOL 200 Top10",
       "market": null,
       "type": "ETF"
     },
@@ -4687,32 +4663,20 @@
       "type": "ETF"
     },
     {
+      "code": "481340",
+      "name": "RISE 미국30년국채액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "292160",
+      "name": "TIGER KRX300",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "159800",
       "name": "마이티 코스피100",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "461450",
-      "name": "KODEX 코스닥글로벌",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "138230",
-      "name": "KIWOOM 미국달러선물",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "442550",
-      "name": "RISE TDF2030액티브 적격",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0198B0",
-      "name": "1Q 삼성전자선물단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -4723,14 +4687,14 @@
       "type": "ETF"
     },
     {
-      "code": "300950",
-      "name": "KODEX 게임산업",
+      "code": "0198B0",
+      "name": "1Q 삼성전자선물단일종목레버리지",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "367740",
-      "name": "HANARO Fn5G산업",
+      "code": "280930",
+      "name": "KODEX 미국러셀2000(H)",
       "market": null,
       "type": "ETF"
     },
@@ -4741,8 +4705,44 @@
       "type": "ETF"
     },
     {
-      "code": "364690",
-      "name": "KODEX 혁신기술테마액티브",
+      "code": "269420",
+      "name": "KODEX S&P글로벌인프라(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "442550",
+      "name": "RISE TDF2030액티브 적격",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0206G0",
+      "name": "1Q 현대차기아채권혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "138230",
+      "name": "KIWOOM 미국달러선물",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "300950",
+      "name": "KODEX 게임산업",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "461450",
+      "name": "KODEX 코스닥글로벌",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "367740",
+      "name": "HANARO Fn5G산업",
       "market": null,
       "type": "ETF"
     },
@@ -4753,8 +4753,14 @@
       "type": "ETF"
     },
     {
-      "code": "0153X0",
-      "name": "PLUS 미국고배당주액티브",
+      "code": "0093D0",
+      "name": "KoAct 팔란티어밸류체인액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "364690",
+      "name": "KODEX 혁신기술테마액티브",
       "market": null,
       "type": "ETF"
     },
@@ -4765,20 +4771,14 @@
       "type": "ETF"
     },
     {
+      "code": "217770",
+      "name": "TIGER 원유선물인버스(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "477730",
       "name": "KODEX 인도타타그룹",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "469160",
-      "name": "ACE 일본반도체",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "464600",
-      "name": "SOL 자동차소부장Fn",
       "market": null,
       "type": "ETF"
     },
@@ -4789,14 +4789,14 @@
       "type": "ETF"
     },
     {
-      "code": "0047P0",
-      "name": "RISE 테슬라고정테크100",
+      "code": "0065G0",
+      "name": "KODEX 차이나테크TOP10",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0065G0",
-      "name": "KODEX 차이나테크TOP10",
+      "code": "469160",
+      "name": "ACE 일본반도체",
       "market": null,
       "type": "ETF"
     },
@@ -4807,74 +4807,20 @@
       "type": "ETF"
     },
     {
-      "code": "239660",
-      "name": "PLUS 우량회사채50",
+      "code": "0047P0",
+      "name": "RISE 테슬라고정테크100",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "447660",
-      "name": "PLUS 애플채권혼합",
+      "code": "0153X0",
+      "name": "PLUS 미국고배당주액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "433220",
-      "name": "에셋플러스 글로벌대장장이액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "375760",
-      "name": "HANARO 탄소효율그린뉴딜",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0026E0",
-      "name": "KODEX 미국S&P500버퍼3월액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "376410",
-      "name": "TIGER 탄소효율그린뉴딜",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "404260",
-      "name": "KODEX 기후변화솔루션",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "217770",
-      "name": "TIGER 원유선물인버스(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0186L0",
-      "name": "KoAct 미국로봇피지컬AI액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "253290",
-      "name": "RISE 헬스케어채권혼합",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "108590",
-      "name": "TREX 200",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "371450",
-      "name": "TIGER 글로벌클라우드컴퓨팅INDXX",
+      "code": "464600",
+      "name": "SOL 자동차소부장Fn",
       "market": null,
       "type": "ETF"
     },
@@ -4885,20 +4831,38 @@
       "type": "ETF"
     },
     {
-      "code": "463300",
-      "name": "RISE 중국본토CSI300",
+      "code": "376410",
+      "name": "TIGER 탄소효율그린뉴딜",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "300640",
-      "name": "RISE 게임테마",
+      "code": "239660",
+      "name": "PLUS 우량회사채50",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "417630",
-      "name": "TIGER KEDI혁신기업ESG30",
+      "code": "433220",
+      "name": "에셋플러스 글로벌대장장이액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "447660",
+      "name": "PLUS 애플채권혼합",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0026E0",
+      "name": "KODEX 미국S&P500버퍼3월액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "375760",
+      "name": "HANARO 탄소효율그린뉴딜",
       "market": null,
       "type": "ETF"
     },
@@ -4909,80 +4873,56 @@
       "type": "ETF"
     },
     {
+      "code": "404260",
+      "name": "KODEX 기후변화솔루션",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "108590",
+      "name": "TREX 200",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "253290",
+      "name": "RISE 헬스케어채권혼합",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0186L0",
+      "name": "KoAct 미국로봇피지컬AI액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "463300",
+      "name": "RISE 중국본토CSI300",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "371450",
+      "name": "TIGER 글로벌클라우드컴퓨팅INDXX",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "300640",
+      "name": "RISE 게임테마",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "364990",
       "name": "TIGER 게임TOP10",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "152380",
-      "name": "KODEX 국채선물10년",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0144M0",
-      "name": "KODEX 미국드론UAM TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "437070",
-      "name": "KODEX 아시아달러채권ESG플러스액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0224X0",
-      "name": "1Q 엔비디아알파벳미국채혼합50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "091220",
-      "name": "TIGER 은행",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "169950",
-      "name": "KODEX 차이나A50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "226980",
-      "name": "KODEX 200 중소형",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "304770",
-      "name": "HANARO 코스닥150",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "489000",
-      "name": "PLUS 일본엔화초단기국채(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "337120",
-      "name": "KODEX 멀티팩터",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "416090",
-      "name": "ACE 중국과창판STAR50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0190M0",
-      "name": "KIWOOM 미국AI테크하이베타",
+      "code": "417630",
+      "name": "TIGER KEDI혁신기업ESG30",
       "market": null,
       "type": "ETF"
     },
@@ -4993,8 +4933,80 @@
       "type": "ETF"
     },
     {
-      "code": "497780",
-      "name": "KoAct 미국천연가스인프라액티브",
+      "code": "226980",
+      "name": "KODEX 200 중소형",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "152380",
+      "name": "KODEX 국채선물10년",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "091220",
+      "name": "TIGER 은행",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "437070",
+      "name": "KODEX 아시아달러채권ESG플러스액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "337120",
+      "name": "KODEX 멀티팩터",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0224X0",
+      "name": "1Q 엔비디아알파벳미국채혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "416090",
+      "name": "ACE 중국과창판STAR50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "169950",
+      "name": "KODEX 차이나A50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0144M0",
+      "name": "KODEX 미국드론UAM TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "489000",
+      "name": "PLUS 일본엔화초단기국채(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0231Z0",
+      "name": "KODEX 코리아TDF2065액티브 적격",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "304770",
+      "name": "HANARO 코스닥150",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0190M0",
+      "name": "KIWOOM 미국AI테크하이베타",
       "market": null,
       "type": "ETF"
     },
@@ -5011,14 +5023,14 @@
       "type": "ETF"
     },
     {
-      "code": "407310",
-      "name": "HANARO 200 TOP10",
+      "code": "497780",
+      "name": "KoAct 미국천연가스인프라액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "213630",
-      "name": "PLUS 미국다우존스고배당주(합성 H)",
+      "code": "407310",
+      "name": "HANARO 200 TOP10",
       "market": null,
       "type": "ETF"
     },
@@ -5029,8 +5041,14 @@
       "type": "ETF"
     },
     {
-      "code": "0203R0",
-      "name": "WON 중단기종합채권(A-이상)액티브",
+      "code": "487950",
+      "name": "KODEX 대만테크고배당다우존스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "213630",
+      "name": "PLUS 미국다우존스고배당주(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -5041,20 +5059,8 @@
       "type": "ETF"
     },
     {
-      "code": "0105D0",
-      "name": "SOL 한국AI소프트웨어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "487950",
-      "name": "KODEX 대만테크고배당다우존스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0018Z0",
-      "name": "RISE 미국양자컴퓨팅",
+      "code": "0203R0",
+      "name": "WON 중단기종합채권(A-이상)액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5065,20 +5071,14 @@
       "type": "ETF"
     },
     {
+      "code": "0018Z0",
+      "name": "RISE 미국양자컴퓨팅",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "228820",
       "name": "TIGER KTOP30",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "304760",
-      "name": "HANARO KRX300",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "229720",
-      "name": "KODEX KTOP30",
       "market": null,
       "type": "ETF"
     },
@@ -5089,14 +5089,26 @@
       "type": "ETF"
     },
     {
-      "code": "183710",
-      "name": "RISE 주식혼합",
+      "code": "0105D0",
+      "name": "SOL 한국AI소프트웨어",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "445690",
-      "name": "BNK 주주가치액티브",
+      "code": "229720",
+      "name": "KODEX KTOP30",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "304760",
+      "name": "HANARO KRX300",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "183710",
+      "name": "RISE 주식혼합",
       "market": null,
       "type": "ETF"
     },
@@ -5107,14 +5119,14 @@
       "type": "ETF"
     },
     {
-      "code": "468370",
-      "name": "KODEX iShares미국인플레이션국채액티브",
+      "code": "445690",
+      "name": "BNK 주주가치액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "385600",
-      "name": "ACE 2차전지&친환경차액티브",
+      "code": "468370",
+      "name": "KODEX iShares미국인플레이션국채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5125,26 +5137,8 @@
       "type": "ETF"
     },
     {
-      "code": "461900",
-      "name": "PLUS 미국테크TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "461910",
-      "name": "PLUS 미국테크TOP10레버리지(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "483330",
-      "name": "ACE 마이크로소프트밸류체인액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "415760",
-      "name": "SOL 차이나육성산업액티브(합성)",
+      "code": "227830",
+      "name": "PLUS 코스피",
       "market": null,
       "type": "ETF"
     },
@@ -5155,44 +5149,20 @@
       "type": "ETF"
     },
     {
-      "code": "227830",
-      "name": "PLUS 코스피",
+      "code": "415760",
+      "name": "SOL 차이나육성산업액티브(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "404120",
-      "name": "TIME K신재생에너지액티브",
+      "code": "385600",
+      "name": "ACE 2차전지&친환경차액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0086C0",
-      "name": "TIGER 리츠부동산인프라10채권혼합액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "460660",
-      "name": "RISE 미국S&P배당킹",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "236350",
-      "name": "TIGER 인도니프티50레버리지(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "474920",
-      "name": "에셋플러스 차이나일등기업포커스10액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "477490",
-      "name": "에셋플러스 글로벌일등기업포커스10액티브",
+      "code": "461910",
+      "name": "PLUS 미국테크TOP10레버리지(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -5203,8 +5173,38 @@
       "type": "ETF"
     },
     {
-      "code": "457690",
-      "name": "KODEX 33-06 국고채액티브",
+      "code": "404120",
+      "name": "TIME K신재생에너지액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "474920",
+      "name": "에셋플러스 차이나일등기업포커스10액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "236350",
+      "name": "TIGER 인도니프티50레버리지(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "461900",
+      "name": "PLUS 미국테크TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "483330",
+      "name": "ACE 마이크로소프트밸류체인액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0086C0",
+      "name": "TIGER 리츠부동산인프라10채권혼합액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5215,14 +5215,8 @@
       "type": "ETF"
     },
     {
-      "code": "391670",
-      "name": "HK 베스트일레븐액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "289260",
-      "name": "TIGER MSCI KOREA ESG리더스",
+      "code": "477490",
+      "name": "에셋플러스 글로벌일등기업포커스10액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5233,8 +5227,14 @@
       "type": "ETF"
     },
     {
-      "code": "494420",
-      "name": "PLUS 미국배당증가성장주데일리커버드콜",
+      "code": "289260",
+      "name": "TIGER MSCI KOREA ESG리더스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "460660",
+      "name": "RISE 미국S&P배당킹",
       "market": null,
       "type": "ETF"
     },
@@ -5245,20 +5245,8 @@
       "type": "ETF"
     },
     {
-      "code": "332620",
-      "name": "PLUS 미국장기우량회사채",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "291130",
-      "name": "ACE MSCI멕시코(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "266410",
-      "name": "KODEX 필수소비재",
+      "code": "457690",
+      "name": "KODEX 33-06 국고채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5269,14 +5257,32 @@
       "type": "ETF"
     },
     {
-      "code": "219390",
-      "name": "RISE 미국S&P원유생산기업(합성 H)",
+      "code": "391670",
+      "name": "HK 베스트일레븐액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "453630",
-      "name": "KODEX 미국S&P500필수소비재",
+      "code": "494420",
+      "name": "PLUS 미국배당증가성장주데일리커버드콜",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "332620",
+      "name": "PLUS 미국장기우량회사채",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "266410",
+      "name": "KODEX 필수소비재",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "291130",
+      "name": "ACE MSCI멕시코(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -5293,26 +5299,32 @@
       "type": "ETF"
     },
     {
-      "code": "265690",
-      "name": "ACE 러시아MSCI(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "438900",
       "name": "HANARO Fn K-푸드",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0220A0",
-      "name": "KIWOOM 현대차그룹TOP3채권혼합50",
+      "code": "265690",
+      "name": "ACE 러시아MSCI(합성)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0207Z0",
-      "name": "KIWOOM 미국우주데이터센터인프라",
+      "code": "453630",
+      "name": "KODEX 미국S&P500필수소비재",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0193L0",
+      "name": "PLUS 삼성전자선물단일종목인버스2X",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "219390",
+      "name": "RISE 미국S&P원유생산기업(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -5323,14 +5335,8 @@
       "type": "ETF"
     },
     {
-      "code": "114460",
-      "name": "ACE 국고채3년",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0051A0",
-      "name": "KoAct 브로드컴밸류체인액티브",
+      "code": "491510",
+      "name": "파워 K-주주가치액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5341,20 +5347,26 @@
       "type": "ETF"
     },
     {
-      "code": "491510",
-      "name": "파워 K-주주가치액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "413930",
-      "name": "WON AI ESG액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "488290",
       "name": "MIDAS 일본테크액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0207Z0",
+      "name": "KIWOOM 미국우주데이터센터인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0220A0",
+      "name": "KIWOOM 현대차그룹TOP3채권혼합50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "114460",
+      "name": "ACE 국고채3년",
       "market": null,
       "type": "ETF"
     },
@@ -5365,8 +5377,14 @@
       "type": "ETF"
     },
     {
-      "code": "387280",
-      "name": "TIGER 퓨처모빌리티액티브",
+      "code": "413930",
+      "name": "WON AI ESG액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0051A0",
+      "name": "KoAct 브로드컴밸류체인액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5389,38 +5407,8 @@
       "type": "ETF"
     },
     {
-      "code": "130680",
-      "name": "TIGER 원유선물Enhanced(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0193L0",
-      "name": "PLUS 삼성전자선물단일종목인버스2X",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0013P0",
-      "name": "RISE 미국은행TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0153P0",
-      "name": "ACE 리츠부동산인프라액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0090B0",
-      "name": "PLUS K방산소부장",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "404650",
-      "name": "SOL KRX기후변화솔루션",
+      "code": "387280",
+      "name": "TIGER 퓨처모빌리티액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5431,14 +5419,32 @@
       "type": "ETF"
     },
     {
-      "code": "234310",
-      "name": "RISE V&S셀렉트밸류",
+      "code": "404650",
+      "name": "SOL KRX기후변화솔루션",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "244620",
-      "name": "KODEX 모멘텀Plus",
+      "code": "0090B0",
+      "name": "PLUS K방산소부장",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0153P0",
+      "name": "ACE 리츠부동산인프라액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0013P0",
+      "name": "RISE 미국은행TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "234310",
+      "name": "RISE V&S셀렉트밸류",
       "market": null,
       "type": "ETF"
     },
@@ -5455,20 +5461,32 @@
       "type": "ETF"
     },
     {
+      "code": "244620",
+      "name": "KODEX 모멘텀Plus",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "130680",
+      "name": "TIGER 원유선물Enhanced(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "373490",
       "name": "KODEX 코리아혁신성장액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "272570",
-      "name": "RISE 중장기국공채액티브",
+      "code": "417450",
+      "name": "RISE 글로벌수소경제",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "417450",
-      "name": "RISE 글로벌수소경제",
+      "code": "272570",
+      "name": "RISE 중장기국공채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5485,14 +5503,8 @@
       "type": "ETF"
     },
     {
-      "code": "0127T0",
-      "name": "KIWOOM 미국S&P500&배당다우존스비중전환",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0088N0",
-      "name": "WON K-글로벌수급상위",
+      "code": "266390",
+      "name": "KODEX 경기소비재",
       "market": null,
       "type": "ETF"
     },
@@ -5503,20 +5515,14 @@
       "type": "ETF"
     },
     {
-      "code": "0127V0",
-      "name": "KIWOOM 미국S&P500 TOP10&배당다우비중전환",
+      "code": "0088N0",
+      "name": "WON K-글로벌수급상위",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "428560",
-      "name": "KODEX 미국ETF산업Top10 Indxx",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0194R0",
-      "name": "KIWOOM SK하이닉스선물단일종목레버리지",
+      "code": "0127T0",
+      "name": "KIWOOM 미국S&P500&배당다우존스비중전환",
       "market": null,
       "type": "ETF"
     },
@@ -5527,14 +5533,8 @@
       "type": "ETF"
     },
     {
-      "code": "266390",
-      "name": "KODEX 경기소비재",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "360150",
-      "name": "KODEX 코스닥150롱코스피200숏선물",
+      "code": "300610",
+      "name": "TIGER K게임",
       "market": null,
       "type": "ETF"
     },
@@ -5545,14 +5545,32 @@
       "type": "ETF"
     },
     {
+      "code": "252650",
+      "name": "KODEX 200동일가중",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0127V0",
+      "name": "KIWOOM 미국S&P500 TOP10&배당다우비중전환",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "137610",
       "name": "TIGER 농산물선물Enhanced(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "252650",
-      "name": "KODEX 200동일가중",
+      "code": "0194R0",
+      "name": "KIWOOM SK하이닉스선물단일종목레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "428560",
+      "name": "KODEX 미국ETF산업Top10 Indxx",
       "market": null,
       "type": "ETF"
     },
@@ -5563,26 +5581,8 @@
       "type": "ETF"
     },
     {
-      "code": "300610",
-      "name": "TIGER K게임",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "400570",
-      "name": "KODEX 유럽탄소배출권선물ICE(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "176950",
-      "name": "KODEX 국채선물10년인버스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "435040",
-      "name": "ACE 글로벌브랜드TOP10",
+      "code": "360150",
+      "name": "KODEX 코스닥150롱코스피200숏선물",
       "market": null,
       "type": "ETF"
     },
@@ -5593,8 +5593,14 @@
       "type": "ETF"
     },
     {
-      "code": "0015F0",
-      "name": "KIWOOM 팔란티어미국30년국채혼합액티브(H)",
+      "code": "409810",
+      "name": "KODEX 미국나스닥100선물인버스(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "400570",
+      "name": "KODEX 유럽탄소배출권선물ICE(H)",
       "market": null,
       "type": "ETF"
     },
@@ -5605,14 +5611,26 @@
       "type": "ETF"
     },
     {
-      "code": "279540",
-      "name": "KODEX 최소변동성",
+      "code": "0015F0",
+      "name": "KIWOOM 팔란티어미국30년국채혼합액티브(H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "484890",
-      "name": "SOL 머니마켓액티브",
+      "code": "435040",
+      "name": "ACE 글로벌브랜드TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "176950",
+      "name": "KODEX 국채선물10년인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "279540",
+      "name": "KODEX 최소변동성",
       "market": null,
       "type": "ETF"
     },
@@ -5623,32 +5641,26 @@
       "type": "ETF"
     },
     {
+      "code": "484890",
+      "name": "SOL 머니마켓액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "363510",
       "name": "SOL KIS단기통안채",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "453660",
-      "name": "KODEX 미국S&P500경기소비재",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "453060",
-      "name": "HANARO KOFR금리액티브(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "251590",
-      "name": "PLUS 고배당저변동50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0208N0",
       "name": "IBK 코스피액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "453660",
+      "name": "KODEX 미국S&P500경기소비재",
       "market": null,
       "type": "ETF"
     },
@@ -5665,56 +5677,20 @@
       "type": "ETF"
     },
     {
+      "code": "453060",
+      "name": "HANARO KOFR금리액티브(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "251590",
+      "name": "PLUS 고배당저변동50",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "332610",
       "name": "PLUS 미국단기회사채(AAA~A)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "487750",
-      "name": "BNK 온디바이스AI",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "409810",
-      "name": "KODEX 미국나스닥100선물인버스(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "269530",
-      "name": "PLUS S&P글로벌인프라",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "269370",
-      "name": "TIGER S&P글로벌인프라(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "457700",
-      "name": "KODEX 53-09 국고채액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "404540",
-      "name": "TIGER KRX기후변화솔루션",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "410870",
-      "name": "TIME K컬처액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "448490",
-      "name": "HANARO 32-10 국고채액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5725,8 +5701,50 @@
       "type": "ETF"
     },
     {
-      "code": "0008E0",
-      "name": "ACE 미국중심중소형제조업",
+      "code": "269530",
+      "name": "PLUS S&P글로벌인프라",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "457700",
+      "name": "KODEX 53-09 국고채액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "410870",
+      "name": "TIME K컬처액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "487750",
+      "name": "BNK 온디바이스AI",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "269370",
+      "name": "TIGER S&P글로벌인프라(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "404540",
+      "name": "TIGER KRX기후변화솔루션",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "448490",
+      "name": "HANARO 32-10 국고채액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "280920",
+      "name": "PLUS 주도업종",
       "market": null,
       "type": "ETF"
     },
@@ -5743,14 +5761,14 @@
       "type": "ETF"
     },
     {
-      "code": "280920",
-      "name": "PLUS 주도업종",
+      "code": "0222D0",
+      "name": "KoAct 고배당액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0222D0",
-      "name": "KoAct 고배당액티브",
+      "code": "0008E0",
+      "name": "ACE 미국중심중소형제조업",
       "market": null,
       "type": "ETF"
     },
@@ -5761,14 +5779,20 @@
       "type": "ETF"
     },
     {
-      "code": "140710",
-      "name": "KODEX 운송",
+      "code": "0113G0",
+      "name": "KoAct 미국바이오헬스케어액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0113G0",
-      "name": "KoAct 미국바이오헬스케어액티브",
+      "code": "464610",
+      "name": "SOL 의료기기소부장Fn",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "498050",
+      "name": "HANARO 바이오코리아액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5791,26 +5815,26 @@
       "type": "ETF"
     },
     {
-      "code": "463640",
-      "name": "KODEX 미국S&P500유틸리티",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "498050",
-      "name": "HANARO 바이오코리아액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "461580",
       "name": "TIGER 코스닥글로벌",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "464610",
-      "name": "SOL 의료기기소부장Fn",
+      "code": "463640",
+      "name": "KODEX 미국S&P500유틸리티",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "140710",
+      "name": "KODEX 운송",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0094L0",
+      "name": "RISE 차이나테크TOP10위클리타겟커버드콜",
       "market": null,
       "type": "ETF"
     },
@@ -5821,20 +5845,8 @@
       "type": "ETF"
     },
     {
-      "code": "446700",
-      "name": "RISE 배터리 리사이클링",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "371870",
       "name": "ACE 차이나항셍테크",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0094L0",
-      "name": "RISE 차이나테크TOP10위클리타겟커버드콜",
       "market": null,
       "type": "ETF"
     },
@@ -5851,8 +5863,20 @@
       "type": "ETF"
     },
     {
+      "code": "310080",
+      "name": "RISE 중국MSCI China(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "419420",
       "name": "KODEX 미국클린에너지나스닥",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "446700",
+      "name": "RISE 배터리 리사이클링",
       "market": null,
       "type": "ETF"
     },
@@ -5863,8 +5887,8 @@
       "type": "ETF"
     },
     {
-      "code": "310080",
-      "name": "RISE 중국MSCI China(H)",
+      "code": "0001P0",
+      "name": "마이티 바이오시밀러&CDMO액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5887,8 +5911,8 @@
       "type": "ETF"
     },
     {
-      "code": "0001P0",
-      "name": "마이티 바이오시밀러&CDMO액티브",
+      "code": "237440",
+      "name": "TIGER 경기방어채권혼합",
       "market": null,
       "type": "ETF"
     },
@@ -5899,38 +5923,20 @@
       "type": "ETF"
     },
     {
-      "code": "456250",
-      "name": "KODEX 유럽명품TOP10 STOXX",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "237440",
-      "name": "TIGER 경기방어채권혼합",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "354350",
-      "name": "HANARO 글로벌럭셔리S&P(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "140570",
       "name": "RISE 수출주",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "494180",
-      "name": "TIME 글로벌소비트렌드액티브",
+      "code": "456250",
+      "name": "KODEX 유럽명품TOP10 STOXX",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "460270",
-      "name": "KIWOOM 미국달러SOFR금리액티브(합성)",
+      "code": "354350",
+      "name": "HANARO 글로벌럭셔리S&P(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -5953,8 +5959,14 @@
       "type": "ETF"
     },
     {
-      "code": "429010",
-      "name": "TIGER 미국나스닥넥스트100",
+      "code": "460270",
+      "name": "KIWOOM 미국달러SOFR금리액티브(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "494180",
+      "name": "TIME 글로벌소비트렌드액티브",
       "market": null,
       "type": "ETF"
     },
@@ -5965,32 +5977,8 @@
       "type": "ETF"
     },
     {
-      "code": "463690",
-      "name": "KODEX 미국S&P500커뮤니케이션",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0067Y0",
-      "name": "TIGER 차이나AI소프트웨어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0226G0",
-      "name": "WON 피지컬AI TOP2플러스액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "117690",
-      "name": "TIGER 차이나항셍30",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "139240",
-      "name": "TIGER 200 철강소재",
+      "code": "429010",
+      "name": "TIGER 미국나스닥넥스트100",
       "market": null,
       "type": "ETF"
     },
@@ -6001,8 +5989,32 @@
       "type": "ETF"
     },
     {
+      "code": "463690",
+      "name": "KODEX 미국S&P500커뮤니케이션",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "117690",
+      "name": "TIGER 차이나항셍30",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0067Y0",
+      "name": "TIGER 차이나AI소프트웨어",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "281990",
       "name": "RISE 중소형고배당",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0226G0",
+      "name": "WON 피지컬AI TOP2플러스액티브",
       "market": null,
       "type": "ETF"
     },
@@ -6013,20 +6025,14 @@
       "type": "ETF"
     },
     {
-      "code": "482030",
-      "name": "KoAct 반도체&2차전지핵심소재액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "227570",
       "name": "TIGER 우량가치",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "449680",
-      "name": "TIGER 한중전기차(합성)",
+      "code": "139240",
+      "name": "TIGER 200 철강소재",
       "market": null,
       "type": "ETF"
     },
@@ -6043,20 +6049,8 @@
       "type": "ETF"
     },
     {
-      "code": "301400",
-      "name": "PLUS 코스닥150",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "230480",
-      "name": "KIWOOM 미국달러선물인버스2X",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "341850",
-      "name": "TIGER 리츠부동산인프라채권",
+      "code": "482030",
+      "name": "KoAct 반도체&2차전지핵심소재액티브",
       "market": null,
       "type": "ETF"
     },
@@ -6067,14 +6061,32 @@
       "type": "ETF"
     },
     {
-      "code": "0084D0",
-      "name": "KIWOOM 미국테크100월간목표헤지액티브",
+      "code": "0133E0",
+      "name": "TIGER 차이나증권",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "375270",
-      "name": "RISE 글로벌데이터센터리츠(합성)",
+      "code": "301400",
+      "name": "PLUS 코스닥150",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "341850",
+      "name": "TIGER 리츠부동산인프라채권",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "230480",
+      "name": "KIWOOM 미국달러선물인버스2X",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "449680",
+      "name": "TIGER 한중전기차(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -6085,20 +6097,26 @@
       "type": "ETF"
     },
     {
+      "code": "375270",
+      "name": "RISE 글로벌데이터센터리츠(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0194N0",
+      "name": "KIWOOM 삼성전자선물단일종목레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0084D0",
+      "name": "KIWOOM 미국테크100월간목표헤지액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0224D0",
       "name": "KIWOOM 미국CPU반도체TOP4+",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0133E0",
-      "name": "TIGER 차이나증권",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "395150",
-      "name": "KODEX 웹툰&드라마",
       "market": null,
       "type": "ETF"
     },
@@ -6115,8 +6133,8 @@
       "type": "ETF"
     },
     {
-      "code": "0194N0",
-      "name": "KIWOOM 삼성전자선물단일종목레버리지",
+      "code": "395150",
+      "name": "KODEX 웹툰&드라마",
       "market": null,
       "type": "ETF"
     },
@@ -6127,20 +6145,14 @@
       "type": "ETF"
     },
     {
-      "code": "497520",
-      "name": "ACE 일라이릴리밸류체인",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "466810",
-      "name": "BNK 2차전지양극재",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "381570",
       "name": "HANARO Fn친환경에너지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "497520",
+      "name": "ACE 일라이릴리밸류체인",
       "market": null,
       "type": "ETF"
     },
@@ -6151,20 +6163,20 @@
       "type": "ETF"
     },
     {
-      "code": "0216K0",
-      "name": "KIWOOM 미국우주테크TOP2채권혼합50",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "217780",
-      "name": "TIGER 차이나CSI300인버스(합성)",
+      "code": "466810",
+      "name": "BNK 2차전지양극재",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "462340",
       "name": "에셋플러스 글로벌다이나믹시니어액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0216K0",
+      "name": "KIWOOM 미국우주테크TOP2채권혼합50",
       "market": null,
       "type": "ETF"
     },
@@ -6181,6 +6193,18 @@
       "type": "ETF"
     },
     {
+      "code": "277650",
+      "name": "TIGER 코스피중형주",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "217780",
+      "name": "TIGER 차이나CSI300인버스(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "270800",
       "name": "RISE KQ고배당",
       "market": null,
@@ -6189,12 +6213,6 @@
     {
       "code": "395280",
       "name": "HANARO Fn K-게임",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "277650",
-      "name": "TIGER 코스피중형주",
       "market": null,
       "type": "ETF"
     },
@@ -6229,8 +6247,8 @@
       "type": "ETF"
     },
     {
-      "code": "0184N0",
-      "name": "PLUS 은채권혼합",
+      "code": "253280",
+      "name": "RISE 헬스케어",
       "market": null,
       "type": "ETF"
     },
@@ -6241,26 +6259,8 @@
       "type": "ETF"
     },
     {
-      "code": "253280",
-      "name": "RISE 헬스케어",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "261110",
-      "name": "TIGER 미국달러선물레버리지",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "487920",
-      "name": "ACE 인도시장대표BIG5그룹액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0218K0",
-      "name": "BNK 스마트카",
+      "code": "0184N0",
+      "name": "PLUS 은채권혼합",
       "market": null,
       "type": "ETF"
     },
@@ -6271,8 +6271,14 @@
       "type": "ETF"
     },
     {
-      "code": "227550",
-      "name": "TIGER 200 산업재",
+      "code": "487920",
+      "name": "ACE 인도시장대표BIG5그룹액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "261110",
+      "name": "TIGER 미국달러선물레버리지",
       "market": null,
       "type": "ETF"
     },
@@ -6283,8 +6289,20 @@
       "type": "ETF"
     },
     {
+      "code": "227550",
+      "name": "TIGER 200 산업재",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0215T0",
       "name": "HANARO 미국AI광통신TOP10",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0218K0",
+      "name": "BNK 스마트카",
       "market": null,
       "type": "ETF"
     },
@@ -6307,6 +6325,24 @@
       "type": "ETF"
     },
     {
+      "code": "0094X0",
+      "name": "1Q 샤오미밸류체인액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "438740",
+      "name": "MIDAS 중소형액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "285690",
+      "name": "FOCUS ESG리더스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "494210",
       "name": "SOL 미국500타겟데일리커버드콜액티브",
       "market": null,
@@ -6325,18 +6361,6 @@
       "type": "ETF"
     },
     {
-      "code": "0094X0",
-      "name": "1Q 샤오미밸류체인액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "285690",
-      "name": "FOCUS ESG리더스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "256450",
       "name": "PLUS 심천차이넥스트(합성)",
       "market": null,
@@ -6349,32 +6373,14 @@
       "type": "ETF"
     },
     {
-      "code": "304670",
-      "name": "KODEX 미국30년국채울트라선물인버스(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "438740",
-      "name": "MIDAS 중소형액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "402460",
       "name": "HANARO Fn K-메타버스MZ",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "139290",
-      "name": "TIGER 200 경기소비재",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "139660",
-      "name": "KIWOOM 미국달러선물인버스",
+      "code": "304670",
+      "name": "KODEX 미국30년국채울트라선물인버스(H)",
       "market": null,
       "type": "ETF"
     },
@@ -6397,8 +6403,14 @@
       "type": "ETF"
     },
     {
-      "code": "390400",
-      "name": "KODEX 미국스마트모빌리티S&P",
+      "code": "139660",
+      "name": "KIWOOM 미국달러선물인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "488480",
+      "name": "RISE 일본섹터TOP4Plus",
       "market": null,
       "type": "ETF"
     },
@@ -6409,8 +6421,14 @@
       "type": "ETF"
     },
     {
-      "code": "488480",
-      "name": "RISE 일본섹터TOP4Plus",
+      "code": "139290",
+      "name": "TIGER 200 경기소비재",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "390400",
+      "name": "KODEX 미국스마트모빌리티S&P",
       "market": null,
       "type": "ETF"
     },
@@ -6427,26 +6445,14 @@
       "type": "ETF"
     },
     {
-      "code": "0036Z0",
-      "name": "RISE 미국천연가스밸류체인",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0176P0",
       "name": "FOCUS AI반도체위클리고정커버드콜",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0138D0",
-      "name": "RISE 동학개미",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "0184V0",
-      "name": "UNICORN K바이오액티브",
+      "code": "0036Z0",
+      "name": "RISE 미국천연가스밸류체인",
       "market": null,
       "type": "ETF"
     },
@@ -6457,26 +6463,26 @@
       "type": "ETF"
     },
     {
+      "code": "0138D0",
+      "name": "RISE 동학개미",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "316300",
       "name": "ACE 싱가포르리츠",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "250780",
-      "name": "TIGER 코스닥150선물인버스",
+      "code": "456200",
+      "name": "PLUS 미국달러SOFR금리액티브(합성)",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "0047N0",
       "name": "PLUS 차이나AI테크TOP10",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "456200",
-      "name": "PLUS 미국달러SOFR금리액티브(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -6493,20 +6499,32 @@
       "type": "ETF"
     },
     {
+      "code": "250780",
+      "name": "TIGER 코스닥150선물인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0184V0",
+      "name": "UNICORN K바이오액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0102X0",
       "name": "ACE 유럽방산TOP10",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "291890",
-      "name": "KODEX MSCI EM선물(H)",
+      "code": "0087F0",
+      "name": "ACE 차이나AI빅테크TOP2+액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0087F0",
-      "name": "ACE 차이나AI빅테크TOP2+액티브",
+      "code": "291890",
+      "name": "KODEX MSCI EM선물(H)",
       "market": null,
       "type": "ETF"
     },
@@ -6523,12 +6541,6 @@
       "type": "ETF"
     },
     {
-      "code": "469530",
-      "name": "RISE 미국달러선물인버스",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "451670",
       "name": "RISE 국채30년레버리지(합성)",
       "market": null,
@@ -6541,20 +6553,14 @@
       "type": "ETF"
     },
     {
+      "code": "469530",
+      "name": "RISE 미국달러선물인버스",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "400580",
       "name": "SOL 유럽탄소배출권선물S&P(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "314700",
-      "name": "HANARO 농업융복합산업",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "433250",
-      "name": "UNICORN R&D 액티브",
       "market": null,
       "type": "ETF"
     },
@@ -6571,20 +6577,14 @@
       "type": "ETF"
     },
     {
-      "code": "0191B0",
-      "name": "MIDAS 코스닥액티브",
+      "code": "314700",
+      "name": "HANARO 농업융복합산업",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "219900",
-      "name": "ACE 중국본토CSI300레버리지(합성)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "407300",
-      "name": "HANARO Fn골프테마",
+      "code": "433250",
+      "name": "UNICORN R&D 액티브",
       "market": null,
       "type": "ETF"
     },
@@ -6595,26 +6595,26 @@
       "type": "ETF"
     },
     {
+      "code": "219900",
+      "name": "ACE 중국본토CSI300레버리지(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "0191B0",
+      "name": "MIDAS 코스닥액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "407300",
+      "name": "HANARO Fn골프테마",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "476310",
       "name": "RISE 글로벌비만산업TOP2+",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "267450",
-      "name": "RISE 미국장기국채선물인버스(H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "470310",
-      "name": "UNICORN 생성형AI강소기업액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "413220",
-      "name": "SOL 차이나태양광CSI(합성)",
       "market": null,
       "type": "ETF"
     },
@@ -6625,14 +6625,32 @@
       "type": "ETF"
     },
     {
+      "code": "483030",
+      "name": "KIWOOM 미국블록버스터바이오테크의약품+",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "413220",
+      "name": "SOL 차이나태양광CSI(합성)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "267450",
+      "name": "RISE 미국장기국채선물인버스(H)",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "432600",
       "name": "RISE 국채선물3년",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "483030",
-      "name": "KIWOOM 미국블록버스터바이오테크의약품+",
+      "code": "470310",
+      "name": "UNICORN 생성형AI강소기업액티브",
       "market": null,
       "type": "ETF"
     },
@@ -6643,20 +6661,14 @@
       "type": "ETF"
     },
     {
-      "code": "220130",
-      "name": "SOL 차이나강소기업CSI500(합성 H)",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "474390",
-      "name": "SOL 국고채30년액티브",
-      "market": null,
-      "type": "ETF"
-    },
-    {
       "code": "0132D0",
       "name": "KoAct 글로벌K컬처밸류체인액티브",
+      "market": null,
+      "type": "ETF"
+    },
+    {
+      "code": "220130",
+      "name": "SOL 차이나강소기업CSI500(합성 H)",
       "market": null,
       "type": "ETF"
     },
@@ -6667,14 +6679,14 @@
       "type": "ETF"
     },
     {
-      "code": "321410",
-      "name": "KODEX 멀티에셋하이인컴(H)",
+      "code": "474390",
+      "name": "SOL 국고채30년액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "291630",
-      "name": "KIWOOM 코스닥150선물레버리지",
+      "code": "321410",
+      "name": "KODEX 멀티에셋하이인컴(H)",
       "market": null,
       "type": "ETF"
     },
@@ -6697,6 +6709,12 @@
       "type": "ETF"
     },
     {
+      "code": "291630",
+      "name": "KIWOOM 코스닥150선물레버리지",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "295000",
       "name": "RISE 국채선물10년",
       "market": null,
@@ -6709,14 +6727,14 @@
       "type": "ETF"
     },
     {
-      "code": "498610",
-      "name": "RISE 인도디지털성장",
+      "code": "0154H0",
+      "name": "KoAct 차이나바이오헬스케어액티브",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "0154H0",
-      "name": "KoAct 차이나바이오헬스케어액티브",
+      "code": "498610",
+      "name": "RISE 인도디지털성장",
       "market": null,
       "type": "ETF"
     },
@@ -6733,14 +6751,20 @@
       "type": "ETF"
     },
     {
+      "code": "227560",
+      "name": "TIGER 200 생활소비재",
+      "market": null,
+      "type": "ETF"
+    },
+    {
       "code": "0078V0",
       "name": "PLUS 미국로보택시",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "227560",
-      "name": "TIGER 200 생활소비재",
+      "code": "244660",
+      "name": "KODEX 퀄리티Plus",
       "market": null,
       "type": "ETF"
     },
@@ -6757,20 +6781,14 @@
       "type": "ETF"
     },
     {
-      "code": "244660",
-      "name": "KODEX 퀄리티Plus",
+      "code": "266550",
+      "name": "PLUS 중형주저변동50",
       "market": null,
       "type": "ETF"
     },
     {
       "code": "391600",
       "name": "ACE 미국친환경그린테마",
-      "market": null,
-      "type": "ETF"
-    },
-    {
-      "code": "266550",
-      "name": "PLUS 중형주저변동50",
       "market": null,
       "type": "ETF"
     },
@@ -6889,14 +6907,14 @@
       "type": "ETF"
     },
     {
-      "code": "252410",
-      "name": "RISE 200선물인버스",
+      "code": "491630",
+      "name": "RISE 미국반도체인버스(합성 H)",
       "market": null,
       "type": "ETF"
     },
     {
-      "code": "491630",
-      "name": "RISE 미국반도체인버스(합성 H)",
+      "code": "252410",
+      "name": "RISE 200선물인버스",
       "market": null,
       "type": "ETF"
     },
