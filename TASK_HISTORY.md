@@ -2427,16 +2427,32 @@
      실적으로만 뒷받침(아래 "진행 예정" 참고).
 
 
+152. **🏷️ 코스피/코스닥 시장 라벨 화면 표시 (2026-08-26, #151 즉시 후속 — 오너 요청
+     "라벨이 있으면 더 좋긴하지 그것까지 보여놔줘").** #151에서 계산은 해두고도
+     `enrich_quant_metrics()`가 최종 저장 dict를 새로 짜면서 조용히 버리고 있던
+     `market`/`market_cap` 필드를, `rank`/`is_visible`과 같은 방식(`s.get()`)으로
+     최종 스냅샷까지 이어주는 것부터 시작.
+     `web/components/html.py`에 `market_label_html()` 신설(코스피=파랑, 코스닥=보라
+     배지, §0-3-10 재사용 — pegy·결투 두 화면이 같이 씀) — 재무제표 읽기 화면의
+     정상/차단 카드 헤더 양쪽에 적용. 결투 게임의 "종목 빠른 검색" 드롭다운은
+     `ui.select()`라 HTML 배지를 못 그려서 "[코스피]"/"[코스닥]" 텍스트 접미사로
+     대체 처리. `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS`에도 `market`
+     컬럼을 추가해 CSV/JSON 다운로드에도 노출(값 없는 구버전 스냅샷은 빈 칸 —
+     §0-1, 지어내지 않음).
+     작업 중 `tests/test_web_session_isolation.py`의 [1] 전역 가변상태 검사가
+     새 전역 `_MARKET_SUFFIX_TEXT`(고정 문자열 2개짜리 상수표)를 잡아내 즉시
+     `ALLOWED_MUTABLE_GLOBALS`에 사유와 함께 등록(§0-3-8) — 이 검사가 정확히
+     의도대로 작동함을 재확인.
+     신규 테스트 4건(collector_kospi200.py의 market/market_cap 보존 2건,
+     stock_history.py의 컬럼 존재·round-trip 2건) 추가. 전체 pytest 스위트
+     회귀 없음 확인(`7 failed, 1450 passed, 5 skipped, 9 errors` — #151과 동일
+     시그니처, 신규 테스트만큼만 증가). 커밋 `33ae5a0`.
+
 ## 진행 예정 (백로그)
 
 - 코스닥(sosok=1) 네이버 시세 테이블 구조가 코스피와 동일하다는 가정(#151) — 사고
   이후 첫 실제 GitHub Actions 실행 결과를 반드시 확인. `workflow_run` 트리거(#150)
   실동작도 같은 첫 실행에서 함께 확인.
-- `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS`에 시장 구분(코스피/코스닥)
-  필드를 추가해 이력 CSV/JSON 내보내기에도 노출할지 — #151에서 `market`/
-  `market_cap` 필드는 계산은 되지만 `enrich_quant_metrics`가 최종 저장 dict를
-  새로 짜면서 함께 넘기지 않아 현재는 버려짐. 화면 표시가 굳이 필요하다는 요청은
-  아직 없어 임의로 추가하지 않음 — 오너 판단 필요.
 - `tests/test_scorecard.py`(약 1464·1469행), `tests/test_duel_page_usd.py`(약
   1749행)에 남아있는 "코스피 상위 200" 표현 — 테스트 정확성에는 영향 없는 순수
   코멘트/독스트링이라 #151에서는 보류. 정리하고 싶으면 언제든 요청.
