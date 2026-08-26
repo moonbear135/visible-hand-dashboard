@@ -14,19 +14,47 @@
 # -----------------------------------------------------------------------------
 # ✅ 2026-08-20 — 아래 cron 시각을 실제 `scrape.yml`(사용자 device_bash로 직접 확인)과
 #    대조했습니다. 실제 `scrape.yml`: name="Daily Market Scraper", cron '5 7 * * 1-5'
-#    (= UTC 07:05 = KST 16:05 시작), 실측 소요 20~30분 → 늦어도 UTC 07:40(KST 16:40) 종료.
+#    (= UTC 07:05 = KST 16:05 시작), 당시 실측 소요 20~30분 → 늦어도 UTC 07:40(KST 16:40) 종료.
 #    이 파일의 cron(UTC 08:10 = KST 17:10)은 그 뒤 약 30분 여유를 두고, 주문 접수 시작
 #    (18:00:01 KST)보다 50분 앞서 끝나도록 잡은 것이었는데, 실제 파일과 대조해보니
-#    **그대로 맞았습니다.** 별도 수정 필요 없음.
+#    당시엔 그대로 맞았습니다.
 #
-#    남은 확인 사항 2가지:
-#    1) 더 안전한 대안 — 작업지시서 2-5 는 **별도 cron 보다 `workflow_run`**
-#       (= `scrape.yml` 완료를 조건으로 실행)을 권합니다. 실제 `scrape.yml`의 name 값
-#       ("Daily Market Scraper")을 위에서 이미 확인했으니, 아래 주석 처리된 대안으로
-#       바꾸고 싶으면 그 값을 그대로 쓰면 됩니다.
-#    2) 커밋 되돌림 충돌. `scrape.yml`이 같은 `data/` 폴더를 커밋하므로, 두 워크플로우가
-#       겹치면 push가 거절될 수 있습니다. 아래 push 단계는 기존 워크플로우들과 같은
-#       "fetch + rebase 재시도" 패턴을 씁니다(실제 `scrape.yml`에서 그대로 확인한 패턴).
+# 🔴 2026-08-26 — `workflow_run` 트리거 추가(오너 요청, DUEL_MODULE_WORK_ORDER.md 2-5
+#    본래 권장 방식). 계기: "재무제표 읽기"(코스피 시가총액 상위 200 → 코스피+코스닥 통합
+#    상위 500 확대) 작업 검토 중, 종목 수가 2.5배로 늘면 `scrape.yml` 실측 소요가 20~30분에서
+#    더 늘어날 수 있고(정확한 새 수치는 아직 실측 전), 그러면 위 cron(17:10)이 전제로 삼은
+#    "scrape.yml은 16:40쯤 끝나 있다"는 가정이 깨져 **이 배치가 '오늘 데이터'가 아니라
+#    '어제 데이터'로 조용히 잘못 판정할 위험**이 있다고 오너가 지적. 에러 없이 틀린 날짜로
+#    처리되는 쪽이라 cron 시각을 넉넉히 미루는 것만으로는 근본 해결이 안 됨(scrape.yml 소요는
+#    매일 일정하지 않고, 미래에 종목 수가 또 늘면 같은 문제가 재발함 — 정확히 같은 이유로
+#    `indicator_kr.yml`도 별도 워크플로우로 분리했던 전례가 있음, TECHNICAL_INDICATOR_WORK_ORDER.md §7).
+#
+#    그래서 **cron 은 그대로 안전망으로 남기고**, `scrape.yml`("Daily Market Scraper") 완료를
+#    조건으로 하는 `workflow_run` 을 주 트리거로 추가합니다. 평소엔 scrape.yml이 몇 분이
+#    걸리든 상관없이 "진짜 끝난 직후"에 이 배치가 시작되고, 혹시 그날 scrape.yml의 cron
+#    자체가 안 돌았다면(정각 혼잡으로 스케줄이 씹히는 경우가 실제로 있음 — scrape.yml 자체
+#    주석 참고) workflow_run 이 아예 안 와도 기존 17:10 cron 이 그대로 돌아 ①번 신선도 점검이
+#    발동합니다(무변동 종목이 허용치를 넘으면 needs_review 로 보류 — 기존 안전장치 그대로 유지).
+#    같은 날 cron·workflow_run 이 둘 다 걸려 두 번 처리돼도 배치 자체가 멱등이라 데이터는
+#    안 깨집니다(위 concurrency 참고, push 재시도만 한 번 더 돎).
+#
+#    job 조건은 아래처럼 잡았습니다:
+#      `github.event_name != 'workflow_run' || (conclusion == 'success' && event == 'schedule')`
+#    · `event_name != 'workflow_run'` — cron/workflow_dispatch로 직접 불렸을 때는 기존과
+#      완전히 동일하게 항상 실행(이 조건 자체가 워크플로우_run 트리거에만 해당하므로).
+#    · `conclusion == 'success'` — scrape.yml이 도중에 실패(코스피 데이터 수집 실패 등)했으면
+#      새 데이터가 커밋되지 않았으므로 이번엔 건너뜁니다(다음 cron 때 그때 상태로 재판정).
+#    · `event == 'schedule'` — scrape.yml 은 `workflow_dispatch`(과거 날짜 백필용, `target_date`
+#      입력 시 코스피 수집 자체를 건너뜀)로도 수동 실행될 수 있습니다. 그 백필 실행은 코스피
+#      데이터를 새로 안 가져오는데도 워크플로우 자체는 성공으로 끝날 수 있어, 필터링 안 하면
+#      "코스피 데이터는 그대로인데 결투 배치만 괜히 한 번 더 깨어남" 이 됩니다. 위험하진
+#      않지만(멱등) 불필요한 실행이라 `event == 'schedule'`(scrape.yml이 원래 자기 cron으로
+#      돌았을 때만)로 걸러냅니다.
+#    ⚠️ `actions/checkout` 은 `ref` 를 안 주면 이 워크플로우 파일이 있는 브랜치(main)의 **그
+#    시점 최신 커밋**을 받아옵니다 — scrape.yml이 방금 push한 커밋이 그대로 딸려 옵니다(둘 다
+#    같은 main 브랜치에서만 도는 워크플로우라 `head_sha` 를 따로 고정할 필요가 없습니다).
+#    실제 GitHub Actions 실행에서 이 연결이 의도대로 동작하는지는 이번 merge 이후 첫 실행을
+#    보고 확인 필요(§0-1 — 이 샌드박스에서 실제 workflow_run 이벤트를 발생시켜볼 수는 없음).
 # =============================================================================
 
 name: Duel Daily Batch
@@ -34,8 +62,16 @@ name: Duel Daily Batch
 on:
   schedule:
     # 평일 08:10 UTC = KST 17:10 (코스피 수집 16:05 완료 후, 주문 접수 18:00:01 시작 전).
-    # ✅ 실제 scrape.yml(cron '5 7 * * 1-5' = KST 16:05, 실측 20~30분 소요)과 대조 완료.
+    # ✅ 실제 scrape.yml(cron '5 7 * * 1-5' = KST 16:05, 2026-08-20 당시 실측 20~30분 소요)과
+    #    대조 완료. 2026-08-26부터는 아래 workflow_run 이 주 트리거이고, 이 cron 은 scrape.yml
+    #    자체가 그날 안 돌았을 때를 대비한 안전망으로 남겨둡니다(위 2026-08-26 코멘트 참고).
     - cron: "10 8 * * 1-5"
+  # scrape.yml("Daily Market Scraper")이 끝나면 그 결과를 조건으로 곧바로 실행 (2026-08-26 추가).
+  # 위 cron 처럼 "몇 시쯤 끝나 있겠지"를 추정할 필요 없이, scrape.yml이 몇 분이 걸리든 항상
+  # "진짜 끝난 직후"에 시작합니다. 어떤 조건으로 실제 처리를 걸렀는지는 아래 job 의 if 참고.
+  workflow_run:
+    workflows: ["Daily Market Scraper"]
+    types: [completed]
   # 수동 실행. needs_review 로 보류된 날을 관리자가 확인한 뒤 결론 내릴 때도 씁니다.
   workflow_dispatch:
     inputs:
@@ -55,13 +91,6 @@ on:
         default: false
         type: boolean
 
-# ⚠️ 더 안전한 대안(작업지시서 2-5 권장) — 실제 scrape.yml 의 name 을 확인한 뒤 바꾸세요.
-#   on:
-#     workflow_run:
-#       workflows: ["<scrape.yml 의 name 값>"]
-#       types: [completed]
-#   그리고 job 에 `if: github.event.workflow_run.conclusion == 'success'` 를 붙입니다.
-
 # 기준값 파일(data/duel_freshness_probe_previous.json)을 저장소에 되커밋하므로 쓰기 권한이
 # 필요합니다. 그 외 권한은 주지 않습니다(최소 권한).
 permissions:
@@ -77,6 +106,12 @@ jobs:
   duel-batch:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # 2026-08-26 — workflow_run 으로 깨어났을 때만 거릅니다(cron·workflow_dispatch 로 직접
+    # 불렸을 때는 이 조건 자체가 항상 참이라 기존과 동일하게 무조건 실행). 상세 근거는 위
+    # 2026-08-26 코멘트 참고.
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' && github.event.workflow_run.event == 'schedule')
 
     steps:
       - name: 저장소 체크아웃
