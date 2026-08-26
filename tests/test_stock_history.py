@@ -166,6 +166,26 @@ def test_field_spec():
     check("beta" in u_map and "piotroski_f" in u_map, "미국 전용 지표(베타·F-Score) 포함")
     check("beta" not in k_map, "코스피에는 베타 컬럼을 만들지 않음(수집하지 않는 값)")
 
+    # 2026-08-26 신설 — 코스피+코스닥 통합 500 확대(오너 후속 요청 "라벨이 있으면 더
+    # 좋긴하지 그것까지 보여놔줘") 후 코스피 파일에만 market 컬럼이 있어야 함.
+    check("market" in k_map, "코스피 파일에 시장구분(market) 컬럼이 있음")
+    check("market" not in u_map, "미국 파일에는 시장구분 컬럼이 없음(코스피/코스닥 구분이 의미 없는 시장)")
+
+
+def test_market_field_round_trips_and_defaults_to_blank_when_absent():
+    """market 필드가 있으면 그대로, 없으면(구버전 스냅샷 등) 값을 지어내지 않고 빈 칸(§0-1)."""
+    print("\n[1-b] market 필드 — 값이 있으면 그대로, 없으면 빈 칸")
+    with_market = {"rank": 1, "name": "테스트코스닥종목", "code": "999999", "price": 1000,
+                   "market": "KOSDAQ"}
+    without_market = {"rank": 2, "name": "구버전스냅샷종목", "code": "888888", "price": 2000}
+
+    row_with = build_history_row(with_market, "2026-08-26", KOSPI_HISTORY_FIELDS)
+    row_without = build_history_row(without_market, "2026-08-26", KOSPI_HISTORY_FIELDS)
+
+    check(row_with["market"] == "KOSDAQ", "market 필드가 있으면 값을 그대로 내보냄", f"→ {row_with['market']!r}")
+    check(row_without["market"] == "", "market 필드가 없으면 빈 칸(모름을 지어내지 않음)",
+          f"→ {row_without['market']!r}")
+
 
 # =============================================================================
 # 2. 실제 스냅샷 -> 이력 행 변환

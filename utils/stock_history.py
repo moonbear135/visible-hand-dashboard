@@ -94,6 +94,10 @@ KOSPI_HISTORY_FIELDS = [
     ("rank",          "시가총액 순위",                 "num"),
     ("name",          "종목명",                       "text"),
     ("code",          "종목코드",                     "text"),
+    # 2026-08-26 신설(TASK_HISTORY #151 후속, 오너 요청 — "라벨이 있으면 더 좋긴하지
+    # 그것까지 보여놔줘"). collector_kospi200.py가 이미 계산해 저장해 둔 값을 그대로
+    # 내보낼 뿐이며, 값이 없는(구버전 스냅샷 등) 종목은 빈 칸으로 정직하게 남습니다(§0-1).
+    ("market",        "시장구분(KOSPI/KOSDAQ)",          "text"),
     ("price",         "현재가(원)",                   "num"),
     ("quant_score",   "퀀트 스코어(획득)",             "num"),
     ("score_max",     "퀀트 스코어(만점)",             "num"),

@@ -161,6 +161,66 @@ def test_hysteresis_new_stock_in_buffer_zone_without_history_is_excluded():
     assert "C0501" not in {c["code"] for c in tracked}
 
 
+# ──────────────────────────────────────────────────────────────
+# enrich_quant_metrics — market / market_cap 필드 보존 (2026-08-26 오너 후속 요청:
+# "라벨이 있으면 더 좋긴하지 그것까지 보여놔줘" — 화면에 코스피/코스닥 라벨을 붙이려면
+# 먼저 이 함수가 값을 버리지 않고 최종 stock_dict까지 이어줘야 함)
+# ──────────────────────────────────────────────────────────────
+
+def _mock_naver_item():
+    """fetch_naver_item_dps_and_eps()가 정상 수집했을 때 돌려주는 형태를 흉내낸 합성 값."""
+    return {
+        "t_per": 12.5, "t_eps": 4000, "f_per": 10.0, "f_eps": 5000,
+        "div_yield": 2.0, "dps": 200, "outstanding_shares": 10_000_000,
+        "t_pbr": 1.2, "ev_ebitda": 8.0, "f_roe": 15.0, "raw_period": "2026.12(E)",
+        "dps_status": "collected", "dps_inherited_from": None, "errors": [],
+    }
+
+
+def test_enrich_quant_metrics_preserves_market_label_and_market_cap(monkeypatch):
+    """
+    _rank_candidates_by_market_cap()이 채운 "market"/"market_cap"과 apply_hysteresis_buffer()가
+    채운 "rank"/"is_visible"은 같은 방식(s.get())으로 최종 stock_dict까지 이어져야 합니다.
+    이 값들이 조용히 사라지면 화면에 코스피/코스닥 라벨을 못 붙입니다 — 그게 이번 회귀의 요지.
+    """
+    monkeypatch.setattr(K, "fetch_naver_item_dps_and_eps", lambda code: _mock_naver_item())
+    monkeypatch.setattr(K, "fetch_recent_volatility", lambda code: 15.0)
+    monkeypatch.setattr(K.time, "sleep", lambda *_a, **_kw: None)  # 테스트 속도(polite-scraping 대기 스킵)
+
+    stocks_raw = [
+        {
+            "code": "247540", "name": "에코프로비엠", "price": 150_000,
+            "t_per": 30.0, "t_roe": 10.0,
+            "market": "KOSDAQ", "market_cap": 150_000 * 10_000_000,
+            "rank": 42, "is_visible": True,
+        }
+    ]
+
+    enriched = K.enrich_quant_metrics(stocks_raw, shares_lookup={"247540": 10_000_000})
+
+    assert len(enriched) == 1
+    out = enriched[0]
+    assert out["market"] == "KOSDAQ"
+    assert out["market_cap"] == 150_000 * 10_000_000
+    assert out["rank"] == 42
+    assert out["is_visible"] is True
+
+
+def test_enrich_quant_metrics_market_is_none_when_absent_from_input():
+    """market 필드가 없는(구버전 스냅샷 등) 입력이면 값을 지어내지 않고 None으로 정직하게 둡니다."""
+    import unittest.mock as mock
+    with mock.patch.object(K, "fetch_naver_item_dps_and_eps", lambda code: _mock_naver_item()), \
+         mock.patch.object(K, "fetch_recent_volatility", lambda code: 15.0), \
+         mock.patch.object(K.time, "sleep", lambda *a, **kw: None):
+        stocks_raw = [
+            {"code": "005930", "name": "삼성전자", "price": 70_000, "t_per": 12.0, "t_roe": 9.0}
+        ]
+        enriched = K.enrich_quant_metrics(stocks_raw, shares_lookup={"005930": 5_000_000_000})
+
+    assert enriched[0]["market"] is None
+    assert enriched[0]["market_cap"] is None
+
+
 def test_hysteresis_respects_custom_thresholds():
     """entry_rank/exit_rank를 명시적으로 넘기면(과거 200/230 등) 그 값을 그대로 존중해야 합니다."""
     candidates = _make_ranked_candidates(230)

@@ -773,17 +773,27 @@ async def _load_broad_price_fallbacks() -> dict:
     return {"broad_kr_prices": broad_kr_prices, "broad_us_prices": broad_us_prices}
 
 
+_MARKET_SUFFIX_TEXT = {"KOSPI": " [코스피]", "KOSDAQ": " [코스닥]"}
+
+
 def _universe_options(index: dict) -> dict:
-    """빠른 검색 후보 {티커: "티커 · 종목명"} — 코스피 상위 200 **안에서만**.
+    """빠른 검색 후보 {티커: "티커 · 종목명"} — 코스피+코스닥 상위 500 **안에서만**.
 
     라벨에 티커를 앞세우는 이유는 '내 성적표'의 `_candidate_options()` 와 같습니다(이름만
     넣으면 코드 검색이 철자 순서에 우연히 걸리는 종목까지 잡습니다).
+
+    2026-08-26 신설 — `ui.select()` 드롭다운은 순수 텍스트라 `market_label_html()` 같은
+    HTML 배지를 못 씁니다. 대신 `collector_kospi200.py`가 채워둔 `market` 필드가 있으면
+    "[코스피]"/"[코스닥]" 텍스트 접미사를 붙입니다. 미국 유니버스(이 함수를 통화 무관하게
+    재사용 — 아래 참고)나 이 필드가 없는 구버전 스냅샷은 접미사 없이 그대로입니다(§0-1 —
+    모르는 값을 지어내지 않음).
     """
     options = {}
     for ticker, stock in (index or {}).items():
         name = (stock or {}).get("name")
         if name:
-            options[ticker] = f"{ticker} · {name}"
+            suffix = _MARKET_SUFFIX_TEXT.get((stock or {}).get("market"), "")
+            options[ticker] = f"{ticker} · {name}{suffix}"
     return dict(sorted(options.items(), key=lambda kv: kv[1]))
 
 

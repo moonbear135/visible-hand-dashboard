@@ -54,6 +54,7 @@ from web.components import (
     graham_unavailable_box,
     info_banner,
     loss_banner_html,
+    market_label_html,
     pager,
     quality_badge,
     quant_score_badge,
@@ -184,6 +185,7 @@ def build_blocked_card_html(s, rank_num) -> str:
                 {rank_prefix_html(rank_num)}
                 <span style="font-size: 22px; font-weight: 800; color: {badge_fg};">{esc(s.get('name') or '종목명 없음')}</span>
                 <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({esc(s.get('code'))})</span>
+                {market_label_html(s.get('market'))}
                 <span style="background-color: {badge_bg}; color: {badge_fg}; font-size: 12px; font-weight: 700; padding: 4px 12px; border-radius: 12px; border: 1px solid {badge_border}; white-space: nowrap;">
                     {badge_label}
                 </span>
@@ -559,6 +561,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
                      전체의 가로 스크롤 폭이 넓어집니다. span 안에서도 줄바꿈되게 normal 로 둡니다. -->
                 <span style="font-size: 24px; font-weight: 800; color: #f8fafc; white-space: normal; overflow-wrap: break-word; max-width: 260px;">{esc(s.get('name') or '종목명 없음')}</span>
                 <span style="font-size: 14px; color: #94a3b8; font-weight: 600;">({esc(s.get('code'))})</span>
+                {market_label_html(s.get('market'))}
                 <!-- 퀀트 종합점수 뱃지 -->
                 <span style="background: linear-gradient(135deg, #b45309 0%, #78350f 100%); color: #fef08a; font-size: 12.5px; font-weight: 800; padding: 4px 11px; border-radius: 12px; border: 1px solid #fde047; white-space: nowrap;">
                     <span class="vh-tooltip" tabindex="0" style="color: #fef08a;">🏆 퀀트 스코어 ℹ️<span class="vh-tooltiptext"><b>종합 퀀트 스코어</b><br>이 회사가 얼마나 돈을 잘 벌고, 주주에게 잘 나눠주고, 가격이 싼지를 종합적으로 채점한 점수예요!<br>수집하지 못한 지표는 점수를 지어내지 않고 배점에서 아예 제외합니다.<br>{score_tooltip_extra}</span></span> {score_badge_html}

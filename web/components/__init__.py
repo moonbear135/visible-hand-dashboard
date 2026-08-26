@@ -25,6 +25,7 @@ from web.components.html import (  # noqa: F401
     holdings_table_html,
     info_badge,
     loss_banner_html,
+    market_label_html,
     pct_html,
     pct_text,
     quality_badge,

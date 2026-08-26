@@ -1480,9 +1480,15 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             # 히스테리시스 버퍼 적용 시 apply_hysteresis_buffer()가 매긴 실제 시가총액 순위를 그대로 쓰고,
             # (버퍼 미적용 구snapshot 등) rank 필드가 없으면 기존처럼 리스트 순서(idx+1)로 대체합니다.
             "rank": s.get("rank", idx + 1),
-            # 화면(공개 페이지)에 보여줄지 여부. 200위 이내면 True, 히스테리시스 버퍼 구간(201~230위)에서
+            # 화면(공개 페이지)에 보여줄지 여부. 500위 이내면 True, 히스테리시스 버퍼 구간(501~575위)에서
             # "이탈 확정 전까지 계속 수집만 하고 화면에는 숨김" 상태면 False.
             "is_visible": s.get("is_visible", True),
+            # 2026-08-26 신설: 코스피/코스닥 통합 500종목 확대(오너 요청)로 어느 시장 소속인지
+            # 화면에 라벨로 보여달라는 후속 요청. fetch_kospi200_real_market_data()가 이미
+            # 채워둔 값을 rank/is_visible과 같은 방식으로 그대로 이어받습니다(계산 없음, §0-1).
+            # 구버전 스냅샷 등 이 필드가 없는 입력은 None(=알 수 없음)으로 정직하게 둡니다.
+            "market": s.get("market"),
+            "market_cap": s.get("market_cap"),
             "name": name,
             "code": code,
             "price": price,

@@ -186,6 +186,31 @@ def rank_prefix_html(rank_num) -> str:
     )
 
 
+def market_label_html(market) -> str:
+    """코스피/코스닥 구분 라벨 배지 (2026-08-26 신설).
+
+    코스피+코스닥 통합 상위 500 확대(TASK_HISTORY #151) 후 오너 요청 — "라벨이 있으면
+    더 좋긴하지 그것까지 보여놔줘". `collector_kospi200.py`가 이미 계산해 저장해 둔
+    `market` 필드("KOSPI"/"KOSDAQ")를 그대로 표시만 합니다(여기서 판정하지 않음).
+
+    구버전 스냅샷 등 `market` 필드 자체가 없는(None) 입력은 값을 지어내지 않고
+    빈 문자열을 돌려줍니다(§0-1) — "코스피"라고 임의로 채우지 않습니다.
+    """
+    if market == 'KOSPI':
+        return (
+            '<span style="background-color: #1e3a5f; color: #7dd3fc; font-size: 11px; '
+            'font-weight: 700; padding: 3px 9px; border-radius: 8px; border: 1px solid '
+            '#38bdf8; white-space: nowrap;">코스피</span>'
+        )
+    if market == 'KOSDAQ':
+        return (
+            '<span style="background-color: #3b1e5f; color: #d8b4fe; font-size: 11px; '
+            'font-weight: 700; padding: 3px 9px; border-radius: 8px; border: 1px solid '
+            '#a855f7; white-space: nowrap;">코스닥</span>'
+        )
+    return ''
+
+
 def quality_badge(state: str) -> str:
     """자본효율성(착시 저평가) 배지.
 
