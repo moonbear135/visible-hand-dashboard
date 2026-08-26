@@ -37,6 +37,37 @@
       "delta_raw_lines_appended": 11,
       "unexpected_report_regressions": [],
       "delta_out_dir": "data/cache/watch_delta"
+    },
+    {
+      "checked_at_kst": "2026-08-27T07:54:40.131899+09:00",
+      "date_range_checked": "20260826~20260826",
+      "matched_stock_codes": [
+        "0013V0",
+        "066360",
+        "100660",
+        "282620",
+        "372910",
+        "389470",
+        "419080",
+        "478560",
+        "900250"
+      ],
+      "matched_stock_codes_source": "호출부가 전달한 list.json 매칭 결과",
+      "replaced_stock_codes": [
+        "0013V0",
+        "066360",
+        "100660",
+        "282620",
+        "372910",
+        "389470",
+        "419080",
+        "478560",
+        "900250"
+      ],
+      "added_stock_codes": [],
+      "delta_raw_lines_appended": 18,
+      "unexpected_report_regressions": [],
+      "delta_out_dir": "data/cache/watch_delta"
     }
   ]
 }
