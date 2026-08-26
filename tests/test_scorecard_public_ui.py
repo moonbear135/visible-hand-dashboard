@@ -1195,6 +1195,10 @@ def test_public_screens_appear_one_at_a_time_inside_the_duel_group():
     트래시토크 톤으로 다시 정리하려는 순전한 UX 결정이고, 켜고 끄는 스위치(§0-3-6 기본
     숨김 · 결투와 무관하게 독립)는 하나도 안 바뀌었습니다 — 이 테스트 이름도 그 자리를
     따라 바꿨습니다.
+
+    🔁 2026-08-26 (오너 요청) — 그 그룹 이름이 다시 `⚔️ 내 밑으로 눈 깔어` →
+    `⚔️ 수익률 비교`로 바뀌었습니다(`web/layout.py` 상위 그룹명 3개 일괄 정리). 역시
+    그룹명만 바뀐 것이라 아래 단언(assert)의 항목·라벨·스위치는 전부 그대로입니다.
     """
     only_consent = _menu_with(SCORECARD_CONSENT_ENABLED="true")
     assert "/scorecard/consent" in only_consent
@@ -1210,10 +1214,11 @@ def test_public_screens_appear_one_at_a_time_inside_the_duel_group():
 
     import web.layout as layout_module
 
-    # 두 항목이 붙는 자리는 `⚔️ 내 밑으로 눈 깔어` 그룹이고, 라벨도 오너 지정 문구
-    # ("공개 동의 관리(= 다 덤벼 신청서)" / "다 덤벼!")로 바뀌었습니다. 관리자전용 플래그는
-    # 그 화면 자신의 스위치(`SCORECARD_*_MENU_ADMIN_ONLY`)를 그대로 따라갑니다.
-    with_flags = _menu_group_items("⚔️ 내 밑으로 눈 깔어", SCORECARD_CONSENT_ENABLED="true",
+    # 두 항목이 붙는 자리는 `⚔️ 수익률 비교`(2026-08-26 이전 이름 `⚔️ 내 밑으로 눈 깔어`)
+    # 그룹이고, 라벨도 오너 지정 문구("공개 동의 관리(= 다 덤벼 신청서)" / "다 덤벼!")로
+    # 바뀌었습니다. 관리자전용 플래그는 그 화면 자신의 스위치
+    # (`SCORECARD_*_MENU_ADMIN_ONLY`)를 그대로 따라갑니다.
+    with_flags = _menu_group_items("⚔️ 수익률 비교", SCORECARD_CONSENT_ENABLED="true",
                                    SCORECARD_LEADERBOARD_ENABLED="true")
     assert with_flags == [
         ("/scorecard/consent", "🔓 공개 동의 관리(= 다 덤벼 신청서)",
@@ -1222,8 +1227,9 @@ def test_public_screens_appear_one_at_a_time_inside_the_duel_group():
          layout_module.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY),
     ]
 
-    # `📊 보유종목` 은 이제 이 두 항목 없이 `/scorecard`·`/report` 만 남습니다.
-    scorecard_group = _menu_group_items("📊 보유종목", SCORECARD_CONSENT_ENABLED="true",
+    # `📊 내 수익률 관리`(2026-08-26 이전 이름 `📊 보유종목`) 는 이제 이 두 항목 없이
+    # `/scorecard`·`/report` 만 남습니다.
+    scorecard_group = _menu_group_items("📊 내 수익률 관리", SCORECARD_CONSENT_ENABLED="true",
                                         SCORECARD_LEADERBOARD_ENABLED="true")
     assert [path for path, _l, _a in scorecard_group] == ["/scorecard", "/report"]
 
