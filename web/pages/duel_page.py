@@ -664,11 +664,11 @@ def _order_side_text(order: dict) -> str:
 #     프로세스 전역 캐시(`web/state.py`)를 써도 안전합니다. 사용자별 데이터(계좌·주문·현금)는
 #     절대 이 경로로 흐르지 않습니다.
 #  ⚠️ 유니버스 목록을 이 파일이 새로 파싱하지 않습니다 — '내 성적표'가 이미 쓰는
-#     `scorecard_db.build_universe_index()` 를 **그대로** 씁니다(§0-3-10 — 코스피 상위 200
-#     목록을 읽는 두 번째 경로를 만들지 않습니다).
+#     `scorecard_db.build_universe_index()` 를 **그대로** 씁니다(§0-3-10 — 코스피+코스닥
+#     통합 상위 500 목록을 읽는 두 번째 경로를 만들지 않습니다).
 # =============================================================================
 async def _load_kospi_universe() -> dict:
-    """코스피 상위 200 유니버스 인덱스 + 메타데이터. 파일이 없으면 인덱스가 빈 dict 입니다.
+    """코스피+코스닥 통합 상위 500 유니버스 인덱스 + 메타데이터. 파일이 없으면 인덱스가 빈 dict 입니다.
 
     반환 dict 에는 **사용자 데이터가 한 조각도 없습니다** — 종목명·종가뿐이라 함수 사이로
     자유롭게 넘겨도 §0-3-8 위반이 아닙니다.
@@ -1176,7 +1176,7 @@ async def _render_body(client, user_id: str, email) -> None:
     market = await _load_kospi_universe()          # 읽기 전용 시세 (사용자 데이터 아님)
     if not market["index"]:
         error_banner(
-            '🚫 코스피 상위 200 종목 스냅샷(data/kospi200_pegy_latest.json)을 읽지 못했습니다. '
+            '🚫 코스피+코스닥 통합 상위 500 종목 스냅샷(data/kospi200_pegy_latest.json)을 읽지 못했습니다. '
             '주문 가능 종목 목록과 보유 종목 평가금액을 표시할 수 없습니다 — 값을 추정하지 않습니다.'
         )
 
@@ -1458,7 +1458,7 @@ def _render_opt_in(client, user_id: str, on_changed) -> None:
             f'- 이후 매월 {MONTHLY_DEPOSIT_DAY}일에 세 계좌 각각 '
             f'{format_amount(MONTHLY_DEPOSIT_KRW, CURRENCY)}씩'
             f'(월 합계 {format_amount(monthly_total, CURRENCY)}) 추가 입금됩니다.\n'
-            '- 거래는 **코스피 상위 200종목·원화**만 다룹니다. 매수는 예수금이 있으면 '
+            '- 거래는 **코스피+코스닥 통합 상위 500종목·원화**만 다룹니다. 매수는 예수금이 있으면 '
             '언제든 할 수 있고, **매도**는 계좌마다 정해진 리밸런싱 주기'
             f'({REBALANCE_WINDOW_TEXT}) 안에서 **딱 1회**씩 할 수 있습니다.\n'
             '- **배당금은 반영되지 않습니다.** 주문은 저장 즉시 체결되지 않고 '
@@ -2195,7 +2195,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
     index = market["index"]
     ui.markdown('#### 🛒 주문하기')
     ui.label(
-        f'코스피 상위 종목만, 원화로만, 주식 수 단위로 주문합니다. '
+        f'코스피+코스닥 상위 종목만, 원화로만, 주식 수 단위로 주문합니다. '
         f'현재 주문 가능 목록에는 {len(index)}종목이 있습니다.'
     ).classes('vh-muted')
     ui.label(f'⏱️ {NOTICE_FILL_TIMING}').classes('vh-muted')
@@ -2299,7 +2299,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
 
     ui.select(
         _universe_options(index), with_input=True, clearable=True, on_change=_picked,
-        label='🔍 종목 빠른 검색 (코스피 상위 200 — 코드·이름 아무거나 입력)',
+        label='🔍 종목 빠른 검색 (코스피+코스닥 상위 500 — 코드·이름 아무거나 입력)',
     ).classes('w-full')
 
     query_input = ui.input(
@@ -2331,7 +2331,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         stock = index.get(ticker)
         if not stock:
             return None, None, (
-                f'{ticker}은(는) 코스피 상위 종목 목록에 없습니다 — 이 모듈은 상위 종목만 '
+                f'{ticker}은(는) 코스피+코스닥 상위 종목 목록에 없습니다 — 이 모듈은 상위 종목만 '
                 '주문할 수 있습니다.'
             )
         resolved_name = stock.get("name") or name

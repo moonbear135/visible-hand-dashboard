@@ -77,7 +77,7 @@ SUMMARY_HISTORY_FILENAME = "pegy_summary_history.json"
 ITEMS_PER_PAGE = 20
 
 FILTER_PRESETS = [
-    "🌐 전체 종목 보기 (200개 코스피)",
+    "🌐 전체 종목 보기 (500개 코스피+코스닥)",
     "🟢 저평가 우량주 그룹 (강력저평가 + 저평가)",
     "🟡 적정가 형성 그룹 (적정가 + 목표달성)",
     "🔴 고평가 / 주의 종목 그룹 (고평가 + 역성장 + 주의)",
@@ -718,7 +718,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     _render_raw_downloads(admin)
     render_summary_metrics(all_stocks, summary_history, (
         "타겟 중앙 Forward PER",
-        "코스피 대표 EPS 성장률 (컨센서스 EPS 기준)",
+        "국내 대표 EPS 성장률 (컨센서스 EPS 기준)",
         "시장 적정 밸류에이션 (PEGY)",
     ))
 
@@ -866,7 +866,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         view['page'] = current_page
 
         ui.markdown(
-            f'**전체 검색/필터 결과:** `{total_items}`개 종목 (총 {len(all_stocks)}개 KOSPI 종목 중)'
+            f'**전체 검색/필터 결과:** `{total_items}`개 종목 (총 {len(all_stocks)}개 국내(코스피+코스닥) 종목 중)'
         )
         ui.separator()
 
@@ -932,7 +932,7 @@ _TITLE_HEAD = """
 """
 
 _TITLE_TAIL = """
-    <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피 시가총액 상위 200개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외하므로, 각 카드에 '획득점수 / 그 종목의 만점 (달성률%)'로 표기됩니다)</span></div>
+    <div style="font-size: 15.5px; color: #64748b; font-weight: 600; margin-top: 6px;">코스피+코스닥 통합 시가총액 상위 500개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외하므로, 각 카드에 '획득점수 / 그 종목의 만점 (달성률%)'로 표기됩니다)</span></div>
 </div>
 """
 

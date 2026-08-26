@@ -373,7 +373,7 @@ async def _load_market_data() -> dict:
     kr_index, kr_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_KR], MARKET_KR)
     us_index, us_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_US], MARKET_US)
 
-    # 상위 200/550 유니버스 **밖** 종목을 위한 보조 목록들. 밸류에이션은 없고 이름/가격만
+    # 상위 500(한국)/550(미국) 유니버스 **밖** 종목을 위한 보조 목록들. 밸류에이션은 없고 이름/가격만
     # 있습니다 — `indexes` 와 절대 섞지 않습니다(섞으면 "밸류에이션 정보 없음"이라는 정직한
     # 메시지 대신 빈 값투성이 카드가 "찾음"으로 표시됩니다. scorecard_db 주석 참고).
     kr_master, _ = await _load_index(KR_TICKER_MASTER_FILENAME, MARKET_KR)
@@ -563,8 +563,8 @@ async def _render_portfolio(client, user_id: str, market: dict, on_changed) -> N
 def _candidate_options(market_code: str, market: dict) -> dict:
     """빠른 검색 후보 {티커: "티커 · 종목명"}.
 
-    후보는 §0-1 대로 **실제 상장종목 목록에서만** 뽑습니다. 한국은 상위 200 유니버스 +
-    전체 상장종목 마스터(코스피·코스닥·ETF), 미국은 상위 550 유니버스입니다.
+    후보는 §0-1 대로 **실제 상장종목 목록에서만** 뽑습니다. 한국은 코스피+코스닥 통합
+    상위 500 유니버스 + 전체 상장종목 마스터(코스피·코스닥·ETF), 미국은 상위 550 유니버스입니다.
     라벨에 티커를 앞세우는 이유(2026-08-13 오너 지적): 종목명만 넣으면 "XOM" 같은 티커 검색이
     이름의 철자 순서에 우연히 걸리는 종목들까지 잡아버립니다.
     """
@@ -616,7 +616,7 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
     def picker_block() -> None:
         options = _candidate_options(form['market'], market)
         scope = ('코스피·코스닥·국내ETF 전체' if form['market'] == MARKET_KR and market["kr_master"]
-                 else '상위 200/550 종목만')
+                 else '상위 500/550 종목만')
 
         def _picked(event) -> None:
             if event.value:
@@ -1331,7 +1331,7 @@ def _render_currency_block(client, user_id: str, group: dict, market: dict, on_c
         info_banner(
             f'ℹ️ {group["unpriced_count"]}개 종목은 현재가를 알 수 없어(유니버스 밖 또는 수집 실패) '
             f'평가금액·비중 계산에서 빠졌습니다: {", ".join(group["unpriced_tickers"])}. '
-            'v1은 상위 200(한국)/550(미국) 밖 종목의 시세를 조회하지 않습니다 — 추정하지 않고 비웁니다.'
+            'v1은 상위 500(한국)/550(미국) 밖 종목의 시세를 조회하지 않습니다 — 추정하지 않고 비웁니다.'
         )
 
     # 정렬 · 편집 상태는 이 블록의 **지역 상태**입니다 (접속마다·통화마다 별개).

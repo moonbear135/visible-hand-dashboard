@@ -1,6 +1,6 @@
 """
 utils/guardrail.py
-코스피 시가총액 상위 200 및 글로벌 종목 전용 데이터 방공망 (Valuation Guardrail)
+코스피+코스닥 통합 시가총액 상위 500 및 글로벌 종목 전용 데이터 방공망 (Valuation Guardrail)
 
 ⚠️ ENGINEERING_SPEC §0-1 (하드코딩·더미 데이터 금지) 준수 규칙
    - 이 모듈은 상위 단계(DataValidator)의 검증 결과를 **절대 상향(False → True)하지 않습니다.**
@@ -25,7 +25,7 @@ GRAHAM_OUTLIER_MULTIPLE = 5.0
 
 def apply_valuation_guardrail(stock_data: dict) -> dict:
     """
-    코스피 시가총액 상위 200 및 글로벌 종목 전용 데이터 검증 & 하드 컷오프 모듈
+    코스피+코스닥 통합 시가총액 상위 500 및 글로벌 종목 전용 데이터 검증 & 하드 컷오프 모듈
     - PER / 주가 스케일 오류 검증
     - 상장주식수 sanity range check (파싱 오염 탐지)
     - g_eff <= 0 역성장 표시

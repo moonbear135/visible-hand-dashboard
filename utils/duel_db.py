@@ -582,8 +582,8 @@ def save_order(client, account_id, ticker, stock_name, requested_quantity,
        값을 검증할 수 없고, 그대로 두면 사용자가 자기에게 유리한 날짜를 골라 넣는 경로가
        남습니다. 그래서 서버측 계산값으로 **항상** 채웁니다.
 
-    ⚠️ **유니버스 검사는 이 함수의 일이 아닙니다**(작업지시서 2-4-3의 첫 항목). 코스피 상위
-       200 목록은 `data/kospi200_pegy_latest.json` 에서 오고, 그 파일을 읽는 건 화면·수집
+    ⚠️ **유니버스 검사는 이 함수의 일이 아닙니다**(작업지시서 2-4-3의 첫 항목). 코스피+코스닥
+       통합 상위 500 목록은 `data/kospi200_pegy_latest.json` 에서 오고, 그 파일을 읽는 건 화면·수집
        계층의 일입니다. 다만 호출부가 이미 목록을 갖고 있다면 `universe_tickers` 로 넘겨
        한 겹 더 막을 수 있게 열어 뒀습니다(이중 방어). **넘기지 않으면 검사하지 않으며,
        "검사했다"고 가장하지도 않습니다.**
@@ -606,8 +606,8 @@ def save_order(client, account_id, ticker, stock_name, requested_quantity,
 
     if universe_tickers is not None and code not in set(universe_tickers):
         raise DuelDbError(
-            f"{code}은(는) 주문 가능한 코스피 상위 종목 목록에 없습니다."
-            " 이 모듈은 코스피 상위 종목만, 원화로만 거래합니다."
+            f"{code}은(는) 주문 가능한 코스피+코스닥 상위 종목 목록에 없습니다."
+            " 이 모듈은 코스피+코스닥 상위 종목만, 원화로만 거래합니다."
         )
 
     moment = _now_kst(now_kst)

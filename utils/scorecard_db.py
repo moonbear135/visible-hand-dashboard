@@ -691,7 +691,7 @@ def find_ticker_by_name(market, name, indexes):
     # 사유가 되므로, 통화 문제가 아니라는 걸 명시적으로 밝히고 다음 행동(코드 직접 입력)을
     # 알려줍니다. 원인을 확실히 모르면서 단정하지 않도록("정확히 상위 200/550 밖이다"라고는
     # 말하지 않음 — 오타일 수도 있음, §0-1) "~일 수 있습니다"는 그대로 남겨둡니다.
-    universe_label = "코스피 시가총액 상위 200" if market_code == MARKET_KR else "미국 시가총액 상위 550"
+    universe_label = "코스피+코스닥 통합 시가총액 상위 500" if market_code == MARKET_KR else "미국 시가총액 상위 550"
     return None, None, (
         f"이 앱이 추적하는 {universe_label} 목록 안에서는 이 이름과 일치하는 종목을 찾지 "
         "못했습니다 — 통화(원화/달러)를 잘못 선택해서가 아니라, 이 종목 자체가 그 목록 "
@@ -838,7 +838,7 @@ def valuation_summary(market, ticker, indexes):
         return {"found": False, "reason": "종목 코드 형식을 알 수 없습니다."}
     stock = (indexes.get(market_code) or {}).get(key)
     if not stock:
-        universe_label = "코스피 시가총액 상위 200" if market_code == MARKET_KR \
+        universe_label = "코스피+코스닥 통합 시가총액 상위 500" if market_code == MARKET_KR \
             else "미국 시가총액 상위 550"
         return {
             "found": False,

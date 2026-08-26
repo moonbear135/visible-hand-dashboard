@@ -577,7 +577,9 @@ def test_save_order_rejects_ticker_outside_universe_when_universe_given():
         duel_db.save_order(client, "acc-1", "999999", "없는종목", 1,
                            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW,
                            universe_tickers={"005930", "000660"})
-    assert "코스피 상위" in str(excinfo.value)
+    # 2026-08-26: 코스피 단독 상위 200 → 코스피+코스닥 통합 상위 500 확대(오너 요청)에 맞춰
+    # duel_db.py의 에러 문구가 "코스피 상위" → "코스피+코스닥 상위"로 바뀜.
+    assert "코스피+코스닥 상위" in str(excinfo.value)
     assert client.calls == []
 
 

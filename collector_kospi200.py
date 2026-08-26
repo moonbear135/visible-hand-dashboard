@@ -75,7 +75,14 @@ VOL_THRESHOLD_PCT = 2.0              # 일간수익률 표준편차(%) 기준 '�
 # 아니라 시장의 정상 상태이므로, 그보다 더 나빠질 때만 경고가 뜨도록 0.85로 잡고
 # 0.70 미만은 진짜 수집 장애(FAILED 직전)로 구분합니다.
 # =========================================================
-VALID_RATIO_SUCCESS = 0.85   # 이 이상이면 SUCCESS (컨센서스 미커버 구조적 결측 감안)
+# 🔴 2026-08-26 재검토 필요 플래그 — 코스피 상위 200(대형 우량주 위주) 기준으로 실측(0.855)한
+# 값입니다. 이제 코스피+코스닥 통합 상위 500까지 넓어져 중소형·코스닥 종목 비중이 늘면
+# 애널리스트 컨센서스 커버리지가 구조적으로 더 낮아질 가능성이 높습니다(중소형주는 대형주보다
+# 커버하는 증권사가 적음). 근거 없이 숫자만 낮추는 건 §0-1 위반이라 지금은 값을 그대로
+# 두었습니다 — 이번 merge 이후 실제 valid_ratio가 여기 얼마나 못 미치는지 첫 실행 로그로
+# 확인한 뒤, 필요하면 그 실측값 근거로 재조정하세요(과거 0.95→0.85 조정과 같은 방식).
+# =========================================================
+VALID_RATIO_SUCCESS = 0.85   # 이 이상이면 SUCCESS (컨센서스 미커버 구조적 결측 감안, 코스피200 기준 실측값 — 위 플래그 참고)
 VALID_RATIO_DEGRADED = 0.70  # 이 미만이면 수집 파이프라인 자체 이상 의심
 
 # PEGY 분모(실효성장률) 최소 유효값(%p) — 2026-08-06 2차 감사 1-9.
@@ -753,159 +760,227 @@ def fetch_naver_item_dps_and_eps(code):
 
 def fetch_kospi200_real_market_data():
     """
-    네이버 증권 코스피 시가총액 순위 목록(item/main.naver)을 실행 시점 기준으로 스크래핑하여
-    코스피 시가총액 상위 종목 시세 데이터(종목코드, 종목명, 현재가, PER, ROE) 200개를 수집합니다.
-    ⚠️ 주의: KRX가 공식 발표하는 "코스피 200 지수" 편입종목과는 다릅니다(공식 지수는 유동주식 시총·업종
-    안배·유동성 심사를 거쳐 연 2회만 리밸런싱됨). 이 프로젝트는 단순 시가총액 순위 기준입니다.
-    (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별 기업 주식으로만 1위~200위 채번)
+    네이버 증권 시가총액 순위 목록(sise_market_sum.naver)을 코스피(sosok=0)+코스닥(sosok=1)
+    양쪽 다 실행 시점 기준으로 스크래핑합니다.
+
+    🔴 2026-08-26(오너 요청 — "재무제표 읽기" 코스피 상위 200 → 코스피+코스닥 통합 상위 500
+       확대, TASK_HISTORY #150 참고). 원래는 코스피(sosok=0)만 긁었는데, 이제 두 시장을 각각
+       독립적으로 페이지네이션해서 모읍니다. 여기서 반환하는 리스트는 아직 "시장별" 순서로만
+       정렬돼 있습니다(코스피 후보 전부 다음 코스닥 후보 전부) — **진짜 통합 순위는 이 함수
+       밖에서 실제 시가총액을 계산해 다시 정렬**합니다(`_rank_candidates_by_market_cap()`
+       참고, 네이버 순위 페이지엔 시가총액 숫자 컬럼이 없어 여기선 계산할 수 없음). 종목별
+       dict 에 `"market": "KOSPI"/"KOSDAQ"` 필드를 새로 추가했습니다.
+       페이지 파싱·ETF 필터링·재시도·실패 시 RuntimeError 로 중단하는 로직은 원래 코스피
+       하나에만 쓰던 걸 시장마다 그대로 재사용합니다(검증된 코드를 새로 짜지 않음, §0-3-10)
+       — 이 파일 아래쪽의 "전 종목 종가" 보조 수집기가 이미 같은 URL 패턴을 sosok=0/1
+       양쪽으로 매일 실전에서 쓰고 있어 코스닥 페이지 자체는 이미 검증된 경로.
+       ⚠️ 다만 코스닥 페이지도 코스피와 **완전히 같은 12컬럼 표 구조**(PER=10번째, ROE=11번째
+       컬럼)인지는 이 샌드박스가 네이버에 접근할 수 없어 사전 실측하지 못했습니다 — 같은
+       URL 템플릿(`sise_market_sum.naver?sosok=`)에 시장 값만 다른 것뿐이라 그럴 가능성이
+       높지만, 이번 merge 이후 첫 실제 실행 로그(GitHub Actions)에서 확인 필요(§0-1).
+
+    ⚠️ 주의: KRX가 공식 발표하는 "코스피 200 지수"/"코스닥 150 지수" 편입종목과는 다릅니다
+    (공식 지수는 유동주식 시총·업종 안배·유동성 심사를 거쳐 리밸런싱됨). 이 프로젝트는
+    단순 시가총액 순위 기준입니다. (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별
+    기업 주식만)
     """
-    stocks_raw = []
     # =========================================================
     # 2026-08-06 2차 감사 1-5: 페이지 수집 실패를 `continue`로 삼키면 순위가 조용히 밀립니다.
-    # (3페이지가 실패하면 101~150위가 통째로 사라지고 151위가 101위 자리에 표시되며,
-    #  히스테리시스 버퍼는 사라진 50종목을 "230위 밖으로 이탈"로 오판해 추적을 끊습니다.)
-    # → 이제 실패한 페이지를 기록해 두고, 필요한 순위 구간을 다 못 채운 채 실패가
-    #    하나라도 있으면 RuntimeError로 수집을 중단합니다(기존 스냅샷 그대로 유지).
-    # 네트워크 일시 오류로 매일 중단되는 일을 막기 위해 페이지 단위 재시도를 먼저 겁니다.
+    # → 실패한 페이지를 기록해 두고, 필요한 순위 구간을 다 못 채운 채 실패가 하나라도
+    #    있으면 RuntimeError로 수집을 중단합니다(기존 스냅샷 그대로 유지). 네트워크 일시
+    #    오류로 매일 중단되는 일을 막기 위해 페이지 단위 재시도를 먼저 겁니다.
     # =========================================================
-    failed_pages = []
-    page_retries = 3          # 페이지 단위 재시도 횟수 (일시적 네트워크 오류 흡수)
-    target_candidates = 250   # 히스테리시스 버퍼(230위) 판정에 필요한 최소 후보 수
+    page_retries = 3   # 페이지 단위 재시도 횟수 (일시적 네트워크 오류 흡수)
+    # 통합 이탈선(575위, apply_hysteresis_buffer 기본값)을 시장별로 안전하게 커버하기 위한
+    # 여유치. 코스피/코스닥 실제 구성비를 몰라도 이 정도면 안전합니다 — 코스닥이 통합
+    # top575에 700개나 기여하려면 산술적으로 코스피가 -125개를 기여해야 하는 모순이라,
+    # 700은 어느 한쪽 시장이 낼 수 있는 최댓값보다도 넉넉한 상한선입니다. 실제 두 시장의
+    # 진짜 구성비는 이번 merge 이후 첫 실행 로그에서 확인 필요(§0-1).
+    target_candidates_per_market = 700
+    max_pages_per_market = 25   # 700 / 50 = 14페이지 + ETF필터링·파싱실패 여유(안전 상한)
 
-    # 네이버 코스피 시가총액 순위 1~9페이지 (페이지당 50개, 버퍼 포함 250개까지 수집)
-    for page in range(1, 10):
-        url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok=0&page={page}"
-        headers = {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
-        }
-        table = None
-        last_error = None
-        for attempt in range(page_retries):
-            try:
-                res = requests.get(url, headers=headers, timeout=5)
-                if res.status_code != 200:
-                    last_error = f"HTTP {res.status_code}"
-                    time.sleep(1.5 * (attempt + 1))
-                    continue
-                soup = BeautifulSoup(res.text, 'html.parser')
-                table = soup.select_one('table.type_2')
-                if table is None:
-                    last_error = "시가총액 표(table.type_2)를 찾지 못함"
-                    time.sleep(1.5 * (attempt + 1))
-                    continue
-                break
-            except Exception as e:
-                last_error = str(e)
-                time.sleep(1.5 * (attempt + 1))
+    all_stocks_raw = []
+    all_failed_pages = []
 
-        if table is None:
-            print(f"🚨 시가총액 {page}페이지 수집 실패({last_error}) — 순위 구간이 비어 순위가 밀릴 수 있습니다.")
-            failed_pages.append({"page": page, "error": last_error})
-            time.sleep(random.uniform(2.0, 3.0))
-            continue
+    for market_label, sosok in (("KOSPI", 0), ("KOSDAQ", 1)):
+        stocks_raw = []
+        failed_pages = []
 
-        try:
-            rows = table.select('tr')
-            for r in rows:
-                cols = r.select('td')
-                if len(cols) < 12:
-                    continue
-                    
-                name_elem = cols[1].select_one('a')
-                if not name_elem:
-                    continue
-                    
-                name = name_elem.text.strip()
-                # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식 순위 부여)
-                # 1차: 브랜드명 키워드 필터 (ETF 운용사 브랜드)
-                fund_brand_keywords = [
-                    "ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL", 
-                    "ARIRANG", "HANARO", "KBSTAR", "PLUS", "KOSEF", "KINDEX", "TREX",
-                    "TIMEFOLIO", "FOCUS", "UNICORN", "HERO",
-                    "KIWOOM", "BNK", "MIRAEASSET"
-                ]
-                # 2차: 상품 유형 키워드 필터 (ETF/펀드 상품명 패턴)
-                fund_type_keywords = [
-                    "액티브", "인덱스", "레버리지", "인버스", "채권", "혼합",
-                    "200TR", "배당성장", "고배당", "K-뉴딜"
-                ]
-                # 3차: 영문 대문자로만 구성 + 숫자 조합 이름 (ETF 패턴, 예: "TIME 미국나스닥100액티브")
-                name_upper_ratio = sum(1 for c in name if c.isupper()) / max(len(name), 1)
-                is_etf_pattern = name_upper_ratio > 0.5 and any(c.isdigit() for c in name) and len(name) > 5
-                
-                if any(kw in name for kw in fund_brand_keywords):
-                    continue
-                if any(kw in name for kw in fund_type_keywords):
-                    continue
-                if is_etf_pattern and name not in ("LG", "SK", "HD"):
-                    continue
-                    
-                href = name_elem.get('href', '')
-                code = href.split('code=')[-1] if 'code=' in href else ''
-                
+        for page in range(1, max_pages_per_market + 1):
+            url = f"https://finance.naver.com/sise/sise_market_sum.naver?sosok={sosok}&page={page}"
+            headers = {
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
+            }
+            table = None
+            last_error = None
+            for attempt in range(page_retries):
                 try:
-                    price = float(cols[2].text.strip().replace(',', ''))
-                except ValueError:
-                    price = 0.0
-                    
-                # 시총 리스트의 PER/ROE 는 파싱 실패 시 임의 대체값을 넣지 않고 None 으로 둡니다.
-                try:
-                    t_per = float(cols[10].text.strip().replace(',', ''))
-                except ValueError:
-                    t_per = None
-
-                try:
-                    t_roe = float(cols[11].text.strip().replace(',', ''))
-                except ValueError:
-                    t_roe = None
-
-                if price <= 0 or not code:
-                    continue
-
-                stocks_raw.append({
-                    "name": name,
-                    "code": code,
-                    "price": price,
-                    # 2026-08-06 2차 감사 1-1: abs() 제거 — 적자 기업의 마이너스 PER 부호를 보존합니다.
-                    # (부호를 지우면 SKC 같은 적자 종목이 화면에 "PER 4.27배"로 표시돼 초저평가처럼 보입니다.)
-                    "t_per": t_per if (t_per is not None and t_per != 0) else None,
-                    "t_roe": t_roe
-                })
-
-                # 히스테리시스 버퍼(진입 200위/이탈 230위) 판정에 필요한 여유분까지 확보.
-                # 230위 판정 + ETF 필터링/파싱 실패 여유분까지 감안해 250개 순수 개별주식 확보.
-                if len(stocks_raw) >= target_candidates:
+                    res = requests.get(url, headers=headers, timeout=5)
+                    if res.status_code != 200:
+                        last_error = f"HTTP {res.status_code}"
+                        time.sleep(1.5 * (attempt + 1))
+                        continue
+                    soup = BeautifulSoup(res.text, 'html.parser')
+                    table = soup.select_one('table.type_2')
+                    if table is None:
+                        last_error = "시가총액 표(table.type_2)를 찾지 못함"
+                        time.sleep(1.5 * (attempt + 1))
+                        continue
                     break
-            if len(stocks_raw) >= target_candidates:
-                break
-        except Exception as e:
-            print(f"🚨 시가총액 {page}페이지 파싱 중 예외: {e}")
-            failed_pages.append({"page": page, "error": f"파싱 예외: {e}"})
+                except Exception as e:
+                    last_error = str(e)
+                    time.sleep(1.5 * (attempt + 1))
 
-        time.sleep(random.uniform(2.0, 3.0)) # 매너 있는 크롤링을 위한 여유 있는 딜레이 (Polite Scraping)
+            if table is None:
+                print(f"🚨 {market_label} 시가총액 {page}페이지 수집 실패({last_error}) — 순위 구간이 비어 순위가 밀릴 수 있습니다.")
+                failed_pages.append({"market": market_label, "page": page, "error": last_error})
+                time.sleep(random.uniform(2.0, 3.0))
+                continue
 
-    # =========================================================
-    # 2026-08-06 2차 감사 1-5: 순위 무결성 검사.
-    # 후보를 목표치(250개)만큼 채우지 못했는데 실패한 페이지가 있다면, 그건 "코스피에
-    # 종목이 그것밖에 없다"가 아니라 "중간 순위 구간이 통째로 빈 채로 뒤 순위가 당겨졌다"는
-    # 뜻입니다. 이 상태로 저장하면 순위·히스테리시스 판정이 전부 오염되므로 중단합니다.
-    # (호출부에서 잡지 않고 그대로 올라가 수집이 실패하며, 기존 스냅샷은 그대로 유지됩니다.)
-    # =========================================================
-    if failed_pages and len(stocks_raw) < target_candidates:
-        detail = ", ".join(f"{fp['page']}페이지({fp['error']})" for fp in failed_pages)
-        raise RuntimeError(
-            f"시가총액 순위 페이지 수집 실패로 순위가 밀릴 수 있어 수집을 중단합니다 "
-            f"(수집 {len(stocks_raw)}/{target_candidates}개, 실패: {detail}) — 기존 스냅샷 유지"
-        )
-    if failed_pages:
-        # 필요한 250개는 다 채웠지만(=앞 페이지들에서 충분히 확보) 뒤쪽 페이지가 실패한 경우.
-        # 순위 자체는 온전하므로 중단하지 않되, 흔적은 남깁니다.
-        print(f"⚠️ 일부 페이지 수집 실패({len(failed_pages)}건)했으나 필요한 순위 구간은 모두 확보했습니다.")
+            try:
+                rows = table.select('tr')
+                for r in rows:
+                    cols = r.select('td')
+                    if len(cols) < 12:
+                        continue
 
-    # 여기서는 200개로 자르지 않습니다 — 히스테리시스 버퍼 판정(apply_hysteresis_buffer)이
-    # 순위 1~250위 전체를 보고 "화면 노출 200개 + 버퍼 구간 최대 230위까지 추적"을 결정합니다.
-    print(f"Successfully retrieved {len(stocks_raw)} real KOSPI candidates (rank order, up to {target_candidates}).")
-    return stocks_raw, failed_pages
+                    name_elem = cols[1].select_one('a')
+                    if not name_elem:
+                        continue
+
+                    name = name_elem.text.strip()
+                    # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식 순위 부여)
+                    # 1차: 브랜드명 키워드 필터 (ETF 운용사 브랜드)
+                    fund_brand_keywords = [
+                        "ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL",
+                        "ARIRANG", "HANARO", "KBSTAR", "PLUS", "KOSEF", "KINDEX", "TREX",
+                        "TIMEFOLIO", "FOCUS", "UNICORN", "HERO",
+                        "KIWOOM", "BNK", "MIRAEASSET"
+                    ]
+                    # 2차: 상품 유형 키워드 필터 (ETF/펀드 상품명 패턴)
+                    fund_type_keywords = [
+                        "액티브", "인덱스", "레버리지", "인버스", "채권", "혼합",
+                        "200TR", "배당성장", "고배당", "K-뉴딜"
+                    ]
+                    # 3차: 영문 대문자로만 구성 + 숫자 조합 이름 (ETF 패턴, 예: "TIME 미국나스닥100액티브")
+                    name_upper_ratio = sum(1 for c in name if c.isupper()) / max(len(name), 1)
+                    is_etf_pattern = name_upper_ratio > 0.5 and any(c.isdigit() for c in name) and len(name) > 5
+
+                    if any(kw in name for kw in fund_brand_keywords):
+                        continue
+                    if any(kw in name for kw in fund_type_keywords):
+                        continue
+                    if is_etf_pattern and name not in ("LG", "SK", "HD"):
+                        continue
+
+                    href = name_elem.get('href', '')
+                    code = href.split('code=')[-1] if 'code=' in href else ''
+
+                    try:
+                        price = float(cols[2].text.strip().replace(',', ''))
+                    except ValueError:
+                        price = 0.0
+
+                    # 시총 리스트의 PER/ROE 는 파싱 실패 시 임의 대체값을 넣지 않고 None 으로 둡니다.
+                    try:
+                        t_per = float(cols[10].text.strip().replace(',', ''))
+                    except ValueError:
+                        t_per = None
+
+                    try:
+                        t_roe = float(cols[11].text.strip().replace(',', ''))
+                    except ValueError:
+                        t_roe = None
+
+                    if price <= 0 or not code:
+                        continue
+
+                    stocks_raw.append({
+                        "name": name,
+                        "code": code,
+                        "price": price,
+                        # 2026-08-06 2차 감사 1-1: abs() 제거 — 적자 기업의 마이너스 PER 부호를 보존합니다.
+                        # (부호를 지우면 SKC 같은 적자 종목이 화면에 "PER 4.27배"로 표시돼 초저평가처럼 보입니다.)
+                        "t_per": t_per if (t_per is not None and t_per != 0) else None,
+                        "t_roe": t_roe,
+                        # 2026-08-26 신설 — 통합 순위 계산·화면 표시용 시장 구분.
+                        "market": market_label,
+                    })
+
+                    if len(stocks_raw) >= target_candidates_per_market:
+                        break
+                if len(stocks_raw) >= target_candidates_per_market:
+                    break
+            except Exception as e:
+                print(f"🚨 {market_label} 시가총액 {page}페이지 파싱 중 예외: {e}")
+                failed_pages.append({"market": market_label, "page": page, "error": f"파싱 예외: {e}"})
+
+            time.sleep(random.uniform(2.0, 3.0))  # 매너 있는 크롤링을 위한 여유 있는 딜레이 (Polite Scraping)
+
+        # =========================================================
+        # 2026-08-06 2차 감사 1-5: 순위 무결성 검사(시장별로 그대로 적용).
+        # 목표치만큼 채우지 못했는데 실패한 페이지가 있다면, "이 시장에 그만큼밖에 없다"가
+        # 아니라 "중간 구간이 통째로 빈 채로 뒤가 당겨졌다"는 뜻이라 중단합니다.
+        # =========================================================
+        if failed_pages and len(stocks_raw) < target_candidates_per_market:
+            detail = ", ".join(f"{fp['page']}페이지({fp['error']})" for fp in failed_pages)
+            raise RuntimeError(
+                f"{market_label} 시가총액 순위 페이지 수집 실패로 순위가 밀릴 수 있어 수집을 중단합니다 "
+                f"(수집 {len(stocks_raw)}/{target_candidates_per_market}개, 실패: {detail}) — 기존 스냅샷 유지"
+            )
+        if failed_pages:
+            print(f"⚠️ {market_label} 일부 페이지 수집 실패({len(failed_pages)}건)했으나 필요한 순위 구간은 모두 확보했습니다.")
+
+        print(f"Successfully retrieved {len(stocks_raw)} real {market_label} candidates (market order, up to {target_candidates_per_market}).")
+        all_stocks_raw.extend(stocks_raw)
+        all_failed_pages.extend(failed_pages)
+
+    # 여기서도 최종 컷을 하지 않습니다 — 아직 시장별 순서로만 합쳐진 상태이고, 실제 통합
+    # 순위·히스테리시스 판정은 이 함수 밖(_rank_candidates_by_market_cap → apply_hysteresis_buffer)
+    # 에서 정해집니다.
+    return all_stocks_raw, all_failed_pages
+
+
+def _rank_candidates_by_market_cap(candidates, shares_lookup):
+    """
+    코스피+코스닥이 합쳐진 후보 목록(아직 "시장별" 순서 — 코스피 후보 전부, 그다음 코스닥
+    후보 전부)을 **실제 시가총액(현재가 × 상장주식수)** 기준 내림차순으로 다시 정렬합니다.
+
+    🔴 2026-08-26 신설. 왜 이 계산이 필요한가: 네이버 '시가총액 순위' 페이지는 시장(코스피/
+    코스닥) 안에서만 내림차순 정렬돼 있고 시가총액 숫자 자체는 이 페이지에서 긁어오지
+    않습니다(PER·ROE만 긁음) — 그래서 두 시장 후보를 그냥 이어붙이면 "코스피 순서 +
+    코스닥 순서"일 뿐 진짜 통합 순위가 아닙니다(예: 코스피 300위가 코스닥 50위보다 시가총액이
+    작을 수 있음). 상장주식수는 `_load_outstanding_shares_lookup()`(FinanceDataReader
+    구조화 데이터, 코스피+코스닥 전체 포함 — `utils/indicator_universe.py`도 같은 전제로
+    이미 씀)로 이미 갖고 있으므로, 네이버에 없는 시가총액 컬럼을 새로 긁는 대신 이미 가진
+    두 값(현재가·상장주식수)을 곱해 직접 계산합니다 — 이건 시가총액의 정의 그 자체라
+    근사치가 아니라 정확한 값입니다.
+
+    상장주식수를 못 찾은 종목(신규상장 직후 등 드문 경우)은 순위를 매길 근거가 없어 이번
+    회차 통합 순위 계산에서 제외합니다 — 값을 지어내지 않습니다(§0-1). 종목 상세 수집 자체가
+    막히는 게 아니라, 이번엔 그 종목만 통합 순위표에서 빠질 뿐입니다.
+
+    candidates: fetch_kospi200_real_market_data()가 반환한, 아직 시장별 순서인 리스트.
+    shares_lookup: _load_outstanding_shares_lookup()의 반환값({코드: 상장주식수}).
+    반환: market_cap 내림차순으로 정렬된 새 리스트(각 dict에 "market_cap" 필드 추가).
+    """
+    ranked = []
+    missing_shares = []
+    for c in candidates:
+        shares = shares_lookup.get(c["code"])
+        if not shares or shares <= 0:
+            missing_shares.append(c["code"])
+            continue
+        c["market_cap"] = c["price"] * shares
+        ranked.append(c)
+
+    if missing_shares:
+        preview = ", ".join(missing_shares[:20])
+        more = f" 외 {len(missing_shares) - 20}개" if len(missing_shares) > 20 else ""
+        print(f"⚠️ 상장주식수를 찾지 못해 통합 순위 계산에서 제외된 종목 {len(missing_shares)}개: {preview}{more}")
+
+    ranked.sort(key=lambda c: c["market_cap"], reverse=True)
+    return ranked
 
 
 def _load_previously_tracked_codes(json_path):
@@ -928,20 +1003,24 @@ def _load_previously_tracked_codes(json_path):
         return set()
 
 
-def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=200, exit_rank=230):
+def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=500, exit_rank=575):
     """
     시가총액 순위 경계선에서 하루만 왔다갔다 해도 종목이 사라졌다 재등장하며
     히스토리 연속성이 깨지는 문제를 막기 위한 히스테리시스 버퍼.
 
-    규칙(오너 확정, 2026-08-06):
-    - 진입: 순위가 entry_rank(200위) 이내로 처음 들어오면 추적 시작.
-    - 유지: 어제 이미 추적 중이었던 종목은 exit_rank(230위) 밖으로 완전히 밀려나야 추적 중단.
-    - 화면 노출은 항상 정확히 entry_rank(200개)만: 버퍼 구간(201~230위)에 걸린 종목은
-      계속 수집·보강은 하되(요약 이력이 끊기지 않도록) `is_visible=False`로 표시해 화면에서는 숨김.
+    규칙(오너 확정, 2026-08-06 — 진입/이탈선 숫자만 2026-08-26에 200/230 → 500/575로 확대,
+    비율은 그대로 유지: 이탈선 = 진입선 × 1.15):
+    - 진입: 순위가 entry_rank(기본 500위) 이내로 처음 들어오면 추적 시작.
+    - 유지: 어제 이미 추적 중이었던 종목은 exit_rank(기본 575위) 밖으로 완전히 밀려나야 추적 중단.
+    - 화면 노출은 항상 정확히 entry_rank(기본 500개)만: 버퍼 구간(entry_rank+1~exit_rank위)에
+      걸린 종목은 계속 수집·보강은 하되(요약 이력이 끊기지 않도록) `is_visible=False`로
+      표시해 화면에서는 숨김.
 
-    candidates: fetch_kospi200_real_market_data()가 반환한 순위 1위부터의 후보 리스트(최대 250개).
+    candidates: fetch_kospi200_real_market_data()가 반환하고 _rank_candidates_by_market_cap()이
+    실제 시가총액(코스피+코스닥 통합) 내림차순으로 정렬한 순위 1위부터의 후보 리스트.
     previous_codes: 직전 수집분에 있었던 종목 코드 집합(_load_previously_tracked_codes 결과).
-    반환: 실제로 이번 회차에 수집/보강할 종목 리스트(200~230개 사이, rank/is_visible 필드 포함).
+    반환: 실제로 이번 회차에 수집/보강할 종목 리스트(entry_rank~exit_rank개 사이,
+    rank/is_visible 필드 포함).
     """
     tracked = []
     for idx, c in enumerate(candidates):
@@ -949,7 +1028,7 @@ def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=200, exit_ran
         if rank <= entry_rank:
             keep = True
         elif c.get("code") in previous_codes and rank <= exit_rank:
-            keep = True  # 히스테리시스: 어제부터 추적 중이었고 아직 230위 안쪽 → 유지
+            keep = True  # 히스테리시스: 어제부터 추적 중이었고 아직 이탈선 안쪽 → 유지
         else:
             keep = False
         if keep:
@@ -964,15 +1043,21 @@ def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=200, exit_ran
     return tracked
 
 
-def enrich_quant_metrics(stocks_raw):
+def enrich_quant_metrics(stocks_raw, shares_lookup=None):
     """
-    수집된 200개 실데이터 종목에 네이버 공식 투자정보(aside_invest_info) 스냅샷 실데이터를 적용하여
-    Forward PEGY, 100점 만점 quant_score, ROE/ROIC 품질 가중 목표주가를 산출합니다.
+    수집된(코스피+코스닥 통합, 최대 수백 개) 실데이터 종목에 네이버 공식 투자정보
+    (aside_invest_info) 스냅샷 실데이터를 적용하여 Forward PEGY, 100점 만점 quant_score,
+    ROE/ROIC 품질 가중 목표주가를 산출합니다.
+
+    shares_lookup: 2026-08-26 신설. `run_kospi200_collector()`가 통합 순위 계산
+    (`_rank_candidates_by_market_cap`) 때 이미 한 번 조회해둔 상장주식수 lookup을 그대로
+    넘겨받아 FinanceDataReader를 중복 호출하지 않습니다. None이면(단독 호출·테스트 등)
+    기존처럼 이 함수가 직접 조회합니다 — 하위 호환.
     """
     enriched_stocks = []
 
     # 상장주식수 1차 출처: FinanceDataReader 구조화 데이터 (한 번만 조회, 종목별 재조회 안 함)
-    outstanding_shares_lookup = _load_outstanding_shares_lookup()
+    outstanding_shares_lookup = shares_lookup if shares_lookup is not None else _load_outstanding_shares_lookup()
 
     # =========================================================
     # 우선주 ROE 상속 전처리: 보통주(코드 끝 0) ROE 룩업 테이블 구축
@@ -1589,9 +1674,15 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
     print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
 
 def run_kospi200_collector():
-    """코스피 시가총액 상위 200 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장"""
-    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피 시가총액 상위 200 100% 실데이터 수집 시작...")
-    
+    """코스피+코스닥 통합 시가총액 상위 500 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장
+
+    🔴 2026-08-26(오너 요청) — 코스피 단독 상위 200 → 코스피+코스닥 통합 상위 500으로 확대.
+    파일명·JSON 키("kospi200_...")는 그대로 유지합니다(이 함수·파일을 참조하는 다른 모듈이
+    20개 이상이라 이름 자체를 바꾸는 건 이번 범위에서 별도로 다루지 않음 — TASK_HISTORY #150
+    참고). 실제 담기는 데이터만 코스피+코스닥 통합으로 바뀝니다.
+    """
+    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피+코스닥 통합 시가총액 상위 500 100% 실데이터 수집 시작...")
+
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(data_dir, exist_ok=True)
     json_path = os.path.join(data_dir, "kospi200_pegy_latest.json")
@@ -1604,18 +1695,27 @@ def run_kospi200_collector():
     candidates, failed_pages = fetch_kospi200_real_market_data()
     if not candidates:
         # 종목 목록조차 못 가져오면 기존 스냅샷을 건드리지 않고 명확히 실패시킵니다.
-        raise RuntimeError("KOSPI 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
+        raise RuntimeError("코스피+코스닥 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
 
-    # 히스테리시스 버퍼 적용: 진입 200위 / 이탈 230위. 화면 노출은 여전히 상위 200개만이고,
-    # 201~230위 버퍼 구간 종목은 어제도 추적 중이었을 때만 "화면 비노출로 계속 수집"됩니다.
+    # 2026-08-26 신설 — 아직 "시장별" 순서로만 합쳐진 candidates를 실제 시가총액(현재가×
+    # 상장주식수)으로 다시 정렬해 진짜 통합 순위를 만듭니다. 상장주식수 조회는 여기서 딱 한 번만
+    # 하고(enrich_quant_metrics에도 그대로 넘겨써서 중복 조회 안 함), 코스피+코스닥 전체를
+    # 커버하는 FinanceDataReader 구조화 데이터를 씁니다(_load_outstanding_shares_lookup 참고).
+    shares_lookup = _load_outstanding_shares_lookup()
+    candidates = _rank_candidates_by_market_cap(candidates, shares_lookup)
+    if not candidates:
+        raise RuntimeError("상장주식수 매칭 실패로 통합 순위를 계산할 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)")
+
+    # 히스테리시스 버퍼 적용: 진입 500위 / 이탈 575위. 화면 노출은 여전히 상위 500개만이고,
+    # 501~575위 버퍼 구간 종목은 어제도 추적 중이었을 때만 "화면 비노출로 계속 수집"됩니다.
     tracked_stocks = apply_hysteresis_buffer(candidates, previous_codes)
     if not tracked_stocks:
         raise RuntimeError("히스테리시스 버퍼 적용 후 추적 대상 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)")
 
-    enriched_stocks = enrich_quant_metrics(tracked_stocks)
+    enriched_stocks = enrich_quant_metrics(tracked_stocks, shares_lookup=shares_lookup)
 
-    # 공개 화면에는 is_visible(순위 200위 이내)인 종목만 노출됩니다. 품질 지표(검증 통과율 등)도
-    # "화면에 실제로 보이는 200개" 기준으로 집계해야 배너 숫자가 사용자에게 의미가 있습니다.
+    # 공개 화면에는 is_visible(순위 500위 이내)인 종목만 노출됩니다. 품질 지표(검증 통과율 등)도
+    # "화면에 실제로 보이는 500개" 기준으로 집계해야 배너 숫자가 사용자에게 의미가 있습니다.
     visible_stocks = [s for s in enriched_stocks if s.get("is_visible", True)]
     total_count = len(visible_stocks)
     tracked_count = len(enriched_stocks)
@@ -1657,7 +1757,7 @@ def run_kospi200_collector():
                 "degraded": VALID_RATIO_DEGRADED
             },
             "description": (
-                f"코스피 시가총액 상위 1위~{total_count}위 퀀트 스냅샷 "
+                f"코스피+코스닥 통합 시가총액 상위 1위~{total_count}위 퀀트 스냅샷 "
                 f"(검증 통과 {len(valid_stocks)}/{total_count} 종목, 상태={status})"
                 + (f" + 히스테리시스 버퍼 비노출 {hidden_buffer_count}종목" if hidden_buffer_count else "")
             )
@@ -1707,7 +1807,7 @@ def run_kospi200_collector():
     except Exception as e:
         print(f"⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
 
-    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
+    print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피+코스닥 통합 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
     return json_path
 
 if __name__ == "__main__":
