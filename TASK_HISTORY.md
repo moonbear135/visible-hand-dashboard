@@ -2366,8 +2366,80 @@
      "진행 예정" 참고).
 
 
+150. **🔁 `duel_daily.yml` CI 타이밍 리스크 대응 — `workflow_run` 트리거 추가
+     (2026-08-26, 오푸스 높음, 오너 요청 — 500종목 확대 착수 전 안전장치).**
+     500종목 확대로 크롤링 시간이 늘어나면 `scrape.yml`(크롤러) → `duel_daily.yml`
+     (결투 주문 마감) 사이의 기존 여유 시간이 줄어들 수 있다는 오너의 지적으로 시작한
+     사전 점검. `duel_daily.yml`은 크롤러 완료를 기다리지 않고 자체 cron(17:10 KST)
+     으로만 돌고 있어, 크롤러가 늦게 끝나면 그날 코스피 데이터가 아직 갱신되기 전에
+     주문을 받을 위험이 있음을 코드 주석·cron 시각 역산으로 확인(18:00:01 KST 주문
+     마감까지 기존 여유 50분).
+     "cron 시간을 그냥 넉넉히 미루기"는 크롤링 시간이 매번 달라 확률적 미봉책일 뿐이라
+     오너와 논의 후 기각. 대신 `scrape.yml`(Daily Market Scraper) 완료를 실제로 감지해
+     깨어나는 `workflow_run` 트리거를 신설하고, 기존 cron은 안전망으로 그대로 유지하는
+     하이브리드 방식 채택.
+     `if: github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion
+     == 'success' && github.event.workflow_run.event == 'schedule')` 조건으로, 크롤러가
+     실패했을 때는 물론이고 **크롤러의 수동 백필 실행(workflow_dispatch, 코스피 수집
+     단계를 건너뛰고도 성공 처리될 수 있음)**에도 결투가 잘못 깨어나지 않도록 필터링.
+     YAML 파싱 검증 후 device에 md5 확인 반영, 커밋 `cf522c1`.
+     ⚠️ `workflow_run` 실제 동작은 이 사고 특성상 로컬 샌드박스에서 라이브 검증이
+     불가능 — 사고 이후 첫 실제 GitHub Actions 실행에서 확인 필요(아래 "진행 예정" 참고).
+
+151. **📈 재무제표 읽기(PEGY) 코스피 단독 상위 200 → 코스피+코스닥 통합 상위 500
+     확대 (2026-08-26, 오푸스 높음, 오너 요청 — "양을 좀 더 늘려야 할거 같아").**
+     오너가 통합 시가총액 500개(코스피/코스닥 분할이 아닌 하나의 순위)로 확정. 확대
+     전 다른 모듈과의 크롤링 시간 충돌 가능성을 먼저 점검(#150의 `duel_daily.yml`
+     안전장치가 이 점검에서 나옴).
+     `collector_kospi200.py`: `fetch_kospi200_real_market_data()`가 코스피·코스닥
+     양쪽(sosok=0/1)을 각각 최대 700후보·25페이지까지 크롤링하도록 확장(기존
+     `run_kr_all_market_prices_collector`가 이미 양쪽 시장을 성공적으로 긁던 운영
+     검증 패턴 재사용, §0-3-10). 신설 `_rank_candidates_by_market_cap()`이 네이버
+     페이지엔 없는 진짜 시가총액(현재가×상장주식수, FinanceDataReader 구조화 데이터)
+     을 직접 계산해 두 시장을 하나의 순위로 재정렬 — `utils/indicator_universe.py`의
+     기존 "시장별 리스트 이어붙이기" 방식보다 더 정확한 방법을 새로 채택(코스닥 상위
+     종목이 코스피 하위 종목보다 시가총액이 큰 경우를 올바르게 반영). 상장주식수를
+     못 찾은 종목은 값을 지어내지 않고 이번 회차 순위 계산에서만 제외(§0-1).
+     히스테리시스 버퍼(`apply_hysteresis_buffer`) 진입/이탈선을 200/230 → 500/575로
+     확대(비율 1.15배 그대로 유지).
+     화면 문구 일괄 갱신 — `web/pages/pegy_page.py`, `utils/scorecard_db.py`,
+     `web/pages/scorecard_page.py`(스코어카드는 상위 종목 밖 시세 조회 안내 문구만
+     해당), `web/pages/duel_page.py`, `utils/duel_db.py`(주문 검증 에러 메시지 포함),
+     `utils/guardrail.py`(독스트링 2곳). `views/*.py`는 미사용 레거시 Streamlit
+     코드로 확인되어(실제 배포는 `main.py` → `web/pages/*.py` NiceGUI 경로만 사용)
+     편집 대상에서 제외.
+     **결투(Duel) 게임 확장 여부**: `web/pages/duel_page.py`/`utils/duel_db.py`가
+     PEGY와 같은 `data/kospi200_pegy_latest.json`을 공유한다는 점을 확인 후 오너에게
+     직접 질문 — "결투도 같이 500개로 확장" 선택 받아 동일하게 반영.
+     신규 단위테스트 `tests/test_collector_kospi200_ranking.py`(10건) 추가 — 통합
+     랭킹이 시장별 입력 순서가 아니라 진짜 시가총액 순서를 따르는지, 히스테리시스
+     500/575 경계(진입·유지·이탈 각 케이스)가 정확한지 직접 검증(기존엔 소스 텍스트
+     순서 검사 같은 간접 테스트만 있었음).
+     작업 중 발견·수정한 회귀 2건: ①새 독스트링에 실수로 들어간 함수명 문자열이
+     `tests/test_stock_history.py`의 소스 순서 검사를 깨서 문구 수정, ②
+     `tests/test_duel_db.py`의 에러 문구 어서션이 "코스피 상위"만 찾고 있어 새 문구
+     "코스피+코스닥 상위"에 맞게 갱신. 매 파일 편집 후 전체 pytest 스위트를 이전
+     시그니처(`7 failed, 5 skipped, 9 errors`)와 비교해 회귀 0건 확인(신규 테스트
+     10건만큼만 passed 증가). 커밋 `fde244a`.
+     ⚠️ 코스닥(sosok=1) 네이버 시세 테이블이 코스피와 똑같은 12컬럼 구조라는 가정은
+     클라우드 샌드박스·디바이스 브리지 양쪽 모두 finance.naver.com 접근이 막혀 있어
+     직접 라이브 검증하지 못했음 — 기존 `run_kr_all_market_prices_collector` 운영
+     실적으로만 뒷받침(아래 "진행 예정" 참고).
+
+
 ## 진행 예정 (백로그)
 
+- 코스닥(sosok=1) 네이버 시세 테이블 구조가 코스피와 동일하다는 가정(#151) — 사고
+  이후 첫 실제 GitHub Actions 실행 결과를 반드시 확인. `workflow_run` 트리거(#150)
+  실동작도 같은 첫 실행에서 함께 확인.
+- `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS`에 시장 구분(코스피/코스닥)
+  필드를 추가해 이력 CSV/JSON 내보내기에도 노출할지 — #151에서 `market`/
+  `market_cap` 필드는 계산은 되지만 `enrich_quant_metrics`가 최종 저장 dict를
+  새로 짜면서 함께 넘기지 않아 현재는 버려짐. 화면 표시가 굳이 필요하다는 요청은
+  아직 없어 임의로 추가하지 않음 — 오너 판단 필요.
+- `tests/test_scorecard.py`(약 1464·1469행), `tests/test_duel_page_usd.py`(약
+  1749행)에 남아있는 "코스피 상위 200" 표현 — 테스트 정확성에는 영향 없는 순수
+  코멘트/독스트링이라 #151에서는 보류. 정리하고 싶으면 언제든 요청.
 - 회원탈퇴(계정 삭제) 셀프서비스 기능 신설 여부 — 오너가 2026-08-25 판단 보류
   ("유지보수 차원의 문제는 계속 관리하면서 봐야 하는 거라 지금 결론은 못 내리겠다").
   지금은 `/privacy` 문서에 "메일로 요청받아 처리"라고 정직하게 적어둔 상태(#149).
