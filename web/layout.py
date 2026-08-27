@@ -164,6 +164,36 @@ DIVIDEND_ENABLED = (os.environ.get("DIVIDEND_ENABLED") or "").strip().lower() ==
 DIVIDEND_MENU_ADMIN_ONLY = False
 
 # =============================================================================
+# 🇺🇸 "미국 배당 달력" 공개 스위치 (배당금 모듈의 미국판, 2026-08-27 추가)
+# =============================================================================
+#  위 한국 배당(`DIVIDEND_ENABLED`)과 **같은 3단계 공개 절차·판정 관례**입니다(§0-3-6
+#  기본 숨김, 환경변수 값이 정확히 "true"일 때만 켜짐).
+#
+#  ⚠️ 일부러 `DIVIDEND_ENABLED` 에 묶지 않고 **완전히 독립된 스위치**로 둡니다. 두 화면은
+#     읽는 데이터 파일도(`dividend_kr_2026_latest.json` ↔ `us_stocks_latest.json`), 데이터의
+#     한계도 다릅니다 — 미국 쪽 배당락일(`ex_dividend_date`)은 배당 전용 페이지가 아니라
+#     종목 개요(Statistics) 스냅샷이라, 배당 데이터가 있는 403종목 중 157종목(39%)만 미래
+#     날짜이고 246종목(61%)은 과거 날짜뿐입니다(2026-08-27 실측). 한국 쪽 스위치를 켠다고
+#     이 한계까지 같이 공개되면 안 되므로 판단을 하나로 묶지 않습니다.
+#
+#    1단계 (전체 숨김)   : DIVIDEND_US_ENABLED=false ← **기본값, 지금 여기입니다.** 메뉴에
+#                          항목이 아예 안 생기고, URL 로 /dividend/us 를 직접 쳐도 화면이
+#                          "준비중" 안내만 그립니다(`web/pages/dividend_us_page.py` 가 같은
+#                          값을 보고 판단 — 이중 방어).
+#    2단계 (관리자 전용) : 서버 환경변수 DIVIDEND_US_ENABLED=true + 아래 True 유지.
+#    3단계 (전체 공개)   : 아래 값을 **False 로 한 글자만** 바꿉니다.
+#
+#  ⚠️ 위 39%/61% 비대칭을 오너가 실제 화면으로 확인하기 전에는 일반 사용자에게 열지
+#     않습니다 — 2단계(관리자 전용)에서 시작합니다.
+DIVIDEND_US_ENABLED = (os.environ.get("DIVIDEND_US_ENABLED") or "").strip().lower() == "true"
+
+#: 2단계(관리자 전용) ↔ 3단계(전체 공개)를 가르는 **단 하나의 불리언**.
+#: ⏳ 2026-08-27 — **2단계(관리자 전용)에서 시작합니다.** 위 39%/61% 비대칭을 오너가 실
+#:    데이터로 직접 확인한 뒤 공개 여부를 정합니다(한국 배당·보조지표 모듈이 밟은 것과
+#:    같은 순서).
+DIVIDEND_US_MENU_ADMIN_ONLY = True
+
+# =============================================================================
 # 🙏 "여기서부터는 신앙입니다" 공개 스위치 (보조지표 모듈, 7번째 모듈, 2026-08-25 추가)
 # =============================================================================
 #  위 배당금 모듈(DIVIDEND_ENABLED)이 밟은 것과 **완전히 같은 3단계 공개 절차·판정 관례**
@@ -277,10 +307,21 @@ if DUEL_ENABLED or SCORECARD_CONSENT_ENABLED or SCORECARD_LEADERBOARD_ENABLED:
 #       표시되는 그 문구)과 페이지 안내문(`GREETING`/`PAGE_TITLE` 등, `dividend_page.py`)은
 #       요청받지 않았으므로 그대로 '💰 투자 감사합니다!'로 둡니다 — 사이드바 상위섹터명만
 #       바뀝니다.
-if DIVIDEND_ENABLED:
-    _MENU_GROUPS.insert(-1, ('💰 배당 달력', [
-        ('/dividend', '💰 투자 감사합니다!', DIVIDEND_MENU_ADMIN_ONLY),
-    ]))
+#    🇺🇸 2026-08-27 추가 — 미국판(`/dividend/us`)이 같은 그룹에 합류합니다. 두 항목은
+#       **서로 다른 스위치**(`DIVIDEND_ENABLED` / `DIVIDEND_US_ENABLED`)를 따로 보고, 한쪽이
+#       꺼져도 다른 쪽 노출에는 영향이 없습니다 — 위 ⚔️ 수익률 비교 그룹이 DUEL_ENABLED·
+#       SCORECARD_CONSENT_ENABLED·SCORECARD_LEADERBOARD_ENABLED 세 스위치를 조건별로
+#       리스트에 붙였다 뗐다 하는 것과 같은 방식입니다. `if DIVIDEND_ENABLED:` 하나로만
+#       감싸면 한국 스위치가 꺼졌을 때 미국 항목까지 같이 사라지는 버그가 생기므로, 그룹
+#       전체의 노출 여부(`if A or B:`)와 그룹 **안** 각 항목의 노출 여부(각자의 `if`)를
+#       분리합니다.
+if DIVIDEND_ENABLED or DIVIDEND_US_ENABLED:
+    _MENU_GROUPS.insert(-1, ('💰 배당 달력', (
+        ([('/dividend', '💰 투자 감사합니다!', DIVIDEND_MENU_ADMIN_ONLY)]
+         if DIVIDEND_ENABLED else [])
+        + ([('/dividend/us', '🇺🇸 미국 배당 달력', DIVIDEND_US_MENU_ADMIN_ONLY)]
+           if DIVIDEND_US_ENABLED else [])
+    )))
 
 # 🙏 여기서부터는 신앙입니다 (보조지표 모듈, 2026-08-25 추가) — 위 배당금 그룹과 **같은
 #    자리·같은 방식**입니다. `insert(-1)` = 마지막 '⚙️ 관리자' 그룹 바로 앞(관리자 그룹은

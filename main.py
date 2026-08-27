@@ -33,6 +33,11 @@ import web.theme
 #                                 순위표 열람, SCORECARD_LEADERBOARD_ENABLED · 기본 관리자 전용)
 #   dividend_page  → '/dividend'    (공개 화면 · "투자 감사합니다!" 배당 캘린더,
 #                                    DIVIDEND_ENABLED 로 단계적 공개, 2026-08-24 추가)
+#   dividend_us_page → '/dividend/us' (관리자 전용 시작 · 🇺🇸 미국 배당 달력,
+#                                    DIVIDEND_US_ENABLED 로 단계적 공개, 2026-08-27 추가.
+#                                    위 한국 배당과 **파일도 스위치도 완전히 분리**돼 있어
+#                                    한쪽을 꺼도 다른 쪽은 그대로 돕니다 — pegy_page(`/`) 와
+#                                    us_stocks_page(`/us`) 가 이미 쓰는 것과 같은 구조)
 #   indicator_page → '/indicator'   (관리자 전용 시작 · "여기서부터는 신앙입니다" 보조지표
 #                                    RSI/MACD/볼린저밴드, INDICATOR_ENABLED 로 단계적 공개,
 #                                    2026-08-25 추가)
@@ -52,6 +57,7 @@ import web.theme
 from web.pages import (  # noqa: F401
     admin_page,
     dividend_page,
+    dividend_us_page,
     duel_page,
     indicator_page,
     macro_page,
