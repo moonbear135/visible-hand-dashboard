@@ -267,6 +267,15 @@ PAYMENT_RECORD_COLOR = '#fcd34d'   # 🟡 배당기준일(원문 라벨 그대�
 PAYMENT_DATE_COLOR = '#4ade80'     # 🟢 지급예정일(실제 돈이 들어오는 날짜)
 PAYMENT_EX_COLOR = '#f87171'       # 🔴 배당락일 — 이 화면이 직접 계산한 값(아래 참고)
 
+#: 🔵 2026-08-27 — 오너 요청: "저기 배당락일 전까지 매수해주세요 저거 잘보여서 좋아 /
+#: 저런 느낌으로 오늘이 몇월몇일인지도 보여주면 좋을 거 같아". 즉 위 배당락일 경고 배너와
+#: 같은 "큰 박스" 방식으로 **오늘 날짜**도 알려달라는 요청입니다. 오늘은 경고가 아니라
+#: 기준점(정보)이라, 이미 뜻이 정해진 위 세 색(🟡 기준일ㆍ🟢 지급일ㆍ🔴 락일)과는 절대
+#: 겹치지 않는 네 번째 색을 씁니다 — 파란 계열(Tailwind blue-400). 이 색은 오늘 배너와
+#: 달력 격자의 "오늘 칸" 테두리 **두 곳에서만** 쓰여, 파란 테두리를 보면 곧 "오늘"이라고
+#: 읽히게 합니다.
+TODAY_HIGHLIGHT_COLOR = '#60a5fa'  # 🔵 오늘(KST) — 날짜 종류가 아니라 "지금 이 시점" 표시
+
 #: 🔴 2026-08-25 — 오너가 "배당락일 하고 지급예정일 둘 다 표시하자"고 요청. 배당락일은
 #: DART 원문에 없는 값이라(배당기준일만 있음) **이 화면이 직접 계산**합니다 — 값을 만드는
 #: 자리라 "🧮 계산값" 배지(§0-1 예시2-보충 — 계산값은 허용하되 반드시 표시)를 붙입니다.
@@ -1318,9 +1327,39 @@ async def _render_body() -> None:
         f'</div>'
     ).classes('w-full')
 
+    # ── 🔵 "오늘은 며칠" — 위 빨간 배너와 세트로 보이는 큰 박스, 달력 바로 위 ──────────
+    # (오너 요청, 2026-08-27) "저기 배당락일 전까지 매수해주세요 저거 잘보여서 좋아 /
+    # 저런 느낌으로 오늘이 몇월몇일인지도 보여주면 좋을 거 같아" — 위 배당락일 경고가
+    # "언제까지 사야 하는지"를 말하는데, 정작 **오늘이 며칠인지**가 화면에 없으면 그 마감을
+    # 스스로 계산할 수 없다는 지적입니다. 그래서 바로 아래에 붙여 한 세트로 읽히게 두되,
+    # 색은 TODAY_HIGHLIGHT_COLOR(파랑) — 경고(빨강)가 아니라 기준점(정보)이기 때문이고,
+    # 아래 달력 격자의 "오늘 칸" 테두리와 같은 색이라 배너와 칸이 서로를 가리킵니다.
+    # 글자는 1.25rem — 위 경고(1.5rem)보다 한 단계 작게 둬서 "경고 > 정보"라는 무게 차이를
+    # 지키면서도, "잘 보여서 좋다"는 피드백대로 본문(1rem)보다는 확실히 크게 남깁니다.
+    # 날짜는 `today_kst()`를 여기서 다시 부르지 않고 위에서 이미 계산해둔 `today` 지역
+    # 변수를 그대로 씁니다 — KST 계산은 이 함수 한 곳에서만 일어나야 배너와 달력이 서로
+    # 다른 날짜를 말하는 일이 없습니다(자정 근처에 실제로 갈릴 수 있는 문제).
+    # 요일은 WEEKDAY_LABELS(일요일 시작)를 재사용합니다 — Python 의 weekday()는 월=0..일=6
+    # 이라 `(weekday() + 1) % 7` 로 옮겨야 이 배열과 짝이 맞습니다(월→1='월', 일→0='일').
+    today_weekday_label = WEEKDAY_LABELS[(today.weekday() + 1) % 7]
+    ui.html(
+        f'<div style="text-align:center; margin: 0 0 16px 0; padding: 14px 20px; '
+        f'background: rgba(30, 58, 138, 0.35); border: 2px solid {TODAY_HIGHLIGHT_COLOR}; '
+        f'border-radius: 10px;">'
+        f'<span style="font-size: 1.25rem; font-weight: 900; '
+        f'color: {TODAY_HIGHLIGHT_COLOR}; line-height: 1.4;">'
+        f'📅 오늘은 {today.year}년 {today.month}월 {today.day}일 '
+        f'({today_weekday_label})이에요</span>'
+        f'</div>'
+    ).classes('w-full')
+
     @ui.refreshable
     def _calendar_section() -> None:
+        # `today`(KST)는 위에서 한 번만 계산해 여기로 넘깁니다 — `_render_calendar`가
+        # 스스로 `today_kst()`를 부르면 계산 자리가 둘로 늘어나 배너와 달력이 어긋날 수
+        # 있습니다(2026-08-27, 오늘 칸 강조 추가하면서).
         _render_calendar(view, _visible_confirmed(), len(confirmed), payment_date_index,
+                         today=today,
                          on_changed=_calendar_section.refresh,
                          on_day_changed=lambda: _day_section.refresh())
 
@@ -1518,8 +1557,13 @@ def _render_raw_downloads() -> None:
 # 5. 달력 — 월 이동 + 요일 7열 격자
 # =============================================================================
 def _render_calendar(view, entries, total_confirmed, payment_date_index,
-                     on_changed, on_day_changed) -> None:
+                     today, on_changed, on_day_changed) -> None:
     """월 이동 줄 + 달력 격자.
+
+    🔵 2026-08-27 — `today`(KST 오늘 날짜)를 **파라미터로 받습니다**. 이 함수 안에서
+       `today_kst()`를 다시 부르지 않는 이유: KST 계산 자리가 둘이 되면 위 "오늘은 며칠"
+       배너와 아래 오늘 칸 강조가 자정 근처에 서로 다른 날짜를 말할 수 있어서입니다.
+       계산은 호출부 `_render_body()` 한 곳에서만 합니다.
 
     ⚠️ 칸의 숫자는 **지금 필터를 통과한 종목만** 셉니다. 필터가 걸려 있으면 그 사실을 바로
        아래 줄에 적습니다 — 안 적으면 "어제는 154건이었는데 오늘은 3건"으로 보입니다(§0-1).
@@ -1627,6 +1671,14 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
             on_day_changed()
         return _handler
 
+    # 🔵 2026-08-27 오너 요청("오늘이 몇월몇일인지도 보여주면 좋을 거 같아")의 달력 쪽 절반 —
+    # 위 배너로 "오늘은 며칠"을 글자로 알렸으니, 격자에서도 그 날이 어디인지 바로 짚이도록
+    # 오늘 칸에만 파란 테두리를 두릅니다. 배너와 같은 TODAY_HIGHLIGHT_COLOR 라서 둘이 같은
+    # 뜻(=오늘)임이 색만으로 읽힙니다. 지금 **보고 있는 달**이 오늘이 속한 달일 때만 그립니다
+    # — 다른 달로 넘기면 그 달에는 오늘이 없으므로 아무 칸도 강조되지 않아야 맞습니다.
+    today_cell_style = f'border: 2px solid {TODAY_HIGHLIGHT_COLOR}; border-radius: 8px;'
+    today_in_view = (today.year, today.month) == (year, month)
+
     with ui.grid(columns=7).classes('w-full gap-1'):
         for label in WEEKDAY_LABELS:
             ui.label(label).classes('text-center text-xs font-bold opacity-60')
@@ -1635,6 +1687,7 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
                 if not day:
                     ui.label('').classes('text-center')
                     continue
+                is_today = today_in_view and day == today.day
                 key = date_key(year, month, day)
                 count = len(grouped.get(key, ()))
                 date_bucket = (payment_date_index or {}).get(key) or {}
@@ -1642,10 +1695,17 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
                 record_count = len(date_bucket.get('record') or ())
                 pay_count = len(date_bucket.get('pay') or ())
                 if not count and not record_count and not pay_count and not ex_count:
-                    ui.label(str(day)).classes('text-center vh-muted py-2')
+                    # 건수가 0인 날도 오늘이면 테두리가 보여야 합니다 — 오늘 강조는 배당
+                    # 건수와 무관한 "지금 이 시점" 표시이기 때문(2026-08-27 오너 요청).
+                    empty_cell = ui.label(str(day)).classes('text-center vh-muted py-2')
+                    if is_today:
+                        empty_cell.style(today_cell_style)
                     continue
                 selected = view['selected_date'] == key
-                with ui.column().classes('w-full gap-0 items-stretch'):
+                day_cell = ui.column().classes('w-full gap-0 items-stretch')
+                if is_today:
+                    day_cell.style(today_cell_style)
+                with day_cell:
                     if count:
                         button = ui.button(f'{day}일 · {count:,}건', on_click=_pick(key)) \
                             .classes('w-full')
