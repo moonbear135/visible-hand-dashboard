@@ -138,5 +138,12 @@
     "growth": 12.61,
     "pegy": 1.39,
     "sample_count": 548
+  },
+  {
+    "collected_at_et": "2026-08-26 20:52",
+    "f_per": 19.79,
+    "growth": 12.625,
+    "pegy": 1.38,
+    "sample_count": 548
   }
 ]
