@@ -315,11 +315,16 @@ if DUEL_ENABLED or SCORECARD_CONSENT_ENABLED or SCORECARD_LEADERBOARD_ENABLED:
 #       감싸면 한국 스위치가 꺼졌을 때 미국 항목까지 같이 사라지는 버그가 생기므로, 그룹
 #       전체의 노출 여부(`if A or B:`)와 그룹 **안** 각 항목의 노출 여부(각자의 `if`)를
 #       분리합니다.
+#    🔁 2026-08-27 (오너 요청, 실 화면 확인 직후) — 미국 항목 라벨을 '🇺🇸 미국 배당 달력'에서
+#       '💰 투자 Thank you!'로 바꿨습니다. 같은 그룹 안에서 한국 항목만 '💰' 아이콘을 쓰고
+#       미국 항목은 국기 아이콘을 써서 아이콘 문법이 서로 다르게 보인다는 오너 피드백 —
+#       한국 쪽 라벨('투자 감사합니다!')과 짝을 이루는 영문 말장난으로 통일해 아이콘도
+#       '💰'로 맞췄습니다.
 if DIVIDEND_ENABLED or DIVIDEND_US_ENABLED:
     _MENU_GROUPS.insert(-1, ('💰 배당 달력', (
         ([('/dividend', '💰 투자 감사합니다!', DIVIDEND_MENU_ADMIN_ONLY)]
          if DIVIDEND_ENABLED else [])
-        + ([('/dividend/us', '🇺🇸 미국 배당 달력', DIVIDEND_US_MENU_ADMIN_ONLY)]
+        + ([('/dividend/us', '💰 투자 Thank you!', DIVIDEND_US_MENU_ADMIN_ONLY)]
            if DIVIDEND_US_ENABLED else [])
     )))
 
