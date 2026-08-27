@@ -474,6 +474,27 @@ def _empty_item_info(error_msg):
     }
 
 
+# =============================================================================
+# EV/EBITDA 서브 요청(navercomp.wisereport.co.kr) 서킷브레이커 — 2026-08-27 신설.
+#
+# 🔴 배경(오너 요청, 500종목 확대 첫 실전 실행에서 발견): 이 도메인은 finance.naver.com과
+# 완전히 다른 사이트라 별도로 접속 상태가 나빠질 수 있는데, 재시도 로직이 없어 실패해도
+# 종목당 정확히 한 번(최대 10초 타임아웃 + 1.5초 사전 대기 = 최대 11.5초)만 날립니다.
+# 문제는 "한 번씩"이 500종목만큼 쌓인다는 것 — 2026-08-27 첫 500종목 실행에서 500개 중
+# 333개(66.6%)가 연결 타임아웃으로 실패했고, 이게 전체 실행시간(1시간 44분)의 대부분을
+# 차지한 것으로 추정됩니다.
+#
+# 해결: 재시도를 늘리는 게 아니라 반대로 "가망 없으면 빨리 포기하기"입니다. 연속
+# _EV_EBITDA_FAILURE_THRESHOLD 번 실패하면, 이번 실행에서는 이 서브 요청 자체를 건너뛰고
+# (=값을 지어내지 않고 그냥 None, §0-1) 상대 서버로 요청을 아예 안 보냅니다 — 남은 종목
+# 전부에 시도했다면 나갔을 요청 수보다 훨씬 적게 나가므로, 상대 서버 입장에서는 부담이
+# 늘어나는 게 아니라 줄어듭니다. 프로세스가 GitHub Actions 배치로 매번 새로 뜨므로
+# 이 상태는 이번 실행 한 번에만 유효합니다(다음 날 실행은 처음부터 다시 시도).
+# =============================================================================
+_EV_EBITDA_FAILURE_THRESHOLD = 8
+_ev_ebitda_circuit = {"consecutive_failures": 0, "open": False, "skipped_count": 0}
+
+
 def fetch_naver_item_dps_and_eps(code):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
@@ -681,48 +702,65 @@ def fetch_naver_item_dps_and_eps(code):
                 errors.append("주당배당금(DPS) 행/연간 컬럼을 찾지 못했습니다 — 배당 미수집(무배당과 구분)")
 
         # EV/EBITDA (Naver WiseReport) 추가 스크래핑
-        time.sleep(1.5) # 서버 부하 방지
-        try:
-            res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
-            if res_ev.status_code == 200:
-                ev_dfs = pd.read_html(res_ev.text)
-                # =========================================================
-                # 2026-08-06 2차 감사 1-6: `iloc[row_idx, 1]` 고정 위치 인덱스 제거
-                # (SPEC §2-1 위반). 위레포트 표는 연도 컬럼 개수가 종목/시점마다 달라서
-                # "무조건 2번째 칸"이 최신 연도라는 보장이 없습니다. 이제 헤더를
-                # DataValidator.classify_header_timeframe()으로 분류해 '연간 실적' 컬럼만
-                # 고른 뒤 가장 최근 것을 쓰고, 헤더 분류에 실패하면 지어내지 않고
-                # 미수집(None)으로 남깁니다.
-                # =========================================================
-                for df in ev_dfs:
-                    if 'EV/EBITDA' not in str(df):
-                        continue
-                    annual_ev_cols = [
-                        i for i, col in enumerate(df.columns)
-                        if DataValidator.classify_header_timeframe(col) in ("TTM", "ANNUAL_TTM", "ANNUAL_EST")
-                    ]
-                    if not annual_ev_cols:
-                        errors.append("EV/EBITDA 표 헤더 기간 분류 실패 → 위치 인덱스 폴백 없이 미수집 처리")
-                        break
-                    for row_idx in range(len(df)):
-                        if 'EV/EBITDA' not in str(df.iloc[row_idx, 0]):
+        # 2026-08-27 신설 — 서킷브레이커: 이 도메인이 연속으로 응답을 안 하면(연결 타임아웃 등)
+        # 남은 종목은 요청 자체를 건너뜁니다. 값은 원래도 못 구한 것과 동일하게 None(§0-1)이고,
+        # 재시도를 늘리는 게 아니라 "가망 없으면 빨리 포기"라 상대 서버 요청 수는 오히려 줄어듭니다
+        # (모듈 상단 `_ev_ebitda_circuit` 주석 참고).
+        if _ev_ebitda_circuit["open"]:
+            _ev_ebitda_circuit["skipped_count"] += 1
+        else:
+            time.sleep(1.5) # 서버 부하 방지
+            try:
+                res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
+                _ev_ebitda_circuit["consecutive_failures"] = 0  # 응답을 받았으면(표 파싱 결과와 무관) 연결 자체는 살아있는 것
+                if res_ev.status_code == 200:
+                    ev_dfs = pd.read_html(res_ev.text)
+                    # =========================================================
+                    # 2026-08-06 2차 감사 1-6: `iloc[row_idx, 1]` 고정 위치 인덱스 제거
+                    # (SPEC §2-1 위반). 위레포트 표는 연도 컬럼 개수가 종목/시점마다 달라서
+                    # "무조건 2번째 칸"이 최신 연도라는 보장이 없습니다. 이제 헤더를
+                    # DataValidator.classify_header_timeframe()으로 분류해 '연간 실적' 컬럼만
+                    # 고른 뒤 가장 최근 것을 쓰고, 헤더 분류에 실패하면 지어내지 않고
+                    # 미수집(None)으로 남깁니다.
+                    # =========================================================
+                    for df in ev_dfs:
+                        if 'EV/EBITDA' not in str(df):
                             continue
-                        for col_i in reversed(annual_ev_cols):
-                            try:
-                                cell = df.iloc[row_idx, col_i]
-                                val = str(cell).replace(',', '').strip()
-                                if pd.isna(cell) or val in ('', 'nan', '-', 'ㅡ', '−'):
-                                    continue
-                                float(val)   # 숫자로 해석되는지만 확인 (문자열 원본 유지)
-                                ev_ebitda = val
-                                break
-                            except (ValueError, TypeError, IndexError):
+                        annual_ev_cols = [
+                            i for i, col in enumerate(df.columns)
+                            if DataValidator.classify_header_timeframe(col) in ("TTM", "ANNUAL_TTM", "ANNUAL_EST")
+                        ]
+                        if not annual_ev_cols:
+                            errors.append("EV/EBITDA 표 헤더 기간 분류 실패 → 위치 인덱스 폴백 없이 미수집 처리")
+                            break
+                        for row_idx in range(len(df)):
+                            if 'EV/EBITDA' not in str(df.iloc[row_idx, 0]):
                                 continue
+                            for col_i in reversed(annual_ev_cols):
+                                try:
+                                    cell = df.iloc[row_idx, col_i]
+                                    val = str(cell).replace(',', '').strip()
+                                    if pd.isna(cell) or val in ('', 'nan', '-', 'ㅡ', '−'):
+                                        continue
+                                    float(val)   # 숫자로 해석되는지만 확인 (문자열 원본 유지)
+                                    ev_ebitda = val
+                                    break
+                                except (ValueError, TypeError, IndexError):
+                                    continue
+                            break
                         break
-                    break
-        except Exception as e:
-            print("EV_EBITDA FETCH_ERROR:", e)
-            errors.append(f"EV/EBITDA 수집 실패: {e}")
+            except Exception as e:
+                print("EV_EBITDA FETCH_ERROR:", e)
+                errors.append(f"EV/EBITDA 수집 실패: {e}")
+                _ev_ebitda_circuit["consecutive_failures"] += 1
+                if _ev_ebitda_circuit["consecutive_failures"] >= _EV_EBITDA_FAILURE_THRESHOLD:
+                    _ev_ebitda_circuit["open"] = True
+                    print(
+                        f"⚡ EV/EBITDA 데이터 소스(navercomp.wisereport.co.kr) 연속 "
+                        f"{_EV_EBITDA_FAILURE_THRESHOLD}회 연결 실패 — 이번 실행에서는 남은 종목의 "
+                        "EV/EBITDA 요청을 건너뜁니다(재시도 강화가 아니라 빨리 포기 — 상대 서버 "
+                        "요청 수는 오히려 줄어듭니다)."
+                    )
 
         # =========================================================
         # 우선주 (Preferred Shares e.g. 00680K 미래에셋증권2우B) 배당금 보정

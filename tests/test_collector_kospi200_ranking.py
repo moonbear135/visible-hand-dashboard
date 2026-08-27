@@ -234,6 +234,106 @@ def test_hysteresis_respects_custom_thresholds():
     assert len(tracked) == 201  # top 200 + 버퍼 1개
 
 
+# ──────────────────────────────────────────────────────────────
+# EV/EBITDA 서킷브레이커 (2026-08-27 신설 — 오너 승인 #19: navercomp.wisereport.co.kr
+# 연속 타임아웃 66.6%로 500종목 실행이 2시간 넘게 걸린 문제 대응. "재시도 강화"가 아니라
+# "가망 없으면 빨리 포기"라 상대 서버 요청 수는 오히려 줄어듭니다 — 서킷 열리면 이후
+# 종목은 이 서브 요청 자체를 건너뛰고 ev_ebitda=None으로 정직하게 둡니다(§0-1).
+# ──────────────────────────────────────────────────────────────
+
+_FAKE_MAIN_PAGE_HTML = '<html><body><table><tr><td>dummy</td></tr></table></body></html>'
+
+
+def _fresh_circuit_state():
+    return {"consecutive_failures": 0, "open": False, "skipped_count": 0}
+
+
+class _FakeResp:
+    def __init__(self, status_code=200, text=_FAKE_MAIN_PAGE_HTML):
+        self.status_code = status_code
+        self.text = text
+
+
+def test_ev_ebitda_circuit_stays_closed_and_requests_normally_below_threshold(monkeypatch):
+    """임계치 미만으로 실패하는 동안은 매 종목마다 실제로 EV/EBITDA 요청을 시도해야 합니다."""
+    state = _fresh_circuit_state()
+    monkeypatch.setattr(K, "_ev_ebitda_circuit", state)
+    monkeypatch.setattr(K.time, "sleep", lambda *a, **kw: None)
+
+    call_count = {"n": 0}
+
+    def fake_get(url, headers=None, timeout=None):
+        if "wisereport" in url:
+            call_count["n"] += 1
+            raise K.requests.exceptions.ConnectionError("mock connection timeout")
+        return _FakeResp()
+
+    monkeypatch.setattr(K.requests, "get", fake_get)
+
+    threshold = K._EV_EBITDA_FAILURE_THRESHOLD
+    for i in range(threshold - 1):
+        result = K.fetch_naver_item_dps_and_eps(f"00000{i}")
+        assert result["ev_ebitda"] is None  # §0-1: 실패 시 지어내지 않고 None
+
+    assert state["open"] is False
+    assert state["consecutive_failures"] == threshold - 1
+    assert call_count["n"] == threshold - 1  # 매번 실제로 시도했음
+    assert state["skipped_count"] == 0
+
+
+def test_ev_ebitda_circuit_opens_exactly_at_threshold_and_then_skips_requests(monkeypatch):
+    """연속 실패가 임계치에 도달하면 서킷이 열리고, 그 이후 호출은 요청 자체를 보내지 않습니다."""
+    state = _fresh_circuit_state()
+    monkeypatch.setattr(K, "_ev_ebitda_circuit", state)
+    monkeypatch.setattr(K.time, "sleep", lambda *a, **kw: None)
+
+    call_count = {"n": 0}
+
+    def fake_get(url, headers=None, timeout=None):
+        if "wisereport" in url:
+            call_count["n"] += 1
+            raise K.requests.exceptions.ConnectionError("mock connection timeout")
+        return _FakeResp()
+
+    monkeypatch.setattr(K.requests, "get", fake_get)
+
+    threshold = K._EV_EBITDA_FAILURE_THRESHOLD
+    for i in range(threshold):
+        K.fetch_naver_item_dps_and_eps(f"11111{i}")
+
+    assert state["open"] is True
+    assert state["consecutive_failures"] == threshold
+    assert call_count["n"] == threshold
+
+    # 서킷이 열린 뒤: 추가 호출해도 wisereport 쪽 requests.get은 더 이상 불리지 않아야 함.
+    result_after_open = K.fetch_naver_item_dps_and_eps("999999")
+    assert call_count["n"] == threshold  # 늘어나지 않음 — 요청 자체를 안 보냄
+    assert result_after_open["ev_ebitda"] is None
+    assert state["skipped_count"] == 1
+
+    K.fetch_naver_item_dps_and_eps("888888")
+    assert call_count["n"] == threshold
+    assert state["skipped_count"] == 2
+
+
+def test_ev_ebitda_circuit_resets_failure_count_on_successful_response(monkeypatch):
+    """표 파싱 결과와 무관하게, 응답 자체를 받으면(연결 성공) 연속 실패 카운트가 0으로 리셋됩니다."""
+    state = {"consecutive_failures": 3, "open": False, "skipped_count": 0}
+    monkeypatch.setattr(K, "_ev_ebitda_circuit", state)
+    monkeypatch.setattr(K.time, "sleep", lambda *a, **kw: None)
+
+    def fake_get(url, headers=None, timeout=None):
+        return _FakeResp()  # 코스피 본문/EV 페이지 둘 다 성공 응답(더미 테이블이라 EV/EBITDA 값 자체는 못 뽑음)
+
+    monkeypatch.setattr(K.requests, "get", fake_get)
+
+    result = K.fetch_naver_item_dps_and_eps("123456")
+
+    assert state["consecutive_failures"] == 0
+    assert state["open"] is False
+    assert result["ev_ebitda"] is None  # 더미 테이블엔 'EV/EBITDA' 행이 없으므로 값은 여전히 None(정상)
+
+
 if __name__ == "__main__":
     import pytest as _pytest
     raise SystemExit(_pytest.main([__file__, "-v"]))
