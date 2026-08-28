@@ -1,14 +1,14 @@
 {
   "summary": {
-    "generated_at_kst": "2026-08-25T06:14:28.668447+09:00",
+    "generated_at_kst": "2026-08-28T13:26:34.330171+09:00",
     "source": "DART 수시공시(거래소공시 pblntf_ty=I) 원문 document.xml",
-    "total_records": 91,
+    "total_records": 93,
     "by_parse_status": {
       "OK": 73,
-      "PARTIAL": 18
+      "PARTIAL": 20
     },
     "records_without_record_date": 0,
-    "records_without_pay_date_expected": 25,
+    "records_without_pay_date_expected": 26,
     "records_with_correction_flag": 10,
     "records_with_subsidiary_notice_flag": 18,
     "missing_label_counts": {
@@ -22,25 +22,25 @@
       "report_nm 판정 규칙은 2026-08 실측 표본 6종에서만 도출했습니다. 규칙 밖의 표기는 UNRECOGNIZED_REPORT_TYPE 으로 아래 scan_stats 에 남고, 이벤트로 만들지 않았습니다(추측해서 넓히지 않았습니다).",
       "파일 이름의 연도는 '접수일이 그 해'라는 뜻일 뿐, 회사의 사업연도와 다를 수 있습니다(list.json 에는 사업연도로 거르는 조건이 없습니다)."
     ],
-    "date_range_checked": "20260801~20260824",
-    "new_records_this_run": 90,
+    "date_range_checked": "20260827~20260827",
+    "new_records_this_run": 2,
     "documents_failed_this_run": 0,
     "document_failures": [],
     "scan_stats": {
-      "pages": 30,
-      "seen_rows": 2999,
-      "dividend_decisions": 91,
-      "shareholder_register_close": 61,
+      "pages": 2,
+      "seen_rows": 153,
+      "dividend_decisions": 2,
+      "shareholder_register_close": 2,
       "unrecognized": 1,
       "skipped_no_stock_code": 0,
       "skipped_bad_stock_code": 0,
       "unrecognized_samples": [
         {
-          "report_nm": "수시공시의무관련사항(공정공시)              (주주가치 제고를 위한 배당 등 주주환원 정책 안내)",
-          "corp_name": "에스티오",
-          "stock_code": "098660",
-          "rcept_no": "20260812900554",
-          "rcept_dt": "20260812",
+          "report_nm": "배당락              ",
+          "corp_name": "풍강",
+          "stock_code": "093380",
+          "rcept_no": "20260827900549",
+          "rcept_dt": "20260827",
           "parse_status": "UNRECOGNIZED_REPORT_TYPE"
         }
       ]
@@ -2846,6 +2846,75 @@
         "7. 배당금지급 예정일자"
       ],
       "unparsed_values": [],
+      "parse_notes": [],
+      "parse_status": "PARTIAL"
+    },
+    {
+      "rcept_no": "20260827800295",
+      "rcept_dt": "20260827",
+      "corp_code": "00120021",
+      "corp_name": "LG",
+      "stock_code": "003550",
+      "stock_code_raw": "003550",
+      "report_nm": "현금ㆍ현물배당결정              ",
+      "report_nm_extra": null,
+      "matched_prefix": "현금ㆍ현물배당결정",
+      "is_correction": false,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260827800295",
+      "collected_at_kst": "2026-08-28T13:26:30.958894+09:00",
+      "dividend_class": "중간배당",
+      "dividend_type": "현금배당",
+      "dps_common": 1000,
+      "dps_preferred": 1000,
+      "yield_common": 0.9,
+      "yield_preferred": 1.4,
+      "total_amount": 154203203000,
+      "record_date": "2026-09-11",
+      "pay_date_expected": "2026-09-23",
+      "board_resolution_date": "2026-08-27",
+      "notes": "1. 당사는 2024년 3월 정기주주총회에서 변경된 정관에 의거하여, 배당 절차 개선(先 배당액 확정, 後 배당기준일 설정)에 따라 기준일을 결정하였음.\n\n2. 상기 3항, 4항의 '종류주식'은 우선주를 의미함.\n\n3. 상기 '4. 시가배당율(%)'은 배당결정일인 이사회 결의일의 직전매매거래일부터 과거 1주일간의 거래소시장에서 형성된 최종가격의 산술평균가격에 대한 1주당 배당금의 백분율임.\n\n4. 상기 '7. 배당금지급 예정일자'와 관련하여 배당금은 상법 제464조의2 규정에 의거, 이사회결의일로부터 1개월 이내에 지급 예정임.",
+      "missing_labels": [],
+      "unparsed_values": [],
+      "parse_notes": [
+        "'3. 1주당 배당금(원)' 옆에 '보통주식'/'종류주식' 구분이 없어 어느 주식의 값인지 판단하지 못했습니다(본 값: '시가배당률(%)').",
+        "'4. 시가배당률(%)' 옆에 '보통주식'/'종류주식' 구분이 없어 어느 주식의 값인지 판단하지 못했습니다(본 값: '배당금총액(원)').",
+        "'5. 배당금총액(원)' 라벨 다음에서 값 셀을 찾지 못했습니다."
+      ],
+      "parse_status": "PARTIAL"
+    },
+    {
+      "rcept_no": "20260827800324",
+      "rcept_dt": "20260827",
+      "corp_code": "01180118",
+      "corp_name": "코람코더원리츠",
+      "stock_code": "417310",
+      "stock_code_raw": "417310",
+      "report_nm": "부동산투자회사금전배당결정              ",
+      "report_nm_extra": null,
+      "matched_prefix": "부동산투자회사금전배당결정",
+      "is_correction": false,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260827800324",
+      "collected_at_kst": "2026-08-28T13:26:34.330043+09:00",
+      "dividend_class": null,
+      "dividend_type": null,
+      "dps_common": 8900,
+      "dps_preferred": null,
+      "yield_common": 81.4,
+      "yield_preferred": null,
+      "total_amount": 359560000000,
+      "record_date": "2026-08-31",
+      "pay_date_expected": null,
+      "board_resolution_date": "2026-08-27",
+      "notes": "1. 상기 “배당금총액” 및 “1주당 배당금”은 현재까지의 결산자료를 기초로 산정하여 이사회에서 결의한 현금배당 예정금액으로, 추후 감사 전 재무제표를 기초로 이사회에서 재결의할 예정이며, 외부감사 결과 및 정기주주총회 승인 과정에서 변경될 수 있습니다.\n\n2. 상기 \"보통주식 기준가격\"은 2026년 8월 26일자 종가입니다.\n\n3. 상기 \"시가배당률\"은 배당기준일 1거래일 전부터 과거 1주일간(2026.08.21 ~ 2026.08.27) 의 유가증권시장에서 형성된 최종시세가격의 산술평균가격에 대한 주당배당금의 비율을 백분율로 산정하였습니다.\n\n4. 당사의 당해 사업연도(제31기)는 2026.06.01~2026.08.31(3개월)입니다.",
+      "missing_labels": [],
+      "unparsed_values": [
+        {
+          "label": "5. 배당금지급 예정일",
+          "raw": "정기주주총회일로부터 1개월 이내"
+        }
+      ],
       "parse_notes": [],
       "parse_status": "PARTIAL"
     }
