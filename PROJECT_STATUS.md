@@ -446,6 +446,23 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
+- **2026-08-28 — CI: EV/EBITDA 서킷브레이커(#153) 실전 검증 완료 +
+  예약 실행(schedule) 감시 워치독(#154) 신설.** #153(2026-08-27 커밋)이 실제
+  GitHub Actions 실행(run #38) 로그로 검증됨 — 서킷브레이커 메시지가 연속 8회
+  실패 직후 정확히 1회 출력, 이후 EV/EBITDA 요청 없음. 핵심 수집 시간 57분(수정
+  전 2시간7분 대비 큰 폭 개선)도 로그 실측으로 확인.
+  같은 날, `scrape.yml`의 schedule 트리거가 2026-08-27·28 이틀 연속 지연·미발동
+  됐던 것이 듀얼게임 주문 취소로 우연히 발견된 문제를 오너가 지적 — "다른
+  크롤링도 한두 개가 아닌데 scrape.yml 하나만 감시하냐"는 오너 확인 요청에 따라
+  저장소의 schedule 트리거 워크플로우 9개(scrape.yml·scrape_us.yml·
+  indicator_kr.yml·scrape_report_snapshots.yml·duel_daily.yml·duel_daily_us.yml·
+  scorecard_publish_daily.yml·watch_dividend_disclosures.yml·
+  watch_dividend_payment_events.yml) 전부를 감시 대상으로 `watch_schedule_health.yml`
+  신설(keep_awake류·연 1회 실행은 의도적으로 제외). 매일 09:00 KST에 GitHub API로
+  최근 성공 실행 여부를 확인해 빠진 게 있으면 이슈 생성 + 잡 실패 처리. GitHub
+  자체 스케줄러 지연의 근본 원인은 여전히 미확인(§0-1) — 이 워치독은 원인 제거가
+  아니라 재발 시 놓치지 않고 알아채는 안전망. 커밋 `2257248`. 상세는
+  TASK_HISTORY.md #154, ⚠️ 오너의 실전 `workflow_dispatch` 수동 확인은 아직 미완.
 - **2026-08-27 — 배당 달력(§11): 🇺🇸 미국 배당 달력 사이드바 라벨 조정 + 전체 공개
   전환 (신설 당일 저녁).** 오너가 실 배포 화면을 확인하며 같은 그룹 안 아이콘 문법이
   다르다고 지적 — 라벨을 `'🇺🇸 미국 배당 달력'` → `'💰 투자 Thank you!'`로 바꿔 한국

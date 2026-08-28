@@ -2478,15 +2478,67 @@
      전체 실행시간이 실제로 크게 줄어드는지, 로그에 서킷 열림 메시지가 정상 출력
      되는지 확인 필요. 커밋 `9c57bf8`(오너 rebase 후 push로 해시가 이 값으로 바뀜).
 
+154. **🚨 `watch_schedule_health.yml` — 예약 실행(schedule) 감시 워치독 신설
+     (2026-08-28, 오너 요청 — "우연찮게 내가 주문 넣어놓은게 실패로 떠서 알았지
+     안그러면 몰랐을꺼 같니야").** `scrape.yml`의 schedule 트리거가 2026-08-27
+     (11시간 넘게 지연)·2026-08-28(6시간 넘게 미발동) 이틀 연속 문제를 겪었는데,
+     이걸 듀얼게임 주문 취소로 우연히 알게 된 것이 문제라는 오너 지적으로 시작.
+     GitHub Actions API(`gh api .../actions/workflows/{file}/runs?event=schedule`)
+     로 최근 실행 기록을 조회해 확인하는 방식. `AskUserQuestion`으로 "저장소 워치독
+     워크플로우 vs Claude/Cowork 매일 확인" 두 옵션을 제시했고, 오너가 저장소
+     워치독(권장) 선택 — 이어서 "scrape.yml 하나뿐이냐, 다른 크롤링도 한두 개가
+     아닌데"라고 범위를 되물어, scrape.yml 하나가 아니라 저장소의 schedule 트리거
+     워크플로우 전체를 훑어(`grep -l "schedule:" .github/workflows/*.yml`) 아래
+     9개로 감시 범위를 넓힘: `scrape.yml`·`scrape_us.yml`·`indicator_kr.yml`·
+     `scrape_report_snapshots.yml`·`duel_daily.yml`(평일 전용), `duel_daily_us.yml`·
+     `scorecard_publish_daily.yml`·`watch_dividend_disclosures.yml`·
+     `watch_dividend_payment_events.yml`(매일).
+     일부러 뺀 것 — `keep_awake.yml`/`render_keep_awake.yml`(데이터 수집이 아닌
+     단순 핑, 실패해도 조용히 잘못된 판단으로 안 이어짐, 주기도 너무 짧아 "하루
+     한 번 확인" 방식과 안 맞음), `collect_dividend_kr.yml`(1년에 한 번만 도는
+     스케줄이라 "오늘 안 돌았나" 검사 자체가 무의미 — `watch_dividend_disclosures.yml`
+     이 이미 매일 안전망 역할을 함).
+     매일 00:00 UTC(KST 09:00, 감시 대상 중 가장 늦게 끝나는 것 이후)에 각 대상의
+     최근 schedule 실행 중 "예상 창(window)" 안에 conclusion=success 가 있는지
+     확인 — 평일 전용은 주말엔 검사 자체를 건너뛰고, 월요일엔 지난 금요일 실행분
+     까지 보이도록 창을 30시간 → 76시간으로 넓힘. 하나라도 빠지면 이슈 생성(오너를
+     assignee 로 지정해 GitHub 기본 알림으로 이메일 발송 유도) + 잡 자체도
+     실패(exit 1) 처리해 Actions 탭에 빨간 X로 남김. 비밀키 불필요(기본
+     `GITHUB_TOKEN`으로 충분).
+     헤더 코멘트에 한계 2가지를 정직하게 명시(§0-1) — ①이 워치독도 결국 같은
+     GitHub Actions schedule 로 돌기 때문에 워치독 자신이 늦게 돌거나 안 돌 가능성을
+     완전히 배제할 수 없음, ②"그 시각 tick이 정확히 발동했는지"가 아니라 "최근
+     window 안에 성공 실행이 한 번이라도 있었는지"만 보므로, 이틀 연속 지연이 겹치는
+     아주 드문 경우 진짜 미발동을 놓칠 가능성이 이론상 있음.
+     검증 — YAML 유효성(`yaml.safe_load`, U+FFFD 0건 확인), 두 `run:` 스텝 모두
+     `bash -n` 문법 통과, 핵심 판정 로직(day-of-week 창 계산 + API 응답 파싱)을
+     실제 저장소의 실시간 GitHub API 응답으로 재현해 9개 대상 전부 예상대로 ✅
+     판정됨을 확인(2026-08-28 22:28 KST 기준). `gh issue create` 경로는 실제
+     이슈를 만드는 부작용이 있어 이번 검증에서는 실행하지 않음(아래 "진행 예정"
+     참고). 커밋 `2257248`.
+
 ## 진행 예정 (백로그)
 
-- 코스닥(sosok=1) 네이버 시세 테이블 구조 가정(#151) — 2026-08-27 첫 실전 500종목
-  실행에서 실제로 코스피 325 / 코스닥 175로 정상 집계됨을 raw JSON 직접 확인으로
-  검증 완료(가정이 맞았음). 다만 `duel_daily.yml`의 `workflow_run` 트리거(#150)
-  실동작은 아직 미확인 — 오너 요청으로 다음 정규 스케줄(평일 16:05 KST) 실행 후
-  Claude가 직접 확인 예정.
-- #153 EV/EBITDA 서킷브레이커 — 코드는 배포됐지만 오너 `git push` 후 다음 실제
-  실행에서 실행시간이 실제로 줄어드는지 아직 미검증.
+- ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26
+  workflow_dispatch(#37→#5, event≠schedule이라 정상 skip)와 2026-08-27 지연된
+  실제 schedule 실행(#38→duel_daily.yml #7, event=schedule로 정상 실행·성공)
+  두 케이스 모두로 의도대로 동작함을 실전 로그로 확인 완료.
+- ✅ #153 EV/EBITDA 서킷브레이커 — 2026-08-27 실전 실행(#38) 로그에서 서킷브레이커
+  로그 라인이 연속 8회 실패 직후 정확히 1회 출력되고 이후 EV/EBITDA 요청이 전혀
+  없음을 확인. 핵심 수집 시간도 57분(03:14→04:11 KST)으로 실측 — 수정 전 2시간
+  7분 대비 큰 폭 개선을 로그로 직접 검증 완료.
+- 🆕 #154 `watch_schedule_health.yml` 워치독 — 코드·YAML 유효성·bash 문법·핵심
+  판정 로직(실시간 GitHub API 데이터로 9개 대상 전부 정상 판정 재현)까지는 검증
+  완료. 다만 이슈 생성 경로(`gh issue create`)는 실제로 실행해보지 않았음(실제
+  이슈를 만드는 부작용이 있어 검증 단계에서 일부러 건드리지 않음) — 오너가 push
+  후 `workflow_dispatch`로 한 번 수동 실행해서 정상 동작(모두 ✅ 판정)까지 확인해
+  주면 좋음. 만약 일부러 실패를 재현해보고 싶으면 TARGETS 목록에 존재하지 않는
+  워크플로우 파일명을 임시로 하나 넣고 돌려보면 이슈 생성 경로까지 실전 확인 가능.
+- GitHub Actions schedule 트리거 자체의 지연·누락(2026-08-27~28, scrape.yml 등
+  여러 워크플로우에서 관측)의 근본 원인은 여전히 미확인 — GitHub 쪽 스케줄러
+  인프라 문제로 추정되나 저장소 설정으로 원인을 특정하거나 고칠 수 있는 부분이
+  아님(§0-1). #154 워치독은 "원인 제거"가 아니라 "재발 시 놓치지 않고 알아채기"
+  용도임을 오너도 인지하고 있음.
 - `tests/test_scorecard.py`(약 1464·1469행), `tests/test_duel_page_usd.py`(약
   1749행)에 남아있는 "코스피 상위 200" 표현 — 테스트 정확성에는 영향 없는 순수
   코멘트/독스트링이라 #151에서는 보류. 정리하고 싶으면 언제든 요청.
