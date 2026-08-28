@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at_kst": "2026-08-27T07:54:40.133711+09:00",
+    "generated_at_kst": "2026-08-28T13:07:00.849909+09:00",
     "total_records": 2763,
     "by_status": {
       "UNMAPPED": 57,
@@ -8,9 +8,9 @@
       "NO_DATA": 113
     },
     "by_report_used": {
-      "반기보고서": 2542,
+      "반기보고서": 2544,
       "3분기보고서": 19,
-      "1분기보고서": 32
+      "1분기보고서": 30
     },
     "ok_with_common_dps": 156,
     "ok_without_common_dps": 2437,
@@ -1188,8 +1188,8 @@
     "bsns_year": "2026",
     "universe_size_input": 2763,
     "universe_size": 2763,
-    "requests_used": 5574,
-    "elapsed_sec": 17597.5,
+    "requests_used": 5583,
+    "elapsed_sec": 17630.2,
     "completed": true,
     "stopped_reason": null,
     "corpcode_source": "cache",
@@ -1257,55 +1257,38 @@
       ],
       "duplicates": []
     },
-    "watch_update_performed_at_kst": "2026-08-27T07:54:40.131899+09:00",
-    "watch_date_range_checked": "20260826~20260826",
+    "watch_update_performed_at_kst": "2026-08-28T13:07:00.847827+09:00",
+    "watch_date_range_checked": "20260827~20260827",
     "watch_replaced_stock_codes": [
-      "0013V0",
-      "066360",
-      "100660",
-      "282620",
-      "372910",
-      "389470",
-      "419080",
-      "478560",
-      "900250"
+      "086710",
+      "246710",
+      "273640",
+      "900100"
     ],
     "watch_added_stock_codes": [],
     "watch_unexpected_report_regressions": [],
     "watch_delta_summary": {
-      "generated_at_kst": "2026-08-27T07:54:39.890891+09:00",
-      "total_records": 9,
+      "generated_at_kst": "2026-08-28T13:07:00.596305+09:00",
+      "total_records": 4,
       "by_status": {
-        "OK": 9
+        "OK": 4
       },
       "by_report_used": {
-        "반기보고서": 9
+        "반기보고서": 3,
+        "1분기보고서": 1
       },
       "ok_with_common_dps": 0,
-      "ok_without_common_dps": 9,
+      "ok_without_common_dps": 4,
       "unmapped_stock_codes": 0,
       "unmapped_detail": [],
       "unknown_se_labels": [],
-      "records_with_parse_notes": [
-        {
-          "stock_code": "282620",
-          "corp_name": "기도산업",
-          "notes": [
-            "알 수 없는 주식종류 '종류주식' (항목: 현금배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주식배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 현금배당금(원)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 주식배당(주)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다."
-          ]
-        }
-      ],
+      "records_with_parse_notes": [],
       "records_with_unit_mismatch": 0,
       "stock_codes_with_unit_mismatch": [],
       "records_with_cross_source_mismatch": 0,
       "stock_codes_with_cross_source_mismatch": [],
-      "mapped_via_name_fallback": 1,
-      "stock_codes_mapped_via_name_fallback": [
-        "0013V0"
-      ],
+      "mapped_via_name_fallback": 0,
+      "stock_codes_mapped_via_name_fallback": [],
       "name_fallback_attempted": true,
       "name_fallback_universe_names": 2734,
       "name_fallback_index_stats": {
@@ -101385,16 +101368,16 @@
         "corp_cls 값은 삼성전자의 'Y' 외에는 실제 응답으로 확인하지 못했습니다."
       ],
       "bsns_year": "2026",
-      "universe_size_input": 9,
-      "universe_size": 9,
+      "universe_size_input": 4,
+      "universe_size": 4,
       "reprt_priority_used": [
         "11014",
         "11012",
         "11013"
       ],
       "skip_not_yet_due": false,
-      "requests_used": 18,
-      "elapsed_sec": 61.5,
+      "requests_used": 9,
+      "elapsed_sec": 32.7,
       "completed": true,
       "stopped_reason": null,
       "corpcode_source": "cache",
@@ -101469,7 +101452,7 @@
       "checkpoint_max_age_days": 14,
       "verification_status": "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. 첫 GitHub Actions 실행 로그로 반드시 확인하세요."
     },
-    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 9종목을 최신 보고서로 교체하고 0종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
+    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 4종목을 최신 보고서로 교체하고 0종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
   },
   "records": [
     {
@@ -197412,6 +197395,7 @@
     {
       "stock_code": "086710",
       "corp_code": "00132202",
+      "corp_code_matched_via": "stock_code",
       "corp_name": "선진뷰티사이언스",
       "corp_cls": "K",
       "market": "코스닥시장",
@@ -197419,8 +197403,8 @@
       "reprt_code": "11012",
       "reprt_name": "반기보고서",
       "stlm_dt": "2026-06-30",
-      "rcept_no": "20260814001361",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814001361",
+      "rcept_no": "20260827000087",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260827000087",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
       "dps_cash_unspecified": null,
@@ -197447,11 +197431,13 @@
       "prev2_dps_cash_common": 60.0,
       "prev2_cash_yield_common": 0.65,
       "prev2_payout_ratio": 7.9,
+      "cross_source_notes": [],
       "status": "OK",
       "status_reason": "반기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-24T02:14:50.618218+09:00",
+      "collected_at_kst": "2026-08-28T13:06:33.106885+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
+      "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
       "probe_log": [
@@ -224664,15 +224650,16 @@
     {
       "stock_code": "273640",
       "corp_code": "01215618",
+      "corp_code_matched_via": "stock_code",
       "corp_name": "와이엠텍",
       "corp_cls": "K",
       "market": "코스닥시장",
       "bsns_year": "2026",
-      "reprt_code": "11013",
-      "reprt_name": "1분기보고서",
-      "stlm_dt": "2026-03-31",
-      "rcept_no": "20260529002393",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260529002393",
+      "reprt_code": "11012",
+      "reprt_name": "반기보고서",
+      "stlm_dt": "2026-06-30",
+      "rcept_no": "20260827000753",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260827000753",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
       "dps_cash_unspecified": null,
@@ -224689,7 +224676,7 @@
       "cash_total_mkrw": null,
       "stock_total_mkrw": null,
       "par_value": 500.0,
-      "eps": 26.0,
+      "eps": 158.0,
       "eps_basis": "연결",
       "net_income_mkrw": 268.0,
       "net_income_basis": "연결",
@@ -224699,11 +224686,13 @@
       "prev2_dps_cash_common": 140.0,
       "prev2_cash_yield_common": 1.31,
       "prev2_payout_ratio": 29.3,
+      "cross_source_notes": [],
       "status": "OK",
-      "status_reason": "1분기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-24T03:02:44.749064+09:00",
+      "status_reason": "반기보고서 기준 누적치",
+      "collected_at_kst": "2026-08-28T13:06:51.347876+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
+      "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
       "probe_log": [
@@ -224715,12 +224704,6 @@
         },
         {
           "reprt_code": "11012",
-          "status": "013",
-          "usable": false,
-          "why": "조회된 데이터가 없습니다(status 013) — 그 보고서가 없거나 배당 표가 없음."
-        },
-        {
-          "reprt_code": "11013",
           "status": "000",
           "usable": true,
           "why": "배당 항목 15행 확인"
@@ -251824,7 +251807,7 @@
       "cross_source_notes": [],
       "status": "OK",
       "status_reason": "1분기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-26T05:33:06.726902+09:00",
+      "collected_at_kst": "2026-08-28T13:06:43.646350+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
@@ -253654,15 +253637,16 @@
     {
       "stock_code": "900100",
       "corp_code": "00781202",
+      "corp_code_matched_via": "stock_code",
       "corp_name": "파이온엑스",
       "corp_cls": "K",
       "market": "코스닥시장",
       "bsns_year": "2026",
-      "reprt_code": "11013",
-      "reprt_name": "1분기보고서",
-      "stlm_dt": "2026-03-31",
-      "rcept_no": "20260529000825",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260529000825",
+      "reprt_code": "11012",
+      "reprt_name": "반기보고서",
+      "stlm_dt": "2026-06-30",
+      "rcept_no": "20260827000641",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260827000641",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
       "dps_cash_unspecified": null,
@@ -253678,10 +253662,10 @@
       "payout_ratio_basis": null,
       "cash_total_mkrw": null,
       "stock_total_mkrw": null,
-      "par_value": 23.0,
-      "eps": -29.0,
+      "par_value": 231.0,
+      "eps": -475.0,
       "eps_basis": "연결",
-      "net_income_mkrw": -1239.0,
+      "net_income_mkrw": -2504.0,
       "net_income_basis": "연결",
       "prev_dps_cash_common": null,
       "prev_cash_yield_common": null,
@@ -253689,11 +253673,13 @@
       "prev2_dps_cash_common": null,
       "prev2_cash_yield_common": null,
       "prev2_payout_ratio": null,
+      "cross_source_notes": [],
       "status": "OK",
-      "status_reason": "1분기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-24T03:53:49.190640+09:00",
+      "status_reason": "반기보고서 기준 누적치",
+      "collected_at_kst": "2026-08-28T13:06:58.131604+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
+      "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
       "probe_log": [
@@ -253705,12 +253691,6 @@
         },
         {
           "reprt_code": "11012",
-          "status": "013",
-          "usable": false,
-          "why": "조회된 데이터가 없습니다(status 013) — 그 보고서가 없거나 배당 표가 없음."
-        },
-        {
-          "reprt_code": "11013",
           "status": "000",
           "usable": true,
           "why": "배당 항목 15행 확인"
