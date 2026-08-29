@@ -89,6 +89,48 @@
       "delta_raw_lines_appended": 9,
       "unexpected_report_regressions": [],
       "delta_out_dir": "data/cache/watch_delta"
+    },
+    {
+      "checked_at_kst": "2026-08-30T07:31:01.169901+09:00",
+      "date_range_checked": "20260828~20260829",
+      "matched_stock_codes": [
+        "003690",
+        "004870",
+        "053690",
+        "054670",
+        "058970",
+        "199480",
+        "221800",
+        "252500",
+        "273640",
+        "282620",
+        "285490",
+        "309710",
+        "900140",
+        "900260"
+      ],
+      "matched_stock_codes_source": "호출부가 전달한 list.json 매칭 결과",
+      "replaced_stock_codes": [
+        "003690",
+        "004870",
+        "053690",
+        "054670",
+        "058970",
+        "199480",
+        "221800",
+        "252500",
+        "273640",
+        "282620",
+        "285490",
+        "309710",
+        "900140",
+        "900260"
+      ],
+      "added_stock_codes": [],
+      "skipped_replacements": [],
+      "delta_raw_lines_appended": 28,
+      "unexpected_report_regressions": [],
+      "delta_out_dir": "data/cache/watch_delta"
     }
   ]
 }
