@@ -392,15 +392,40 @@ def test_the_scorecard_card_is_rendered_in_both_branches_of_render_accounts():
             "client", "user_id", constant, "price_lookup"], wrapper
 
     # 성적표 칸이 창유형 칸들과 **같은 배치 스타일**을 쓰는지(카드 폭이 혼자 달라지지 않게).
-    src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_render_accounts"])
-    grid_style = ('flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; '
-                  'align-content: start;')
-    assert src.count(grid_style) == 2, (
-        "성적표 칸과 창유형 칸의 배치 스타일이 다릅니다(같은 grid 칸이어야 합니다)."
+    #
+    # 2026-08-29 — 국내/해외 구역을 완전히 분리하면서(오너 확정, 달러 트랙까지 쓰면
+    # 카드가 8장으로 늘어 어느 카드가 어느 통화인지 갈리지 않는다는 지적) `_render_accounts()`
+    # 안에서 성적표 칸·창유형 칸을 감싸던 `display: grid` 래퍼 div 가 없어졌습니다 — 이제
+    # 두 카드는 그냥 같은 `ui.row()` 의 형제로 나란히 놓입니다. 그래서 "폭이 같다"는 보장은
+    # `_render_accounts()` 소스가 아니라, **카드를 실제로 그리는 세 함수가 전부 같은 카드
+    # 스타일 리터럴을 쓰는지**로 확인합니다(`_render_scorecard_summary_card()` ·
+    # `_render_account_card()` · `_render_account_card_usd()`) — 이 세 함수 중 하나라도
+    # 폭 규칙이 달라지면 국내/해외 구역 모두에서 카드 폭이 어긋납니다.
+    card_style = "flex: 1 1 320px; min-width: 0;"
+    for fn_name in ("_render_scorecard_summary_card", "_render_account_card",
+                    "_render_account_card_usd"):
+        fn_src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[fn_name])
+        assert card_style in fn_src, (
+            f"{fn_name}() 의 카드 폭 스타일이 다른 카드들과 어긋납니다(같은 "
+            f"'{card_style}' 이어야 합니다)."
+        )
+    # 국내/해외 구역이 계좌가 없을 때 그리는 "계좌가 아직 없습니다" 자리표시 카드도 **같은
+    # 폭 스타일**을 직접 걸어야 합니다(위 세 함수 호출이 아니라 `_render_accounts()` 안에서
+    # 인라인으로 그리는 유일한 카드라서, 위 검사에 안 걸립니다 — 2026-08-29 리뷰에서 지적된
+    # 공백). 국내 자리표시 1개 + 해외 자리표시 1개 = 정확히 2번이어야 합니다.
+    combined_src = ast.unparse(ast.Module(body=list(combined), type_ignores=[]))
+    assert combined_src.count(card_style) == 2, (
+        f"국내/해외 '계좌가 아직 없습니다' 자리표시 카드의 폭 스타일이 예상과 다릅니다 "
+        f"(정확히 2개여야 함): {combined_src.count(card_style)}개"
     )
     # 원화 전용 분기의 카드 줄 클래스는 그대로여야 합니다(기존 화면 회귀).
     assert "'w-full gap-4 items-stretch'" in ast.unparse(ast.Module(body=list(krw_only),
                                                                     type_ignores=[]))
+    # 국내/해외 두 구역 모두 원화 전용 분기와 **같은 줄 클래스**를 씁니다(2026-08-29).
+    combined_src = ast.unparse(ast.Module(body=list(combined), type_ignores=[]))
+    assert combined_src.count("'w-full gap-4 items-stretch'") == 2, (
+        "국내 구역·해외 구역이 각각 'w-full gap-4 items-stretch' 줄 하나씩을 써야 합니다."
+    )
 
 
 def test_the_usd_scorecard_card_is_guarded_by_usd_market_being_present():

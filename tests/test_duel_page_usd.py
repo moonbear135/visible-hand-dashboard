@@ -612,6 +612,102 @@ def test_usd_positions_table_uses_dollar_amounts_and_escapes_names():
 
 
 # =============================================================================
+# 6-B. 🔴 (2026-08-29) 종목별 수익률 — `evaluate_holding()`(scorecard_db.py)과 같은 식,
+#      값을 모르면 0%로 지어내지 않고 '—'(§0-1), 오르면 빨강/내리면 파랑(pct_html 재사용).
+# =============================================================================
+def test_position_rows_computes_per_holding_return_pct_the_same_way_as_scorecard():
+    from utils.scorecard_db import MARKET_KR
+
+    import web.pages.duel_page as page
+
+    lookup, _asked = _price_lookup_spy({(MARKET_KR, "005930"): 90000.0})
+    positions = [
+        # 이득: (90000*10 - 80000*10) / (80000*10) * 100 = +12.5%
+        {"ticker": "005930", "stock_name": "삼성전자", "quantity": 10, "avg_cost": 80000.0,
+         "status": "active"},
+        # 가격을 못 구함 — 0%로 지어내지 않고 None
+        {"ticker": "000001", "stock_name": "가격미상", "quantity": 5, "avg_cost": 20000.0,
+         "status": "active"},
+        # 상장폐지 확정 — 평가액 0원은 사실이므로 -100%는 지어낸 값이 아닙니다.
+        {"ticker": "DEAD1", "stock_name": "상장폐지주", "quantity": 2, "avg_cost": 50000.0,
+         "status": "delisted", "delisted_date": "2026-07-01"},
+    ]
+    summary = page._position_rows(positions, lookup)
+    by_ticker = {row["ticker"]: row for row in summary["rows"]}
+    assert by_ticker["005930"]["profit_pct"] == pytest.approx(12.5)
+    assert by_ticker["000001"]["profit_pct"] is None
+    assert by_ticker["DEAD1"]["profit_pct"] == pytest.approx(-100.0)
+
+
+def test_position_rows_usd_computes_per_holding_return_pct_the_same_way_as_krw():
+    from utils.scorecard_db import MARKET_US
+
+    import web.pages.duel_page as page
+
+    lookup, _asked = _price_lookup_spy({(MARKET_US, "AAPL"): 180.0})
+    positions = [
+        # 손실: (180*3 - 200*3) / (200*3) * 100 = -10%
+        {"ticker": "AAPL", "stock_name": "Apple Inc.", "quantity": 3, "avg_cost": 200.0,
+         "status": "active"},
+        {"ticker": "ZZZZ", "stock_name": "Unknown", "quantity": 5, "avg_cost": 10.0,
+         "status": "active"},
+        {"ticker": "DEAD", "stock_name": "Delisted Co", "quantity": 2, "avg_cost": 50.0,
+         "status": "delisted", "delisted_date": "2026-07-01"},
+    ]
+    summary = page._position_rows_usd(positions, lookup)
+    by_ticker = {row["ticker"]: row for row in summary["rows"]}
+    assert by_ticker["AAPL"]["profit_pct"] == pytest.approx(-10.0)
+    assert by_ticker["ZZZZ"]["profit_pct"] is None
+    assert by_ticker["DEAD"]["profit_pct"] == pytest.approx(-100.0)
+
+
+def test_krw_positions_table_shows_a_return_pct_column_colored_by_sign():
+    """오르면 빨강(#f87171)·내리면 파랑(#60a5fa) — '내 성적표'·'사장님 보고서'와 같은 색
+    (2026-08-11 오너 확정, `pct_html()` 재사용). 헤더에 '수익률'이 새로 생겼습니다."""
+    import web.pages.duel_page as page
+
+    captured = []
+    saved_ui = page.ui
+    page.ui = _UiStub(captured)
+    try:
+        page._render_positions_table([
+            {"ticker": "005930", "stock_name": "삼성전자", "quantity": 10, "avg_cost": 80000.0,
+             "price": 90000.0, "value": 900000.0, "profit_pct": 12.5, "note": ""},
+            {"ticker": "000001", "stock_name": "손실주", "quantity": 5, "avg_cost": 20000.0,
+             "price": 15000.0, "value": 75000.0, "profit_pct": -25.0, "note": ""},
+        ])
+    finally:
+        page.ui = saved_ui
+
+    blob = "\n".join(captured)
+    assert "수익률" in blob
+    assert "+12.50%" in blob and "#f87171" in blob
+    assert "-25.00%" in blob and "#60a5fa" in blob
+
+
+def test_usd_positions_table_shows_a_dash_when_return_pct_is_missing_or_none():
+    """`.get('profit_pct')` 로 읽으므로 키가 아예 없거나 None 이어도 0%로 위장하지 않고
+    '—'로 그립니다(§0-1) — 이 방어가 조용히 사라지는 것을 잡는 회귀 테스트."""
+    import web.pages.duel_page as page
+
+    captured = []
+    saved_ui = page.ui
+    page.ui = _UiStub(captured)
+    try:
+        page._render_positions_table_usd([
+            {"ticker": "ZZZZ", "stock_name": "Unknown", "quantity": 5, "avg_cost": 10.0,
+             "price": None, "value": None, "note": "가격 확인 중"},      # profit_pct 키 없음
+            {"ticker": "AAPL", "stock_name": "Apple Inc.", "quantity": 3, "avg_cost": 150.0,
+             "price": 200.0, "value": 600.0, "profit_pct": None, "note": ""},  # 명시적 None
+        ])
+    finally:
+        page.ui = saved_ui
+
+    blob = "\n".join(captured)
+    assert blob.count("—") >= 2, "값을 모르는 수익률 칸이 '—'로 그려지지 않았습니다."
+
+
+# =============================================================================
 # 7. 🔴 트랙 독립 — 한쪽만 참여해도 화면이 깨지지 않습니다 (§5-11-10 · 스키마 §14-10)
 # =============================================================================
 SYNTHETIC_KRW_ACCOUNTS = [

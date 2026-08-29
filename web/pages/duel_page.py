@@ -130,7 +130,8 @@ from web.auth import (
 from web.auth_ui import fail_message, render_auth
 from web.blocking import run_blocking
 from web.components import (
-    error_banner, esc, holdings_table_html, info_banner, metric_card, pct_text, warning_banner,
+    error_banner, esc, holdings_table_html, info_banner, metric_card, pct_html, pct_text,
+    warning_banner,
 )
 from web.layout import DUEL_ENABLED, DUEL_MENU_ADMIN_ONLY, layout
 from web.state import (
@@ -1599,6 +1600,7 @@ def _position_rows(positions, price_lookup):
         ticker = str(position.get("ticker") or "")
         quantity = float(position.get("quantity") or 0)
         avg_cost = float(position.get("avg_cost") or 0)
+        cost = quantity * avg_cost
         delisted = position.get("status") == "delisted"
         price = None if delisted else price_lookup(MARKET_KR, ticker)
 
@@ -1613,6 +1615,11 @@ def _position_rows(positions, price_lookup):
             value = quantity * price
             note = ''
 
+        # 종목별 수익률 — `utils/scorecard_db.py::evaluate_holding()` 와 **같은 식**입니다
+        # (profit / cost * 100, cost 는 매입원가 = 수량 × 평균매입가). 가격을 모르면(§0-1)
+        # 0% 로 지어내지 않고 None — `pct_html()` 이 '—' 로 그립니다.
+        profit_pct = ((value - cost) / cost * 100.0) if (value is not None and cost > 0) else None
+
         if value is not None:
             position_value += value
         rows.append({
@@ -1622,6 +1629,7 @@ def _position_rows(positions, price_lookup):
             "avg_cost": avg_cost,
             "price": price,
             "value": value,
+            "profit_pct": profit_pct,
             "note": note,
         })
     rows.sort(key=lambda r: (r["value"] is None, -(r["value"] or 0)))
@@ -1654,12 +1662,14 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
                            bundles=None, usd_bundles=None, broad_prices=None) -> None:
     """계좌 비교 영역.
 
-    💵 2026-08-21 — 달러 계좌가 하나라도 있으면 **같은 창유형 카드 안에 위쪽 원화 블록,
-       아래쪽 달러 블록**을 나란히 그립니다(§5-11-2 오너 확정, "내 성적표"의
-       `_render_currency_block()` 이 통화별로 독립 블록을 그리는 방식과 같은 정신).
-       🔴 **두 블록을 합산한 숫자는 만들지 않습니다** — 이 함수 어디에도 원화 값과 달러
+    💵 2026-08-21 — 달러 계좌가 하나라도 있으면 원화 구역 전체와 달러 구역 전체를 **위아래로
+       완전히 분리**해서 그립니다(2026-08-29 오너 확정 — 처음엔 창유형 카드 한 칸 안에
+       위쪽 원화·아래쪽 달러를 쌓았지만, 달러 트랙까지 쓰는 사용자는 카드가 8장으로 늘면서
+       어느 카드가 어느 통화인지 한눈에 갈리지 않는다는 지적을 받아 구역 자체를 나눴습니다).
+       각 구역의 내부 배치는 원화 전용 분기(아래 첫 분기)와 같은 모양입니다.
+       🔴 **두 구역을 합산한 숫자는 만들지 않습니다** — 이 함수 어디에도 원화 값과 달러
        값이 같은 산술식에 들어가는 자리가 없습니다. 환율 시계열이 없는 앱에서 두 통화를
-       더하면 그 숫자는 지어낸 값이 되기 때문입니다(§0-1).
+       더하면 그 숫자는 지어낸 값이 되기 때문입니다(§0-1 · §5-11-2).
 
     ⚠️ **달러 계좌가 하나도 없으면 예전과 글자 그대로 같은 경로**로 그립니다(아래 첫 분기).
        원화만 쓰는 사용자의 화면을 바꾸지 않기 위한 의도적인 두 경로입니다.
@@ -1692,25 +1702,22 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
                                            bundle=_bundle_for(bundles, account.get("id")))
         return
 
-    # ── 원화 + 달러 병기 (§5-11-2) ────────────────────────────────────────────
+    # ── 🇰🇷 국내 / 🇺🇸 해외 완전 분리 (2026-08-29 오너 확정, §5-11-2) ──────────────
+    #    2026-08-21에는 창유형 한 칸 안에 원화 카드를 위, 달러 카드를 아래로 쌓아 나란히
+    #    뒀는데, 달러 트랙까지 쓰는 사용자는 카드가 8장으로 늘면서 "어느 카드가 어느
+    #    통화인지" 한눈에 갈리지 않는다는 지적(2026-08-29, 실사용 스크린샷)을 받았습니다.
+    #    그래서 통화별로 **구역 자체를 위아래로 완전히 나눴습니다** — 국내 구역 전체(성적표
+    #    +1·3·6개월)를 먼저, 그 아래 해외 구역 전체를 별도로 그립니다. 각 구역의 내부 배치는
+    #    원화 전용 분기(바로 위)와 **글자 그대로 같은 모양**(성적표 칸 + 창유형 칸들이 같은
+    #    `ui.row()` 의 형제)이라 새 계산식이 필요 없고, §5-11-2(원화·달러 합산 금지) 위험이
+    #    늘지 않습니다 — 이 함수엔 여전히 두 통화 값이 만나는 산술식이 한 곳도 없습니다.
     krw_by_window = {a.get("window_type"): a for a in (accounts or [])}
     ui.markdown('#### 💰 내 가상계좌')
     ui.label(
         '창유형(1·3·6개월)마다 원화 계좌와 달러 계좌가 **각각 별도 계좌**로 있습니다. '
-        '같은 칸의 위쪽이 원화, 아래쪽이 달러입니다.'
+        '아래에 🇰🇷 국내 구역과 🇺🇸 해외 구역을 완전히 나눠 보여줍니다.'
     ).classes('vh-muted')
     ui.label(f'※ {NOTICE_NO_FX_MIX}').classes('vh-muted')
-    if market["as_of"]:
-        ui.label(
-            f'🕒 원화 평가금액은 코스피 종가 스냅샷({esc(str(market["as_of"]))} 기준) 기준입니다 — '
-            '실시간 시세가 아닙니다.'
-        ).classes('vh-muted')
-    if usd_market["as_of"]:
-        ui.label(
-            f'🕒 달러 평가금액은 미국 종가 스냅샷({esc(str(usd_market["as_of"]))} 기준, 한국시간) '
-            '기준입니다 — 실시간 시세가 아닙니다. 두 시장은 마감 시각이 다르므로 기준 시각도 '
-            '서로 다릅니다.'
-        ).classes('vh-muted')
 
     # 창유형 순서는 규칙 계층의 `ACCOUNT_WINDOW_TYPES`(M1→M3→M6)를 따릅니다. 혹시 그 목록에
     # 없는 창유형이 내려오면 **조용히 빼지 않고** 뒤에 이어 그립니다(§0-1 — 계좌가 화면에서
@@ -1720,46 +1727,55 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
              if w not in known and w is not None]
     ordered = known + sorted(set(extra), key=str)
 
+    # ── 🇰🇷 국내 결투 (원화) ──────────────────────────────────────────────────
+    ui.markdown('##### 🇰🇷 국내 결투 (원화)')
+    if market["as_of"]:
+        ui.label(
+            f'🕒 평가금액은 코스피 종가 스냅샷({esc(str(market["as_of"]))} 기준) 기준입니다 — '
+            '실시간 시세가 아닙니다.'
+        ).classes('vh-muted')
     with ui.row().classes('w-full gap-4 items-stretch'):
-        # 📊 맨 앞 칸 — **실제 자산**('내 성적표'). 창유형 칸들과 같은 구조(위쪽 원화,
-        #    아래쪽 달러)로 두어 눈으로 바로 대조되게 합니다(2026-08-21 오너 스케치).
-        #    🔴 §5-11-2 — 아래 두 줄은 **서로 완전히 독립된 두 번의 호출**입니다. 통화도
-        #       시장 데이터도 각자 인자로 따로 넘기고, 두 호출이 공유하는 변수(누적합 등)가
-        #       하나도 없습니다 — 원화 값과 달러 값이 같은 산술식에 들어갈 자리 자체가
-        #       없어야 하기 때문입니다(환율 시계열이 없으므로 더하면 지어낸 값이 됩니다).
-        with ui.element('div').style(
-                'flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; align-content: start;'):
-            await _render_scorecard_summary_card_krw(client, user_id, market,
-                                                     broad_prices=broad_prices)
-            if usd_market is not None:
-                await _render_scorecard_summary_card_usd(client, user_id, usd_market,
-                                                         broad_prices=broad_prices)
-
+        # 📊 맨 앞 칸은 **실제 자산**('내 성적표') 요약입니다 — 원화 전용 분기와 같은 자리·
+        #    같은 순서(성적표 → 1개월 → 3개월 → 6개월).
+        await _render_scorecard_summary_card_krw(client, user_id, market,
+                                                 broad_prices=broad_prices)
         for window_type in ordered:
             krw_account = krw_by_window.get(window_type)
-            usd_account = usd_by_window.get(window_type)
-            if krw_account is None and usd_account is None:
-                continue
-            # 🔴 창유형 한 칸. `display: grid` 로 두는 이유: 안쪽 카드가 이미
-            #    `flex: 1 1 320px` 을 달고 있어서, 이 칸을 세로 flex 로 만들면 그 320px 이
-            #    **높이 기준값**으로 해석돼 빈 카드가 320px 로 늘어납니다. grid 의 암시적
-            #    행은 내용 높이를 그대로 따르므로 그 부작용이 없습니다.
-            with ui.element('div').style(
-                    'flex: 1 1 320px; min-width: 0; display: grid; gap: 12px; align-content: start;'):
-                if krw_account is not None:
-                    await _render_account_card(
-                        client, user_id, krw_account, market,
-                        bundle=_bundle_for(bundles, krw_account.get("id")))
-                else:
+            if krw_account is not None:
+                await _render_account_card(
+                    client, user_id, krw_account, market,
+                    bundle=_bundle_for(bundles, krw_account.get("id")))
+            else:
+                with ui.column().classes('vh-card gap-2').style('flex: 1 1 320px; min-width: 0;'):
                     ui.label(
                         f'{WINDOW_TITLES.get(window_type, str(window_type))} — 원화 계좌는 아직 '
                         '없습니다(아래 원화 참여 안내 참고).'
                     ).classes('vh-muted vh-keep-all')
-                if usd_account is not None:
-                    await _render_account_card_usd(
-                        client, user_id, usd_account, usd_market,
-                        bundle=_bundle_for(usd_bundles, usd_account.get("id")))
-                else:
+
+    # ── 🇺🇸 해외 결투 (달러) ──────────────────────────────────────────────────
+    ui.markdown('##### 🇺🇸 해외 결투 (달러)')
+    if usd_market["as_of"]:
+        ui.label(
+            f'🕒 평가금액은 미국 종가 스냅샷({esc(str(usd_market["as_of"]))} 기준, 한국시간) '
+            '기준입니다 — 실시간 시세가 아닙니다. 두 시장은 마감 시각이 다르므로 기준 시각도 '
+            '위 국내 구역과 서로 다릅니다.'
+        ).classes('vh-muted')
+    with ui.row().classes('w-full gap-4 items-stretch'):
+        # 🔴 §5-11-2 — 위 국내 구역과 **서로 완전히 독립된 렌더**입니다. 통화도 시장 데이터도
+        #    각자 인자로 따로 넘기고, 두 구역이 공유하는 변수(누적합 등)가 하나도 없습니다 —
+        #    원화 값과 달러 값이 같은 산술식에 들어갈 자리 자체가 없어야 하기 때문입니다
+        #    (환율 시계열이 없으므로 더하면 지어낸 값이 됩니다).
+        if usd_market is not None:
+            await _render_scorecard_summary_card_usd(client, user_id, usd_market,
+                                                     broad_prices=broad_prices)
+        for window_type in ordered:
+            usd_account = usd_by_window.get(window_type)
+            if usd_account is not None:
+                await _render_account_card_usd(
+                    client, user_id, usd_account, usd_market,
+                    bundle=_bundle_for(usd_bundles, usd_account.get("id")))
+            else:
+                with ui.column().classes('vh-card gap-2').style('flex: 1 1 320px; min-width: 0;'):
                     ui.label(
                         f'{WINDOW_TITLES.get(window_type, str(window_type))} — 달러 계좌는 아직 '
                         '없습니다(아래 달러 참여 안내 참고).'
@@ -1863,7 +1879,7 @@ def _render_positions_table(rows) -> None:
     🔐 §0-3-9 — `stock_name` 은 DB 에 저장되는 사용자 소유 컬럼이 아니라 주문 저장 시 우리가
        유니버스에서 넣은 값이지만, 표에 나가는 값은 예외 없이 `esc()` 를 거칩니다.
     """
-    headers = ['종목', '수량', '평균매입가', '현재가', '평가금액']
+    headers = ['종목', '수량', '평균매입가', '현재가', '평가금액', '수익률']
     body_rows = []
     for row in rows:
         name = row["stock_name"] or row["ticker"]
@@ -1875,12 +1891,15 @@ def _render_positions_table(rows) -> None:
         else:
             price_cell = esc(format_amount(row["price"], CURRENCY))
             value_cell = esc(format_amount(row["value"], CURRENCY))
+        # 종목별 수익률 — 오르면 빨강/내리면 파랑(2026-08-11 오너 확정, '내 성적표'·'사장님
+        # 보고서'와 같은 색·같은 함수 `pct_html()`). 값을 모르면 '—'(§0-1, 0%로 위장 금지).
         body_rows.append([
             label,
             esc(f'{row["quantity"]:,.6g}'),
             esc(format_amount(row["avg_cost"], CURRENCY)),
             price_cell,
             value_cell,
+            pct_html(row.get("profit_pct")),
         ])
     ui.html(holdings_table_html(headers, body_rows)).classes('w-full')
 
@@ -1906,6 +1925,7 @@ def _position_rows_usd(positions, price_lookup):
         ticker = str(position.get("ticker") or "")
         quantity = float(position.get("quantity") or 0)
         avg_cost = float(position.get("avg_cost") or 0)
+        cost = quantity * avg_cost
         delisted = position.get("status") == "delisted"
         price = None if delisted else price_lookup(MARKET_US, ticker)
 
@@ -1920,6 +1940,10 @@ def _position_rows_usd(positions, price_lookup):
             value = quantity * price
             note = ''
 
+        # 종목별 수익률 — 원화 `_position_rows()` 와 **같은 식**(§0-3-10). 가격을 모르면
+        # None(§0-1) — `pct_html()` 이 '—' 로 그립니다.
+        profit_pct = ((value - cost) / cost * 100.0) if (value is not None and cost > 0) else None
+
         if value is not None:
             position_value += value
         rows.append({
@@ -1928,6 +1952,7 @@ def _position_rows_usd(positions, price_lookup):
             "quantity": quantity,
             "avg_cost": avg_cost,
             "price": price,
+            "profit_pct": profit_pct,
             "value": value,
             "note": note,
         })
@@ -2031,7 +2056,7 @@ def _render_positions_table_usd(rows) -> None:
     갈라진 이유는 통화 상수 하나뿐입니다(`CURRENCY` → `CURRENCY_USD`, 상각 표기 '0원' → '$0').
     🔐 §0-3-9 — 표에 나가는 값은 예외 없이 `esc()` 를 거칩니다.
     """
-    headers = ['종목', '수량', '평균매입가', '현재가', '평가금액']
+    headers = ['종목', '수량', '평균매입가', '현재가', '평가금액', '수익률']
     body_rows = []
     for row in rows:
         name = row["stock_name"] or row["ticker"]
@@ -2043,12 +2068,14 @@ def _render_positions_table_usd(rows) -> None:
         else:
             price_cell = esc(format_amount(row["price"], CURRENCY_USD))
             value_cell = esc(format_amount(row["value"], CURRENCY_USD))
+        # 종목별 수익률 — 원화 표와 같은 색·같은 함수 `pct_html()`(오르면 빨강/내리면 파랑).
         body_rows.append([
             label,
             esc(f'{row["quantity"]:,.6g}'),
             esc(format_amount(row["avg_cost"], CURRENCY_USD)),
             price_cell,
             value_cell,
+            pct_html(row.get("profit_pct")),
         ])
     ui.html(holdings_table_html(headers, body_rows)).classes('w-full')
 
