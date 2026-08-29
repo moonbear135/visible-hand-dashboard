@@ -470,17 +470,18 @@ def test_wiring():
         check("git add data/" in text or "git add -A data/" in text,
               f"{name} 가 data/ 전체를 커밋 (새 이력 파일도 자동 포함)")
 
-    pegy = (REPO_ROOT / "views" / "pegy_view.py").read_text(encoding="utf-8")
-    usv = (REPO_ROOT / "views" / "us_stocks_view.py").read_text(encoding="utf-8")
-    for label, text in (("코스피 화면", pegy), ("미국 화면", usv)):
-        check("load_stock_history(" in text, f"[{label}] 다운로드가 이력 기반으로 배선됨")
-        check("build_history_csv_bytes(" in text and "build_history_json_bytes(" in text,
-              f"[{label}] CSV/JSON 모두 이력 형식으로 생성")
-        check("build_stock_csv_bytes(" not in text, f"[{label}] 옛 하루치 내보내기 함수 잔재 없음")
-        check("_download_search" in text, f"[{label}] 다운로드 전용 검색창 유지(기존 UI 구조 그대로)")
+    # 2026-08-29 — Streamlit 은퇴(views/pegy_view.py · views/us_stocks_view.py →
+    # archive/streamlit_views/)로, 다운로드 배선은 두 화면이 공유하는 NiceGUI 컴포넌트
+    # `web/components/stock_download.py` 한 곳에서만 확인합니다.
+    dl = (REPO_ROOT / "web" / "components" / "stock_download.py").read_text(encoding="utf-8")
+    check("load_stock_history(" in dl, "[다운로드 컴포넌트] 다운로드가 이력 기반으로 배선됨")
+    check("build_history_csv_bytes(" in dl and "build_history_json_bytes(" in dl,
+          "[다운로드 컴포넌트] CSV/JSON 모두 이력 형식으로 생성")
+    check("build_stock_csv_bytes(" not in dl,
+          "[다운로드 컴포넌트] 옛 하루치 내보내기 함수 잔재 없음")
 
     # 이력이 아직 없을 때 사용자에게 사실대로 알리는 안내가 있는지
-    check("아직 없습니다" in pegy and "아직 없습니다" in usv,
+    check("아직 없습니다" in dl,
           "이력이 없으면 파일을 지어내지 않고 그 사실을 안내")
 
 

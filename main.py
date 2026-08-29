@@ -1,9 +1,12 @@
 """
 NiceGUI 진입점 — **지금 실서비스가 도는 곳**입니다 (2026-08-17 컷오버 완료).
 
-기존 `app.py`(Streamlit 진입점)와 `views/` 는 **즉시 롤백에 대비해 컷오버 후 최소 2주간
-그대로 살려둡니다.** 유예가 끝나면 archive/ 로 옮겨 서비스 경로에서 제거합니다
-(ENGINEERING_SPEC.md §0-3-10 — 듀얼런은 기한이 있는 임시 상태입니다).
+2026-08-29 — 듀얼런(Streamlit 병행) 종료. 오너 결정으로 예정(2026-08-31)보다 이틀 빠르게
+`app.py`·`visiblehand.py` 는 `archive/` 로, `views/*.py` 는 `archive/streamlit_views/` 로
+옮겨 서비스 경로에서 제거했습니다. 프론트엔드는 이제 **NiceGUI 단일 스택**입니다
+(ENGINEERING_SPEC.md §0-3-10 — 듀얼런은 기한이 있는 임시 상태였고, 그 기한이 끝났습니다).
+⚠️ Streamlit Cloud 에 떠 있는 구 앱 자체는 코드로 내릴 수 없습니다 — 오너가 Streamlit
+   Cloud 대시보드에서 직접 중지해야 합니다.
 
 실행 방법:
   로컬:  NICEGUI_STORAGE_SECRET=아무-긴-난수-문자열 python main.py

@@ -225,7 +225,7 @@ ALLOWED_MUTABLE_GLOBALS = {
     #    입니다. 이 화면은 로그인이 없고(관리자 비밀번호 게이트만 있음) 사용자별 데이터를
     #    아예 다루지 않습니다 — 읽는 건 모든 관리자에게 동일한 `market_history.csv` 와
     #    `data/macro_commentary.json` 뿐이라 §0-3-8 의 "읽기 전용 시장데이터" 쪽입니다.
-    #    아래 4개가 원본과 글자 단위로 같은지는 [8] 이 매번 대조합니다.
+    #    (원본 `views/macro_view.py` 와의 글자 단위 대조는 2026-08-29 Streamlit 은퇴로 종료.)
     ("web/pages/macro_page.py", "layers"):
         "위험 점수 구간(0~10층) → 라벨·권장 비중 문구(고정 문자열 튜플). 값이 대입되는 코드가 없음.",
     ("web/pages/macro_page.py", "FRIENDLY_NAMES"):
@@ -1241,41 +1241,14 @@ def test_login_is_shared_between_scorecard_and_report():
 #       ① 관리자가 아닌 접속에는 **본문이 한 글자도 그려지지 않는다** (§0-3-6 / §0-3-9)
 #       ② 이식하면서 **숫자가 달라지지 않았다** — 오너가 "개발 중단"을 지시한 화면이라
 #          기능 추가·개선이 아니라 "있는 그대로 옮기기"가 목표였기 때문입니다.
-#          그래서 원본 `views/macro_view.py` 와 리터럴·계산·차트 데이터를 **직접 대조**합니다.
+#          원본 `views/macro_view.py` 와 리터럴·차트 데이터를 직접 대조하던 검사는
+#          2026-08-29 Streamlit 은퇴(views/ → archive/streamlit_views/)로 제거했습니다.
 # =============================================================================
-def _module_literal(path, name):
-    """파일을 import 하지 않고(=streamlit 의존 회피) 모듈 최상위 리터럴 값만 꺼냅니다.
-
-    (`tests/test_macro_scoring.py::_literal_from_source` 와 같은 기법 — `views/macro_view.py`
-     는 streamlit 을 import 하므로 오프라인 환경에서 import 자체가 불가능합니다.)
-    """
-    tree = ast.parse(Path(path).read_text(encoding="utf-8"))
-    for node in tree.body:
-        if isinstance(node, ast.Assign):
-            for target in node.targets:
-                if isinstance(target, ast.Name) and target.id == name:
-                    return ast.literal_eval(node.value)
-    return None
-
-
-def _chart_block(path):
-    """트렌드 차트의 집계 코드 블록(`df_temp = ...` ~ `chart_data.columns = ...`)만 잘라냅니다."""
-    src = Path(path).read_text(encoding="utf-8")
-    start = src.index('df_temp = history_df.copy()')
-    tail = 'chart_data.columns = ["위험 지수"]'
-    end = src.index(tail) + len(tail)
-    lines = src[start:end].split("\n")
-    body = [line for line in lines[1:] if line.strip()]
-    indent = min(len(line) - len(line.lstrip()) for line in body)
-    return "\n".join([lines[0]] + [line[indent:] if len(line) >= indent else line for line in lines[1:]])
-
-
 def test_macro_page_wiring():
     print("\n[8] web/pages/macro_page.py 배선 (🏢 매크로 방공망 · 관리자 전용)")
     _install_nicegui_stub()
 
     page_path = REPO_ROOT / "web" / "pages" / "macro_page.py"
-    view_path = REPO_ROOT / "views" / "macro_view.py"
     src = page_path.read_text(encoding="utf-8")
     code = python_code_only(src)
 
@@ -1293,11 +1266,6 @@ def test_macro_page_wiring():
           "드로어 메뉴에 등록되어 있고 admin_only=True (비관리자에게는 안 보임)")
     check("macro_page" in (REPO_ROOT / "main.py").read_text(encoding="utf-8"),
           "main.py 가 macro_page 를 import (@ui.page 등록)")
-
-    # ── (b) 상수가 원본과 글자 단위로 같은가 ──────────────────────────────
-    for name in ("layers", "FRIENDLY_NAMES", "STUDY_ONLY_INDICATORS", "DROPPED_AS_DUPLICATE"):
-        check(_module_literal(page_path, name) == _module_literal(view_path, name),
-              f"`{name}` 이 views/macro_view.py 와 완전히 동일 (문구를 손대지 않음)")
 
     # ── (c) 옛 프록시 계산식이 되살아나지 않았는가 (test_macro_scoring [15] 과 같은 기준) ──
     for var in ("skew_base", "synth_base"):
@@ -1363,22 +1331,6 @@ def test_macro_page_wiring():
           "차트가 원본과 같은 호출 (계열 1개 = '위험 지수', x = Date)")
     check("h-80" not in code and "height: 300px" in code,
           "차트 높이를 명시 (안 주면 0px 로 그려져 통째로 사라짐 — 계획서 §7)")
-
-    import pandas as pd
-    import web.pages.macro_page as macro
-
-    view_block, page_block = _chart_block(view_path), _chart_block(page_path)
-    history_df = macro._load_history_df()
-    if history_df.empty:
-        check(False, "차트 대조용 market_history.csv 로드", "← 파일이 없거나 비어 있습니다")
-    else:
-        for option in ("일별 (Daily)", "주별 (Weekly)", "월별 (Monthly)"):
-            env_view = {"history_df": history_df, "pd": pd, "period_option": option}
-            env_page = {"history_df": history_df, "pd": pd, "period_option": option}
-            exec(view_block, env_view)          # noqa: S102 — 원본 소스를 그대로 돌려 대조하는 것이 목적
-            exec(page_block, env_page)          # noqa: S102
-            check(env_view["chart_data"].equals(env_page["chart_data"]),
-                  f"트렌드 차트 데이터가 원본과 완전히 동일 ({option})")
 
 
 def test_macro_render_smoke():

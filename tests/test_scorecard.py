@@ -21,7 +21,6 @@ SCORECARD_WORK_ORDER.md §4-4 / §6-3 에 따라, 이 세션에서는 **실제 S
 실행: python tests/test_scorecard.py
 """
 
-import importlib
 import io
 import json
 import os
@@ -422,7 +421,7 @@ def test_currency_separation():
           "통화를 합친 '총 자산' 그룹이 존재하지 않음")
 
     # 소스에 환율 변환 흔적이 없는지 (fx/exchange rate/usd_krw 류)
-    for rel in ("utils/scorecard_db.py", "views/scorecard_view.py"):
+    for rel in ("utils/scorecard_db.py",):
         src = (REPO_ROOT / rel).read_text(encoding="utf-8").lower()
         forbidden = ("usd_krw", "usdkrw", "exchange_rate", "fx_rate", "환율변환", "환율 적용")
         hits = [token for token in forbidden if token in src]
@@ -1303,493 +1302,26 @@ def test_sql_schema():
 # =============================================================================
 # 9. 화면 / 라우팅 배선 (스테이징 기본 숨김 + 기존 모듈 무손상)
 # =============================================================================
-def _install_streamlit_stub():
-    """
-    streamlit 미설치 환경에서도 views/scorecard_view.py 를 import 할 수 있게 최소 스텁을
-    주입합니다(오프라인 검증용). 이미 진짜 streamlit 이 설치돼 있으면 아무것도 하지 않습니다.
-    """
-    try:
-        import streamlit  # noqa: F401
-        return False
-    except ImportError:
-        pass
-
-    class _Secrets:
-        def get(self, _name, default=None):
-            return default
-
-    class _Stub(types.ModuleType):
-        secrets = _Secrets()
-
-        def __getattr__(self, name):  # 어떤 위젯 호출이든 무해한 함수로
-            def _noop(*args, **kwargs):
-                return None
-            return _noop
-
-    stub = _Stub("streamlit")
-    stub.secrets = _Secrets()
-    sys.modules["streamlit"] = stub
-    return True
-
-
 def test_view_and_routing():
-    print("\n[9] 화면·라우팅 배선")
-    view_path = REPO_ROOT / "views" / "scorecard_view.py"
-    check(view_path.exists(), "views/scorecard_view.py 존재")
-    view_src = view_path.read_text(encoding="utf-8")
-
-    check("NO_FX_CONVERSION_NOTICE" in view_src, "환율 변환 없음 고지를 화면에서 표시")
-    check("st.error" in view_src, "실패를 st.error 로 사용자에게 노출(§0-1)")
-    check("cache_resource" not in view_src.replace("@st.cache_resource 로 캐시하면 안 됩니다", ""),
-          "Supabase 클라이언트를 캐시하지 않음(세션 공유 사고 방지)")
-    check("st.session_state" in view_src, "클라이언트/세션은 st.session_state 에 보관")
-    check(not re.search(r"open\([^)]*['\"]w", view_src), "화면 코드가 파일을 쓰지 않음(읽기 전용)")
-
-    # 2026-08-11 오너 실사용 피드백 반영 회귀 방지 -----------------------------
-    check('st.form("scorecard_add_form")' not in view_src,
-          "보유종목 입력은 더 이상 st.form 을 안 씀(Enter 키 오submit 방지)")
-    check('st.button("➕ 추가 / 평균단가 재계산"' in view_src,
-          "입력은 명시적 버튼 클릭으로만 제출됨")
-    check("_reset_input_fields" in view_src, "추가 성공 후 입력창을 비우는 로직 존재")
-    check("resolve_stock_query" in view_src,
-          "종목코드/티커/종목명 통합 조회 연동(2026-08-11 오너 지시 — 한 칸에서 전부 인식)")
-    check('key="scorecard_query"' in view_src,
-          "종목 입력창이 코드/티커/이름 통합 단일 필드임")
-    check('key="scorecard_ticker"' not in view_src and 'key="scorecard_name"' not in view_src,
-          "예전 종목코드/종목명 분리 필드는 제거됨")
-    check('scorecard_picker_' in view_src and "st.selectbox" in view_src,
-          "이름 일부만 쳐도 후보가 나오는 빠른 검색 selectbox 연동(2026-08-11 오너 요청)")
-    check('st.session_state["scorecard_query"] = candidate_map[picked]' in view_src,
-          "빠른 검색에서 고르면 통합 입력칸에 자동으로 채워짐(2026-08-13부터는 라벨이 아니라 "
-          "candidate_map으로 매핑한 실제 티커/코드 값을 채움 — 아래 참고)")
-    check('candidate_map[f"{ticker} · {name}"] = ticker' in view_src,
-          "빠른 검색 후보 라벨에 티커를 포함(2026-08-13 오너 지적 — 이름만 있으면 Streamlit의 "
-          "퍼지 매칭이 티커 검색을 이름 속 우연한 글자 순서와 혼동해 관계없는 결과를 잔뜩 보여줌)")
-    check("scorecard_picker_{market}" in view_src,
-          "빠른 검색 키가 시장별로 분리됨(한국/미국 선택 바뀔 때 후보 목록도 같이 바뀜)")
-    # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰 지적) — 위 체크는 주석에 적힌 리터럴 문구만
-    # 봐도 통과해버리는 취약한 체크였습니다. 실제 nonce 키 조립 코드와, "정적 키를 pop해서
-    # 재사용"하던 예전 방식으로 되돌아가지 않았는지를 직접 확인하는 체크를 추가합니다.
-    check('picker_key = f"scorecard_picker_{market}_{picker_nonce}"' in view_src,
-          "빠른 검색 selectbox가 실제로 nonce를 포함한 키를 조립함(주석이 아니라 코드 자체 확인, "
-          "2026-08-11 TASK_HISTORY #85 — 정적 키 재사용 시 클릭이 씹히던 버그 수정)")
-    check("st.session_state.pop(picker_key" not in view_src,
-          "selectbox를 정적 키 pop() 방식으로 초기화하던 예전 코드로 되돌아가지 않음"
-          "(pop()은 브라우저에 값 변경을 알리지 않아 같은 버그가 재발함 — 오푸스 리뷰로 확인)")
-    check('st.session_state["scorecard_pending_reset"] = True' in view_src
-          and 'st.session_state.pop("scorecard_pending_reset", False)' in view_src,
-          "텍스트 입력 3종(종목/수량/매입가)도 pop()이 아니라 '다음 렌더 맨 앞에서 대입'하는 "
-          "방식으로 초기화됨(2026-08-11, TASK_HISTORY #85 오푸스 리뷰로 발견 — pop()만으로는 "
-          "브라우저에 남은 직전 값이 되돌아와 종목이 중복 합산될 위험이 있었음)")
-    check('st.session_state["scorecard_flash"]' in view_src,
-          "추가 성공 메시지를 재실행 이후에도 실제로 볼 수 있도록 session_state에 남겨 다음 "
-          "렌더에서 그림(2026-08-11, TASK_HISTORY #85 — 예전엔 st.rerun() 직후 지워져 사실상 "
-          "안 보였음)")
-    check("DEBUG" not in view_src,
-          "원인 추적용으로 잠깐 배포했던 임시 디버그 코드가 남아있지 않음(2026-08-11)")
-    # 2026-08-16 (#106 → #126 → #127) — #106/#126은 st.columns() 9칸을 CSS로 "가로
-    # 유지"시키려 했지만 실기기에서 계속 세로로 쌓여 깨졌습니다. Streamlit 공식 GitHub
-    # 이슈 #6592로 원인을 확인: 칸 반응형 쌓기는 CSS class가 아니라 각 칸 div에 JS가
-    # 직접 박아넣는 인라인 style로 동작해 스타일시트로는 원천적으로 못 덮어씁니다. #127은
-    # 데이터 7칸을 st.columns() 없이 순수 HTML <table>로 바꿔(Streamlit 반응형 JS가
-    # 아예 관여하지 않음) overflow-x:auto로 가로 스크롤만 되게 했습니다. ✏️/🗑️ 버튼은
-    # (오너 지시: "모바일이라고 기능을 줄여버리면 안 돼") 없애지 않고 표 아래 별도
-    # "종목 관리" 섹션(칸 3개짜리, 훨씬 단순)의 진짜 Streamlit 위젯으로 그대로 유지합니다.
-    check("<table>" in view_src and "<thead>" in view_src and "<tbody>" in view_src,
-          "종목별 데이터 표가 st.columns() 대신 순수 HTML <table>로 그려짐(2026-08-16 #127 — "
-          "Streamlit 공식 이슈 #6592: 칸 반응형 쌓기는 인라인 style이라 CSS로 못 덮어씀)")
-    check("overflow-x: auto" in view_src and "-webkit-overflow-scrolling: touch" in view_src,
-          "표 바깥을 감싸는 컨테이너가 화면 폭과 무관하게 가로 스크롤 유지"
-          "(세로로 쌓여 깨지는 것 자체가 원천 차단됨, 2026-08-11 오너 지적 → 2026-08-16 #127로 근본 해결)")
-    check("_colored_pct_html" in view_src,
-          "표 안 수익률 색칠(오르면 빨강/내리면 파랑)이 순수 HTML table 셀 안에서도 "
-          "그대로 유지됨(:red[..] 콜론 마크다운은 raw HTML 안에서 안 먹혀 별도 HTML 버전 헬퍼 추가)")
-    check('key=f"scorecard_edit_btn_{row_id}"' in view_src
-          and 'key=f"scorecard_del_btn_{row_id}"' in view_src
-          and "icon=\":material/edit:\"" in view_src
-          and "icon=\":material/delete:\"" in view_src,
-          "✏️ 수정 / 🗑️ 삭제 버튼이 표를 HTML로 바꾼 뒤에도 그대로 남아있음(모바일이라고 "
-          "기능을 줄이지 않음 — 2026-08-16 오너 명시적 지시)")
-    # 2026-08-16 (#127 후속) — 오너 실기기 재확인 결과, 표는 고쳐졌는데 그 아래 "종목 관리"
-    # 줄(종목명 + ✏️ + 🗑️)이 st.columns([4, 0.6, 0.6])를 쓰고 있어서 똑같이 세로로
-    # 쌓여 화면이 쓸데없이 길어지는 문제가 재현됨 — 칸이 3개뿐이라 덜 걸릴 거라 예상했던
-    # 게 틀렸고(칸 "개수"가 아니라 컨테이너 폭이 임계값보다 좁은지로 판정되는 것으로 보임),
-    # 이 줄도 st.columns()를 버리고 종목당 컨테이너 + CSS flex-row로 교체함.
-    check("mcol1, mcol2, mcol3 = st.columns" not in view_src,
-          "'종목 관리' 줄에서도 st.columns()를 걷어냄(모바일에서 라벨/✏️/🗑️가 각각 "
-          "세로로 쌓여 화면이 쓸데없이 길어지던 문제 재발 방지, 2026-08-16 오너 실기기 재확인)")
-    check('key=f"{table_key}_mgmt_row_{row_id}"' in view_src,
-          "'종목 관리' 각 줄이 종목별 컨테이너로 감싸짐 — 그 컨테이너 안 세로 블록을 "
-          "CSS로 flex-row 전환해 라벨+버튼이 화면 폭과 무관하게 항상 한 줄에 나옴")
-    check('[data-testid="stVerticalBlock"] {' in view_src
-          and "flex-direction: row !important" in view_src
-          and 'flex: 1 1 auto' in view_src,
-          "st.columns()가 쓰는 stHorizontalBlock(JS가 인라인 style을 박아넣어 CSS로 "
-          "못 이김, #6592)과 달리 일반 stVerticalBlock에는 그런 JS가 없어 순수 CSS "
-          "flex로 라벨(남는 폭 다 먹음)+버튼(내용물 크기만) 배치를 확실히 관철시킴")
-    # 2026-08-16 (#129 핫픽스) — #128에서 이 CSS <style> f-string 안에 넣은 설명 주석에
-    # `_{row_id}` (홑겹 중괄호)를 실수로 그대로 써서, 이 f-string이 만들어지는 시점(표
-    # 렌더링 시작 시점, 종목 반복문보다 훨씬 앞)에 아직 정의되지 않은 `row_id`를 파이썬이
-    # 변수로 해석해버려 `UnboundLocalError`로 배포 직후 화면이 통째로 깨진 사고가 있었음
-    # (`_{{row_id}}` 로 중괄호를 두 겹 써야 글자 그대로 출력됨 — f-string 리터럴 규칙).
-    # "문자열에 특정 텍스트가 있는지"만 보는 체크로는 이런 종류의 실수를 못 잡으므로,
-    # 표 CSS f-string 블록을 실제로 소스에서 그대로 추출해 **진짜로 한 번 조립**해보고
-    # (이 시점엔 row_id 를 일부러 정의하지 않음 — 실제 실행 순서와 동일) 에러 없이
-    # 조립되는지 직접 검증합니다. 앞으로 이 블록에 비슷한 실수(홑겹 중괄호로 아직
-    # 없는 변수를 참조)가 생기면 이 테스트가 바로 잡아냅니다.
-    _css_match = re.search(
-        r'table_key = f"scorecard_rows_\{currency\}"\n\s*st\.markdown\(\n\s*f"""(.*?)"""',
-        view_src, re.S,
-    )
-    if _css_match is None:
-        check(False, "표 CSS f-string 블록을 소스에서 찾을 수 있음(위치가 바뀌었으면 이 "
-                      "정규식을 갱신해야 함)")
-    else:
-        try:
-            # 실제 함수 실행 시점과 똑같이 table_key 만 정의된 상태에서 f-string을 조립.
-            # row_id(및 그 밖의 종목별 반복 변수)는 일부러 정의하지 않음 — 만약 CSS
-            # 주석 안에 홑겹 중괄호로 그런 변수가 남아있다면 여기서 바로 터짐.
-            table_key = "scorecard_rows_KRW"  # noqa: F841 (f-string에서 참조됨)
-            eval('f"""' + _css_match.group(1) + '"""')
-            check(True, "표 CSS <style> f-string이 row_id 등 아직 정의 안 된 변수 없이 "
-                        "안전하게 조립됨(2026-08-16 #129 — 실배포에서 UnboundLocalError로 "
-                        "화면이 깨졌던 실수 재발 방지, 실제로 f-string을 조립해서 검증)")
-        except Exception as exc:  # noqa: BLE001
-            check(False, "표 CSS <style> f-string 조립",
-                  f"(에러 발생: {type(exc).__name__}: {exc} — 홑겹 중괄호로 아직 정의 안 된 "
-                  "변수를 참조하고 있을 가능성 높음, #129와 같은 사고 재발)")
-    check("_row_label_html" in view_src and "<br>" in view_src,
-          "표의 종목 칸이 '종목명 / (코드)' 두 줄로 강제 줄바꿈되어 옆 칸과 안 겹침(2026-08-11 오너 요청)")
-    check("load_kr_ticker_master" in view_src and "broad_kr_index" in view_src,
-          "코스피 상위 200 밖(코스닥·ETF 포함) 종목도 이름으로 찾는 전체 상장종목 목록 연동"
-          "(2026-08-11, TASK_HISTORY #83)")
-    check("broad_index=broad_kr_index if market == MARKET_KR else None" in view_src,
-          "전체 상장종목 목록은 한국에서만 쓰임(미국은 아직 상위 550까지만)")
-    check("load_kr_all_market_prices" in view_src and "broad_kr_prices=kr_all_prices" in view_src,
-          "코스피 상위 200 밖 종목도 실제 종가를 보여주는 전 종목 종가 목록 연동"
-          "(2026-08-11, TASK_HISTORY #84)")
-    check("load_us_all_market_prices" in view_src and "broad_us_prices=us_all_prices" in view_src,
-          "미국 상위 550 밖 종목도 실제 종가를 보여주는 전 종목 현재가 목록 연동"
-          "(2026-08-12, TASK_HISTORY #92)")
-    check("load_us_all_etf_prices" in view_src and "us_all_prices = {**us_etf_prices, **us_all_prices}" in view_src,
-          "미국 ETF 현재가 목록도 같은 폴백에 합쳐져 들어감 — ETF 보유 종목(예: KORU)이 "
-          "'현재가 없음'으로 뜨지 않음(2026-08-12, TASK_HISTORY #93)")
-    check("NAME_LOOKUP_MARKETS" not in view_src,
-          "종목명 자동조회를 미국 전용으로 막던 제한 제거(한국도 이름으로 입력 가능)")
-    check('st.expander("🗑️ 잘못 입력한 종목 삭제"' not in view_src,
-          "드롭다운으로 고른 뒤 지우는 예전 방식은 제거됨")
-    check("update_holding" in view_src, "종목별 인라인 수정(값 덮어쓰기) 기능 연동")
-    check('help="수정"' in view_src and 'help="삭제"' in view_src,
-          "종목 줄마다 수정/삭제 버튼이 바로 붙어있음")
-    check('icon=":material/edit:"' in view_src and 'icon=":material/delete:"' in view_src,
-          "수정/삭제 버튼이 이모지 대신 Material 아이콘을 씀(글꼴 여백 때문에 중앙정렬 안 되던 문제 근본 수정)")
-    check("sort_holding_rows" in view_src and "SORT_FIELD_OPTIONS" in view_src,
-          "보유종목 표 정렬(오름차순/내림차순) 기능 연동")
-    check("banner = st.error if diff >= 0 else st.info" in view_src,
-          "손익 배너가 국내 증시 관례(빨강=오름/파랑=내림)로 통일됨(해외 관례 초록/빨강 아님)")
-    check('delta_color="off"' in view_src,
-          "평가손익 요약의 st.metric 내장 delta 색(초록/빨강)을 끄고 _colored_pct 로 직접 색칠")
-    check("_colored_pct" in view_src and ":red[" in view_src and ":blue[" in view_src,
-          "수익률을 국내 증시 관례대로 오르면 빨강/내리면 파랑으로 표시")
-    check("_row_chart_label" in view_src and "def _row_chart_label" in view_src,
-          "원형차트(보유 비중/수익 비중) 범례는 종목코드 없이 이름만 표시"
-          "(2026-08-13, 표·기타 텍스트는 코드 병기 유지)")
-    check(view_src.count("names=[_row_chart_label(r, indexes)") == 2,
-          "두 원형차트(보유 비중, 수익 비중) 모두 차트 전용 라벨 함수를 씀")
-
-    # 2026-08-13 오너 요청 3건 — 미국 종목 한글 표기, $ 마크다운 렌더링 버그, ETF 긴 이름 줄바꿈.
-    check("from utils.company_names_kr import resolve_korean_name" in view_src,
-          "공개 미국주식 화면과 같은 한글 표기 모듈을 재사용(새 로직 중복 없음)")
-    check("def _us_korean_name(row, indexes)" in view_src,
-          "미국 종목 한글명 조회 함수 신설")
-    check('stock.get("name_kr")' in view_src,
-          "상위 550 유니버스 안 종목은 공개 화면과 동일한 사전 계산 name_kr을 그대로 재사용")
-    check("resolve_korean_name(ticker, english_name)" in view_src,
-          "유니버스 밖 미국 종목은 즉석에서 같은 모듈을 호출해 보조로 한글명 생성(§0-1, 지어내지 않음)")
-    check("def _display_name(row, indexes)" in view_src
-          and "if row.get(\"market\") == MARKET_US" in view_src,
-          "미국 종목은 한글명, 한국 종목은 기존 종목명을 쓰도록 표시 로직 분기")
-    check("def _row_label(row, indexes)" in view_src and "def _row_label_html(row, indexes)" in view_src,
-          "_row_label/_row_label_html이 indexes를 받아 _display_name()을 거치도록 시그니처 확장")
-
-    check("def _md_amount(value, currency, decimals=None)" in view_src,
-          "마크다운용 금액 이스케이프 함수 신설(2026-08-13, $ 페어링 KaTeX 오작동 버그 수정)")
-    check('.replace("$", "\\\\$")' in view_src,
-          "달러 기호를 이스케이프해 두 개 이상 나타나도 LaTeX 수식으로 오인되지 않게 함")
-    check('_md_amount(avg_price, currency)' in view_src and '_md_amount(price, currency)' in view_src,
-          "평균매입가 VS 현재가 배너가 마크다운 안전 포맷을 씀(버그가 있던 바로 그 배너)")
-    check("f\"- {_row_chart_label(r, indexes)} {_md_amount(r['profit'], currency)}\"" in view_src,
-          "손실 종목 안내 캡션도 마크다운 안전 포맷을 씀(2개 이상 손실 종목일 때도 안전)")
-    check('"\\n".join(' in view_src and 'loser_lines' in view_src,
-          "손실 종목 여러 개면 쉼표로 이어붙인 한 문장 대신 종목당 한 줄 목록으로 표시"
-          "(2026-08-13 오너 지적 — 한국처럼 손실 종목이 많으면 지저분해 보이던 문제)")
-    # st.metric에 넘기는 값은 마크다운을 거치지 않아 이 버그가 없으므로 그대로 format_amount 사용
-    check('c1.metric("현재가", format_amount(summary.get("price"), currency))' in view_src,
-          "st.metric 경로는 마크다운이 아니라 이 버그가 없어 format_amount를 그대로 씀(과잉수정 방지)")
-
-    check('white-space: normal; overflow-wrap: anywhere;' in view_src,
-          "표의 종목 칸은 인라인 스타일로 줄바꿈을 허용해 긴 ETF 이름이 옆 칸을 밀어내지 않음"
-          "(2026-08-13 오너 지적 — 부모 표 전체의 nowrap보다 우선순위가 높은 인라인 스타일)")
-
-    # 2026-08-13 오너 요청(#109) — 비밀번호 찾기(재설정) 배선.
-    check('st.tabs(["로그인", "회원가입", "비밀번호 찾기"])' in view_src,
-          "로그인 화면에 '비밀번호 찾기' 탭이 생김(기존 로그인·회원가입 탭은 그대로)")
-    check("비밀번호를 잊으셨나요?" in view_src,
-          "로그인 탭 안에 재설정 진입 안내가 있음(계정 무한생성 방지가 목적)")
-    check("send_password_reset_code" in view_src and "reset_password_with_code" in view_src,
-          "재설정 2단계가 모두 데이터 계층 함수로 연결됨(화면이 Supabase 를 직접 호출하지 않음)")
-    check('st.form("scorecard_reset_request_form")' in view_src
-          and 'st.form("scorecard_reset_confirm_form")' in view_src,
-          "1단계(코드 발송)·2단계(코드+새 비밀번호) 폼이 분리돼 있음")
-    check("reset_password_with_code(\n                    _new_auth_client()" in view_src
-          or "reset_password_with_code(_new_auth_client()" in view_src,
-          "코드 검증은 세션에 저장하지 않는 **1회용 클라이언트**로 실행 — 같은 브라우저의 "
-          "기존 로그인 세션을 덮어쓰지 않음")
-    check("def _new_auth_client()" in view_src and "SESSION_CLIENT_KEY" not in
-          view_src.split("def _new_auth_client()")[1].split("def _render_not_ready")[0],
-          "_new_auth_client() 는 공용 클라이언트(SESSION_CLIENT_KEY)를 재사용하지 않음")
-    reset_tab_src = view_src.split("with tab_reset:")[1].split("# DB 컬럼이")[0]
-    check("SESSION_USER_KEY" not in reset_tab_src,
-          "재설정 탭이 로그인 세션(SESSION_USER_KEY)을 건드리지 않음")
-    check('type="password"' in reset_tab_src and "scorecard_reset_pw2" in reset_tab_src,
-          "새 비밀번호와 확인란 둘 다 마스킹된 입력으로 받음")
-    check("{{ .Token }}" in view_src,
-          "오너 설정 체크리스트에 Reset Password 템플릿의 6자리 코드 변수 안내가 들어감")
-
+    print("\n[9] 데이터 모듈 격리 · 작업 범위")
+    # 2026-08-29 — Streamlit 은퇴(views/ → archive/streamlit_views/)로, 이 테스트에서
+    # `views/scorecard_view.py`·`visiblehand.py` 를 읽거나 import 하던 검사는 전부
+    # 제거했습니다. 살아있는 공유 로직(utils/scorecard_db.py)의 불변식만 남습니다.
     db_src = (REPO_ROOT / "utils" / "scorecard_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src), "데이터 모듈도 data/*.json 을 쓰지 않음")
     check("try:" in db_src and "except ImportError" in db_src,
           "supabase/streamlit import 를 try/except ImportError 로 감쌈")
-    check(not re.search(r"https://[a-z0-9]+\.supabase\.co", db_src + view_src),
+    check(not re.search(r"https://[a-z0-9]+\.supabase\.co", db_src),
           "소스에 실제 Supabase URL 없음")
     check("SUPABASE_SERVICE_ROLE" not in db_src and "service_role_key" not in db_src,
           "service_role 키를 읽는 코드 없음")
 
-    # 라우팅: 기본 숨김 + 기존 두 화면 무손상
-    # 2026-08-12(TASK_HISTORY #105): 관리자 메뉴는 사이드바 맨 아래에 있어야 한다는 오너 방침이라
-    # render_admin_sidebar() 호출은 대분류 라디오보다 **뒤**에 남아있습니다(#103과 반대). 대신
-    # 대분류 라디오는 `admin_mode_hint`(st.session_state 를 미리 읽은 값, 한 실행 지연 가능)로
-    # 그리고, admin_mode_hint 와 실제 admin_mode 가 다르면 즉시 `st.rerun()`해서 위치는 유지하면서
-    # 정확성도 지킵니다("로그인 성공은 뜨는데 메뉴가 안 보인다"던 #103 버그의 재발 방지책).
-    app_src = (REPO_ROOT / "visiblehand.py").read_text(encoding="utf-8")
-    check("render_scorecard_page" in app_src, "visiblehand.py 에 내 성적표 라우팅 추가")
-    check("show_scorecard = top_choice == TOP_SCORECARD" in app_src,
-          "내 성적표 표시 여부는 최상위 라디오 선택 결과로만 결정됨(기본값은 선택 안 됨=False)")
-    check("admin_mode_hint = st.session_state.get(\"admin_mode\", False)" in app_src,
-          "대분류 라디오는 admin_mode 를 세션에서 미리 읽어(hint) 판단함")
-    check("scorecard_available = render_scorecard_page is not None and is_scorecard_visible(admin_mode_hint)" in app_src,
-          "관리자 미리보기/명시 플래그일 때만 최상위 라디오에 내 성적표 선택지가 추가됨")
-    check("top_options.append(TOP_SCORECARD)" in app_src,
-          "내 성적표는 최상위 라디오에 조건부로만 합류함(무조건 노출 아님)")
-    check("if admin_mode != admin_mode_hint:" in app_src and "st.rerun()" in app_src,
-          "hint 와 실제 admin_mode 가 다르면 즉시 재실행해 화면을 최신 상태로 맞춤(스테일 재발 방지)")
-    check("except Exception as _scorecard_import_exc" in app_src,
-          "모듈 로드 실패해도 기존 화면이 죽지 않도록 import 가드")
-    for legacy in ("render_us_stocks_page()", "render_macro_page()", "render_pegy_page()"):
-        check(legacy in app_src, f"기존 라우팅 `{legacy}` 유지")
-    check(app_src.index("if show_scorecard:") < app_src.index("elif selected_market == MARKET_US:"),
-          "라우팅 분기 순서: 내 성적표 → 기존 분기(기존 기본 경로는 그대로 pegy)")
-
-    # 기존 두 모듈 파일을 건드리지 않았는지(이번 작업 범위 확인)
-    for untouched in ("views/pegy_view.py", "views/us_stocks_view.py", "utils/scoring.py",
-                      "utils/constants.py"):
+    # 기존 모듈 파일을 건드리지 않았는지(이번 작업 범위 확인)
+    #  ⚠️ 2026-08-29 — `views/pegy_view.py` · `views/us_stocks_view.py` 는 Streamlit 은퇴로
+    #     archive/streamlit_views/ 로 옮겨져 이 목록에서 뺐습니다.
+    for untouched in ("utils/scoring.py", "utils/constants.py"):
         src = (REPO_ROOT / untouched).read_text(encoding="utf-8")
         check("scorecard" not in src.lower(), f"{untouched} 에 내 성적표 관련 수정 없음")
-
-    # 실제 import 가능한지 (supabase 패키지 없는 상태)
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.scorecard_view")
-        check(True, "views.scorecard_view import 성공 (supabase 패키지 없이도)")
-        saved_env = _clear_supabase_env()
-        try:
-            check(module.is_scorecard_enabled() is False, "SCORECARD_ENABLED 기본값 = 꺼짐")
-            check(module.is_scorecard_visible(False) is False, "일반 방문자에게는 메뉴 비노출")
-            check(module.is_scorecard_visible(True) is True, "관리자 모드에서는 미리보기 가능")
-            os.environ["SCORECARD_ENABLED"] = "1"
-            importlib.reload(module)
-            check(module.is_scorecard_enabled() is True, "플래그를 켜면 활성화됨")
-
-            # 2026-08-11 오너 실사용 피드백 반영분 — UI 헬퍼 단위 검증 -----------
-            check(module._parse_positive_number("1,664,333", "매입가") == 1664333.0,
-                  "콤마 섞인 숫자 입력도 파싱됨")
-            check(module._parse_positive_number(" 10 ", "수량") == 10.0,
-                  "앞뒤 공백은 무시하고 파싱")
-            expect_raises(lambda: module._parse_positive_number("", "수량"), ValueError,
-                          "빈 값은 예외(0으로 채우지 않음)")
-            expect_raises(lambda: module._parse_positive_number("하이닉스", "매입가"), ValueError,
-                          "숫자가 아닌 값은 예외")
-            expect_raises(lambda: module._parse_positive_number("0", "수량"), ValueError,
-                          "0은 거부(수량·매입가 모두 0보다 커야 함)")
-            expect_raises(lambda: module._parse_positive_number("-5", "수량"), ValueError,
-                          "음수는 거부")
-
-            # 🔐 2026-08-13 공개 전환 전 점검에서 보강한 방어 ------------------------
-            # 파이썬 float() 는 "nan"/"inf"/"1e400" 을 성공적으로 파싱하고, NaN·Infinity 는
-            # `<= 0` 검사를 통과해버립니다. 수정(✏️) 경로는 make_lot() 을 거치지 않아 이 값이
-            # 그대로 Supabase 로 나가던 상태였습니다.
-            for bad in ("nan", "NaN", "inf", "Infinity", "1e400"):
-                expect_raises(lambda b=bad: module._parse_positive_number(b, "수량"), ValueError,
-                              f"NaN/무한대 입력 거부: {bad!r}")
-            expect_raises(lambda: module._parse_positive_number("1e300", "매입가"), ValueError,
-                          "DB numeric(20,6) 에 안 들어가는 초대형 값은 화면 단계에서 거부"
-                          "(Postgres 원문 오류를 사용자에게 노출하지 않음)")
-            check(module._parse_positive_number(str(module.MAX_INPUT_VALUE - 1), "수량")
-                  == float(module.MAX_INPUT_VALUE - 1),
-                  "상한 바로 아래 값은 정상 통과(정상 입력을 과하게 막지 않음)")
-
-            # 🔐 XSS — 사용자가 소유한 DB 컬럼(stock_name)이 unsafe_allow_html 로 그려지는
-            # 유일한 자리. Supabase REST 를 직접 호출하면 본인 행에 임의 HTML 을 넣을 수 있어
-            # (RLS 는 남의 행만 막습니다) 반드시 이스케이프해야 합니다.
-            evil = '<img src=x onerror="alert(1)">'
-            rendered = module._row_label_html(
-                {"ticker": "005930", "stock_name": evil, "market": sdb.MARKET_KR}, {},
-            )
-            check("<img" not in rendered and "&lt;img" in rendered,
-                  "종목명에 들어있는 HTML 태그가 실행되지 않고 글자 그대로 이스케이프됨")
-            check("onerror=\"alert(1)\"" not in rendered,
-                  "이벤트 핸들러 속성이 살아남지 않음")
-            check("<br>" in rendered and rendered.startswith("<div"),
-                  "우리가 직접 넣는 <br>·<div> 는 그대로 유지(기존 두 줄 표기 동작 무손상)")
-            rendered_ticker_only = module._row_label_html(
-                {"ticker": "<b>X</b>", "stock_name": None, "market": sdb.MARKET_KR}, {},
-            )
-            check("&lt;b&gt;" in rendered_ticker_only,
-                  "종목명이 없어 티커만 그릴 때도 이스케이프됨")
-
-            # 코드 형식 판정 정규식은 utils/scorecard_db.py 로 옮겨졌습니다(2026-08-11 통합 입력창
-            # 리디자인 — resolve_stock_query 가 코드/이름을 함께 판단하기 위해 필요).
-            check(bool(sdb.KR_TICKER_LIKE.fullmatch("005930")), "6자리 숫자 코드는 코드로 인정")
-            check(bool(sdb.KR_TICKER_LIKE.fullmatch("00680K")), "영숫자 우선주 코드도 코드로 인정")
-            check(not sdb.KR_TICKER_LIKE.fullmatch("하이닉스"),
-                  "한글 종목명은 코드 형식으로 인정하지 않음(오너가 겪은 실사용 버그 재현 방지)")
-            check(not sdb.KR_TICKER_LIKE.fullmatch("삼성전자우"),
-                  "한글 종목명(우선주 포함)도 코드로 인정하지 않음")
-            check(bool(sdb.US_TICKER_LIKE.fullmatch("AAPL")), "미국 티커도 코드 형식으로 인정")
-            check(bool(sdb.US_TICKER_LIKE.fullmatch("BRK.B")), "점 포함 미국 티커도 코드로 인정")
-
-            check(not hasattr(module, "NAME_LOOKUP_MARKETS"),
-                  "종목명 자동조회를 특정 시장으로 제한하던 상수는 제거됨(2026-08-11 오너 지시)")
-
-            # 2026-08-13 오너 요청 3건 — 미국 종목 한글 표기, VS 배너 $ 마크다운 렌더링 버그,
-            # ETF처럼 긴 종목명의 표 줄바꿈. 문자열만 보는 소스 검사 말고 실제 함수를 직접
-            # 호출해 동작을 검증합니다.
-            us_row_in_universe = {
-                "market": module.MARKET_US, "ticker": "XOM",
-                "stock_name": "ExxonMobil Holdings Corporation Common Stock",
-            }
-            us_indexes = {
-                module.MARKET_US: {
-                    "XOM": {"name": "ExxonMobil Holdings Corporation Common Stock",
-                            "name_kr": "엑슨모빌"},
-                },
-                module.MARKET_KR: {},
-            }
-            check(module._us_korean_name(us_row_in_universe, us_indexes) == "엑슨모빌",
-                  "유니버스 안 미국 종목은 스냅샷에 미리 계산된 name_kr을 그대로 씀"
-                  "(공개 미국주식 화면과 정확히 같은 표기가 보장됨)")
-            check(module._row_chart_label(us_row_in_universe, us_indexes) == "엑슨모빌",
-                  "미국 종목 차트 라벨도 한글명만 나옴(영문 풀네임 아님)")
-            check(module._row_label(us_row_in_universe, us_indexes) == "엑슨모빌 (XOM)",
-                  "미국 종목 표시 라벨은 '한글명 (티커)' 형식(영문 풀네임보다 훨씬 짧음)")
-
-            us_row_out_of_universe = {
-                "market": module.MARKET_US, "ticker": "ZZZQQ",
-                "stock_name": "Zzz Testing Corporation Common Stock",
-            }
-            empty_us_indexes = {module.MARKET_US: {}, module.MARKET_KR: {}}
-            on_the_fly = module._us_korean_name(us_row_out_of_universe, empty_us_indexes)
-            check(bool(on_the_fly) and "Corporation" not in on_the_fly and "Common" not in on_the_fly,
-                  "유니버스 밖 미국 종목(스냅샷에 name_kr 없음)은 즉석에서 같은 음역 모듈을 "
-                  "호출해 한글명을 보조로 만듦 — 영문 풀네임이 그대로 노출되지 않음")
-
-            kr_row = {"market": module.MARKET_KR, "ticker": "005930", "stock_name": "삼성전자"}
-            check(module._row_label(kr_row, us_indexes) == "삼성전자 (005930)",
-                  "한국 종목은 기존과 동일하게 종목명을 그대로 씀(한글 변환 로직에 영향받지 않음)")
-
-            html_label = module._row_label_html(us_row_in_universe, us_indexes)
-            check("엑슨모빌<br>(XOM)" in html_label and "white-space: normal" in html_label,
-                  "표 셀도 한글명을 쓰고, 긴 이름이 옆 칸을 밀어내지 않도록 줄바꿈 인라인 "
-                  "스타일이 포함됨(2026-08-13 오너 지적 — ETF 등 긴 종목명 대비)")
-
-            check(module._md_amount(1234.5, "USD") == "\\$1,234.50",
-                  "_md_amount()는 $ 를 이스케이프해서 돌려줌(마크다운에서 두 개 이상 나타나도 "
-                  "LaTeX 수식으로 오인되지 않게 함 — 2026-08-13 'VS' 배너 렌더링 버그 수정)")
-            check(module._md_amount(93076, "KRW") == "93,076원",
-                  "원화는 애초에 $ 가 없어 이스케이프해도 원래 표기와 동일(이 버그 자체가 없었음)")
-
-            # 2026-08-11(TASK_HISTORY #85, 오푸스 리뷰로 발견) — module.st.session_state를
-            # 직접 덮어쓰면 streamlit이 진짜로 설치된 환경에서는 그 프로세스의 진짜
-            # streamlit 모듈 상태까지 오염시킬 수 있습니다(스텁이 없으면 module.st는 진짜
-            # streamlit). finally에서 반드시 원래 값으로 되돌립니다.
-            _original_session_state = getattr(module.st, "session_state", None)
-            try:
-                fake_state = {"scorecard_query": "005930",
-                              "scorecard_qty": "10", "scorecard_price": "70000",
-                              "scorecard_market": module.MARKET_KR,
-                              f"scorecard_picker_nonce_{module.MARKET_KR}": 2,
-                              f"scorecard_picker_{module.MARKET_KR}_2": "삼성전자 (005930)",
-                              f"scorecard_picker_{module.MARKET_US}_0": "Apple (AAPL)"}
-                module.st.session_state = fake_state
-                module._reset_input_fields()
-                check(
-                    fake_state.get("scorecard_pending_reset") is True,
-                    "추가 성공 시 입력 필드를 바로 지우지 않고 '다음 렌더에서 지워달라'는 표시만 "
-                    "남김(2026-08-11, TASK_HISTORY #85 오푸스 리뷰로 발견 — 위젯 생성 후에는 "
-                    "session_state를 대입해도 pop()과 마찬가지로 브라우저에 전달되지 않아, "
-                    "실제 초기화는 다음 렌더 맨 앞 `_consume_pending_reset()`에서 위젯 생성 "
-                    "전에 이뤄져야 함)",
-                )
-                check(
-                    fake_state.get(f"scorecard_picker_nonce_{module.MARKET_KR}") == 3
-                    and fake_state.get(f"scorecard_picker_nonce_{module.MARKET_US}") == 1,
-                    "빠른 검색 selectbox는 nonce가 올라가 다음 렌더에서 완전히 새 위젯으로 그려짐"
-                    "(2026-08-11, TASK_HISTORY #85 — 정적 키 pop 방식에서 나타난 '버튼 눌러도 "
-                    "반응 없음' 버그 수정. 이전 위젯 인스턴스(...MARKET_KR}_2)는 더 이상 쓰이지 않게 됨)",
-                )
-                check("scorecard_market" in fake_state, "시장 선택(라디오)은 초기화 대상이 아님(그대로 유지)")
-
-                # _consume_pending_reset() 자체도 직접 검증 — 표시가 있을 때만 지우고,
-                # 없으면 아무 것도 건드리지 않는지(2026-08-11, TASK_HISTORY #85).
-                consume_state = {"scorecard_pending_reset": True,
-                                  "scorecard_query": "005930", "scorecard_qty": "10",
-                                  "scorecard_price": "70000", "scorecard_market": module.MARKET_KR}
-                module.st.session_state = consume_state
-                module._consume_pending_reset()
-                check(
-                    consume_state.get("scorecard_query") == ""
-                    and consume_state.get("scorecard_qty") == ""
-                    and consume_state.get("scorecard_price") == ""
-                    and "scorecard_pending_reset" not in consume_state
-                    and consume_state.get("scorecard_market") == module.MARKET_KR,
-                    "_consume_pending_reset(): 표시가 있으면 입력 3종을 빈 문자열로 '대입'해서 "
-                    "지우고(pop이 아님 — 대입이라야 프런트엔드까지 전달됨), 표시 자체도 소비하며, "
-                    "시장 선택은 건드리지 않음",
-                )
-                no_flag_state = {"scorecard_query": "005930"}
-                module.st.session_state = no_flag_state
-                module._consume_pending_reset()
-                check(no_flag_state.get("scorecard_query") == "005930",
-                      "_consume_pending_reset(): 표시가 없으면 아무 것도 지우지 않음(불필요한 "
-                      "리셋으로 타이핑 중인 값을 날리지 않음)")
-            finally:
-                if _original_session_state is not None:
-                    module.st.session_state = _original_session_state
-                else:
-                    try:
-                        del module.st.session_state
-                    except AttributeError:
-                        pass
-        finally:
-            _restore_env(saved_env)
-            importlib.reload(module)
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.scorecard_view import 성공 (supabase 패키지 없이도)",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.scorecard_view", None)
 
 
 # =============================================================================
@@ -1801,8 +1333,14 @@ def test_requirements_and_docs():
     lines = [ln.strip() for ln in req.splitlines()]
     check(any(ln == "supabase" or ln.startswith("supabase") and not ln.startswith("#")
               for ln in lines), "requirements.txt 에 supabase 추가됨")
-    for kept in ("streamlit==1.50.0", "plotly", "pandas", "bcrypt"):
+    for kept in ("plotly", "pandas", "bcrypt"):
         check(any(ln.startswith(kept) for ln in lines), f"기존 의존성 `{kept}` 유지")
+    # 2026-08-29 — Streamlit 은퇴로 streamlit/altair 는 이제 "유지해야 할 의존성"이 아니라
+    # "빠져 있어야 하는" 쪽입니다(듀얼런 종료 — 부록 B).
+    check(not any(ln.startswith("streamlit") for ln in lines),
+          "requirements.txt 에 streamlit 이 더 이상 없음(Streamlit 은퇴 완료)")
+    check(not any(ln.startswith("altair") for ln in lines),
+          "requirements.txt 에 altair 가 더 이상 없음(Streamlit 전용 차트 라이브러리)")
 
     order_doc = (REPO_ROOT / "SCORECARD_WORK_ORDER.md")
     check(order_doc.exists(), "작업지시서 원본 보존")

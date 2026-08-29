@@ -4,10 +4,11 @@
 > **크롤링·가공·검증 파이프라인의 무결성을 보장하기 위한 불변 규칙서입니다.**
 > **코드를 수정하는 AI 또는 개발자는 반드시 이 문서를 먼저 읽어야 합니다.**
 
-> 📌 **문서 신선도 안내 (2026-08-17 추가)**
+> 📌 **문서 신선도 안내 (2026-08-17 추가, 2026-08-29 갱신)**
 > **코딩 원칙(§0-1 ~ §9)은 프레임워크·호스팅과 무관하게 지금도 그대로 유효합니다** — 이 부분은
 > 낡지 않았습니다. 다만 본문 곳곳의 **코드 예시·파일 경로 일부는 NiceGUI 이전(2026-08-17) 전의
-> Streamlit 기준**입니다(예: `st.error()` 표기, `views/` 화면 경로). **지금 아키텍처·배포·화면
+> Streamlit 기준**입니다(예: `st.error()` 표기, `views/` 화면 경로) — 2026-08-29 Streamlit 은퇴로
+> 이 예시들이 가리키던 파일 자체가 `archive/`로 옮겨졌습니다. **지금 아키텍처·배포·화면
 > 구조는 `PROJECT_STATUS.md` §0을 먼저 보세요.** 현재 파일 구조는 이 문서 §10에 갱신해 두었습니다.
 
 ---
@@ -18,10 +19,10 @@
 |------|------|
 | **프로젝트명** | 잘 보면 보이는 손 (The Visible Hand) |
 | **목적** | KOSPI 200 시가총액 상위 종목의 퀀트 밸류에이션(PEGY) 대시보드 |
-| **프론트엔드** | 🚀 NiceGUI (`main.py` + `web/`) — 2026-08-17 컷오버 완료. 🕰️ 구 Streamlit(`visiblehand.py`·`app.py`·`views/`)은 롤백용으로 동결 보관 중(§10) |
+| **프론트엔드** | 🚀 NiceGUI (`main.py` + `web/`) — 2026-08-17 컷오버, 2026-08-29 Streamlit 은퇴 완료로 단일 스택. 구 Streamlit(`visiblehand.py`·`app.py`·`views/`)은 `archive/`로 이동(§10) |
 | **데이터 수집** | 네이버 증권 웹 스크래핑 (`collector_kospi200.py`, `scrape_daily.py`) |
 | **검증 파이프라인** | 3단계 DataValidator (`utils/data_validator.py`) |
-| **배포** | 🚀 Render (Docker, `Dockerfile`) + GitHub Actions 자동 수집. 🕰️ 구 Streamlit Community Cloud 앱은 롤백 안전장치로 유지 중 — 기한·정리 대상은 `PROJECT_STATUS.md` §0-2·§0-5-4 |
+| **배포** | 🚀 Render (Docker, `Dockerfile`) + GitHub Actions 자동 수집. 구 Streamlit Community Cloud 앱은 코드상 정리 완료 — 앱 자체 중지는 오너가 Streamlit Cloud 대시보드에서 수동으로 해야 함(`PROJECT_STATUS.md` §0-2·§0-5-4) |
 
 ---
 
@@ -483,7 +484,9 @@ if kospi_close is None:
 - **듀얼런은 기한이 있는 임시 상태**입니다. 새 프레임워크(`web/`)와 옛 프레임워크(`views/`)가
   동시에 존재하는 기간은 "검증이 끝날 때까지"로 한정하고, 그 기간이 지나면 옛 코드를
   **`archive/`로 이동**해 실제 서비스 경로에서 제거합니다. "언젠가 정리하겠다"고 무기한
-  남겨두지 않습니다.
+  남겨두지 않습니다. *(✅ 2026-08-29 — 이 듀얼런은 종료됐습니다. `views/`는 더 이상 존재하지
+  않고 `archive/streamlit_views/`로 옮겨졌습니다. 아래 원칙 자체는 다음에 비슷한 이전 작업이
+  생겼을 때를 위해 남겨둡니다.)*
   > 📌 **지금 적용되는 기한과 정리 대상 목록은 `PROJECT_STATUS.md` §0-2·§0-5-4가 살아있는
   > 단일 출처입니다** (2026-08-17 컷오버 완료 → 그 시점부터 최소 2주간 Streamlit 앱·`views/`·
   > `visiblehand.py`·`app.py`를 롤백 안전장치로 **수정 없이** 유지 → 유예 종료 후 `archive/`
@@ -863,15 +866,15 @@ t_fair   = min(t_eps × min(growth + sh_yield, 25.0), price × 2.5)
 
 | 파일 | 역할 | 수정 시 주의 |
 |------|------|-------------|
-| `visiblehand.py` | 🕰️ 구 Streamlit 메인 앱 (동결) | UI만 담당. 데이터 가공 로직 절대 여기에 넣지 말 것 |
-| `views/pegy_view.py` | 🕰️ 구 PEGY 밸류에이션 페이지 (동결) | JSON 데이터 읽기 전용. 가공은 collector에서 완료 |
-| `views/macro_view.py` | 🕰️ 구 매크로 방공망 페이지 (동결) | market_history.csv 읽기 전용 |
+| `main.py` | 🚀 NiceGUI 진입점 (@ui.page 등록 · /healthz · ui.run) | UI만 담당. 데이터 가공 로직 절대 여기에 넣지 말 것 |
+| `web/pages/pegy_page.py` | 🚀 PEGY 밸류에이션 페이지 | JSON 데이터 읽기 전용. 가공은 collector에서 완료 |
+| `web/pages/macro_page.py` | 🚀 매크로 방공망 페이지 | market_history.csv 읽기 전용 |
 
-> 🚀 **표현 계층은 2026-08-17부로 `main.py` + `web/pages/`(NiceGUI)로 옮겨졌습니다.** 위 세 파일을
-> 포함한 `views/`는 롤백 유예 기간 동안 **한 글자도 수정하지 않는** 동결 상태입니다(§0-3-10).
-> 화면을 고쳐야 하면 `web/pages/`를 고치세요 — 파일별 대응 관계는 §10, 공개 상태는
-> `PROJECT_STATUS.md` §0-3을 보세요. **"UI만 담당하고 데이터 가공 로직을 넣지 않는다"는 규칙
-> 자체는 `web/` 쪽에도 똑같이 적용됩니다.**
+> 🕰️ **2026-08-29 Streamlit 은퇴 완료.** `visiblehand.py`·`app.py`·`views/`(위 표가 가리키던
+> 구 파일들 포함)는 `archive/`로 이동했고 서비스 경로에서 완전히 빠졌습니다(§0-3-10). 표현
+> 계층은 이제 `main.py` + `web/pages/`(NiceGUI) 단일 스택입니다 — 파일별 옛 대응 관계는 §10,
+> 공개 상태는 `PROJECT_STATUS.md` §0-3을 보세요. **"UI만 담당하고 데이터 가공 로직을 넣지
+> 않는다"는 규칙 자체는 그대로 유효합니다.**
 
 ### 검증 계층 (Test Layer)
 
@@ -974,16 +977,20 @@ python -c "import json; d=json.load(open('data/kospi200_pegy_latest.json',encodi
 
 ---
 
-## 10. 📂 디렉토리 구조 (전체) — 2026-08-17 갱신
+## 10. 📂 디렉토리 구조 (전체) — 2026-08-29 갱신
 
-> ⚠️ **지금 이 저장소는 웹 프레임워크가 두 벌 들어있는 "듀얼런" 상태입니다.** 어느 쪽이
-> 실서비스인지 헷갈리면 잘못된 파일을 고치게 되므로, 아래 표시를 먼저 보세요.
+> ✅ **2026-08-29 — Streamlit 은퇴 완료(듀얼런 종료).** 오너 결정으로 예정(2026-08-31)보다
+> 이틀 빠르게 진행했습니다. 프론트엔드는 이제 `main.py` + `web/`(NiceGUI) **단일 스택**입니다.
+> 구 Streamlit 코드(`visiblehand.py`·`app.py`·`views/`)는 `archive/`로 옮겨 서비스 경로에서
+> 뺐습니다 — 아래 목록의 `archive/` 항목이 그것입니다. **Streamlit Cloud 에 떠 있는 구 앱
+> 자체는 코드로 내릴 수 없어 오너가 대시보드에서 직접 중지해야 합니다**(`PROJECT_STATUS.md`
+> §0-2·§0-5-4).
 >
 > | 표시 | 뜻 |
 > |---|---|
 > | 🚀 **NiceGUI — 지금 실서비스** | `https://visiblehand.co.kr` (Render)가 실제로 실행하는 코드. **화면 수정은 여기서** |
-> | 🕰️ **Streamlit — 롤백 안전장치** | 2026-08-17 컷오버 전 코드. **수정 금지**(§0-3-10, 지금은 아무도 안 건드리는 참고용 사본). 유예 종료 후 `archive/`로 이동 예정 — **기한·정리 대상 목록은 `PROJECT_STATUS.md` §0-2·§0-5-4가 단일 출처** |
-> | (표시 없음) | 두 스택이 **공용으로 쓰는** 수집·계산·데이터 계층. 이전 대상이 아니었고 그대로 재사용됩니다 |
+> | 🗄️ **archive/ — 은퇴한 Streamlit 코드** | 참고용으로만 보관. **수정 금지**(§0-3-10) — 되살릴 계획 없음 |
+> | (표시 없음) | 두 스택이 **공용으로 썼던** 수집·계산·데이터 계층. 지금은 NiceGUI 단독 소비처로 그대로 재사용됩니다 |
 
 ```
 visible_hand/
@@ -1008,17 +1015,16 @@ visible_hand/
 │       ├── macro_page.py             /admin/macro 매크로 방공망 (관리자 전용·개발 중단)
 │       └── admin_page.py             /admin       관리자 콘솔
 │
-├── 🕰️ visiblehand.py             구 Streamlit 메인 앱 (동결)
-├── 🕰️ app.py                     구 Streamlit 엔트리포인트 (동결)
-├── 🕰️ index.html                 구 GitHub Pages 래퍼(Streamlit iframe). 커스텀 도메인 해제됨
-├── 🕰️ keep_awake_ping.py         구 Streamlit 슬립 방지 핑 (파일 주석에 삭제 대상 표시됨)
-├── 🕰️ views/                     구 Streamlit 화면 계층 (동결) — web/pages/ 와 1:1 대응
-│   ├── pegy_view.py                → web/pages/pegy_page.py
-│   ├── us_stocks_view.py           → web/pages/us_stocks_page.py
-│   ├── scorecard_view.py           → web/pages/scorecard_page.py
-│   ├── report_view.py              → web/pages/report_page.py
-│   ├── macro_view.py               → web/pages/macro_page.py
-│   └── admin_view.py               → web/pages/admin_page.py
+├── 🗄️ archive/                   은퇴한 Streamlit 코드 (2026-08-29, 참고용, 수정 금지)
+│   ├── visiblehand.py               구 Streamlit 메인 앱
+│   ├── app.py                       구 Streamlit 엔트리포인트
+│   └── streamlit_views/             구 Streamlit 화면 계층 — web/pages/ 와 1:1 대응이었음
+│       ├── pegy_view.py                → web/pages/pegy_page.py
+│       ├── us_stocks_view.py           → web/pages/us_stocks_page.py
+│       ├── scorecard_view.py           → web/pages/scorecard_page.py
+│       ├── report_view.py              → web/pages/report_page.py
+│       ├── macro_view.py               → web/pages/macro_page.py
+│       └── admin_view.py               → web/pages/admin_page.py
 │
 ├── collector_kospi200.py         코스피 시총 상위 200 수집기 (핵심)
 ├── collector_us_stocks.py        🇺🇸 미국주식 550종목 수집기 + 상단 지수 3종
@@ -1084,14 +1090,16 @@ visible_hand/
 │   ├── scrape_report_snapshots.yml 📈 벤치마크 종가 + 사용자별 평가금액 스냅샷 적재
 │   ├── duel_daily.yml              ⚔️ (2026-08-20 신설, 초안) 결투 모듈 야간 배치 — 크롤링 신선도 판정 →
 │   │                               주문 체결/취소 → 정기입금 → 스냅샷 적재. 관리자 전용 공개 전까지는 숨김 상태
-│   ├── render_keep_awake.yml       🚀 Render 무료 인스턴스 슬립 방지 (10분 간격)
-│   └── keep_awake.yml              🕰️ Streamlit 슬립 방지 (유예 종료 시 streamlit_wake job 삭제 대상)
+│   └── render_keep_awake.yml       🚀 Render 무료 인스턴스 슬립 방지 (10분 간격)
+│      (🗑️ 2026-08-29 — keep_awake.yml·keep_awake_ping.py 는 구 Streamlit Cloud 슬립 방지
+│       용도였고 은퇴와 함께 삭제했습니다.)
 │
 ├── Dockerfile                    🚀 Render 배포용 (Streamlit Cloud는 사용 안 함)
-├── requirements.txt              Python 의존성 (streamlit·altair는 유예 종료 후 제거 대상)
+├── requirements.txt              Python 의존성 (2026-08-29 — streamlit·altair 제거 완료)
 ├── .gitattributes                줄바꿈(CRLF/LF) 잡음 방지 — `git add --renormalize` 금지
 ├── .gitignore / .dockerignore    비밀 파일·archive/ 등 제외 규칙
-├── .devcontainer/devcontainer.json  🕰️ Codespaces 설정 (streamlit run app.py 기준)
+├── .devcontainer/devcontainer.json  🕰️ Codespaces 설정 (streamlit run app.py 기준 — 로컬 개발용
+│                                     참고 문서일 뿐 서비스 경로 아님. 필요 시 별도 갱신 대상)
 │
 ├── ENGINEERING_SPEC.md           ← 이 문서 (코딩 원칙 · AI 불변 규칙서)
 ├── PROJECT_STATUS.md             ← **현황판. 다음 세션은 여기부터, 특히 §0**

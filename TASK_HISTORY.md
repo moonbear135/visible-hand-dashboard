@@ -2829,6 +2829,74 @@
      방어선입니다. 실행 전 파일 안의 확인 질의(주석 처리됨)로 이미 중복 원장
      행이 있는지 먼저 확인하는 것을 권장합니다.
 
+160. **🗑️ Streamlit 은퇴 — 듀얼런 종료 (2026-08-29, 오푸스 엑스트라, 오너 결정 —
+     "streamlit은 없애는 방향으로 가기로 했는데 그것까지 진행을 지금해버리자
+     그걸 고려하고 문제가 되는걸 정리해줘").** `NICEGUI_MIGRATION_PLAN.md`
+     부록 B에 예정(2026-08-31)돼 있던 정리 작업을 오너 지시로 이틀 앞당겨
+     실행. 매크로/PEGY/보조지표/리포트 재감사(`MACRO_REAUDIT_FINDINGS.md`,
+     47건) 처리 도중 S-1(구조 리팩터) 항목이 시급해져, PEGY 모듈 자체
+     수정보다 먼저 처리했습니다(PEGY는 다음 순서로 유예 — 아래 참고).
+
+     **부록 B 체크리스트 그대로 실행** — `index.html`·`keep_awake_ping.py`·
+     `.github/workflows/keep_awake.yml` **삭제**(`CNAME`은 이전부터 이미
+     없었음), `visiblehand.py`·`app.py` → `archive/`, `views/` 6개 →
+     `archive/streamlit_views/` 이동, `requirements.txt`에서 `streamlit`·
+     `altair` 제거, `ENGINEERING_SPEC.md`(§0 표·§6 표현계층 표·§10 디렉토리
+     구조)·`PROJECT_STATUS.md`(§0-2·§0-5 항목4)를 NiceGUI 단일 스택
+     기준으로 갱신.
+
+     **회귀 테스트 처리 원칙** — 화면(옛 `views/*.py`)만 검증하던 코드는
+     제거하되, 같은 함수 안에서 여전히 살아있는 공유 로직(`utils/report_db.py`
+     ·`utils/scorecard_db.py` 등)을 함께 검증하던 부분은 위쪽 그대로 보존.
+     `test_report.py`(8개 함수)·`test_scorecard.py`(2개 함수 + 의존성
+     검사)·`test_web_session_isolation.py::test_macro_page_wiring`에서
+     이 방식으로 화면 전용 블록만 제거. `test_macro_scoring.py`는 다르게
+     처리 — 5개 함수가 `views/macro_view.py`의 리터럴을 조회하던 것을
+     **삭제 대신 `web/pages/macro_page.py`로 재배선**(네 핵심 리터럴
+     `layers`·`FRIENDLY_NAMES`·`STUDY_ONLY_INDICATORS`·`DROPPED_AS_DUPLICATE`가
+     실제로 그 파일에 있음을 직접 확인한 뒤 재배선 — 삭제했다면 매크로
+     화면-상수 정합성 회귀 보호가 통째로 사라졌을 것). `test_stock_history.py`도
+     같은 이유로 `views/pegy_view.py`+`views/us_stocks_view.py` 개별 검사를
+     두 화면이 공유하는 `web/components/stock_download.py` 검사로 재배선.
+
+     **제가 직접 발견해 고친 것 2건** (에이전트 자체 보고에는 없었음,
+     오너 요청 — "전체 검증은 이 채팅방에서") — ①`test_scorecard.py::
+     test_requirements_and_docs`가 `streamlit==1.50.0`을 "유지해야 할
+     의존성"으로 단언하고 있어 `requirements.txt` 정리 직후 깨질 예정이던
+     것을 발견해 "streamlit/altair가 더 이상 없어야 한다"는 반대 방향
+     단언으로 직접 수정. ②`test_report.py::test_workflow`가 실제 기기
+     저장소의 `.github/workflows/keep_awake.yml`을 직접 읽어 "다른
+     워크플로우를 안 건드렸는지" 확인하는 목록에 포함하고 있어, 그 파일
+     삭제 직후 `FileNotFoundError`로 깨지는 것을 기기에서 전체 테스트
+     실행 중 발견 → 목록에서 제거(살아있는 `scrape.yml`·`scrape_us.yml`
+     검사는 그대로 유지). 이 두 건 모두 클라우드 검토용 사본에는
+     `requirements.txt`·`.github/`가 애초에 없어서 구현 에이전트가
+     건드릴 수 없었던 파일이라, 기기에서 직접 재현·수정했습니다.
+
+     **검증** — 기기 저장소에서 `git stash`로 이번 변경 전 상태를 정확히
+     복원해 전용 베이스라인으로 삼고, 전체 테스트 스위트를 두 번(수정
+     전/후) 직접 실행해 FAILED/ERROR 테스트 ID 집합을 통째로 diff —
+     **완전히 동일**(13개 항목, 전부 이번 작업과 무관한 기존 실패 —
+     예: `test_duel.py`·`test_event_loop_blocking.py`의 사전 존재하던
+     실패, `archive/test_scrape.py`의 프록시 오류). 통과 수만 정확히
+     1건 감소(1612 → 1611)했는데, 이는 삭제한 옛 `test_period_buttons`
+     테스트 함수 1개가 통째로 없어진 것과 정확히 일치(신규 실패 아님).
+     `py_compile`로 수정한 파일 전부 컴파일 확인. `archive/` 밑 파일들도
+     `.gitignore`에 걸려 있지만 `git mv`로 이미 추적 중이던 파일의
+     이동이라 정상적으로 추적 유지됨을 확인.
+
+     **오너 후속 조치 필요** — Streamlit Cloud 대시보드에서 구 앱
+     (`visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app`)을
+     **직접 중지**해 주세요. 코드 정리는 끝났지만 그 앱 자체를 내리는
+     것은 코드로 할 수 없는 일입니다.
+
+     **의도적으로 남겨둔 것** — `archive/test_harness.py` 등 이전부터
+     `archive/`에 있던 무관한 스크립트는 이번 작업 대상이 아니므로
+     그대로 둠. PEGY 모듈 자체의 버그 수정(H-4·M-1·M-2·M-3·M-14·L-6·L-7·
+     L-8·L-11 등, `MACRO_REAUDIT_FINDINGS.md` 기준)은 다음 순서로 유예 —
+     오너의 원래 요청("PEGY모듈 검토에 집중해줘")이 이번 작업 다음
+     차례입니다.
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26

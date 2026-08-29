@@ -244,9 +244,9 @@ def test_real_history_spot_check():
 def test_wiring():
     print("\n[7] 배선 — 수집·화면 양쪽이 같은 함수를 쓰는가")
     scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
-    view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "web" / "pages" / "macro_page.py").read_text(encoding="utf-8")
 
-    for name, src in (("scrape_daily.py", scrape_src), ("views/macro_view.py", view_src)):
+    for name, src in (("scrape_daily.py", scrape_src), ("web/pages/macro_page.py", view_src)):
         check("measured_downside_risk" in src, f"{name} 가 measured_downside_risk 를 사용")
         check("0.5 - 2.5 * kospi" not in src.replace("×", "*"),
               f"{name} 에 옛 임의 계수식(0.5 - 2.5×수익률)이 남아있지 않음")
@@ -301,7 +301,7 @@ ACTIVE_EXPECTED = {
 def _literal_from_source(path, name):
     """
     파일을 import 하지 않고(=streamlit 등 의존성 없이) 모듈 최상단 리터럴 할당값만 꺼냅니다.
-    views/macro_view.py 는 streamlit 의존이라 오프라인 테스트에서 import 할 수 없습니다.
+    화면 모듈은 UI 프레임워크 의존이라 오프라인 테스트에서 import 할 수 없습니다.
     """
     import ast
     tree = ast.parse(Path(path).read_text(encoding="utf-8"))
@@ -386,11 +386,11 @@ def test_weight_redistribution():
 def test_retired_indicators_removed_from_code():
     print("\n[9] 코드 제거 — 뺀 지표의 계산식이 정말 사라졌는가 (#69, #72)")
     scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
-    view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "web" / "pages" / "macro_page.py").read_text(encoding="utf-8")
 
     # market_scores / market_scores_raw 항목이 남아있으면 CSV에 계속 값이 쌓입니다.
     for key in sorted(RETIRED_EXPECTED_NOW):
-        for fname, src in (("scrape_daily.py", scrape_src), ("views/macro_view.py", view_src)):
+        for fname, src in (("scrape_daily.py", scrape_src), ("web/pages/macro_page.py", view_src)):
             has_entry = (f'"{key}": {{' in src or f'"{key}": None if' in src
                          or f'"{key}": clip' in src)
             check(not has_entry, f"{fname} 의 점수 사전에 '{key}' 항목이 없음")
@@ -404,7 +404,7 @@ def test_retired_indicators_removed_from_code():
                 "short_base", "bal_base"):
         pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b|{var}\s+is\s+None", re.MULTILINE)
         check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
-        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"web/pages/macro_page.py 에 '{var}' 계산/사용이 없음")
 
     # #72: short_base/bal_base 의 입력이던 변동성·고점대비낙폭 계산도 함께 사라져야 합니다.
     # (남겨두면 아무 데도 안 쓰이는 죽은 계산이 되고, 그 값을 이유로 수집 전체를 막는
@@ -412,7 +412,7 @@ def test_retired_indicators_removed_from_code():
     for var in ("volatility", "dist_from_high"):
         pattern = re.compile(rf"^\s*{var}\s*=|{var}\s+is\s+None", re.MULTILINE)
         check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
-        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"web/pages/macro_page.py 에 '{var}' 계산/사용이 없음")
     check("임의 상수(1.2 / 0.08)로 대체하지 않고" not in scrape_src,
           "쓰이지 않는 값(변동성·낙폭) 때문에 수집 전체가 죽던 하드 실패 게이트(raise)가 제거됨")
     # 반대로 KOSPI/환율 종가 결측 방어(§0-1의 핵심)는 그대로 살아 있어야 합니다.
@@ -432,7 +432,7 @@ def test_study_section_matches_code():
     print("\n[10] 문서-코드 일치 — 화면 공부 섹션 목록 == 실제로 뺀 목록 (#69, #72)")
     from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
 
-    view_path = REPO_ROOT / "views" / "macro_view.py"
+    view_path = REPO_ROOT / "web" / "pages" / "macro_page.py"
     study = _literal_from_source(view_path, "STUDY_ONLY_INDICATORS")
     dropped = _literal_from_source(view_path, "DROPPED_AS_DUPLICATE")
     friendly = _literal_from_source(view_path, "FRIENDLY_NAMES")
@@ -798,7 +798,7 @@ def test_krx_failure_modes():
 def test_krx_wiring():
     print("\n[15] 배선·기록 — 두 파일이 같은 방식으로 바뀌었고 가중치는 그대로인가 (#70)")
     scrape_src = (REPO_ROOT / "scrape_daily.py").read_text(encoding="utf-8")
-    view_src = (REPO_ROOT / "views" / "macro_view.py").read_text(encoding="utf-8")
+    view_src = (REPO_ROOT / "web" / "pages" / "macro_page.py").read_text(encoding="utf-8")
     db_src = (REPO_ROOT / "utils" / "db.py").read_text(encoding="utf-8")
     wf_src = (REPO_ROOT / ".github" / "workflows" / "scrape.yml").read_text(encoding="utf-8")
 
@@ -810,7 +810,7 @@ def test_krx_wiring():
     for var in ("skew_base", "synth_base"):
         pattern = re.compile(rf"^\s*{var}\s*=|clip\({var}\b|{var}\s+is\s+None", re.MULTILINE)
         check(not pattern.search(scrape_src), f"scrape_daily.py 에 '{var}' 계산/사용이 없음")
-        check(not pattern.search(view_src), f"views/macro_view.py 에 '{var}' 계산/사용이 없음")
+        check(not pattern.search(view_src), f"web/pages/macro_page.py 에 '{var}' 계산/사용이 없음")
     check("0.3 * (usd_close - 1300)" not in scrape_src and "0.3 * (usd_close - 1300)" not in view_src,
           "'합성선물'을 환율로 계산하던 식(0.3×(USD-1300)/200)이 두 파일 모두에서 사라짐")
 
@@ -836,7 +836,7 @@ def test_krx_wiring():
           "Synthetic_Futures 의 CSV 한글 헤더도 그대로 유지")
 
     # 화면 표기명은 반대로, 실제 내용대로 바뀌어야 합니다(라벨과 내용 불일치 방지)
-    friendly = _literal_from_source(REPO_ROOT / "views" / "macro_view.py", "FRIENDLY_NAMES")
+    friendly = _literal_from_source(REPO_ROOT / "web" / "pages" / "macro_page.py", "FRIENDLY_NAMES")
     check("VKOSPI" in friendly["VKOSPI_Skew"] and "실측" in friendly["VKOSPI_Skew"],
           f"화면 표기명이 실제 내용(VKOSPI 실측)을 반영: {friendly['VKOSPI_Skew']!r}")
     check("베이시스" in friendly["Synthetic_Futures"] and "실측" in friendly["Synthetic_Futures"],
@@ -869,7 +869,7 @@ def test_short_indicators_reclassified():
     print("\n[16] 공매도 2종 재분류 — '데이터 없음'이 아니라 '경로를 안 쓰기로 함'인가 (#72)")
     from utils.constants import RISK_WEIGHTS, RETIRED_RISK_INDICATORS
 
-    view_path = REPO_ROOT / "views" / "macro_view.py"
+    view_path = REPO_ROOT / "web" / "pages" / "macro_page.py"
     study = _literal_from_source(view_path, "STUDY_ONLY_INDICATORS") or []
     by_key = {d["key"]: d for d in study}
     dropped = _literal_from_source(view_path, "DROPPED_AS_DUPLICATE") or []
@@ -949,19 +949,19 @@ def test_friendly_names_single_source():
     ("VKOSPI 공포지수") 옆에 붙여 보여줬습니다. 두 이름은 가리키는 지표 자체가 다릅니다
     (#70 에서 프록시 → KRX 실측으로 바뀌면서 내용이 바뀜).
 
-    이제 단일 출처는 `utils/constants.py::MACRO_FRIENDLY_NAMES` 이고, 화면 2개의 리터럴은
-    (Streamlit 무변경 원칙 + 기존 대조 테스트 때문에) 그대로 두되 **여기서 매번 대조**합니다.
+    이제 단일 출처는 `utils/constants.py::MACRO_FRIENDLY_NAMES` 이고, 화면(`web/pages/
+    macro_page.py`)의 리터럴은 그대로 두되 **여기서 매번 대조**합니다.
     """
     print("\n[17] 지표 표기명 단일 출처 — 세 곳이 어긋나지 않는가 (2026-08-17)")
     from utils.constants import MACRO_FRIENDLY_NAMES, RISK_WEIGHTS
 
-    view = _literal_from_source(REPO_ROOT / "views" / "macro_view.py", "FRIENDLY_NAMES")
+    # 2026-08-29 — Streamlit 은퇴로 화면은 `web/pages/macro_page.py` 하나만 남았습니다
+    # (옛 `views/macro_view.py` 와의 대조 검사는 그 파일과 함께 제거).
     page = _literal_from_source(REPO_ROOT / "web" / "pages" / "macro_page.py", "FRIENDLY_NAMES")
 
-    check(view is not None and page is not None, "두 화면 파일에서 표기명 사전을 읽음")
-    check(view == page, "① Streamlit 화면과 NiceGUI 화면의 표기명이 동일")
-    _diff = set((MACRO_FRIENDLY_NAMES or {}).items()) ^ set((view or {}).items())
-    check(MACRO_FRIENDLY_NAMES == view,
+    check(page is not None, "화면 파일에서 표기명 사전을 읽음")
+    _diff = set((MACRO_FRIENDLY_NAMES or {}).items()) ^ set((page or {}).items())
+    check(MACRO_FRIENDLY_NAMES == page,
           "② 단일 출처(utils/constants.MACRO_FRIENDLY_NAMES)가 화면과 글자 단위로 동일"
           + (f" — 차이: {sorted(_diff)}" if _diff else ""))
     check(set(MACRO_FRIENDLY_NAMES) == set(RISK_WEIGHTS),

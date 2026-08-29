@@ -48,12 +48,14 @@ DNS 전환(컷오버)과 "내 성적표"·"사장님 보고서" 공개 전환, �
 
 - **`https://visiblehand.co.kr`** → **Render**(NiceGUI, `main.py` + `web/` 전체)가 서빙.
   가비아 DNS: `A @ 216.24.57.1`, `CNAME www → visible-hand-dashboard.onrender.com`.
-- **구 Streamlit 앱**(`https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/`)은
-  **롤백 안전장치로 2026-08-31까지(최소 2주) 계속 살려둡니다.** 이 기간 동안은 내리지
-  마세요. `views/`·`visiblehand.py`·`app.py`도 그때까지 저장소에 그대로 둡니다(코드
-  수정 금지 — 지금은 아무도 안 건드리는 참고용 사본일 뿐).
-- GitHub Pages 커스텀 도메인 설정은 해제됨(`CNAME` 파일도 삭제됨) — 더 이상 도메인을
-  안 씀.
+- **✅ 2026-08-29 — 듀얼런(Streamlit 병행) 종료.** 오너 결정으로 예정(2026-08-31)보다
+  이틀 빠르게 진행했습니다. `views/`·`visiblehand.py`·`app.py`는 `archive/`로 옮겨
+  서비스 경로·저장소 루트에서 제거했습니다(`views/` → `archive/streamlit_views/`).
+  **구 Streamlit 앱**(`https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/`)
+  자체는 코드로 내릴 수 없습니다 — ⚠️ **오너가 Streamlit Cloud 대시보드에서 직접
+  중지해야 합니다(아직 안 함).**
+- GitHub Pages 커스텀 도메인 설정은 해제됨(`CNAME` 파일도, `index.html`도 삭제됨) — 더
+  이상 도메인을 안 씀.
 
 ### 0-3. 화면별 공개 상태 (지금 기준)
 
@@ -90,8 +92,10 @@ web/
 utils/data_source.py     원격 데이터 로드 (DATA_SOURCE_BASE_URL 미설정 시 기존과 100% 동일)
 tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증 — 가장 중요한 테스트
 ```
-`views/`·`utils/db.py`·`utils/*_db.py` 등 기존 Streamlit·계산 계층 파일들은 **§2 표가
-여전히 정확**합니다(둘 다 씁니다 — 계산 로직은 이전하지 않고 그대로 재사용했습니다).
+`utils/db.py`·`utils/*_db.py` 등 기존 계산 계층 파일들은 **§2 표가 여전히 정확**합니다
+(계산 로직은 이전하지 않고 그대로 재사용했습니다). `views/`는 2026-08-29 Streamlit 은퇴로
+`archive/streamlit_views/`로 옮겨졌습니다 — §2 표의 `views/` 관련 행은 이제 과거 기록입니다
+(아래 §0-5 항목 4 참고).
 
 ### 0-5. 지금 열려있는 일 (다음에 반드시 확인/처리할 것) — §4는 낡았으니 여기부터
 
@@ -116,11 +120,16 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
    SECONDS = 60.0`이 실제로 작동함을 확인. ③ 오타 제거 후 재배포 → 배너 정상 소멸,
    실제 보유 종목 데이터 정상 표시까지 확인. 테스트 중 겪은 1회성 로그아웃은 재배포로
    인스턴스가 재시작되며 메모리 세션이 초기화된 것으로, 버그 아님(정상 동작).
-4. **⏳ 2026-08-31 이후 정리 작업** — Streamlit 앱 정지, `views/`·`visiblehand.py`·
-   `app.py`·`index.html`·`CNAME`·`keep_awake_ping.py`의 Streamlit 관련 부분을
-   `archive/`로 이동, `requirements.txt`에서 streamlit·altair 등 제거,
-   `.github/workflows/keep_awake.yml`의 `streamlit_wake` job 삭제(코드 주석에 표시돼
-   있음).
+4. **✅ 완료 — Streamlit 은퇴 (2026-08-29, 오너 결정으로 예정 2026-08-31보다 이틀
+   빠르게 진행, `NICEGUI_MIGRATION_PLAN.md` 부록 B 기준).** `views/`(6개 파일) →
+   `archive/streamlit_views/`, `visiblehand.py`·`app.py` → `archive/` 이동.
+   `index.html`·`CNAME`·`keep_awake_ping.py`·`.github/workflows/keep_awake.yml`
+   삭제(`CNAME`은 이전부터 이미 없었음). `requirements.txt`에서 `streamlit`·`altair`
+   제거. 이 이동·삭제로 영향받는 회귀 테스트(`tests/test_report.py`·
+   `test_scorecard.py`·`test_web_session_isolation.py`·`test_macro_scoring.py`·
+   `test_stock_history.py`)는 Streamlit 뷰 전용 검증만 제거하고 공용 계산 계층
+   (`utils/*_db.py`, `web/pages/*`) 검증은 그대로 보존했습니다. **⚠️ 오너 후속 조치 —
+   Streamlit Cloud 대시보드에서 구 앱을 직접 중지해야 합니다(코드로는 불가능).**
 5. **✅ 완료 — "내 성적표" v2(스크린샷 OCR) (2026-08-17 착수 → 2026-08-18 정식 공개 전환
    완료).**
    자세한 스케줄·설계 결정은 `SCORECARD_V2_OCR_WORK_ORDER.md`(레포 루트) 참고. 1~4단계(오너

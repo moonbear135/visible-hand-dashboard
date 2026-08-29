@@ -32,7 +32,6 @@ REPORT_WORK_ORDER.md §9-4 / §9-7 에 따라, 이 세션에서는 **실제 Supa
 
 import contextlib
 import io
-import importlib
 import json
 import os
 import random
@@ -1020,62 +1019,6 @@ class _BoomClient(_FakeClient):
         return query
 
 
-class _StreamlitRecorder:
-    """화면 함수가 실제로 무슨 문구를 그리는지 받아 적는 가짜 st."""
-
-    def __init__(self):
-        self.markdown_calls = []
-        self.caption_calls = []
-
-    def markdown(self, text, *_args, **_kwargs):
-        self.markdown_calls.append(str(text))
-
-    def caption(self, text, *_args, **_kwargs):
-        self.caption_calls.append(str(text))
-
-    def __getattr__(self, _name):
-        def _noop(*_args, **_kwargs):
-            return None
-        return _noop
-
-
-class _HoldingViewRecorder(_StreamlitRecorder):
-    """종목별 상세 섹션 검증용 — info/warning/error/selectbox/expander 까지 받아 적습니다."""
-
-    def __init__(self):
-        super().__init__()
-        self.warning_calls = []
-        self.info_calls = []
-        self.error_calls = []
-        self.selectbox_calls = []
-
-    def reset(self):
-        for calls in (self.markdown_calls, self.caption_calls, self.warning_calls,
-                      self.info_calls, self.error_calls, self.selectbox_calls):
-            calls.clear()
-
-    def warning(self, text, *_args, **_kwargs):
-        self.warning_calls.append(str(text))
-
-    def info(self, text, *_args, **_kwargs):
-        self.info_calls.append(str(text))
-
-    def error(self, text, *_args, **_kwargs):
-        self.error_calls.append(str(text))
-
-    def selectbox(self, _label, options, *_args, **_kwargs):
-        options = list(options)
-        self.selectbox_calls.append(options)
-        return options[0] if options else None
-
-    def expander(self, *_args, **_kwargs):
-        return contextlib.nullcontext()
-
-    def columns(self, spec, **_kwargs):
-        count = spec if isinstance(spec, int) else len(spec)
-        return [self for _ in range(count)]
-
-
 def test_price_stamp_wiring():
     print("\n[9-1] 가격 수집 시각(KST) 저장·표시 배선")
 
@@ -1204,48 +1147,6 @@ def test_price_stamp_wiring():
           "이 기능 이전에 저장된 행은 None(빈칸이 아니라 '없음'으로 다뤄짐)")
     check(fetched[1][rdb.PRICE_STAMP_FIELD] == "2026-08-12 17:50", "저장된 시각이 그대로 조회됨")
     check(fetched[2][rdb.PRICE_STAMP_FIELD] is None, "공백 문자열도 None 으로 정규화")
-
-    # ---- ⑦ 화면 문구 ---------------------------------------------------------
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        recorder = _StreamlitRecorder()
-        module.st = recorder
-        try:
-            module._render_price_stamp(MARKET_KR, {"snapshot_date": date(2026, 8, 12),
-                                                   rdb.PRICE_STAMP_FIELD: "2026-08-12 17:50"})
-            kr_line = recorder.markdown_calls[-1]
-            check("2026-08-12 17:50" in kr_line and "한국시간" in kr_line,
-                  "한국 블록: 저장된 시각을 한국시간으로 표기")
-            check("**" in kr_line, "회색 캡션이 아니라 굵은 본문 한 줄로 노출(오너: '확 들어오질 않아')")
-
-            recorder.markdown_calls.clear()
-            recorder.caption_calls.clear()
-            module._render_price_stamp(MARKET_US, {"snapshot_date": date(2026, 8, 12),
-                                                   rdb.PRICE_STAMP_FIELD: "2026-08-13 07:14"})
-            check("2026-08-13 07:14" in recorder.markdown_calls[-1],
-                  "미국 블록: 한국 블록과 **따로** 그 시장의 시각을 표기")
-            check(any("미국장" in text for text in recorder.caption_calls),
-                  "미국은 거래일 다음 날 새벽에 찍히는 이유를 함께 안내(오너 혼동 방지)")
-
-            recorder.markdown_calls.clear()
-            module._render_price_stamp(MARKET_KR, {"snapshot_date": date(2026, 8, 1),
-                                                   rdb.PRICE_STAMP_FIELD: None})
-            missing_line = recorder.markdown_calls[-1]
-            check("시각 정보 없음" in missing_line and "2026-08-01" in missing_line,
-                  "값이 없는 과거 행은 '시각 정보 없음'으로 정직하게 표시")
-            check(re.search(r"\d{1,2}:\d{2}", missing_line) is None,
-                  "없는 값을 오늘 시각·자정(00:00) 같은 값으로 대신 채우지 않음(문구에 시:분이 아예 없음)")
-        finally:
-            module.st = real_st
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 시각 표시 문구 검증", f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
 
 
 # =============================================================================
@@ -1660,275 +1561,6 @@ def test_holding_snapshots():
     check(rdb.compare_holding_total(None, 100.0)["comparable"] is False,
           "대조할 값이 없으면 '일치'라고 말하지 않음")
 
-    # ---- ⑽ 화면 문구 ---------------------------------------------------------
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        recorder = _HoldingViewRecorder()
-        module.st = recorder
-        try:
-            summary_rows = rdb.sort_snapshots([
-                snap(date(2026, 8, 12), 3200000.0, 2700000.0, holdings_count=2, priced_count=2),
-            ])
-            module._render_holding_history(MARKET_KR, multi, summary_rows,
-                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
-            check("삼성전자 (005930)" in table and "SK하이닉스 (000660)" in table,
-                  "한눈에 보는 표: 종목명(코드) 표기가 '내 성적표'와 같은 관례")
-            check(":red[" in table or ":blue[" in table,
-                  "수익률 색상이 국내 증시 관례(오르면 빨강/내리면 파랑)로 통일")
-            check("원" in table and "$" not in table, "금액은 format_amount() 통화 표기 그대로")
-            check("**합계 2종목**" in table, "표 맨 아래 합계 한 줄 — 한 장에서 총액이 바로 보임")
-            check(len(table.splitlines()) <= 6,
-                  "종목 수 + 헤더 + 합계 만큼만 — 기간 전체를 한 표에 늘어놓지 않음")
-            # 2026-08-13 (#114) 오너 지시로 **정상일 때는 아무 말도 하지 않습니다.**
-            # ("⚖️ 데이터 대조 통과 …"는 개발자용 자체 검증 문구 — 방문자에게는 소음이고,
-            #  정상일 때 매번 뜨면 진짜 경고가 묻힙니다.) 대조 자체는 계속 돌고, 어긋난
-            # 경우의 경고는 아래 '대조 불일치' 검사가 그대로 지킵니다.
-            check(not any("대조" in t for t in
-                          recorder.caption_calls + recorder.info_calls + recorder.warning_calls),
-                  "🔴 합계와 일치하면 대조 문구를 아예 띄우지 않음(정상일 땐 조용히)")
-            check(any("005380" in t for t in recorder.caption_calls),
-                  "기간 중 기록이 끊긴 종목을 표에 섞지 않고 따로 안내")
-            daily = next(t for t in recorder.markdown_calls if t.startswith("| 거래일 |"))
-            check("종가 수집 시각(KST)" in daily and "2026-08-10 17:50" in daily,
-                  "펼친 일별 표에는 그날 가격 수집 시각(한국시간)까지 함께")
-
-            # 가격을 몰랐던 날 — 빈칸·이전 가격 대체 금지
-            recorder.reset()
-            unpriced_only = [r for r in multi if r["ticker"] == "000660"
-                             and r["snapshot_date"] <= date(2026, 8, 11)]
-            module._render_holding_history(MARKET_KR, unpriced_only, [],
-                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            table2 = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
-            check("가격 모름" in table2,
-                  "가격을 몰랐던 날은 '가격 모름'으로 정직하게 표시(빈칸·이전 가격 대체 금지)")
-            check("1,100,000" not in table2,
-                  "전날 가격을 끌어와서 채우지 않음")
-            check("100.00%" not in table2,
-                  "그날 가격을 아는 종목이 하나도 없으면 합계 비중을 '100%'라고 쓰지 않음(§0-1)")
-            check("모름" in table2, "그 경우 종목의 비중 칸은 '모름'")
-            # 대조할 합계 스냅샷이 없는 경우 — 화면은 **아무 주장도 하지 않습니다**.
-            # 말하지 않는 것과 "일치한다"고 말하는 것은 전혀 다릅니다(§0-1 위반 아님).
-            check(not any("일치" in t for t in
-                          recorder.caption_calls + recorder.info_calls + recorder.warning_calls),
-                  "대조할 합계 스냅샷이 없으면 '일치'라고 말하지 않음")
-
-            # 불일치 — 숨기지 않고 경고
-            recorder.reset()
-            wrong = rdb.sort_snapshots([snap(date(2026, 8, 12), 999.0, 111.0)])
-            module._render_holding_history(MARKET_KR, multi, wrong,
-                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            check(any("대조 불일치" in t for t in recorder.warning_calls),
-                  "🔴 합계와 종목별 합이 어긋나면 숨기지 않고 경고로 드러냄")
-
-            # 표가 아직 없는 상태 — 안내로 대체(리포트 나머지는 정상)
-            recorder.reset()
-            module._render_holding_history(
-                MARKET_KR, [], [], date(2026, 8, 1), date(2026, 8, 31), "KRW",
-                error="PGRST205: Could not find the table "
-                      "'public.portfolio_holding_snapshots' in the schema cache")
-            # 2026-08-13 (#114) — 방문자에게는 "아직 준비되지 않았습니다" 한 줄만 보이고,
-            # 설치 절차 전문은 '🔧 관리자' expander 안으로 접었습니다(문구 간소화). 안내
-            # 자체가 사라지면 안 되므로 실행할 SQL 파일 이름은 그대로 있어야 합니다.
-            check(any("준비되지 않았습니다" in t for t in recorder.info_calls),
-                  "테이블이 아직 없으면 그 사실을 화면에 알림")
-            check(any("report_schema.sql" in t for t in recorder.markdown_calls),
-                  "실행할 SQL 파일 안내는 관리자용으로 접어서 보존(삭제하지 않음)")
-            check(not recorder.error_calls,
-                  "그 경우는 빨간 오류가 아니라 안내(기존 리포트는 정상 동작하므로)")
-
-            recorder.reset()
-            module._render_holding_history(MARKET_KR, [], [], date(2026, 8, 1),
-                                           date(2026, 8, 31), "KRW",
-                                           error="네트워크가 끊겼습니다")
-            check(any("네트워크" in t for t in recorder.error_calls),
-                  "그 밖의 조회 실패는 조용히 넘기지 않고 화면까지 도달시킴(§0-1)")
-
-            # 기간 리포트가 "데이터 부족"인 구간에서도 **저장된 종목별 기록은 보여야** 합니다.
-            # (기능을 켠 첫 달은 기간 시작 이전 기준점이 없어 거의 항상 INSUFFICIENT 입니다 —
-            #  여기서 숨기면 오너가 SQL 을 실행하고도 새 표를 한참 못 봅니다.)
-            recorder.reset()
-            window_only = rdb.sort_snapshots([
-                snap(date(2026, 8, 10), 3100000.0, 2700000.0),
-                snap(date(2026, 8, 12), 3200000.0, 2700000.0),
-            ])
-            module._render_market_block(MARKET_KR, window_only, PERIOD_MONTHLY,
-                                        date(2026, 8, 15), holding_rows=multi)
-            check(any("데이터 부족" in t for t in recorder.error_calls),
-                  "기간 시작 이전 기준점이 없으면 '데이터 부족'이 여전히 주 컨텐츠(§3 무손상)")
-            check(any(t.startswith("| 종목 |") for t in recorder.markdown_calls),
-                  "그 구간에서도 저장된 종목별 기록은 그대로 보여 줌(계산이 아니라 기록이므로)")
-        finally:
-            module.st = real_st
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 종목별 상세 렌더링 검증",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
-
-
-# =============================================================================
-# 9-3. ◀ 이전 기간 / 최신 기간 / 다음 기간 ▶ 버튼 (2026-08-13 #114 회귀 방지)
-# =============================================================================
-#  오너 신고: "일간으로 했을 때 맨위에 있는 이전기간 / 최신기간 / 다음기간 저거 작동 안하고
-#  있어 … 저 단추는 뭐하러 있는건지 모르겠어".
-#
-#  🔴 이 블록에서 가장 중요한 검사는 **"다음 렌더에서 달력 위젯 자체(session_state의
-#     report_ref_date_input 키)가 새 날짜를 갖는가"** 입니다. `report_ref_date`(별도 키)만
-#     확인하면 옛 코드도 통과해 버립니다 — 옛 버그는 바로 "다른 키만 바뀌고 위젯은 그대로"
-#     였기 때문입니다.
-# =============================================================================
-class _Rerun(Exception):
-    """st.rerun() 흉내 — Streamlit 처럼 그 자리에서 스크립트 실행을 끊습니다."""
-
-
-class _PeriodControlsFake:
-    """
-    기준일 달력의 **Streamlit 실제 규칙**을 그대로 흉내 내는 가짜 st.
-
-    재현하는 핵심 규칙: *키를 준 위젯은 한 번 만들어지고 나면 `session_state[그 키]` 가
-    유일한 출처이고, `value=` 인자는 무시된다.* 이 규칙을 흉내 내지 않으면 이번 버그를
-    재현할 수도, 회귀를 막을 수도 없습니다.
-    """
-
-    def __init__(self, pressed=None):
-        self.session_state = {}
-        self.pressed = pressed
-        self.rerun_count = 0
-
-    def selectbox(self, _label, options, index=0, key=None, **_kwargs):
-        options = list(options)
-        value = options[index]
-        if key is not None:
-            self.session_state[key] = value
-        return value
-
-    def date_input(self, _label, value=None, key=None, **_kwargs):
-        if key is None:
-            return value
-        if key in self.session_state:      # ← 위젯 키가 언제나 이깁니다(= 실제 Streamlit)
-            return self.session_state[key]
-        self.session_state[key] = value
-        return value
-
-    def button(self, _label, key=None, **_kwargs):
-        return key == self.pressed
-
-    def rerun(self):
-        self.rerun_count += 1
-        raise _Rerun()
-
-    def columns(self, spec, **_kwargs):
-        count = spec if isinstance(spec, int) else len(spec)
-        return [self for _ in range(count)]
-
-    # `with col_period:` 를 쓸 수 있게 — 던더 메서드는 __getattr__ 로 가로챌 수 없어 직접 정의.
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *_exc):
-        return False
-
-    def __getattr__(self, _name):
-        def _noop(*_args, **_kwargs):
-            return None
-        return _noop
-
-
-def test_period_buttons():
-    print("\n[9-3] 기간 이동 버튼 — 눌러도 반응 없던 버그(#114) 회귀 방지")
-
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        fake = _PeriodControlsFake()
-        module.st = fake
-        try:
-            widget_key = module.REF_DATE_WIDGET_KEY
-            ref_key = module.SESSION_REF_DATE_KEY
-            pending_key = module.SESSION_PENDING_REF_DATE_KEY
-            today = date.today()
-
-            def render(pressed=None):
-                """한 번의 화면 렌더. 버튼을 눌렀으면 rerun 으로 끊깁니다(실제와 동일)."""
-                fake.pressed = pressed
-                try:
-                    return module._render_period_controls()
-                except _Rerun:
-                    return None
-
-            check(widget_key == "report_ref_date_input" and widget_key != ref_key,
-                  "달력 위젯의 진짜 키와 '기준일 저장용' 키가 서로 다른 키임(버그의 무대)")
-
-            # ---- 일간 ----------------------------------------------------
-            fake.session_state[module.SESSION_PERIOD_KEY] = PERIOD_DAILY
-            period, ref = render()
-            check(period == PERIOD_DAILY and ref == today, "첫 렌더 = 일간 · 오늘")
-            check(fake.session_state[widget_key] == today, "달력 위젯 키에 오늘이 들어감")
-
-            check(render(pressed="report_prev_period") is None and fake.rerun_count == 1,
-                  "'◀ 이전 기간'을 누르면 st.rerun() 으로 화면을 다시 그림")
-            check(fake.session_state.get(pending_key) == today - timedelta(days=1),
-                  "버튼은 위젯 키를 직접 못 고치므로 pending 표시만 남김(위젯 생성 뒤라 대입 금지)")
-            check(fake.session_state[widget_key] == today,
-                  "그 렌더에서는 달력이 아직 옛 날짜 — 대입은 다음 렌더 맨 앞에서 일어남")
-
-            period, ref = render()
-            yesterday = today - timedelta(days=1)
-            check(ref == yesterday, "🔴 다음 렌더에서 기준일이 실제로 하루 전으로 이동")
-            check(fake.session_state[widget_key] == yesterday,
-                  "🔴 **달력 위젯 자체**(report_ref_date_input)가 새 날짜를 가짐 "
-                  "— 옛 코드는 여기서 실패했습니다(다른 키만 바뀌고 위젯은 그대로)")
-            check(fake.session_state[ref_key] == yesterday, "기준일 저장용 키도 새 날짜")
-            check(pending_key not in fake.session_state, "pending 표시는 쓰고 나서 지워짐")
-
-            render(pressed="report_next_period")
-            period, ref = render()
-            check(ref == today and fake.session_state[widget_key] == today,
-                  "'다음 기간 ▶' 은 정확히 되돌아옴(하루 앞으로)")
-
-            render(pressed="report_prev_period")
-            render()
-            render(pressed="report_prev_period")
-            period, ref = render()
-            check(ref == today - timedelta(days=2), "여러 번 눌러도 누적해서 이동")
-            render(pressed="report_latest_period")
-            period, ref = render()
-            check(ref == today and fake.session_state[widget_key] == today,
-                  "'최신 기간' 은 어디서 눌러도 오늘로 돌아옴")
-
-            # ---- 월간 (기간 단위가 달라도 같은 경로) ----------------------
-            fake.session_state[module.SESSION_PERIOD_KEY] = PERIOD_MONTHLY
-            fake.session_state[widget_key] = date(2026, 8, 13)
-            fake.session_state[ref_key] = date(2026, 8, 13)
-            render()
-            render(pressed="report_prev_period")
-            period, ref = render()
-            check(period == PERIOD_MONTHLY and ref == date(2026, 7, 1),
-                  "월간에서 '이전 기간' = 지난달 1일(shift_period 규칙 그대로)")
-            check(fake.session_state[widget_key] == date(2026, 7, 1),
-                  "월간에서도 달력 위젯 자체가 새 날짜를 가짐")
-
-            # 버튼을 누르지 않은 평범한 렌더가 값을 되돌리지 않는지(옛 버그의 두 번째 겹)
-            period, ref = render()
-            check(ref == date(2026, 7, 1) and fake.session_state[widget_key] == date(2026, 7, 1),
-                  "그냥 다시 그리기만 하면 기준일이 옛 값으로 되돌아가지 않음")
-        finally:
-            module.st = real_st
-    except Exception as exc:  # noqa: BLE001
-        check(False, "기간 이동 버튼 검증", f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
-
 
 # =============================================================================
 # 9-4. 📊 종목별 비중(%) · 비중 변화 (2026-08-13 #114 신설)
@@ -2037,59 +1669,6 @@ def test_holding_weights():
           "기록이 없으면 빈 결과")
     check(rdb.build_weight_comparison(None)["rows"] == [], "history 가 없어도 죽지 않음")
 
-    # ---- ⑤ 화면 문구 ---------------------------------------------------------
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        recorder = _HoldingViewRecorder()
-        module.st = recorder
-        try:
-            check(module._md_weight(75.0) == "75.00%", "비중 표기(소수 2자리)")
-            check(module._md_weight(None) == "모름",
-                  "🔴 비중을 모르면 '0%' 가 아니라 '모름'")
-            check(module._colored_pp(20.0) == ":red[+20.00%p]"
-                  and module._colored_pp(-26.25) == ":blue[-26.25%p]",
-                  "비중 변화는 %p 단위 + 국내 증시 색 관례(늘면 빨강/줄면 파랑)")
-            check(module._colored_pp(None) == "—", "변화량이 없으면 —(0으로 속이지 않음)")
-
-            summary = rdb.sort_snapshots([
-                snap(date(2026, 8, 12), 3200000.0, 2700000.0, holdings_count=2, priced_count=2)])
-            module._render_holding_history(MARKET_KR, rows, summary,
-                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
-            check("| 종목 | 비중 |" in table, "종목별 상세 표 두 번째 칸이 비중(%)")
-            check("75.00%" in table and "25.00%" in table, "표에 실제 비중이 찍힘")
-            check("**100.00%**" in table, "합계 줄의 비중은 100%")
-            check("원가합" in table,
-                  "합계 줄 '평균매입가' 칸이 원가 합계임을 칸 안에서 밝힘(설명 캡션 대신)")
-
-            change_table = [t for t in recorder.markdown_calls if t.startswith("| 종목 |")][1]
-            check("2026-08-10" in change_table and "2026-08-12" in change_table,
-                  "비중 변화 표 머리글에 비교한 두 날짜를 그대로 표기")
-            check(":red[+20.00%p]" in change_table, "늘어난 종목은 +%p (빨강)")
-            check(":blue[-26.25%p]" in change_table and "현대차 (005380)" in change_table,
-                  "🔴 매도돼 사라진 종목도 숨기지 않고 -26.25%p 로 표시")
-            check(any("비중 변화" in t for t in recorder.caption_calls),
-                  "비중 변화 표에 제목 한 줄")
-
-            # 하루치뿐이면 비중 변화 표 자체가 없음
-            recorder.reset()
-            module._render_holding_history(
-                MARKET_KR, [r for r in rows if r["snapshot_date"] == date(2026, 8, 12)],
-                summary, date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            check(len([t for t in recorder.markdown_calls if t.startswith("| 종목 |")]) == 1,
-                  "비교할 날이 하루뿐이면 비중 변화 표를 그리지 않음(화면을 늘리지 않음)")
-        finally:
-            module.st = real_st
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 비중 표시 검증", f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
-
 
 # =============================================================================
 # 9-5. 🇺🇸 리포트 화면의 미국 종목명 한글 표기 (2026-08-16 #115 회귀 방지)
@@ -2141,265 +1720,20 @@ def test_us_korean_names():
     check(all("Common Stock" in (r["stock_name"] or "") for r in us_rows),
           "🔴 저장되는 스냅샷의 stock_name 은 여전히 **영문 원문** (DB 는 손대지 않음)")
 
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        scorecard = importlib.import_module("views.scorecard_view")
-        from utils.company_names_kr import resolve_korean_name  # noqa: PLC0415
-
-        # ---- ① 라벨 함수 단위 ------------------------------------------------
-        indexes = module._display_indexes(MARKET_US)
-        universe = indexes.get(MARKET_US) or {}
-        check(bool(universe.get("NVDA", {}).get("name_kr")),
-              "미국 유니버스 스냅샷에서 미리 계산된 name_kr 을 그대로 읽어옴(재계산 없음)")
-        check(module._display_indexes(MARKET_KR) == {},
-              "한국 블록에서는 유니버스 파일을 아예 읽지 않음(변환이 필요 없으므로)")
-
-        nvda = {"ticker": "NVDA", "stock_name": "NVIDIA Corporation Common Stock"}
-        check(module._holding_label(nvda, MARKET_US, indexes) == "엔비디아 (NVDA)",
-              "🔴 미국 종목은 영문 풀네임이 아니라 한글명 — '엔비디아 (NVDA)'")
-        spcx = {"ticker": "SPCX",
-                "stock_name": "Space Exploration Technologies Corp. Class A Common Stock"}
-        check(module._holding_label(spcx, MARKET_US, indexes) == "스페이스X (SPCX)",
-              "오너가 예로 든 스페이스X 도 그대로 — '스페이스X (SPCX)'")
-        check(module._holding_name(nvda, MARKET_US, indexes) == "엔비디아",
-              "코드 없이 이름만 쓰는 자리(기록이 끊긴 종목 안내)도 같은 한글명")
-
-        # ② 한국 종목은 영향 없음
-        samsung = {"ticker": "005930", "stock_name": "삼성전자", "market": MARKET_KR}
-        check(module._holding_label(samsung, MARKET_KR, {}) == "삼성전자 (005930)",
-              "🔴 한국 종목은 저장된 종목명 그대로(이번 변경의 영향 없음)")
-
-        # ③ 유니버스 밖 종목 — 죽지 않고 같은 모듈의 폴백으로 이름을 만듦
-        outside = {"ticker": "ZZZQ",
-                   "stock_name": "Bright Harbor Robotics Inc. Common Stock"}
-        expected_outside = resolve_korean_name("ZZZQ", outside["stock_name"])["korean_name"]
-        check("ZZZQ" not in universe, "전제 확인 — ZZZQ 는 상위 550 유니버스 밖")
-        check(module._holding_label(outside, MARKET_US, indexes)
-              == f"{expected_outside} (ZZZQ)",
-              "유니버스 밖 종목은 company_names_kr 의 자동 음역으로 폴백(같은 단일 출처)")
-
-        # ④ 한글명을 끝내 못 만드는 경우 — 지어내지 않고 영문명 그대로(§0-1)
-        nameless = {"ticker": "0000", "stock_name": "9 9 9"}
-        check(resolve_korean_name("0000", "9 9 9")["korean_name"] is None,
-              "전제 확인 — 이 이름은 음역조차 만들 수 없음")
-        check(module._holding_label(nameless, MARKET_US, indexes) == "9 9 9 (0000)",
-              "🔴 한글명을 못 만들면 지어내지 않고 영문명으로 정직하게 되돌아감(§0-1)")
-
-        # ⑤ 단일 출처 — '내 성적표'와 글자 하나까지 같은 값
-        for probe in (nvda, spcx, outside):
-            same = scorecard._display_name(dict(probe, market=MARKET_US), indexes)
-            check(module._holding_label(probe, MARKET_US, indexes)
-                  == f"{same} ({probe['ticker']})",
-                  f"'내 성적표'와 완전히 같은 표기({probe['ticker']}) — 두 화면이 어긋나지 않음")
-
-        # ---- ⑥ 실제 화면 렌더링 ----------------------------------------------
-        real_st = module.st
-        recorder = _HoldingViewRecorder()
-        module.st = recorder
-        try:
-            us_summary = rdb.sort_snapshots([
-                snap(date(2026, 8, 12), 3400.0, 2400.0, market=MARKET_US,
-                     holdings_count=2, priced_count=2,
-                     benchmark_symbol=rdb.US_PRIMARY_BENCHMARK, benchmark_value=600.0)])
-            module._render_holding_history(MARKET_US, us_rows, us_summary,
-                                           date(2026, 8, 1), date(2026, 8, 31), "USD")
-            tables = [t for t in recorder.markdown_calls if t.startswith("| 종목 |")]
-            detail_table = tables[0]
-            check("엔비디아 (NVDA)" in detail_table,
-                  "🔴 종목별 상세 표에 한글명이 실제로 찍힘")
-            check("NVIDIA Corporation" not in detail_table
-                  and "Common Stock" not in detail_table,
-                  "🔴 영문 풀네임·상품 설명이 표에서 사라짐(오너가 지적한 그 부분)")
-            check(f"{expected_outside} (ZZZQ)" in detail_table,
-                  "유니버스 밖 종목도 표에서 한글로 보임")
-
-            change_table = tables[1]
-            check("스페이스X (SPCX)" in change_table and "엔비디아 (NVDA)" in change_table,
-                  "🔴 비중 변화 표도 같은 한글명(같은 화면에서 이름이 두 개가 되지 않음)")
-            check(any("스페이스X(SPCX" in t for t in recorder.caption_calls),
-                  "기록이 끊긴 종목 안내 줄도 한글명")
-
-            # 한국 블록은 그대로 — 같은 렌더러를 한국 시장으로 부르면 저장된 이름 그대로
-            recorder.reset()
-            kr_holdings = [holding(MARKET_KR, "005930", 10, 70000, "삼성전자")]
-            _r, kr_detail, _s = rdb.build_snapshot_rows_with_holdings(
-                "u1", kr_holdings, price_lookup_factory({(MARKET_KR, "005930"): 80000.0}),
-                {MARKET_KR: "2026-08-12"},
-                price_stamp_by_market={MARKET_KR: "2026-08-12 17:50"})
-            module._render_holding_history(MARKET_KR, kr_detail, [],
-                                           date(2026, 8, 1), date(2026, 8, 31), "KRW")
-            kr_table = next(t for t in recorder.markdown_calls if t.startswith("| 종목 |"))
-            check("삼성전자 (005930)" in kr_table,
-                  "🔴 한국 시장 블록은 예전 그대로(한글명 변환이 끼어들지 않음)")
-        finally:
-            module.st = real_st
-
-        # ---- ⑦ 배선 자체 — 로직을 베껴 쓰지 않고 import 해서 재사용했는지 ------
-        view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
-        check("from views.scorecard_view import _display_name" in view_src,
-              "리포트가 '내 성적표'의 표기 함수를 그대로 import(로직 중복 구현 없음)")
-        check("from views.scorecard_view import SESSION_CLIENT_KEY, SESSION_USER_KEY" in view_src,
-              "기존 세션 키 import 줄은 그대로 보존(읽기 전용 재사용 관례 유지)")
-        # 2026-08-16 수정 — 원래 이 자리는 "scorecard_src 에 '2026-08-16' 문자열이 없어야
-        # 한다"는 날짜 문자열 검사였습니다(#115 커밋 당일 scorecard_view.py 가 안 바뀌었는지
-        # 확인하려던 용도). 그런데 같은 날 오너가 스코어카드 화면 자체의 **가시성**(요약 카드
-        # 동기화 시각·수익률 글자가 작다)을 지적해 scorecard_view.py 를 정당하게 고치면서
-        # 날짜가 겹쳐 이 검사가 오탐(false positive)으로 항상 실패하게 됐습니다. 실제로
-        # 지켜야 할 불변식은 "날짜 문자열이 없어야 한다"가 아니라 "리포트가 재사용하는
-        # 표기 함수(_display_name/_us_korean_name)가 여전히 그대로 존재하고, 그 함수가
-        # 리포트 전용 로직으로 갈라지지 않았다"는 것이므로 검사를 그쪽으로 바꿨습니다.
-        scorecard_src = (REPO_ROOT / "views" / "scorecard_view.py").read_text(encoding="utf-8")
-        check("def _display_name(row, indexes)" in scorecard_src
-              and "def _us_korean_name(row, indexes)" in scorecard_src,
-              "'내 성적표'의 표기 함수(_display_name/_us_korean_name)가 그대로 존재 — "
-              "리포트가 재사용하는 함수 자체는 갈라지지 않음(단방향 재사용 유지)")
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 미국 한글명 표기 검증",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
-
 
 def test_benchmark_average():
     print("\n[9-6] ➗ 벤치마크 비교 — 미국 두 지수 평균 한 줄 (#116)")
 
-    spy_key, oneq_key = rdb.US_BENCHMARK_KEYS
-    spy_label = "S&P 500 (SPY ETF 종가 기준)"
-    oneq_label = "나스닥 종합 (ONEQ ETF 종가 기준)"
+    check(len(rdb.US_BENCHMARK_KEYS) == 2,
+          "평균에 쓸 미국 벤치마크 키 두 개를 report_db 가 단일 출처로 들고 있음")
 
-    def report_for(change_pct):
-        """포트폴리오 쪽은 이 테스트의 관심사가 아니라, 화면이 읽는 키만 채운 최소 dict."""
-        return {"baseline": {"snapshot_date": date(2026, 7, 31)},
-                "latest": {"snapshot_date": date(2026, 8, 31)},
-                "value_change_pct": change_pct}
-
-    def bench(symbol, label, closes, is_proxy=True):
-        return {"symbol": symbol, "label": label, "closes": closes,
-                "is_proxy": is_proxy, "note": ""}
-
-    # 기간 양 끝 날짜만 있으면 되는 합성 종가(포트폴리오와 **같은 두 날짜**로만 계산되므로).
-    spy_up10 = {"2026-07-31": 100.0, "2026-08-31": 110.0}     # +10.00%
-    oneq_up20 = {"2026-07-31": 200.0, "2026-08-31": 240.0}    # +20.00%  → 평균 +15.00%
-    oneq_down4 = {"2026-07-31": 200.0, "2026-08-31": 192.0}   # -4.00%   → 평균 +3.00%
-    oneq_half = {"2026-07-31": 200.0}                          # 종료일 종가 없음(=비교 불가)
-    kospi_up5 = {"2026-07-31": 3000.0, "2026-08-31": 3150.0}   # +5.00%
-
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        real_loader = module.benchmark_closes_for_market
-        recorder = _HoldingViewRecorder()
-        module.st = recorder
-
-        def use(benchmarks):
-            module.benchmark_closes_for_market = lambda *_a, **_k: list(benchmarks)
-            recorder.reset()
-
-        def avg_lines():
-            return [t for t in recorder.markdown_calls if "평균" in t]
-
-        try:
-            # ---- (a) 미국 · 둘 다 있을 때 = 정확한 산술 평균 --------------------
-            use([bench(spy_key, spy_label, spy_up10),
-                 bench(oneq_key, oneq_label, oneq_up20)])
-            module._render_benchmarks(report_for(18.0), MARKET_US)
-            lines = avg_lines()
-            check(len(lines) == 1, "🔴 미국 블록에 평균 줄이 정확히 한 줄 생김",
-                  f"(실제 {len(lines)}줄)")
-            line = lines[0] if lines else ""
-            check("+15.00%" in line,
-                  "🔴 평균이 두 수익률(+10.00% · +20.00%)의 정확한 산술 평균 +15.00%")
-            check("차이 +3.00%p" in line,
-                  "내 포트폴리오(+18.00%)와의 차이도 기존 줄과 같은 방식(+3.00%p)")
-            check("내 포트폴리오" in line and ":red[+18.00%]" in line,
-                  "내 수익률 표기·색 관례가 기존 벤치마크 줄과 동일")
-            check(line.startswith("- **") and "S&P 500 / 나스닥 종합 평균**" in line,
-                  "글머리표·굵은 라벨 형식이 기존 줄과 통일 — 'S&P 500 / 나스닥 종합 평균'")
-            check("VOO" not in line and "QQQ" not in line,
-                  "🔴 실제로 수집하는 건 SPY·ONEQ 프록시라, 가지고 있지도 않은 VOO/QQQ 종가로 "
-                  "계산한 것처럼 적지 않음(§0-1)")
-            check("→ (" not in line and "( 1" not in line,
-                  "서로 다른 두 ETF 가격의 평균 같은 무의미한 숫자는 넣지 않음(수익률 평균만)")
-            check(recorder.markdown_calls.index(line) == len(recorder.markdown_calls) - 1,
-                  "평균 줄은 기존 벤치마크 줄들 **아래**에 붙음")
-
-            # 개별 줄과 평균 줄이 같은 계산에서 나온 값인지(화면 안에서 숫자가 어긋나지 않게)
-            check(any(":red[+10.00%]" in t for t in recorder.markdown_calls)
-                  and any(":red[+20.00%]" in t for t in recorder.markdown_calls),
-                  "위 두 벤치마크 줄은 예전 그대로(+10.00% · +20.00%)")
-
-            # 음수가 섞여도 그대로 — (+10.00 + -4.00) / 2 = +3.00
-            use([bench(spy_key, spy_label, spy_up10),
-                 bench(oneq_key, oneq_label, oneq_down4)])
-            module._render_benchmarks(report_for(-1.0), MARKET_US)
-            line = (avg_lines() or [""])[0]
-            check(":red[+3.00%]" in line and "차이 -4.00%p" in line,
-                  "한쪽이 마이너스여도 산술 평균 그대로(+3.00%), 색·차이 표기도 관례대로")
-
-            # 내 수익률을 모르는 경우 — 평균 줄은 나오되 '차이'는 지어내지 않음
-            use([bench(spy_key, spy_label, spy_up10),
-                 bench(oneq_key, oneq_label, oneq_up20)])
-            module._render_benchmarks(report_for(None), MARKET_US)
-            line = (avg_lines() or [""])[0]
-            check("+15.00%" in line and "차이" not in line,
-                  "내 수익률이 없으면 평균만 보여주고 '차이'는 만들어내지 않음(§0-1)")
-
-            # ---- (b) 한국 · 벤치마크가 코스피 하나뿐 = 평균 줄 없음 --------------
-            use([bench("KOSPI", "코스피 지수", kospi_up5, is_proxy=False)])
-            module._render_benchmarks(report_for(7.0), MARKET_KR)
-            check(any(":red[+5.00%]" in t for t in recorder.markdown_calls),
-                  "전제 확인 — 한국 블록의 코스피 비교 줄은 예전 그대로 나옴")
-            check(avg_lines() == [],
-                  "🔴 한국 시장(벤치마크 1개)에는 평균 줄이 아예 나오지 않음")
-
-            # ---- (c) 한쪽이 비교 불가 = 조용히 생략(지어내지 않기) ----------------
-            use([bench(spy_key, spy_label, spy_up10),
-                 bench(oneq_key, oneq_label, oneq_half)])
-            module._render_benchmarks(report_for(18.0), MARKET_US)
-            check(any("비교 불가" in t for t in recorder.markdown_calls),
-                  "전제 확인 — 종료일 종가가 없는 벤치마크는 '비교 불가'로 표시됨")
-            check(avg_lines() == [],
-                  "🔴 한쪽이 available=False 면 남은 하나로 평균을 만들지 않고 **조용히 생략**")
-            check(not any("데이터 없음" in t or "알 수 없" in t for t in avg_lines()),
-                  "'평균: 데이터 없음' 같은 애매한 줄도 넣지 않음(§0-1)")
-
-            # 미국인데 나스닥 벤치마크 파일이 아직 없는 상태(수집 전)도 같은 결과
-            use([bench(spy_key, spy_label, spy_up10)])
-            module._render_benchmarks(report_for(18.0), MARKET_US)
-            check(avg_lines() == [],
-                  "벤치마크 목록에 한쪽이 아예 없으면(수집 전) 평균 줄 없음")
-        finally:
-            module.st = real_st
-            module.benchmark_closes_for_market = real_loader
-
-        # ---- (d) 배선·범위 -----------------------------------------------------
-        view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
-        check("US_BENCHMARK_KEYS" in python_code_only(view_src),
-              "평균에 쓸 두 벤치마크를 화면이 새로 정의하지 않고 report_db 의 키 목록을 재사용")
-        check("MARKET_US" in view_src[view_src.index("def _render_benchmark_average"):
-                                      view_src.index("def _render_benchmarks")],
-              "평균 줄은 미국 시장에서만 그리도록 함수 안에서 명시적으로 걸러냄")
-        check("예금" not in view_src and "은행" not in view_src,
-              "🔴 이번 범위에서 뺀 '시중은행 예금금리' 비교는 코드에 들어가지 않음"
-              "(실데이터 출처가 없어 가짜 값을 넣지 않기로 오너가 결정 — §0-1)")
-        db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
-        check("def benchmark_period_return" in db_src
-              and not re.search(r"^def .*average", db_src, re.M),
-              "계산 모듈(report_db)에 새 함수를 만들지 않고 기존 기간 수익률 계산을 그대로 재사용"
-              "(평균은 화면이 그 결과 두 개로 한 줄 더 그리는 것뿐)")
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 벤치마크 평균 줄 검증",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
+    # 2026-08-29 — 화면(구 Streamlit views/report_view.py) 문구 검증 블록은 Streamlit 은퇴와
+    # 함께 제거했습니다. 계산 모듈 쪽 불변식만 여기 남습니다.
+    db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
+    check("def benchmark_period_return" in db_src
+          and not re.search(r"^def .*average", db_src, re.M),
+          "계산 모듈(report_db)에 새 함수를 만들지 않고 기존 기간 수익률 계산을 그대로 재사용"
+          "(평균은 화면이 그 결과 두 개로 한 줄 더 그리는 것뿐)")
 
 
 # =============================================================================
@@ -2449,82 +1783,6 @@ def test_daily_weekend_fallback():
     ])
     check(rdb.resolve_display_date(us_snaps, PERIOD_DAILY, sunday) == (thursday, True),
           "시장별로 각자의 마지막 기록일을 고름(한국 08-14 / 미국 08-13 처럼 달라도 됨)")
-
-    # ---- ② 화면 ---------------------------------------------------------------
-    detail_rows = []
-    for day, price in ((thursday.isoformat(), 78000.0), (friday.isoformat(), 80000.0)):
-        _r, _h, _s = rdb.build_snapshot_rows_with_holdings(
-            "u1", [holding(MARKET_KR, "005930", 10, 70000, "삼성전자")],
-            price_lookup_factory({(MARKET_KR, "005930"): price}), {MARKET_KR: day},
-            price_stamp_by_market={MARKET_KR: f"{day} 17:50"})
-        detail_rows.extend(_h)
-    detail_rows = rdb.sort_holding_snapshots(detail_rows)
-
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        real_st = module.st
-        recorder = _HoldingViewRecorder()
-        module.st = recorder
-        try:
-            # ---- (a) 주말 기준일 + 그 이전 기록 있음 → 대체 표시 + 안내 --------
-            recorder.reset()
-            module._render_market_block(MARKET_KR, kr_snaps, PERIOD_DAILY, sunday,
-                                        holding_rows=detail_rows)
-            notice = " ".join(recorder.warning_calls)
-            check("2026-08-16" in notice and "2026-08-14" in notice,
-                  "🔴 안내 문구에 **고른 날(2026-08-16)과 실제로 보여주는 날(2026-08-14)이 "
-                  "둘 다** 들어 있음 — 몰래 바꿔치기하지 않음(§0-1)")
-            check("(일)" in notice and "(금)" in notice,
-                  "요일까지 적어 '주말이라 기록이 없다'는 사실이 바로 읽힘")
-            check(not any("데이터 부족" in t for t in recorder.error_calls),
-                  "더 이상 화면이 '데이터 부족'만 남기고 비지 않음(오너 요청)")
-            check(any("비교 구간" in t and "2026-08-14" in t for t in recorder.caption_calls),
-                  "평일과 **완전히 같은 표**를 그림(비교 구간 캡션이 대체된 날짜로 나옴)")
-            check(any(t.startswith("| 종목 |") for t in recorder.markdown_calls),
-                  "종목별 상세 표도 대체된 날짜 기준으로 함께 나옴")
-            check(any("2026-08-14 종가 기준" in t for t in recorder.markdown_calls),
-                  "🕐 수집 시각 줄도 대체된 날짜의 저장값 — 오늘 시각으로 메우지 않음")
-            check(not any("2026-08-16 종가" in t for t in recorder.markdown_calls),
-                  "🔴 어디에도 '2026-08-16 종가'라고 쓰지 않음(그 날짜의 값이 아니므로)")
-
-            # ---- (b) 기준일 이전에 기록이 전혀 없음 → 기존 '데이터 부족' 그대로 --
-            recorder.reset()
-            later_only = rdb.sort_snapshots([snap(date(2026, 8, 17), 3300000.0, 2700000.0)])
-            module._render_market_block(MARKET_KR, later_only, PERIOD_DAILY, sunday)
-            check(any("데이터 부족" in t for t in recorder.error_calls),
-                  "🔴 대체할 과거 기록이 없으면 예전 그대로 '데이터 부족'(지어낼 값이 없으므로)")
-            check(not recorder.warning_calls
-                  or not any("대신" in t for t in recorder.warning_calls),
-                  "그때는 대체 안내를 띄우지 않음(대체한 게 없으므로)")
-
-            # ---- (c) 평일(기준일에 기록이 있음) → 예전과 동일 -------------------
-            recorder.reset()
-            module._render_market_block(MARKET_KR, kr_snaps, PERIOD_DAILY, friday,
-                                        holding_rows=detail_rows)
-            check(not any("대신" in t for t in recorder.warning_calls),
-                  "🔴 기준일에 기록이 있는 평일에는 안내 문구가 아예 나오지 않음(회귀 없음)")
-            check(any("비교 구간" in t and "2026-08-14" in t for t in recorder.caption_calls)
-                  and not any("데이터 부족" in t for t in recorder.error_calls),
-                  "평일 표시는 이번 변경 전과 동일")
-
-            # ---- (d) 배선 — 종목별 조회 범위도 함께 넓혔는지 --------------------
-            view_code = python_code_only(
-                (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8"))
-            check("resolve_display_date" in view_code,
-                  "날짜 판정은 report_db 의 함수 한 곳에서만(화면이 따로 구현하지 않음)")
-            check("start_date=holding_start" in view_code,
-                  "대체된 날짜가 종목별 스냅샷 조회 범위 밖으로 잘리지 않도록 시작일을 넓힘")
-        finally:
-            module.st = real_st
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view 주말 대체 표시 검증",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
 
 
 def test_holding_schema_and_wiring():
@@ -2587,17 +1845,12 @@ def test_holding_schema_and_wiring():
           "🔴 기존 합계 테이블 정의·제약은 한 글자도 바뀌지 않음")
 
     db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
-    view_src = (REPO_ROOT / "views" / "report_view.py").read_text(encoding="utf-8")
-    view_code = python_code_only(view_src)
+    # 2026-08-29 — Streamlit 은퇴로 `views/report_view.py` 를 읽던 화면 검사는 제거했습니다.
     check("HOLDING_SNAPSHOTS_TABLE" in db_src and "portfolio_holding_snapshots" in db_src,
           "데이터 계층에 종목별 테이블 상수")
-    check("create_service_client" not in view_code and "SERVICE_ROLE" not in view_code,
-          "🔴 화면 코드에는 여전히 service_role 경로가 없음(가장 중요한 격리)")
-    check("_render_holding_history" in view_src and "_render_snapshot_table" in view_src,
-          "종목별 상세는 기존 '스냅샷 원본 보기'와 **별도 섹션**")
-    check("compare_holding_total" in view_code,
-          "화면이 매번 합계와 대조(어긋나면 드러남)")
-    check(not re.search(r"open\([^)]*['\"]w", db_src + view_src),
+    check("compare_holding_total" in db_src,
+          "데이터 계층이 합계 대조 함수를 제공(화면이 매번 대조할 수 있게)")
+    check(not re.search(r"open\([^)]*['\"]w", db_src),
           "새 코드도 어떤 파일에도 쓰지 않음(읽기 전용)")
     check("delete(" not in python_code_only(db_src),
           "데이터 계층에 delete 경로가 없음(과거 기록을 지우는 코드 없음)")
@@ -2689,70 +1942,19 @@ def test_workflow():
           "타임아웃·동시성 가드(기존 워크플로우 관례)")
     check(not re.search(r"eyJ[A-Za-z0-9_-]{20,}", yml), "워크플로우에 실제 키 값이 적혀 있지 않음")
 
-    # 기존 두 워크플로우는 건드리지 않았는지
-    for other in ("scrape.yml", "scrape_us.yml", "keep_awake.yml"):
+    # 기존 워크플로우는 건드리지 않았는지
+    # 2026-08-29 — Streamlit 은퇴로 keep_awake.yml 자체가 삭제돼 이 목록에서 뺐습니다
+    # (부록 B). 남은 두 워크플로우는 여전히 살아있고 그대로 검증합니다.
+    for other in ("scrape.yml", "scrape_us.yml"):
         text = (REPO_ROOT / ".github" / "workflows" / other).read_text(encoding="utf-8")
         check("report" not in text.lower(), f"{other} 에 리포트 관련 수정 없음")
 
 
-def _install_streamlit_stub():
-    """streamlit 미설치 환경에서도 views/report_view.py 를 import 할 수 있게 최소 스텁 주입."""
-    try:
-        import streamlit  # noqa: F401
-        return False
-    except ImportError:
-        pass
-
-    class _Secrets:
-        def get(self, _name, default=None):
-            return default
-
-    class _Stub(types.ModuleType):
-        secrets = _Secrets()
-
-        def __getattr__(self, name):
-            def _noop(*args, **kwargs):
-                return None
-            return _noop
-
-    stub = _Stub("streamlit")
-    stub.secrets = _Secrets()
-    sys.modules["streamlit"] = stub
-    return True
-
-
 def test_view_and_scope():
-    print("\n[12] 화면 배선 · 작업 범위")
-    view_path = REPO_ROOT / "views" / "report_view.py"
-    check(view_path.exists(), "views/report_view.py 존재")
-    view_src = view_path.read_text(encoding="utf-8")
-
-    check("NO_FX_CONVERSION_NOTICE" in view_src, "환율 변환 없음 고지 표시")
-    check("REPORT_SIMPLE_RETURN_NOTICE" in view_src,
-          "단순 비교 수익률이라는 한계 고지 표시(작업지시서 §5)")
-    check("st.error" in view_src, "실패·데이터 부족을 화면까지 도달시킴(§0-1)")
-    check("_render_shortage" in view_src and "데이터 부족" in view_src,
-          "데이터 부족을 주 컨텐츠로 그리는 전용 렌더러가 있음(§3)")
-    check("cache_resource" not in view_src.replace("@st.cache_resource 로 캐시하면", ""),
-          "Supabase 클라이언트를 캐시하지 않음(로그인 세션 공유 사고 방지)")
-    check("from views.scorecard_view import SESSION_CLIENT_KEY, SESSION_USER_KEY" in view_src,
-          "'내 성적표'와 같은 로그인 세션을 재사용(세션 키를 새로 정의하지 않음)")
-    check(not re.search(r"open\([^)]*['\"]w", view_src), "화면 코드가 파일을 쓰지 않음(읽기 전용)")
-    view_code = python_code_only(view_src)
-    check("create_service_client" not in view_code and "SERVICE_ROLE" not in view_code,
-          "화면 코드에는 service_role 경로가 전혀 없음(가장 중요한 격리 — 오너 안내문에만 "
-          "'앱에 넣지 마세요'라는 설명으로 등장)")
-    check(":red[" in view_src and ":blue[" in view_src,
-          "수익률 색상이 국내 증시 관례(오르면 빨강/내리면 파랑)로 '내 성적표'와 통일")
-    check("_md_amount" in view_src, "마크다운 금액 표기는 $ 이스케이프 사용(#88 렌더링 버그 방지)")
-    check("_render_price_stamp" in view_src and "PRICE_STAMP_FIELD" in view_src,
-          "가격 수집 시각을 시장 블록마다 그리는 전용 렌더러가 있음(2026-08-13 오너 요청)")
-    view_stamp_fn = view_src[view_src.index("def _render_price_stamp"):
-                             view_src.index("def _render_not_ready")]
-    check("date.today()" not in python_code_only(view_stamp_fn)
-          and "datetime.now" not in python_code_only(view_stamp_fn),
-          "시각 표시가 '지금'을 쓰지 않음 — 저장된 행의 값만 보여줌(오늘 시각으로 대체 금지)")
-
+    print("\n[12] 데이터 모듈 · 수집기 작업 범위")
+    # 2026-08-29 — Streamlit 은퇴(views/ → archive/streamlit_views/)로 이 테스트에서
+    # `views/report_view.py`·`visiblehand.py` 를 읽거나 import 하던 검사는 모두 제거했습니다.
+    # 살아있는 공유 로직(utils/report_db.py · collector_us_indices.py)의 불변식만 남습니다.
     db_src = (REPO_ROOT / "utils" / "report_db.py").read_text(encoding="utf-8")
     check(not re.search(r"open\([^)]*['\"]w", db_src),
           "데이터 모듈이 어떤 파일도 쓰지 않음(market_history.csv 포함)")
@@ -2762,12 +1964,12 @@ def test_view_and_scope():
           "배치 모듈은 streamlit 을 아예 import 하지 않고 st.secrets 도 읽지 않음"
           "(service_role 이 앱 설정에서 읽히는 경로 자체를 만들지 않기 위해 — 설명 주석에만 등장)")
     check("os.environ.get(name)" in db_src, "배치 키는 환경변수에서만 읽음")
-    check(not re.search(r"https://[a-z0-9]+\.supabase\.co", db_src + view_src),
+    collector_src = (REPO_ROOT / "collector_us_indices.py").read_text(encoding="utf-8")
+    check(not re.search(r"https://[a-z0-9]+\.supabase\.co", db_src + collector_src),
           "소스에 실제 Supabase URL 없음")
-    check(not re.search(r"eyJ[A-Za-z0-9_-]{20,}", db_src + view_src),
+    check(not re.search(r"eyJ[A-Za-z0-9_-]{20,}", db_src + collector_src),
           "소스에 실제 키(JWT) 값 없음")
 
-    collector_src = (REPO_ROOT / "collector_us_indices.py").read_text(encoding="utf-8")
     check("_polite_sleep" in collector_src, "요청 사이 딜레이(§0-3-2)")
     check("USSourceBlockedError" in collector_src and "즉시 중단" in collector_src,
           "차단 시 재시도 반복 없이 중단(§0-3-2)")
@@ -2790,69 +1992,17 @@ def test_view_and_scope():
     #     침범하면 안 되는 다른 모듈들"만 남깁니다.
     report_markers = ("report_db", "report_view", "portfolio_daily_snapshots",
                       "collector_us_indices", "us_index_history")
-    for untouched in ("views/scorecard_view.py", "utils/scorecard_db.py",
+    #  ⚠️ 2026-08-29 수정 — Streamlit 은퇴로 `views/*.py` 는 archive/streamlit_views/ 로
+    #     옮겨졌으므로 이 목록에서 뺐습니다(경로 자체가 없어졌습니다).
+    for untouched in ("utils/scorecard_db.py",
                       "collector_us_stocks.py", "collector_kospi200.py",
-                      "utils/scoring.py", "views/pegy_view.py", "views/us_stocks_view.py",
-                      "utils/constants_us.py", "scrape_daily.py", "views/macro_view.py"):
+                      "utils/scoring.py",
+                      "utils/constants_us.py", "scrape_daily.py"):
         src = (REPO_ROOT / untouched).read_text(encoding="utf-8").lower()
         check(not any(marker in src for marker in report_markers),
               f"{untouched} 에 리포트 모듈 관련 수정 없음")
 
-    # 사이드바 배선 (TASK_HISTORY #102·#105 + 2026-08-13 레이아웃 정리) --------------
-    app_src = (REPO_ROOT / "visiblehand.py").read_text(encoding="utf-8")
-    check("from views.report_view import is_report_visible, render_report_page" in app_src,
-          "리포트 화면이 사이드바에 배선됨(import 가드 안)")
-    check("except Exception as _report_import_exc" in app_src,
-          "리포트 모듈 로드 실패해도 기존 화면이 죽지 않도록 import 가드")
-    check("report_available = render_report_page is not None and is_report_visible(admin_mode_hint)"
-          in app_src,
-          "리포트 하위 메뉴도 대분류 라디오와 같은 admin_mode_hint 를 사용(#105 패턴 통일)")
-    # 레이아웃 고정: 하위 메뉴 라디오는 반드시 관리자 메뉴(render_admin_sidebar) **위**에서
-    # 그려져야 합니다. 아래로 내려가면 대분류를 바꿀 때 관리자 메뉴 위치가 흔들립니다.
-    check(app_src.index('key="scorecard_subpage"') < app_src.index("admin_mode = render_admin_sidebar()"),
-          "내 성적표 하위 메뉴 라디오가 관리자 메뉴보다 위에서 그려짐(관리자 메뉴 세로 위치 고정)")
-    check(app_src.count("render_category_header(") == 3,
-          "두 대분류가 같은 헤더 함수를 써서 같은 높이로 그려짐(정의 1 + 호출 2)")
-    # ⚠️ 반드시 주석을 걷어낸 '실제 코드'로 확인합니다 — 왜 sticky/fixed 를 쓰지 않았는지
-    #    설명하는 주석 자체에 그 낱말이 들어 있어서, 원문으로 검사하면 항상 실패합니다.
-    app_code = python_code_only(app_src)
-    check("position: sticky" not in app_code and "position: fixed" not in app_code,
-          "레이아웃 고정에 Streamlit 내부 DOM 의존 CSS(sticky/fixed)를 쓰지 않음")
-
     check((REPO_ROOT / "REPORT_WORK_ORDER.md").exists(), "작업지시서 원본 보존")
-
-    stubbed = _install_streamlit_stub()
-    try:
-        module = importlib.import_module("views.report_view")
-        check(True, "views.report_view import 성공 (supabase 패키지 없이도)")
-        saved = os.environ.pop("REPORT_ENABLED", None)
-        try:
-            check(module.is_report_enabled() is False, "REPORT_ENABLED 기본값 = 꺼짐")
-            check(module.is_report_visible(False) is False, "일반 방문자에게는 비노출(스테이징)")
-            check(module.is_report_visible(True) is True, "관리자 모드에서는 미리보기 가능")
-            os.environ["REPORT_ENABLED"] = "1"
-            importlib.reload(module)
-            check(module.is_report_enabled() is True, "플래그를 켜면 활성화됨")
-            check(module._colored_pct(1.5) == ":red[+1.50%]", "상승은 빨강")
-            check(module._colored_pct(-1.5) == ":blue[-1.50%]", "하락은 파랑")
-            check(module._colored_pct(0) == "+0.00%", "보합은 색 없음")
-            check(module._colored_pct(None) == "—", "값이 없으면 —(0%로 속이지 않음)")
-            check(module._md_amount(1234.5, "USD") == "\\$1,234.50",
-                  "$ 이스케이프(마크다운 수식 오인 방지)")
-        finally:
-            if saved is not None:
-                os.environ["REPORT_ENABLED"] = saved
-            else:
-                os.environ.pop("REPORT_ENABLED", None)
-            importlib.reload(module)
-    except Exception as exc:  # noqa: BLE001
-        check(False, "views.report_view import 성공 (supabase 패키지 없이도)",
-              f"({type(exc).__name__}: {exc})")
-    finally:
-        if stubbed:
-            sys.modules.pop("streamlit", None)
-            sys.modules.pop("views.report_view", None)
-            sys.modules.pop("views.scorecard_view", None)
 
 
 # =============================================================================
@@ -2925,7 +2075,6 @@ def main():
     test_batch_end_to_end()
     test_price_stamp_wiring()
     test_holding_snapshots()
-    test_period_buttons()
     test_holding_weights()
     test_us_korean_names()
     test_benchmark_average()
