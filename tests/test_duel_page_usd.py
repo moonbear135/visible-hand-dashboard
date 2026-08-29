@@ -2874,14 +2874,36 @@ def test_every_write_handler_is_guarded_against_double_clicks():
 
     매도는 DB 부분 유니크 인덱스가 두 번째를 막아 주지만 **매수에는 아무 멱등 장치가
     없어**, 두 번 누르면 주문 두 건이 그대로 들어가고 FIFO 로 차례차례 체결됩니다.
+
+    2026-08-29 재감사 M-10 — `indicator_page.py`도 같은 결함을 갖고 있는 것이 드러나
+    이 헬퍼를 `web/components/widgets.py::guard_double_click`로 승격했습니다(§0-3-10,
+    `tests/test_web_components.py`가 그 함수 자체의 동작을 검증합니다). 이 화면은 이제
+    그 이름을 import 해서 그대로 씁니다 — 아래 검사도 로컬 정의 대신 import 여부와
+    호출 지점을 봅니다.
     """
-    assert "_guard_double_click" in FUNCTIONS, "중복 클릭 방어 헬퍼가 없습니다."
-    guard_src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_guard_double_click"])
+    assert "guard_double_click" in PAGE_SRC and "from web.components import" in PAGE_SRC, (
+        "중복 클릭 방어 헬퍼(guard_double_click)를 web.components 에서 import 하지 않습니다."
+    )
+    assert "_guard_double_click" not in FUNCTIONS, (
+        "이 파일에 중복 클릭 방어 헬퍼를 다시 로컬로 정의했습니다 — "
+        "web/components/widgets.py::guard_double_click 를 재사용하세요(§0-3-10)."
+    )
+
+    widgets_src = (REPO_ROOT / "web" / "components" / "widgets.py").read_text(encoding="utf-8")
+    assert "def guard_double_click(handler):" in widgets_src, (
+        "공용 모듈(web/components/widgets.py)에 guard_double_click 정의가 없습니다."
+    )
+    widgets_tree = ast.parse(widgets_src)
+    guard_node = next(
+        node for node in ast.walk(widgets_tree)
+        if isinstance(node, ast.FunctionDef) and node.name == "guard_double_click"
+    )
+    guard_src = ast.get_source_segment(widgets_src, guard_node)
     assert "finally" in guard_src, "예외가 나면 버튼이 잠긴 채로 남습니다(반드시 finally 로 되살리기)."
 
     for handler in ("_submit", "_submit_sell", "_submit_usd", "_submit_sell_usd",
                     "_save", "_cancel", "_save_usd", "_cancel_usd"):
-        assert f"_guard_double_click({handler})" in PAGE_SRC, (
+        assert f"guard_double_click({handler})" in PAGE_SRC, (
             f"{handler}() 에 중복 클릭 방어가 걸려 있지 않습니다(M-3)."
         )
     # 원래 처리기를 **직접** on_click 으로 물려 두면 방어가 우회됩니다.

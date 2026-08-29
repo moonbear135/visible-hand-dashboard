@@ -41,6 +41,7 @@ from web.components.widgets import (  # noqa: F401
     disclaimer_footer,
     download_button,
     error_banner,
+    guard_double_click,
     info_banner,
     metric_card,
     pager,

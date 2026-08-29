@@ -130,8 +130,8 @@ from web.auth import (
 from web.auth_ui import fail_message, render_auth
 from web.blocking import run_blocking
 from web.components import (
-    error_banner, esc, holdings_table_html, info_banner, metric_card, pct_html, pct_text,
-    warning_banner,
+    error_banner, esc, guard_double_click, holdings_table_html, info_banner, metric_card,
+    pct_html, pct_text, warning_banner,
 )
 from web.layout import DUEL_ENABLED, DUEL_MENU_ADMIN_ONLY, layout
 from web.state import (
@@ -388,52 +388,10 @@ NOTICE_TWR_USD = (
 # =============================================================================
 # 1. 공통 표시 도우미 (전부 순수 함수 — 상태를 갖지 않습니다)
 # =============================================================================
-def _guard_double_click(handler):
-    """
-    처리기를 감싸 **처리 중에는 트리거 버튼을 잠급니다**(2026-08-29 재감사 M-3).
-
-    🔴 왜 필요한가: 이 화면의 모든 저장·수정·취소는 `await run_blocking(...)` 으로 Supabase
-       왕복을 기다리는데, 그동안 버튼이 그대로 눌립니다. 매도는 DB 부분 유니크 인덱스
-       (`duel_orders_one_sell_per_window`)가 두 번째를 막아 주지만 **매수에는 아무 멱등
-       장치가 없어**, 두 번 누르면 `duel_orders` 에 두 행이 그대로 들어가고 FIFO 로 차례차례
-       체결돼 사용자가 의도의 두 배를 삽니다.
-
-    ⚠️ 이 잠금은 **화면 쪽 방어일 뿐**입니다(§0-3-1 — 화면을 최종 판정자로 만들지 않습니다).
-       접수 시간대·보유 수량·창 소진 판정의 최종 권한은 여전히 `utils/duel_db.py` 와 DB
-       트리거에 있습니다.
-
-    사용법(이 파일의 8곳이 전부 같은 모양입니다)::
-
-        submit = _guard_double_click(_submit)
-        submit.bind_button(ui.button('...', on_click=submit).props('no-caps'))
-
-    ⚠️ `finally` 에서 반드시 되살립니다 — 예외가 났는데 버튼이 잠긴 채로 남으면 사용자는
-       화면을 새로고침하기 전까지 아무것도 할 수 없고, 그 이유도 알 수 없습니다.
-       (NiceGUI 의 `disable()`/`enable()` 은 props 만 바꾸므로, 그 사이에 `on_changed()` 가
-        화면을 다시 그려 이 버튼이 이미 사라졌더라도 안전합니다.)
-    """
-    state = {"running": False, "button": None}
-
-    async def wrapped(*_args, **_kwargs):
-        if state["running"]:
-            return                      # 이미 처리 중 — 두 번째 클릭은 버립니다
-        state["running"] = True
-        button = state["button"]
-        if button is not None:
-            button.disable()
-        try:
-            await handler()
-        finally:
-            state["running"] = False
-            if button is not None:
-                button.enable()
-
-    def bind_button(button):
-        state["button"] = button
-        return button
-
-    wrapped.bind_button = bind_button
-    return wrapped
+# `_guard_double_click`(중복 클릭 방어, 2026-08-29 재감사 M-3)은 2026-08-29 재감사
+# M-10에서 `indicator_page.py`도 같은 결함을 갖고 있는 것이 드러나면서 §0-3-10에 따라
+# `web/components/widgets.py::guard_double_click`로 승격했습니다 — 이 파일 안 8곳은
+# import 한 이름을 그대로 씁니다(동작은 한 글자도 바뀌지 않았습니다).
 
 
 def _fail(exc, fallback: str) -> str:
@@ -2697,7 +2655,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         )
         on_changed()
 
-    _submit_guarded = _guard_double_click(_submit)          # M-3 — 중복 클릭 방어
+    _submit_guarded = guard_double_click(_submit)          # M-3 — 중복 클릭 방어
     _submit_guarded.bind_button(
         ui.button('🛒 매수 주문 저장', on_click=_submit_guarded).props('no-caps color=primary'))
     ui.label(
@@ -2894,7 +2852,7 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
             )
             on_changed()
 
-        _submit_sell_guarded = _guard_double_click(_submit_sell)     # M-3
+        _submit_sell_guarded = guard_double_click(_submit_sell)     # M-3
         _submit_sell_guarded.bind_button(
             ui.button('🔁 리밸런싱 매도 주문 저장', on_click=_submit_sell_guarded)
             .props('no-caps color=negative'))
@@ -3158,7 +3116,7 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         )
         on_changed()
 
-    _submit_usd_guarded = _guard_double_click(_submit_usd)  # M-3 — 중복 클릭 방어
+    _submit_usd_guarded = guard_double_click(_submit_usd)  # M-3 — 중복 클릭 방어
     _submit_usd_guarded.bind_button(
         ui.button('💵 달러 매수 주문 저장', on_click=_submit_usd_guarded)
         .props('no-caps color=primary'))
@@ -3346,7 +3304,7 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
             )
             on_changed()
 
-        _submit_sell_usd_guarded = _guard_double_click(_submit_sell_usd)   # M-3
+        _submit_sell_usd_guarded = guard_double_click(_submit_sell_usd)   # M-3
         _submit_sell_usd_guarded.bind_button(
             ui.button('🔁 달러 리밸런싱 매도 주문 저장', on_click=_submit_sell_usd_guarded)
             .props('no-caps color=negative'))
@@ -3571,8 +3529,8 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed,
             ui.notify('✅ 주문을 취소했습니다 — 내역에는 취소 기록이 남습니다.', type='positive')
             on_changed()
 
-        _save_guarded = _guard_double_click(_save)           # M-3
-        _cancel_guarded = _guard_double_click(_cancel)       # M-3
+        _save_guarded = guard_double_click(_save)           # M-3
+        _cancel_guarded = guard_double_click(_cancel)       # M-3
         _save_guarded.bind_button(
             ui.button('수량 저장', on_click=_save_guarded)
             .props('flat dense no-caps').classes('shrink-0'))
@@ -3841,8 +3799,8 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed,
             on_changed()
 
         # (원화 대기 주문 줄과 같은 M-3 방어 — 미러를 빼 두면 바로 divergence 가 됩니다)
-        _save_usd_guarded = _guard_double_click(_save_usd)
-        _cancel_usd_guarded = _guard_double_click(_cancel_usd)
+        _save_usd_guarded = guard_double_click(_save_usd)
+        _cancel_usd_guarded = guard_double_click(_cancel_usd)
         _save_usd_guarded.bind_button(
             ui.button('수량 저장', on_click=_save_usd_guarded)
             .props('flat dense no-caps').classes('shrink-0'))

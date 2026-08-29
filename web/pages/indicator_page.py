@@ -39,6 +39,7 @@ from web.components import (
     error_banner,
     esc,
     fmt_num,
+    guard_double_click,
     info_banner,
     pager,
     pct_html,
@@ -391,13 +392,19 @@ def _render_data_timestamp(payload) -> None:
     )
 
 
-def _build_day_over_day_html(stock: dict, recent_rows: list) -> str:
+def _build_day_over_day_html(stock: dict, recent_rows: list, data_date: str = None) -> str:
     """"전일 대비" 한 줄. 비교할 전일 데이터가 없으면 지어내지 않고 그 사실을 그대로 밝힙니다.
 
     RSI 변화량은 `pct_html()`(기존 등락률 색 함수, §0-3-10 재사용)로 표시합니다 —
     오르면 빨강/내리면 파랑은 "숫자가 커졌다/작아졌다"는 사실 색일 뿐, 종합판정에는
     일부러 안 쓴 매수/매도 색과는 다른 자리입니다(RSI 자체는 매수·매도 신호가 아니라
     하나의 계산값이므로).
+
+    :param data_date: 카드 상단(종합판정·RSI 큰 숫자)이 기준으로 삼는 실제 날짜
+        (`indicator_kr_latest.json`). 2026-08-29 재감사 H-5 — 이력 CSV 수집이 그날 실패해
+        `recent_rows[0]`이 실제로는 며칠 전 값이어도 이 함수는 그걸 확인할 방법이 없어
+        "전일 대비"라는 말이 실제로는 "N일 전 대비"였습니다. `data_date`와 비교해 어긋나면
+        그 사실을 그대로 밝힙니다.
     """
     recent_rows = recent_rows or []
     if len(recent_rows) < 2:
@@ -408,6 +415,7 @@ def _build_day_over_day_html(stock: dict, recent_rows: list) -> str:
         )
 
     today_row, prev_row = recent_rows[0], recent_rows[1]
+    today_row_date = today_row.get('date') or '—'
     prev_date = prev_row.get('date') or '—'
     today_rsi = _to_float(today_row.get('rsi'))
     prev_rsi = _to_float(prev_row.get('rsi'))
@@ -426,9 +434,18 @@ def _build_day_over_day_html(stock: dict, recent_rows: list) -> str:
             f'종합판정 변화: {esc(prev_verdict)} → {esc(today_verdict)}</div>'
         )
 
+    # 이력의 최신 행이 오늘 기준일과 다르면 "전일 대비"가 사실은 "N일 전 대비"이므로 밝힙니다.
+    stale_note = ''
+    if data_date and today_row_date != '—' and str(today_row_date) != str(data_date):
+        stale_note = (
+            f'<div style="font-size: 11px; color: #fbbf24; margin-top: 2px;">'
+            f'⚠️ 이력에 쌓인 가장 최근 기록일은 {esc(today_row_date)}입니다(오늘 {esc(data_date)} 수집분 아님) '
+            f'— 위 비교는 실제로 {esc(today_row_date)} vs {esc(prev_date)} 입니다.</div>'
+        )
+
     return (
         f'<div style="font-size: 12.5px; color: #94a3b8; margin-top: 6px;">'
-        f'전일({esc(prev_date)}) 대비 RSI {rsi_delta_html}</div>{change_line}'
+        f'전일({esc(prev_date)}) 대비 RSI {rsi_delta_html}</div>{change_line}{stale_note}'
     )
 
 
@@ -441,7 +458,7 @@ def _format_short_date(date_str) -> str:
     return text or '—'
 
 
-def _build_recent_trend_html(recent_rows: list) -> str:
+def _build_recent_trend_html(recent_rows: list, data_date: str = None) -> str:
     """최근 며칠 흐름을 작은 칩으로 나열합니다 — "-1일 -2일 -3일은 뒤로 넘겨보기 정도로"
     (§6-2 원 결정, 2026-08-25 오너 재확인: "데이터는 쌓일 거니까 3일치는 볼 수 있게").
 
@@ -452,19 +469,35 @@ def _build_recent_trend_html(recent_rows: list) -> str:
     이력이 1건뿐이면(비교할 "며칠"이 없음) 아무것도 그리지 않습니다 — 그 경우는
     `_build_day_over_day_html()`의 "전일 데이터가 아직 없습니다" 문구 하나로 충분하고,
     칩을 하나만 덜렁 보여주면 오히려 헷갈립니다.
+
+    :param data_date: 카드 상단이 기준으로 삼는 실제 오늘 날짜. 2026-08-29 재감사 H-5 —
+        예전엔 이력의 가장 최근 행을 무조건 '오늘'이라고 라벨링했는데, 그날 수집이
+        실패했으면 그 행은 실제로 며칠 전 값입니다. `data_date`와 실제로 일치할 때만
+        '오늘'이라고 부르고, 아니면 그 행의 진짜 날짜를 그대로 찍습니다.
     """
     recent_rows = recent_rows or []
     if len(recent_rows) < 2:
         return ''
 
+    latest_row_date = recent_rows[0].get('date')
+    latest_is_actually_today = bool(
+        data_date and latest_row_date and str(latest_row_date) == str(data_date)
+    )
+
     chips = []
     # recent_rows 는 최신이 먼저(내림차순) — 칩은 과거→오늘 순으로 보여주려 뒤집습니다.
     for i, row in enumerate(reversed(recent_rows)):
-        is_today = (i == len(recent_rows) - 1)
-        date_label = '오늘' if is_today else _format_short_date(row.get('date'))
+        is_latest = (i == len(recent_rows) - 1)
+        is_today = is_latest and latest_is_actually_today
+        if is_today:
+            date_label = '오늘'
+        else:
+            date_label = _format_short_date(row.get('date'))
         rsi_val = _to_float(row.get('rsi'))
         rsi_text = f'{rsi_val:.1f}' if rsi_val is not None else '—'
         verdict = row.get('verdict_label') or '—'
+        # 강조 테두리는 "오늘"일 때만 — 데이터가 실제로 오늘이 아니면 가장 최근 칸이어도
+        # 강조하지 않습니다(강조 자체가 "이게 오늘 값"이라는 암묵적 주장이므로).
         border = '#38bdf8' if is_today else '#334155'
         bg = 'rgba(56, 189, 248, 0.12)' if is_today else 'rgba(15, 23, 42, 0.6)'
         chips.append(
@@ -476,8 +509,17 @@ def _build_recent_trend_html(recent_rows: list) -> str:
             f'</div>'
         )
 
+    stale_trend_note = ''
+    if data_date and latest_row_date and not latest_is_actually_today:
+        stale_trend_note = (
+            f'<div style="font-size: 10.5px; color: #fbbf24; margin-top: 4px;">'
+            f'⚠️ 가장 최근 기록은 {esc(_format_short_date(latest_row_date))}까지입니다 '
+            f'(오늘 {esc(_format_short_date(data_date))} 수집분이 아직 없음)</div>'
+        )
+
     return (
         '<div style="display: flex; gap: 6px; margin-top: 8px;">' + ''.join(chips) + '</div>'
+        + stale_trend_note
     )
 
 
@@ -492,8 +534,8 @@ def _render_stock_card(stock: dict, recent_rows: list = None, data_date: str = N
     reasons = _parse_unavailable_reasons(stock.get('unavailable_reasons'))
     warmup = bool(stock.get('warmup_insufficient'))
     bars_used = stock.get('bars_used')
-    day_over_day_html = _build_day_over_day_html(stock, recent_rows)
-    recent_trend_html = _build_recent_trend_html(recent_rows)
+    day_over_day_html = _build_day_over_day_html(stock, recent_rows, data_date)
+    recent_trend_html = _build_recent_trend_html(recent_rows, data_date)
 
     def _block(label_key, available_html):
         """지표 하나(RSI/MACD/Bollinger) — 산출 가능하면 값, 아니면 사유를 그대로 보여줍니다(§0-1)."""
@@ -653,4 +695,11 @@ def _render_ai_panel(stock: dict, data_date: str) -> None:
         button.props(remove='loading')
         button.set_text('🤖 AI 해설 (표시됨)')
 
-    button.on_click(_on_click)
+    # 2026-08-29 재감사 M-10 — `state['loaded']`는 응답이 온 "뒤"에만 세워져 왕복이 끝나기
+    # 전 두 번째 클릭을 막지 못했고(`button.props('loading')`은 스피너일 뿐 재클릭을 막지
+    # 않습니다), 이 화면은 duel_page의 매수 주문과 달리 재호출을 막을 DB 쪽 방어(유니크
+    # 인덱스)도 없어 그대로 유료 Gemini 호출이 2회 나갔습니다. `duel_page.py`의 같은
+    # 결함(M-3)에 쓰인 `guard_double_click`을 그대로 재사용합니다(§0-3-10).
+    _on_click_guarded = guard_double_click(_on_click)
+    _on_click_guarded.bind_button(button)
+    button.on_click(_on_click_guarded)

@@ -110,6 +110,12 @@ from web.state import (
 #    (미국 종목이면 한글명, 한국 종목이면 저장된 종목명 그대로 — DB 값은 손대지 않습니다.)
 from web.pages.scorecard_page import _display_name
 
+# 2026-08-29 재감사 M-13 — 기준일 기본값이 `date.today()`(Render 서버=UTC 로컬시간)라
+# 한국 자정~오전 9시 사이에 열면 하루 전 날짜로 시작했습니다. `dividend_page.py`(커밋
+# `ba2b62b`, §0-1)가 이미 만들어 둔 KST 안전 헬퍼를 그대로 재사용합니다(§0-3-10 —
+# 같은 로직을 새로 만들지 않음).
+from web.pages.dividend_page import today_kst
+
 MARKET_TITLES = {
     MARKET_KR: "🇰🇷 한국 주식 (원화)",
     MARKET_US: "🇺🇸 미국 주식 (달러)",
@@ -325,7 +331,7 @@ async def _render_signed_in(client, user_id: str, email) -> None:
         ui.label(f'로그인: {email or user_id}').classes('flex-1 min-w-0 truncate vh-muted')
         ui.button('로그아웃', on_click=_logout_click).props('flat dense no-caps').classes('shrink-0')
 
-    view = {'period': DEFAULT_PERIOD, 'ref_date': date.today()}
+    view = {'period': DEFAULT_PERIOD, 'ref_date': today_kst()}
 
     # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
     #    · 여기서처럼 **직접 부를 때는 반드시 `await`** 해야 화면이 그려집니다.
@@ -379,7 +385,7 @@ def _render_period_controls(view: dict, body) -> None:
                   on_click=lambda: _shift_ref_date(view, -1, date_input, body)) \
             .props('outline no-caps').style('flex: 1 1 120px;')
         ui.button('최신 기간',
-                  on_click=lambda: _apply_ref_date(view, date.today(), date_input, body)) \
+                  on_click=lambda: _apply_ref_date(view, today_kst(), date_input, body)) \
             .props('outline no-caps').style('flex: 1 1 120px;')
         ui.button('다음 기간 ▶',
                   on_click=lambda: _shift_ref_date(view, 1, date_input, body)) \

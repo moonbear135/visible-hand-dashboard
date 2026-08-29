@@ -2980,6 +2980,96 @@
      (H-5·M-10·L-1~L-4)·리포트(M-13·S-4) 서브모듈 findings 는 아직 오너와 범위를
      확정하지 않은 상태로 남겨둡니다.
 
+162. **🔧 스파게티 감사 3차 — 보조지표·리포트 모듈 버그 수정 (2026-08-29, 오푸스
+     엑스트라, 오너 지시 — "작업 순서는 뭐가 편하겠어? … 처리할 수 있는건 지금
+     최대한 처리하자").** `MACRO_REAUDIT_FINDINGS.md` 재감사 47건 중 보조지표
+     (`web/pages/indicator_page.py`) H-5·M-10, 리포트(`web/pages/report_page.py`·
+     `utils/report_db.py`) M-13 을 반영. S-4(`report_db.py` 1,903줄 구조 분해)는
+     감사 문서 자신의 판단("급하지 않습니다 — 지금 실제 버그는 이 파일에서 나오지
+     않았습니다")대로 이번에도 백로그 유예.
+
+     **①H-5** — 보조지표 카드가 이력(`recent_rows`)의 가장 최근 행을 위치만 보고
+     무조건 "오늘"이라 라벨링하고 강조 테두리까지 두르던 문제. 그날 이력 수집이
+     실패하면 최신 행이 실제로는 며칠 전 값인데도 "오늘"·"전일 대비"라고 단정적으로
+     말하고 있었습니다(§0-1). `_build_day_over_day_html()`·`_build_recent_trend_html()`
+     에 카드 상단이 실제로 쓰는 기준일 `data_date`를 넘겨, 이력 최신 행 날짜와
+     실제로 일치할 때만 "오늘"이라 부르고 강조하도록 고쳤습니다. 어긋나면 "이력에
+     쌓인 가장 최근 기록일은 YYYY-MM-DD입니다(오늘 수집분 아님)"는 경고를 그
+     자리에 그대로 붙입니다 — 값을 지어내거나 숨기지 않고 어긋난 사실 자체를
+     보여주는 쪽을 택했습니다. 재현: 수정 전 코드에 "최신 이력 = 3일 전" 상황을
+     그대로 넣으면 `>오늘<` 라벨과 `#38bdf8` 강조 테두리가 그대로 나오는 것을
+     직접 실행으로 확인했습니다(아래 회귀 테스트가 이 케이스를 고정합니다).
+
+     **②M-10** — AI 해설 버튼에 중복 클릭 방어가 없어(`state['loaded']`가 응답이
+     온 **뒤**에만 세워지고 `button.props('loading')`은 스피너일 뿐 재클릭을 막지
+     않음) 빠르게 두 번 누르면 유료 Gemini 호출이 2회 나가던 문제. `duel_page.py`가
+     이미 8곳에서 쓰던 `_guard_double_click`(M-3, 2026-08-29 재감사)를 그대로
+     재사용해 `_render_ai_panel`의 버튼에 걸었습니다. 이 화면이 두 번째 소비자가
+     된 시점에 §0-3-10에 따라 화면 전용 헬퍼를 `web/components/widgets.py::
+     guard_double_click`로 승격하고, `duel_page.py`도 그 공용 이름을 import해서
+     쓰도록 바꿨습니다(동작은 한 글자도 안 바뀜 — 이름과 위치만 바뀜).
+     `utils/indicator_ai.py::_fetch_cached()`가 캐시 조회 실패를 "캐시 없음"과
+     동일하게 처리해 무제한 재생성될 수 있다는 감사의 두 번째 지적은 코드를 직접
+     읽고 **의도적으로 손대지 않았습니다** — 아래 "의도적으로 손대지 않은 것"
+     참고.
+
+     **③M-13** — `utils/report_db.py::compute_period_report`의 `today` 기본값이
+     `date.today()`라 배포 서버(Render, UTC) 기준으로 계산돼, 한국 자정 근처엔
+     "오늘"이 실제 한국 날짜보다 하루 이를 수 있던 문제. 이 파일이 `utils/`
+     계층이라 `web/`을 import할 수 없어(§6 계층 분리) 이 파일 전용 로컬
+     `_KST`(zoneinfo) 헬퍼를 다른 `utils/*.py`·수집기 파일들과 같은 관용구로
+     새로 만들었고, `web/pages/report_page.py`는 이미 있는 `dividend_page.py::
+     today_kst()`를 재사용했습니다(§0-3-10, `report_page.py`가 `scorecard_page.py`
+     의 `_display_name`을 재사용하던 것과 같은 전례). `pegy_page.py`의 L-5·
+     `dividend_page.py`의 커밋 `ba2b62b`와 같은 계열의 UTC 기준일 버그입니다.
+
+     **신규 회귀 테스트** — `tests/test_indicator_page.py`(신규, 8건)가 H-5를
+     `_build_day_over_day_html`/`_build_recent_trend_html`(둘 다 화면 함수 밖
+     모듈 최상위 순수 함수라 직접 호출 가능)을 실제로 호출한 HTML로 검증합니다.
+     수정 전 코드에 그대로 돌려 "최신 이력 = 3일 전" 상황에서 `>오늘<` 라벨과
+     `#38bdf8` 강조가 실제로 나오는 것을 직접 실행으로 재현·확인했습니다(버그를
+     실제로 잡아내는 테스트임을 실행으로 증명). `tests/test_web_components.py`
+     (신규, 4건)는 승격된 `guard_double_click`이 처리 중 두 번째 호출을 실제로
+     버리는지, 완료 후엔 다시 정상 동작하는지, 예외가 나도 `finally`로 버튼을
+     되살리는지, 버튼을 안 묶어도 안 죽는지를 NiceGUI 없이(가짜 버튼 객체로)
+     검증합니다. 기존 `tests/test_duel_page_usd.py::
+     test_every_write_handler_is_guarded_against_double_clicks`(M-3 회귀 테스트)
+     도 헬퍼가 로컬 정의에서 공용 import로 바뀐 것을 반영해 갱신했습니다(원래
+     테스트가 `_guard_double_click` 로컬 정의를 AST로 직접 찾고 있어, 승격만
+     했는데도 그 자체로 "깨지는" 것을 발견해 고쳤습니다 — 아래 검증 참고).
+
+     **검증** — 기기 저장소에서 `git stash`로 이번에 바뀐 9개 파일 전부(수정 7 ·
+     신규 2)를 정확히 되돌려 진짜 베이스라인으로 삼고, 전체 테스트 스위트를 두 번
+     (수정 전/후) 직접 실행해 FAILED/ERROR ID 집합을 통째로 diff — **완전히
+     동일**(신규 실패 0건, 기존에 있던 4 failed·5 errors 그대로 — `archive/`
+     구버전 화면·OCR 플래그·매크로 렌더 스모크 등 이번 변경과 무관한 기존 결함).
+     통과 수는 정확히 새 테스트 수만큼 증가(1658 → 1670, +12 = test_indicator_page.py
+     8건 + test_web_components.py 4건). 이번엔 기기의 nicegui·supabase·plotly 등
+     의존성이 (기기 VM이 최근 재시작된 것으로 보여) 전부 빠져 있던 것을 발견해
+     `pip install -r requirements.txt`로 재설치했고, 그 과정에서 드러난 별개의
+     기존 환경 결함(pyOpenSSL 21.0.0이 새로 설치된 cryptography 50.0.0과 안 맞아
+     `archive/test_live.py`·`tests/test_collector_indicator_kr.py` 등 4개 파일이
+     수집조차 안 되던 문제)도 `pyopenssl` 패키지만 최신으로 올려 코드 변경 없이
+     해결 — 이 부분은 이번 재감사 대상과 무관한 순수 환경 문제였습니다(`archive/
+     test_scrape.py`가 import 시점에 `finance.naver.com`으로 실제 네트워크 호출을
+     하는 것은 기기 방화벽 때문에 여전히 막혀 있어, 이 파일 하나만 두 번의 실행
+     모두에서 동일하게 `--ignore`했습니다). `py_compile`로 수정·신규 파일 전부
+     컴파일 확인.
+
+     **의도적으로 손대지 않은 것** — S-4(구조 리팩터, 급하지 않음). M-10의
+     캐시-실패-를-캐시-없음으로-처리하는 부분(`utils/indicator_ai.py::
+     _fetch_cached()`/`_save_cache()`) — 코드를 직접 읽어보니 이미 실패를
+     `print()`로 서버 로그에 남기고 있고(§0-3-4 준수), Supabase upsert라 중복
+     저장이 행을 깨뜨리지 않으며, 감사 문서 자신의 "실제 적용 순서" 표(§8)에도
+     이 부분의 코드 수정은 올라 있지 않고 "Supabase RLS 미확인 — 서버 로그로만
+     판별 가능"이라고 **운영 확인 사항**으로만 남겨 뒀습니다. 즉 이건 코드 결함이
+     아니라 "오너가 실제 서비스 Supabase 대시보드에서 `indicator_ai_commentary`
+     테이블/RLS가 실제로 살아 있는지, 서버 로그에 `⚠️ [indicator_ai] 캐시 조회/
+     저장 실패`가 찍히고 있는지"를 확인해야 하는 운영 항목이라 판단해 코드는
+     그대로 두었습니다 — 오너가 원하면 로그 확인 방법을 별도로 안내하겠습니다.
+     매크로 서브모듈(H-1·M-4~M-9·M-11·M-12·L-1~L-4·L-9·L-10·L-12~L-14)은 오너
+     지시대로 여전히 전부 유예 상태입니다.
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26

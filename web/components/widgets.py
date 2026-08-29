@@ -252,6 +252,55 @@ def scroll_to_top() -> None:
     )
 
 
+def guard_double_click(handler):
+    """
+    처리기를 감싸 **처리 중에는 트리거 버튼을 잠급니다** (원래 `duel_page.py` 전용
+    `_guard_double_click`, 2026-08-29 재감사 M-3에서 만들어짐. 같은 재감사의 M-10에서
+    `indicator_page.py`도 같은 결함을 갖고 있는 것을 발견해 여기로 승격 — §0-3-10,
+    두 번째 소비자가 생긴 시점에 화면 전용 헬퍼를 공용 모듈로 옮깁니다).
+
+    🔴 왜 필요한가: `await run_blocking(...)`으로 느린 왕복(DB/외부 API)을 기다리는 버튼은
+       그동안 다시 눌립니다. 서버 쪽에 멱등 장치(유니크 인덱스 등)가 없는 화면일수록,
+       두 번째 클릭이 그대로 중복 요청(중복 매수 주문, 중복 유료 API 호출 등)이 됩니다.
+
+    ⚠️ 이 잠금은 **화면 쪽 방어일 뿐**입니다(§0-3-1 — 화면을 최종 판정자로 만들지 않습니다).
+       진짜 멱등성(중복 방지)의 최종 권한은 여전히 DB 쪽(유니크 인덱스·upsert 등)에 있어야
+       합니다 — 이 헬퍼는 "정상적인 사용자의 실수(빠른 두 번 클릭)"만 막습니다.
+
+    사용법::
+
+        submit = guard_double_click(_submit)
+        submit.bind_button(ui.button('...', on_click=submit).props('no-caps'))
+
+    ⚠️ `finally`에서 반드시 되살립니다 — 예외가 났는데 버튼이 잠긴 채로 남으면 사용자는
+       화면을 새로고침하기 전까지 아무것도 할 수 없고, 그 이유도 알 수 없습니다.
+       (NiceGUI의 `disable()`/`enable()`은 props만 바꾸므로, 그 사이에 `on_changed()`가
+        화면을 다시 그려 이 버튼이 이미 사라졌더라도 안전합니다.)
+    """
+    state = {"running": False, "button": None}
+
+    async def wrapped(*_args, **_kwargs):
+        if state["running"]:
+            return                      # 이미 처리 중 — 두 번째 클릭은 버립니다
+        state["running"] = True
+        button = state["button"]
+        if button is not None:
+            button.disable()
+        try:
+            await handler()
+        finally:
+            state["running"] = False
+            if button is not None:
+                button.enable()
+
+    def bind_button(button):
+        state["button"] = button
+        return button
+
+    wrapped.bind_button = bind_button
+    return wrapped
+
+
 def pager(total_pages: int, current_page: int, on_change: Callable[[int], None]) -> None:
     """페이지네이션 + **이동 시 최상단 스크롤** (계획서 §9 "2. pegy" 완료기준 ④).
 

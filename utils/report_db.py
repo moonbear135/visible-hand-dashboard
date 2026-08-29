@@ -69,6 +69,19 @@ import sys
 from datetime import date, datetime, timedelta
 from decimal import Decimal
 
+# 2026-08-29 재감사 M-13 — `compute_period_report`의 `today` 기본값이 `date.today()`라
+# 배포 서버(Render, UTC)의 로컬 시간대를 그대로 탔습니다. 한국 자정~오전 9시 사이에는
+# 서버가 아직 "어제"라, is_window_ended 판정이 하루 어긋날 수 있었습니다. 이 파일은
+# `utils/` 계층이라 `web/` 쪽 헬퍼(`web/pages/dividend_page.py::today_kst`)를 그대로
+# import 할 수 없으므로(§6 — 계산 계층이 표현 계층에 의존하면 안 됨), 이 파일 전용으로
+# 이 저장소의 다른 `utils/*.py`가 이미 쓰는 것과 같은 관례(zoneinfo 우선, 실패 시 폴백)를
+# 따릅니다.
+try:
+    from zoneinfo import ZoneInfo
+    _KST = ZoneInfo("Asia/Seoul")
+except Exception:
+    _KST = None
+
 # 🌐 벤치마크 원본 파일 2개(`market_history.csv`, `data/us_index_history.json`)를 여는 단일
 #    창구입니다. 원격 로드가 꺼져 있으면(기본값) 예전과 똑같은 로컬 파일 읽기이고,
 #    켜져 있으면 다른 스냅샷들과 같은 최신성 추적·전역 배너를 함께 받습니다 (§0-1).
@@ -709,7 +722,7 @@ def compute_period_report(snapshots, period, ref_date, today=None):
     """
     period = normalize_period(period)
     window_start, window_end = period_bounds(period, ref_date)
-    today = to_date(today) if today else date.today()
+    today = to_date(today) if today else (datetime.now(_KST).date() if _KST else date.today())
 
     rows = sort_snapshots(snapshots)
     in_window = [r for r in rows if window_start <= r["snapshot_date"] <= window_end]
