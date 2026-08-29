@@ -2517,6 +2517,45 @@
      이슈를 만드는 부작용이 있어 이번 검증에서는 실행하지 않음(아래 "진행 예정"
      참고). 커밋 `2257248`.
 
+155. **🧪 `test_export_end_to_end` CSV 헤더 기대값 — #152 컬럼 신설을 못 따라온
+     테스트 하나 수정 (2026-08-29, 결투 모듈 작업 세션이 전체 pytest를 돌리다
+     발견해 넘긴 건).** 증상은 `tests/test_stock_history.py::test_export_end_to_end`
+     의 "헤더 앞부분 확인"이 CSV 5번째 칸으로 `현재가(원)`을 기대하는데 실제로는
+     `시장구분(KOSPI/KOSDAQ)`이 나오는 것.
+     원인은 2026-08-26 `33ae5a0`(#152, 코스피/코스닥 시장 라벨 표시)에서
+     `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS`에 `("market",
+     "시장구분(KOSPI/KOSDAQ)", "text")`를 `code`와 `price` **사이**(5번째)에
+     끼워 넣으면서 `price`가 6번째로 밀린 것. 그 커밋이 이 파일에 새 테스트 2건
+     (market round-trip)은 추가했는데, 정작 예전부터 앞 5칸을 **문자열로 하드코딩**
+     해 둔 이 검사(`parsed[0][:5] == [...]`)만 같이 못 고쳐 그 이후로 계속 실패
+     상태였습니다.
+     **어느 쪽을 고칠지 먼저 확인** — 컬럼 순서(소스)를 되돌릴 이유가 있는지 봤고,
+     되돌리지 않기로 판단했습니다. 근거 ①`market`은 종목 식별 정보(날짜·순위·
+     종목명·종목코드) 바로 뒤에 붙는 게 사람이 엑셀로 열었을 때 자연스럽고 #152
+     커밋 메시지·TASK_HISTORY #152 모두 CSV/JSON 노출을 의도한 작업으로 적고 있음,
+     ②이력 CSV를 **컬럼 위치(인덱스)로 읽는 소비자가 저장소에 하나도 없음**을
+     확인 — 쓰기는 `csv.DictWriter`, 읽기는 `read_history_rows()`/
+     `load_stock_history()`의 `csv.DictReader`로 전부 **영문 키 기준**이고
+     (`utils/stock_history.py`), 다운로드 바이트를 만드는 `utils/stock_export.py`도
+     `field_labels(FIELDS)`로 헤더를 생성. `views/pegy_view.py`·
+     `views/us_stocks_view.py`·`web/pages/pegy_page.py`·`web/pages/us_stocks_page.py`
+     는 `FIELDS` 상수를 통째로 넘기기만 하고 인덱스를 쓰지 않음(§0-3-10 재사용
+     관례대로 로더를 공유하고 있어 인덱스 하드코딩이 애초에 없었음).
+     `grep`으로 `현재가(원)` 하드코딩도 저장소 전체에서 이 테스트 한 줄뿐임을 확인.
+     그래서 **소스는 그대로 두고 테스트 기대값만** 새 순서
+     (`날짜·시가총액 순위·종목명·종목코드·시장구분(KOSPI/KOSDAQ)·현재가(원)`, `[:6]`)로
+     맞추고, 왜 바뀌었는지(#152, `33ae5a0`)와 "인덱스 의존 소비자가 없어 순서 변경이
+     안전하다"는 확인 결과를 주석으로 남겨 다음에 컬럼이 또 끼어들 때 헤매지 않게 했습니다.
+     검증 — `pytest tests/test_stock_history.py -q` → `15 passed`(수정 전 동일 명령은
+     `15 passed, 1 error`), `python tests/test_stock_history.py` 직접 실행도 "✅ 전체 통과".
+     전체 스위트는 같은 환경에서 수정 전/후를 각각 돌려 비교(`pytest -q
+     --continue-on-collection-errors`): 수정 전 `4 failed, 1487 passed, 6 errors`
+     → 수정 후 `4 failed, 1487 passed, 5 errors`로, 사라진 것은 정확히
+     `test_export_end_to_end` 하나뿐이고 다른 항목은 실패 목록까지 그대로 —
+     회귀 없음. 남은 실패는 이번 범위 밖(배당 모듈 이벤트루프 블로킹 관련
+     `tests/test_event_loop_blocking.py` 작업분과 렌더 스모크·수집기 의존성/
+     네트워크 이슈)이라 손대지 않았습니다.
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26

@@ -388,8 +388,16 @@ def test_export_end_to_end():
     check("삼성전자" in text, "CSV 안의 한글이 깨지지 않고 그대로 디코드됨")
     parsed = list(csv.reader(io.StringIO(text)))
     check(parsed[0] == field_labels(KOSPI_HISTORY_FIELDS), "CSV 헤더가 한국어 라벨")
-    check(parsed[0][:5] == ["날짜", "시가총액 순위", "종목명", "종목코드", "현재가(원)"],
-          f"헤더 앞부분 확인 ({parsed[0][:5]})")
+    # 2026-08-29 수정 — 2026-08-26 `33ae5a0`(TASK_HISTORY #152)에서 `code`와 `price`
+    # 사이에 `market`("시장구분(KOSPI/KOSDAQ)") 컬럼이 신설되면서 `price`가 5번째에서
+    # 6번째로 밀렸는데, 그 커밋이 이 파일에 새 테스트 2건은 추가하면서 여기 하드코딩된
+    # 기대값만 못 따라와 이 검사가 계속 실패하고 있었습니다. 컬럼 순서 자체는 의도된
+    # 것이라(종목 식별 정보 날짜·순위·종목명·종목코드·시장구분을 앞에 모음) 기대값 쪽을
+    # 새 순서에 맞춥니다 — 이력 CSV를 읽는 코드는 모두 `csv.DictReader`(영문 키 기준)라
+    # 컬럼 위치에 의존하는 소비자는 없음을 확인했습니다.
+    check(parsed[0][:6] == ["날짜", "시가총액 순위", "종목명", "종목코드",
+                            "시장구분(KOSPI/KOSDAQ)", "현재가(원)"],
+          f"헤더 앞부분 확인 ({parsed[0][:6]})")
     check(len(parsed) == 3, f"헤더 1줄 + 이력 2줄 ({len(parsed)}줄)")
     check(parsed[1][0] == "2026-08-08" and parsed[2][0] == "2026-08-09", "날짜가 행(시계열 표)")
     code_col = parsed[0].index("종목코드")
