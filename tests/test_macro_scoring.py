@@ -1021,3 +1021,131 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 — scrape_daily.py (H7/H8/M13/M14/L2/L3/L4/L5)
+# =============================================================================
+import importlib  # noqa: E402
+
+SCRAPE_DAILY_SRC = (Path(__file__).parent.parent / "scrape_daily.py").read_text(encoding="utf-8")
+# 주석에는 "예전엔 이랬다"는 기록이 그대로 남아 있으므로, '코드가 실제로 그렇게 되어 있는지'를
+# 볼 때는 주석 줄을 걷어낸 본문만 봅니다.
+SCRAPE_DAILY_CODE = "\n".join(
+    line for line in SCRAPE_DAILY_SRC.split("\n") if not line.strip().startswith("#")
+)
+
+
+def test_history_read_failure_aborts_instead_of_silently_emptying():
+    """H7: market_history.csv 읽기 실패를 pd.DataFrame() 으로 삼키면 이력이 통째로 날아갑니다."""
+    assert "history_df = pd.DataFrame()\n        except" not in SCRAPE_DAILY_CODE
+    assert "이력이 소실될 위험이 있어 수집을 중단합니다" in SCRAPE_DAILY_CODE
+    # 읽기 except 블록이 RuntimeError 를 던지는지 (KOSPI/환율 결측 방어와 같은 방식)
+    read_block = SCRAPE_DAILY_SRC[SCRAPE_DAILY_SRC.index("history_df = pd.read_csv(HISTORY_FILE)"):]
+    read_block = read_block[:read_block.index("# 2. 크롤링 기초 데이터 수집")]
+    assert "raise RuntimeError" in read_block
+
+
+def test_history_read_failure_actually_raises(tmp_path, monkeypatch):
+    """H7: 실제로 손상된 CSV 를 만나면 예외로 중단되어야 합니다."""
+    import scrape_daily as SD
+    bad = tmp_path / "market_history.csv"
+    # 헤더 없이 열 개수가 들쭉날쭉한 파일 → read_csv 또는 rename 이후 "Date" 접근에서 실패
+    bad.write_text("a,b,c\n1,2\n3,4,5,6,7\n", encoding="utf-8")
+    monkeypatch.setattr(SD, "HISTORY_FILE", str(bad))
+    with pytest.raises(RuntimeError, match="이력이 소실될 위험"):
+        SD.scrape_and_update("2026-08-28")
+
+
+def test_investor_flow_columns_found_by_label():
+    """H8: 3주체 컬럼을 헤더 라벨로 찾아야 합니다."""
+    import scrape_daily as SD
+    from bs4 import BeautifulSoup
+    html = """<table class="type_1"><tr>
+      <th>날짜</th><th>개인</th><th>외국인</th><th>기관계</th><th>금융투자</th>
+    </tr></table>"""
+    tb = BeautifulSoup(html, "html.parser").find("table")
+    idx = SD.extract_investor_flow_column_indices(tb)
+    assert idx == {"retail": 1, "foreigner": 2, "institution": 3}
+
+
+def test_investor_flow_columns_follow_reordered_header():
+    """H8: 네이버가 순서를 바꾸면 라벨을 따라가야 합니다(위치 고정 금지)."""
+    import scrape_daily as SD
+    from bs4 import BeautifulSoup
+    html = """<table class="type_1"><tr>
+      <th>날짜</th><th>외국인</th><th>기관계</th><th>개인</th>
+    </tr></table>"""
+    tb = BeautifulSoup(html, "html.parser").find("table")
+    idx = SD.extract_investor_flow_column_indices(tb)
+    assert idx == {"foreigner": 1, "institution": 2, "retail": 3}
+
+
+def test_investor_flow_columns_missing_label_returns_empty():
+    """H8: 라벨을 못 찾으면 빈 dict — 위치 인덱스로 지어내면 안 됩니다."""
+    import scrape_daily as SD
+    from bs4 import BeautifulSoup
+    html = '<table class="type_1"><tr><th>날짜</th><th>A</th><th>B</th><th>C</th></tr></table>'
+    tb = BeautifulSoup(html, "html.parser").find("table")
+    assert SD.extract_investor_flow_column_indices(tb) == {}
+
+
+def test_investor_flow_page_loop_scopes_exception_per_row():
+    """H8: 페이지 순회 전체가 아니라 행 단위로 예외를 잡아야 합니다."""
+    block = SCRAPE_DAILY_SRC[SCRAPE_DAILY_SRC.index("# 3. 네이버 금융 외국인/기관 수급"):]
+    block = block[:block.index("# 4. 리스크 지표 연산")]
+    assert "다음 행 계속" in block
+    assert "다음 페이지 계속" in block
+
+
+def test_kospi_change_recompute_uses_measured_prev_close():
+    """M13: 이미 실측한 전일 종가를 나눗셈으로 역산하지 않습니다."""
+    assert "kospi_prev_est" not in SCRAPE_DAILY_CODE
+    assert "kospi_close_fdr / (1 + kospi_change)" not in SCRAPE_DAILY_CODE
+    assert "kospi_change = (kospi_close_naver - kospi_prev) / kospi_prev" in SCRAPE_DAILY_CODE
+
+
+def test_kospi_and_usd_have_as_of_columns():
+    """M14: KOSPI/환율 값에도 실제 기준 거래일을 남깁니다(VKOSPI 패턴과 동일)."""
+    import scrape_daily as SD
+    assert "KOSPI_AsOf" in SD.COL_MAP
+    assert "USD_KRW_AsOf" in SD.COL_MAP
+    assert 'new_data["KOSPI_AsOf"] = [kospi_as_of]' in SCRAPE_DAILY_SRC
+    assert 'new_data["USD_KRW_AsOf"] = [usd_as_of]' in SCRAPE_DAILY_SRC
+
+
+def test_unused_period_keywords_import_removed():
+    """L2: 쓰이지 않는 PERIOD_KEYWORDS import 는 삭제되어야 합니다."""
+    assert "from utils.data_validator import PERIOD_KEYWORDS" not in SCRAPE_DAILY_CODE
+
+
+def test_clip_comes_from_single_source():
+    """L3: clip() 은 utils/macro_scoring.py 하나만 정의하고 scrape_daily 는 import 합니다."""
+    import scrape_daily as SD
+    from utils.macro_scoring import clip as canonical_clip
+    assert "def clip(val):" not in SCRAPE_DAILY_CODE
+    assert SD.clip is canonical_clip
+    assert canonical_clip(1.5) == 1.0 and canonical_clip(-0.5) == 0.0 and canonical_clip(0.3) == 0.3
+
+
+def test_net_flow_min_sample_is_not_hardcoded():
+    """L4: 하드코딩 20 대신 상수를 참조해야 합니다(메시지 문구 포함)."""
+    assert "if len(history_df) < 20:" not in SCRAPE_DAILY_CODE
+    assert "if len(history_df) < NET_FLOW_MIN_SAMPLE:" in SCRAPE_DAILY_CODE
+    assert "권장 20행" not in SCRAPE_DAILY_CODE
+
+
+def test_macro_proxy_coefficients_are_named_constants_with_unchanged_values():
+    """L5: 계수를 상수로 뽑되 **값은 그대로**여야 합니다(오너 결정 전까지 변경 금지)."""
+    from utils import constants as C
+    assert (C.FX_PROXY_BASE, C.FX_PROXY_SLOPE, C.FX_PROXY_CENTER, C.FX_PROXY_SCALE) == (0.5, 0.3, 1200.0, 300.0)
+    assert (C.PUT_PROXY_BASE, C.PUT_PROXY_SLOPE) == (0.5, 0.4)
+    assert C.FX_FOREIGNER_CHANGE_SLOPE == 0.1
+    assert C.FX_OFFSET_RETAIL == 0.2
+    assert C.FLOW_OFFSET_FOREIGN == 0.1
+    assert C.FLOW_OFFSET_INSTITUTION == 0.05
+    assert C.FLOW_OFFSET_RETAIL_UP == 0.15
+    assert C.FLOW_OFFSET_RETAIL_DOWN == 0.1
+    # 본문에 매직넘버가 남아 있지 않아야 함
+    assert "0.5 + 0.3 * (usd_close - 1200) / 300" not in SCRAPE_DAILY_CODE
+    assert "0.5 - 0.4 * kospi_change" not in SCRAPE_DAILY_CODE

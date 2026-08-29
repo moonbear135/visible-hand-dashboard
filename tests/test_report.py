@@ -2855,6 +2855,60 @@ def test_view_and_scope():
             sys.modules.pop("views.scorecard_view", None)
 
 
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 — collector_us_indices.py (L6 / L7 / L8)
+# =============================================================================
+
+def test_reaudit_dead_extract_proxy_name_removed():
+    """L6: 참조 0건이던 죽은 함수는 사라져야 합니다."""
+    assert not hasattr(cui, "extract_proxy_name")
+
+
+def test_reaudit_benchmarks_dropped_unreachable_name_check():
+    """L7: 도달 불가였던 expected_phrase(4번째 요소)를 제거하고 3-튜플로 줄입니다."""
+    for row in cui.US_INDEX_BENCHMARKS:
+        assert len(row) == 3, f"3-튜플이어야 합니다: {row}"
+    keys = {key for key, *_ in cui.US_INDEX_BENCHMARKS}
+    assert keys == {"SP500_PROXY_SPY", "NASDAQ_PROXY_ONEQ"}
+    src = (Path(__file__).parent.parent / "collector_us_indices.py").read_text(encoding="utf-8")
+    code_only = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
+    assert "proxy_name_verified" not in code_only, "항상 None 이던 이름 검증은 제거되어야 합니다"
+    # 실제로 작동하는 유일한 검증(티커 대조)은 그대로 남아 있어야 합니다
+    assert "source_symbol == proxy_symbol.upper()" in code_only
+
+
+def test_reaudit_total_failure_records_reason_without_touching_closes(tmp_path, monkeypatch):
+    """L8: 두 지수가 다 실패해도 기존 종가는 그대로 두고 실패 사유는 파일에 남깁니다."""
+    data_dir = tmp_path
+    existing = {
+        "metadata": {"collected_at_kst": "2026-08-28T18:00:00+09:00"},
+        "indices": {
+            "SP500_PROXY_SPY": {"closes": {"2026-08-27": 640.0, "2026-08-28": 641.5},
+                                "count": 2, "last_error": None},
+            "NASDAQ_PROXY_ONEQ": {"closes": {"2026-08-28": 92.0}, "count": 1, "last_error": None},
+        },
+    }
+    path = data_dir / cui.US_INDEX_HISTORY_FILENAME
+    path.write_text(json.dumps(existing, ensure_ascii=False), encoding="utf-8")
+
+    def boom(symbol):
+        raise RuntimeError("소스 응답 형식이 바뀌었습니다")
+
+    monkeypatch.setattr(cui, "fetch_index_history", boom)
+
+    result = cui.run_us_index_history_collector(data_dir=str(data_dir), delay=False)
+    assert result is not None, "실패 사유를 남기려면 파일을 써야 합니다"
+
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    # 핵심: 기존 종가가 한 건도 사라지지 않아야 합니다
+    assert saved["indices"]["SP500_PROXY_SPY"]["closes"] == {"2026-08-27": 640.0, "2026-08-28": 641.5}
+    assert saved["indices"]["NASDAQ_PROXY_ONEQ"]["closes"] == {"2026-08-28": 92.0}
+    # 실패 사유는 각 지수와 metadata 양쪽에 남아야 합니다
+    assert "소스 응답 형식이 바뀌었습니다" in saved["indices"]["SP500_PROXY_SPY"]["last_error"]
+    assert saved["metadata"]["fetched_any"] is False
+    assert any("수집 실패" in w for w in saved["metadata"]["warnings"])
+
+
 def main():
     print("=" * 74)
     print("📈 리포트 모듈 오프라인 검증 (Supabase 미연결 · 네트워크 불필요)")

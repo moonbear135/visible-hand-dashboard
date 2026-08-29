@@ -179,7 +179,15 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
 from corp_code_mapper import (  # noqa: E402
     DART_API_KEY_ENV,
+    DART_DISCLOSURE_LIST_URL,
     DART_FATAL_STATUSES,
+    DART_LIST_MAX_PAGES,
+    DART_LIST_PAGE_COUNT,
+    DART_NETWORK_RETRY,
+    DART_REQUEST_DELAY_MAX,
+    DART_REQUEST_DELAY_MIN,
+    DART_REQUEST_TIMEOUT_SEC,
+    DART_RETRY_DELAY_SEC,
     DART_STATUS_MESSAGES,
     _now_kst,
     get_api_key,
@@ -197,26 +205,16 @@ from collector_dividend_kr import (  # noqa: E402
 # =============================================================================
 # 1. 엔드포인트·상수
 # =============================================================================
-DART_DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
+# 2026-08-29 재감사 M11: DART_DISCLOSURE_LIST_URL / page_count·재시도 상한 / 크롤링
+# 매너 상수는 collector_dividend_kr.py 와 같은 값을 여기서 다시 정의하고 있었습니다
+# ("완전히 독립적으로 두기 위함"이 근거였지만, 바로 위에서 이미 collector_dividend_kr
+# 에서 dart_document_url/normalize_stock_code 를 import하고 있어 독립은 성립하지 않고
+# 드리프트 위험만 남았습니다). corp_code_mapper.py 로 옮겨 두 파일이 공유합니다
+# (위 import 참고) — DART_STATUS_MESSAGES 를 이미 그렇게 공유하는 것과 같은 이유입니다.
 DART_DOCUMENT_URL = "https://opendart.fss.or.kr/api/document.xml"
 
 # 거래소공시(수시공시). 배당결정 공시가 여기로 옵니다 — 정기공시("A")가 아닙니다.
 EXCHANGE_PBLNTF_TY = "I"
-
-# list.json 의 page_count 최대값(문서·실측 모두 100).
-DART_LIST_PAGE_COUNT = 100
-# 방어적 상한. total_page 가 이 수를 넘으면 무한 루프를 의심하고 크게 실패합니다.
-DART_LIST_MAX_PAGES = 1000
-
-# 크롤링 매너 상수 (§0-3-2) — collector_dividend_kr.py 와 같은 기준입니다.
-# (같은 값을 여기서 다시 정의하는 이유: 이 수집기가 그쪽 모듈의 상수를 바꾸거나 그쪽
-#  동작에 영향을 주지 않도록 완전히 독립적으로 두기 위함입니다. 값이 같은 것은 "같은 서버,
-#  같은 예의"라는 근거가 같기 때문입니다.)
-DART_REQUEST_TIMEOUT_SEC = 20
-DART_REQUEST_DELAY_MIN = 2.0
-DART_REQUEST_DELAY_MAX = 3.0
-DART_NETWORK_RETRY = 1
-DART_RETRY_DELAY_SEC = 5.0
 
 # 문서 본문은 zip 이라 JSON 응답보다 큽니다. 그래도 한 건이 수십 MB 일 이유가 없으므로
 # 방어적 상한을 둡니다(응답이 이상하면 메모리를 통째로 먹지 않고 실패합니다).
@@ -722,8 +720,18 @@ def parse_dividend_decision_document(html_text, log=print, report_prefix=None):
 
     # 한 필드에 별칭이 여러 개면, 어느 쪽으로든 잡혔을 때 그 필드의 항목은 전부 빠집니다
     # (`found_labels` 가 field 단위이므로 자동으로 그렇게 됩니다).
-    missing_labels = [display for field, _key, display in LABEL_SPECS
-                      if field not in found_labels and field not in absent_by_form]
+    #
+    # ⚠️ 2026-08-29 재감사 L15: 반대로 **양쪽 별칭이 다 안 잡혔을 때**는 예전 코드가 같은
+    # 필드를 두 번 보고했습니다(LABEL_SPECS 를 그대로 순회했기 때문). 예를 들어
+    # `pay_date_expected` 하나를 못 찾았을 뿐인데 missing_labels 에
+    # "7. 배당금지급 예정일자" 와 "5. 배당금지급 예정일" 이 함께 실려, 결측 항목 수가
+    # 실제보다 많아 보였습니다. 필드 단위로 중복을 제거하고 대표 표기(display_of)로
+    # 한 번만 보고합니다.
+    missing_labels = [
+        display_of[f]
+        for f in dict.fromkeys(field for field, _key, _display in LABEL_SPECS)
+        if f not in found_labels and f not in absent_by_form
+    ]
 
     if all(field not in found_labels for field in CORE_FIELDS):
         status = PARSE_FAILED

@@ -115,6 +115,30 @@ DART_STATUS_MESSAGES = {
 # 재시도해봐야 똑같고, 계속 두드리는 것 자체가 §0-3-2 위반입니다.
 DART_FATAL_STATUSES = ("010", "011", "012", "020", "101", "800", "901")
 
+# =============================================================================
+# 3-1. DART 공통 엔드포인트·크롤링 매너 상수
+#    2026-08-29 재감사 M11: collector_dividend_kr.py 와 collector_dividend_payment_kr.py
+#    양쪽에 같은 값이 각각 하드코딩돼 있었습니다("완전히 독립적으로 두기 위함"이라는
+#    근거였지만, 두 파일 모두 이미 이 모듈에서 dart_document_url / normalize_stock_code
+#    등을 import하고 있어 독립은 이미 성립하지 않았고, 남는 건 드리프트 위험뿐이었습니다
+#    — DART가 요청 매너 기준을 바꾸면 한쪽만 고쳐질 수 있습니다).
+#    이 표(DART_STATUS_MESSAGES)를 두 파일이 공유하는 것과 같은 이유로, 여기 한 곳에만
+#    둡니다.
+# =============================================================================
+DART_DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
+
+# list.json 의 page_count 최대값(문서·실측 모두 100).
+DART_LIST_PAGE_COUNT = 100
+# 방어적 상한. total_page 가 이 수를 넘으면 무한 루프를 의심하고 크게 실패합니다.
+DART_LIST_MAX_PAGES = 1000
+
+# 크롤링 매너 상수 (§0-3-2)
+DART_REQUEST_TIMEOUT_SEC = 20
+DART_REQUEST_DELAY_MIN = 2.0        # time.sleep(random.uniform(2.0, 3.0))
+DART_REQUEST_DELAY_MAX = 3.0
+DART_NETWORK_RETRY = 1              # 네트워크/5xx 만 1회 재시도
+DART_RETRY_DELAY_SEC = 5.0
+
 KST = timezone(timedelta(hours=9))
 
 
@@ -224,7 +248,7 @@ def _decode_error_body(raw_bytes):
 # =============================================================================
 # 5. ZIP/XML 파싱 (순수 함수 — 바이트만 주면 되므로 오프라인 테스트 대상)
 # =============================================================================
-def parse_corpcode_zip(zip_bytes):
+def parse_corpcode_zip(zip_bytes, return_stats=False):
     """
     corpCode.xml 응답 바이트(ZIP)를 파싱해 회사 목록(dict 리스트)을 반환합니다.
 
@@ -235,6 +259,13 @@ def parse_corpcode_zip(zip_bytes):
 
     실패는 전부 DartCorpCodeError. 조용히 빈 리스트를 돌려주지 않습니다(§0-1) —
     빈 리스트는 "DART에 회사가 하나도 없다"는 뜻이 되어버리기 때문입니다.
+
+    return_stats: 2026-08-29 재감사 L14. True 면 (valid, parse_stats) 튜플을 돌려줍니다.
+      parse_stats = {"total_list_nodes": N, "invalid_entries": M}
+      corp_code 가 없어 버린 <list> 항목 수(M)를 여기서 세어 두지 않으면, 아래에서
+      valid 만 반환하는 순간 그 사실이 영원히 사라집니다 — "몇 건을 버렸는지"는
+      응답 규격이 바뀌었는지 알아채는 유일한 신호라 통계에 실어야 합니다(§0-1).
+      기본값 False 는 기존 호출부(리스트만 기대)와 100% 하위 호환입니다.
     """
     if not zip_bytes:
         raise DartCorpCodeError("corpCode 응답이 비어 있습니다(0 바이트).")
@@ -311,6 +342,9 @@ def parse_corpcode_zip(zip_bytes):
             f"corpCode XML 에서 유효한 <list> 항목을 하나도 찾지 못했습니다 "
             f"(전체 <list> 노드 {len(entries)}개). 응답 규격이 바뀌었을 수 있습니다."
         )
+    if return_stats:
+        return valid, {"total_list_nodes": len(entries),
+                       "invalid_entries": len(entries) - len(valid)}
     return valid
 
 
@@ -728,11 +762,20 @@ def get_corp_code_index(cache_path, api_key=None, max_age_days=CORPCODE_CACHE_MA
             # raw 보관 실패가 수집 자체를 죽일 이유는 없지만, 조용히 넘기지는 않습니다.
             log(f"  ⚠️ corpCode 원본 ZIP 보관 실패(수집은 계속): {type(e).__name__}: {e}")
 
-    entries = parse_corpcode_zip(zip_bytes)
+    entries, parse_stats = parse_corpcode_zip(zip_bytes, return_stats=True)
     index, stats = build_stock_code_index(entries)
+    # 2026-08-29 재감사 L14: corp_code 없이 버린 항목 수를 통계에 실어 요약 로그에 노출합니다.
+    # 예전엔 파싱 함수 안에서만 세고 아무 데도 전달하지 않아, "오늘 200건이 통째로 빠졌다"는
+    # 신호가 어디에도 남지 않았습니다.
+    stats["invalid_entries"] = parse_stats["invalid_entries"]
+    stats["total_list_nodes"] = parse_stats["total_list_nodes"]
     save_corpcode_cache(cache_path, entries, stats)
     log(f"  ✅ corpCode 신규 수신: 전체 {stats['total_entries']:,}건 중 "
         f"상장 종목코드 보유 {stats['listed_entries']:,}건 "
         f"(비상장 {stats['unlisted_entries']:,}건, 형식오류 {len(stats['malformed_stock_codes'])}건, "
         f"종목코드 중복 {len(stats['duplicates'])}건)")
+    if stats["invalid_entries"]:
+        log(f"  ⚠️ corp_code 가 없어 제외한 <list> 항목 {stats['invalid_entries']:,}건 "
+            f"(전체 <list> 노드 {stats['total_list_nodes']:,}개) — 평소와 크게 다르면 "
+            "응답 규격 변경을 의심하세요.")
     return index, {"source": "network", "stats": stats, "cache_note": "", "entries": entries}

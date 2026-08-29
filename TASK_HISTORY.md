@@ -2640,6 +2640,84 @@
      테스트 12건 전부 통과.
 
 
+158. **🔧 스파게티 감사 2차 — 수집기(Collectors) 모듈 41건 전부 반영 (2026-08-29,
+     오푸스 엑스트라, 오너 요청 — "모듈별로 하나씩 오푸스 높음으로 검토하면서
+     고쳐보자, 한번 할 때 전부 다").** `SPAGHETTI_AUDIT_2026-08-29.md`의 8개 모듈
+     순회 중 첫 번째(수집기→결투→매크로 순으로 오푸스 엑스트라, 나머지는 오푸스
+     높음). 대상 9개 파일(`collector_kospi200.py`/`collector_dividend_kr.py`/
+     `collector_dividend_payment_kr.py`/`collector_us_stocks.py`/
+     `collector_us_indices.py`/`corp_code_mapper.py`/
+     `probe_indicator_universe_timing.py`/`scrape_daily.py`/
+     `collector_indicator_kr.py`, 총 11,314줄) 재감사(오푸스 서브에이전트, 실행
+     재현 4건 포함) 결과 나온 높음 12·중간 14·낮음 15 = 41건 중 38건 반영(M1/M2/M3
+     제외 — 아래 참고), 나머지 M11 1건은 제가 직접 수정.
+
+     **높음 12건** — ①`collector_kospi200.py`: 종목 상세 파싱 260줄을 감싸던
+     단일 try/except가 재무제표 파싱 실패 시 이미 성공한 aside 스냅샷(PER/EPS/
+     PBR/상장주식수)까지 통째로 버리던 문제(H1) → 구획 A(aside)/구획 B(재무제표)로
+     try 분리. ②DPS 셀 파싱 실패(공백 포함 등)가 "무배당 확정"으로 오판정되던
+     문제(H2) → `dps_cell_parse_error` 플래그로 구분. ③배당수익률 **행이 있기만
+     하면**(값 유무 무관) 무배당 확정되던 `or` 버그(H3) → 재무제표 확인 +
+     배당수익률 명시적 N/A 둘 다 만족해야 확정. ④코스피·코스닥 시가총액 순위표
+     현재가/PER/ROE를 `cols[2]`/`cols[10]`/`cols[11]` 고정 인덱스로 읽던 것(H4,
+     SPEC §2-1 위반) → `extract_market_sum_column_indices()`로 헤더 라벨 기반
+     판정(가격 라벨 실패 시 페이지 실패로 처리해 기존 순위 무결성 가드 재사용).
+     ⑤`pegy_summary_history.json` 읽기 실패 시 `history=[]`로 몇 년치 이력을
+     1행으로 덮어쓰던 것(H5) → 손상 파일 백업 + 이력 갱신 스킵 + tmp/os.replace
+     원자적 쓰기. ⑥`__main__` 실행 순서가 "코스피200 수집(ETF/우선주 판정에
+     `kr_ticker_master.json` 필요) → 마스터 목록 생성" 순이라 항상 전날 파일
+     기준이었던 것(H6) → 마스터 목록을 먼저 만들도록 순서 교체 + 신선도 경고.
+     ⑦`scrape_daily.py`: `market_history.csv` 읽기 실패 시 `pd.DataFrame()`으로
+     몇 년치 이력을 1행으로 덮어쓰던 것(H7) → `RuntimeError`로 즉시 중단.
+     ⑧투자자별 매매동향(개인/외국인/기관) `cells[1]/[2]/[3]` 고정 인덱스 + 한 행
+     파싱 실패가 5페이지 순회 전체를 중단시키던 것(H8) → 헤더 라벨 기반 열 판정
+     (`extract_investor_flow_column_indices`) + 예외 범위를 행 단위/페이지
+     단위로 축소. ⑨`collector_dividend_kr.py`: `run_watch_disclosures()`가
+     `run_collection()`의 반환값(`completed` 여부)을 확인하지 않아 DART 예산
+     초과·차단으로 중단돼도 워터마크를 전진시켜 미확인 공시 구간을 영구히
+     놓치던 것(H9) → `completed=False`면 워터마크 미전진 + 사유 로그.
+     ⑩`collector_us_stocks.py`: `--limit N`(테스트용 부분 수집)이 가드 없이
+     프로덕션 스냅샷·이력을 덮어쓰던 것(H10) → `collector_dividend_kr.py`와
+     같은 `--allow-overwrite` 가드 도입. ⑪시총÷상장주식수로 역산한 종가에 범위
+     검증이 전혀 없던 것(H11) → 상식 범위 검증 + 그동안 저장만 하고 안 쓰던
+     `csv_price`와 교차대조. ⑫우선주 부모(보통주) 코드를 `code[:-1]+'0'` 문자열
+     추측만으로 확정해 DPS를 상속하던 것(H12) → `kr_ticker_master.json`에서 그
+     코드가 실제 보통주(STOCK)로 확인될 때만 상속.
+
+     **중간 14건·낮음 15건** — 매직넘버 상수화 다수, 죽은 코드 제거(`compute_
+     roic_premium()` — 이 파일은 ROIC 원천 데이터를 수집하지 않아 `roic`가 코드
+     어디서도 `None` 외의 값이었던 적이 없어 늘 0.0만 반환하던 경로, 소비부
+     `pegy_view.py`/`pegy_page.py`/`scoring.py`는 전부 `.get()` 안전 접근이라
+     키 제거로 인한 영향 없음 확인), 이력 중복 판정 입도 통일(분 단위→일 단위),
+     역산 대신 이미 가진 실측 전일 종가 재사용, `missing_labels` 중복 보고(별칭
+     라벨 둘 다 못 찾았을 때 필드 하나가 두 번 잡히던 것, 관련 테스트도 버그를
+     정답으로 인코딩하고 있던 것 함께 수정) 등. **M11**(DART 엔드포인트·매너
+     상수 8종이 `collector_dividend_kr.py`/`collector_dividend_payment_kr.py`
+     양쪽에 각각 하드코딩 — "완전히 독립적으로 두기 위함"이 근거였는데 두 파일
+     모두 이미 서로/`corp_code_mapper.py`를 import하고 있어 독립이 성립하지
+     않던 항목)은 서브에이전트 지시에서 실수로 빠뜨렸던 것을 발견해 제가 직접
+     `corp_code_mapper.py`로 이동·단일화(`DART_STATUS_MESSAGES`를 이미 그렇게
+     공유하는 것과 같은 방식) — 회귀 0건 재확인.
+
+     **의도적으로 손대지 않은 것** — M1(`enrich_quant_metrics()`, 591줄)/
+     M2(`scrape_and_update()`, 510줄)/M3(`fetch_naver_item_dps_and_eps()`,
+     300줄·10단 중첩) 3건은 순수 구조 리팩터(§0-1 위반 아님)이고, 실거래망
+     검증이 안 되는 샌드박스에서 손대기엔 파급범위가 커 백로그로 유예.
+
+     **검증** — 10개 파일(수집기 9개 + `utils/constants.py`·
+     `utils/macro_scoring.py`) 수정, 61건 회귀 테스트 신규(6개 파일). 오푸스
+     서브에이전트의 자체 보고를 그대로 신뢰하지 않고 이 대화방에서 직접
+     재검증(오너 요청 — "전체 검증은 이 채팅방에서 하고 싶다"): H1~H12·M4·
+     M13/M14·L15 전부 실제 수정 코드를 직접 읽고 로직·초기화·소비부(consumer)
+     안전성까지 확인. 커밋 `6ea3773`(Top-5 반영 직후) 기준으로 이번에 손댄 16개
+     파일(소스 10 + 테스트 6)만 `git show`로 복원해 전용 베이스라인을 재구성,
+     전체 테스트 스위트를 두 번(수정 전/후) 직접 실행해 FAILED/ERROR 테스트
+     ID 집합을 통째로 diff — 신규 실패 0건, 신규 통과 55건, 기존 실패 1건만
+     ERROR→FAILED로 상태가 이동(이 클라우드 검토용 사본에 없는 픽스처 파일이
+     원인이라 수정 전후 근본원인 동일). M11 격리 수정 추가 후에도 동일 diff로
+     회귀 0건 재확인.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26

@@ -108,6 +108,17 @@ RETURN_POP_LOOKBACK = 252
 RETURN_POP_MIN_SAMPLE = 60
 
 
+def clip(val):
+    """0.0~1.0 범위로 자릅니다(위험도 스케일의 상·하한).
+
+    2026-08-29 재감사 L3: scrape_daily.py 가 이 한 줄짜리 함수를 자기 파일 안에
+    따로 정의해 쓰고 있었습니다. 매크로 점수 계산 로직의 단일 출처가 이 모듈이므로
+    여기로 옮기고, scrape_daily.py 는 import 해서 씁니다.
+    (views/macro_view.py · web/pages/macro_page.py 안의 지역 사본은 별도 범위입니다.)
+    """
+    return min(1.0, max(0.0, val))
+
+
 def compute_population_stats(values, min_sample):
     """
     실측값 목록의 (평균, 표준편차)를 반환합니다. 표본이 min_sample 미만이거나 표준편차가

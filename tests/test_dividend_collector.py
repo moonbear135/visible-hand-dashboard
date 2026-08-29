@@ -30,6 +30,7 @@ _REPO_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 if _REPO_ROOT not in sys.path:
     sys.path.insert(0, _REPO_ROOT)
 
+from pathlib import Path                             # noqa: E402
 import corp_code_mapper as ccm                       # noqa: E402
 import collector_dividend_kr as cdk                  # noqa: E402
 
@@ -3705,6 +3706,12 @@ def watch_cli(tmp_path, monkeypatch):
         "apply_calls": [],
         "order": [],
         "today": fixed_now.date(),
+        # 2026-08-29 재감사 H9: run_collection() 은 중단돼도 예외 없이 completed=False 인
+        # summary 를 정상 반환합니다. 감시 모드 호출부가 그 값을 실제로 확인하는지 검증할 수
+        # 있도록, 가짜 run_collection 이 돌려줄 summary 를 테스트가 갈아끼울 수 있게 둡니다.
+        # 기본값은 '전수 완료'(예전 fake 가 돌려주던 빈 dict 는 completed 키 자체가 없어
+        # 이제 '미완료'로 읽힙니다 — 성공 시나리오를 뜻하려면 명시해야 합니다).
+        "run_summary": {"completed": True, "stopped_reason": None},
     }
 
     def fake_fetch(bgn_de, end_de, api_key, session=None, detail_types=None, log=print):
@@ -3716,7 +3723,7 @@ def watch_cli(tmp_path, monkeypatch):
         ctx["run_calls"].append({"universe": list(universe_codes), "year": year,
                                  "out_dir": delta_out_dir, "kwargs": kwargs})
         ctx["order"].append("run_collection")
-        return [], {}
+        return [], dict(ctx["run_summary"])
 
     def fake_apply(main_out_dir, delta_out_dir, year, **kwargs):
         ctx["apply_calls"].append({"main": main_out_dir, "delta": delta_out_dir,
@@ -4211,3 +4218,179 @@ def test_watch_end_to_end_does_not_disturb_the_main_checkpoint(watch_end_to_end)
               "--watch-disclosures"])
     assert os.path.exists(main_ckpt)
     assert open(main_ckpt, "rb").read() == before
+
+
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 (H9 / M9 / M10 / M12)
+# =============================================================================
+
+def test_watch_does_not_advance_watermark_when_delta_run_is_incomplete(watch_cli):
+    """
+    H9: 델타 수집이 전수 완료되지 않았으면 상태 파일(워터마크)을 전진시키면 안 됩니다.
+
+    run_collection() 은 중단돼도 예외 없이 completed=False 인 summary 를 정상 반환합니다.
+    예전 호출부는 그 반환값을 아예 받지 않아, 반영되지 않은 공시 구간이 "확인 끝"으로
+    기록되고 다음 실행이 그 구간을 다시 보지 않았습니다.
+    """
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    ctx["run_summary"] = {"completed": False, "stopped_reason": "요청 한도 초과"}
+
+    rc = cdk.main(_watch_argv(ctx))
+
+    assert rc == 2, "부분 실패는 조용히 성공(0)하면 안 됩니다"
+    assert not os.path.exists(ctx["state_path"]), "워터마크를 전진시키지 않아야 합니다"
+    # 델타 자체는 이미 반영합니다(부분 성공한 종목의 최신 값은 살립니다)
+    assert ctx["order"] == ["fetch", "run_collection", "apply_watch_update"]
+
+
+def test_watch_advances_watermark_only_when_delta_run_completed(watch_cli):
+    """H9 반대편: 전수 완료면 예전처럼 워터마크가 전진해야 합니다(회귀 방지)."""
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+    ctx["run_summary"] = {"completed": True, "stopped_reason": None}
+
+    assert cdk.main(_watch_argv(ctx)) == 0
+    assert os.path.exists(ctx["state_path"])
+
+
+def test_reaudit_shared_helpers_replace_duplicated_blocks():
+    """M9: merge/watch 의 순수 배관 4종이 공통 헬퍼로 뽑혀 있어야 합니다."""
+    assert callable(cdk._read_json_log)
+    assert callable(cdk._read_delta_raw_lines)
+    assert callable(cdk._combine_completion)
+    assert callable(cdk._num_add)
+    # 정책 차이(교체 vs 거부)는 각 함수에 그대로 남아 있어야 합니다 — 헬퍼로 뽑지 않았음
+    src = (Path(__file__).parent.parent / "collector_dividend_kr.py").read_text(encoding="utf-8")
+    assert "def merge_delta_output(" in src and "def apply_watch_update(" in src
+
+
+def test_reaudit_read_json_log_shares_one_implementation(tmp_path):
+    """M9-4: 키 이름만 다른 두 함수가 하나의 구현을 쓰는지."""
+    missing = str(tmp_path / "nope.json")
+    assert cdk._read_merge_log(missing) == {"merges": []}
+    assert cdk._read_watch_log(missing) == {"watches": []}
+    broken = tmp_path / "broken.json"
+    broken.write_text("{ not json", encoding="utf-8")
+    assert cdk._read_merge_log(str(broken)) == {"merges": []}
+    assert cdk._read_watch_log(str(broken)) == {"watches": []}
+    wrong_shape = tmp_path / "wrong.json"
+    wrong_shape.write_text('{"merges": "not a list"}', encoding="utf-8")
+    assert cdk._read_merge_log(str(wrong_shape)) == {"merges": []}
+
+
+def test_reaudit_num_add_is_a_single_shared_helper():
+    """M9-2: _num()/_num_add() 중복 제거 — 동작은 그대로."""
+    assert cdk._num_add(1, 2) == 3
+    assert cdk._num_add(1.5, 2) == 3.5
+    assert cdk._num_add(None, 2) is None
+    assert cdk._num_add(True, 2) is None, "bool 은 더하지 않습니다"
+    assert cdk._num_add(1, "x") is None
+
+
+def test_reaudit_combine_completion_keeps_per_function_labels():
+    """M9-3: 사유 문자열의 델타 라벨은 호출부가 정합니다(merge/watch 문구 유지)."""
+    ok, reason = cdk._combine_completion({"completed": True}, {"completed": True}, "델타 실행")
+    assert ok is True and reason is None
+    ok, reason = cdk._combine_completion(
+        {"completed": True}, {"completed": False, "stopped_reason": "차단"}, "감시 델타")
+    assert ok is False and "감시 델타 미완료(차단)" in reason
+    ok, reason = cdk._combine_completion(
+        {"completed": False}, {"completed": False}, "델타 실행")
+    assert "기존 실행 미완료(사유 미기록)" in reason and "델타 실행 미완료(사유 미기록)" in reason
+
+
+def test_reaudit_all_kind_specific_unspecified_fields_reach_the_record():
+    """M10: 4쌍 중 1개만 산출물에 실리던 것을 전부 싣습니다."""
+    parsed = {f"{m}_unspecified": f"v-{m}" for m in cdk._KIND_SPECIFIC_METRICS}
+    parsed.update({f"{m}_unspecified_all": [f"v-{m}"] for m in cdk._KIND_SPECIFIC_METRICS})
+    record = cdk.build_dividend_record(
+        stock_code="005930", corp_info={"corp_code": "00126380"}, bsns_year=2026,
+        reprt_code="11012", payload={}, parsed_now=parsed,
+        parsed_prev=None, parsed_prev2=None, status="OK", status_reason="")
+    for metric in cdk._KIND_SPECIFIC_METRICS:
+        assert record[f"{metric}_unspecified"] == f"v-{metric}", metric
+        assert record[f"{metric}_unspecified_all"] == [f"v-{metric}"], metric
+
+
+def test_reaudit_plausible_reprt_codes_uses_kst_not_utc(monkeypatch):
+    """M12: 제출기한 판정 기준일이 KST 여야 합니다(UTC 러너에서 하루 밀림 방지)."""
+    src = (Path(__file__).parent.parent / "collector_dividend_kr.py").read_text(encoding="utf-8")
+    body = src[src.index("def plausible_reprt_codes("):]
+    body = body[:body.index("\ndef ", 10)]
+    # 주석에는 "예전엔 date.today() 였다"는 기록이 남아 있으므로 코드 줄만 봅니다.
+    code_only = "\n".join(ln for ln in body.split("\n") if not ln.strip().startswith("#"))
+    assert "date.today()" not in code_only
+    assert "_now_kst().date()" in code_only
+
+    # KST 로 계산되는지 실제 확인: _now_kst 를 갈아끼우면 결과가 바뀌어야 합니다.
+    import datetime as _dt
+    calls = {"n": 0}
+
+    class _Fake:
+        @staticmethod
+        def date():
+            calls["n"] += 1
+            return _dt.date(2026, 1, 1)
+
+    monkeypatch.setattr(cdk, "_now_kst", lambda: _Fake)
+    cdk.plausible_reprt_codes(2026, priority=cdk.REPRT_CODE_PRIORITY)
+    assert calls["n"] == 1, "_now_kst() 로 기준일을 받아야 합니다"
+
+
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 — corp_code_mapper.py (L14)
+# =============================================================================
+
+def test_reaudit_parse_corpcode_zip_reports_invalid_entry_count():
+    """L14: corp_code 가 없어 버린 항목 수를 통계로 돌려줍니다."""
+    xml = ("<result>"
+           "<list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>"
+           "<stock_code>005930</stock_code><modify_date>20260101</modify_date></list>"
+           "<list><corp_name>코드없는회사</corp_name><stock_code>000000</stock_code></list>"
+           "<list><corp_name>또다른코드없는회사</corp_name></list>"
+           "</result>")
+    zip_bytes = _make_corpcode_zip(xml)
+
+    # 하위 호환: 기본 호출은 예전과 똑같이 리스트만 돌려줍니다.
+    entries = ccm.parse_corpcode_zip(zip_bytes)
+    assert isinstance(entries, list)
+    assert len(entries) == 1
+
+    entries2, stats = ccm.parse_corpcode_zip(zip_bytes, return_stats=True)
+    assert entries2 == entries
+    assert stats["total_list_nodes"] == 3
+    assert stats["invalid_entries"] == 2, "버린 항목 수가 통계에 실려야 합니다"
+
+
+def test_reaudit_invalid_entry_count_reaches_get_corp_code_index_stats(tmp_path, monkeypatch):
+    """L14: 그 값이 get_corp_code_index() 의 info['stats'] 와 요약 로그까지 도달해야 합니다."""
+    xml = ("<result>"
+           "<list><corp_code>00126380</corp_code><corp_name>삼성전자</corp_name>"
+           "<stock_code>005930</stock_code><modify_date>20260101</modify_date></list>"
+           "<list><corp_name>코드없는회사</corp_name></list>"
+           "</result>")
+    zip_bytes = _make_corpcode_zip(xml)
+    monkeypatch.setattr(ccm, "download_corpcode_zip", lambda **kw: zip_bytes)
+
+    lines = []
+    _index, info = ccm.get_corp_code_index(
+        str(tmp_path / "cache.json"), api_key="K", force_refresh=True, log=lines.append)
+
+    assert info["stats"]["invalid_entries"] == 1
+    assert info["stats"]["total_list_nodes"] == 2
+    assert any("corp_code 가 없어 제외한" in ln for ln in lines), "요약 로그에 한 줄 남아야 합니다"
+
+
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 — probe_indicator_universe_timing.py (L1)
+# =============================================================================
+
+def test_reaudit_probe_dead_fail_codes_removed():
+    """L1: 아무 데서도 쓰이지 않던 fail_codes 지역변수는 삭제되어야 합니다."""
+    src = (Path(__file__).parent.parent
+           / "probe_indicator_universe_timing.py").read_text(encoding="utf-8")
+    code_only = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
+    assert "fail_codes" not in code_only

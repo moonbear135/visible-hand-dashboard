@@ -111,13 +111,18 @@ US_INDEX_HISTORY_URL_TEMPLATE = "https://stockanalysis.com/etf/{symbol}/history/
 
 US_INDEX_HISTORY_FILENAME = "us_index_history.json"
 
-# (벤치마크 키, 화면 표기, 프록시 ETF 티커, 프록시 ETF 이름에서 확인할 문구(소문자 부분일치))
+# (벤치마크 키, 화면 표기, 프록시 ETF 티커)
 #   · 키 이름에 PROXY 와 실제 ETF 티커를 박아 둔 이유는 위 파일 상단 설명 참고(§0-1).
-#   · 확인 문구는 "소스가 바뀌어 엉뚱한 ETF 를 담는 것"을 막는 장치입니다. 기존
-#     `fetch_one_index_quote()` 가 'Index Tracked' 라벨로 하던 검증과 같은 목적입니다.
+#
+# ⚠️ 2026-08-29 재감사 L7: 네 번째 요소였던 `expected_phrase`(ETF 이름 부분일치 검증 문구)를
+# 제거했습니다. 2026-08-12 실응답 확인대로 **과거주가 엔드포인트에는 ETF 이름이 아예 없어**
+# `proxy_name` 이 항상 None 이고, 그래서 `proxy_name_verified` 도 항상 None 이었습니다.
+# 즉 그 검증 블록과 그에 딸린 경고 블록은 한 번도 실행된 적이 없는 도달 불가 코드였습니다.
+# 실제로 작동하는 검증은 응답이 스스로 말하는 티커 대조(source_symbol == proxy_symbol)뿐이라
+# 그것만 남깁니다 — "있는 척하는 검증"을 지우는 것이 §0-1 에 맞습니다.
 US_INDEX_BENCHMARKS = (
-    ("SP500_PROXY_SPY", "S&P 500 (SPY ETF 종가 기준)", "spy", "s&p 500"),
-    ("NASDAQ_PROXY_ONEQ", "나스닥 종합 (ONEQ ETF 종가 기준)", "oneq", "nasdaq composite"),
+    ("SP500_PROXY_SPY", "S&P 500 (SPY ETF 종가 기준)", "spy"),
+    ("NASDAQ_PROXY_ONEQ", "나스닥 종합 (ONEQ ETF 종가 기준)", "oneq"),
 )
 
 # 응답 한 행에서 쓰는 키(실응답에서 확인한 그대로). §2-1 정신대로 "몇 번째 열"이 아니라
@@ -292,13 +297,8 @@ def extract_source_info(decoded_nodes, block=None):
     return info
 
 
-def extract_proxy_name(decoded_nodes):
-    """
-    응답 안에서 ETF 이름을 찾습니다(예: "Fidelity Nasdaq Composite Index ETF").
-    소스가 바뀌어 엉뚱한 종목을 담는 사고를 막기 위한 확인용이며, 못 찾으면 None 입니다
-    (지어내지 않습니다 — 호출 쪽이 '확인 불가'로 기록합니다).
-    """
-    return extract_source_info(decoded_nodes)["proxy_name"]
+# (2026-08-29 재감사 L6: `extract_proxy_name()` 삭제 — 참조 0건인 죽은 함수였습니다.
+#  필요하면 `extract_source_info(...)["proxy_name"]` 을 직접 쓰면 됩니다.)
 
 
 def normalize_history_rows(rows):
@@ -417,7 +417,7 @@ def run_us_index_history_collector(data_dir=None, delay=True):
     print("=" * 70)
     print("[미국 벤치마크 일별 종가] 추종 ETF 프록시에서 수집합니다(지수 포인트 아님)")
 
-    for position, (key, label_ko, proxy_symbol, expected_phrase) in enumerate(US_INDEX_BENCHMARKS):
+    for position, (key, label_ko, proxy_symbol) in enumerate(US_INDEX_BENCHMARKS):
         if blocked:
             warnings.append(f"{key}: 앞선 요청이 차단돼 수집을 시도하지 않았습니다.")
             print(f"  ⏭️ {label_ko}: 앞선 차단으로 건너뜀")
@@ -459,17 +459,13 @@ def run_us_index_history_collector(data_dir=None, delay=True):
         # 엔드포인트에는 ETF 이름이 아예 없고(`{"symbol":"SPY", "source":"tiingo", …}`),
         # 이름으로만 검증하면 정상 응답에도 매번 거짓 경고가 붙습니다.
         source_symbol = source_info.get("source_symbol")
-        proxy_name = source_info.get("proxy_name")
         symbol_verified = (source_symbol == proxy_symbol.upper()) if source_symbol else None
         entry["source_symbol"] = source_symbol
         entry["source_provider"] = source_info.get("source_provider")
         entry["source_updated"] = source_info.get("source_updated")
         entry["proxy_symbol_verified"] = symbol_verified
-        entry["proxy_name"] = proxy_name
-        # 이름은 응답에 없을 수 있어 **있을 때만** 검증합니다(없으면 None = 확인 불가).
-        entry["proxy_name_verified"] = (
-            expected_phrase in proxy_name.lower() if proxy_name else None
-        )
+        # (2026-08-29 재감사 L7: proxy_name / proxy_name_verified 기반 검증 제거 —
+        #  이 엔드포인트 응답에 ETF 이름이 없어 항상 None 이라 도달 불가였습니다.)
         if symbol_verified is False:
             note = (f"응답이 말하는 티커가 요청과 다릅니다"
                     f"(요청 {proxy_symbol.upper()} / 응답 {source_symbol!r}) — 확인 필요")
@@ -477,11 +473,6 @@ def run_us_index_history_collector(data_dir=None, delay=True):
             print(f"  ⚠️ {label_ko}: {note}")
         elif symbol_verified is None:
             note = "응답에서 티커를 찾지 못해 종목 확인을 하지 못했습니다(값은 그대로 저장)"
-            warnings.append(f"{key}: {note}")
-            print(f"  ⚠️ {label_ko}: {note}")
-        if entry["proxy_name_verified"] is False:
-            note = (f"프록시 ETF 이름이 기대 문구('{expected_phrase}')를 포함하지 않습니다"
-                    f"(실제: {proxy_name!r}) — 소스가 바뀌었을 수 있어 확인 필요")
             warnings.append(f"{key}: {note}")
             print(f"  ⚠️ {label_ko}: {note}")
 
@@ -509,11 +500,15 @@ def run_us_index_history_collector(data_dir=None, delay=True):
         print(f"  ✅ {label_ko}: 응답 {len(rows)}행 / 신규 {added}일 / 누적 {len(merged)}일 "
               f"(최신 {entry['last_date']} = {merged.get(entry['last_date'])})")
 
-    if not fetched_any:
-        print("⚠️ 한 지수도 수집하지 못해 파일을 건드리지 않습니다(기존 값 그대로 유지).")
-        print("=" * 70)
-        return None
-
+    # =========================================================================
+    # ⚠️ 2026-08-29 재감사 L8: 두 지수가 **모두** 실패한 날은 예전엔 파일을 아예 건드리지
+    # 않고 끝냈습니다. 그런데 위 실패 처리 경로들은 실패 사유를 `entry["last_error"]` 와
+    # `warnings` 에 **메모리 안에서만** 담아 두므로, 그 사유가 어디에도 남지 않고 사라졌습니다.
+    # 파일만 보면 "어제 값 그대로 = 아무 일 없었음"과 구분이 안 됩니다.
+    # 이제 **기존 closes(가격 이력)는 한 글자도 건드리지 않고** 실패 사유(last_error)와
+    # metadata.warnings 만 갱신해 저장합니다
+    # (collector_us_stocks.py 의 metadata.failed_tickers 패턴과 같은 취지).
+    # =========================================================================
     os.makedirs(resolved_dir, exist_ok=True)
     json_path = os.path.join(resolved_dir, US_INDEX_HISTORY_FILENAME)
     payload = {
@@ -525,6 +520,10 @@ def run_us_index_history_collector(data_dir=None, delay=True):
             "close_kind": "unadjusted_close",
             "source_blocked": blocked,
             "warnings": warnings,
+            # 2026-08-29 재감사 L8: 이번 실행에서 종가를 한 건이라도 새로 받았는지.
+            # False 면 아래 closes 는 **이전 실행에서 쌓인 값 그대로**이고, 각 지수의
+            # last_error 에 이번 실패 사유가 들어 있습니다.
+            "fetched_any": fetched_any,
             "description": (
                 "리포트 모듈용 미국 벤치마크 일별 종가. ⚠️ 지수 포인트가 아니라 추종 ETF"
                 "(SPY=S&P500, ONEQ=나스닥종합)의 미조정 종가입니다 — 기간 수익률 비교 용도."
@@ -534,7 +533,11 @@ def run_us_index_history_collector(data_dir=None, delay=True):
     }
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
-    print(f"[미국 벤치마크] 저장 완료 -> {json_path}")
+    if fetched_any:
+        print(f"[미국 벤치마크] 저장 완료 -> {json_path}")
+    else:
+        print("⚠️ 한 지수도 수집하지 못했습니다 — 기존 종가는 그대로 두고 실패 사유만 "
+              f"기록했습니다(metadata.fetched_any=False) -> {json_path}")
     print("=" * 70)
     return json_path
 
@@ -561,8 +564,7 @@ def cmd_show(_args):
         print(f"  · {key:<20} {entry.get('label_ko')}")
         print(f"      프록시 {entry.get('proxy_symbol')} (응답 티커 {entry.get('source_symbol')}"
               f" / 공급자 {entry.get('source_provider')}) "
-              f"티커검증={entry.get('proxy_symbol_verified')} "
-              f"이름검증={entry.get('proxy_name_verified')}")
+              f"티커검증={entry.get('proxy_symbol_verified')}")
         print(f"      {entry.get('first_date')} ~ {last} / {len(closes)}일 "
               f"/ 최신 종가 {closes.get(last)}")
         if entry.get("last_error"):

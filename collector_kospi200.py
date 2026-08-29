@@ -44,7 +44,6 @@ from utils.constants import (
     TARGET_PER_CAP,
     TARGET_PRICE_CAP_MULTIPLE,
     ROE_PREMIUM_BASELINE_PCT,
-    ROIC_PREMIUM_BASELINE_PCT,
     VALUE_TRAP_ROE_PCT,
 )
 # 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
@@ -102,6 +101,18 @@ VOL_PENALTY_MIN = 1.05               # 기준선을 살짝 넘었을 때 최소 
 VOL_PENALTY_MAX = 1.40               # 변동성이 매우 큰 경우 최대 벌점 배수(상한)
 VOL_PENALTY_SEVERITY_CAP_PCT = 10.0  # 기준선 대비 +10%p 초과분부터는 최대 벌점으로 고정(윈저라이즈)
 
+# 2026-08-29 재감사 M5: yfinance PER 교차검증 표본 수(상단 N개 종목).
+# 근거: 전 종목(500개) 교차검증은 외부 API 호출 비용·소요시간이 커서 감당이 안 되고,
+# 이 검증의 목적은 "우리 파싱이 통째로 틀어졌는지"를 잡는 것이라 상위 표본이면 충분합니다.
+# (예전엔 함수 안에 `idx < 15` 매직넘버로 박혀 있어 근거도 조정 지점도 없었습니다.)
+YFINANCE_CROSS_CHECK_TOP_N = 15
+
+# 2026-08-29 재감사 L13: 그레이엄 공식 제외 대상인 금융업종 판정 키워드.
+# ⚠️ 업종 코드 데이터를 수집하지 않아 **종목명 키워드 기반 추정**입니다 — 오탐(이름에
+# 키워드가 있는 비금융사)과 누락(키워드가 없는 금융사)이 모두 가능합니다. 로직 자체는
+# 그대로 두고 매직 리터럴만 상수화한 것입니다(TASK_HISTORY 참고).
+FINANCIAL_SECTOR_NAME_KEYWORDS = ['은행', '금융지주', '보험', '증권', '캐피탈']
+
 
 def compute_vol_penalty(vol_std):
     """
@@ -143,10 +154,10 @@ ROE_PREMIUM_MIN = -0.10           # SPEC §5-2 기존 하한 유지
 ROE_PREMIUM_UPSIDE_RANGE_PCT = 18.0    # 기준선 +18%p(=ROE 30%)에서 최대 프리미엄
 ROE_PREMIUM_DOWNSIDE_RANGE_PCT = 12.0  # 기준선 -12%p(=ROE 0%)에서 최대 디스카운트
 
-ROIC_PREMIUM_MAX = 0.10           # SPEC §5-2 기존 상한 유지
-ROIC_PREMIUM_MIN = -0.05          # SPEC §5-2 기존 하한 유지
-ROIC_PREMIUM_UPSIDE_RANGE_PCT = 15.0   # 기준선 +15%p(=ROIC 25%)에서 최대 프리미엄
-ROIC_PREMIUM_DOWNSIDE_RANGE_PCT = 10.0 # 기준선 -10%p(=ROIC 0%)에서 최대 디스카운트
+# 2026-08-29 재감사 M4: ROIC 프리미엄 상수/함수는 제거했습니다. 이 파일은 ROIC 원천
+# 데이터(영업이익·투하자본)를 수집하지 않아 roic 가 코드 어디에서도 None 외의 값으로
+# 대입된 적이 없고, compute_roic_premium() 은 항상 0.0 만 반환하는 죽은 경로였습니다.
+# (미국 쪽은 실제로 ROIC를 수집하므로 utils/scoring_us.py 의 ROIC 프리미엄은 살아 있습니다.)
 
 
 def _linear_premium(value, baseline, up_range, down_range, prem_max, prem_min):
@@ -171,15 +182,6 @@ def compute_roe_premium(f_roe):
         f_roe, ROE_PREMIUM_BASELINE_PCT,
         ROE_PREMIUM_UPSIDE_RANGE_PCT, ROE_PREMIUM_DOWNSIDE_RANGE_PCT,
         ROE_PREMIUM_MAX, ROE_PREMIUM_MIN
-    )
-
-
-def compute_roic_premium(roic):
-    """ROIC(%) → 목표가 품질 프리미엄(-0.05 ~ +0.10). 실측 없으면 0.0(중립)."""
-    return _linear_premium(
-        roic, ROIC_PREMIUM_BASELINE_PCT,
-        ROIC_PREMIUM_UPSIDE_RANGE_PCT, ROIC_PREMIUM_DOWNSIDE_RANGE_PCT,
-        ROIC_PREMIUM_MAX, ROIC_PREMIUM_MIN
     )
 
 
@@ -462,7 +464,14 @@ def run_kr_all_market_prices_collector(data_dir=None, max_pages_per_market=120):
 
 
 def _empty_item_info(error_msg):
-    """종목 상세 수집 실패 시 반환 구조 (모든 수치는 None = '데이터 없음')"""
+    """종목 상세 수집 실패 시 반환 구조 (모든 수치는 None = '데이터 없음').
+
+    ⚠️ 2026-08-29 재감사 H1: 이 dict의 키 집합은 정상 반환 dict와 **완전히 동일**해야 합니다.
+    예전엔 `div_yield_row_found` 등이 빠져 있어, 소비부가 `item["div_yield_row_found"]` 처럼
+    직접 접근하면 실패 경로에서만 KeyError가 났습니다. 이제 이 함수는 페이지 요청 자체가
+    실패한 경우(응답 없음/상태코드 이상)에만 쓰이며, 파싱 도중 일부만 실패한 경우는
+    fetch_naver_item_dps_and_eps() 가 이미 구한 값을 그대로 살려서 반환합니다.
+    """
     return {
         "t_per": None, "t_eps": None, "f_per": None, "f_eps": None,
         "div_yield": None, "dps": None, "outstanding_shares": None,
@@ -470,6 +479,8 @@ def _empty_item_info(error_msg):
         # 2026-08-06 2차 감사 1-4: '무배당 확정'과 '수집 실패'를 절대 같은 값으로 섞지 않습니다.
         "dps_status": "not_collected",
         "dps_inherited_from": None,
+        "div_yield_row_found": False,
+        "div_yield_row_explicit_na": False,
         "errors": [error_msg]
     }
 
@@ -495,7 +506,7 @@ _EV_EBITDA_FAILURE_THRESHOLD = 8
 _ev_ebitda_circuit = {"consecutive_failures": 0, "open": False, "skipped_count": 0}
 
 
-def fetch_naver_item_dps_and_eps(code):
+def fetch_naver_item_dps_and_eps(code, ticker_types=None):
     """
     네이버 증권 종목 상세 페이지(item/main.naver)의 우측 Investment Info 스냅샷 및
     주요 재무제표 표에서 TIMEFRAME_KEYWORDS 사전을 기반으로 동적 키워드 헤더 타겟팅을 적용합니다.
@@ -504,6 +515,15 @@ def fetch_naver_item_dps_and_eps(code):
     반환: dict — 파싱하지 못한 항목은 반드시 None 이며, 실패 사유는 errors 리스트에 누적됩니다.
     f_roe: "주요재무제표" 표의 연간 추정(E) 컬럼(예: 2026.12(E))에서 뽑은 Forward ROE 컨센서스.
     (2026-08-06 추가 — 진단 로그로 존재 확인 후 실제 추출 로직으로 전환. 추가 크롤링 요청 없음.)
+
+    ticker_types: 2026-08-29 재감사 H12. 우선주 DPS를 보통주에서 상속할 때, 추측으로 만든
+    부모 코드가 실제로 마스터 목록에 존재하는 보통주(type == "STOCK")인지 검증하는 데 씁니다.
+    None이면 모듈 캐시(_get_ticker_types_cached())를 씁니다.
+
+    ⚠️ 2026-08-29 재감사 H1: 파싱 구획(aside 스냅샷 / 재무제표 / EV/EBITDA / 우선주 상속)마다
+    자기 try/except를 두어, 한 구획이 실패해도 나머지 구획이 이미 구한 값은 그대로 살립니다.
+    예전엔 하나의 광역 try 가 전부를 감싸고 있어서, 재무제표 표 하나가 없으면 aside에서 이미
+    정상적으로 읽은 PER/EPS/상장주식수까지 통째로 버려졌습니다(부분 성공 폐기).
     """
     url = f"https://finance.naver.com/item/main.naver?code={code}"
     headers = {
@@ -529,20 +549,34 @@ def fetch_naver_item_dps_and_eps(code):
     if not res or res.status_code != 200:
         return _empty_item_info(f"종목 상세 페이지 응답 코드 이상: {getattr(res, 'status_code', 'NO_RESPONSE')}")
 
+    # =========================================================
+    # 2026-08-29 재감사 H1: 반환용 변수를 전부 여기서 미리 초기화합니다.
+    # 어느 파싱 구획에서 실패하든, 그 전까지 성공한 값은 자동으로 보존됩니다.
+    # =========================================================
+    t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
+    t_pbr, ev_ebitda, f_roe = None, None, None
+    raw_period = None          # 실제 파싱한 헤더에서 판정한 수집 기간 (검증 1단계 입력)
+    outstanding_shares = None
+    parsed_dps = None
+    # 기본값은 항상 '수집 실패'입니다 — 아래에서 실제로 확인했을 때만 상태를 올립니다.
+    dps_status = "not_collected"
+    dps_inherited_from = None
+    # 2026-08-06 2차 감사 1-4: 배당수익률 '행 자체가 있었는지'를 기록해 둡니다.
+    # 행이 있는데 숫자가 없으면(N/A) '무배당'이고, 행 자체가 없으면 '수집 실패'입니다.
+    div_yield_row_found = False
+    # 2026-08-29 재감사 H3: '행이 있었다'와 '행이 있는데 값이 명시적으로 비어 있었다(N/A)'는
+    # 전혀 다른 사실입니다. 무배당 확정 근거로 쓸 수 있는 건 후자뿐입니다.
+    div_yield_row_explicit_na = False
+    # 2026-08-29 재감사 H2: DPS 셀 파싱 오류가 한 번이라도 있었으면 '무배당 확정'으로
+    # 승격하지 않습니다(파싱 실패를 '배당 없음'이라는 실측 사실로 둔갑시키지 않음).
+    dps_cell_parse_error = False
+    errors = []
+
     try:
         soup = BeautifulSoup(res.text, 'html.parser')
 
-        t_per, t_eps, f_per, f_eps, div_yield = None, None, None, None, None
-        t_pbr, ev_ebitda, f_roe = None, None, None
-        raw_period = None          # 실제 파싱한 헤더에서 판정한 수집 기간 (검증 1단계 입력)
-        errors = []
-
         # 1. 1차 출처: 우측 Investment Info 공식 스냅샷
         aside = soup.select_one('div.aside_invest_info')
-        outstanding_shares = None
-        # 2026-08-06 2차 감사 1-4: 배당수익률 '행 자체가 있었는지'를 기록해 둡니다.
-        # 행이 있는데 숫자가 없으면(N/A) '무배당'이고, 행 자체가 없으면 '수집 실패'입니다.
-        div_yield_row_found = False
         # =========================================================
         # 2026-08-06 2차 감사 1-1: 정규식에 `-?`를 추가해 마이너스 부호를 캡처합니다.
         # 네이버는 적자 기업의 PER·EPS를 음수로 표기하는데(예: "-49.26배 l -6,851원"),
@@ -551,155 +585,184 @@ def fetch_naver_item_dps_and_eps(code):
         # 양쪽 다 날아가 항상 통과했기 때문에 검증 하네스도 못 잡았습니다.
         # =========================================================
         per_eps_pattern = r'(-?[\d\.,]+)배\s*l\s*(-?[\d\.,]+)원'
-        if aside:
-            for tr in aside.find_all('tr'):
-                text = tr.text.strip().replace('\n', ' ')
-                if 'PERlEPS' in text and '추정' not in text and '동일업종' not in text:
-                    per_match = re.search(per_eps_pattern, text)
-                    if per_match:
-                        t_per = float(per_match.group(1).replace(',', ''))
-                        t_eps = int(float(per_match.group(2).replace(',', '')))
-                        # 실제 헤더 라벨에서 기간을 판정 (하드코딩 "TTM" 전달 금지)
-                        label_match = re.match(r'^(.*?)\s*-?[\d\.,]+배', text)
-                        raw_label = label_match.group(1).strip() if label_match else text
-                        if re.search(r'\(\d{4}\.\d{2}\)', raw_label):
-                            # 네이버의 'PER|EPS(YYYY.MM)' 는 해당 분기까지의 최근 4분기 합산(TTM) 지표
-                            raw_period = "TTM"
+        # -------------------------------------------------------------
+        # 구획 A: aside 스냅샷 파싱 (2026-08-29 재감사 H1 — 자기 try/except)
+        # 실패해도 이 구획이 만드는 값만 초기값(None/False)으로 남기고, 재무제표·
+        # EV/EBITDA·우선주 상속 등 나머지 구획은 그대로 이어서 실행합니다.
+        # -------------------------------------------------------------
+        try:
+            if aside:
+                for tr in aside.find_all('tr'):
+                    text = tr.text.strip().replace('\n', ' ')
+                    if 'PERlEPS' in text and '추정' not in text and '동일업종' not in text:
+                        per_match = re.search(per_eps_pattern, text)
+                        if per_match:
+                            t_per = float(per_match.group(1).replace(',', ''))
+                            t_eps = int(float(per_match.group(2).replace(',', '')))
+                            # 실제 헤더 라벨에서 기간을 판정 (하드코딩 "TTM" 전달 금지)
+                            label_match = re.match(r'^(.*?)\s*-?[\d\.,]+배', text)
+                            raw_label = label_match.group(1).strip() if label_match else text
+                            if re.search(r'\(\d{4}\.\d{2}\)', raw_label):
+                                # 네이버의 'PER|EPS(YYYY.MM)' 는 해당 분기까지의 최근 4분기 합산(TTM) 지표
+                                raw_period = "TTM"
+                            else:
+                                raw_period = DataValidator.classify_header_timeframe(raw_label)
+                    elif '추정PERlEPS' in text:
+                        per_match = re.search(per_eps_pattern, text)
+                        if per_match:
+                            f_per = float(per_match.group(1).replace(',', ''))
+                            f_eps = int(float(per_match.group(2).replace(',', '')))
+                    elif 'PBRlBPS' in text:
+                        # BPS(자본총계)가 음수인 자본잠식 기업은 PBR도 음수로 표기되므로 부호를 보존합니다.
+                        pbr_match = re.search(r'(-?[\d\.,]+)배', text)
+                        if pbr_match:
+                            t_pbr = pbr_match.group(1).replace(',', '')
+                    elif '배당수익률' in text:
+                        div_yield_row_found = True
+                        yield_match = re.search(r'([\d\.,]+)%', text)
+                        if yield_match:
+                            div_yield = float(yield_match.group(1).replace(',', ''))
                         else:
-                            raw_period = DataValidator.classify_header_timeframe(raw_label)
-                elif '추정PERlEPS' in text:
-                    per_match = re.search(per_eps_pattern, text)
-                    if per_match:
-                        f_per = float(per_match.group(1).replace(',', ''))
-                        f_eps = int(float(per_match.group(2).replace(',', '')))
-                elif 'PBRlBPS' in text:
-                    # BPS(자본총계)가 음수인 자본잠식 기업은 PBR도 음수로 표기되므로 부호를 보존합니다.
-                    pbr_match = re.search(r'(-?[\d\.,]+)배', text)
-                    if pbr_match:
-                        t_pbr = pbr_match.group(1).replace(',', '')
-                elif '배당수익률' in text:
-                    div_yield_row_found = True
-                    yield_match = re.search(r'([\d\.,]+)%', text)
-                    if yield_match:
-                        div_yield = float(yield_match.group(1).replace(',', ''))
-                elif '상장주식수' in text:
-                    # 파싱 sanity range check: 상장주식수는 최소 100만 주 이상이어야 함.
-                    # (구 버전은 첫 번째 숫자를 그대로 집어 외국인소진율 등 다른 필드를
-                    #  상장주식수로 오인했고, 200종목 중 197종목이 조용히 오염되었음)
-                    shares_text = text.split('상장주식수')[-1].strip()
-                    candidates = []
-                    for raw_num in re.findall(r'\d[\d,]*', shares_text):
-                        try:
-                            candidates.append(int(raw_num.replace(',', '')))
-                        except ValueError:
-                            continue
-                    plausible = [c for c in candidates if c >= MIN_OUTSTANDING_SHARES]
-                    if plausible:
-                        outstanding_shares = max(plausible)
-                    else:
-                        outstanding_shares = None
-                        errors.append(f"상장주식수 파싱 실패 (후보값={candidates})")
-
-        # 2. 2차 출처: 주요 재무제표 동적 키워드 타겟팅 (하드코딩 및 iloc 인덱스 금지)
-        dfs = pd.read_html(res.text, encoding='euc-kr')
-        fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
-        parsed_dps = None
-        # 기본값은 항상 '수집 실패'입니다 — 아래에서 실제로 확인했을 때만 상태를 올립니다.
-        dps_status = "not_collected"
-        dps_inherited_from = None
-        if fin_df_list:
-            fin_df = fin_df_list[0]
-
-            # =========================================================
-            # 2026-08-06 추가: Forward ROE 컨센서스 — 진단 로그(2026-08-06 밤)로 이 표에
-            # "2026.12(E)" 같은 연간 추정 컬럼 + "ROE(지배주주)" 행이 함께 존재함을 확인했습니다.
-            # 이미 fetch 중인 페이지에서 그대로 뽑아내는 것이라 추가 크롤링 요청이 없습니다.
-            # DataValidator.classify_header_timeframe()이 반환하는 "ANNUAL_EST"(연간+추정)
-            # 컬럼만 동적으로 골라 쓰며(iloc 위치 고정 금지, 기존 원칙 그대로), 분기 추정치
-            # (예: 2026.06(E))는 여기 안 들어가도록 명확히 구분됩니다.
-            # =========================================================
-            annual_est_cols = []
-            for idx, col in enumerate(fin_df.columns):
-                if DataValidator.classify_header_timeframe(col) == "ANNUAL_EST":
-                    annual_est_cols.append(idx)
-
-            f_roe = None
-            for _di in range(len(fin_df)):
-                _row_label = str(fin_df.iloc[_di, 0])
-                if 'ROE' in _row_label.upper():
-                    for col_i in annual_est_cols:
-                        try:
-                            v_str = str(fin_df.iloc[_di, col_i]).replace(',', '').strip()
-                            if v_str in ('', 'nan', '-', 'ㅡ', '−'):
+                            # 2026-08-29 재감사 H3: 행은 있는데 숫자가 없다(N/A 등)는
+                            # '명시적으로 배당수익률이 비어 있다'는 뜻입니다. 행 존재
+                            # 여부(div_yield_row_found)만으로는 이걸 구분할 수 없어,
+                            # 무배당 확정 근거로 쓸 수 있는 플래그를 따로 둡니다.
+                            div_yield_row_explicit_na = True
+                    elif '상장주식수' in text:
+                        # 파싱 sanity range check: 상장주식수는 최소 100만 주 이상이어야 함.
+                        # (구 버전은 첫 번째 숫자를 그대로 집어 외국인소진율 등 다른 필드를
+                        #  상장주식수로 오인했고, 200종목 중 197종목이 조용히 오염되었음)
+                        shares_text = text.split('상장주식수')[-1].strip()
+                        candidates = []
+                        for raw_num in re.findall(r'\d[\d,]*', shares_text):
+                            try:
+                                candidates.append(int(raw_num.replace(',', '')))
+                            except ValueError:
                                 continue
-                            v = float(v_str)
-                            # 반도체 등 경기순환 업종은 실제로 극단적인 추정 ROE가 나올 수 있어
-                            # 값 자체를 지우지 않되, 상식 밖 범위(±300% 초과)만 데이터 오염
-                            # 의심으로 제외합니다(PER 이상치 가드레일과 동일한 취지).
-                            if abs(v) > 300.0:
-                                errors.append(f"Forward ROE 컨센서스 이상치 의심(범위 초과, {v}%) — 제외")
-                                continue
-                            f_roe = v
-                            break
-                        except (ValueError, TypeError, IndexError):
-                            continue
-                    break
-            if f_roe is None:
-                errors.append("Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)")
+                        plausible = [c for c in candidates if c >= MIN_OUTSTANDING_SHARES]
+                        if plausible:
+                            outstanding_shares = max(plausible)
+                        else:
+                            outstanding_shares = None
+                            errors.append(f"상장주식수 파싱 실패 (후보값={candidates})")
+        except Exception as _aside_err:
+            errors.append(f"aside 투자정보 스냅샷 파싱 실패: {_aside_err} — 이 구획 값만 미수집, 나머지는 계속 진행")
 
-            # 동적 헤더 시계열 분류
-            annual_cols = []
-            for idx, col in enumerate(fin_df.columns):
-                tf_type = DataValidator.classify_header_timeframe(col)
-                if tf_type in ["TTM", "ANNUAL_TTM"]:
-                    annual_cols.append(idx)
-                    
-            if not annual_cols:
-                # SPEC §2-1 위치 인덱스(iloc) 폴백 절대 금지.
-                # 연간 컬럼을 키워드로 특정하지 못하면 분기 데이터를 연간으로 오인할 수 있으므로
-                # 추정하지 않고 DPS 미수집(None)으로 남깁니다.
-                errors.append("재무제표 연간 컬럼 헤더 분류 실패 → DPS 수집 생략")
+        # -------------------------------------------------------------
+        # 구획 B: 주요재무제표 파싱 (2026-08-29 재감사 H1 — 자기 try/except)
+        # pd.read_html() 은 표가 하나도 없으면 ValueError 를 던집니다. 예전엔 그게
+        # 함수 전체의 광역 except 로 튀어올라 aside에서 이미 읽은 PER/EPS/PBR/
+        # 상장주식수까지 통째로 버려졌습니다. 이제 이 구획이 만드는 값
+        # (f_roe / dps / dps_status)만 미수집으로 남고 나머지는 계속 진행합니다.
+        # -------------------------------------------------------------
+        try:
+            # 2. 2차 출처: 주요 재무제표 동적 키워드 타겟팅 (하드코딩 및 iloc 인덱스 금지)
+            dfs = pd.read_html(res.text, encoding='euc-kr')
+            fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
+            if fin_df_list:
+                fin_df = fin_df_list[0]
 
-            # =========================================================
-            # 2026-08-06 2차 감사 1-4: 배당 수집 결과를 3가지 상태로 명확히 구분합니다.
-            #   collected            : 재무제표에서 양수 DPS를 실제로 읽음
-            #   no_dividend_confirmed: '주당배당금' 행을 찾았고 연간 컬럼이 전부 '-'/0 → 무배당 확정
-            #   not_collected        : 행/연간컬럼 자체를 못 찾음 → 값을 모르는 상태
-            # 예전에는 이 셋이 전부 dps=0 / "no_dividend_or_not_collected" 하나로 뭉개져서,
-            # 수집 실패한 종목이 "실측된 저배당"으로 20점 만점 중 3점을 받고 있었습니다.
-            # =========================================================
-            dps_row_found = False
-            dps_all_annual_cells_blank = True
-            for i, row in fin_df.iterrows():
-                row_str = ' '.join([str(x) for x in row.values])
-                if '주당배당금' in row_str and parsed_dps is None:
-                    dps_row_found = True
-                    for col_i in reversed(annual_cols):
-                        try:
-                            v_str = str(row.values[col_i]).replace(',', '').strip()
-                            # 네이버는 배당이 없는 해에 셀을 '-'로 표시합니다. 이건 파싱 실패가
-                            # 아니라 "배당 없음"이라는 뜻이므로, 에러로 기록하지 않고 조용히 건너뜁니다.
-                            if v_str in ('', 'nan', '-', 'ㅡ', '−'):
-                                continue
-                            v = float(v_str)
-                            dps_all_annual_cells_blank = False   # 숫자 셀을 실제로 읽었음
-                            if v > 0:
-                                parsed_dps = int(v)
+                # =========================================================
+                # 2026-08-06 추가: Forward ROE 컨센서스 — 진단 로그(2026-08-06 밤)로 이 표에
+                # "2026.12(E)" 같은 연간 추정 컬럼 + "ROE(지배주주)" 행이 함께 존재함을 확인했습니다.
+                # 이미 fetch 중인 페이지에서 그대로 뽑아내는 것이라 추가 크롤링 요청이 없습니다.
+                # DataValidator.classify_header_timeframe()이 반환하는 "ANNUAL_EST"(연간+추정)
+                # 컬럼만 동적으로 골라 쓰며(iloc 위치 고정 금지, 기존 원칙 그대로), 분기 추정치
+                # (예: 2026.06(E))는 여기 안 들어가도록 명확히 구분됩니다.
+                # =========================================================
+                annual_est_cols = []
+                for idx, col in enumerate(fin_df.columns):
+                    if DataValidator.classify_header_timeframe(col) == "ANNUAL_EST":
+                        annual_est_cols.append(idx)
+
+                f_roe = None
+                for _di in range(len(fin_df)):
+                    _row_label = str(fin_df.iloc[_di, 0])
+                    if 'ROE' in _row_label.upper():
+                        for col_i in annual_est_cols:
+                            try:
+                                v_str = str(fin_df.iloc[_di, col_i]).replace(',', '').strip()
+                                if v_str in ('', 'nan', '-', 'ㅡ', '−'):
+                                    continue
+                                v = float(v_str)
+                                # 반도체 등 경기순환 업종은 실제로 극단적인 추정 ROE가 나올 수 있어
+                                # 값 자체를 지우지 않되, 상식 밖 범위(±300% 초과)만 데이터 오염
+                                # 의심으로 제외합니다(PER 이상치 가드레일과 동일한 취지).
+                                if abs(v) > 300.0:
+                                    errors.append(f"Forward ROE 컨센서스 이상치 의심(범위 초과, {v}%) — 제외")
+                                    continue
+                                f_roe = v
                                 break
-                        except (ValueError, TypeError, IndexError) as e:
-                            errors.append(f"DPS 셀 파싱 실패(col={col_i}): {e}")
+                            except (ValueError, TypeError, IndexError):
+                                continue
+                        break
+                if f_roe is None:
+                    errors.append("Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)")
 
-            if parsed_dps is not None and parsed_dps > 0:
-                dps_status = "collected"
-            elif dps_row_found and annual_cols and dps_all_annual_cells_blank:
-                # 연간 컬럼을 다 훑었는데 전부 '-' → 네이버 표기상 "배당 없음" 확정
-                dps_status = "no_dividend_confirmed"
-            elif dps_row_found and annual_cols:
-                # 숫자는 있었는데 전부 0 이하 → 이것도 무배당 확정
-                dps_status = "no_dividend_confirmed"
-            else:
-                dps_status = "not_collected"
-                errors.append("주당배당금(DPS) 행/연간 컬럼을 찾지 못했습니다 — 배당 미수집(무배당과 구분)")
+                # 동적 헤더 시계열 분류
+                annual_cols = []
+                for idx, col in enumerate(fin_df.columns):
+                    tf_type = DataValidator.classify_header_timeframe(col)
+                    if tf_type in ["TTM", "ANNUAL_TTM"]:
+                        annual_cols.append(idx)
+                    
+                if not annual_cols:
+                    # SPEC §2-1 위치 인덱스(iloc) 폴백 절대 금지.
+                    # 연간 컬럼을 키워드로 특정하지 못하면 분기 데이터를 연간으로 오인할 수 있으므로
+                    # 추정하지 않고 DPS 미수집(None)으로 남깁니다.
+                    errors.append("재무제표 연간 컬럼 헤더 분류 실패 → DPS 수집 생략")
+
+                # =========================================================
+                # 2026-08-06 2차 감사 1-4: 배당 수집 결과를 3가지 상태로 명확히 구분합니다.
+                #   collected            : 재무제표에서 양수 DPS를 실제로 읽음
+                #   no_dividend_confirmed: '주당배당금' 행을 찾았고 연간 컬럼이 전부 '-'/0 → 무배당 확정
+                #   not_collected        : 행/연간컬럼 자체를 못 찾음 → 값을 모르는 상태
+                # 예전에는 이 셋이 전부 dps=0 / "no_dividend_or_not_collected" 하나로 뭉개져서,
+                # 수집 실패한 종목이 "실측된 저배당"으로 20점 만점 중 3점을 받고 있었습니다.
+                # =========================================================
+                dps_row_found = False
+                dps_all_annual_cells_blank = True
+                for i, row in fin_df.iterrows():
+                    row_str = ' '.join([str(x) for x in row.values])
+                    if '주당배당금' in row_str and parsed_dps is None:
+                        dps_row_found = True
+                        for col_i in reversed(annual_cols):
+                            try:
+                                v_str = str(row.values[col_i]).replace(',', '').strip()
+                                # 네이버는 배당이 없는 해에 셀을 '-'로 표시합니다. 이건 파싱 실패가
+                                # 아니라 "배당 없음"이라는 뜻이므로, 에러로 기록하지 않고 조용히 건너뜁니다.
+                                if v_str in ('', 'nan', '-', 'ㅡ', '−'):
+                                    continue
+                                v = float(v_str)
+                                dps_all_annual_cells_blank = False   # 숫자 셀을 실제로 읽었음
+                                if v > 0:
+                                    parsed_dps = int(v)
+                                    break
+                            except (ValueError, TypeError, IndexError) as e:
+                                # 2026-08-29 재감사 H2: 여기서 예외가 나면 그 셀은 '읽지 못한'
+                                # 것이지 '비어 있는' 것이 아닙니다. 예전엔 이 경우에도
+                                # dps_all_annual_cells_blank 가 True 로 남아 파싱 실패가
+                                # '무배당 확정'이라는 실측 사실로 승격됐습니다.
+                                dps_cell_parse_error = True
+                                errors.append(f"DPS 셀 파싱 실패(col={col_i}): {e}")
+
+                if parsed_dps is not None and parsed_dps > 0:
+                    dps_status = "collected"
+                elif dps_cell_parse_error:
+                    # 2026-08-29 재감사 H2: 셀 파싱 오류가 하나라도 있었으면 무배당 확정 불가.
+                    dps_status = "not_collected"
+                    errors.append("DPS 셀 파싱 오류가 있어 무배당 확정 불가 — 미수집(not_collected) 처리")
+                elif dps_row_found and annual_cols and dps_all_annual_cells_blank:
+                    # 연간 컬럼을 다 훑었는데 전부 '-' → 네이버 표기상 "배당 없음" 확정
+                    dps_status = "no_dividend_confirmed"
+                elif dps_row_found and annual_cols:
+                    # 숫자는 있었는데 전부 0 이하 → 이것도 무배당 확정
+                    dps_status = "no_dividend_confirmed"
+                else:
+                    dps_status = "not_collected"
+                    errors.append("주당배당금(DPS) 행/연간 컬럼을 찾지 못했습니다 — 배당 미수집(무배당과 구분)")
+        except Exception as _fin_err:
+            errors.append(f"주요재무제표 파싱 실패: {_fin_err} — DPS/Forward ROE 미수집, 나머지는 계속 진행")
 
         # EV/EBITDA (Naver WiseReport) 추가 스크래핑
         # 2026-08-27 신설 — 서킷브레이커: 이 도메인이 연속으로 응답을 안 하면(연결 타임아웃 등)
@@ -769,32 +832,52 @@ def fetch_naver_item_dps_and_eps(code):
         # "이 우선주의 실측 DPS"처럼 보였습니다(우선주는 보통주보다 배당이 높은 게
         # 일반적이라 실제로 과소평가되는 값입니다).
         # =========================================================
-        if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
-            parent_code = code[:-1] + '0'
-            parent_info = fetch_naver_item_dps_and_eps(parent_code)
-            p_dps = parent_info.get("dps")
-            if p_dps and p_dps > 0:
-                parsed_dps = p_dps
-                dps_status = "inherited_from_common"
-                dps_inherited_from = parent_code
-                errors.append(f"우선주 DPS를 보통주({parent_code})에서 상속 — 실측 아님(우선주 배당은 통상 더 높음)")
+        # ⚠️ 2026-08-29 재감사 H12: 부모 코드는 `code[:-1] + '0'` 으로 **추측**한 값입니다.
+        # 예전엔 이 추측 코드를 검증 없이 그대로 크롤링해 DPS를 상속했습니다 — 그 코드가
+        # 실제로는 다른 회사이거나 ETF여도 알 길이 없었습니다. 이제 마스터 목록에서
+        # type == "STOCK" 으로 확인된 경우에만 상속합니다(확인 못 하면 상속하지 않고
+        # not_collected 유지 — 값을 지어내지 않음, §0-1).
+        try:
+            if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
+                parent_code = code[:-1] + '0'
+                types = ticker_types if ticker_types is not None else _get_ticker_types_cached()
+                if types.get(parent_code) == "STOCK":
+                    parent_info = fetch_naver_item_dps_and_eps(parent_code, ticker_types=types)
+                    p_dps = parent_info.get("dps")
+                    if p_dps and p_dps > 0:
+                        parsed_dps = p_dps
+                        dps_status = "inherited_from_common"
+                        dps_inherited_from = parent_code
+                        errors.append(f"우선주 DPS를 보통주({parent_code})에서 상속 — 실측 아님(우선주 배당은 통상 더 높음)")
+                else:
+                    errors.append(
+                        f"우선주 DPS 상속 보류 — 추정 부모 코드({parent_code})가 마스터 목록의 "
+                        f"보통주(STOCK)로 확인되지 않음(type={types.get(parent_code)!r})"
+                    )
+        except Exception as _pref_err:
+            errors.append(f"우선주 DPS 상속 처리 실패: {_pref_err}")
 
-        return {
-            "t_per": t_per, "t_eps": t_eps, "f_per": f_per, "f_eps": f_eps,
-            "div_yield": div_yield, "dps": parsed_dps,
-            "outstanding_shares": outstanding_shares,
-            "t_pbr": t_pbr, "ev_ebitda": ev_ebitda, "f_roe": f_roe,
-            "raw_period": raw_period,
-            "dps_status": dps_status,
-            "dps_inherited_from": dps_inherited_from,
-            "div_yield_row_found": div_yield_row_found,
-            "errors": errors
-        }
     except Exception as e:
+        # 최후 방어선: 위 개별 구획 try 들이 잡지 못한 완전히 예상 밖의 예외.
+        # 함수 진입부에서 반환용 변수를 전부 초기화해 두었으므로, 여기까지 왔더라도
+        # 그 시점까지 성공적으로 파싱된 값은 아래 반환 dict에 그대로 살아 있습니다.
         print("FETCH_ERROR:", e)
         import traceback
         traceback.print_exc()
-        return _empty_item_info(f"종목 상세 파싱 예외: {e}")
+        errors.append(f"종목 상세 파싱 예외: {e}")
+
+    return {
+        "t_per": t_per, "t_eps": t_eps, "f_per": f_per, "f_eps": f_eps,
+        "div_yield": div_yield, "dps": parsed_dps,
+        "outstanding_shares": outstanding_shares,
+        "t_pbr": t_pbr, "ev_ebitda": ev_ebitda, "f_roe": f_roe,
+        "raw_period": raw_period,
+        "dps_status": dps_status,
+        "dps_inherited_from": dps_inherited_from,
+        "div_yield_row_found": div_yield_row_found,
+        "div_yield_row_explicit_na": div_yield_row_explicit_na,
+        "errors": errors
+    }
 
 def load_ticker_types(path=None):
     """반환: {code: "STOCK"|"ETF"|...} (data/kr_ticker_master.json 기준).
@@ -816,6 +899,104 @@ def load_ticker_types(path=None):
         print(f"⚠️ {path} 를 읽지 못했습니다: {e}")
         return {}
     return {s["code"]: s.get("type") for s in data.get("stocks", []) if s.get("code")}
+
+
+# 2026-08-29 재감사 H12: 우선주 부모 코드 검증용 캐시.
+# fetch_naver_item_dps_and_eps() 가 종목마다 호출되므로, 마스터 파일을 매번 다시 읽지
+# 않도록 이번 실행 동안 한 번만 읽어 재사용합니다(호출부가 ticker_types를 넘겨주면 그걸 우선).
+_ticker_types_cache = {"loaded": False, "value": {}}
+
+
+def get_ticker_master_generated_date(path=None):
+    """data/kr_ticker_master.json 의 metadata.generated_at 앞 10글자(YYYY-MM-DD)만 돌려줍니다.
+    파일이 없거나 못 읽으면 None(경고를 못 찍을 뿐, 별도 에러로 취급하지 않음).
+    collector_indicator_kr.py::get_price_list_generated_date() 와 같은 규약입니다."""
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "data", KR_TICKER_MASTER_FILENAME)
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        generated_at = data.get("metadata", {}).get("generated_at", "")
+        return generated_at[:10] if generated_at else None
+    except Exception:
+        return None
+
+
+def _warn_ticker_master_staleness():
+    """2026-08-29 재감사 H6: 마스터 목록이 오늘 자가 아니면 한 줄 경고를 남깁니다.
+    차단하지는 않습니다 — 기존 파일이라도 있으면 ETF 판정은 되고, 없는 것보다 낫습니다."""
+    today_str = datetime.now().strftime("%Y-%m-%d")
+    generated_date = get_ticker_master_generated_date()
+    if generated_date is None:
+        print(f"  ⚠️ data/{KR_TICKER_MASTER_FILENAME} 을 읽지 못했습니다 — ETF 판정·우선주 부모 "
+              "검증에 쓸 종목 타입을 확인할 수 없어, 확인 못 한 후보는 전부 걸러집니다(안전한 쪽으로).")
+    elif generated_date != today_str:
+        print(f"  ⚠️ data/{KR_TICKER_MASTER_FILENAME} 이 {generated_date}자 스냅샷입니다(오늘 "
+              f"{today_str}과 다름) — 오늘 신규 상장/폐지된 종목은 ETF 판정·우선주 부모 검증에 "
+              "반영되지 않습니다.")
+
+
+def _get_ticker_types_cached():
+    if not _ticker_types_cache["loaded"]:
+        _ticker_types_cache["value"] = load_ticker_types()
+        _ticker_types_cache["loaded"] = True
+    return _ticker_types_cache["value"]
+
+
+def extract_market_sum_column_indices(table):
+    """
+    네이버 시가총액 순위표(table.type_2)의 헤더 행에서 '현재가'/'PER'/'ROE' 열의 위치를
+    **라벨로** 찾아 {"price": i, "per": j, "roe": k} 형태로 돌려줍니다.
+
+    ⚠️ 2026-08-29 재감사 H4: 예전엔 cols[2](현재가)·cols[10](PER)·cols[11](ROE)로 위치를
+    고정 인덱싱했습니다. 네이버가 컬럼을 하나만 넣거나 빼도 조용히 다른 숫자를 가격·PER·
+    ROE로 읽어 들이고, 그 값이 그대로 순위·PEGY·목표가에 들어갑니다(SPEC §2-1 위치 인덱스
+    금지 위반). collector_us_stocks.py 의 라벨 기반 추출과 같은 원칙으로 헤더에서 찾습니다.
+
+    라벨을 못 찾은 필드는 **키 자체를 넣지 않습니다** — 호출부는 값을 지어내지 말고
+    미수집(None)으로 처리해야 합니다(위치 인덱스 폴백 금지).
+    """
+    header_cells = []
+    thead = table.select_one('thead')
+    if thead is not None:
+        header_row = thead.select_one('tr')
+        if header_row is not None:
+            header_cells = header_row.select('th, td')
+    if not header_cells:
+        # thead 가 없는 마크업 대비: 헤더 역할을 하는 첫 <th> 행을 찾습니다.
+        for r in table.select('tr'):
+            th_cells = r.select('th')
+            if th_cells:
+                header_cells = th_cells
+                break
+
+    indices = {}
+    for i, cell in enumerate(header_cells):
+        label = cell.get_text(strip=True).replace(' ', '')
+        if not label:
+            continue
+        upper = label.upper()
+        if "price" not in indices and '현재가' in label:
+            indices["price"] = i
+        if "per" not in indices and 'PER' in upper:
+            indices["per"] = i
+        if "roe" not in indices and 'ROE' in upper:
+            indices["roe"] = i
+    return indices
+
+
+def _cell_float(cols, idx):
+    """cols[idx] 를 float 로 파싱. 인덱스가 없거나(라벨 미발견) 범위를 벗어나거나
+    숫자가 아니면 None — 절대 다른 열의 값으로 대체하지 않습니다."""
+    if idx is None or idx >= len(cols):
+        return None
+    try:
+        return float(cols[idx].text.strip().replace(',', ''))
+    except (ValueError, AttributeError):
+        return None
+
 
 def fetch_kospi200_real_market_data():
     """
@@ -904,6 +1085,24 @@ def fetch_kospi200_real_market_data():
                 time.sleep(random.uniform(2.0, 3.0))
                 continue
 
+            # 2026-08-29 재감사 H4: 헤더 라벨로 열 위치를 판정합니다. 표는 페이지마다 다시
+            # 로드되므로 페이지마다 확인합니다(비용이 무시할 수준이고, 같은 시장 안에서
+            # 구조가 달라지면 그것 자체가 이상 신호라 매번 보는 편이 안전합니다).
+            col_idx = extract_market_sum_column_indices(table)
+            if "price" not in col_idx:
+                # 가격 열조차 라벨로 특정하지 못하면 이 페이지는 해석 불가입니다.
+                # 위치 인덱스로 폴백해 엉뚱한 열을 가격으로 읽는 대신(§2-1) 페이지 실패로
+                # 기록해, 아래 순위 무결성 검사가 "순위가 밀렸다"를 잡아내게 합니다.
+                msg = "시가총액 표 헤더에서 '현재가' 열을 찾지 못함 — 위치 인덱스 폴백 금지"
+                print(f"🚨 {market_label} 시가총액 {page}페이지 {msg}")
+                failed_pages.append({"market": market_label, "page": page, "error": msg})
+                time.sleep(random.uniform(2.0, 3.0))
+                continue
+            if "per" not in col_idx:
+                print(f"⚠️ {market_label} {page}페이지: 헤더에서 'PER' 열을 찾지 못해 PER 미수집(None) 처리합니다.")
+            if "roe" not in col_idx:
+                print(f"⚠️ {market_label} {page}페이지: 헤더에서 'ROE' 열을 찾지 못해 ROE 미수집(None) 처리합니다.")
+
             try:
                 rows = table.select('tr')
                 for r in rows:
@@ -932,21 +1131,13 @@ def fetch_kospi200_real_market_data():
                     if ticker_types.get(code) != "STOCK":
                         continue
 
-                    try:
-                        price = float(cols[2].text.strip().replace(',', ''))
-                    except ValueError:
-                        price = 0.0
+                    # 2026-08-29 재감사 H4: 전부 헤더 라벨로 찾은 인덱스를 씁니다.
+                    parsed_price = _cell_float(cols, col_idx.get("price"))
+                    price = parsed_price if parsed_price is not None else 0.0
 
                     # 시총 리스트의 PER/ROE 는 파싱 실패 시 임의 대체값을 넣지 않고 None 으로 둡니다.
-                    try:
-                        t_per = float(cols[10].text.strip().replace(',', ''))
-                    except ValueError:
-                        t_per = None
-
-                    try:
-                        t_roe = float(cols[11].text.strip().replace(',', ''))
-                    except ValueError:
-                        t_roe = None
+                    t_per = _cell_float(cols, col_idx.get("per"))
+                    t_roe = _cell_float(cols, col_idx.get("roe"))
 
                     if price <= 0 or not code:
                         continue
@@ -1138,12 +1329,16 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
 
         # =========================================================
         # 우선주 ROE 상속: ROE=0이고 우선주로 판별되면 보통주 ROE 사용
-        # 우선주 판별 기준: 코드 끝자리 5(1우), 7(2우B), K, L 또는 종목명에 '우' 포함
+        # 우선주 판별 기준: 코드 끝자리 5(1우), 7(2우B), K, L
         # ⚠️ 2026-08-06 2차 감사 1-7: 상속받은 값은 '이 종목의 실측치'가 아니므로 반드시
         # 마킹합니다(예전엔 아무 흔적 없이 실측값처럼 저장·표시됐습니다).
         # =========================================================
         t_roe_inherited_from = None
-        is_preferred = code[-1] in ('5', '7', 'K', 'L') or ('우' in name and name != code)
+        # ⚠️ 2026-08-29 재감사 L12: 이름 부분일치(`'우' in name`) 조건을 제거했습니다.
+        # 한국 상장 종목코드 체계에서 우선주는 끝자리 5/7/K/L 로 판정하는 것이 표준이고,
+        # 종목명에 '우'가 들어가는 보통주(예: '우리금융지주', '동우…')를 우선주로 오탐해
+        # 엉뚱한 보통주 ROE를 상속시키는 부작용만 있었습니다.
+        is_preferred = code[-1] in ('5', '7', 'K', 'L')
         if (t_roe is None or t_roe == 0) and is_preferred:
             parent_key = code[:5]
             inherited_roe = common_roe_lookup.get(parent_key)
@@ -1248,7 +1443,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         #   전제가 잘 안 맞습니다. 계산 자체는 하되 화면에 강한 경고 배지를 붙입니다.
         # =========================================================
         graham_target = None
-        graham_is_financial_sector = any(kw in name for kw in ['은행', '금융지주', '보험', '증권', '캐피탈'])
+        graham_is_financial_sector = any(kw in name for kw in FINANCIAL_SECTOR_NAME_KEYWORDS)
         try:
             t_pbr_val = float(t_pbr) if t_pbr not in (None, '') else None
         except (ValueError, TypeError):
@@ -1279,6 +1474,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         # =========================================================
         item_dps_status = item.get("dps_status", "not_collected")
         div_yield_row_found = bool(item.get("div_yield_row_found"))
+        div_yield_row_explicit_na = bool(item.get("div_yield_row_explicit_na"))
         dps_source = None
         dps_inherited_from = None
         if real_dps and real_dps > 0:
@@ -1294,9 +1490,16 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         elif n_div_yield and n_div_yield > 0 and price > 0:
             dps = int(price * (n_div_yield / 100.0))
             dps_source = "derived_from_div_yield"
-        elif item_dps_status == "no_dividend_confirmed" or div_yield_row_found:
+        elif item_dps_status == "no_dividend_confirmed" and div_yield_row_explicit_na:
             # 재무제표 '주당배당금' 행을 실제로 확인했고 값이 없음 → 무배당 확정.
-            # (배당수익률 행이 페이지에 있는데 숫자가 없는 경우도 네이버 표기상 '배당 없음'입니다.)
+            # ⚠️ 2026-08-29 재감사 H3: 예전 조건은
+            #   `item_dps_status == "no_dividend_confirmed" or div_yield_row_found`
+            # 였습니다. div_yield_row_found 는 aside 표에 '배당수익률' 행이 **있기만 하면**
+            # True 라(숫자가 있든 없든) 사실상 모든 종목에서 True 였고, or 로 묶여 있어
+            # 재무제표를 못 읽은 종목까지 전부 '무배당 확정(dps=0)'으로 채점됐습니다.
+            # 이제 ⓐ 재무제표에서 실제로 전부 비었음을 확인했고(H2 덕분에 파싱 오류가
+            # 있으면 이 상태가 되지 않습니다) ⓑ 배당수익률 행도 명시적으로 비어 있을 때
+            # (N/A) 두 근거가 모두 갖춰진 경우에만 무배당으로 확정합니다.
             dps = 0
             dps_source = "no_dividend_confirmed"
         else:
@@ -1345,14 +1548,15 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         # 2026-08-06: Forward ROE는 네이버 "주요재무제표" 표의 연간 추정(E) 컬럼에서 실측
         # (fetch_naver_item_dps_and_eps 에서 이미 파싱 — 추가 크롤링 요청 없음). 컨센서스
         # 커버리지가 없는 종목은 그대로 None → '데이터 없음' 유지(지어내지 않음).
-        # ROIC는 영업이익/투하자본 별도 계산이 필요한 원천 데이터를 수집하지 않으므로 계속 None.
-        # (구 버전: f_roe = t_roe × 1.12, roic = t_roe × 0.88, 실패 시 8.5 / 6.8 상수 — 전부 제거됨)
+        # (구 버전: f_roe = t_roe × 1.12, 실패 시 8.5 상수 — 전부 제거됨)
+        # 2026-08-29 재감사 M4: ROIC는 원천 데이터(영업이익·투하자본)를 아예 수집하지 않아
+        # 값이 항상 None 이었습니다. 항상 0을 반환하는 프리미엄 계산과, 모든 종목에 무조건
+        # 붙던 "ROIC 컨센서스 미수집" data_issues 문자열(= 500종목 전부에 같은 문구)을
+        # 함께 제거했습니다. 실제로 수집하게 되면 그때 다시 넣습니다(§0-1).
         # =========================================================
         f_roe = item.get("f_roe")
         if f_roe is None:
             data_issues.append("Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)")
-        roic = None
-        data_issues.append("ROIC 컨센서스 미수집 (원천 데이터 없음, 스코어링 제외)")
 
         # =========================================================
         # 성장률(growth): 네이버 실측 '추정 EPS' 와 'TTM EPS' 의 실제 증감률로 산출합니다.
@@ -1382,9 +1586,14 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
 
         # yfinance 오차 교차검증 — 검증 미수행과 '이상 없음'을 구분 (None = 검증 불가)
         per_discrepancy = None
-        if idx < 15 and HAS_YFINANCE and f_per:
+        if idx < YFINANCE_CROSS_CHECK_TOP_N and HAS_YFINANCE and f_per:
+            # ⚠️ 2026-08-29 재감사 M5: 예전엔 접미사가 `.KS`(코스피)로 하드코딩돼 있었습니다.
+            # 2026-08-26에 수집 대상이 코스닥까지 넓어졌는데, 코스닥 종목을 `.KS`로 조회하면
+            # yfinance가 다른 종목을 주거나(동일 코드가 양쪽에 있을 경우) 빈 값을 줍니다.
+            # market 이 없어 확실하지 않으면 원래 기본값이던 코스피(.KS)로 시도합니다.
+            yf_suffix = ".KQ" if s.get("market") == "KOSDAQ" else ".KS"
             try:
-                ticker = yf.Ticker(f"{code}.KS")
+                ticker = yf.Ticker(f"{code}{yf_suffix}")
                 info = ticker.info
                 y_f_pe = info.get("forwardPE")
                 if y_f_pe and f_per > 0:
@@ -1430,12 +1639,11 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
 
         # =========================================================
         # 목표주가(f_target) — ENGINEERING_SPEC §5-2 와 동일하게 캡 적용.
-        # f_roe / roic 가 None 이면 품질 프리미엄을 적용할 근거가 없으므로 0으로 둡니다.
+        # f_roe 가 None 이면 품질 프리미엄을 적용할 근거가 없으므로 0으로 둡니다.
         # 2026-08-06 2차 감사 1-2: 프리미엄을 절벽(if >= 12.0)이 아니라 기준선 대비
         # 절대거리 선형 스케일링으로 산출합니다(compute_roe_premium 주석 참고).
         # =========================================================
         roe_prem = compute_roe_premium(f_roe)
-        roic_prem = compute_roic_premium(roic)
 
         # =========================================================
         # 2026-08-06 2차 감사 1-3: 캡에 걸렸다는 흔적을 반드시 남깁니다.
@@ -1448,7 +1656,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         f_target_uncapped = None
         target_per_capped = False
         if f_eps and growth_eff and growth_eff > 0:
-            target_pegy = 1.0 * (1.0 + roe_prem + roic_prem)
+            target_pegy = 1.0 * (1.0 + roe_prem)
             raw_target_per = target_pegy * growth_eff
             target_per = min(raw_target_per, TARGET_PER_CAP)          # SPEC §5-2: 25배 Cap
             target_per_capped = raw_target_per > TARGET_PER_CAP
@@ -1552,7 +1760,6 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             # 우선주가 보통주 ROE를 상속받은 경우의 출처(실측 아님) — 2차 감사 1-7
             "t_roe_inherited_from": t_roe_inherited_from,
             "f_roe": f_roe,
-            "roic": roic,
             "dps": dps,
             "dps_source": dps_source,
             "dps_inherited_from": dps_inherited_from,
@@ -1588,7 +1795,6 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             "target_per": round(target_per, 2) if target_per is not None else None,
             "target_per_capped": target_per_capped,
             "roe_premium": roe_prem,
-            "roic_premium": roic_prem,
             "vol": vol,
             "vol_std": vol_std,
             "vol_penalty": vol_penalty,
@@ -1712,8 +1918,28 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
         try:
             with open(history_path, "r", encoding="utf-8") as f:
                 history = json.load(f)
-        except Exception:
-            history = []
+        except Exception as e:
+            # =========================================================
+            # ⚠️ 2026-08-29 재감사 H5: 예전엔 `except Exception: history = []` 로 조용히
+            # 넘어가 이 파일을 1행짜리 새 파일로 덮어썼습니다 — 누적 이력 전체가 로그
+            # 한 줄 없이 사라지는 경로였습니다. 이제 손상된 파일을 백업해 두고 경고를
+            # 남긴 뒤, 이번 실행에서는 **이력 갱신 자체를 건너뜁니다**. 스냅샷 저장은
+            # 이 함수 호출 전에 이미 끝나 있으므로 핵심 수집 결과에는 영향이 없습니다.
+            # (collector_dividend_payment_kr.py 의 read_payment_events() /
+            #  DartPaymentFatalError 와 같은 원칙 — 못 읽은 채로 새로 쓰지 않는다.)
+            # =========================================================
+            backup_path = f"{history_path}.corrupt.{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+            try:
+                os.replace(history_path, backup_path)
+                moved = f" 손상 파일을 {backup_path} 로 백업했습니다."
+            except Exception as be:
+                moved = f" (손상 파일 백업도 실패: {be})"
+            print(
+                f"🚨 {history_path} 를 읽지 못했습니다({type(e).__name__}: {e})."
+                f"{moved} 지금까지 쌓인 요약 이력을 덮어써 잃지 않도록 이번 실행에서는 "
+                "이력 갱신을 건너뜁니다(스냅샷 저장은 이미 완료됨)."
+            )
+            return
 
     new_record = {
         "date": meta_date,
@@ -1726,12 +1952,29 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
         "pegy_sample_count": len(pegy_list)
     }
 
-    # 동일 시각 중복 기록 방지 후 누적 저장을 위해 이력 추가
-    history = [h for h in history if h.get("date") != meta_date]
+    # =========================================================
+    # 2026-08-29 재감사 M6: 중복 판정 입도를 **일 단위**로 맞춥니다.
+    # meta_date 는 "YYYY-MM-DD HH:MM" 처럼 분 단위 문자열이라, 예전 비교
+    # (`h.get("date") != meta_date`)는 같은 날 두 번 실행하면 서로 다른 값으로 보여
+    # 하루에 여러 행이 쌓였습니다(종목별 시계열 이력 기록은 일 단위라 두 이력 파일의
+    # 입도가 서로 달랐습니다). 과거 레코드가 분 단위 문자열로 저장돼 있어도 안전하도록
+    # 비교할 때 양쪽 다 앞 10자리(YYYY-MM-DD)만 씁니다.
+    # =========================================================
+    def _day_key(value):
+        return str(value)[:10] if value else ""
+
+    new_record["collected_at"] = meta_date   # 분 단위 원본 타임스탬프는 별도 필드로 보존
+    day = _day_key(meta_date)
+    history = [h for h in history if _day_key(h.get("date")) != day]
     history.append(new_record)
 
-    with open(history_path, "w", encoding="utf-8") as f:
+    # 2026-08-29 재감사 H5: tmp → os.replace 원자적 교체.
+    # (collector_dividend_payment_kr.py::_atomic_write_json() 와 같은 방식 —
+    #  쓰다 만 파일이 남아 다음 실행에서 '손상 파일'이 되는 일을 막습니다.)
+    tmp_path = f"{history_path}.tmp"
+    with open(tmp_path, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
+    os.replace(tmp_path, history_path)
 
     print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
 
@@ -1744,6 +1987,12 @@ def run_kospi200_collector():
     참고). 실제 담기는 데이터만 코스피+코스닥 통합으로 바뀝니다.
     """
     print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피+코스닥 통합 시가총액 상위 500 100% 실데이터 수집 시작...")
+
+    # 2026-08-29 재감사 L11: EV/EBITDA 서킷브레이커는 모듈 전역이라 같은 프로세스에서
+    # 이 함수를 두 번 부르면 지난 실행의 열린 상태가 그대로 남습니다(테스트·배치 재실행).
+    # 실행 단위로 초기 상태를 복원합니다.
+    _ev_ebitda_circuit.clear()
+    _ev_ebitda_circuit.update({"consecutive_failures": 0, "open": False, "skipped_count": 0})
 
     data_dir = os.path.join(os.path.dirname(__file__), "data")
     os.makedirs(data_dir, exist_ok=True)
@@ -1813,6 +2062,11 @@ def run_kospi200_collector():
             # 2차 감사 1-5: 순위 출처가 불완전했는지 여부(뒤쪽 페이지 실패 등)를 그대로 남깁니다.
             "rank_source_incomplete": bool(failed_pages),
             "rank_source_failed_pages": failed_pages,
+            # 2026-08-29 재감사 L11: 서킷브레이커가 열려 EV/EBITDA 요청을 건너뛴 종목 수.
+            # 예전엔 이 카운터를 올리기만 하고 아무도 읽지 않아, "오늘 EV/EBITDA가 왜 이렇게
+            # 많이 비었지?"를 사후에 확인할 방법이 없었습니다.
+            "ev_ebitda_skipped_count": _ev_ebitda_circuit.get("skipped_count", 0),
+            "ev_ebitda_circuit_open": bool(_ev_ebitda_circuit.get("open")),
             # 상태 판정에 쓴 임계값도 함께 저장해 나중에 "왜 DEGRADED였지?"를 추적할 수 있게 합니다.
             "valid_ratio_thresholds": {
                 "success": VALID_RATIO_SUCCESS,
@@ -1873,13 +2127,25 @@ def run_kospi200_collector():
     return json_path
 
 if __name__ == "__main__":
-    run_kospi200_collector()
-    # 2026-08-11(TASK_HISTORY #83): 핵심 수집(위 줄)이 끝난 뒤 별도로 실행합니다 — 이 보조
-    # 목록 수집이 실패해도(FDR API 변경 등) 이미 저장된 핵심 스냅샷은 절대 건드리지 않습니다.
+    # =========================================================
+    # ⚠️ 2026-08-29 재감사 H6: 마스터 목록(kr_ticker_master.json)을 **먼저** 만듭니다.
+    # 예전 순서는 코스피200 수집 → 마스터 목록 → 전 종목 종가 였습니다. 그런데 코스피200
+    # 수집의 ETF 판정·우선주 부모 검증이 바로 그 마스터 파일을 읽으므로, 항상 '전날 파일'
+    # 기준으로 판정하고 있었습니다(첫 실행에서는 파일이 아예 없어 전 종목이 걸러짐).
+    # 이 보조 수집이 실패해도(FDR API 변경 등) 기존 파일이 있으면 그대로 쓰게 되므로
+    # try/except 로 감싸 두는 기존 설계는 그대로 유지합니다(TASK_HISTORY #83).
+    # =========================================================
     try:
         run_kr_ticker_master_collector()
     except Exception as e:
         print(f"⚠️ [전체 상장종목 목록] 수집 중 예외 발생(핵심 수집 결과에는 영향 없음): {e}")
+
+    # 마스터 파일 신선도 확인 — 오늘 자가 아니면(생성 실패로 어제 파일이 남았거나 파일 없음)
+    # ETF 판정·우선주 부모 검증이 낡은 목록 기준이라는 사실을 로그로 명시합니다
+    # (collector_indicator_kr.py 의 유니버스 신선도 경고와 같은 취지).
+    _warn_ticker_master_staleness()
+
+    run_kospi200_collector()
     # 2026-08-11(TASK_HISTORY #84): 마찬가지로 핵심 수집과 완전히 독립 — 실패해도 위 두 단계
     # 결과는 그대로 유지됩니다. 페이지가 많아(코스피+코스닥 전체) 몇 분 더 걸립니다.
     try:

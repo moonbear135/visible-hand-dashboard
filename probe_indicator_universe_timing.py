@@ -115,7 +115,8 @@ def print_report(result, days):
         for code, reason in result["failures"][:10]:
             print(f"  {code}: {reason}")
         # 연속 실패가 후반부에 몰려있으면 = 네이버가 짧은 간격 요청을 막기 시작했다는 신호
-        fail_codes = {c for c, _ in result["failures"]}
+        # (2026-08-29 재감사 L1: 여기서 만들던 `fail_codes` 집합은 아래 print 에서도, 이 함수
+        #  어디에서도 쓰이지 않는 죽은 변수였습니다 — 1회성 진단 스크립트라 그냥 삭제합니다.)
         print("\n  ⚠️ 실패가 뒤로 갈수록(뒷번호 종목일수록) 몰려있다면, 네이버가 짧은 "
               "간격의 반복 요청을 중간부터 막기 시작했다는 신호일 수 있습니다 — "
               "그렇다면 delay를 늘려서 다시 실측해보세요.")

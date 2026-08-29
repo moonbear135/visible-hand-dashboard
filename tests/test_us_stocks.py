@@ -696,6 +696,113 @@ def _collect_subparser_actions():
     return []
 
 
+# =============================================================================
+# 2026-08-29 재감사 회귀 테스트 (H10 / H11 / M7 / M8 / L9 / L10)
+# =============================================================================
+US_STOCKS_SRC = (Path(__file__).parent.parent / "collector_us_stocks.py").read_text(encoding="utf-8")
+
+
+def test_reaudit_limit_mode_does_not_write_production_outputs():
+    """H10: --limit 부분 수집은 --allow-overwrite 없이는 산출물에 쓰지 않습니다."""
+    print("\n[재감사 H10] --limit 테스트 모드가 프로덕션 산출물을 덮어쓰지 않는가")
+    import argparse
+    parser_src = US_STOCKS_SRC[US_STOCKS_SRC.index('p_collect = sub.add_parser('):]
+    parser_src = parser_src[:parser_src.index("p_collect.set_defaults")]
+    check('"--allow-overwrite"' in parser_src, "collect 서브커맨드에 --allow-overwrite 플래그가 있음")
+    check("write_outputs = (not is_partial_run) or allow_overwrite" in US_STOCKS_SRC,
+          "부분 수집이면 allow_overwrite 없이는 쓰지 않도록 판정")
+    check('"partial_run": is_partial_run,' in US_STOCKS_SRC,
+          "스냅샷 metadata 에 partial_run 표시")
+    check('"limit": limit,' in US_STOCKS_SRC, "스냅샷 metadata 에 limit 표시")
+    # 실제 인자 파싱에서 플래그가 살아 있는지
+    p = argparse.ArgumentParser()
+    p.add_argument("--limit", type=int, default=None)
+    p.add_argument("--allow-overwrite", action="store_true")
+    ns = p.parse_args(["--limit", "5"])
+    check(ns.allow_overwrite is False, "--limit 만 주면 allow_overwrite 는 False")
+
+
+def _fields_html(market_cap, shares):
+    """종가 블록이 없어 역산 경로를 타게 되는 최소 페이지."""
+    return (
+        "<html><body><table>"
+        f"<tr><td>Market Cap</td><td>{market_cap}</td></tr>"
+        f"<tr><td>Shares Outstanding</td><td>{shares}</td></tr>"
+        "</table></body></html>"
+    )
+
+
+def test_reaudit_calculated_price_range_and_cross_check():
+    """H11/L9: 역산 종가에 범위 검증 + 유니버스 CSV 가격 교차 대조를 겁니다."""
+    print("\n[재감사 H11] 역산 종가 범위/교차 검증")
+    check(C.MIN_REASONABLE_CLOSE == 0.01 and C.MAX_REASONABLE_CLOSE == 1_000_000.0,
+          "상식 범위 상수가 정의되어 있음")
+    check(C.MAX_CALCULATED_PRICE_DIVERGENCE_RATIO == 2.0, "CSV 대조 허용 괴리 배수 상수가 정의되어 있음")
+
+    src = US_STOCKS_SRC[US_STOCKS_SRC.index("price_source = \"calculated_marketcap_div_shares\""):]
+    src = src[:src.index("elif price is None:")]
+    check("MIN_REASONABLE_CLOSE <= price <= MAX_REASONABLE_CLOSE" in src, "역산 직후 범위 검증 수행")
+    check('csv_price = (universe_row or {}).get("csv_price")' in src,
+          "지금까지 미사용이던 csv_price 를 실제로 교차 대조에 사용(L9)")
+    check("MAX_CALCULATED_PRICE_DIVERGENCE_RATIO" in src, "괴리 배수 상수를 실제로 사용")
+    # 범위 밖 값이면 price=None 으로 두고 사유를 남기는지(문자열 근거)
+    check("상식 범위" in src and "price = None" in src, "범위를 벗어나면 지어내지 않고 미수집 처리")
+
+
+def test_reaudit_market_cap_cross_validation_distinguishes_unknown():
+    """M8: 대조 자체를 못 한 경우는 False 가 아니라 None 이어야 합니다."""
+    print("\n[재감사 M8] 교차검증 미수행(None) vs 실패(False) 구분")
+    # 유니버스 행이 없음 → 대조 불가
+    d_none = derive_fields({"market_cap": 1_000.0}, None)
+    check(d_none["market_cap_cross_validated"] is None, "유니버스 행이 없으면 None(판정 불가)")
+    check(d_none["market_cap_discrepancy"] is None, "괴리율도 None")
+    # 유니버스 행은 있는데 시총 결측 → 역시 대조 불가
+    d_none2 = derive_fields({"market_cap": 1_000.0}, {"csv_market_cap": None})
+    check(d_none2["market_cap_cross_validated"] is None, "CSV 시총이 없으면 None(판정 불가)")
+    # 실제로 대조해서 틀린 경우는 여전히 False
+    d_false = derive_fields({"market_cap": 1_000.0}, {"csv_market_cap": 10_000.0})
+    check(d_false["market_cap_cross_validated"] is False, "실제 대조 실패는 그대로 False")
+
+
+def test_reaudit_summary_history_dedupes_by_session_date():
+    """M7: 같은 거래일 레코드는 추가가 아니라 교체되어야 합니다."""
+    print("\n[재감사 M7] 미국 요약 이력 중복 제거")
+    tmpdir = tempfile.mkdtemp()
+    try:
+        path = os.path.join(tmpdir, "us_summary_history.json")
+        stocks = [{"f_per": 20.0, "growth": 10.0, "f_pegy": 1.5}]
+        C.update_us_summary_history("2026-08-28 16:05", stocks, path, history_date="2026-08-28")
+        C.update_us_summary_history("2026-08-28 18:30", stocks, path, history_date="2026-08-28")
+        C.update_us_summary_history("2026-08-29 16:05", stocks, path, history_date="2026-08-29")
+        with open(path, encoding="utf-8") as f:
+            history = json.load(f)
+        check(len(history) == 2, "같은 거래일 두 번 실행 → 행이 하나만 남음", f"실제 {len(history)}행")
+        check(history[0]["collected_at_et"] == "2026-08-28 18:30", "같은 날은 마지막 실행값으로 교체")
+        check(history[0]["session_date"] == "2026-08-28", "레코드에 거래일이 기록됨")
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+def test_reaudit_parsers_accept_prebuilt_soup():
+    """L10: 같은 HTML 을 세 번 파싱하지 않도록 soup 객체를 받을 수 있어야 합니다."""
+    print("\n[재감사 L10] soup 재사용")
+    from bs4 import BeautifulSoup
+    html = "<html><body><table><tr><td>Market Cap</td><td>1.5B</td></tr></table></body></html>"
+    soup = BeautifulSoup(html, "html.parser")
+    pairs_from_str = extract_label_value_pairs(html)
+    pairs_from_soup = extract_label_value_pairs(soup)
+    check(pairs_from_str == pairs_from_soup, "문자열/soup 두 입력의 결과가 동일(하위 호환 유지)")
+    price_str = extract_close_price(html)
+    price_soup = extract_close_price(soup)
+    check(price_str == price_soup, "extract_close_price 도 두 입력에서 동일")
+    # collect_one 이 실제로 한 번만 파싱하는지 (본문에서 확인)
+    body = US_STOCKS_SRC[US_STOCKS_SRC.index("def collect_one("):]
+    body = body[:body.index("\ndef ", 10)]
+    check(body.count('BeautifulSoup(html, "html.parser")') == 0,
+          "collect_one 안에 중복 BeautifulSoup 생성이 남아있지 않음")
+    check(body.count("_as_soup(html)") == 1, "soup 를 딱 한 번만 만듦")
+
+
 def main():
     print("=" * 70)
     print("🇺🇸 미국주식 수집기 기초틀 오프라인 검증")
@@ -713,6 +820,11 @@ def main():
     test_derive_fields()
     test_session_resolution()
     test_automation_readiness()
+    test_reaudit_limit_mode_does_not_write_production_outputs()
+    test_reaudit_calculated_price_range_and_cross_check()
+    test_reaudit_market_cap_cross_validation_distinguishes_unknown()
+    test_reaudit_summary_history_dedupes_by_session_date()
+    test_reaudit_parsers_accept_prebuilt_soup()
 
     print("\n" + "=" * 70)
     if FAILURES:

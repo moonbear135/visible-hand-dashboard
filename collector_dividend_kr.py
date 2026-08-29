@@ -182,6 +182,14 @@ from corp_code_mapper import (  # noqa: E402
     DartCorpCodeError,
     DART_API_KEY_ENV,
     DART_FATAL_STATUSES,
+    DART_DISCLOSURE_LIST_URL,
+    DART_LIST_MAX_PAGES,
+    DART_LIST_PAGE_COUNT,
+    DART_NETWORK_RETRY,
+    DART_REQUEST_DELAY_MAX,
+    DART_REQUEST_DELAY_MIN,
+    DART_REQUEST_TIMEOUT_SEC,
+    DART_RETRY_DELAY_SEC,
     DART_STATUS_MESSAGES,
     _now_kst,
     build_corp_name_index,
@@ -196,9 +204,11 @@ from corp_code_mapper import (  # noqa: E402
 # =============================================================================
 DART_ALOT_MATTER_URL = "https://opendart.fss.or.kr/api/alotMatter.json"
 
-# DART "공시검색"(list.json). 접수일 구간에 **새로 접수된 공시 목록**만 가볍게 훑는 용도입니다.
+# DART "공시검색"(list.json) URL, page_count/재시도 상한, 크롤링 매너 상수는
+# 2026-08-29 재감사 M11 로 corp_code_mapper.py 로 옮겨 공유합니다(위 import 참고,
+# collector_dividend_payment_kr.py 도 같은 값을 그쪽에서 가져옵니다) — DART_STATUS_MESSAGES
+# 와 같은 이유로 단일 출처를 유지합니다.
 # (2026-08-24 GitHub Actions 에서 실제 DART_API_KEY 로 호출해 응답 형태를 실측했습니다.)
-DART_DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 
 # 정기공시(pblntf_ty="A") 중 배당 표가 실려 오는 세 가지 상세유형.
 #   A001 = 사업보고서 / A002 = 반기보고서 / A003 = 분기보고서
@@ -208,10 +218,8 @@ DART_DISCLOSURE_LIST_URL = "https://opendart.fss.or.kr/api/list.json"
 #    기존 `collect_one()` 의 우선순위 탐색(3분기→반기→1분기)이 그대로 판정합니다.
 PERIODIC_DETAIL_TYPES = ("A001", "A002", "A003")
 
-# list.json 의 page_count 최대값(문서·실측 모두 100).
-DART_LIST_PAGE_COUNT = 100
-# 방어적 상한. total_page 가 이 수를 넘으면 무한 루프를 의심하고 크게 실패합니다.
-DART_LIST_MAX_PAGES = 1000
+# (2026-08-29 재감사 M11: DART_LIST_PAGE_COUNT / DART_LIST_MAX_PAGES 는
+#  corp_code_mapper.py 로 이동 — 위 import 참고)
 
 # DART 공시 원문 문서 URL 템플릿 (rcept_no 로 바로 연결됩니다 — 사용자가 원문 대조 가능)
 DART_DOCUMENT_URL_TEMPLATE = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
@@ -249,14 +257,8 @@ CORP_CLS_MARKET = {
     "E": "기타(비상장 등)",
 }
 
-# =============================================================================
-# 3. 크롤링 매너 상수 (§0-3-2) — collector_kospi200.py 기준을 그대로 따릅니다
-# =============================================================================
-DART_REQUEST_TIMEOUT_SEC = 20
-DART_REQUEST_DELAY_MIN = 2.0        # time.sleep(random.uniform(2.0, 3.0))
-DART_REQUEST_DELAY_MAX = 3.0
-DART_NETWORK_RETRY = 1              # 네트워크/5xx 만 1회 재시도
-DART_RETRY_DELAY_SEC = 5.0
+# (2026-08-29 재감사 M11: 크롤링 매너 상수 DART_REQUEST_TIMEOUT_SEC 등은
+#  corp_code_mapper.py 로 이동 — 위 import 참고, collector_dividend_payment_kr.py 와 공유)
 
 # 1회 실행 예산. 넘으면 체크포인트를 남기고 정상 종료합니다(중단이 아니라 '이어하기').
 # 20,000 은 DART 안내상의 일 한도라, 그보다 넉넉히 아래에서 멈춥니다.
@@ -694,7 +696,11 @@ def plausible_reprt_codes(bsns_year, today=None, priority=REPRT_CODE_PRIORITY):
     근거: 자본시장법상 분기·반기보고서는 각 기간 종료 후 45일, 사업보고서는 사업연도
           종료 후 90일 이내 제출.
     """
-    today = today or date.today()
+    # ⚠️ 2026-08-29 재감사 M12: `date.today()` 는 실행 서버의 시스템 시간(GitHub Actions 러너는
+    # UTC)을 씁니다. 제출기한은 한국 날짜 기준이라, UTC 기준으로 판정하면 KST 기준 마감일
+    # 당일 오전 9시 이전(=UTC 로는 아직 전날)에 실행했을 때 "아직 기한이 안 지났다"고 보고
+    # 그날 나온 보고서를 통째로 건너뜁니다. 이 파일이 이미 쓰고 있는 `_now_kst()` 로 맞춥니다.
+    today = today or _now_kst().date()
     year = int(bsns_year)
     kept = []
     for code in priority:
@@ -937,7 +943,6 @@ def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
         # ── 당기(=해당 보고서 기준 회계연도 누적) ─────────────────────────────
         "dps_cash_common": parsed_now.get("dps_cash_common"),
         "dps_cash_preferred": parsed_now.get("dps_cash_preferred"),
-        "dps_cash_unspecified": parsed_now.get("dps_cash_unspecified"),
         "dps_cash_common_all": parsed_now.get("dps_cash_common_all"),
         "dps_cash_preferred_all": parsed_now.get("dps_cash_preferred_all"),
         "dps_stock_common": parsed_now.get("dps_stock_common"),
@@ -991,6 +996,20 @@ def build_dividend_record(stock_code, corp_info, bsns_year, reprt_code, payload,
         ) if reprt_code else None,
         "source": "DART OpenAPI alotMatter.json",
     }
+
+    # =========================================================================
+    # ⚠️ 2026-08-29 재감사 M10: 파서(parse_alot_matter)는 _KIND_SPECIFIC_METRICS 4개
+    # (dps_cash / dps_stock / cash_yield / stock_yield) **전부**에 대해
+    # `{metric}_unspecified` / `{metric}_unspecified_all` 를 만들어 두는데, 위 레코드
+    # 나열에는 `dps_cash_unspecified` 하나만 손으로 적혀 있어 나머지 3쌍이 산출물에
+    # 실리지 않았습니다. "종류 구분 없이 온 값을 버리지 않는다"는 파서의 설계 의도가
+    # 저장 단계에서 4분의 1만 지켜지고 있던 셈입니다.
+    # 손으로 나열하는 대신 같은 상수를 순회해, 파서가 만드는 만큼 그대로 싣습니다.
+    # =========================================================================
+    for metric in _KIND_SPECIFIC_METRICS:
+        record[f"{metric}_unspecified"] = parsed_now.get(f"{metric}_unspecified")
+        record[f"{metric}_unspecified_all"] = parsed_now.get(f"{metric}_unspecified_all")
+
     return record
 
 
@@ -2117,21 +2136,108 @@ def _format_code_list(codes, cap=20):
     return ", ".join(codes[:cap]) + f" ...외 {len(codes) - cap}건"
 
 
-def _read_merge_log(path):
-    """병합 이력 읽기. 없거나 깨졌으면 빈 이력으로 시작합니다(이력이 없다고 병합을 막진 않습니다)."""
+def _read_json_log(path, list_key, role):
+    """
+    {list_key: [...]} 형태의 이력 파일을 읽습니다. 없거나 깨졌으면 빈 이력으로 시작합니다
+    (이력이 없다고 작업 자체를 막지는 않습니다).
+
+    role : 로그 메시지에 쓸 사람말 이름("병합" / "감시").
+
+    2026-08-29 재감사 M9-4: `_read_merge_log()` 와 `_read_watch_log()` 가 딕셔너리 키
+    이름("merges"/"watches")만 다르고 나머지는 한 글자도 다르지 않았습니다. 이 파일이 이미
+    쓰고 있는 `_read_run_output(role=...)` 패턴(공통 함수 + 역할 라벨 인자)을 그대로 따릅니다.
+    """
     if not os.path.exists(path):
-        return {"merges": []}
+        return {list_key: []}
     try:
         with open(path, "r", encoding="utf-8") as f:
             data = json.load(f)
     except Exception as e:
-        print(f"  ⚠️ 병합 이력 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
+        print(f"  ⚠️ {role} 이력 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
               f"이력 없이 진행합니다: {path}")
-        return {"merges": []}
-    if not isinstance(data, dict) or not isinstance(data.get("merges"), list):
-        print(f"  ⚠️ 병합 이력 파일의 형태가 예상과 다릅니다 — 이력 없이 진행합니다: {path}")
-        return {"merges": []}
+        return {list_key: []}
+    if not isinstance(data, dict) or not isinstance(data.get(list_key), list):
+        print(f"  ⚠️ {role} 이력 파일의 형태가 예상과 다릅니다 — 이력 없이 진행합니다: {path}")
+        return {list_key: []}
     return data
+
+
+def _read_merge_log(path):
+    """병합 이력 읽기. 없거나 깨졌으면 빈 이력으로 시작합니다(이력이 없다고 병합을 막진 않습니다)."""
+    return _read_json_log(path, "merges", "병합")
+
+
+def _num_add(a, b):
+    """
+    두 리포트의 숫자를 더합니다. 한쪽이라도 숫자가 아니면 더할 수 없다고 말합니다(None).
+    (bool 은 int 의 하위형이라 실수로 더해지지 않도록 먼저 걸러냅니다.)
+
+    2026-08-29 재감사 M9-2: merge_delta_output() 안의 `_num()` 과 apply_watch_update() 안의
+    `_num_add()` 가 이름과 docstring만 다르고 로직이 완전히 같았습니다. 하나로 합칩니다.
+    """
+    if isinstance(a, bool) or isinstance(b, bool):
+        return None
+    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+        return a + b
+    return None
+
+
+def _read_delta_raw_lines(delta_raw_path, log=print, action_word="병합"):
+    """
+    델타 raw.jsonl 을 미리 다 읽어 검증까지 끝냅니다(쓰기는 호출부가 나중에 몰아서 합니다 —
+    중간에 실패해 반쪽만 쓰이는 일이 없도록).
+
+    반환: (lines, missing)  — missing 은 "파일이 아예 없었다"(실패가 아님)를 뜻합니다.
+    한 줄이라도 JSON 이 아니면 ValueError 를 던집니다 — 깨진 원본을 이어붙이지 않습니다.
+
+    2026-08-29 재감사 M9-1: merge_delta_output() ④ 와 apply_watch_update() ② 의 이 블록이
+    공백까지 동일했습니다.
+    """
+    lines = []
+    missing = not os.path.exists(delta_raw_path)
+    if missing:
+        # 실패가 아닙니다: 델타 종목이 전부 UNMAPPED 였다면 요청 자체가 0건이라 raw 가
+        # 안 생깁니다. 다만 '없었다'는 사실은 조용히 넘기지 않고 로그에 남깁니다.
+        log(f"  ⚠️ 델타 raw 파일이 없습니다: {delta_raw_path} — "
+            f"원본 응답 없이 가공본만 {action_word}합니다(요청이 0건이었다면 정상입니다).")
+        return lines, missing
+    with open(delta_raw_path, "r", encoding="utf-8") as f:
+        for lineno, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                json.loads(line)        # 형태 확인만 — 원문 줄을 그대로 이어붙입니다
+            except Exception as e:
+                raise ValueError(
+                    f"델타 raw 파일 {lineno}번째 줄이 JSON 이 아닙니다: {delta_raw_path} "
+                    f"({type(e).__name__}: {e}). 원본 보관 파일이 깨진 채로 이어붙이지 "
+                    "않습니다 — 파일을 확인하고 다시 시도하세요.")
+            lines.append(line)
+    return lines, missing
+
+
+def _combine_completion(main_summary, delta_summary, delta_label):
+    """
+    두 실행 리포트의 완료 여부를 합칩니다.
+
+    delta_label : 사유 문자열에 쓸 델타 쪽 이름("델타 실행" / "감시 델타").
+    반환 : (both_completed, stopped_reason)
+
+    2026-08-29 재감사 M9-3: merge/watch 양쪽의 completed·stopped_reason 조립이 라벨 한 단어만
+    빼고 동일했습니다.
+    """
+    main_completed = bool(main_summary.get("completed"))
+    delta_completed = bool(delta_summary.get("completed"))
+    both_completed = main_completed and delta_completed
+    if both_completed:
+        return True, None
+    parts = []
+    if not main_completed:
+        parts.append(f"기존 실행 미완료({main_summary.get('stopped_reason') or '사유 미기록'})")
+    if not delta_completed:
+        parts.append(f"{delta_label} 미완료({delta_summary.get('stopped_reason') or '사유 미기록'})")
+    return False, " / ".join(parts)
 
 
 def merge_delta_output(main_out_dir, delta_out_dir, bsns_year, force=False, log=print):
@@ -2196,70 +2302,32 @@ def merge_delta_output(main_out_dir, delta_out_dir, bsns_year, force=False, log=
     # (쓰기는 검증이 전부 끝난 뒤에 몰아서 합니다 — 중간에 실패해 반쪽만 쓰이는 일이 없도록)
     delta_raw_path = os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
     main_raw_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
-    delta_raw_lines = []
-    delta_raw_missing = not os.path.exists(delta_raw_path)
-    if delta_raw_missing:
-        # 실패가 아닙니다: 델타 종목이 전부 UNMAPPED 였다면 요청 자체가 0건이라 raw 가
-        # 안 생깁니다. 다만 '없었다'는 사실은 조용히 넘기지 않고 로그에 남깁니다.
-        log(f"  ⚠️ 델타 raw 파일이 없습니다: {delta_raw_path} — "
-            "원본 응답 없이 가공본만 병합합니다(요청이 0건이었다면 정상입니다).")
-    else:
-        with open(delta_raw_path, "r", encoding="utf-8") as f:
-            for lineno, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    json.loads(line)        # 형태 확인만 — 원문 줄을 그대로 이어붙입니다
-                except Exception as e:
-                    raise ValueError(
-                        f"델타 raw 파일 {lineno}번째 줄이 JSON 이 아닙니다: {delta_raw_path} "
-                        f"({type(e).__name__}: {e}). 원본 보관 파일이 깨진 채로 이어붙이지 "
-                        "않습니다 — 파일을 확인하고 다시 시도하세요.")
-                delta_raw_lines.append(line)
+    delta_raw_lines, delta_raw_missing = _read_delta_raw_lines(
+        delta_raw_path, log=log, action_word="병합")
 
     # ── ⑤ 병합 ────────────────────────────────────────────────────────────────
     merged_records = list(main_records) + list(delta_records)     # 순서: 기존 → 델타
     merged_unmapped = (list(main_summary.get("unmapped_detail") or [])
                        + list(delta_summary.get("unmapped_detail") or []))
 
-    main_completed = bool(main_summary.get("completed"))
-    delta_completed = bool(delta_summary.get("completed"))
-    both_completed = main_completed and delta_completed
-    if both_completed:
-        stopped_reason = None
-    else:
-        parts = []
-        if not main_completed:
-            parts.append(f"기존 실행 미완료({main_summary.get('stopped_reason') or '사유 미기록'})")
-        if not delta_completed:
-            parts.append(f"델타 실행 미완료({delta_summary.get('stopped_reason') or '사유 미기록'})")
-        stopped_reason = " / ".join(parts)
+    both_completed, stopped_reason = _combine_completion(main_summary, delta_summary, "델타 실행")
 
     # corp_code 캐시 상태는 **나중에 돈 쪽**(델타)이 최신입니다. 없으면 기존 것을 씁니다.
     corpcode_source = delta_summary.get("corpcode_source", main_summary.get("corpcode_source"))
     corpcode_stats = delta_summary.get("corpcode_stats", main_summary.get("corpcode_stats"))
 
-    def _num(a, b):
-        """두 리포트의 숫자를 더합니다. 한쪽이라도 숫자가 아니면 더할 수 없다고 말합니다(None)."""
-        if isinstance(a, bool) or isinstance(b, bool):
-            return None
-        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            return a + b
-        return None
-
     # ⚠️ universe 크기 합산은 **두 유니버스가 겹치지 않는다**는 전제 위에서만 맞습니다.
     #    그 전제는 위 ③ 겹침 검사가 이미 보장합니다(겹치면 여기까지 오지 못합니다).
     merged_summary = summarize_results(merged_records, merged_unmapped, extra={
         "bsns_year": str(bsns_year),
-        "universe_size_input": _num(main_summary.get("universe_size_input"),
-                                    delta_summary.get("universe_size_input")),
-        "universe_size": _num(main_summary.get("universe_size"),
-                              delta_summary.get("universe_size")),
-        "requests_used": _num(main_summary.get("requests_used"),
-                              delta_summary.get("requests_used")),
-        "elapsed_sec": _num(main_summary.get("elapsed_sec"),
-                            delta_summary.get("elapsed_sec")),
+        "universe_size_input": _num_add(main_summary.get("universe_size_input"),
+                                        delta_summary.get("universe_size_input")),
+        "universe_size": _num_add(main_summary.get("universe_size"),
+                                  delta_summary.get("universe_size")),
+        "requests_used": _num_add(main_summary.get("requests_used"),
+                                  delta_summary.get("requests_used")),
+        "elapsed_sec": _num_add(main_summary.get("elapsed_sec"),
+                                delta_summary.get("elapsed_sec")),
         "completed": both_completed,
         "stopped_reason": stopped_reason,
         "corpcode_source": corpcode_source,
@@ -2354,19 +2422,7 @@ def watch_log_path(out_dir, bsns_year):
 
 def _read_watch_log(path):
     """감시 이력 읽기. 없거나 깨졌으면 빈 이력으로 시작합니다(`_read_merge_log` 와 같은 결)."""
-    if not os.path.exists(path):
-        return {"watches": []}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"  ⚠️ 감시 이력 파일을 읽지 못했습니다({type(e).__name__}: {e}) — "
-              f"이력 없이 진행합니다: {path}")
-        return {"watches": []}
-    if not isinstance(data, dict) or not isinstance(data.get("watches"), list):
-        print(f"  ⚠️ 감시 이력 파일의 형태가 예상과 다릅니다 — 이력 없이 진행합니다: {path}")
-        return {"watches": []}
-    return data
+    return _read_json_log(path, "watches", "감시")
 
 
 def _reprt_priority_index(reprt_code):
@@ -2419,24 +2475,8 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
     #    (merge_delta_output ④ 와 같은 순서: 검증을 전부 끝낸 뒤에야 첫 바이트를 씁니다)
     delta_raw_path = os.path.join(delta_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
     main_raw_path = os.path.join(main_out_dir, f"dividend_kr_{bsns_year}_raw.jsonl")
-    delta_raw_lines = []
-    if not os.path.exists(delta_raw_path):
-        log(f"  ⚠️ 델타 raw 파일이 없습니다: {delta_raw_path} — "
-            "원본 응답 없이 가공본만 반영합니다(요청이 0건이었다면 정상입니다).")
-    else:
-        with open(delta_raw_path, "r", encoding="utf-8") as f:
-            for lineno, line in enumerate(f, 1):
-                line = line.strip()
-                if not line:
-                    continue
-                try:
-                    json.loads(line)        # 형태 확인만 — 원문 줄을 그대로 이어붙입니다
-                except Exception as e:
-                    raise ValueError(
-                        f"델타 raw 파일 {lineno}번째 줄이 JSON 이 아닙니다: {delta_raw_path} "
-                        f"({type(e).__name__}: {e}). 원본 보관 파일이 깨진 채로 이어붙이지 "
-                        "않습니다 — 파일을 확인하고 다시 시도하세요.")
-                delta_raw_lines.append(line)
+    delta_raw_lines, _delta_raw_missing = _read_delta_raw_lines(
+        delta_raw_path, log=log, action_word="반영")
 
     # ── ③ 교체/추가 ───────────────────────────────────────────────────────────
     #    기존 순서를 그대로 지킵니다(같은 자리에서 값만 바뀝니다). 새 종목만 뒤에 붙습니다.
@@ -2496,26 +2536,7 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
     merged_unmapped = (list(main_summary.get("unmapped_detail") or [])
                        + list(delta_summary.get("unmapped_detail") or []))
 
-    def _num_add(a, b):
-        """숫자 둘을 더합니다. 한쪽이라도 숫자가 아니면 '더할 수 없다'(None)."""
-        if isinstance(a, bool) or isinstance(b, bool):
-            return None
-        if isinstance(a, (int, float)) and isinstance(b, (int, float)):
-            return a + b
-        return None
-
-    main_completed = bool(main_summary.get("completed"))
-    delta_completed = bool(delta_summary.get("completed"))
-    both_completed = main_completed and delta_completed
-    if both_completed:
-        stopped_reason = None
-    else:
-        parts = []
-        if not main_completed:
-            parts.append(f"기존 실행 미완료({main_summary.get('stopped_reason') or '사유 미기록'})")
-        if not delta_completed:
-            parts.append(f"감시 델타 미완료({delta_summary.get('stopped_reason') or '사유 미기록'})")
-        stopped_reason = " / ".join(parts)
+    both_completed, stopped_reason = _combine_completion(main_summary, delta_summary, "감시 델타")
 
     checked_at = _now_kst().isoformat()
     merged_summary = summarize_results(merged_records, merged_unmapped, extra={
@@ -2828,7 +2849,12 @@ def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
     _reset_watch_delta_workspace(delta_out_dir, delta_out_dir, bsns_year, log=log)
     _seed_watch_delta_corpcode_cache(cache_dir, delta_out_dir, log=log)
 
-    run_collection(
+    # ⚠️ 2026-08-29 재감사 H9: 예전에는 이 호출의 **반환값을 아예 받지 않았습니다.**
+    # run_collection() 은 중간에 끊겨도(요청 한도 초과·DART 차단·시간 초과) 예외를 던지지 않고
+    # completed=False 인 summary 를 정상 반환하는 설계라, 부분 실패가 호출부에 전혀 전달되지
+    # 않았습니다. 그 결과 아래 ⑥에서 워터마크(last_checked_de)가 그대로 전진해, 반영되지 않은
+    # 공시 구간이 "확인 끝"으로 기록되고 다음 실행이 그 구간을 다시 보지 않았습니다.
+    _delta_records, delta_summary = run_collection(
         matched_input_codes, bsns_year, delta_out_dir,
         cache_dir=delta_out_dir,
         api_key=api_key, session=session,
@@ -2847,6 +2873,21 @@ def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
                        matched_stock_codes=matched_norm)
 
     # ── ⑥ 여기까지 왔을 때만 "확인 끝"으로 기록합니다 ────────────────────────
+    # 2026-08-29 재감사 H9: 델타 수집이 전수 완료되지 않았으면 워터마크를 전진시키지 않습니다.
+    # 델타 자체는 위 ⑤에서 이미 반영했습니다(부분 성공한 종목의 최신 값은 살립니다) — 다만
+    # "이 구간은 다 확인했다"고 적지 않아, 다음 실행이 같은 구간을 다시 확인합니다.
+    # (collector_dividend_payment_kr.py 의 "실패한 날의 전날까지만 전진, 그것도 불가능하면
+    #  아예 건드리지 않는다" 패턴과 같은 원칙입니다. 이쪽은 워터마크가 '공시 접수일 구간'
+    #  하나뿐이고 실패 단위는 '종목'이라, 안전하게 자를 수 있는 중간 지점이 없습니다 —
+    #  그래서 더 정교한 부분 전진 대신 '전진 안 함'을 확실히 구현합니다.)
+    delta_completed = bool((delta_summary or {}).get("completed"))
+    if not delta_completed:
+        reason = (delta_summary or {}).get("stopped_reason") or "사유 미기록"
+        log(f"  🚨 델타 수집이 전수 완료되지 않았습니다({reason}) — 상태 파일을 전진시키지 "
+            f"않습니다(last_checked_de 유지). 다음 실행이 {date_range_checked} 구간을 다시 "
+            "확인합니다. 이미 반영된 종목은 그대로 남아 있습니다.")
+        return 2
+
     _write_watch_state(state_path, end_de)
     log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de})")
     return 0

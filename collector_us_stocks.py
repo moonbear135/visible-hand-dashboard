@@ -565,10 +565,40 @@ def build_statistics_url(symbol):
 _NA_TOKENS = {"n/a", "na", "-", "--", "—", "–", ""}
 _PAYWALL_TOKENS = {"upgrade", "unlock", "pro"}
 
+# =============================================================================
+# 2026-08-29 재감사 H11: 역산 종가(시총÷주식수) 범위 검증 상수.
+#
+# 종가를 직접 못 읽으면 시총÷주식수로 역산하는데, 예전엔 그 결과에 아무 검증이 없었습니다.
+# 두 입력 중 하나라도 단위가 어긋나면(예: 시총이 백만 달러 단위로 파싱되거나 주식수가
+# 천 주 단위로 파싱되면) 결과가 몇 자릿수씩 틀어진 채 그대로 '종가'로 저장되고,
+# 그 값이 PER·PEGY·목표가·순위에 전부 흘러들어갑니다.
+# collector_us_indices.py 의 MIN/MAX_REASONABLE_CLOSE 와 같은 형식 검증입니다.
+# =============================================================================
+MIN_REASONABLE_CLOSE = 0.01
+MAX_REASONABLE_CLOSE = 1_000_000.0
+# 유니버스 CSV 가 들고 있는 가격(csv_price)과 역산값의 허용 괴리 배수.
+# 2배를 넘으면 둘 중 하나가 확실히 틀린 것이므로 값을 지어내지 않고 미수집 처리합니다.
+# (csv_price 는 수집 시점과 며칠 차이가 날 수 있어, 정상 등락으로 설명 가능한 폭보다
+#  훨씬 넉넉하게 잡았습니다 — 단위 오류 같은 '자릿수 급 오류'만 잡는 것이 목적입니다.)
+MAX_CALCULATED_PRICE_DIVERGENCE_RATIO = 2.0
+
 
 def _normalize_label(text):
     """라벨 텍스트 정규화(소문자·공백 축약). 표의 '위치'가 아니라 이 라벨로만 값을 찾습니다."""
     return " ".join(str(text).replace("\xa0", " ").split()).strip().lower()
+
+
+def _as_soup(html_or_soup):
+    """HTML 문자열이면 파싱하고, 이미 BeautifulSoup 객체면 그대로 씁니다.
+
+    2026-08-29 재감사 L10: collect_one() 이 같은 HTML 을 세 번(라벨쌍 추출 / 종가 추출 /
+    배당 문구 탐지) 따로 파싱하고 있었습니다. 종목 하나당 세 번 × 550종목이라 순수한 중복
+    비용이라, 호출부가 soup 를 한 번만 만들어 넘길 수 있게 합니다. 테스트를 비롯한 기존
+    호출부는 문자열을 그대로 넘겨도 예전과 똑같이 동작합니다(하위 호환).
+    """
+    if isinstance(html_or_soup, BeautifulSoup):
+        return html_or_soup
+    return BeautifulSoup(html_or_soup, "html.parser")
 
 
 def extract_label_value_pairs(html):
@@ -577,8 +607,9 @@ def extract_label_value_pairs(html):
     ⚠️ SPEC §2-1: 열 번호(iloc)를 고정하지 않습니다. 각 행의 **첫 셀 = 라벨, 마지막 셀 = 값**
        이라는 key-value 표 구조만 사용하며, 어떤 지표를 쓸지는 라벨 키워드로 결정합니다.
     같은 라벨이 여러 번 나오면 처음 것만 사용합니다(중복 표 방어).
+    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L10).
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _as_soup(html)
     pairs = []
     seen = set()
     for table in soup.find_all("table"):
@@ -777,9 +808,11 @@ def extract_close_price(html):
 
     찾지 못하면 값을 지어내지 않고 (None, None, 사유) 를 반환합니다.
 
+    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L10).
+
     반환: (price, asof_text, error)
     """
-    soup = BeautifulSoup(html, "html.parser")
+    soup = _as_soup(html)
     text = soup.get_text("\n")
     lines = [ln.strip() for ln in text.split("\n")]
     lines = [ln for ln in lines if ln]
@@ -876,8 +909,13 @@ def derive_fields(fields, universe_row=None):
         derived["market_cap_discrepancy"] = round(diff, 4)
         derived["market_cap_cross_validated"] = diff <= US_MARKETCAP_CROSSCHECK_TOLERANCE
     else:
+        # ⚠️ 2026-08-29 재감사 M8: 여기는 "대조해 보니 틀렸다"가 아니라 "대조 자체를 못 했다"
+        # (유니버스 행이 없거나 어느 한쪽 시총이 결측)입니다. 예전엔 이 경우에도 False 를
+        # 넣어, 진짜 교차검증 실패와 검증 미수행이 리포트·화면에서 똑같이 보였습니다.
+        # None = 판정 불가로 구분합니다(소비부는 `is False` 로 명시 비교 — utils/scoring_us.py
+        # 의 데이터 이슈 판정이 이미 그렇게 되어 있습니다).
         derived["market_cap_discrepancy"] = None
-        derived["market_cap_cross_validated"] = False
+        derived["market_cap_cross_validated"] = None
 
     return derived
 
@@ -909,11 +947,13 @@ def collect_one(symbol, universe_row=None, session=None):
     fetch_seconds = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    pairs = extract_label_value_pairs(html)
+    # 2026-08-29 재감사 L10: 같은 HTML 을 세 번 파싱하던 것을 한 번으로 줄입니다.
+    soup = _as_soup(html)
+    pairs = extract_label_value_pairs(soup)
     fields, meta = map_pairs_to_fields(pairs)
-    price, asof_text, price_error = extract_close_price(html)
+    price, asof_text, price_error = extract_close_price(soup)
     asof_dt = parse_close_timestamp(asof_text)
-    dividend_statement = detect_dividend_statement(BeautifulSoup(html, "html.parser").get_text(" "))
+    dividend_statement = detect_dividend_statement(soup.get_text(" "))
     parse_seconds = time.perf_counter() - t1
 
     # 종가를 못 읽었으면 시총÷주식수로 역산(§0-1 예시2-보충 '계산값' 예외:
@@ -928,6 +968,34 @@ def collect_one(symbol, universe_row=None, session=None):
             result["errors"].append(f"종가 직접 파싱 실패({price_error}) → 시총÷주식수 계산값 사용")
         except (TypeError, ValueError, ZeroDivisionError):
             price = None
+
+        # ── 2026-08-29 재감사 H11: 역산값 검증 ──────────────────────────────
+        # ⓐ 상식적인 주가 범위를 벗어나면 입력(시총/주식수) 단위가 어긋난 것입니다.
+        if price is not None and not (MIN_REASONABLE_CLOSE <= price <= MAX_REASONABLE_CLOSE):
+            result["errors"].append(
+                f"역산 종가({price})가 상식 범위({MIN_REASONABLE_CLOSE}~{MAX_REASONABLE_CLOSE})를 "
+                "벗어나 미수집 처리 — 시총/주식수 단위 오류 의심"
+            )
+            price = None
+            price_source = None
+            price_calculated = False
+        # ⓑ 유니버스 CSV 가 가격을 들고 있으면 교차 대조합니다(L9: 지금까지 담아만 두고
+        #    아무 데서도 안 쓰던 csv_price 를 여기서 실제로 씁니다).
+        if price is not None:
+            csv_price = (universe_row or {}).get("csv_price")
+            if csv_price:
+                try:
+                    ratio = max(float(csv_price), price) / min(float(csv_price), price)
+                except (TypeError, ValueError, ZeroDivisionError):
+                    ratio = None
+                if ratio is not None and ratio >= MAX_CALCULATED_PRICE_DIVERGENCE_RATIO:
+                    result["errors"].append(
+                        f"역산 종가({price:.4f})가 유니버스 CSV 가격({csv_price})과 "
+                        f"{ratio:.1f}배 괴리 — 미수집 처리(둘 중 하나가 확실히 틀림)"
+                    )
+                    price = None
+                    price_source = None
+                    price_calculated = False
     elif price is None:
         result["errors"].append(f"종가 수집 실패: {price_error}")
         price_source = None
@@ -1213,8 +1281,19 @@ def _median(values):
     return round(statistics.median(vals), 4) if vals else None
 
 
-def update_us_summary_history(snapshot_time_et, visible_stocks, path):
-    """상단 요약 지표(중앙값 3종)를 누적 기록합니다. 표본이 없으면 값을 지어내지 않습니다."""
+def update_us_summary_history(snapshot_time_et, visible_stocks, path, history_date=None):
+    """상단 요약 지표(중앙값 3종)를 누적 기록합니다. 표본이 없으면 값을 지어내지 않습니다.
+
+    history_date: 이 레코드가 속한 **거래일**(YYYY-MM-DD). 소스 타임스탬프에서 뽑은 값을
+    호출부가 넘겨줍니다.
+
+    ⚠️ 2026-08-29 재감사 M7: 예전엔 무조건 `history.append(record)` 라, 같은 날 두 번
+    실행하면(재시도·수동 재수집) 같은 거래일 행이 두 개 쌓였습니다. `collected_at_et` 만
+    분 단위로 달라서 나중에 이력을 읽는 쪽에서는 그게 하루 두 건인지 이틀치인지 구분할
+    방법이 없었습니다. 이제 거래일(일 단위) 기준으로 **같은 날 레코드는 교체**합니다.
+    (코스피 쪽 update_pegy_summary_history() 와 같은 원칙이며, 그쪽이 겪은 '분 단위 비교'
+     버그를 반복하지 않도록 여기서는 처음부터 일 단위 키로 맞춥니다.)
+    """
     history = []
     if os.path.exists(path):
         try:
@@ -1228,6 +1307,7 @@ def update_us_summary_history(snapshot_time_et, visible_stocks, path):
 
     record = {
         "collected_at_et": snapshot_time_et,
+        "session_date": history_date,
         "f_per": _median([s.get("f_per") for s in visible_stocks]),
         "growth": _median([s.get("growth") for s in visible_stocks]),
         "pegy": _median([
@@ -1236,6 +1316,13 @@ def update_us_summary_history(snapshot_time_et, visible_stocks, path):
         ]),
         "sample_count": len(visible_stocks),
     }
+
+    if history_date:
+        def _day_key(h):
+            # 과거 레코드에는 session_date 가 없으므로 collected_at_et 의 앞 10자리로 대체합니다.
+            return h.get("session_date") or str(h.get("collected_at_et", ""))[:10]
+        history = [h for h in history if _day_key(h) != history_date]
+
     history.append(record)
     with open(path, "w", encoding="utf-8") as f:
         json.dump(history, f, ensure_ascii=False, indent=2)
@@ -1393,7 +1480,7 @@ def evaluate_collection_readiness(snapshot_path=None, now_et=None):
     }
 
 
-def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=False):
+def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=False, allow_overwrite=False):
     """
     미국주식 전수 수집 배치.
 
@@ -1440,9 +1527,25 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
         raise RuntimeError("히스테리시스 적용 후 추적 대상이 0개입니다 — 수집을 중단합니다(기존 스냅샷 유지)")
     universe_by_symbol = {r["symbol"]: r for r in tracked}
 
+    # =========================================================
+    # ⚠️ 2026-08-29 재감사 H10: `--limit N` 은 "동작 확인용 부분 수집"인데, 예전에는 그
+    # 결과가 프로덕션 산출물(스냅샷·요약 이력·시계열 이력)을 그대로 덮어썼습니다.
+    # 즉 5종목 테스트 한 번이 550종목 스냅샷을 5종목짜리로 갈아치우고, 그날의 요약 이력과
+    # 종목별 시계열에도 5종목만 기록되어 이력에 영구적인 구멍이 남았습니다.
+    # collector_dividend_kr.py 의 `--allow-overwrite` 패턴과 같은 원칙으로,
+    # 명시적으로 덮어쓰기를 허용하지 않는 한 부분 수집 결과는 파일에 쓰지 않습니다.
+    # =========================================================
+    is_partial_run = bool(limit)
+    write_outputs = (not is_partial_run) or allow_overwrite
     if limit:
         tracked = tracked[:limit]
         print(f"⚠️ --limit {limit} 적용: 상위 {len(tracked)}종목만 수집합니다(테스트 모드, 전수 아님)")
+        if allow_overwrite:
+            print("   --allow-overwrite 가 지정되어 부분 수집 결과를 프로덕션 산출물에 씁니다 "
+                  "(metadata.partial_run=True 로 표시됩니다).")
+        else:
+            print("   테스트 모드라 스냅샷·요약 이력·시계열 이력에 쓰지 않습니다 "
+                  "(정말 덮어쓰려면 --allow-overwrite 를 함께 주세요).")
 
     # 2026-08-07: 이전 실행이 소스 차단(HTTP 429)으로 중간에 끊긴 적이 있으면 이어서 진행합니다.
     # (오늘과 다른 날짜의 체크포인트는 절대 재사용하지 않음 — load_collect_checkpoint 참고)
@@ -1607,23 +1710,29 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
             "success": US_VALID_RATIO_SUCCESS, "degraded": US_VALID_RATIO_DEGRADED,
         },
         "currency": "USD",
+        # 2026-08-29 재감사 H10: 이 스냅샷이 부분 수집(--limit) 결과인지 파일 안에 남깁니다.
+        "partial_run": is_partial_run,
+        "limit": limit,
         "description": (
             f"미국(나스닥+뉴욕) 시가총액 상위 1~{len(visible)}위 퀀트 스냅샷 "
             f"(검증 통과 {len(valid)}/{len(visible)} 종목, 상태={status}, 통화 USD)"
         ),
     }
 
-    with open(snapshot_path, "w", encoding="utf-8") as f:
-        json.dump({"metadata": metadata, "stocks": enriched}, f, ensure_ascii=False, indent=2)
-    with open(raw_path, "w", encoding="utf-8") as f:
-        json.dump({
-            "metadata": {
-                "collected_at_et": now_et.isoformat(),
-                "note": "크롤링 직후 (라벨, 값) 원문. 가공 결과와 분리 보관 (ENGINEERING_SPEC §0-3-3)",
-            },
-            "items": raw_items,
-        }, f, ensure_ascii=False, indent=2)
-    update_us_summary_history(now_et.strftime("%Y-%m-%d %H:%M"), visible, history_path)
+    if write_outputs:
+        with open(snapshot_path, "w", encoding="utf-8") as f:
+            json.dump({"metadata": metadata, "stocks": enriched}, f, ensure_ascii=False, indent=2)
+        with open(raw_path, "w", encoding="utf-8") as f:
+            json.dump({
+                "metadata": {
+                    "collected_at_et": now_et.isoformat(),
+                    "note": "크롤링 직후 (라벨, 값) 원문. 가공 결과와 분리 보관 (ENGINEERING_SPEC §0-3-3)",
+                },
+                "items": raw_items,
+            }, f, ensure_ascii=False, indent=2)
+    else:
+        print("⏭️  테스트 모드(--limit)라 스냅샷/원문 파일에 쓰지 않았습니다 "
+              "— 프로덕션 산출물을 부분 수집 결과로 덮어쓰지 않습니다(§0-1).")
 
     # ── 종목별 시계열 이력 누적 (2026-08-09 신설, TASK_HISTORY #64) ──────────────────
     # 여기까지 도달했다는 건 유니버스 수집·전수 크롤링·스코어링·스냅샷 저장이 예외 없이
@@ -1642,20 +1751,33 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
         history_date = max(source_session_dates.items(), key=lambda kv: kv[1])[0]
     else:
         history_date = session["session_date"]
-    try:
-        history_result = record_daily_history(
-            path=_data_path(US_HISTORY_FILENAME),
-            stocks=enriched,
-            date_str=history_date,
-            fields=US_HISTORY_FIELDS,
-            status=status,
-        )
-        if history_result["recorded"]:
-            print(f"  종목별 시계열 이력 누적: {history_result['reason']} -> {US_HISTORY_FILENAME}")
-        else:
-            print(f"  ⚠️ 종목별 시계열 이력 미기록: {history_result['reason']}")
-    except Exception as e:
-        print(f"  ⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
+
+    # 2026-08-29 재감사 M7: 요약 이력도 같은 거래일 기준으로 중복 제거합니다(위 함수 주석 참고).
+    # H10: 테스트 모드(--limit)에서는 요약 이력도 건드리지 않습니다.
+    if write_outputs:
+        update_us_summary_history(now_et.strftime("%Y-%m-%d %H:%M"), visible, history_path,
+                                  history_date=history_date)
+    else:
+        print("⏭️  테스트 모드(--limit)라 요약 이력에 쓰지 않았습니다.")
+
+    if write_outputs:
+        try:
+            history_result = record_daily_history(
+                path=_data_path(US_HISTORY_FILENAME),
+                stocks=enriched,
+                date_str=history_date,
+                fields=US_HISTORY_FIELDS,
+                status=status,
+            )
+            if history_result["recorded"]:
+                print(f"  종목별 시계열 이력 누적: {history_result['reason']} -> {US_HISTORY_FILENAME}")
+            else:
+                print(f"  ⚠️ 종목별 시계열 이력 미기록: {history_result['reason']}")
+        except Exception as e:
+            print(f"  ⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
+    else:
+        print("⏭️  테스트 모드(--limit)라 종목별 시계열 이력에 쓰지 않았습니다 "
+              "— 부분 수집이 이력에 구멍을 내지 않도록 막습니다.")
 
     print("=" * 70)
     print(f"[완료] {len(visible)}종목 노출 (+버퍼 {metadata['hidden_buffer_count']}) / "
@@ -2066,6 +2188,7 @@ def cmd_collect(args):
         limit=args.limit,
         delay=not args.no_delay,
         skip_indices=args.skip_indices,
+        allow_overwrite=getattr(args, "allow_overwrite", False),
     )
     # 2026-08-12(TASK_HISTORY #92): 핵심 수집(위)이 끝난 **뒤에** 별도로 실행합니다.
     #   · try/except 로 감싸 이 보조 수집이 실패해도 이미 저장된 550종목 스냅샷은 그대로입니다.
@@ -2156,6 +2279,12 @@ def main():
                                 "구조에서 하루 한 번만 실제 수집되도록 하는 방어 장치입니다.")
     p_collect.add_argument("--no-delay", action="store_true",
                            help="⚠️ 크롤링 매너 위반 — 오프라인 테스트 외에는 쓰지 마세요")
+    # 2026-08-29 재감사 H10: --limit(부분 수집) 결과로 프로덕션 산출물을 덮어쓰려면
+    # 이 플래그를 명시해야 합니다(collector_dividend_kr.py 의 같은 이름 플래그와 동일한 취지).
+    p_collect.add_argument("--allow-overwrite", action="store_true",
+                           help="--limit 로 부분 수집한 결과를 스냅샷/요약 이력/시계열 이력에 "
+                                "그대로 쓰도록 허용합니다(기본값: 쓰지 않음). 스냅샷에는 "
+                                "metadata.partial_run=True 와 limit 값이 남습니다.")
     p_collect.set_defaults(func=cmd_collect)
 
     p_prices = sub.add_parser(

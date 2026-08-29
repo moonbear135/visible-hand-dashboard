@@ -322,10 +322,36 @@ def test_impossible_date_is_rejected(real_document_html):
 
 
 def test_empty_or_garbage_document_is_failed_not_silently_empty():
+    # 2026-08-29 재감사 L15: 기대치를 LABEL_SPECS **행 수**가 아니라 **필드 수**로 고칩니다.
+    # LABEL_SPECS 에는 pay_date_expected 의 별칭 두 줄이 들어 있어, 예전 코드는 그 필드
+    # 하나를 못 찾았을 때 missing_labels 에 두 번 실었습니다(= 결측 항목이 실제보다 많아
+    # 보임). 이제 필드당 대표 표기 하나만 보고하므로 distinct 필드 수와 같아야 합니다.
+    distinct_fields = {field for field, _key, _display in cp.LABEL_SPECS}
     for text in ("", "<html><body>표가 없습니다</body></html>"):
         parsed = cp.parse_dividend_decision_document(text)
         assert parsed["parse_status"] == cp.PARSE_FAILED
-        assert len(parsed["missing_labels"]) == len(cp.LABEL_SPECS)
+        assert len(parsed["missing_labels"]) == len(distinct_fields)
+        # 중복 보고가 없어야 합니다(같은 필드가 두 번 실리면 안 됨)
+        assert len(parsed["missing_labels"]) == len(set(parsed["missing_labels"]))
+
+
+def test_reaudit_missing_labels_reports_each_field_only_once():
+    """
+    L15: 별칭이 두 개인 필드(pay_date_expected)를 못 찾았을 때 missing_labels 에 두 번
+    실리면 안 됩니다. 결측 항목 수가 실제보다 많아 보여, 파싱 품질 판정이 왜곡됩니다.
+    """
+    # pay_date_expected 만 없고 나머지는 다 있는 문서를 만들어도, 그 필드는 한 번만 보고
+    parsed = cp.parse_dividend_decision_document("")
+    dup = [lbl for lbl in parsed["missing_labels"]
+           if lbl in ("7. 배당금지급 예정일자", "5. 배당금지급 예정일")]
+    assert len(dup) == 1, f"pay_date_expected 는 한 번만 보고되어야 합니다: {dup}"
+    # 전체적으로도 중복이 없어야 합니다
+    assert len(parsed["missing_labels"]) == len(set(parsed["missing_labels"]))
+    # 보고된 표기는 전부 대표 표기(LABEL_SPECS 의 첫 항목)여야 합니다
+    first_display = {}
+    for field, _key, display in cp.LABEL_SPECS:
+        first_display.setdefault(field, display)
+    assert set(parsed["missing_labels"]) <= set(first_display.values())
 
 
 def test_rowspan_label_without_stock_kind_sublabel_leaves_a_note():

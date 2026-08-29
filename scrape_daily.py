@@ -21,7 +21,16 @@ except ImportError:
 
 # 2026-08-06 2차 감사 5-1/5-2/4-1: 가중치·정규화·증폭기 로직을 macro_view.py와 공유하는
 # 단일 출처로 이전(utils/macro_scoring.py, utils/constants.py 참고).
-from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
+from utils.constants import (
+    RISK_WEIGHTS, INVESTOR_WEIGHTS,
+    # 2026-08-29 재감사 L5: 본문에 매직넘버로 박혀 있던 매크로 프록시 계수(실측 근거 없음,
+    # #66 조사 대기)를 값 변경 없이 이름 있는 상수로 뽑아 단일 출처에 모았습니다.
+    FX_PROXY_BASE, FX_PROXY_SLOPE, FX_PROXY_CENTER, FX_PROXY_SCALE,
+    PUT_PROXY_BASE, PUT_PROXY_SLOPE,
+    FX_FOREIGNER_CHANGE_SLOPE, FX_OFFSET_RETAIL,
+    FLOW_OFFSET_FOREIGN, FLOW_OFFSET_INSTITUTION,
+    FLOW_OFFSET_RETAIL_UP, FLOW_OFFSET_RETAIL_DOWN,
+)
 from utils.macro_scoring import (
     compute_historical_stats, compute_sub_scores, compute_final_score,
     # 2026-08-10 (#68): 실측 지표(5일 수익률·3주체 순매수) 정규화 — 자세한 배경은 해당 모듈 주석 참고
@@ -29,6 +38,8 @@ from utils.macro_scoring import (
     NET_FLOW_MIN_SAMPLE, RETURN_POP_MIN_SAMPLE,
     # 2026-08-10 (#70): VKOSPI 레벨처럼 "값이 클수록 위험"인 실측 지표용 + 이력 컬럼 분포 생성기
     measured_upside_risk, history_column_population,
+    # 2026-08-29 재감사 L3: 이 파일에 따로 정의돼 있던 clip() 을 단일 출처에서 가져옵니다.
+    clip,
 )
 # 2026-08-10 (#70): KRX OPEN API(공식 무료) 실측 수집. 인증키(환경변수 KRX_OPENAPI_KEY)가 없거나
 # 호출이 실패하면 예외를 던지지 않고 값이 None으로 돌아와, 해당 지표만 배점에서 빠집니다.
@@ -79,14 +90,59 @@ COL_MAP = {
     "VKOSPI_Level_AsOf": "VKOSPI 기준 거래일",
     "Futures_Basis_Raw": "선물 베이시스 (KOSPI200 선물 종가 − 지수 종가, 실측 원값)",
     "Futures_Basis_AsOf": "선물 베이시스 기준 거래일",
+    # 2026-08-29 재감사 M14: KOSPI/환율 종가에도 **그 값의 실제 기준 거래일**을 남깁니다.
+    # 예전엔 FDR 시계열에서 "target_date 이전의 가장 최신 값"을 가져오면서(휴장·지연으로
+    # 며칠 전 값일 수 있음) 그 사실이 어디에도 기록되지 않아, 저장된 행의 Date 컬럼만 보면
+    # 그날 실제 종가처럼 보였습니다. VKOSPI/선물 베이시스가 이미 쓰던 _AsOf 패턴 그대로입니다.
+    # (네이버 재조회로 덮어쓴 경우에는 그 값이 수집 당일 시세이므로 date_key 가 들어갑니다.)
+    "KOSPI_AsOf": "코스피 종가 기준 거래일",
+    "USD_KRW_AsOf": "원/달러 환율 기준 거래일",
 }
 
-# (SPEC §3: 개별 크롤러의 PERIOD_KEYWORDS 사본 하드코딩 금지.
-#  이 파일에서는 실제로 사용되지 않으므로 utils/data_validator.py 의 사전을 단일 출처로 참조합니다.)
-from utils.data_validator import PERIOD_KEYWORDS  # noqa: F401  (단일 출처 유지용)
+# (2026-08-29 재감사 L2: `from utils.data_validator import PERIOD_KEYWORDS  # noqa: F401` 삭제.
+#  "단일 출처 유지용"이라는 주석과 달리 이 파일 어디에서도 쓰이지 않는 죽은 import 였습니다 —
+#  실제로 참조하지 않는 import 는 단일 출처를 강제하지 못하고 noqa 로 린터만 침묵시킵니다.)
+# (2026-08-29 재감사 L3: 지역 clip() 정의 삭제 — utils/macro_scoring.py 의 것을 import 합니다.)
 
-def clip(val):
-    return min(1.0, max(0.0, val))
+# =============================================================================
+# 2026-08-29 재감사 H8: 투자자별 매매동향 표(투자주체 3주체) 컬럼 위치를 헤더 라벨로 찾습니다.
+#
+# 예전엔 cells[1]=개인 / cells[2]=외국인 / cells[3]=기관계 로 위치를 고정 인덱싱했습니다.
+# 네이버가 컬럼 순서를 바꾸거나 하나 끼워 넣으면 조용히 다른 주체의 금액이 그 자리에 들어가고,
+# 그 값이 그대로 수급 위험 점수와 market_history.csv 에 기록됩니다(SPEC §2-1 위반).
+# collector_kospi200.py::extract_market_sum_column_indices() 와 같은 원칙입니다.
+#
+# 라벨을 못 찾으면 **값을 지어내지 않고 빈 dict** 를 돌려줍니다 — 호출부는 그 경우
+# sugeub_fetched=False 로 남겨 기존 차단(Reject) 경로를 그대로 타야 합니다.
+# =============================================================================
+INVESTOR_FLOW_LABELS = {
+    "retail": ('개인',),
+    "foreigner": ('외국인',),
+    "institution": ('기관계', '기관'),
+}
+
+
+def extract_investor_flow_column_indices(table):
+    """반환: {"retail": i, "foreigner": j, "institution": k} 또는 {} (라벨 미발견).
+
+    데이터 행이 빈 셀을 걸러낸 뒤 인덱싱되므로, 헤더도 같은 방식(빈 셀 제외)으로 읽어
+    같은 좌표계를 씁니다. 헤더가 2단(rowspan/colspan)인 경우를 대비해 헤더 행을 하나씩
+    보면서 **3주체 라벨이 모두 들어 있는 한 행** 안에서만 인덱스를 확정합니다
+    (여러 행을 이어 붙이면 colspan 때문에 데이터 셀과 좌표가 어긋납니다).
+    """
+    for tr in table.find_all('tr')[:3]:
+        labels = [c.get_text(strip=True).replace(' ', '') for c in tr.find_all(['th', 'td'])]
+        labels = [l for l in labels if l]
+        found = {}
+        for key, accepted in INVESTOR_FLOW_LABELS.items():
+            for i, label in enumerate(labels):
+                if label in accepted:
+                    found[key] = i
+                    break
+        if len(found) == len(INVESTOR_FLOW_LABELS):
+            return found
+    return {}
+
 
 def scrape_and_update(target_date_override=None):
     is_backfill = bool(target_date_override)
@@ -125,8 +181,19 @@ def scrape_and_update(target_date_override=None):
                 print(f"ℹ️ {date_key} 데이터가 이미 존재합니다. 최신 데이터로 덮어씁니다.")
                 history_df = history_df[history_df["Date"] != date_key]
         except Exception as e:
-            print(f"❌ 기존 파일 읽기 오류: {str(e)}")
-            history_df = pd.DataFrame()
+            # =========================================================
+            # ⚠️ 2026-08-29 재감사 H7: 예전엔 여기서 `history_df = pd.DataFrame()` 으로
+            # 조용히 넘어갔습니다. 그런데 이 함수 끝(저장 단계)은 history_df 에 오늘 행을
+            # 붙여 market_history.csv 를 **통째로 다시 씁니다** — 즉 읽기가 한 번 실패하면
+            # 몇 년치 이력이 오늘 1행짜리 파일로 덮어써지고, 로그에는 경고 한 줄만 남습니다.
+            # 아래 KOSPI/환율 결측 방어(§0-1)와 똑같은 원칙으로, 메우지 말고 중단합니다.
+            # =========================================================
+            raise RuntimeError(
+                f"{HISTORY_FILE} 를 읽지 못해 이력이 소실될 위험이 있어 수집을 중단합니다 "
+                f"({type(e).__name__}: {e}). 저장 단계가 이 파일을 전체 재작성하므로, "
+                "읽지 못한 채 진행하면 지금까지 쌓인 과거 행이 오늘 1행으로 덮어써집니다. "
+                "기존 파일을 복구하거나 손상 여부를 확인한 뒤 다시 실행하세요."
+            )
 
     # 2. 크롤링 기초 데이터 수집
     #    ⚠️ 시드값(1.2 / 0.08 / 0.5)을 미리 넣어두면 FDR 조회가 실패해도 그 값이
@@ -139,6 +206,14 @@ def scrape_and_update(target_date_override=None):
     # 아래에서 의존 지표를 배점 제외합니다.
     kospi_change = None
     usd_change = None
+    # 2026-08-29 재감사 M13: 전일 종가 '실측값'. 아래 네이버 재조회 블록이 변화율을 다시
+    # 계산할 때, 예전엔 이 값이 스코프 밖이라 `kospi_close_fdr / (1 + kospi_change)` 로
+    # 되돌려 추정했습니다 — 이미 손에 쥔 실측값을 버리고 반올림 오차가 섞인 역산값을
+    # 쓰는 것이라, 여기로 끌어올려 그대로 재사용합니다.
+    kospi_prev = None
+    # 2026-08-29 재감사 M14: 위 두 종가가 '실제로 어느 거래일 값인지'를 함께 기록합니다.
+    kospi_as_of = None
+    usd_as_of = None
     # (2026-08-10 #72: volatility / dist_from_high 선언 제거 — 이 두 값을 쓰던 공매도 2개
     #  지표가 점수에서 빠져 참조하는 코드가 남지 않았습니다. 아래 FDR 조회 블록의 계산과
     #  "이 값이 없으면 수집 중단" 하드 실패 게이트도 함께 제거했습니다.)
@@ -168,6 +243,7 @@ def scrape_and_update(target_date_override=None):
                 if not valid_kospi.empty and not valid_usd.empty:
                     latest_kospi = valid_kospi.iloc[-1]
                     kospi_close = float(latest_kospi['Close'])
+                    kospi_as_of = pd.Timestamp(valid_kospi.index[-1]).strftime("%Y-%m-%d")
                     # 변화율 계산
                     idx_k = valid_kospi.index.get_loc(valid_kospi.index[-1])
                     if idx_k >= 1:
@@ -182,6 +258,7 @@ def scrape_and_update(target_date_override=None):
 
                     latest_usd = valid_usd.iloc[-1]
                     usd_close = float(latest_usd['Close'])
+                    usd_as_of = pd.Timestamp(valid_usd.index[-1]).strftime("%Y-%m-%d")
                     idx_u = valid_usd.index.get_loc(valid_usd.index[-1])
                     if idx_u >= 1:
                         usd_prev = float(valid_usd.iloc[idx_u-1]['Close'])
@@ -248,12 +325,24 @@ def scrape_and_update(target_date_override=None):
                         if deviation > NAVER_DEVIATION_WARN_THRESHOLD and kospi_change is not None:
                             # FDR 종가 기준으로 이미 계산된 변화율을, 실제로 저장될 네이버 종가
                             # 기준으로 다시 맞춥니다(둘 다 "전일 대비"라는 의미는 동일하게 유지).
-                            kospi_prev_est = kospi_close_fdr / (1 + kospi_change)
-                            kospi_change = (kospi_close_naver - kospi_prev_est) / kospi_prev_est
-                            print(f"⚠️ 네이버 KOSPI({kospi_close_naver})가 FDR 종가({kospi_close_fdr})와 "
-                                  f"{deviation*100:.2f}% 괴리 — FDR이 지연된 것으로 보고 변화율을 "
-                                  f"네이버 종가 기준으로 재계산했습니다.")
+                            # 2026-08-29 재감사 M13: FDR 시계열에서 이미 읽어둔 전일 종가
+                            # 실측값(kospi_prev)을 그대로 씁니다. 예전엔 이 자리에서
+                            # `kospi_close_fdr / (1 + kospi_change)` 로 전일가를 역산했는데,
+                            # 그 값은 바로 위에서 kospi_prev 로 나눠 만든 kospi_change 를
+                            # 다시 나눠 되돌린 것이라 실측값보다 나을 수 없습니다.
+                            if kospi_prev and kospi_prev > 0:
+                                kospi_change = (kospi_close_naver - kospi_prev) / kospi_prev
+                                print(f"⚠️ 네이버 KOSPI({kospi_close_naver})가 FDR 종가({kospi_close_fdr})와 "
+                                      f"{deviation*100:.2f}% 괴리 — FDR이 지연된 것으로 보고 변화율을 "
+                                      f"네이버 종가 기준(전일 실측 종가 {kospi_prev})으로 재계산했습니다.")
+                            else:
+                                print(f"⚠️ 네이버 KOSPI({kospi_close_naver})가 FDR 종가({kospi_close_fdr})와 "
+                                      f"{deviation*100:.2f}% 괴리 — 전일 실측 종가가 없어 변화율을 "
+                                      "재계산하지 못했습니다(역산으로 지어내지 않음, §0-1).")
+                                kospi_change = None
                     kospi_close = kospi_close_naver
+                    # M14: 네이버 값으로 덮어썼으면 기준일도 수집 대상 영업일로 바뀝니다.
+                    kospi_as_of = date_key
                     print(f"✅ 네이버 금융 KOSPI 수집 성공: {kospi_close}")
 
             # USD/KRW 수집
@@ -265,6 +354,7 @@ def scrape_and_update(target_date_override=None):
                 if u_val_str.replace('.', '', 1).isdigit():
                     usd_close_naver = float(u_val_str)
                     usd_close = usd_close_naver
+                    usd_as_of = date_key
                     print(f"✅ 네이버 금융 환율 수집 성공: {usd_close}")
 
         except Exception as e:
@@ -301,36 +391,61 @@ def scrape_and_update(target_date_override=None):
     sugeub_fetched = False
     
     # Naver Finance 1~5페이지 날짜 매칭 방식 적용
-    try:
-        headers = {'User-Agent': 'Mozilla/5.0'}
-        found = False
-        for page in range(1, 6):
+    # ⚠️ 2026-08-29 재감사 H8: 예전엔 5페이지 순회 **전체**를 하나의 try 가 감쌌습니다.
+    # 1페이지의 한 행에서 int() 하나만 실패해도 남은 행과 2~5페이지 순회가 통째로 중단돼,
+    # 페이지 뒤쪽에 있었을 목표 날짜 행을 아예 못 보고 "수급 수집 실패"로 차단됐습니다.
+    # 이제 예외 범위를 **행 단위**로 좁혀, 한 행이 깨져도 같은 페이지의 나머지 행과
+    # 다음 페이지 순회는 그대로 계속됩니다.
+    headers = {'User-Agent': 'Mozilla/5.0'}
+    found = False
+    for page in range(1, 6):
+        try:
             url = f'https://finance.naver.com/sise/investorDealTrendDay.naver?bizdate={date_key.replace("-", "")}&sosok=01&page={page}'
             r = requests.get(url, headers=headers, timeout=5)
             r.encoding = 'euc-kr'
             soup = BeautifulSoup(r.text, 'html.parser')
             tb = soup.find('table', class_='type_1')
-            
-            if tb:
-                rows = tb.find_all('tr')
-                for tr in rows[2:]:
-                    cells = [td.text.strip() for td in tr.find_all(['td'])]
-                    cells = [c for c in cells if c]
-                    if cells and len(cells) >= 4:
-                        date_str = "20" + cells[0].replace(".", "-")
-                        if date_str == date_key:
-                            retail_flow = int(cells[1].replace(",", ""))
-                            foreigner_flow = int(cells[2].replace(",", ""))
-                            institution_flow = int(cells[3].replace(",", ""))
-                            sugeub_fetched = True
-                            found = True
-                            break
-                if found:
-                    break
-        if sugeub_fetched:
-            print(f"✅ 네이버 수급 수집 완료 (매칭 성공). 외인: {foreigner_flow}, 기관: {institution_flow}")
-    except Exception as e:
-        print(f"⚠️ 네이버 수급 스크래핑 실패: {str(e)}")
+        except Exception as e:
+            print(f"⚠️ 네이버 수급 {page}페이지 요청 실패(다음 페이지 계속): {e}")
+            continue
+
+        if not tb:
+            continue
+
+        # H8: 3주체 컬럼 위치를 헤더 라벨로 판정합니다. 못 찾으면 이 페이지의 수급 값을
+        # 파싱하지 않고 넘어갑니다 — 위치 인덱스로 폴백해 엉뚱한 주체의 금액을 기록하느니
+        # sugeub_fetched=False 로 남겨 아래 차단(Reject) 경로를 타는 편이 안전합니다.
+        col_idx = extract_investor_flow_column_indices(tb)
+        if not col_idx:
+            print(f"⚠️ 네이버 수급 {page}페이지: 헤더에서 개인/외국인/기관계 라벨을 찾지 못해 "
+                  "이 페이지는 파싱하지 않습니다(위치 인덱스 폴백 금지).")
+            continue
+
+        max_needed = max(col_idx.values())
+        for tr in tb.find_all('tr')[2:]:
+            try:
+                cells = [td.text.strip() for td in tr.find_all(['td'])]
+                cells = [c for c in cells if c]
+                if not cells or len(cells) <= max_needed:
+                    continue
+                date_str = "20" + cells[0].replace(".", "-")
+                if date_str != date_key:
+                    continue
+                retail_flow = int(cells[col_idx["retail"]].replace(",", ""))
+                foreigner_flow = int(cells[col_idx["foreigner"]].replace(",", ""))
+                institution_flow = int(cells[col_idx["institution"]].replace(",", ""))
+                sugeub_fetched = True
+                found = True
+                break
+            except Exception as e:
+                # 한 행이 깨져도 같은 페이지의 나머지 행은 계속 봅니다.
+                print(f"⚠️ 네이버 수급 {page}페이지 행 파싱 실패(다음 행 계속): {e}")
+                continue
+        if found:
+            break
+
+    if sugeub_fetched:
+        print(f"✅ 네이버 수급 수집 완료 (매칭 성공). 외인: {foreigner_flow}, 기관: {institution_flow}")
 
     if not sugeub_fetched:
         print("🚨 [에러] 수급 데이터 매칭 및 스크래핑에 실패하여 수집을 차단(Reject)하고 종료합니다.")
@@ -363,8 +478,10 @@ def scrape_and_update(target_date_override=None):
     # "📚 공부용 참고" 섹션(views/macro_view.py STUDY_ONLY_INDICATORS)으로 **이동**했습니다.
     # ⚠️ market_history.csv의 기존 두 컬럼은 과거 기록 보존을 위해 그대로 둡니다(앞으로만 안 씀).
     # 이제 남은 프록시는 2개(fx/put)뿐이고 나머지 4개는 전부 실측입니다.
-    fx_base = 0.5 + 0.3 * (usd_close - 1200) / 300  # usd_close 자체는 위에서 이미 None 방어됨
-    put_base = None if kospi_change is None else (0.5 - 0.4 * kospi_change)
+    # 2026-08-29 재감사 L5: 계산식·값은 그대로이고 숫자만 이름 있는 상수로 대체했습니다
+    # (임의 선형 프록시, 실측 근거 없음 — utils/constants.py 의 주석 참고, #66 조사 대기).
+    fx_base = FX_PROXY_BASE + FX_PROXY_SLOPE * (usd_close - FX_PROXY_CENTER) / FX_PROXY_SCALE  # usd_close 자체는 위에서 이미 None 방어됨
+    put_base = None if kospi_change is None else (PUT_PROXY_BASE - PUT_PROXY_SLOPE * kospi_change)
 
     # -------------------------------------------------------------------------
     # [실측 지표 ①] Stock_Net_Sell — 3주체 순매수 '금액'을 과거 분포 대비 정규화
@@ -457,16 +574,16 @@ def scrape_and_update(target_date_override=None):
 
     # 2026-08-06 2차 감사 4-4 방어: usd_change가 None이면 FX_Swap_Point의 외국인 항목도
     # None으로 두어야 하므로, fx_base와 usd_change 보정을 분리해 None 전파를 명시적으로 처리.
-    fx_foreigner = None if usd_change is None else clip(fx_base + 0.1 * usd_change)
+    fx_foreigner = None if usd_change is None else clip(fx_base + FX_FOREIGNER_CHANGE_SLOPE * usd_change)
 
     market_scores = {
         "FX_Swap_Point": None if fx_foreigner is None else {
-            "Foreigner": fx_foreigner, "Institution": clip(fx_base), "Retail": clip(fx_base - 0.2)
+            "Foreigner": fx_foreigner, "Institution": clip(fx_base), "Retail": clip(fx_base - FX_OFFSET_RETAIL)
         },
         "Put_OTM_OI": None if put_base is None else {
-            "Foreigner": clip(put_base + (0.1 if foreigner_flow < 0 else -0.1)),
-            "Institution": clip(put_base + (0.05 if institution_flow < 0 else -0.05)),
-            "Retail": clip(put_base + (0.15 if retail_flow > 0 else -0.1))
+            "Foreigner": clip(put_base + (FLOW_OFFSET_FOREIGN if foreigner_flow < 0 else -FLOW_OFFSET_FOREIGN)),
+            "Institution": clip(put_base + (FLOW_OFFSET_INSTITUTION if institution_flow < 0 else -FLOW_OFFSET_INSTITUTION)),
+            "Retail": clip(put_base + (FLOW_OFFSET_RETAIL_UP if retail_flow > 0 else -FLOW_OFFSET_RETAIL_DOWN))
         },
         # (2026-08-10 #72: 여기 있던 "Short_Ratio" 항목 제거 — 공부용 참고 섹션으로 이동)
         # 실측 지표 ③: VKOSPI 지수값. 시장 전체가 하나의 값으로 매기는 변동성 기대라
@@ -512,8 +629,9 @@ def scrape_and_update(target_date_override=None):
         current_weighted_risks[item] = weighted_risk
         metrics_dict[item] = weighted_risk
 
-    if len(history_df) < 20:
-        print(f"⚠️ 정규화 표본 부족: 누적 이력 {len(history_df)}행 (권장 20행 이상). "
+    # 2026-08-29 재감사 L4: 하드코딩된 20 → 이미 이 파일이 import 하고 있는 상수 참조.
+    if len(history_df) < NET_FLOW_MIN_SAMPLE:
+        print(f"⚠️ 정규화 표본 부족: 누적 이력 {len(history_df)}행 (권장 {NET_FLOW_MIN_SAMPLE}행 이상). "
               f"Z-Score 기반 서브 점수가 극단으로 튈 수 있습니다.")
 
     # 2026-08-06 2차 감사 5-1/5-2/4-1: 과거 통계·시그모이드 변환·증폭기 로직을
@@ -564,6 +682,15 @@ def scrape_and_update(target_date_override=None):
     new_data["Futures_Basis_Raw"] = [None if futures_basis is None else round(futures_basis, 4)]
     new_data["VKOSPI_Level_AsOf"] = [krx_as_of if vkospi_level is not None else None]
     new_data["Futures_Basis_AsOf"] = [krx_as_of if futures_basis is not None else None]
+
+    # 2026-08-29 재감사 M14: KOSPI/환율 값의 실제 기준 거래일. Date 컬럼(수집 대상 영업일)과
+    # 다르면, 그날 휴장이었거나 소스가 지연된 것입니다 — 그 사실을 행 안에 남깁니다.
+    new_data["KOSPI_AsOf"] = [kospi_as_of]
+    new_data["USD_KRW_AsOf"] = [usd_as_of]
+    if kospi_as_of and kospi_as_of != date_key:
+        print(f"ℹ️ 저장된 KOSPI 종가는 {kospi_as_of} 기준입니다(수집 대상 영업일 {date_key}과 다름).")
+    if usd_as_of and usd_as_of != date_key:
+        print(f"ℹ️ 저장된 원/달러 환율은 {usd_as_of} 기준입니다(수집 대상 영업일 {date_key}과 다름).")
 
     for k, v in metrics_dict.items():
         new_data[k] = [round(v, 3)]
