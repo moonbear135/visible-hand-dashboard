@@ -425,6 +425,24 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
      3개가 이 사본에서 실패). 지금 운영 환경이 어떤 pandas 버전으로 떠 있는지는 확인 안 함
      — 당장 장애는 아니지만, 다음에 이 파일을 만질 때 `pd.read_html(io.StringIO(res.text), ...)`
      로 바꿔두는 편이 안전합니다.
+10. **📋 재감사 4차 전체 진행 현황 (2026-08-29 갱신, 오너 지시로 모듈별 순차 진행 중).**
+    저장소 전체를 모듈 단위로 순회하며 4번째 재감사(오푸스 높음, "한번 할 때 전부 다" —
+    발견되는 High/Medium/Low/Structural 전 등급을 한 라운드에 처리)를 진행 중입니다.
+    상세 경위는 각 모듈 절(§9~§13)과 `TASK_HISTORY.md` #158~#166 참고.
+    - ✅ 수집기 — 완료 (`COLLECTOR_REAUDIT_FINDINGS.md`)
+    - ✅ 결투다! — 완료 (`DUEL_REAUDIT_FINDINGS.md`, §12)
+    - ✅ 매크로/PEGY/보조지표/리포트 — 완료 (`MACRO_REAUDIT_FINDINGS.md`, TASK_HISTORY #161~#162)
+    - ✅ 내 성적표(스코어카드) — 완료 (`SCORECARD_REAUDIT_FINDINGS.md`, TASK_HISTORY #163)
+    - ✅ 배당(KR/US) — 완료, 41건 중 37건 반영·4건 유예 (`DIVIDEND_REAUDIT_FINDINGS.md`, TASK_HISTORY #164)
+    - ✅ 미국주식 — 완료, 44건 전부 처리 완료(1차 32건 + 2차 유예분 8건 중 6건 반영,
+      1건은 정책 이관, S-1만 계속 유예) (`US_STOCKS_REAUDIT_FINDINGS.md`, TASK_HISTORY #165~#166)
+    - 🟠 **공유인프라 — 지금 착수.** `utils/data_source.py`·`web/auth.py`·`web/layout.py`·
+      `web/state.py`·`web/components/`처럼 여러 화면이 공유하는 코드, 그리고 지금까지
+      재감사에서 "한 화면만 고치면 안 되고 여러 모듈에 걸쳐 있어 나중에 한 번에" 라고
+      미뤄 둔 정책성 항목들(예: M-13 — 이력 CSV의 캡/바닥값 플래그를 코스피·미국
+      양쪽에 어떻게 적용할지, §0-5 백로그의 TASK_HISTORY #166 참고)을 이 모듈에서
+      함께 정리합니다.
+    - ⬜ 테스트 스위트 — 아직 시작 전. 공유인프라 다음 마지막 순서.
 
 ## 1. 이 프로젝트는 무엇인가
 
