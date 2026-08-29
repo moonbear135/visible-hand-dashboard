@@ -55,7 +55,6 @@ METRIC_COLUMNS = list(RISK_WEIGHTS.keys())
 # 이미 CSV에 쌓여 있는 과거 값은 기록 보존을 위해 그대로 두고(삭제 금지), 아래 COL_MAP에도
 # 한글 매핑을 남겨둡니다(과거 행을 다시 읽을 때 필요). 다만 신규 파일에 빈 컬럼을 만들지는
 # 않으므로 ensure_metric_columns() 대상에서는 뺐습니다.
-RETIRED_METRIC_COLUMNS = list(RETIRED_RISK_INDICATORS.keys())
 
 
 def _notify(callback, message, level=logging.WARNING):
@@ -160,7 +159,6 @@ def ensure_metric_columns(df):
 
 
 # 하위 호환용 별칭 (외부에서 과거 이름으로 호출하더라도 더 이상 데이터를 생성하지 않음)
-backfill_missing_metrics = ensure_metric_columns
 
 def repair_missing_supply_data(df, on_warning=None):
     """

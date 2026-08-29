@@ -34,36 +34,6 @@ class DataValidator:
     """
     
     @staticmethod
-    def normalize_currency(value_str):
-        """
-        문자열 내의 화폐 단위('백만원', '억원', '원')를 파악하여
-        순수 숫자를 원화(KRW) 기준 단위로 정규화(Scaling)하여 float로 반환합니다.
-        """
-        if not value_str or pd.isna(value_str):
-            return 0.0
-            
-        text = str(value_str).replace(',', '').strip()
-        
-        # 숫자 부분 추출 (음수, 소수점 포함)
-        match = re.search(r'(-?\d+(\.\d+)?)', text)
-        if not match:
-            return 0.0
-            
-        val = float(match.group(1))
-        
-        # 단위 스케일링
-        if '백만원' in text:
-            val *= 1_000_000
-        elif '억원' in text or '억' in text:
-            val *= 100_000_000
-        elif '조원' in text or '조' in text:
-            val *= 1_000_000_000_000
-        elif '천원' in text:
-            val *= 1_000
-            
-        return val
-    
-    @staticmethod
     def classify_header_timeframe(header_text):
         """
         헤더 텍스트를 분석하여 TTM (연간), QUARTERLY (분기), DAILY (일별), ESTIMATE (추정) 여부를 판정

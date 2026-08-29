@@ -1520,7 +1520,7 @@ def _render_raw_downloads() -> None:
     없습니다. 종목 하나만 골라 받는 도구는 이 지시서에 없어(오너 확인, 2026-08-24)
     **넣지 않았습니다** — 전부(raw + 가공 + 기준선) 파일째 받는 것만 지원합니다.
     """
-    today = date.today().strftime('%Y%m%d')
+    today = today_kst().strftime('%Y%m%d')
     latest_path = data_path(DATA_FILENAME)
     raw_path = data_path(RAW_FILENAME)
     history_path = data_path(HISTORY_FILENAME)

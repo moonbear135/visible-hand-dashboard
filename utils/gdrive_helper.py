@@ -79,8 +79,3 @@ def upload_file(local_file_path: str, folder_id: str = None):
     지정한 로컬 파일을 구글 드라이브 폴더로 백업합니다. (scrape_daily.py 호환 전용)
     """
     return upload_to_gdrive(local_file_path=local_file_path, drive_folder_id=folder_id or DEFAULT_TARGET_FOLDER_ID)
-
-if __name__ == '__main__':
-    # 테스트 업로드
-    test_file_path = r"C:\Users\crown\.gemini\antigravity\scratch\visible_hand\market_history.csv"
-    upload_file(test_file_path, folder_id=DEFAULT_TARGET_FOLDER_ID)

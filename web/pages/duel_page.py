@@ -905,7 +905,7 @@ def _render_header_usd() -> None:
     """
     ui.label(
         f'💵 달러 결투 — 가상의 {format_amount(SEED_AMOUNT_USD, CURRENCY_USD)}로 시작하는 '
-        '미국주식 계좌 3개가 원화 계좌와 **완전히 따로** 있습니다. 참여도, 성적도, 순위표도 '
+        '미국주식 계좌 3개가 원화 계좌와 완전히 따로 있습니다. 참여도, 성적도, 순위표도 '
         '원화 트랙과 별개입니다.'
     ).classes('vh-muted')
     for notice in MANDATORY_NOTICES_USD:
@@ -1002,8 +1002,8 @@ def _render_rules_expansion() -> None:
             '내 데이터가 남습니다.\n\n'
             '---\n\n'
 
-            '**규칙 4) 살 수 있는 종목은 코스피 시가총액 상위 200종목뿐입니다**\n\n'
-            '거래 통화는 원화만입니다. 미국주식·코스닥·ETF 는 이 모듈에서 거래할 수 '
+            '**규칙 4) 살 수 있는 종목은 코스피+코스닥 통합 시가총액 상위 500종목뿐입니다**\n\n'
+            '거래 통화는 원화만입니다. 미국주식·ETF 는 이 모듈에서 거래할 수 '
             '없습니다.\n\n'
             '---\n\n'
 
@@ -1722,7 +1722,7 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
     krw_by_window = {a.get("window_type"): a for a in (accounts or [])}
     ui.markdown('#### 💰 내 가상계좌')
     ui.label(
-        '창유형(1·3·6개월)마다 원화 계좌와 달러 계좌가 **각각 별도 계좌**로 있습니다. '
+        '창유형(1·3·6개월)마다 원화 계좌와 달러 계좌가 각각 별도 계좌로 있습니다. '
         '아래에 🇰🇷 국내 구역과 🇺🇸 해외 구역을 완전히 나눠 보여줍니다.'
     ).classes('vh-muted')
     ui.label(f'※ {NOTICE_NO_FX_MIX}').classes('vh-muted')
@@ -2247,7 +2247,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
 
     if not index:
         error_banner(
-            '🚫 주문 가능 종목 목록을 읽지 못해 **매수** 창을 열 수 없습니다. '
+            '🚫 주문 가능 종목 목록을 읽지 못해 매수 창을 열 수 없습니다. '
             '(보유 종목을 파는 리밸런싱 매도는 유니버스 목록과 무관하므로 아래에 그대로 '
             '열려 있습니다.)'
         )
@@ -2520,7 +2520,7 @@ def _render_sell_form(client, user_id: str, accounts, window: dict, on_changed,
     # 2-4-5 — 체결이 취소될 수 있는 경우를 **주문 전에** 알려 둡니다(사후 통보로 끝내지 않기).
     ui.label(
         '⚠️ 그날 종가 수집이 실패하거나 휴장일이면 이 매도 주문도 체결되지 않고 사유와 함께 '
-        '취소됩니다. 그 경우 이번 매도 기회는 **다시 열립니다** — 취소된 매도는 그 기회를 '
+        '취소됩니다. 그 경우 이번 매도 기회는 다시 열립니다 — 취소된 매도는 그 기회를 '
         '소진하지 않습니다(데이터 문제로 사용자의 기회를 빼앗지 않기 위한 규칙입니다).'
     ).classes('vh-muted vh-keep-all')
 
@@ -2605,8 +2605,8 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
             '매도 수량 (몇 주)', placeholder='예: 3',
         ).style('flex: 1 1 160px;')
         ui.label(
-            '※ 1주부터 보유 전량까지 가능합니다. 이 계좌에서는 이번 매도 기회에 **딱 한 '
-            '번**만 저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
+            '※ 1주부터 보유 전량까지 가능합니다. 이 계좌에서는 이번 매도 기회에 딱 한 '
+            '번만 저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
         ).classes('vh-muted vh-keep-all')
 
         message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')
@@ -2715,7 +2715,7 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
 
     if not index:
         error_banner(
-            '🚫 미국 주문 가능 종목 목록을 읽지 못해 달러 **매수** 창을 열 수 없습니다. '
+            '🚫 미국 주문 가능 종목 목록을 읽지 못해 달러 매수 창을 열 수 없습니다. '
             '(보유 종목을 파는 리밸런싱 매도는 유니버스 목록과 무관하므로 아래에 그대로 '
             '열려 있습니다.)'
         )
@@ -2975,7 +2975,7 @@ def _render_sell_form_usd(client, user_id: str, accounts, window: dict, on_chang
     ).classes('vh-muted')
     ui.label(
         '⚠️ 그날 미국 종가 수집이 실패하거나 미국 증시 휴장일이면 이 매도 주문도 체결되지 '
-        '않고 사유와 함께 취소됩니다. 그 경우 이번 매도 기회는 **다시 열립니다** — 취소된 '
+        '않고 사유와 함께 취소됩니다. 그 경우 이번 매도 기회는 다시 열립니다 — 취소된 '
         '매도는 그 기회를 소진하지 않습니다.'
     ).classes('vh-muted vh-keep-all')
 
@@ -3056,7 +3056,7 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
         ).style('flex: 1 1 160px;')
         ui.label(
             '※ 1주부터 보유 전량까지 가능합니다. 이 달러 계좌에서는 이번 매도 기회에 '
-            '**딱 한 번**만 저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
+            '딱 한 번만 저장할 수 있고, 접수 시간대 안에서는 수량 수정·취소가 됩니다.'
         ).classes('vh-muted vh-keep-all')
 
         message = ui.label('').classes('text-red-400 text-base whitespace-pre-line')

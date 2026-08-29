@@ -306,7 +306,7 @@ def scrape_and_update(target_date_override=None):
         found = False
         for page in range(1, 6):
             url = f'https://finance.naver.com/sise/investorDealTrendDay.naver?bizdate={date_key.replace("-", "")}&sosok=01&page={page}'
-            r = requests.get(url, headers=headers)
+            r = requests.get(url, headers=headers, timeout=5)
             r.encoding = 'euc-kr'
             soup = BeautifulSoup(r.text, 'html.parser')
             tb = soup.find('table', class_='type_1')
