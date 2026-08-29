@@ -376,6 +376,33 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 8. **참고**: §4(매크로 재설계) 이하 Streamlit 시절 "지금 열려있는 일" 목록은 이제
    대부분 낡았거나(성적표·보고서 공개는 새 사이트 기준으로 §0-3 참고) 매크로처럼
    여전히 유효한 오너 지시(중단 상태 유지)만 남아있습니다 — 필요할 때만 개별 대조하세요.
+9. **🔴 미해결 — `pytest tests/` 전수 실행 중 새로 발견한 것 2건 (2026-08-29, 결투 화면
+   작업 중 곁다리로 발견 — 처리는 보류, 기록만 남김. 결투 모듈 자체와는 무관).**
+   - 🔴 **(심각) `web/pages/dividend_page.py` 이벤트 루프 블로킹** —
+     `tests/test_event_loop_blocking.py::test_no_blocking_call_is_left_on_the_event_loop`가
+     `_render_raw_downloads()` 안의 `read_download_bytes(...)` 호출 3곳(1534·1542·1550행)이
+     `run_blocking()`으로 감싸지지 않은 채 이벤트 루프 위에서 그대로 동기 실행되는 것을
+     잡아냅니다. **2026-08-21 실제 접속 전원 끊김 사고와 같은 유형**입니다(`web/blocking.py`
+     모듈 독스트링 참고). 배당금(6번째 모듈) 파일이라 이 세션에서 직접 고치지 않았습니다
+     — 그 모듈 세션에서 `await run_blocking(read_download_bytes, ...)`로 감싸는 수정이
+     필요합니다.
+   - 🟡 **(경미) `tests/test_stock_history.py::test_export_end_to_end` 헤더 순서 불일치** —
+     CSV 헤더 5번째 칸이 테스트 기대값("현재가(원)")과 실제 값("시장구분(KOSPI/KOSDAQ)")이
+     다릅니다. `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS` 컬럼 순서와 이 테스트의
+     기대 배열이 언제부턴가 어긋난 것으로 보이며, 결투·성적표 어느 쪽과도 무관한 이력
+     다운로드 화면(2026-08-06 이전 구현) 쪽 사소한 드리프트입니다.
+   - 참고(고침 필요 없음, 기록만): `data/us_sample/`은 `.gitignore` 대상이라 새로 clone한
+     환경에서는 `tests/test_us_scoring.py`의 "샘플 파일 존재" 검사가 항상 실패합니다 —
+     로컬 전용 샘플이라 코드 문제 아님. 렌더 스모크 계열(`test_render_smoke` 등 4개)과
+     `test_upload_widget_is_really_not_rendered_when_flag_is_off`도 단독 실행하면 통과하는,
+     같은 pytest 프로세스 안에서 nicegui 가짜 클라이언트를 순차 재사용할 때만 나는 테스트
+     도구 자체의 순서 의존성입니다(실제 화면 버그 아님, 여러 세션에 걸쳐 반복 확인됨).
+   - 부수 관찰: `requirements.txt`가 `pandas`/`lxml` 버전을 고정하지 않아, 새로 설치되는
+     최신 pandas(3.0.2 확인)에서 `collector_kospi200.py`의 `pd.read_html(res.text, ...)`
+     호출 3곳이 깨집니다(`tests/test_collector_kospi200_ranking.py`의 서킷브레이커 테스트
+     3개가 이 사본에서 실패). 지금 운영 환경이 어떤 pandas 버전으로 떠 있는지는 확인 안 함
+     — 당장 장애는 아니지만, 다음에 이 파일을 만질 때 `pd.read_html(io.StringIO(res.text), ...)`
+     로 바꿔두는 편이 안전합니다.
 
 ## 1. 이 프로젝트는 무엇인가
 
