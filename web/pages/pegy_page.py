@@ -29,6 +29,17 @@ except Exception:
 import pandas as pd
 from nicegui import ui
 
+
+def _kst_today_str() -> str:
+    """다운로드 파일명용 오늘 날짜(KST, YYYYMMDD).
+
+    2026-08-29 재감사 L-5: 다운로드 버튼 4곳이 `datetime.now()`(서버 시각 — Render는
+    UTC)로 파일명을 만들고 있어, 한국 자정 근처에 받으면 파일명 날짜가 실제 한국
+    날짜와 하루 어긋날 수 있었습니다. `dividend_page.py`(커밋 `ba2b62b`)와 같은 계열
+    수정이며, 이 파일이 이미 갖고 있는 KST 헬퍼(위 :23-27)를 그대로 씁니다.
+    """
+    return (datetime.now(KST) if KST else datetime.now()).strftime('%Y%m%d')
+
 from utils.db import COL_MAP, HISTORY_FILE
 from utils.guardrail import apply_valuation_guardrail
 from utils.stock_history import (
@@ -84,6 +95,34 @@ FILTER_PRESETS = [
     "🔴 고평가 / 주의 종목 그룹 (고평가 + 역성장 + 주의)",
     "⚙️ 세부 뱃지 직접 선택 (커스텀 필터)",
 ]
+
+
+def resolve_preset_badges(preset: str, custom_badges, all_badge_options):
+    """프리셋(+커스텀 선택) → 실제로 필터링에 쓸 배지 목록.
+
+    2026-08-29 재감사 M-1 수정: "고평가" 프리셋이 예전엔 `"검증" in b` 부분일치를
+    썼는데, `utils/scoring.py`가 부여하는 **중립** 배지
+    `"🔵 Trailing만 검증됨 (Forward 데이터 없음)"`(컨센서스 미커버리지일 뿐 저평가도
+    고평가도 아님)까지 "고평가/주의" 그룹에 잘못 끌려 들어왔습니다. 실제 경고성
+    배지(`utils/scoring.py`의 🔴 6종)는 전부 "고평가" 또는 "역성장" 부분문자열을
+    이미 포함하고 있어 "검증"은 그 중립 배지 하나만 추가로 잡아내는 오탐이었으므로
+    제거했습니다("오류"·"위험"은 현재 배지 목록 기준 무해한 중복이라 그대로 둡니다).
+
+    `None`(프리셋이 전체 보기 등 아무 갈래에도 안 걸림 = 필터 없음)과 `[]`(사용자가
+    "세부 뱃지 직접 선택"에서 배지를 전부 해제 = 아무것도 안 고름)을 호출부가
+    구분할 수 있도록 다르게 반환합니다 — M-2가 이 둘을 구분하지 못해서 배지를
+    전부 해제해도 필터가 무력화(500종목 전부 노출)됐습니다.
+    """
+    if "세부 뱃지" in preset:
+        return custom_badges
+    if "저평가 우량주" in preset:
+        return [b for b in all_badge_options if "저평가" in b]
+    if "적정가" in preset:
+        return [b for b in all_badge_options if "적정가" in b]
+    if "고평가" in preset:
+        return [b for b in all_badge_options
+                if ("고평가" in b or "역성장" in b or "오류" in b or "위험" in b)]
+    return None
 
 
 # =============================================================================
@@ -279,32 +318,55 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
     t_pbr_str = fmt_num(s.get("t_pbr"))
     ev_ebitda = s.get("ev_ebitda")
     ev_ebitda_str = fmt_num(ev_ebitda)
+    # 2026-08-29 재감사 L-6·L-11: 적자(EV/EBITDA<0)면 "약 -3.4년" 같은 의미 없는 M&A
+    # 원금회수기간을 그리지 않습니다(같은 카드의 그레이엄 넘버는 적자를 이미 정확히
+    # 차단하고 있어 방어 수준을 맞춥니다). 폰트 크기도 처음부터 13px로 직접 만들어
+    # 두고, 예전처럼 만들어 놓고 나중에 문자열 치환(`.replace("11px","13px")`)으로
+    # 바꾸지 않습니다 — 이 값의 유일한 사용처(:622 부근)가 13px 하나뿐이라 치환
+    # 자체가 불필요한 위험이었습니다.
     ev_years_str = ""
     try:
         ev_val = float(ev_ebitda)
-        ev_years_str = f" <span style='font-size: 11px; color: #94a3b8; font-weight: 500;'>(약 {ev_val:.1f}년)</span>"
+        if ev_val > 0:
+            ev_years_str = f" <span style='font-size: 13px; color: #94a3b8; font-weight: 500;'>(약 {ev_val:.1f}년)</span>"
     except (ValueError, TypeError):
         pass
 
-    dps_val = s.get("dps") or 0
-    dps_str = f"{dps_val:,.0f}원/주" if dps_val > 0 else "무배당"
+    # 2026-08-29 재감사 H-4: dps=None("미수집")과 dps=0("무배당 확인됨")을 화면이 다시
+    # 뭉개지 않도록 dps_source(collector_kospi200.py 가 이미 세 갈래로 나눠 저장)를
+    # 그대로 따라갑니다. 파이프라인이 네 곳(scoring.py·guardrail.py·data_issues·
+    # collector 자체 H3 수정)에서 공들여 지킨 구분을 화면 한 줄이 되돌리면 안 됩니다.
+    dps_val = s.get("dps")
+    dps_source = s.get("dps_source")
+    if dps_source == "not_collected" or dps_val is None:
+        dps_str = "데이터 없음"
+    elif dps_source == "no_dividend_confirmed":
+        dps_str = "무배당(확인됨)"
+    else:
+        dps_str = f"{dps_val:,.0f}원/주"
     calc_dps_tag = warn_badge(
         "🧮 계산값",
         "재무제표에 확정 DPS가 없어 배당수익률로 역산한 값입니다 (실측 아님)",
-    ) if s.get("dps_source") == "derived_from_div_yield" else ""
+    ) if dps_source == "derived_from_div_yield" else ""
 
     growth_val = s.get("growth")
     growth_disp = "데이터 없음" if growth_val is None else f"{growth_val:+.1f}%"
     if str(s.get("growth_source", "")).endswith("_calculated"):
         growth_disp += calc_eps_tag
 
+    # 2026-08-29 재감사 L-7: `price`는 아래 갭 계산·상한 판정에서 계속 "0 = 결측"
+    # 센티널로 쓰이므로 그대로 두되, **사람이 읽는 화면 문구**는 결측(0)과 실측 0원을
+    # 헷갈리지 않도록 `price_display`를 따로 둡니다(§0-1 — 결측을 "0원"으로 보여주지
+    # 않기). 헤더 쪽 현재가는 이미 `fmt_num(s.get('price'), ...)`로 이렇게 하고
+    # 있었는데, 아래 Forward 비교박스의 '현재가'만 이 변환을 빠뜨리고 있었습니다.
     price = s.get("price") or 0
+    price_display = f"{price:,.0f}원" if price > 0 else "데이터 없음"
 
-    # 콘크리트 바닥가 (현재가 ÷ PBR)
+    # 콘크리트 바닥가 (현재가 ÷ PBR) — price 가 결측(0)이면 "0원"을 만들지 않습니다.
     floor_price_str = "데이터 없음"
     try:
         pbr_val = float(s.get("t_pbr"))
-        if pbr_val > 0:
+        if pbr_val > 0 and price > 0:
             floor_price_str = f"{price / pbr_val:,.0f}원"
     except (ValueError, TypeError):
         pass
@@ -507,7 +569,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
                     <div class="comparison-box" style="margin-bottom: 8px; border-color: #38bdf8; width: 100%;">
                         <div class="comparison-row divider">
                             <span class="label-text">현재가</span>
-                            <span class="price-text-curr">{price:,.0f}원</span>
+                            <span class="price-text-curr">{price_display}</span>
                         </div>
                         <div class="comparison-row divider">
                             <span class="label-text">
@@ -541,7 +603,10 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
     loss_banner = ""
     if t_roe_val is not None and t_roe_val < 0:
         loss_banner = loss_banner_html(
-            f"⚠️ 적자 기업 — PEGY 밸류에이션 산출 불가 (ROE {esc(t_roe_val)}%)",
+            # 2026-08-29 재감사 L-8: 카드의 다른 모든 자리는 fmt_num(..., 1)로 반올림해
+            # 보여주는데 이 한 줄만 원본 float를 그대로 찍어 "ROE -3.2000000001%"가
+            # 나올 수 있었습니다. 같은 규칙으로 맞춥니다.
+            f"⚠️ 적자 기업 — PEGY 밸류에이션 산출 불가 (ROE {esc(fmt_num(t_roe_val, '%', 1))})",
             "본 종목은 최근 12개월 기준 <b>순이익 적자(ROE &lt; 0)</b> 상태로, 성장 기반 밸류에이션(PEGY)을 적용할 수 없습니다.\n"
             "아래 목표주가·적정가는 <b>참고 불가</b>하며, 이익 정상화 전까지 투자에 각별한 주의가 필요합니다.",
         )
@@ -619,7 +684,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
                         <span class="vh-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PER ℹ️<span class="vh-tooltiptext">1년 동안 번 돈에 비해 주가가 몇 배인가? (낮을수록 저렴)</span></span> {esc(fmt_num(s.get('t_per'), '배', 2))} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="vh-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EPS ℹ️<span class="vh-tooltiptext">주식 1주가 1년 동안 벌어온 순수익(원)</span></span> {esc(t_eps_display)}{calc_eps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> <span class="vh-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">PBR ℹ️<span class="vh-tooltiptext">회사 전 재산을 다 팔았을 때 가치 대비 주가가 몇 배인가? (1배 이하면 바겐세일)</span></span> {esc(t_pbr_display)}
                     </div>
                     <div style="font-size: 18px; color: #38bdf8; font-weight: 800; letter-spacing: -0.4px;">
-                        <span class="vh-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&amp;A 원금회수) ℹ️<span class="vh-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {esc(ev_display)}{ev_years_str.replace("11px", "13px")}
+                        <span class="vh-tooltip" tabindex="0" style="font-size: 13px; font-weight: 800; color: #94a3b8; border-bottom: 1px dotted #475569;">EV/EBITDA (M&amp;A 원금회수) ℹ️<span class="vh-tooltiptext">회사를 통째로 샀을 때, 장사해서 본전 뽑는 기간</span></span> {esc(ev_display)}{ev_years_str}
                     </div>
                 </div>
                 <div>
@@ -675,7 +740,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     # (`st.stop()` 은 NiceGUI 에서 그냥 return 입니다 — 계획서 부록 A)
     if last_updated_at is None or not all_stocks:
         error_banner(
-            f"🚨 시가총액 상위 200 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
+            f"🚨 시가총액 상위 500 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
             "가짜 기본값으로 화면을 채우지 않기 위해 밸류에이션 수치를 표시하지 않습니다. "
             "자동 수집(GitHub Actions `Daily Market Scraper`)이 정상 동작했는지 확인해 주세요."
         )
@@ -754,20 +819,6 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         'page': 1,
     }
 
-    def _selected_badges():
-        """프리셋 → 배지 목록. (원본 selectbox/multiselect 분기 그대로)"""
-        preset = view['preset']
-        if "세부 뱃지" in preset:
-            return view['badges']
-        if "저평가 우량주" in preset:
-            return [b for b in all_badge_options if "저평가" in b]
-        if "적정가" in preset:
-            return [b for b in all_badge_options if "적정가" in b]
-        if "고평가" in preset:
-            return [b for b in all_badge_options
-                    if ("고평가" in b or "역성장" in b or "오류" in b or "검증" in b or "위험" in b)]
-        return None
-
     def _filtered():
         stocks = processed_stocks
         query = view['search']
@@ -776,8 +827,12 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
                 s for s in stocks
                 if query.lower() in (s.get("name") or "").lower() or query in (s.get("code") or "")
             ]
-        badges = _selected_badges()
-        if badges:
+        # 2026-08-29 재감사 M-2: `if badges:` 는 "필터 없음"(None)과 "사용자가 배지를
+        # 전부 해제함"([])을 둘 다 falsy 로 취급해 후자에서도 필터를 건너뛰었습니다
+        # (배지 0개를 선택했는데 500종목이 전부 남는 버그). `is not None` 으로
+        # 명시적으로 갈라 [] 는 "일치하는 배지가 없음 = 결과 0건"이 되도록 합니다.
+        badges = resolve_preset_badges(view['preset'], view['badges'], all_badge_options)
+        if badges is not None:
             stocks = [s for s in stocks if s.get("badge") in badges]
         if view['value_trap_only']:
             stocks = [s for s in stocks if s.get("value_trap", False)]
@@ -852,7 +907,7 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         search_placeholder='예: 삼성전자, 005930',
         empty_hint='📌 종목명 또는 종목코드를 입력하면 후보 목록이 나타납니다.',
         no_match_hint='종목명 일부 또는 6자리 종목코드로 다시 검색해 주세요. '
-                      '(이 화면은 시가총액 상위 200종목만 담고 있습니다.)',
+                      '(이 화면은 코스피+코스닥 통합 시가총액 상위 500종목만 담고 있습니다.)',
         price_label='최신 현재가',
         caption='검색해서 종목을 고르면, 그 종목의 **날짜별 이력**(하루 한 줄)을 표로 내보냅니다. '
                 '항목은 카드에 보이는 재무 지표(PER·PBR·ROE·배당·목표주가·퀀트 스코어 등)이고 '
@@ -982,15 +1037,15 @@ def _render_raw_downloads(admin: bool) -> None:
     with ui.row().classes('w-full gap-3 items-center'):
         if os.path.exists(latest_path):
             download_button(
-                '📥 시가총액 상위 200 최신 스냅샷 다운로드 (JSON)',
-                f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.json",
+                '📥 시가총액 상위 500 최신 스냅샷 다운로드 (JSON)',
+                f"kospi200_latest_{_kst_today_str()}.json",
                 lambda: read_download_bytes(latest_path),
                 media_type='application/json',
             )
             if admin:
                 download_button(
                     '📊 [관리자] 최신 스냅샷 다운로드 (Excel)',
-                    f"kospi200_latest_{datetime.now().strftime('%Y%m%d')}.csv",
+                    f"kospi200_latest_{_kst_today_str()}.csv",
                     lambda: _snapshot_csv_bytes(latest_path),
                     media_type='text/csv',
                     failure_text='[관리자] 스냅샷을 CSV로 변환하지 못했습니다.',
@@ -998,14 +1053,14 @@ def _render_raw_downloads(admin: bool) -> None:
         if os.path.exists(history_path):
             download_button(
                 '📥 누적 요약 히스토리 다운로드 (JSON)',
-                f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.json",
+                f"pegy_summary_history_{_kst_today_str()}.json",
                 lambda: read_download_bytes(history_path),
                 media_type='application/json',
             )
             if admin:
                 download_button(
                     '📊 [관리자] 히스토리 다운로드 (Excel)',
-                    f"pegy_summary_history_{datetime.now().strftime('%Y%m%d')}.csv",
+                    f"pegy_summary_history_{_kst_today_str()}.csv",
                     lambda: pd.read_json(history_path).to_csv(index=False).encode('utf-8-sig'),
                     media_type='text/csv',
                     failure_text='[관리자] 히스토리를 CSV로 변환하지 못했습니다.',
