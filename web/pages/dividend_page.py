@@ -795,9 +795,58 @@ def date_key(year, month, day) -> str:
     return f'{year:04d}-{month:02d}-{day:02d}'
 
 
-def month_choices(year):
-    """월 선택기 항목 `{1: '2026년 1월', … 12: '2026년 12월'}` (함수 지역 dict)."""
-    return {month: f'{year}년 {month}월' for month in range(1, 13)}
+def available_months(entries, payment_date_index, today):
+    """달력에서 오갈 수 있는 달 목록 `[(연, 월), …]` — 결산기준일ㆍ지급예정일 데이터가
+    실제로 덮는 범위 전체(연도 경계 포함).
+
+    🔴 2026-08-29(오푸스 감사 Top-5 #4) — 이전에는 `_render_calendar()`의 `_shift()`/
+       `_on_month()`가 `1 <= month <= 12`로 **한 해 안에서만** 움직여서, 12월 결산 배당의
+       지급예정일(통상 다음 해 3~4월, `build_payment_date_index()`의 `pay` 축)이 파일에는
+       있는데도 화면 어디서도 볼 방법이 없었습니다.
+       미국 배당 화면(`dividend_us_logic.py::available_months()`)이 배당락일이 연도를
+       걸치는 같은 문제를 이 방식(데이터가 덮는 최소~최대 달을 한 줄로 이어 놓기)으로
+       이미 풀어 둔 걸 그대로 이식합니다(§0-3-10, 검증된 코드를 새로 짜지 않음). 다만
+       두 화면은 서로 import 하지 않는 게 확정 원칙(`dividend_us_logic.py` 머리말 ① —
+       "한국 배당 화면은 이번 작업에서 한 글자도 건드리지 않는다"는 과거 결정이 이번
+       작업으로 갱신됐을 뿐, "두 화면이 서로 의존하지 않는다"는 원칙 자체는 유효)이라
+       로직만 복제합니다.
+
+    오늘이 속한 달은 데이터가 없어도 항상 포함합니다 — 기본으로 여는 달이 목록에 없으면
+    화면이 열리자마자 엉뚱한 달로 튕기기 때문입니다.
+    """
+    months = {(today.year, today.month)}
+    for entry in entries or ():
+        parsed = parse_iso_date((entry or {}).get('settle_date'))
+        if parsed is not None:
+            months.add((parsed.year, parsed.month))
+    for date_str in (payment_date_index or {}).keys():
+        parsed = parse_iso_date(date_str)
+        if parsed is not None:
+            months.add((parsed.year, parsed.month))
+    if not months:
+        return []
+    (start_year, start_month) = min(months)
+    (end_year, end_month) = max(months)
+
+    ordered = []
+    year, month = start_year, start_month
+    while (year, month) <= (end_year, end_month):
+        ordered.append((year, month))
+        year, month = (year + 1, 1) if month == 12 else (year, month + 1)
+    return ordered
+
+
+def shift_month(year, month, delta):
+    """`(연, 월)`에서 `delta`달만큼 이동한 `(연, 월)`. 연도 경계를 알아서 넘어갑니다.
+    (2026-08-29 오푸스 감사 Top-5 #4 — `dividend_us_logic.py::shift_month()`와 동일 로직.)
+    """
+    index = year * 12 + (month - 1) + delta
+    return index // 12, index % 12 + 1
+
+
+def month_label(year, month) -> str:
+    """월 선택기·건수 줄에 쓰는 라벨 `'2026년 3월'`."""
+    return f'{year}년 {month}월'
 
 
 def market_choices(entries):
@@ -1279,6 +1328,12 @@ async def _render_body() -> None:
         'suggested_month': suggested_month,
     }
 
+    # 🔴 2026-08-29(오푸스 감사 Top-5 #4) — 오갈 수 있는 달 범위를 **전체(미필터) 확정
+    #    목록 + 지급일정 색인**에서 한 번만 계산합니다(필터를 걸어도 이동 가능한 범위 자체는
+    #    줄어들지 않아야 하므로, `_visible_confirmed()`가 아니라 `confirmed`를 씁니다 —
+    #    `dividend_us_page.py`가 `data['entries']`를 쓰는 것과 같은 이유).
+    months = available_months(confirmed, payment_date_index, today)
+
     all_entries = confirmed + pending
     markets = market_choices(all_entries)
 
@@ -1358,7 +1413,7 @@ async def _render_body() -> None:
         # `today`(KST)는 위에서 한 번만 계산해 여기로 넘깁니다 — `_render_calendar`가
         # 스스로 `today_kst()`를 부르면 계산 자리가 둘로 늘어나 배너와 달력이 어긋날 수
         # 있습니다(2026-08-27, 오늘 칸 강조 추가하면서).
-        _render_calendar(view, _visible_confirmed(), len(confirmed), payment_date_index,
+        _render_calendar(view, _visible_confirmed(), len(confirmed), payment_date_index, months,
                          today=today,
                          on_changed=_calendar_section.refresh,
                          on_day_changed=lambda: _day_section.refresh())
@@ -1556,7 +1611,7 @@ def _render_raw_downloads() -> None:
 # =============================================================================
 # 5. 달력 — 월 이동 + 요일 7열 격자
 # =============================================================================
-def _render_calendar(view, entries, total_confirmed, payment_date_index,
+def _render_calendar(view, entries, total_confirmed, payment_date_index, months,
                      today, on_changed, on_day_changed) -> None:
     """월 이동 줄 + 달력 격자.
 
@@ -1564,6 +1619,12 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
        `today_kst()`를 다시 부르지 않는 이유: KST 계산 자리가 둘이 되면 위 "오늘은 며칠"
        배너와 아래 오늘 칸 강조가 자정 근처에 서로 다른 날짜를 말할 수 있어서입니다.
        계산은 호출부 `_render_body()` 한 곳에서만 합니다.
+
+    🔴 2026-08-29(오푸스 감사 Top-5 #4) — `months`(오갈 수 있는 `(연, 월)` 목록,
+       `available_months()`)도 **파라미터로 받습니다**. 예전에는 이 함수 안에서
+       `1 <= month <= 12`로 월만 옮기고 연도는 그대로 둬서, 12월 결산 배당의
+       지급예정일(다음 해 3~4월)까지 이동할 방법이 없었습니다. 이제는 미국 배당
+       화면과 같은 방식(연도를 걸쳐 이어진 달 목록 + 그 안에서의 인덱스)으로 이동합니다.
 
     ⚠️ 칸의 숫자는 **지금 필터를 통과한 종목만** 셉니다. 필터가 걸려 있으면 그 사실을 바로
        아래 줄에 적습니다 — 안 적으면 "어제는 154건이었는데 오늘은 3건"으로 보입니다(§0-1).
@@ -1586,37 +1647,50 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index,
         return
 
     grouped = group_by_settle_date(entries)
-    year, month = view['year'], view['month']
 
-    def _shift(delta):
+    if not months:
+        # today 가 항상 `available_months()`에 포함되므로 사실상 도달하지 않지만,
+        # 방어적으로 남겨 둡니다(위 `dividend_us_page.py::_render_calendar()`와 같은 자리).
+        info_banner('ℹ️ 달력에 표시할 결산기준일ㆍ지급예정일이 한 건도 없습니다.')
+        return
+
+    year, month = view['year'], view['month']
+    if (year, month) not in months:
+        # 보던 달이 데이터 범위 밖으로 밀려났으면(드묾) 조용히 튕기지 않고 가장 가까운
+        # 끝으로 붙인 뒤, 아래 건수 줄에서 "이번 달은 비어 있다"고 그대로 밝힙니다.
+        year, month = months[-1] if (year, month) > months[-1] else months[0]
+        view['year'], view['month'] = year, month
+
+    index = months.index((year, month))
+
+    def _go(target_index):
         def _handler(_event=None) -> None:
-            target = month + delta
-            if 1 <= target <= 12:
-                view['month'] = target
-                view['selected_date'] = None
-                view['day_page'] = 1
-                on_changed()
-                on_day_changed()
+            view['year'], view['month'] = months[target_index]
+            view['selected_date'] = None
+            view['day_page'] = 1
+            on_changed()
+            on_day_changed()
         return _handler
 
     with ui.row().classes('w-full items-center gap-2'):
-        if month > 1:
-            ui.button('◀ 이전 달', on_click=_shift(-1)).props('flat dense no-caps')
+        if index > 0:
+            ui.button('◀ 이전 달', on_click=_go(index - 1)).props('flat dense no-caps')
 
         def _on_month(event) -> None:
             picked = to_int(event.value)
-            if picked is None or not 1 <= picked <= 12:
+            if picked is None or not 0 <= picked < len(months):
                 return
-            view['month'] = picked
+            view['year'], view['month'] = months[picked]
             view['selected_date'] = None
             view['day_page'] = 1
             on_changed()
             on_day_changed()
 
-        ui.select(month_choices(year), value=month, label='보는 달',
-                  on_change=_on_month).style('flex: 0 0 200px;')
-        if month < 12:
-            ui.button('다음 달 ▶', on_click=_shift(1)).props('flat dense no-caps')
+        choices = {offset: month_label(*pair) for offset, pair in enumerate(months)}
+        ui.select(choices, value=index, label='보는 달',
+                  on_change=_on_month).style('flex: 0 0 220px;')
+        if index < len(months) - 1:
+            ui.button('다음 달 ▶', on_click=_go(index + 1)).props('flat dense no-caps')
 
     month_total = 0
     for key, items in grouped.items():

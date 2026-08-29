@@ -403,6 +403,20 @@ def derive_valuation(stock):
         )
         f_target_cap_reason = ((f_target_cap_reason + " / ") if f_target_cap_reason else "") + floor_note
         issues.append(f"목표주가 바닥값 적용: {floor_note}")
+        # 2026-08-29(오푸스 감사 Top-5 #2-A2): 바닥값 자체가 2.5배 폭주 방지 캡을 넘으면
+        # 캡도 그대로 적용합니다 — 캡은 "이 목표가가 신뢰구간 안에 있는가"를 보는 것이지
+        # 산출 경로(PEGY 역산 vs BPS 바닥값)를 가리지 않습니다(§0-1, 근거 없는 큰 수를
+        # 검증 없이 그대로 내보내지 않음). price_cap_value 는 위 블록에서 이미 계산됨
+        # (f_target 이 None 이 아니려면 그 블록이 실행됐어야 하므로 안전하게 재사용 가능).
+        if f_target > price_cap_value:
+            f_target = round(price_cap_value, 2)
+            f_target_capped = True
+            floor_cap_note = (
+                f"장부가 바닥값(${out['floor_price']:,.2f})도 현재가 "
+                f"{US_TARGET_PRICE_CAP_MULTIPLE}배 상한을 초과해 상한값으로 절단"
+            )
+            f_target_cap_reason = f_target_cap_reason + " / " + floor_cap_note
+            issues.append(f"목표주가 캡 적용: {floor_cap_note}")
     out["f_target"] = f_target
     out["f_target_capped"] = f_target_capped
     out["f_target_floored"] = f_target_floored
@@ -431,6 +445,11 @@ def derive_valuation(stock):
     ):
         t_fair = out["floor_price"]
         t_fair_floored = True
+        # 2026-08-29(오푸스 감사 Top-5 #2-A2): f_target 과 동일하게, 바닥값이 캡을 넘으면
+        # 캡도 적용합니다(위 if 블록이 이미 실행됐으므로 price_cap_value 재사용 가능).
+        if t_fair > price_cap_value:
+            t_fair = round(price_cap_value, 2)
+            t_fair_capped = True
     out["t_fair"] = t_fair
     out["t_fair_capped"] = t_fair_capped
     out["t_fair_floored"] = t_fair_floored
@@ -499,6 +518,7 @@ def compute_population_stats(stocks, min_samples=5):
 def calculate_us_quant_score(
     f_pegy=None, t_roe=None, roic=None, sh_return=None, piotroski=None, beta=None,
     f_per=None, price=None, f_target=None, growth=None, f_target_capped=False,
+    f_target_floored=False,
     growth_pop_stats=None, roe_pop_stats=None, pegy_pop_stats=None,
 ):
     """
@@ -663,7 +683,11 @@ def calculate_us_quant_score(
         if pegy_scoring_available:
             # 교차검증 1: 현재가가 이미 목표가를 넘었는데 저평가 배지를 주면 안 됩니다.
             # ⚠️ 목표가가 '캡 상수'인 종목은 캡과 현재가를 비교하는 게 동어반복이라 건너뜁니다.
-            if f_target_capped:
+            # ⚠️ 2026-08-29(오푸스 감사 Top-5 #2-A1): 목표가가 BPS 바닥값으로 대체된 종목도
+            # 마찬가지로 건너뜁니다 — f_target = price / t_pbr 인 상태에서 overshoot을
+            # 계산하면 항상 (t_pbr - 1)로 단순화돼(PBR 재진술의 동어반복), PEGY 역산과
+            # 무관한 값으로 "목표가 초과" 배지·점수 캡을 잘못 발동시킵니다.
+            if f_target_capped or f_target_floored:
                 pass
             elif f_target and price > 0:
                 overshoot = (price / f_target) - 1.0
@@ -742,6 +766,7 @@ def score_all(stocks):
             price=s.get("price"),
             f_target=s.get("f_target"),
             f_target_capped=s.get("f_target_capped", False),
+            f_target_floored=s.get("f_target_floored", False),
             growth=s.get("growth"),
             growth_pop_stats=pop["growth"],
             roe_pop_stats=pop["roe"],

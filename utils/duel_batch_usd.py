@@ -306,8 +306,11 @@ def run_nightly_batch_usd(service_client, target_date, *,
             if price is not None:
                 close_prices[ticker] = price
 
+        # 2026-08-29(오푸스 감사 Top-5 #3): currency="USD" 를 명시하지 않으면
+        # `calculate_fill()`의 실패 사유 문구가 기본값 "KRW"로 "원"을 붙여, 달러 계좌
+        # 사용자가 "가용 예수금 1,051원" 같은 원화 단위 문구를 보게 됩니다.
         fill_plan = plan_order_fills(pending, cash_balances, close_prices,
-                                     positions_by_account, day)
+                                     positions_by_account, day, currency="USD")
         summary["orders"] = fill_plan["counts"]
         summary["filled_amount_total"] = fill_plan["filled_amount_total"]
         summary["sold_amount_total"] = fill_plan["sold_amount_total"]

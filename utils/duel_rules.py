@@ -265,6 +265,22 @@ def _fmt_money(value):
     return text if text else "0"
 
 
+def _fmt_currency(value, currency="KRW"):
+    """금액을 통화 표기까지 포함한 문자열로 (문구 전용).
+
+    2026-08-29(오푸스 감사 Top-5 #3): `calculate_fill()`의 실패 사유 문구가 통화와
+    무관하게 항상 "원"을 붙이고 있어, 이 함수가 USD 결투 배치에도 그대로 재사용되면서
+    (`utils/duel_batch.py::plan_order_fills()` → `duel_batch_usd.py`) 달러 계좌 사용자가
+    "가용 예수금 1,051원" 같은 문구를 보게 됩니다. KRW="12,345원"(접미), USD="$12,345"
+    (접두) — `utils/duel_rules.py`의 체급 문구("$750 이상")·
+    `duel_batch_usd.py::format_summary_lines_usd()`("$"를 금액 앞에)와 같은 표기 관례.
+    """
+    text = _fmt_money(value)
+    if currency == "USD":
+        return f"${text}"
+    return f"{text}원"
+
+
 # =============================================================================
 # 2. 매수 창 개폐 — work order 2-3
 # =============================================================================
@@ -379,9 +395,13 @@ def resolve_fill_trading_day(saved_at_kst, trading_days):
 # =============================================================================
 # 5. 체결 수량 계산(부분체결 포함) — work order 1-3 / 2-4-6
 # =============================================================================
-def calculate_fill(requested_quantity, close_price, available_cash):
+def calculate_fill(requested_quantity, close_price, available_cash, currency="KRW"):
     """
     주문 1건의 부분체결 계산. work order 2-4-6 참고.
+
+    currency : 실패 사유 문구의 통화 표기("KRW" 기본값 / "USD"). 2026-08-29(오푸스 감사
+        Top-5 #3) 신설 — 이 함수 자체는 통화와 무관한 순수 사칙연산이지만, 사람이 읽는
+        `fail_reason` 문구만은 호출부(원화 결투 vs USD 결투)에 맞는 통화 표기를 써야 합니다.
 
     규칙(오너 확정)
       · `requested_quantity × 종가` ≤ 가용 현금  → **전량 체결**(`filled`)
@@ -421,12 +441,12 @@ def calculate_fill(requested_quantity, close_price, available_cash):
         status = ORDER_PARTIALLY_FILLED
         reason = (
             f"요청 {requested}주 중 {filled}주만 예수금 부족으로 체결되었습니다"
-            f" (체결가 {_fmt_money(price)}원, 가용 예수금 {_fmt_money(cash)}원)."
+            f" (체결가 {_fmt_currency(price, currency)}, 가용 예수금 {_fmt_currency(cash, currency)})."
         )
     else:
         status = ORDER_EXPIRED
         reason = (
-            f"예수금 {_fmt_money(cash)}원으로는 1주({_fmt_money(price)}원)도 살 수 없어"
+            f"예수금 {_fmt_currency(cash, currency)}으로는 1주({_fmt_currency(price, currency)})도 살 수 없어"
             f" 요청 {requested}주가 체결되지 않았습니다."
         )
 
@@ -442,10 +462,13 @@ def calculate_fill(requested_quantity, close_price, available_cash):
 # =============================================================================
 # 6. 같은 계좌의 pending 주문 여러 건 — FIFO 예수금 배정 (work order 2-4-6)
 # =============================================================================
-def allocate_pending_orders(available_cash, pending_orders, close_prices):
+def allocate_pending_orders(available_cash, pending_orders, close_prices, currency="KRW"):
     """
     한 계좌의 `pending` 주문들에 예수금을 **`saved_at` 빠른 순서대로** 배정합니다.
     work order 2-4-6 참고.
+
+    currency : `calculate_fill()`에 그대로 전달되는 실패 사유 문구의 통화 표기
+        ("KRW" 기본값 / "USD"). 2026-08-29(오푸스 감사 Top-5 #3) 신설.
 
     왜 순서가 중요한가: 같은 계좌에 주문이 여러 건 있으면 **뒤 주문이 앞 주문 몫까지
     넘보면 안 됩니다.** 앞 주문부터 하나씩 체결하며 가용 현금을 깎아 나가고, 그 결과
@@ -507,7 +530,7 @@ def allocate_pending_orders(available_cash, pending_orders, close_prices):
                 ),
             }
         else:
-            outcome = calculate_fill(requested, price, cash)
+            outcome = calculate_fill(requested, price, cash, currency=currency)
             cash = outcome["remaining_cash"]
 
         results.append({

@@ -247,6 +247,47 @@ def test_us_scoring_full_suite():
     check(res_d["forward_available"] is False, "PER 오염: forward_available=False")
     check(res_d["quant_score"] <= res_d["score_max"] * 0.13, "PER 오염: 점수 상한 12% 이하로 눌림")
 
+    # 2-6b. BPS 바닥값이 목표가를 끌어올리는 저성장 자본집약 우량주
+    # (2026-08-29 오푸스 감사 Top-5 #2 — 실행 재현: "저PBR 우량주가 +233% 상승 여력로
+    # 표시" 였던 원인의 반대쪽 증상. floor_price = price/t_pbr 가 PEGY 역산 목표가를
+    # 밀어올려 f_target=50, 현재가=100 이 되면서 overshoot=100% 짜리 "목표가 초과"
+    # 교차검증이 걸립니다. 이 교차검증은 f_target_floored 상태에서 대수적으로 PBR-1의
+    # 동어반복이라 건너뛰어야 합니다(#2-A1) — 건너뛰지 않으면 점수가 20/100까지 짓눌립니다.)
+    floor_stock = {
+        "symbol": "FLOOR", "name": "Low Growth Capital Intensive Co. Common Stock",
+        "price": 100.0, "t_per": 10.0, "f_per": 20.0, "t_eps": 10.0, "t_pbr": 2.0,
+        "t_roe": 15.0, "roic": 10.0, "sh_return": 2.0, "growth": 5.0,
+        "piotroski_f": 7, "beta": 1.0, "industry": "Insurance",
+    }
+    floor_stock.update(derive_valuation(floor_stock))
+    check(floor_stock["floor_price"] == 50.0, f"바닥값: floor_price=price/t_pbr ({floor_stock['floor_price']})")
+    check(floor_stock["f_target"] == 50.0, f"바닥값: f_target 이 PEGY 역산값 대신 바닥값으로 대체 ({floor_stock['f_target']})")
+    check(floor_stock["f_target_floored"] is True, "바닥값: f_target_floored=True 로 흔적 기록")
+    check(floor_stock["f_target_capped"] is False, "바닥값: 캡(2.5배=250)엔 안 걸림 — floored 만 True")
+    res_floor = calculate_us_quant_score(
+        f_pegy=floor_stock["f_pegy"], t_roe=floor_stock["t_roe"], roic=floor_stock["roic"],
+        sh_return=floor_stock["sh_return"], piotroski=floor_stock["piotroski_f"], beta=floor_stock["beta"],
+        f_per=floor_stock["f_per"], price=floor_stock["price"], f_target=floor_stock["f_target"],
+        growth=floor_stock["growth"], f_target_capped=floor_stock["f_target_capped"],
+        f_target_floored=floor_stock["f_target_floored"],
+    )
+    check("목표가 초과" not in res_floor["badge"],
+          f"바닥값: PBR-1 동어반복 교차검증이 건너뛰어져 '목표가 초과' 오배지가 안 붙음 ({res_floor['badge']})")
+    check(res_floor["quant_score"] > res_floor["score_max"] * 0.30,
+          f"바닥값: 동어반복 교차검증으로 점수가 짓눌리지 않음 ({res_floor['quant_score']}/{res_floor['score_max']})")
+
+    # 바닥값 자체가 2.5배 폭주 방지 캡을 넘으면(#2-A2) 캡도 그대로 적용돼야 합니다.
+    floor_over_cap = dict(floor_stock, symbol="FLOORCAP", t_pbr=0.2)  # floor_price=100/0.2=500 > 250
+    floor_over_cap = {k: v for k, v in floor_over_cap.items() if k in (
+        "symbol", "name", "price", "t_per", "f_per", "t_eps", "t_pbr", "t_roe", "roic",
+        "sh_return", "growth", "piotroski_f", "beta", "industry")}
+    floor_over_cap.update(derive_valuation(floor_over_cap))
+    check(floor_over_cap["floor_price"] == 500.0, "바닥값 폭주: floor_price 자체는 500 (100/0.2)")
+    check(floor_over_cap["f_target"] == 250.0,
+          f"바닥값 폭주: f_target 이 바닥값(500)이 아니라 2.5배 캡(250)으로 절단 ({floor_over_cap['f_target']})")
+    check(floor_over_cap["f_target_capped"] is True, "바닥값 폭주: f_target_capped=True 로 흔적 기록")
+    check(floor_over_cap["f_target_floored"] is True, "바닥값 폭주: f_target_floored 도 True (두 보정 모두 적용된 사실 보존)")
+
     # 2-7. 데이터 결측 — 종가 없음 / 모든 지표 없음
     res_nopx = calculate_us_quant_score(price=None)
     check(res_nopx["quant_score"] is None and res_nopx["score_max"] is None,

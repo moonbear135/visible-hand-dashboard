@@ -588,7 +588,7 @@ def resolve_action(freshness, override=None):
 # 4. 체결 계획 — work order 2-4-6
 # =============================================================================
 def plan_order_fills(pending_orders, cash_balances, close_prices, existing_positions,
-                     fill_date):
+                     fill_date, currency="KRW"):
     """
     그날 귀속된 `pending` 주문 전부에 대해 **무엇을 어떻게 기록할지**를 메모리에서 다 만듭니다.
     Supabase 를 부르지 않습니다(호출부가 결과를 그대로 일괄 기록합니다).
@@ -624,6 +624,11 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
                             `cancelled` 로 돌려줍니다(0원·전일 종가로 때우지 않습니다).
         existing_positions: `{account_id: [포지션 행, ...]}`.
         fill_date         : 체결에 쓴 거래일(= 종가의 날짜).
+        currency          : 실패 사유 문구의 통화 표기("KRW" 기본값 / "USD",
+                            `duel_rules.allocate_pending_orders()`에 그대로 전달). 이 함수는
+                            `duel_batch_usd.py`가 그대로 재사용합니다(2026-08-29 오푸스 감사
+                            Top-5 #3) — 신설 전에는 항상 "원"이 붙어 USD 계좌 사용자가
+                            "가용 예수금 1,051원" 같은 문구를 봤습니다.
 
     ⚠️ 같은 계좌에서 같은 종목을 **여러 건** 산 경우, 포지션 행은 **한 줄로 합쳐** 보냅니다.
        `duel_db.upsert_positions()` 는 한 요청에 같은 (계좌, 종목)이 두 번 들어오면 요청
@@ -773,7 +778,7 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
         balances[account_id] = _round6(available)
 
         # ── ② 그다음 매수 (기존 FIFO 배정 그대로 · 위에서 늘어난 현금으로) ──────────
-        outcomes = duel_rules.allocate_pending_orders(available, buy_orders, prices)
+        outcomes = duel_rules.allocate_pending_orders(available, buy_orders, prices, currency=currency)
 
         for outcome in outcomes:
             status = outcome["status"]

@@ -796,6 +796,27 @@ def fetch_naver_item_dps_and_eps(code):
         traceback.print_exc()
         return _empty_item_info(f"종목 상세 파싱 예외: {e}")
 
+def load_ticker_types(path=None):
+    """반환: {code: "STOCK"|"ETF"|...} (data/kr_ticker_master.json 기준).
+    파일이 없거나 읽기 실패하면 빈 dict를 반환합니다 (→ 아래 필터에서 전부 걸러짐,
+    안전한 쪽으로 — "무엇인지 확인 못 한 종목은 통과시키지 않는다").
+
+    2026-08-29(오푸스 감사 Top-5 #1): collector_indicator_kr.py::load_ticker_types() 와
+    완전히 동일한 규약입니다 — 정답 코드가 이미 이 저장소에 있어 그대로 재사용합니다
+    (§0-3-10, 검증된 코드를 새로 짜지 않음).
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "data", KR_TICKER_MASTER_FILENAME)
+    if not os.path.exists(path):
+        return {}
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"⚠️ {path} 를 읽지 못했습니다: {e}")
+        return {}
+    return {s["code"]: s.get("type") for s in data.get("stocks", []) if s.get("code")}
+
 def fetch_kospi200_real_market_data():
     """
     네이버 증권 시가총액 순위 목록(sise_market_sum.naver)을 코스피(sosok=0)+코스닥(sosok=1)
@@ -836,6 +857,14 @@ def fetch_kospi200_real_market_data():
     # 진짜 구성비는 이번 merge 이후 첫 실행 로그에서 확인 필요(§0-1).
     target_candidates_per_market = 700
     max_pages_per_market = 25   # 700 / 50 = 14페이지 + ETF필터링·파싱실패 여유(안전 상한)
+
+    # 2026-08-29(오푸스 감사 Top-5 #1): ETF/ETN 여부를 종목명 키워드로 "짐작"하지 않고
+    # data/kr_ticker_master.json(FinanceDataReader 공식 상장종목 목록)로 확정합니다.
+    # 시장 루프 밖에서 한 번만 로드(페이지마다 다시 읽지 않음).
+    ticker_types = load_ticker_types()
+    if not ticker_types:
+        print("⚠️ data/kr_ticker_master.json 을 읽지 못해 ticker_types 가 비어 있습니다 "
+              "— 이번 수집에서는 종목 타입을 확인할 수 없는 모든 후보가 걸러집니다(안전한 쪽으로).")
 
     all_stocks_raw = []
     all_failed_pages = []
@@ -887,32 +916,21 @@ def fetch_kospi200_real_market_data():
                         continue
 
                     name = name_elem.text.strip()
-                    # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식 순위 부여)
-                    # 1차: 브랜드명 키워드 필터 (ETF 운용사 브랜드)
-                    fund_brand_keywords = [
-                        "ETN", "ETF", "TIGER", "KODEX", "ACE", "RISE", "SOL",
-                        "ARIRANG", "HANARO", "KBSTAR", "PLUS", "KOSEF", "KINDEX", "TREX",
-                        "TIMEFOLIO", "FOCUS", "UNICORN", "HERO",
-                        "KIWOOM", "BNK", "MIRAEASSET"
-                    ]
-                    # 2차: 상품 유형 키워드 필터 (ETF/펀드 상품명 패턴)
-                    fund_type_keywords = [
-                        "액티브", "인덱스", "레버리지", "인버스", "채권", "혼합",
-                        "200TR", "배당성장", "고배당", "K-뉴딜"
-                    ]
-                    # 3차: 영문 대문자로만 구성 + 숫자 조합 이름 (ETF 패턴, 예: "TIME 미국나스닥100액티브")
-                    name_upper_ratio = sum(1 for c in name if c.isupper()) / max(len(name), 1)
-                    is_etf_pattern = name_upper_ratio > 0.5 and any(c.isdigit() for c in name) and len(name) > 5
-
-                    if any(kw in name for kw in fund_brand_keywords):
-                        continue
-                    if any(kw in name for kw in fund_type_keywords):
-                        continue
-                    if is_etf_pattern and name not in ("LG", "SK", "HD"):
-                        continue
 
                     href = name_elem.get('href', '')
                     code = href.split('code=')[-1] if 'code=' in href else ''
+
+                    # ETF, ETN, 인덱스 펀드류 상품 걸러내기 (순수 개별 기업 주식만 순위 부여)
+                    # 2026-08-29(오푸스 감사 Top-5 #1): 예전에는 종목명 키워드(브랜드명·상품유형
+                    # 키워드·대문자+숫자 패턴)로 ETF 여부를 "짐작"했습니다. 이 방식은 "BNK금융지주"
+                    # (순수 개별 기업 주식)를 "BNK" 키워드에 걸려 ETF로 오분류해 순위에서 빼버리는
+                    # 등 오탐이 있었습니다. collector_indicator_kr.py / utils/indicator_universe.py
+                    # 가 이미 data/kr_ticker_master.json(FinanceDataReader 공식 상장종목 목록,
+                    # type="STOCK"/"ETF") 기반으로 이 문제를 정확히 해결해 둔 검증된 패턴이라
+                    # 여기도 그대로 적용합니다(§0-3-10, 새 로직을 짜지 않음). ticker_types 에 없는
+                    # (=STOCK 여부를 확인 못 한) 종목은 걸러집니다 — 안전한 쪽으로.
+                    if ticker_types.get(code) != "STOCK":
+                        continue
 
                     try:
                         price = float(cols[2].text.strip().replace(',', ''))

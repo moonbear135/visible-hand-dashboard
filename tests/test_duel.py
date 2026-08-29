@@ -129,6 +129,48 @@ def test_fill_share_count_is_not_flipped_by_binary_rounding():
     assert result["status"] == ORDER_FILLED
 
 
+def test_fill_reason_defaults_to_won_suffix():
+    """currency 인자를 안 주면 기존과 똑같이 "원"이 붙어야 합니다(하위호환)."""
+    result = calculate_fill(requested_quantity=10, close_price=70_000, available_cash=500_000)
+    assert "70,000원" in result["fail_reason"] and "500,000원" in result["fail_reason"], result["fail_reason"]
+    assert "$" not in result["fail_reason"]
+
+    result_expired = calculate_fill(requested_quantity=3, close_price=70_000, available_cash=50_000)
+    assert "원" in result_expired["fail_reason"]
+    assert "$" not in result_expired["fail_reason"]
+
+
+def test_fill_reason_uses_dollar_sign_prefix_for_usd_currency():
+    """
+    2026-08-29(오푸스 감사 Top-5 #3) — currency="USD" 를 넘기면 실패 사유 문구가
+    "원"(접미) 대신 "$"(접두, duel_batch_usd.py::format_summary_lines_usd() 와 같은
+    관례)를 써야 합니다. 고치기 전에는 이 인자 자체가 없어 달러 계좌에도 항상 "원"이
+    붙었습니다.
+    """
+    result = calculate_fill(
+        requested_quantity=10, close_price=70_000, available_cash=500_000, currency="USD",
+    )
+    assert result["status"] == ORDER_PARTIALLY_FILLED
+    reason = result["fail_reason"]
+    assert "원" not in reason, reason
+    assert "$500,000" in reason and "$70,000" in reason, reason
+
+    result_expired = calculate_fill(
+        requested_quantity=3, close_price=70_000, available_cash=50_000, currency="USD",
+    )
+    assert "원" not in result_expired["fail_reason"], result_expired["fail_reason"]
+    assert "$" in result_expired["fail_reason"]
+
+
+def test_allocate_pending_orders_threads_currency_into_fail_reason():
+    """allocate_pending_orders() 의 currency 인자가 calculate_fill() 까지 그대로 전달됩니다."""
+    orders = [{"id": 1, "ticker": "AAPL", "saved_at": "2026-08-29T09:00:00+09:00", "requested_quantity": 10}]
+    results = allocate_pending_orders(500_000, orders, {"AAPL": 70_000}, currency="USD")
+    assert len(results) == 1
+    assert "원" not in results[0]["fail_reason"]
+    assert "$" in results[0]["fail_reason"]
+
+
 # =============================================================================
 # ② 후행지표 원칙 회귀 — 종가가 없으면 절대 체결하지 않는다 (§0-1 / §0-3-1)
 # =============================================================================

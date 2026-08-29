@@ -36,6 +36,7 @@ NiceGUI 는 한 프로세스·한 이벤트 루프가 모든 접속자를 처리
 """
 
 import ast
+import re
 import asyncio
 import sys
 import threading
@@ -680,4 +681,42 @@ def test_the_home_page_search_box_no_longer_reads_files_on_the_loop():
         assert len(awaited) == 1, (
             f"{page} 가 render_stock_download_tool() 을 await 하지 않습니다 — "
             "코루틴만 만들어 놓고 버리면 검색 도구가 통째로 그려지지 않습니다."
+        )
+
+
+def test_auth_ui_signup_and_password_reset_use_run_blocking_not_raw_io_bound():
+    """
+    🔴 2026-08-29(오푸스 감사 Top-5 #5) — `web/auth_ui.py`의 회원가입ㆍ비밀번호 재설정
+    코드 발송ㆍ비밀번호 변경 3곳이 `run.io_bound()`를 직접 썼습니다. 이 함수는 요청이
+    취소되면 예외 없이 `None`을 돌려주는데, 세 호출부 모두 그 반환값을 확인하지 않고
+    (또는 확인해도 `f'✅ {None}'`처럼 그대로 흘려) 곧장 성공 토스트를 띄웠습니다 — 취소된
+    요청이 "회원가입됐다"/"코드를 보냈다"/"비밀번호를 바꿨다"는 거짓 성공으로 보이는
+    사고입니다(§0-1). `run_blocking()`(`web/blocking.py`)은 취소 시 `BlockingCallAborted`
+    를 던져, 이미 있던 `except Exception` 정직한 실패 배너가 대신 뜨게 만듭니다.
+
+    이 테스트는 소스 텍스트로 "다시 `run.io_bound`로 되돌아가지 않았는지"만 못 박습니다
+    (AST 기반 스캐너는 위 `test_no_blocking_call_is_left_on_the_event_loop`이 이미 담당 —
+    거긴 "동기로 직접 호출"만 잡고, `run.io_bound(fn, ...)`처럼 감싸서 부르는 자리는
+    안 잡히므로 여기서 별도로 확인합니다).
+    """
+    path = REPO_ROOT / "web" / "auth_ui.py"
+    src = path.read_text(encoding="utf-8")
+
+    # 문서 주석(예: busy() 독스트링의 일반 설명)에는 "run.io_bound" 라는 글자가 남아 있어도
+    # 무방합니다 — 실제로 **호출**하는 코드가 없는지만 AST 로 확인합니다.
+    tree = ast.parse(src)
+    live_io_bound_calls = [
+        n for n in ast.walk(tree)
+        if isinstance(n, ast.Call) and getattr(n.func, "attr", None) == "io_bound"
+    ]
+    assert not live_io_bound_calls, (
+        "web/auth_ui.py 가 다시 run.io_bound()를 직접 쓰고 있습니다 — "
+        "await run_blocking(그함수, ...) 로 바꾸세요(취소 시 예외 없이 성공 토스트가 뜨는 사고 재발)."
+    )
+    assert "from web.blocking import run_blocking" in src, (
+        "web/auth_ui.py 가 run_blocking 을 import 하지 않습니다."
+    )
+    for blocking_fn in ("sign_up", "send_password_reset_code", "reset_password_with_code"):
+        assert re.search(rf"run_blocking\(\s*{blocking_fn}\b", src), (
+            f"{blocking_fn}() 호출이 run_blocking 을 거치지 않는 것으로 보입니다."
         )

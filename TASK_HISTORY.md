@@ -2596,6 +2596,50 @@
      있어 삭제가 보안 개선도 겸함을 확인 — #157 후보로 아래 백로그에 기록.
 
 
+157. **🔧 스파게티 감사 Top 5 전부 반영 (2026-08-29, 오푸스 높음, 오너 요청 —**
+     **"1번에서 5번은 지금 바로 다 고쳐버리자").** #156 리포트의 Top 5를 순서대로
+     수정. ①`collector_kospi200.py` — 브랜드명 부분일치 ETF 필터("BNK" 키워드가
+     "BNK금융지주"를 오탐)를 걷어내고, `collector_indicator_kr.py`/
+     `utils/indicator_universe.py`가 이미 쓰던 `data/kr_ticker_master.json`
+     (FinanceDataReader 공식 상장종목 목록) 기반 `type == "STOCK"` 판정으로 교체
+     (같은 저장소의 검증된 패턴 재사용, §0-3-10). 마스터 파일이 없거나 못 읽으면
+     빈 dict → 전부 걸러짐(안전한 쪽으로, 기존 규약과 동일). `load_ticker_types()`
+     신설 + 회귀 테스트 3건. ②`utils/scoring_us.py` — BPS 바닥값(floor) 보정 두
+     가지 결함 수정: (A-1) `f_target_floored`/`t_fair_floored` 플래그를
+     `calculate_us_quant_score()`까지 실제로 전달해, 목표가 초과 교차검증(현재는
+     floor 적용 시 대수적으로 `PBR-1`의 동어반복이 되어 실효성장률과 무관한 값으로
+     점수를 잘못 짓누르던 문제)을 캡 적용 종목과 동일하게 건너뛰도록 함.
+     (A-2) 바닥값 자체가 2.5배 폭주 방지 캡을 넘으면 캡도 그대로 적용(캡은 산출
+     경로를 안 가림). 재현 시나리오(저PBR 우량주, floor가 목표가를 밀어올려 현재가
+     대비 100% "초과"로 오판정되던 case)로 점수가 20/100 → 58/100으로 정상화됨을
+     확인, 회귀 테스트 10건 추가. ③`utils/duel_rules.py::calculate_fill()` — 실패
+     사유 문구에 `currency` 인자(기본값 "KRW") 신설, `_fmt_currency()` 헬퍼로
+     KRW="원"(접미)/USD="$"(접두, 기존 체급 문구·`format_summary_lines_usd()`와
+     같은 표기 관례)를 분기. `allocate_pending_orders()`→`utils/duel_batch.py::
+     plan_order_fills()`까지 그대로 관통시키고, `duel_batch_usd.py`의 호출부
+     한 곳에서만 `currency="USD"`를 명시(원화 결투 배치는 기본값 그대로라 무변경).
+     회귀 테스트 4건. ④`web/pages/dividend_page.py` — 연도 경계를 못 넘던
+     `_shift()`/`_on_month()`(`1 <= month <= 12`)를 미국 배당 화면
+     (`dividend_us_logic.py::available_months()`)과 같은 방식(데이터가 실제로
+     덮는 최소~최대 달을 연도 상관없이 한 줄로 이어놓고 그 안에서 이동)으로 교체.
+     새 `available_months()`(결산기준일 + 지급예정일 색인 둘 다 스캔)/
+     `shift_month()`/`month_label()` 신설 — 두 배당 화면은 서로 import하지 않는
+     확정 원칙(`dividend_us_logic.py` 머리말)이라 로직만 복제. 12월 결산 배당의
+     익년 3~4월 지급예정일 도달 재현 테스트로 확인, 신규 테스트 파일 5건.
+     ⑤`web/auth_ui.py` — 회원가입/비밀번호 재설정 코드 발송/비밀번호 변경 3곳의
+     `run.io_bound()` 직접 호출을 전부 `run_blocking()`(`web/blocking.py`)으로
+     교체. 취소 시 예외 없이 `None`을 돌려주던 것을 `BlockingCallAborted`로 바꿔,
+     이미 있던 `except Exception`(§0-3-4 정직한 실패 배너 규약)이 대신 처리하게
+     함 — 기존 예외 처리 코드는 한 글자도 안 바꿈. 특히 비밀번호 변경 경로는 취소돼도
+     "✅ 비밀번호를 변경했습니다" 성공 토스트가 그대로 뜨던, Top 5 중 가장 직접적인
+     사용자 피해 항목. 소스 검증 테스트 1건 추가(AST로 `run.io_bound` 직접 호출
+     소멸 확인). **검증** — 5개 파일 + 관련 테스트 12건 신규, 코드 전체 기존
+     스위트 재실행 결과 `sql/duel_schema.sql`·`DUEL_MODULE_WORK_ORDER.md` 등
+     이 클라우드 검토용 사본에만 없는 파일 때문에 나는 실패 91건은 수정 전후
+     완전히 동일(diff 0건)함을 확인 — 이번 5개 수정으로 인한 회귀 0건, 새 회귀
+     테스트 12건 전부 통과.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26
@@ -2631,16 +2675,6 @@
   자리 4개가 실제로 잘 뜨는지 확인 후 `web/ads.py`의 `ADS_ADMIN_ONLY`를 `False`로
   바꿔 3단계(전체 공개) 전환.
 
-- 🆕 #156 스파게티 감사 Top 5 (`SPAGHETTI_AUDIT_2026-08-29.md` 1장) — 전부 격리
-  수정 가능으로 분류됐지만 실서비스 데이터/화면에 영향을 주어 오너 검토 없이는
-  손대지 않음: ①`collector_kospi200.py:892-912` ETF 필터가 "BNK금융지주" 같은
-  실제 상장사를 유니버스에서 매일 제외(순위 밀림 동반), ②`utils/scoring_us.py`의
-  BPS 바닥값(floor) 보정이 목표가 2.5배 캡을 우회 + 교차검증을 `PBR-1` 동어반복화,
-  ③`utils/duel_rules.py::calculate_fill()` 실패 사유에 달러 계좌인데도 "원" 단위
-  노출, ④`web/pages/dividend_page.py` KR 배당 달력이 `today.year`에 갇혀 12월
-  결산 배당 지급예정일(익년 3~4월)에 도달 불가, ⑤`web/auth_ui.py` 회원가입/
-  비밀번호 재설정·변경 4곳이 `run_blocking()` 미사용으로 취소된 요청도 "성공"
-  토스트를 띄움.
 - 🆕 #156 컷오버 유예 만료 — `main.py`가 예고한 Streamlit(`views/`)/NiceGUI
   듀얼런 유예(2026-08-17 + 2주)가 **2026-08-31로 이미 도래**. `app.py`/
   `visiblehand.py`/`views/`/`keep_awake_ping.py`(+ workflow의 streamlit_wake

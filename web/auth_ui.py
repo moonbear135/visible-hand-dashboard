@@ -17,7 +17,7 @@
 
 from contextlib import contextmanager
 
-from nicegui import run, ui
+from nicegui import ui
 
 from utils.scorecard_db import (
     ScorecardError,
@@ -26,6 +26,7 @@ from utils.scorecard_db import (
     sign_up,
 )
 from web.auth import get_client_async, login, new_auth_client
+from web.blocking import run_blocking
 from web.components import info_banner
 
 
@@ -157,9 +158,15 @@ def _render_signup_form() -> None:
                 if client is None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 가입할 수 없습니다.'
                     return
-                # run.io_bound 이유는 로그인 폼과 동일 — 동기 네트워크 호출이 이벤트 루프를
-                # 막아 로딩 표시가 화면에 안 그려지는 문제 방지.
-                await run.io_bound(sign_up, client, (email_input.value or '').strip(), password_input.value or '')
+                # 2026-08-29(오푸스 감사 Top-5 #5): 예전엔 `run.io_bound()`를 직접 썼습니다
+                # — 이벤트 루프를 막지 않는 것까진 같지만, 요청이 취소되면 `sign_up()`의
+                # 반환값이 (원래도 안 쓰였으므로) 조용히 사라지고 아래 "✅ 가입 요청이
+                # 접수되었습니다" 성공 토스트가 그대로 떴습니다 — 실제로는 가입 자체가
+                # 안 됐을 수 있는데도요(§0-1). `run_blocking()`(`web/blocking.py`)은 취소
+                # 시 `BlockingCallAborted`를 던져 아래 `except Exception` 이 정직한 실패
+                # 배너로 대신 처리하게 합니다 — 그 처리는 이 파일이 이미 갖고 있어(위
+                # `fail_message()`) except 절은 한 글자도 안 바꿨습니다.
+                await run_blocking(sign_up, client, (email_input.value or '').strip(), password_input.value or '')
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {fail_message(exc, "가입 요청을 처리하지 못했습니다. 잠시 후 다시 시도해 주세요.", context="회원가입")}'
                 return
@@ -221,7 +228,12 @@ def _render_reset_form() -> None:
                     message.text = '🚫 Supabase 연결이 준비되지 않아 코드를 보낼 수 없습니다.'
                     return
                 # 발송 요청은 로그인 세션을 만들지 않으므로 이 접속의 클라이언트로 보내도 안전합니다.
-                notice = await run.io_bound(send_password_reset_code, client, address)
+                # 2026-08-29(오푸스 감사 Top-5 #5): `run.io_bound()` → `run_blocking()`.
+                # 예전엔 요청이 취소되면 `notice`가 `None`이 되어 아래 성공 토스트가
+                # "✅ None"으로 뜨거나, 최악의 경우 코드가 발송되지 않았는데도 성공
+                # 문구를 봤습니다. 취소는 이제 `BlockingCallAborted`로 올라와 아래
+                # `except Exception`(기존 그대로)이 정직한 실패 배너를 띄웁니다.
+                notice = await run_blocking(send_password_reset_code, client, address)
             except Exception as exc:                   # noqa: BLE001
                 message.text = f'🚫 {fail_message(exc, "재설정 코드를 보내지 못했습니다. 잠시 후 다시 시도해 주세요.", context="비밀번호 재설정")}'
                 return
@@ -237,7 +249,11 @@ def _render_reset_form() -> None:
         message.text = ''
         with busy(confirm_btn):
             try:
-                await run.io_bound(
+                # 2026-08-29(오푸스 감사 Top-5 #5): `run.io_bound()` → `run_blocking()`.
+                # 예전엔 요청이 취소돼도 예외가 안 나 아래 "✅ 비밀번호를 변경했습니다"
+                # 성공 토스트가 그대로 떴습니다 — 실제로는 비밀번호가 안 바뀌었을 수
+                # 있는데도요(§0-1, 이 Top-5 중 가장 사용자 피해가 직접적인 항목).
+                await run_blocking(
                     reset_password_with_code,
                     new_auth_client(),
                     (request_email.value or '').strip(),  # 1단계에서 입력한 이메일을 그대로 재사용

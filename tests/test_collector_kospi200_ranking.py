@@ -334,6 +334,38 @@ def test_ev_ebitda_circuit_resets_failure_count_on_successful_response(monkeypat
     assert result["ev_ebitda"] is None  # 더미 테이블엔 'EV/EBITDA' 행이 없으므로 값은 여전히 None(정상)
 
 
+# ──────────────────────────────────────────────────────────────
+# load_ticker_types (2026-08-29 오푸스 감사 Top-5 #1)
+# collector_indicator_kr.py::load_ticker_types() 와 완전히 동일한 규약이어야 합니다.
+# ──────────────────────────────────────────────────────────────
+
+def test_load_ticker_types_missing_file_returns_empty(tmp_path):
+    result = K.load_ticker_types(str(tmp_path / "nope.json"))
+    assert result == {}
+
+
+def test_load_ticker_types_valid_file(tmp_path):
+    import json
+    p = tmp_path / "tickers.json"
+    p.write_text(
+        json.dumps({"stocks": [
+            {"code": "005390", "name": "BNK금융지주", "type": "STOCK"},
+            {"code": "069500", "name": "KODEX 200", "type": "ETF"},
+        ]}),
+        encoding="utf-8",
+    )
+    result = K.load_ticker_types(str(p))
+    assert result == {"005390": "STOCK", "069500": "ETF"}
+
+
+def test_load_ticker_types_unreadable_file_returns_empty(tmp_path):
+    """JSON 파싱 자체가 깨진 파일도 예외를 던지지 않고 빈 dict(안전한 쪽으로)를 반환해야 합니다."""
+    p = tmp_path / "broken.json"
+    p.write_text("{이건 유효한 JSON이 아님", encoding="utf-8")
+    result = K.load_ticker_types(str(p))
+    assert result == {}
+
+
 if __name__ == "__main__":
     import pytest as _pytest
     raise SystemExit(_pytest.main([__file__, "-v"]))
