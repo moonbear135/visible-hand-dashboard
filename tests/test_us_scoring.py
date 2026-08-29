@@ -82,8 +82,19 @@ def test_us_scoring_full_suite():
     # =============================================================================
     section("1. 실데이터 검증 — data/us_sample 의 실제 12종목 수집 결과")
 
+    # 2026-08-29 재감사 S3: `data/us_sample/` 는 ENGINEERING_SPEC.md 가 명시한 대로
+    # .gitignore 대상이라 오너 PC 밖(이 검토용 클라우드 사본, CI 등)에는 아예 존재하지
+    # 않습니다. 예전에는 이 부재 자체를 `check()`(FAILURES 에 기록)로 다뤄, 있으면 좋은
+    # "추가 확인"이었을 이 섹션이 회귀 게이트 전체를 영구히 빨간불로 만들었습니다
+    # (그 아래 실데이터 검증 15건도 통째로 실행되지 않음). 진짜 수집 결과를 이 저장소
+    # 사본에 커밋된 픽스처로 옮기는 이상적인 수정은 그 실데이터 자체가 오너 PC 에만 있어
+    # 이 세션에서는 만들 수 없습니다(§0-1 — 있지도 않은 실측 데이터를 지어내지 않음).
+    # 대신 부재를 "정보성 스킵"으로 낮춰, 있으면(오너 PC) 실데이터 15건이 그대로 실행되고
+    # 없으면(이 사본·CI) 이 섹션만 건너뛰고 나머지 78건 스위트는 정상적으로 회귀 게이트
+    # 역할을 하게 합니다.
     sample_files = sorted(glob(str(ROOT / "data" / "us_sample" / "sample_processed_*.json")))
-    check(bool(sample_files), "샘플 파일 존재", f"(찾은 파일 {len(sample_files)}개)")
+    if not sample_files:
+        print("  ℹ️ 샘플 파일 없음(.gitignore 대상, 오너 PC 전용) — 이 섹션만 건너뜁니다")
 
     if sample_files:
         with open(sample_files[-1], "r", encoding="utf-8") as f:
@@ -162,7 +173,7 @@ def test_us_scoring_full_suite():
     res = calculate_us_quant_score(
         f_pegy=loss["f_pegy"], t_roe=loss["t_roe"], roic=loss["roic"], sh_return=loss["sh_return"],
         piotroski=loss["piotroski_f"], beta=loss["beta"], f_per=loss["f_per"], price=loss["price"],
-        f_target=loss["f_target"], growth=loss["growth"],
+        f_target=loss["f_target"], growth=loss["growth"], is_trailing_loss=loss["is_trailing_loss"],
     )
     check(res["is_cutoff"] is True and "역성장/적자" in res["badge"], f"적자기업: 역성장/적자 컷오프 ({res['badge']})")
     check(res["quant_score"] <= res["score_max"] * 0.30, "적자기업: 점수 상한이 만점의 30% 이하로 눌림")
@@ -193,6 +204,7 @@ def test_us_scoring_full_suite():
         f_pegy=bank["f_pegy"], t_roe=bank["t_roe"], roic=bank["roic"], sh_return=bank["sh_return"],
         piotroski=bank["piotroski_f"], beta=bank["beta"], f_per=bank["f_per"], price=bank["price"],
         f_target=bank["f_target"], growth=bank["growth"], f_target_capped=bank["f_target_capped"],
+        is_trailing_loss=bank["is_trailing_loss"],
     )
     check(res_bank["score_max"] == 85, f"은행: ROIC 15점이 배점에서 빠져 만점 85 ({res_bank['score_max']})")
     check(any("ROIC" in x for x in res_bank["excluded_items"]), "은행: 제외 사유에 ROIC 명시")
@@ -207,6 +219,7 @@ def test_us_scoring_full_suite():
         f_pegy=hyper["f_pegy"], t_roe=hyper["t_roe"], roic=hyper["roic"], sh_return=hyper["sh_return"],
         piotroski=hyper["piotroski_f"], beta=hyper["beta"], f_per=hyper["f_per"], price=hyper["price"],
         f_target=hyper["f_target"], growth=hyper["growth"], f_target_capped=hyper["f_target_capped"],
+        is_trailing_loss=hyper["is_trailing_loss"],
     )
     # 성장률 150% → 성장률 상한 35%p 로 절단, 주주환원 4.5%p 는 상한(10) 미만이라 그대로 → 39.5%p
     check(hyper["g_eff"] == 39.5,
@@ -242,7 +255,7 @@ def test_us_scoring_full_suite():
     res_d = calculate_us_quant_score(
         f_pegy=dirty["f_pegy"], t_roe=dirty["t_roe"], roic=dirty["roic"], sh_return=dirty["sh_return"],
         piotroski=dirty["piotroski_f"], beta=dirty["beta"], f_per=dirty["f_per"], price=dirty["price"],
-        f_target=dirty["f_target"], growth=dirty["growth"],
+        f_target=dirty["f_target"], growth=dirty["growth"], is_trailing_loss=dirty["is_trailing_loss"],
     )
     check(res_d["forward_available"] is False, "PER 오염: forward_available=False")
     check(res_d["quant_score"] <= res_d["score_max"] * 0.13, "PER 오염: 점수 상한 12% 이하로 눌림")
@@ -270,11 +283,17 @@ def test_us_scoring_full_suite():
         f_per=floor_stock["f_per"], price=floor_stock["price"], f_target=floor_stock["f_target"],
         growth=floor_stock["growth"], f_target_capped=floor_stock["f_target_capped"],
         f_target_floored=floor_stock["f_target_floored"],
+        f_target_uncapped=floor_stock["f_target_uncapped"], is_trailing_loss=floor_stock["is_trailing_loss"],
     )
-    check("목표가 초과" not in res_floor["badge"],
-          f"바닥값: PBR-1 동어반복 교차검증이 건너뛰어져 '목표가 초과' 오배지가 안 붙음 ({res_floor['badge']})")
-    check(res_floor["quant_score"] > res_floor["score_max"] * 0.30,
-          f"바닥값: 동어반복 교차검증으로 점수가 짓눌리지 않음 ({res_floor['quant_score']}/{res_floor['score_max']})")
+    # 2026-08-29 재감사 H6: f_target(=바닥값 그 자체)과 비교하면 PBR-1 의 동어반복이라
+    # 예전에는 교차검증을 통째로 건너뛰었는데, 그러면 PEGY 역산 원값(f_target_uncapped=
+    # $34.47) 대비 현재가($100)가 190% 나 비싸다는 진짜 신호까지 함께 사라졌습니다.
+    # f_target_uncapped 를 기준으로 검증하도록 고쳐, 이제는 이 종목이 실제로 "목표가 초과"
+    # 배지 + 낮은 점수를 받습니다 — 동어반복 없이 진짜 신호가 되살아난 것이 이 테스트의 취지입니다.
+    check("목표가 초과" in res_floor["badge"],
+          f"바닥값: f_target_uncapped 기준 교차검증이 살아나 '목표가 초과' 배지가 붙음 ({res_floor['badge']})")
+    check(res_floor["quant_score"] <= res_floor["score_max"] * 0.30,
+          f"바닥값: 진짜 초과분(190%)에 비례해 점수가 짓눌림 ({res_floor['quant_score']}/{res_floor['score_max']})")
 
     # 바닥값 자체가 2.5배 폭주 방지 캡을 넘으면(#2-A2) 캡도 그대로 적용돼야 합니다.
     floor_over_cap = dict(floor_stock, symbol="FLOORCAP", t_pbr=0.2)  # floor_price=100/0.2=500 > 250
@@ -307,7 +326,7 @@ def test_us_scoring_full_suite():
     res_t = calculate_us_quant_score(
         f_pegy=tonly["f_pegy"], t_roe=tonly["t_roe"], roic=tonly["roic"], sh_return=tonly["sh_return"],
         piotroski=tonly["piotroski_f"], beta=tonly["beta"], f_per=tonly["f_per"], price=tonly["price"],
-        f_target=tonly["f_target"], growth=tonly["growth"],
+        f_target=tonly["f_target"], growth=tonly["growth"], is_trailing_loss=tonly["is_trailing_loss"],
     )
     check(tonly["is_valid"] is True, "Forward 결측: 종목 전체를 차단하지 않음")
     check(tonly["forward_data_missing"] is True, "Forward 결측: forward_data_missing 플래그")
@@ -495,8 +514,8 @@ def test_us_scoring_full_suite():
         check("failed_tickers" in meta, "실패 종목 목록 필드 존재 (조용히 건너뛰지 않음)")
         check(meta["failed_count"] == 0, f"실패 0건 ({meta['failed_tickers']})")
         check(meta["scoring"]["population_sample_size"] == 4, "2차 패스 population 표본 수 기록")
-        check(meta["indices"]["sp500"]["intraday_change_pct"] is not None,
-              f"상단 지수 3종 메타데이터에 저장됨 (등락률={meta['indices']['sp500']['intraday_change_pct']}%)")
+        check(meta["indices"]["sp500"]["daily_change_pct"] is not None,
+              f"상단 지수 3종 메타데이터에 저장됨 (등락률={meta['indices']['sp500']['daily_change_pct']}%)")
         check(meta["indices"]["nasdaq"]["tracked_index_verified"] is True,
               "나스닥종합 ETF 프록시(ONEQ)의 'Index Tracked' 라벨 검증 통과")
         check(meta["indices"]["sp500"]["is_etf_proxy"] is True, "지수 3종이 ETF 프록시 출처임을 메타데이터에 표기")
@@ -594,6 +613,86 @@ def test_us_scoring_full_suite():
         C._http_get = _orig_http_get
         C._data_path = _orig_data_path
         C._polite_sleep = _orig_sleep
+
+
+    # =============================================================================
+    # 7. 재감사 S4 — 프로덕션 배선 회귀 테스트 (단위 함수가 아니라 run_us_collector() 전체)
+    # =============================================================================
+    # H1: 대량 수집 실패가 status/valid_ratio 에 실제로 반영되는지. 예전 버그는
+    # valid_ratio 의 분모가 "수집 성공분"(visible)이라, 4종목 중 3종목이 통째로 실패해도
+    # 성공한 1종목만 깨끗하면 valid_ratio=1.0 → SUCCESS 로 오판정했습니다. collect_ratio
+    # (분모=수집 대상 전체)를 AND 로 넣은 뒤에는 이 시나리오가 FAILED 로 나와야 합니다.
+    section("7. 재감사 S4 — 대량 수집 실패 배선 (H1)")
+
+    def _fake_http_get_mass_failure(url, timeout=None):
+        if url.endswith("all.csv"):
+            return _FakeResponse(UNIVERSE_CSV)
+        for proxy_sym, html in FAKE_INDEX_PAGES.items():
+            if f"/etf/{proxy_sym}/" in url.lower():
+                return _FakeResponse(html)
+        # AAA만 성공, BBB/CCC/DDD 는 (차단이 아니라) 진짜 실패 — 소스 자체는 살아있고
+        # 이 종목들 파싱만 깨진 상황을 흉내냅니다(USSourceBlockedError 였다면 전체가 즉시
+        # 중단되므로 여기서는 일부러 일반 예외를 씁니다).
+        if "/stocks/aaa/" in url.lower():
+            return _FakeResponse(FAKE_PAGES["AAA"])
+        if any(f"/stocks/{s.lower()}/" in url.lower() for s in ("bbb", "ccc", "ddd")):
+            raise RuntimeError("테스트용 강제 파싱 실패")
+        raise RuntimeError(f"테스트에 없는 URL 요청: {url}")
+
+    tmpdir3 = tempfile.mkdtemp(prefix="us_collect_mass_failure_test_")
+    C._http_get = _fake_http_get_mass_failure
+    C._data_path = lambda filename: os.path.join(tmpdir3, filename)
+    C._polite_sleep = lambda: None
+    try:
+        snapshot_path3 = C.run_us_collector(target_size=4, delay=False)
+        with open(snapshot_path3, "r", encoding="utf-8") as f:
+            payload3 = json.load(f)
+        meta3 = payload3["metadata"]
+        check(meta3["failed_count"] == 3, f"4종목 중 3종목 수집 실패로 기록됨 ({meta3['failed_tickers']})")
+        check(meta3["valid_ratio"] == 1.0,
+              f"예전 버그의 분모(valid_ratio, 성공분 기준)만 보면 100%로 보임 ({meta3['valid_ratio']})")
+        check(meta3["collect_ratio"] < 0.30,
+              f"collect_ratio(전체 대상 기준)는 25%로 대량 실패를 드러냄 ({meta3['collect_ratio']})")
+        check(meta3["status"] == "FAILED",
+              f"AND 조건 덕분에 valid_ratio=100% 여도 status=FAILED (실제: {meta3['status']}) "
+              "— 고치기 전이었다면 SUCCESS 로 오판정했을 자리")
+    finally:
+        C._http_get = _orig_http_get
+        C._data_path = _orig_data_path
+        C._polite_sleep = _orig_sleep
+
+
+    # =============================================================================
+    # H2/H3: apply_us_guardrail() 이 진짜로 정합성 모순을 잡는지, 그리고 자기자본(BPS) 음수인
+    # 정상 종목(자사주 매입형 우량주)은 모순으로 오판정하지 않는지 — 두 방향 다 회귀 가드.
+    # =============================================================================
+    section("8. 재감사 S4 — apply_us_guardrail() 정합성 모순 배선 (H2/H3)")
+
+    # 진짜 모순: 자기자본이 양수(또는 미상)인데 ROE 는 적자로 나옴 — 부호 유실 의심.
+    real_contradiction = {
+        "symbol": "BAD", "name": "Bad Data Co. Common Stock", "price": 50.0,
+        "t_per": 15.0, "t_eps": 3.0, "t_roe": -12.0, "bps": 40.0,
+    }
+    real_contradiction.update(derive_valuation(real_contradiction))
+    real_contradiction = apply_us_guardrail(real_contradiction)
+    check(real_contradiction.get("is_unverified") is True,
+          "진짜 모순(ROE 적자 + 양수 자기자본 + 양수 PER/EPS)은 is_unverified=True 로 차단됨")
+    check("모순" in (real_contradiction.get("unverified_reason") or ""),
+          f"차단 사유에 '모순'이 명시됨 ({real_contradiction.get('unverified_reason')})")
+
+    # 자사주 매입형 우량주: 자기자본이 음수라 ROE 부호가 뒤집힌 정상 상태 — 모순 아님(H2).
+    buyback_heavy = {
+        "symbol": "MCD2", "name": "Buyback Heavy Co. Common Stock", "price": 300.0,
+        "t_per": 25.0, "t_eps": 12.0, "t_roe": -40.0, "bps": -15.0,
+    }
+    buyback_heavy.update(derive_valuation(buyback_heavy))
+    buyback_heavy = apply_us_guardrail(buyback_heavy)
+    check(buyback_heavy.get("is_unverified") is not True,
+          f"자기자본 음수(자사주 매입형)면 같은 ROE<0+PER>0 조합이어도 모순으로 안 잡음 "
+          f"(실제 is_unverified={buyback_heavy.get('is_unverified')})")
+    check(buyback_heavy.get("negative_equity") is True, "negative_equity 플래그가 True 로 기록됨")
+    check(buyback_heavy.get("is_trailing_loss") is not True,
+          "ROE 음수만으로 적자(is_trailing_loss) 판정하지 않음 — EPS>0/순이익>0 이면 흑자 유지")
 
     print("\n" + "=" * 74)
     if FAILURES:

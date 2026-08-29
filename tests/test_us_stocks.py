@@ -427,6 +427,30 @@ def test_price_block():
           "무배당 문장이 없으면 unknown(수집 실패와 구분 유지)")
 
 
+def test_reaudit_l7_close_timestamp_abbrev_mismatch_logged_not_crashed():
+    """L7: 소스가 말한 EDT/EST 약어와 zoneinfo 계산 결과가 달라도 죽지 않고,
+    (날짜만 쓰는) 반환값은 그대로 정확해야 하며, 불일치는 로그에만 남습니다(§0-3-4)."""
+    print("\n[재감사 L7] 타임스탬프 시간대 약어 불일치 처리")
+    import contextlib
+
+    # 정상 케이스: 여름(8월)이면 실제로도 EDT라 불일치 없음.
+    normal = parse_close_timestamp("Aug 5, 2026, 4:00 PM EDT")
+    check(normal is not None and normal.date().isoformat() == "2026-08-05",
+          "정상 EDT 문자열은 그대로 파싱")
+
+    # 불일치 케이스: 8월인데 소스가 EST(겨울 표준시)라고 잘못 표기 — zoneinfo 는 날짜 기준으로
+    # EDT를 계산하므로 두 값이 어긋납니다. 크래시 없이 날짜는 여전히 정확해야 합니다.
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        mismatched = parse_close_timestamp("Aug 5, 2026, 4:00 PM EST")
+    check(mismatched is not None and mismatched.date().isoformat() == "2026-08-05",
+          "약어가 실제와 달라도 날짜 파싱 결과는 흔들리지 않음(지금은 .date() 만 쓰므로 무해)")
+    logged = buf.getvalue()
+    check("불일치" in logged, "불일치는 서버 로그(print)에 남음")
+    check("EST" in logged and "EDT" in logged,
+          "로그에 소스 약어와 계산된 약어가 둘 다 남아 원인 추적 가능")
+
+
 def test_table_extraction():
     print("\n[4-b] 표 라벨/값 추출 (열 번호 고정 없이)")
     pairs = extract_label_value_pairs(HTML_TABLE)
@@ -495,8 +519,8 @@ def test_index_proxy():
         entry = fetch_one_index_quote("nasdaq", "나스닥 종합", "Nasdaq Composite", "oneq", "nasdaq composite")
         check(entry["close"] == 104.78, f"ETF 종가 추출 (실제 {entry['close']})")
         check(entry["previous_close"] == 102.07, f"전일 종가(Previous Close) 라벨 매칭 (실제 {entry['previous_close']})")
-        check(entry["intraday_change_pct"] == 2.66,
-              f"등락률 = (종가-전일종가)/전일종가 계산값 (실제 {entry['intraday_change_pct']}%, 실측 표기 2.66%와 일치)")
+        check(entry["daily_change_pct"] == 2.66,
+              f"등락률 = (종가-전일종가)/전일종가 계산값 (실제 {entry['daily_change_pct']}%, 실측 표기 2.66%와 일치)")
         check(entry["change_calculated"] is True, "등락률에 '계산값' 플래그(§0-1 예시2-보충)")
         check(entry["is_etf_proxy"] is True, "ETF 프록시 출처임을 표기")
         check(entry["tracked_index_verified"] is True,
@@ -529,12 +553,15 @@ def test_derive_fields():
               "market_cap": 49.98e9}
     d = derive_fields(fields, {"csv_market_cap": 49.5e9})
     check(d["growth"] == 16.43 and d["growth_source"], "성장률 출처 표기와 함께 설정")
-    check(d["forward_available"] is True, "f_per+성장률 있으면 Forward 사용 가능")
+    # 2026-08-29 재감사 L10: forward_available 은 derive_fields()(여기)와 derive_valuation()
+    # (utils/scoring_us.py)에 완전히 같은 식으로 중복 계산돼 있었고, run_us_collector() 에서
+    # 후자가 항상 전자를 덮어써 전자의 값은 어디서도 읽히지 않는 죽은 계산이었습니다.
+    # derive_valuation() 을 유일한 출처로 남기고 derive_fields() 에서는 제거했습니다 —
+    # forward_available 검증은 tests/test_us_scoring.py 의 derive_valuation 테스트가 맡습니다.
+    check("forward_available" not in d, "forward_available은 derive_valuation()에서만 계산(중복 제거)")
     check(d["market_cap_cross_validated"] is True, "두 출처 시총 오차 허용범위 내 → 교차검증 통과")
     d2 = derive_fields(fields, {"csv_market_cap": 20.0e9})
     check(d2["market_cap_cross_validated"] is False, "시총 괴리 크면 교차검증 실패로 기록")
-    d3 = derive_fields({"f_per": 31.14, "growth_eps_3y": None}, None)
-    check(d3["forward_available"] is False, "성장률 없으면 Forward 마스킹 대상")
 
 
 # =============================================================================
@@ -784,8 +811,8 @@ def test_reaudit_summary_history_dedupes_by_session_date():
 
 
 def test_reaudit_parsers_accept_prebuilt_soup():
-    """L10: 같은 HTML 을 세 번 파싱하지 않도록 soup 객체를 받을 수 있어야 합니다."""
-    print("\n[재감사 L10] soup 재사용")
+    """L6: 같은 HTML 을 세 번 파싱하지 않도록 soup 객체를 받을 수 있어야 합니다."""
+    print("\n[재감사 L6] soup 재사용")
     from bs4 import BeautifulSoup
     html = "<html><body><table><tr><td>Market Cap</td><td>1.5B</td></tr></table></body></html>"
     soup = BeautifulSoup(html, "html.parser")
@@ -815,6 +842,7 @@ def main():
     test_field_mapping()
     test_number_parsers()
     test_price_block()
+    test_reaudit_l7_close_timestamp_abbrev_mismatch_logged_not_crashed()
     test_table_extraction()
     test_index_proxy()
     test_derive_fields()

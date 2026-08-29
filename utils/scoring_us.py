@@ -131,7 +131,8 @@ def _linear_premium(value, baseline, up_range, down_range, prem_max, prem_min):
 # Trailing ROE 15점: 0%(손익분기)=0점, 미국 자기자본비용 하단(9%)=10점,
 #   실측 중앙값 수준(US_ROE_PREMIUM_BASELINE_PCT=16%) 이상=만점.
 US_ROE_SCORE_KNOTS = [(0.0, 0.0), (US_VALUE_TRAP_ROE_PCT, 10.0), (US_ROE_PREMIUM_BASELINE_PCT, 15.0)]
-# ROIC 15점: 0%=0점, WACC 하단(8%)=10점, WACC 상단+여유(12%) 이상=만점.
+# ROIC 15점: 0%=0점, 착시 저평가 기준선(US_VALUE_TRAP_ROIC_PCT=6.5%, 2026-08-29 재감사 L2 —
+#   이전 "WACC 하단(8%)" 주석은 실측 확정 전 잠정값(8.0) 시절의 잔재)=10점, 상단(12%) 이상=만점.
 US_ROIC_SCORE_KNOTS = [(0.0, 0.0), (US_VALUE_TRAP_ROIC_PCT, 10.0), (US_ROIC_PREMIUM_BASELINE_PCT, 15.0)]
 # 주주환원 20점: 미국은 배당보다 자사주 매입 비중이 커 Shareholder Yield(배당+자사주)를 씁니다.
 #   ⚠️ 이 값은 **음수가 될 수 있습니다**(증자·주식보상으로 주식수가 늘면 희석). 실제 12종목
@@ -148,9 +149,10 @@ US_PEGY_SCORE_BANDS = [
     (US_PEGY_BAND_STRONG_UNDER, 35),      # < 0.65
     (US_PEGY_BAND_UNDER, 28),             # < 0.95
     (US_PEGY_BAND_FAIR, 20),              # < 1.35
-    (US_PEGY_EXTREME_OVERVALUED, 8),      # < 2.00
+    (US_PEGY_EXTREME_OVERVALUED, 8),      # < US_PEGY_EXTREME_OVERVALUED(=3.0, 2026-08-07 조정)
 ]
-US_PEGY_SCORE_WORST = 0                   # >= 2.00
+US_PEGY_SCORE_WORST = 0                   # >= US_PEGY_EXTREME_OVERVALUED(=3.0)
+# (2026-08-29 재감사 L1: 위 두 주석의 "2.00"은 2026-08-07에 3.0으로 조정되기 전 값의 잔재였습니다.)
 
 # 목표주가 교차검증 상한 — 현재가가 목표가를 얼마나 초과했는지(overshoot)에 비례.
 US_TARGET_OVERSHOOT_CAP_BEST_PCT = 60.0
@@ -227,17 +229,30 @@ def derive_valuation(stock):
     # -------------------------------------------------------------------------
     # 적자 판정 — 소스는 적자 기업의 PER 을 음수로 주지 않고 n/a 로 주며, EPS 라벨이
     # "Earnings Per Share (EPS)" → "Loss Per Share" 로 바뀌면서 값이 음수가 됩니다
-    # (TASK_HISTORY #46 실측 확인). 그래서 PER 부호가 아니라 EPS·ROE 부호로 판정합니다.
+    # (TASK_HISTORY #46 실측 확인). 그래서 PER 부호가 아니라 EPS·순이익 부호로 판정합니다.
+    #
+    # ⚠️ 2026-08-29 재감사 H2: 예전에는 ROE 음수도 적자 증거로 넣었는데, ROE = 순이익÷
+    # 자기자본이라 **자사주 매입을 오래 한 미국 대형 우량주**(맥도날드·홈디포·스타벅스 등)는
+    # 순이익이 크게 흑자여도 자기자본이 음수라 ROE 가 음수로 나옵니다. 이 경우를 "적자"로
+    # 오판정하지 않도록 ROE 부호는 적자 판정에서 뺐습니다 — 진짜 적자는 EPS/순이익이
+    # 이미 잡습니다. ROE 는 자본효율성 점수(US_ROE_SCORE_KNOTS)에서만 반영합니다.
     # -------------------------------------------------------------------------
     loss_evidence = []
     if t_eps is not None and t_eps <= 0:
         loss_evidence.append(f"Trailing EPS {t_eps}")
-    if t_roe is not None and t_roe < 0:
-        loss_evidence.append(f"Trailing ROE {t_roe}%")
     if stock.get("net_income") is not None and stock["net_income"] < 0:
         loss_evidence.append("순이익(TTM) 적자")
     out["is_trailing_loss"] = bool(loss_evidence)
     out["loss_evidence"] = loss_evidence
+
+    # 자기자본(장부가) 음수 — 자사주 매입 누적 등으로 흔히 발생하는 정상적인 재무 상태입니다.
+    # ROE 해석이 왜곡되는 원인을 화면에 알려주기 위한 정보성 플래그입니다(적자 판정과 무관).
+    out["negative_equity"] = bool(bps is not None and bps < 0)
+    if out["negative_equity"] and t_roe is not None and t_roe < 0 and not out["is_trailing_loss"]:
+        issues.append(
+            f"Trailing ROE {t_roe}% (자기자본이 음수 — 자사주 매입 누적 등으로 ROE 해석이 "
+            "왜곡될 수 있습니다. 적자 판정에는 반영하지 않음)"
+        )
 
     if t_per is None and out["is_reit"]:
         issues.append("PER 미제공 — 리츠는 소스가 PER 대신 Price/FFO 를 제공합니다(정상)")
@@ -518,7 +533,7 @@ def compute_population_stats(stocks, min_samples=5):
 def calculate_us_quant_score(
     f_pegy=None, t_roe=None, roic=None, sh_return=None, piotroski=None, beta=None,
     f_per=None, price=None, f_target=None, growth=None, f_target_capped=False,
-    f_target_floored=False,
+    f_target_floored=False, f_target_uncapped=None, is_trailing_loss=False,
     growth_pop_stats=None, roe_pop_stats=None, pegy_pop_stats=None,
 ):
     """
@@ -566,10 +581,14 @@ def calculate_us_quant_score(
     # -------------------------------------------------------------------------
     # Guardrail 1: 역성장/적자
     # -------------------------------------------------------------------------
+    # 2026-08-29 재감사 H2: 예전에는 t_roe <= 0.0 을 역성장/적자 증거로 썼는데, 자기자본이
+    # 음수인 우량주(자사주 매입 누적)는 ROE 가 음수여도 실적은 흑자입니다. 이미 EPS/순이익
+    # 기준으로 판정된 is_trailing_loss(derive_valuation) 를 대신 씁니다 — ROE 는 자본효율성
+    # 점수(위 ROE knots)에서만 반영됩니다(음수 ROE 는 knots 상 이미 0점).
     if forward_available:
-        is_decline = (growth <= 0.0) or (t_roe is not None and t_roe <= 0.0)
+        is_decline = (growth <= 0.0) or is_trailing_loss
     else:
-        is_decline = (t_roe is not None and t_roe <= 0.0)
+        is_decline = is_trailing_loss
 
     if is_decline and pegy_scoring_available:
         excluded_items.append("PEGY 밸류에이션 35점 (역성장/적자 상태 — PEGY 공식 성립 불가)")
@@ -682,15 +701,19 @@ def calculate_us_quant_score(
 
         if pegy_scoring_available:
             # 교차검증 1: 현재가가 이미 목표가를 넘었는데 저평가 배지를 주면 안 됩니다.
-            # ⚠️ 목표가가 '캡 상수'인 종목은 캡과 현재가를 비교하는 게 동어반복이라 건너뜁니다.
-            # ⚠️ 2026-08-29(오푸스 감사 Top-5 #2-A1): 목표가가 BPS 바닥값으로 대체된 종목도
-            # 마찬가지로 건너뜁니다 — f_target = price / t_pbr 인 상태에서 overshoot을
-            # 계산하면 항상 (t_pbr - 1)로 단순화돼(PBR 재진술의 동어반복), PEGY 역산과
-            # 무관한 값으로 "목표가 초과" 배지·점수 캡을 잘못 발동시킵니다.
-            if f_target_capped or f_target_floored:
-                pass
-            elif f_target and price > 0:
-                overshoot = (price / f_target) - 1.0
+            # ⚠️ 목표가가 '캡 상수'이거나 BPS 바닥값으로 대체된 종목은 f_target 자체가
+            # price/t_pbr 의 재진술이라 f_target 과 직접 비교하면 동어반복이 됩니다
+            # (2026-08-29 오푸스 감사 Top-5 #2-A1 이 처음 발견).
+            # ⚠️ 2026-08-29 재감사 H6: 그렇다고 검증을 통째로 건너뛰면, 캡/바닥값 적용 전
+            # PEGY 역산 원값(f_target_uncapped) 대비 진짜 초과분이라는 신호까지 함께
+            # 사라집니다(바닥값이 걸렸다는 건 정의상 pre_floor_target < floor_price 이므로,
+            # 현재가가 바닥값보다 높으면 PEGY 목표가보다는 훨씬 더 높다는 뜻 — 오히려 더
+            # 강하게 경고해야 할 구간). f_target 대신 f_target_uncapped 를 기준으로 검증합니다
+            # (캡 경로는 uncapped 값이 price 보다 커서 overshoot 이 자연히 음수가 되므로
+            # 동어반복 없이 그대로 둬도 안전합니다).
+            cross_check_target = f_target_uncapped if (f_target_capped or f_target_floored) else f_target
+            if cross_check_target and price > 0:
+                overshoot = (price / cross_check_target) - 1.0
                 if overshoot >= 0.0:
                     severity = min(max(overshoot, 0.0), US_TARGET_OVERSHOOT_SEVERITY_CAP)
                     ratio = severity / US_TARGET_OVERSHOOT_SEVERITY_CAP
@@ -748,12 +771,16 @@ def score_all(stocks):
     for s in stocks:
         if id(s) not in pool_ids:
             # 검증 미통과 종목은 점수를 0점으로 주지 않고 '측정 불가'로 남깁니다.
+            # 2026-08-29 재감사 L12: 배지만 있고 사유가 어디에도 안 넘어갔습니다 —
+            # unverified_reason/reject_reason 을 score_excluded_items 에 실어
+            # 화면 툴팁(quant_score_badge 의 tooltip_extra)에 자동 노출되게 합니다.
+            reason = s.get("unverified_reason") or s.get("reject_reason")
             s.setdefault("quant_score", None)
             s.setdefault("score_max", None)
             s.setdefault("badge", "⚠️ 데이터 검증 필요")
             s.setdefault("badge_bg", "#78350f")
             s.setdefault("badge_fg", "#facc15")
-            s.setdefault("score_excluded_items", [])
+            s.setdefault("score_excluded_items", [f"전 항목 ({reason})"] if reason else [])
             continue
         res = calculate_us_quant_score(
             f_pegy=s.get("f_pegy"),
@@ -767,6 +794,8 @@ def score_all(stocks):
             f_target=s.get("f_target"),
             f_target_capped=s.get("f_target_capped", False),
             f_target_floored=s.get("f_target_floored", False),
+            f_target_uncapped=s.get("f_target_uncapped"),
+            is_trailing_loss=s.get("is_trailing_loss", False),
             growth=s.get("growth"),
             growth_pop_stats=pop["growth"],
             roe_pop_stats=pop["roe"],
@@ -813,12 +842,17 @@ def apply_us_guardrail(stock):
     t_eps = s.get("t_eps")
     t_roe = s.get("t_roe")
     f_per = s.get("f_per")
+    bps = s.get("bps")
     shares = s.get("outstanding_shares")
 
     # 정합성 크로스체크 (값을 고치지 않고 그대로 노출 — 회귀 가드)
-    if t_roe is not None and t_roe < 0 and t_per is not None and t_per > 0:
+    # 2026-08-29 재감사 H2: 자기자본(bps)이 음수로 확인된 종목은 ROE<0 + PER/EPS>0 이
+    # 부호 유실이 아니라 정상 상태입니다(자사주 매입 누적). bps 를 모르거나 양수일 때만
+    # "모순"으로 판정합니다.
+    negative_equity_known = bps is not None and bps < 0
+    if t_roe is not None and t_roe < 0 and t_per is not None and t_per > 0 and not negative_equity_known:
         warnings.append(f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing PER {t_per}배(양수) — 부호 유실 의심")
-    if t_roe is not None and t_roe < 0 and t_eps is not None and t_eps > 0:
+    if t_roe is not None and t_roe < 0 and t_eps is not None and t_eps > 0 and not negative_equity_known:
         warnings.append(f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing EPS ${t_eps}(양수) — 부호 유실 의심")
     if s.get("graham_target") and s.get("is_trailing_loss"):
         warnings.append("모순: 적자 종목인데 그레이엄 넘버가 산출됨 — 표시 금지 대상")
@@ -869,8 +903,11 @@ def apply_us_guardrail(stock):
     # 배당/주주환원 미수집과 '무배당 확정'을 구분해 표시합니다.
     if s.get("dividend_status") == "not_collected" or s.get("sh_return") is None:
         s["dividend_data_unverified"] = True
+        # 2026-08-29 재감사 M8: 여기(수집/검증 계층)는 HTML 을 만들지 않습니다 — 화면(표현
+        # 계층)이 esc() 로 이스케이프한 뒤 줄바꿈만 <br> 로 변환합니다. 예전에는 이 문자열에
+        # 리터럴 "<br>"이 박혀 있어, esc() 를 거치면 "&lt;br&gt;"로 글자 그대로 노출됐습니다.
         s["dividend_unverified_reason"] = (
-            "이 종목의 주주환원 데이터(배당·자사주 수익률)를 수집하지 못했습니다.<br>"
+            "이 종목의 주주환원 데이터(배당·자사주 수익률)를 수집하지 못했습니다.\n"
             "'환원이 없다'는 뜻이 아니라 '값을 확인하지 못했다'는 뜻이며, 주주환원 점수는 배점에서 제외됩니다."
         )
 

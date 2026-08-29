@@ -102,6 +102,7 @@ from utils.constants_us import (
     US_SUMMARY_HISTORY_FILENAME,
     US_VALID_RATIO_SUCCESS,
     US_VALID_RATIO_DEGRADED,
+    US_SNAPSHOT_SHRINK_GUARD_RATIO,
     US_INDEX_PROXY_URL_TEMPLATE,
     US_INDEX_DEFINITIONS,
     # 2026-08-12 신설(TASK_HISTORY #92) — 미국 전 종목 현재가(가격 전용) 수집용 (constants_us §9)
@@ -591,7 +592,7 @@ def _normalize_label(text):
 def _as_soup(html_or_soup):
     """HTML 문자열이면 파싱하고, 이미 BeautifulSoup 객체면 그대로 씁니다.
 
-    2026-08-29 재감사 L10: collect_one() 이 같은 HTML 을 세 번(라벨쌍 추출 / 종가 추출 /
+    2026-08-29 재감사 L6: collect_one() 이 같은 HTML 을 세 번(라벨쌍 추출 / 종가 추출 /
     배당 문구 탐지) 따로 파싱하고 있었습니다. 종목 하나당 세 번 × 550종목이라 순수한 중복
     비용이라, 호출부가 soup 를 한 번만 만들어 넘길 수 있게 합니다. 테스트를 비롯한 기존
     호출부는 문자열을 그대로 넘겨도 예전과 똑같이 동작합니다(하위 호환).
@@ -607,7 +608,7 @@ def extract_label_value_pairs(html):
     ⚠️ SPEC §2-1: 열 번호(iloc)를 고정하지 않습니다. 각 행의 **첫 셀 = 라벨, 마지막 셀 = 값**
        이라는 key-value 표 구조만 사용하며, 어떤 지표를 쓸지는 라벨 키워드로 결정합니다.
     같은 라벨이 여러 번 나오면 처음 것만 사용합니다(중복 표 방어).
-    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L10).
+    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L6).
     """
     soup = _as_soup(html)
     pairs = []
@@ -808,7 +809,7 @@ def extract_close_price(html):
 
     찾지 못하면 값을 지어내지 않고 (None, None, 사유) 를 반환합니다.
 
-    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L10).
+    html: HTML 문자열 또는 이미 파싱된 BeautifulSoup 객체(2026-08-29 재감사 L6).
 
     반환: (price, asof_text, error)
     """
@@ -864,7 +865,17 @@ def parse_close_timestamp(asof_text):
     try:
         naive = datetime.strptime(f"{m.group(1)} {m.group(2).upper().replace(' ', '')}",
                                   "%b %d, %Y %I:%M%p")
-        return naive.replace(tzinfo=ET)
+        aware = naive.replace(tzinfo=ET)
+        # 2026-08-29 재감사 L7: 소스 문자열의 EDT/EST 약어(m.group(3))는 지금까지 정규식으로만
+        # 잡아 놓고 실제로는 안 썼습니다 — 날짜만 쓰는 지금(.date())은 무해하지만, 소스가 말한
+        # 약어와 zoneinfo 가 그 날짜로 계산한 실제 오프셋(tzname())이 다르면 서머타임 전환일
+        # 근처 데이터 이상 신호일 수 있어 서버 로그에만 남깁니다(화면에는 노출 안 함, §0-3-4).
+        source_abbrev = m.group(3).upper()
+        computed_abbrev = aware.tzname()
+        if computed_abbrev and source_abbrev != computed_abbrev:
+            print(f"  ⚠️ 장마감 타임스탬프 시간대 약어 불일치: 소스='{source_abbrev}' "
+                  f"vs 계산='{computed_abbrev}' (원문: '{asof_text}')")
+        return aware
     except ValueError:
         return None
 
@@ -893,10 +904,11 @@ def derive_fields(fields, universe_row=None):
         "stockanalysis_eps_growth_forecast_3y" if fields.get("growth_eps_3y") is not None else None
     )
 
-    # Forward 섹션 가용 여부 (§5-5: 없으면 섹션만 마스킹)
-    derived["forward_available"] = (
-        fields.get("f_per") is not None and derived["growth"] is not None
-    )
+    # 2026-08-29 재감사 L10: "Forward 섹션 가용 여부"를 여기서도 계산했는데, 이 결과는
+    # collect_one() → run_us_collector() 에서 derive_valuation()(utils/scoring_us.py) 이
+    # 곧바로 덮어쓰고 어디서도 이 값을 그 전에 읽지 않습니다 — 완전히 같은 식이 두 파일에
+    # 복제되어 있던 죽은 계산이었습니다(§0-3-10 단일 출처 원칙). derive_valuation() 을
+    # 유일한 출처로 남기고 여기서는 계산하지 않습니다.
 
     # 주주환원율: 사이트가 배당+자사주를 합쳐 제공(Shareholder Yield). 없으면 None.
     derived["sh_return"] = fields.get("shareholder_yield")
@@ -947,7 +959,7 @@ def collect_one(symbol, universe_row=None, session=None):
     fetch_seconds = time.perf_counter() - t0
 
     t1 = time.perf_counter()
-    # 2026-08-29 재감사 L10: 같은 HTML 을 세 번 파싱하던 것을 한 번으로 줄입니다.
+    # 2026-08-29 재감사 L6: 같은 HTML 을 세 번 파싱하던 것을 한 번으로 줄입니다.
     soup = _as_soup(html)
     pairs = extract_label_value_pairs(soup)
     fields, meta = map_pairs_to_fields(pairs)
@@ -1208,7 +1220,10 @@ def fetch_one_index_quote(key, label_ko, label_en, proxy_symbol, expected_tracke
         "key": key, "label_ko": label_ko, "label_en": label_en,
         "proxy_symbol": proxy_symbol.upper(), "is_etf_proxy": True,
         "close": None, "previous_close": None, "session_date": None,
-        "intraday_change_pct": None, "change_calculated": False,
+        # 2026-08-29 재감사 L5: "장중(intraday)"이라는 이름과 달리 실제 값은 "장마감 종가 대비
+        # 전일 종가 등락률"(확정치)입니다. §0-3-1 "실시간을 암시하는 표현 금지" 취지에 맞춰
+        # daily_change_pct 로 이름을 바꿉니다.
+        "daily_change_pct": None, "change_calculated": False,
         "tracked_index_label": None, "tracked_index_verified": False,
         "error": None, "source": build_index_proxy_url(proxy_symbol),
     }
@@ -1243,7 +1258,7 @@ def fetch_one_index_quote(key, label_ko, label_en, proxy_symbol, expected_tracke
         entry["error"] = "전일 종가(Previous Close) 값을 찾지 못해 등락률을 계산하지 못함"
         return entry
     entry["previous_close"] = previous_close
-    entry["intraday_change_pct"] = round((price - previous_close) / previous_close * 100.0, 2)
+    entry["daily_change_pct"] = round((price - previous_close) / previous_close * 100.0, 2)
     entry["change_calculated"] = True
 
     if not entry["tracked_index_verified"]:
@@ -1265,7 +1280,7 @@ def fetch_index_quotes():
     for key, label_ko, label_en, proxy_symbol, expected_phrase in US_INDEX_DEFINITIONS:
         entry = fetch_one_index_quote(key, label_ko, label_en, proxy_symbol, expected_phrase)
         results[key] = entry
-        pct = entry.get("intraday_change_pct")
+        pct = entry.get("daily_change_pct")
         pct_str = f"{pct:+.2f}%" if pct is not None else "-"
         print(f"  [지수] {label_ko:<10} 등락률={pct_str} ({entry.get('session_date') or '-'}) "
               f"{'⚠️ ' + entry['error'] if entry.get('error') else ''}")
@@ -1426,8 +1441,10 @@ def snapshot_covered_session_dates(snapshot_path):
     except Exception as e:
         print(f"  ⚠️ 기존 스냅샷을 읽지 못했습니다({e}) — 이미 수집됐는지 알 수 없어 수집을 진행합니다.")
         return set(), None
-    if meta.get("status") == "FAILED":
-        # 실패한 수집 결과는 '이미 수집됨'으로 치지 않습니다(다음 크론이 재시도해야 함).
+    # 2026-08-29 재감사 M15: DEGRADED(valid_ratio/collect_ratio 0.70~0.90)도 "알지만 나쁜
+    # 상태"이지 "이미 잘 수집됨"이 아닙니다. FAILED 만 재시도 대상으로 보면, H1 수정 후
+    # collect_ratio 가 낮아 DEGRADED 로 판정된 날도 다음 크론이 재시도하지 않게 됩니다.
+    if meta.get("status") in ("FAILED", "DEGRADED"):
         return set(), meta.get("last_updated_at_et")
     covered = set((meta.get("session_dates_from_source") or {}).keys())
     hint_date = ((meta.get("session_hint") or {}).get("session_date"))
@@ -1520,9 +1537,14 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
 
     # 2) 유니버스
     rows = fetch_universe_rows()
-    selected, uni_stats = filter_universe(rows, target_size=target_size)
+    # 2026-08-29 재감사 M1: 히스테리시스 이탈 구간(entry_rank~exit_rank)의 후보가 애초에
+    # 목록에 존재해야 버퍼가 발동할 수 있습니다. filter_universe 를 entry_rank(=target_size)
+    # 까지만 뽑으면 551위 이상이 아예 없어 버퍼가 구조적으로 죽은 코드가 됩니다 —
+    # 이탈 순위(기본 600위)까지 넉넉히 뽑은 뒤에 버퍼를 적용합니다.
+    universe_fetch_size = max(target_size, US_HYSTERESIS_EXIT_RANK)
+    selected, uni_stats = filter_universe(rows, target_size=universe_fetch_size)
     print_universe_stats(uni_stats)
-    tracked = apply_us_hysteresis_buffer(selected, previous_symbols)
+    tracked = apply_us_hysteresis_buffer(selected, previous_symbols, entry_rank=target_size)
     if not tracked:
         raise RuntimeError("히스테리시스 적용 후 추적 대상이 0개입니다 — 수집을 중단합니다(기존 스냅샷 유지)")
     universe_by_symbol = {r["symbol"]: r for r in tracked}
@@ -1589,7 +1611,9 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
                 save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
                                          failed_tickers, sorted(completed_symbols))
             if delay and i < total:
-                _polite_sleep_with_batch_cooldown(i)
+                # 2026-08-29 재감사 L8: overall(=already_done + i, 이어하기 포함 누적 카운터)을
+                # 넘겨야 재개 실행에서도 요청 밀도가 리셋되지 않습니다(§0-3-2).
+                _polite_sleep_with_batch_cooldown(overall)
             continue
 
         raw_items.append({
@@ -1605,7 +1629,7 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
                 save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
                                          failed_tickers, sorted(completed_symbols))
             if delay and i < total:
-                _polite_sleep_with_batch_cooldown(i)
+                _polite_sleep_with_batch_cooldown(overall)
             continue
 
         stock = dict(r["processed"])
@@ -1640,7 +1664,7 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
             save_collect_checkpoint(checkpoint_path, session["session_date"], enriched, raw_items,
                                      failed_tickers, sorted(completed_symbols))
         if delay and i < total:
-            _polite_sleep_with_batch_cooldown(i)
+            _polite_sleep_with_batch_cooldown(overall)
 
     if blocked_error:
         # 2026-08-07: 차단돼도 지금까지 모은 건 체크포인트에 남겨서, 다음 실행이 처음부터
@@ -1657,9 +1681,6 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
     if not enriched:
         raise RuntimeError("수집 성공 종목이 0개입니다 — 기존 스냅샷을 유지하고 중단합니다")
 
-    # 전수 수집이 끝까지 완주됐으므로 체크포인트는 더 이상 필요 없습니다(다음 실행은 새로 시작).
-    clear_collect_checkpoint(checkpoint_path)
-
     # 5) 2차 패스 — 횡단면 population 통계 후 일괄 스코어링
     print("-" * 70)
     print(f"[2차 패스] 횡단면 population 통계 계산 후 {len(enriched)}종목 일괄 스코어링")
@@ -1671,14 +1692,35 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
     visible = [s for s in enriched if s.get("is_visible", True)]
     valid = [s for s in visible if s.get("is_valid") and not s.get("is_unverified")]
     valid_ratio = (len(valid) / len(visible)) if visible else 0.0
+    # 2026-08-29 재감사 H1: valid_ratio 의 분모(visible)는 '수집에 성공한' 종목만입니다 —
+    # 몇 종목이 실패하든 성공분만 깨끗하면 이 비율은 항상 1.0이 되어 대량 실패를 완전히
+    # 놓칩니다. grand_total(=이번 세션에서 수집 '대상'이었던 종목 수, 성공+실패)을 분모로
+    # 하는 collect_ratio 를 별도로 계산해 AND 조건으로 넣습니다.
+    collect_ratio = (len(enriched) / grand_total) if grand_total else 0.0
     if not visible:
         status = "FAILED"
-    elif valid_ratio >= US_VALID_RATIO_SUCCESS:
+    elif valid_ratio >= US_VALID_RATIO_SUCCESS and collect_ratio >= US_VALID_RATIO_SUCCESS:
         status = "SUCCESS"
-    elif valid_ratio >= US_VALID_RATIO_DEGRADED:
+    elif valid_ratio >= US_VALID_RATIO_DEGRADED and collect_ratio >= US_VALID_RATIO_DEGRADED:
         status = "DEGRADED"
     else:
         status = "FAILED"
+
+    # 2026-08-29 재감사 H1: 상태 판정과 별개로, 직전 스냅샷 대비 노출 종목 수가 급감했으면
+    # (예: 550종목 → 8종목) 그 사실만으로 이미 소스 대량 실패를 강하게 의심할 수 있습니다.
+    # write_outputs=True(=실제 프로덕션 산출물에 쓰는 경로)일 때만 가드를 걸어, 직전까지
+    # 좋았던 스냅샷을 부실한 결과로 덮어쓰지 않고 중단합니다(collector_kospi200.py 의
+    # 소스 건전성 가드와 같은 정신). 의도된 축소(유니버스 정책 변경 등)라면
+    # --allow-overwrite 로 강제할 수 있습니다.
+    if write_outputs and not allow_overwrite and previous_symbols:
+        shrink_ratio = len(visible) / len(previous_symbols)
+        if shrink_ratio < US_SNAPSHOT_SHRINK_GUARD_RATIO:
+            raise RuntimeError(
+                f"직전 스냅샷 대비 노출 종목 수가 급감했습니다(직전 {len(previous_symbols)}종목 → "
+                f"이번 {len(visible)}종목, {shrink_ratio:.0%}) — 소스 대량 실패 가능성이 높아 "
+                f"기존 스냅샷을 덮어쓰지 않고 중단합니다(§0-1). 의도된 축소라면 "
+                f"--allow-overwrite 로 강제할 수 있습니다."
+            )
 
     now_et = _now_et()
     elapsed_min = (time.perf_counter() - started_at) / 60.0
@@ -1697,6 +1739,10 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
         "total_count": len(visible),
         "valid_count": len(valid),
         "valid_ratio": round(valid_ratio, 3),
+        # 2026-08-29 재감사 H1: 수집 '대상'(성공+실패) 대비 실제 성공 비율. valid_ratio 와
+        # AND 로 묶어야 대량 실패를 SUCCESS 로 오판정하지 않습니다(위 계산부 주석 참고).
+        "collect_ratio": round(collect_ratio, 3),
+        "collect_target_count": grand_total,
         "tracked_count": len(enriched),
         "hidden_buffer_count": len(enriched) - len(visible),
         "failed_tickers": failed_tickers,
@@ -1715,11 +1761,16 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
         "limit": limit,
         "description": (
             f"미국(나스닥+뉴욕) 시가총액 상위 1~{len(visible)}위 퀀트 스냅샷 "
-            f"(검증 통과 {len(valid)}/{len(visible)} 종목, 상태={status}, 통화 USD)"
+            f"(검증 통과 {len(valid)}/{len(visible)} 종목, 수집 성공 {len(enriched)}/{grand_total} 종목, "
+            f"상태={status}, 통화 USD)"
         ),
     }
 
     if write_outputs:
+        # 2026-08-29 재감사 H7: 예전에는 이 줄이 '루프를 한 번도 안 돌아도' 무조건 실행돼,
+        # --limit 테스트 실행이 진행 중이던 전수 수집 체크포인트를 지워버렸습니다. 실제로
+        # 프로덕션 산출물에 쓸 때(write_outputs=True)만 체크포인트를 정리합니다.
+        clear_collect_checkpoint(checkpoint_path)
         with open(snapshot_path, "w", encoding="utf-8") as f:
             json.dump({"metadata": metadata, "stocks": enriched}, f, ensure_ascii=False, indent=2)
         with open(raw_path, "w", encoding="utf-8") as f:

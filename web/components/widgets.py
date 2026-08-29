@@ -169,10 +169,16 @@ def render_summary_metrics(stocks, summary_history, labels) -> None:
     if len(summary_history) >= 2 and None not in (calc_f_per, calc_growth, calc_pegy):
         prev = summary_history[-2]
         p_per, p_growth, p_pegy = prev.get('f_per'), prev.get('growth'), prev.get('pegy')
+        # 2026-08-29 재감사 L13: summary_history[-2] 를 조건 없이 "이전 동기화"라고만 불러,
+        # 수집이 며칠 건너뛰었을 때 실제로는 "며칠 전 대비"인데도 화면에는 날짜가 없었습니다
+        # (§0-3-1). session_date 가 있으면 함께 표시하고, 옛 레코드처럼 없으면 이전 문구
+        # 그대로 둡니다(있지도 않은 날짜를 지어내지 않음).
+        prev_date = prev.get('session_date')
+        prev_date_txt = f' ({prev_date} 대비)' if prev_date else ' (이전 동기화 대비)'
         if p_per is not None:
-            f_per_delta_str = f'{calc_f_per - p_per:+.1f}배 (이전 동기화 대비)'
+            f_per_delta_str = f'{calc_f_per - p_per:+.1f}배{prev_date_txt}'
         if p_growth is not None:
-            growth_delta_str = f'{calc_growth - p_growth:+.1f}%p (이전 동기화 대비)'
+            growth_delta_str = f'{calc_growth - p_growth:+.1f}%p{prev_date_txt}'
         if p_pegy is not None:
             pegy_delta_num = f'{calc_pegy - p_pegy:+.2f}'
 

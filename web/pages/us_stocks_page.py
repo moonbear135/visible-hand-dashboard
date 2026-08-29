@@ -25,16 +25,32 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
   - 페이지네이션: 30개씩 (`utils/constants_us.US_PAGE_SIZE` — 코스피 20개와 다름)
 """
 
-import os
 from datetime import datetime
 
 from nicegui import ui
 
+try:
+    from zoneinfo import ZoneInfo
+    ET = ZoneInfo("America/New_York")
+except Exception:                                      # noqa: BLE001
+    ET = None
+
 from utils.constants_us import (
+    US_FAILED_TICKERS_BANNER_RATIO,
+    US_GEFF_TOTAL_CAP_PCT,
+    US_GROWTH_ADJ_THRESHOLD_PCT,
+    US_GROWTH_CAP_PCT,
     US_PAGE_SIZE,
     US_RAW_SNAPSHOT_FILENAME,
+    US_SH_RETURN_CAP_PCT,
     US_SNAPSHOT_FILENAME,
+    US_STALE_SESSION_WARNING_DAYS,
     US_SUMMARY_HISTORY_FILENAME,
+    US_TARGET_PER_CAP,
+    US_TARGET_PRICE_CAP_MULTIPLE,
+    US_TARGET_UNIVERSE_SIZE,
+    US_VALUE_TRAP_ROE_PCT,
+    US_VALUE_TRAP_ROIC_PCT,
 )
 from utils.stock_history import US_HISTORY_FIELDS, US_HISTORY_FILENAME, US_KEY_FIELD
 
@@ -127,13 +143,21 @@ async def load_us_snapshot():
 
 
 async def load_us_summary_history():
-    """data/us_summary_history.json 누적 요약 이력. 없으면 빈 목록."""
+    """data/us_summary_history.json 누적 요약 이력. 없으면 빈 목록.
+
+    2026-08-29 재감사 M11: 예전에는 `os.path.exists(path)`(로컬 파일 유무)로만 미리 걸러
+    아예 읽기를 시도조차 안 했습니다. `load_json_file_async()`/`data_source.read_text()`
+    는 `DATA_SOURCE_BASE_URL` 이 켜진 원격 모드에서는 **원격에서도** 읽는데, 배포 이미지에
+    로컬 사본이 없는 원격 모드에서는 원격에 진짜 파일이 있어도 이 가드 때문에 건너뛰고
+    조용히 빈 목록을 반환했습니다. 로컬/원격 어느 쪽이든 실제로 시도해 보고, "파일이 아직
+    없음"(누적 이력은 자연히 그럴 수 있는 정상 상태)만 조용히 빈 목록으로 처리하며, 그 밖의
+    진짜 오류(손상·네트워크 등)는 그대로 경고 배너로 알립니다.
+    """
     path = data_path(US_SUMMARY_HISTORY_FILENAME)
-    if not os.path.exists(path):
-        return []
     payload, load_error = await load_json_file_async(path)
     if payload is None:
-        warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
+        if load_error and "없습니다" not in load_error:
+            warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
         return []
     return payload if isinstance(payload, list) else []
 
@@ -173,19 +197,37 @@ def build_index_header_html(indices) -> str:
 
     수집에 실패한 지수는 값을 지어내지 않고 '데이터 없음 + 실패 사유'를 그대로 노출합니다.
     """
+    # 2026-08-29 재감사 M17: 지수 정보가 통째로 없거나(--skip-indices, 재개 실행 실패 등)
+    # 일부만 없으면 예전에는 그 자리를 조용히 생략했습니다 — "원래 없는 화면"과 "수집
+    # 실패"를 사용자가 구분할 수 없었습니다(§0-1). 이제 그 사실을 회색 경고 카드로 남깁니다.
     if not indices:
-        return ""
+        return compact(
+            '<div style="background-color: rgba(120,53,15,0.35); border: 1px solid #92400e; '
+            'border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; color: #fcd34d; '
+            'font-size: 13px; font-weight: 600;">⚠️ 상단 지수 3종(S&amp;P500·나스닥·다우존스)을 '
+            '수집하지 못했습니다.</div>'
+        )
     cards = []
+    missing_labels = []
+    index_key_labels = {"sp500": "S&P500", "nasdaq": "나스닥 종합", "dow": "다우존스"}
     for key in ("sp500", "nasdaq", "dow"):
         idx = indices.get(key)
         if not idx:
+            missing_labels.append(index_key_labels[key])
             continue
-        change = idx.get("intraday_change_pct")
+        # 2026-08-29 재감사 L5: 필드명이 collector_us_stocks.py 에서 daily_change_pct 로
+        # 바뀌었습니다(값은 "장중"이 아니라 "장마감 종가 대비 전일 종가 등락률"이라 §0-3-1 상
+        # 실시간을 암시하는 이름이 적절하지 않았습니다).
+        change = idx.get("daily_change_pct")
+        # 2026-08-29 재감사 M2: 수집기는 'Index Tracked' 라벨 불일치 등을 error 에 성실히
+        # 남기는데(예: 소스가 ONEQ 를 다른 ETF 로 바꿔치기), 등락률이 계산되면 그 error 가
+        # 화면에서 통째로 버려졌습니다. 등락률 유무와 무관하게 error 가 있으면 항상 노출합니다.
+        error = idx.get("error")
         if change is None:
             value_html = (
                 '<div style="font-size: 20px; color: #94a3b8; font-weight: 800; margin-top: 6px;">데이터 없음</div>'
                 '<div style="font-size: 11px; color: #f87171; font-weight: 600; margin-top: 2px;">'
-                f'수집 실패: {esc(idx.get("error") or "원인 미상")}</div>'
+                f'수집 실패: {esc(error or "원인 미상")}</div>'
             )
         else:
             color = "#4ade80" if change >= 0 else "#f87171"
@@ -194,6 +236,11 @@ def build_index_header_html(indices) -> str:
                 f'<div style="font-size: 30px; color: {color}; font-weight: 800; letter-spacing: -1px; '
                 f'margin-top: 4px;">{arrow} {abs(change):.2f}%</div>'
             )
+            if error:
+                value_html += (
+                    '<div style="font-size: 11px; color: #fbbf24; font-weight: 700; margin-top: 4px;">'
+                    f'⚠️ {esc(error)}</div>'
+                )
         date_label = f' ({esc(idx.get("session_date"))} 장마감 기준)' if idx.get("session_date") else ""
         cards.append(f"""
         <div style="flex: 1 1 260px; background: linear-gradient(135deg, #1e293b, #0f172a); border: 1.5px solid #334155; border-radius: 14px; padding: 16px 20px;">
@@ -207,8 +254,21 @@ def build_index_header_html(indices) -> str:
         </div>
         """)
     if not cards:
-        return ""
-    return compact(
+        return compact(
+            '<div style="background-color: rgba(120,53,15,0.35); border: 1px solid #92400e; '
+            'border-radius: 10px; padding: 12px 16px; margin-bottom: 20px; color: #fcd34d; '
+            'font-size: 13px; font-weight: 600;">⚠️ 상단 지수 3종(S&amp;P500·나스닥·다우존스)을 '
+            '수집하지 못했습니다.</div>'
+        )
+    missing_html = ""
+    if missing_labels:
+        missing_html = compact(
+            '<div style="background-color: rgba(120,53,15,0.35); border: 1px solid #92400e; '
+            'border-radius: 10px; padding: 10px 16px; margin-bottom: 12px; color: #fcd34d; '
+            'font-size: 12.5px; font-weight: 600;">'
+            f'⚠️ {esc(", ".join(missing_labels))} 지수를 수집하지 못했습니다.</div>'
+        )
+    return missing_html + compact(
         '<div style="display: flex; gap: 16px; margin-bottom: 20px; flex-wrap: wrap;">'
         + "".join(cards) + "</div>"
     )
@@ -283,8 +343,12 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
     roic = s.get("roic")
     roa = s.get("roa")
     beta = s.get("beta")
-    roe_color = "#94a3b8" if t_roe is None else ("#f43f5e" if t_roe < 9.0 else "#4ade80")
-    roic_color = "#94a3b8" if roic is None else ("#f43f5e" if roic < 8.0 else "#38bdf8")
+    # 2026-08-29 재감사 M5/M6: 하드코딩된 9.0/8.0 은 scoring_us.py 의 실제 착시 저평가
+    # 판정 기준(US_VALUE_TRAP_ROE_PCT=9.0, US_VALUE_TRAP_ROIC_PCT=6.5)과 어긋나 있었습니다
+    # (ROIC 쪽은 8.0으로 실제 기준보다 높게 표시되어, 6.5~8.0% 구간 종목이 화면에서는
+    # 빨간색으로 보이지만 실제로는 착시 저평가 판정을 통과한 상태였습니다). 단일 출처로 통일합니다(§0-3-10).
+    roe_color = "#94a3b8" if t_roe is None else ("#f43f5e" if t_roe < US_VALUE_TRAP_ROE_PCT else "#4ade80")
+    roic_color = "#94a3b8" if roic is None else ("#f43f5e" if roic < US_VALUE_TRAP_ROIC_PCT else "#38bdf8")
 
     # ── 베타 배지 (코스피 화면의 '변동성' 배지 자리) ──────────────────────
     if beta is None:
@@ -334,15 +398,21 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
         "데이터 소스가 Forward EPS를 직접 주지 않아 <b>장마감 종가 ÷ Forward PER(애널리스트 컨센서스)</b>로 "
         "역산한 값입니다.<br>두 입력 모두 실측값이고 순수 나눗셈이라 계산했지만, 실측 EPS는 아닙니다.",
     ) if s.get("f_eps_calculated") else ""
+    # 2026-08-29 재감사 L4: 아래 두 툴팁의 숫자(100%/35%p/10%p/40%p)는 constants_us 의
+    # US_GROWTH_ADJ_THRESHOLD_PCT/US_GROWTH_CAP_PCT/US_SH_RETURN_CAP_PCT/US_GEFF_TOTAL_CAP_PCT
+    # 를 그대로 문자열로 박아넣은 것이었습니다 — 상수가 바뀌면 화면 문구만 조용히 틀려집니다(§0-3-10).
     growth_capped_badge_html = warn_badge(
         "⚠️ 고성장 추정 보수반영",
-        "예상 성장률이 100%를 넘어 기저효과(일시적 실적 급변) 왜곡 가능성을 의심해, 퀀트 스코어의 "
+        f"예상 성장률이 {fmt_num(US_GROWTH_ADJ_THRESHOLD_PCT, '%', 0)}를 넘어 기저효과(일시적 실적 급변) "
+        "왜곡 가능성을 의심해, 퀀트 스코어의 "
         "PEGY 항목 점수만 보수적으로 깎았습니다.<br>목표가·적정가 갭은 원래 성장률 그대로 계산되어 "
         "있습니다(값 자체는 건드리지 않음).",
     ) if s.get("growth_score_capped") else ""
     geff_capped_badge_html = warn_badge(
         "🧮 상한 적용값",
-        "실효성장률이 상한(성장률 35%p / 주주환원 10%p / 합계 40%p)에 걸려 절단된 값입니다.<br>"
+        f"실효성장률이 상한(성장률 {fmt_num(US_GROWTH_CAP_PCT, '%p', 0)} / "
+        f"주주환원 {fmt_num(US_SH_RETURN_CAP_PCT, '%p', 0)} / "
+        f"합계 {fmt_num(US_GEFF_TOTAL_CAP_PCT, '%p', 0)})에 걸려 절단된 값입니다.<br>"
         f"캡 미적용 원값: {esc(fmt_num(s.get('g_eff_uncapped'), '%p', 2))}",
     ) if s.get("g_eff_capped") else ""
 
@@ -356,6 +426,16 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
     g_eff = s.get("g_eff")
     is_negative_growth = g_eff is not None and g_eff <= 0
     is_geff_missing = (g_eff is None) and not s.get("forward_data_missing")
+    # 2026-08-29 재감사 H3: was_blocked(정합성 모순 등으로 is_unverified=True) 는 그레이엄
+    # 박스를 띄울지(forward_needs_mask, 아래)에만 쓰였고 실제 Forward 섹션 분기 체인에는
+    # 없었습니다 — 그래서 "데이터 정합성 모순 감지"로 차단된 종목도 아래 다른 사유
+    # (per_extreme/negative_growth/geff_missing/forward_data_missing) 에 해당하지 않으면
+    # 경고 없이 그대로 정상 Forward 패널이 렌더됐습니다. 코스피 화면(pegy_page.py)의
+    # is_generic_harness_fail 분기를 그대로 이식합니다.
+    is_generic_harness_fail = (
+        was_blocked and not is_per_extreme and not is_negative_growth
+        and not is_geff_missing and not s.get("forward_data_missing")
+    )
     forward_needs_mask = bool(
         was_blocked or is_per_extreme or is_negative_growth or is_geff_missing
         or s.get("forward_data_missing") or s.get("f_pegy") is None
@@ -389,18 +469,69 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
             f"{esc(cap_reason)}.<br>{uncapped_txt}"
             "고성장 종목은 PEGY 공식상 목표가가 발산하기 때문에 폭주 방지 상한을 두고 있습니다.",
         )
+    elif price and f_target and s.get("f_target_floored"):
+        # 2026-08-29 재감사 H4: 예전에는 장부가(BPS) 바닥값이 걸려도 그냥 "+66.7% 상승 여력"
+        # (초록)만 보여주고, 우리 모델이 실제로 낸 PEGY 역산값(대개 훨씬 낮거나 마이너스)은
+        # 화면 어디에도 없었습니다. 캡 경로처럼 두 값을 나란히 표시합니다(§0-1).
+        gap_pct = ((f_target - price) / price) * 100.0
+        gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
+        bar_color = "#22c55e" if gap_pct >= 0 else "#ef4444"
+        bar_width = min(abs(gap_pct), 100)
+        floor_dir = "상승 여력" if gap_pct >= 0 else "프리미엄"
+        uncapped = s.get("f_target_uncapped")
+        if uncapped and price > 0:
+            pegy_gap_pct = ((uncapped - price) / price) * 100.0
+            pegy_gap_str = f"+{pegy_gap_pct:.1f}%" if pegy_gap_pct >= 0 else f"{pegy_gap_pct:.1f}%"
+            gap_str = f"장부가 기준 {gap_pct:+.1f}% {floor_dir} (모델 목표가는 {pegy_gap_str})"
+            pegy_txt = f"PEGY 역산 산출값은 {esc(fmt_usd(uncapped))}({pegy_gap_str})입니다.<br>"
+        else:
+            gap_str = f"장부가 기준 {gap_pct:+.1f}% {floor_dir}"
+            pegy_txt = ""
+        target_cap_badge_html = info_badge(
+            "🛡️ 장부가 바닥값",
+            "PEGY 역산값이 장부가(BPS)보다 낮게 나와 BPS를 대신 사용했습니다.<br>"
+            f"{pegy_txt}자세한 내용은 위 안내 참고.",
+        )
     elif price and f_target:
         gap_pct = ((f_target - price) / price) * 100.0
         gap_str = f"+{gap_pct:.1f}% 상승 여력" if gap_pct >= 0 else f"{abs(gap_pct):.1f}% 프리미엄"
         gap_color = "#4ade80" if gap_pct >= 0 else "#fca5a5"
         bar_color = "#22c55e" if gap_pct >= 0 else "#ef4444"
         bar_width = min(abs(gap_pct), 100)
-        target_cap_badge_html = info_badge(
-            "🛡️ 장부가 바닥값",
-            "PEGY 역산값이 장부가(BPS)보다 낮게 나와 BPS를 대신 사용했습니다. 자세한 내용은 위 안내 참고.",
-        ) if s.get("f_target_floored") else ""
+        target_cap_badge_html = ""
     else:
         gap_str, gap_color, bar_color, bar_width, target_cap_badge_html = "측정불가", "#94a3b8", "#64748b", 0, ""
+
+    # ── Trailing 적정가(t_fair) 계산값 배지 (§0-1) ──────────────────────────
+    # 2026-08-29 재감사 H5: t_fair_capped/t_fair_floored/t_fair_uncapped 는
+    # scoring_us.py 에서 f_target 과 완전히 같은 규칙(상한 캡·BPS 바닥값)으로 계산되지만
+    # 화면에는 표시되지 않아, 캡/바닥값이 적용된 t_fair 도 "실측 기반 정상 적정가"처럼
+    # 보였습니다. f_target 자리와 같은 배지를 붙입니다.
+    t_fair = s.get("t_fair")
+    t_fair_uncapped = s.get("t_fair_uncapped")
+    if s.get("t_fair_capped"):
+        t_fair_uncapped_txt = (
+            f"캡을 적용하지 않은 산출값은 {esc(fmt_usd(t_fair_uncapped))} 입니다.<br>"
+            if t_fair_uncapped else ""
+        )
+        t_fair_badge_html = warn_badge(
+            "🧮 상한 적용값",
+            "이 과거 적정가는 계산 결과가 아니라 <b>상한(캡) 값</b>입니다.<br>"
+            f"{t_fair_uncapped_txt}"
+            "고성장 종목은 PEGY 공식상 적정가가 발산하기 때문에 폭주 방지 상한을 두고 있습니다.",
+        )
+    elif s.get("t_fair_floored"):
+        t_fair_uncapped_txt = (
+            f"PEGY 역산 산출값은 {esc(fmt_usd(t_fair_uncapped))} 입니다.<br>"
+            if t_fair_uncapped else ""
+        )
+        t_fair_badge_html = info_badge(
+            "🛡️ 장부가 바닥값",
+            "PEGY 역산값이 장부가(BPS)보다 낮게 나와 BPS를 대신 사용했습니다.<br>"
+            f"{t_fair_uncapped_txt}자세한 내용은 위 안내 참고.",
+        )
+    else:
+        t_fair_badge_html = ""
 
     # ── 목표가 바닥값(장부가/BPS) 적용 배너 ───────────────────────────────
     # PEGY 역산 공식이 저성장 자본집약형(보험/지주/유틸리티 등) 우량주에서 목표가를
@@ -459,7 +590,11 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
             title_color="#fbbf24", sub_color="#fde047", corner_text="🛡️ 주주환원 데이터 확인 필요",
             icon="🛡️", headline="주주환원 데이터 검증 대기 중", body_color="#fef08a", corner_nowrap=False,
             body_html=(
-                f"{esc(s.get('dividend_unverified_reason') or '배당·자사주 수익률을 수집하지 못했습니다.')}<br>"
+                # 2026-08-29 재감사 M8: 수집/검증 계층은 이제 순수 텍스트(줄바꿈은 \n)만
+                # 넘깁니다 — esc() 로 이스케이프한 뒤 여기(표현 계층)에서만 <br> 로 바꿉니다.
+                # (예전에는 계층이 만든 문자열에 리터럴 "<br>"이 박혀 있어 esc() 를 거치면
+                # "&lt;br&gt;"로 글자 그대로 노출됐습니다.)
+                f"{esc(s.get('dividend_unverified_reason') or '배당·자사주 수익률을 수집하지 못했습니다.').replace(chr(10), '<br>')}<br>"  # noqa: E501
                 "위 <b>Trailing(과거 실적)</b> 지표는 수집된 값 그대로 정상 반영되어 있으니 참고해 주세요."
             ),
         )
@@ -484,6 +619,19 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
             body_html=(
                 "애널리스트 컨센서스 기반 Forward PER이 정상 범위를 크게 벗어나 신뢰할 수 없습니다.<br>"
                 "위 <b>Trailing(과거 실적)</b> 지표는 정상 산출되었으니 참고해 주세요."
+            ),
+        )
+    elif is_generic_harness_fail:
+        _harness_reason = s.get("unverified_reason") or s.get("reject_reason") or "사유 미상"
+        forward_section_html = forward_mask_html(
+            border_color="#facc15", inner_border="#92400e", gradient_from="rgba(120, 53, 15, 0.35)",
+            title_color="#fbbf24", sub_color="#fde047", corner_text="🛡️ 데이터 검증 실패",
+            icon="🛡️", headline="데이터 검증 실패 (정합성 교차검증)", corner_nowrap=False,
+            body_html=(
+                "수집 단계의 데이터 검증을 통과하지 못했습니다:<br>"
+                f"<b>{esc(_harness_reason)}</b><br>"
+                "위 <b>Trailing(과거 실적)</b> 지표는 참고용으로 노출되며, Forward 밸류에이션은 "
+                "검증 통과 전까지 산출하지 않습니다."
             ),
         )
     elif s.get("forward_data_missing") or is_geff_missing or s.get("f_pegy") is None:
@@ -524,7 +672,7 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
             <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
-                        <span class="vh-tooltip" tabindex="0">실효성장률 (g_eff) ℹ️<span class="vh-tooltiptext"><b>실효성장률 = 3년 EPS 성장 전망 + 주주환원율(배당+자사주)</b><br>PEGY의 분모입니다. 폭주 방지를 위해 성장률 35%p / 주주환원 10%p / 합계 40%p 상한을 둡니다(상한에 걸리면 옆에 배지가 붙습니다).</span></span>
+                        <span class="vh-tooltip" tabindex="0">실효성장률 (g_eff) ℹ️<span class="vh-tooltiptext"><b>실효성장률 = 3년 EPS 성장 전망 + 주주환원율(배당+자사주)</b><br>PEGY의 분모입니다. 폭주 방지를 위해 성장률 {esc(fmt_num(US_GROWTH_CAP_PCT, '%p', 0))} / 주주환원 {esc(fmt_num(US_SH_RETURN_CAP_PCT, '%p', 0))} / 합계 {esc(fmt_num(US_GEFF_TOTAL_CAP_PCT, '%p', 0))} 상한을 둡니다(상한에 걸리면 옆에 배지가 붙습니다).</span></span>
                     </div>
                     <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{esc(fmt_num(g_eff, '%p', 2))}{geff_capped_badge_html}{growth_capped_badge_html}</div>
                 </div>
@@ -556,7 +704,7 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
                         </div>
                         <div class="comparison-row">
                             <span class="label-text">
-                                <span class="vh-tooltip" tabindex="0" style="color: #14b8a6; font-weight: 700;">모델 목표가 ℹ️<span class="vh-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br><b>① 목표 PEGY</b> = 1.0 + ROE/ROIC 프리미엄<br><b>② 목표 PER</b> = 목표 PEGY × 실효성장률(g_eff)<br><b>③ 목표주가</b> = Forward EPS × 목표 PER<br>고성장 종목은 공식상 발산하므로 <b>목표 PER 35배 / 현재가의 2.5배</b> 상한을 둡니다.<br>⚠️ 위 '애널리스트 컨센서스' 목표주가와는 다른 값입니다(그쪽은 소스 실측, 이쪽은 우리 모델 계산).</span></span>
+                                <span class="vh-tooltip" tabindex="0" style="color: #14b8a6; font-weight: 700;">모델 목표가 ℹ️<span class="vh-tooltiptext" style="color: #f1f5f9; font-weight: 400;"><b>목표 적정주가 (Forward PEGY 역산)</b><br><b>① 목표 PEGY</b> = 1.0 + ROE/ROIC 프리미엄<br><b>② 목표 PER</b> = 목표 PEGY × 실효성장률(g_eff)<br><b>③ 목표주가</b> = Forward EPS × 목표 PER<br>고성장 종목은 공식상 발산하므로 <b>목표 PER {esc(fmt_num(US_TARGET_PER_CAP, '배', 0))} / 현재가의 {esc(fmt_num(US_TARGET_PRICE_CAP_MULTIPLE, '배', 1))}</b> 상한을 둡니다.<br>⚠️ 위 '애널리스트 컨센서스' 목표주가와는 다른 값입니다(그쪽은 소스 실측, 이쪽은 우리 모델 계산).</span></span>
                             </span>
                             <span class="price-text-target">{esc(fmt_usd(f_target))}{target_cap_badge_html}</span>
                         </div>
@@ -651,9 +799,12 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
 
         <!-- 4. Trailing 섹션 (과거 실적 참고용) -->
         <div style="background-color: rgba(30, 41, 59, 0.45); border: 1px solid #334155; border-radius: 10px; padding: 12px 18px; margin-bottom: 14px; opacity: 0.92;">
-            <div style="font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 10px; border-bottom: 1px dashed #475569; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center;">
+            <div style="font-size: 12px; font-weight: 700; color: #94a3b8; margin-bottom: 10px; border-bottom: 1px dashed #475569; padding-bottom: 4px; display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 4px;">
                 <span>📜 Trailing (과거 실적 참고용)</span>
-                <span style="font-size: 11px; color: #64748b; font-weight: 400;">*최근 12개월(TTM) 확정 실적 스냅샷</span>
+                <span style="font-size: 11px; color: #64748b; font-weight: 400;">*최근 12개월(TTM) 확정 실적 스냅샷
+                    <!-- 2026-08-29 재감사 M14: PEGY/과거 적정가 두 칸은 확정 실적이 아니라
+                         애널리스트 3년 성장 전망(growth)을 함께 씁니다 — 상시 노출로 밝힙니다. -->
+                    (단, PEGY·과거 적정가는 애널리스트 3년 성장 전망을 함께 씁니다)</span>
             </div>
             <div style="display: grid; grid-template-columns: 1fr 1.2fr; gap: 24px 16px; align-items: flex-start; margin-top: 10px;">
                 <div>
@@ -686,7 +837,7 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                         <span class="vh-tooltip" tabindex="0">PEGY / 과거 적정가 ℹ️<span class="vh-tooltiptext"><b>Trailing PEGY &amp; 과거 적정주가</b><br>• PEGY: Trailing PER ÷ 실효성장률<br>• 과거 적정가: 과거 실적 기준 퀀트 타겟 주가</span></span>
                     </div>
-                    <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{esc(fmt_num(s.get('t_pegy'), '', 2))} <span style="color: #475569; font-size: 15px; margin: 0 4px;">/</span> {esc(fmt_usd(s.get('t_fair')))}</div>
+                    <div style="font-size: 18px; font-weight: 800; color: #38bdf8;">{esc(fmt_num(s.get('t_pegy'), '', 2))} <span style="color: #475569; font-size: 15px; margin: 0 4px;">/</span> {esc(fmt_usd(s.get('t_fair')))}{t_fair_badge_html}</div>
                 </div>
             </div>
         </div>
@@ -698,6 +849,56 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
         {forward_section_html}
     </div>
     """)
+
+
+# =============================================================================
+# 3-1. 필터 로직 (순수 함수 — 2026-08-29 재감사 M12/L9/S4/S5 대응으로 분리)
+# =============================================================================
+# `_render_body()` 안의 지역 클로저였던 두 함수를 순수 함수로 뽑았습니다. 로직은 그대로이고
+# (S1 이 지적한 320줄 리팩터와는 별개의 아주 작은 기계적 추출입니다), NiceGUI 없이 이
+# 모듈만 import 해도 독립적으로 테스트할 수 있게 하기 위함입니다(test_dividend_page_calendar.py
+# 가 이미 쓰는 것과 같은 패턴).
+def select_badges_for_preset(preset: str, custom_badges, all_badge_options):
+    """프리셋 → 배지 목록. (원본 selectbox/multiselect 분기 그대로)"""
+    if "세부 뱃지" in preset:
+        return custom_badges
+    if "저평가 우량주" in preset:
+        return [b for b in all_badge_options if "저평가" in b and "고평가" not in b]
+    if "적정가" in preset:
+        return [b for b in all_badge_options if "적정가" in b]
+    if "고평가" in preset:
+        return [
+            b for b in all_badge_options
+            if ("고평가" in b or "역성장" in b or "위험" in b or "검증" in b)
+            and not any(nb in b for nb in _NON_WARNING_BADGES)
+        ]
+    return None
+
+
+def apply_stock_filters(all_stocks, query, badges, preset, value_trap_only):
+    stocks = all_stocks
+    if query:
+        q = query.lower()
+        stocks = [
+            s for s in stocks
+            if q in (s.get("name") or "").lower()
+            or q in (s.get("name_kr") or "")
+            or q in (s.get("symbol") or "").lower()
+        ]
+    # 2026-08-29 재감사 L9: "if badges:" 는 "필터 없음"(None)과 "세부 뱃지 프리셋에서
+    # 사용자가 배지를 전부 해제함"([]) 을 구분하지 못해, 후자일 때도 조용히 필터를
+    # 건너뛰고 전체 종목을 보여줬습니다(사용자는 0건을 기대함). None 만 "필터 없음"으로 봅니다.
+    if badges is not None:
+        stocks = [s for s in stocks if s.get("badge") in badges]
+    # 2026-08-29 재감사 M12: 「🟢 저평가 우량주 그룹」은 밸류에이션 배지(f_pegy 밴드)만
+    # 봐서 '우량' 조건이 하나도 없었습니다 — value_trap=True(착시 저평가, ROE·ROIC 미달)
+    # 종목도 그대로 포함됐습니다. 프리셋 이름이 이미 '우량'을 약속하므로, 이 프리셋일
+    # 때만 착시 저평가 종목을 제외합니다(다른 프리셋·세부 뱃지 직접 선택에는 영향 없음).
+    if "저평가 우량주" in preset:
+        stocks = [s for s in stocks if not s.get("value_trap")]
+    if value_trap_only:
+        stocks = [s for s in stocks if s.get("value_trap")]
+    return stocks
 
 
 # =============================================================================
@@ -737,6 +938,12 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     last_updated_et = metadata.get("last_updated_at_et")
     last_updated_kst = metadata.get("last_updated_at_kst")
     snapshot_status = metadata.get("status", "UNKNOWN")
+    # 2026-08-29 재감사 M3: last_updated_at_et 는 "수집을 **돌린** 시각"이라, 휴장일에
+    # 크론이 돌면(수집기가 그날을 휴장일로 알지 못함) 전 거래일 종가를 오늘 시각으로
+    # 갱신한 스냅샷이 나올 수 있습니다(§0-3-1). 실제 데이터가 담고 있는 거래일을 먼저
+    # 보여줍니다 — 지수 카드는 이미 session_date 를 표시하는데 종목 쪽엔 없었던 비대칭도
+    # 함께 해소합니다.
+    trading_date = _snapshot_trading_date_iso(metadata)
 
     if snapshot_status not in ("SUCCESS", "UNKNOWN"):
         warning_banner(
@@ -745,9 +952,35 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
             "일부 종목은 데이터 부족으로 '측정 불가' 카드로 표시됩니다."
         )
 
+    # 2026-08-29 재감사 M4: 코스피 화면(pegy_page.py)은 관리자에게만 노후 경고를 띄우지만,
+    # 미국 화면은 감사 권고대로 일반 사용자에게도 띄웁니다(§0-3-13 — 투자 판단에 직결).
+    # 미국 시장 휴장일 캘린더가 없어 "영업일"이 아니라 "달력일"로 계산하고, 문구도
+    # 정직하게 "달력일"이라고 밝힙니다(§0-1).
+    if trading_date:
+        stale_days = compute_stale_days(trading_date, datetime.now(ET) if ET else datetime.now())
+        if stale_days is not None and stale_days >= US_STALE_SESSION_WARNING_DAYS:
+            warning_banner(
+                f"⚠️ 마지막 확정 거래일이 {trading_date}로, 오늘로부터 {stale_days:.0f}일(달력일) "
+                "지났습니다.\n"
+                "아래 수치는 최신 시세가 아닐 수 있습니다 — 자동 수집이 멈춰 있는지 "
+                "확인이 필요할 수 있습니다."
+            )
+
     # 수집 실패 종목은 조용히 건너뛰지 않고 전부 화면에 기록합니다 (§0-1).
     failed = metadata.get("failed_tickers") or []
     if failed:
+        # 2026-08-29 재감사 M7: §0-3-13 은 유의사항을 접힌 아코디언 안에 숨기지 말라고
+        # 명시합니다. 실패 비율이 낮으면(가끔 있는 개별 종목 실패) 목록만 아코디언에
+        # 두지만, 유니버스의 일정 비율 이상이 실패하면(H1 이 지적한 "542종목 실종" 같은
+        # 대량 실패) 그 사실 자체를 펼쳐진 경고 배너로 승격합니다.
+        universe_size = metadata.get("collect_target_count") or metadata.get("total_count")
+        fail_ratio = (len(failed) / universe_size) if universe_size else 0.0
+        if fail_ratio >= US_FAILED_TICKERS_BANNER_RATIO:
+            warning_banner(
+                f"⚠️ 수집 실패 {len(failed)}종목({fail_ratio:.0%}) — 목록은 아래에서 펼쳐볼 수 "
+                "있습니다.\n"
+                "실패 비율이 낮지 않아 소스 쪽 대량 장애 가능성이 있습니다."
+            )
         with ui.expansion(
             f"⚠️ 수집 실패 {len(failed)}종목 (조용히 건너뛰지 않고 전부 기록합니다)"
         ).classes('w-full').props('dense-toggle'):
@@ -756,19 +989,24 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
             if len(failed) > 100:
                 ui.label(f"... 외 {len(failed) - 100}종목").classes('vh-muted')
 
+    trading_date_html = (
+        f'<span style="font-size: 13px; color: #86efac; font-weight: 700; margin-left: 10px;">'
+        f'거래일 {esc(trading_date)} 장마감 확정치</span>'
+    ) if trading_date else ""
     ui.html(compact(f"""
         <div style="background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); border: 1.5px solid #0284c7; border-radius: 10px; padding: 12px 20px; margin-bottom: 22px; text-align: center;">
             <span style="font-size: 15.5px; font-weight: 800; color: #38bdf8;">
                 📅 마지막 동기화: {esc(last_updated_et or NA_TEXT)} ET
                 <span style="font-size: 13px; color: #7dd3fc;">({esc(last_updated_kst or NA_TEXT)} KST)</span>
             </span>
+            {trading_date_html}
             <span style="font-size: 13px; color: #94a3b8; margin-left: 14px; font-weight: 600;">
                 • 미국 장마감 후 확정 데이터 ({esc(metadata.get('total_count', len(all_stocks)))}개 종목 / 상태 {esc(snapshot_status)})
             </span>
         </div>
     """)).classes('w-full')
 
-    _render_raw_downloads()
+    _render_raw_downloads(metadata)
     render_summary_metrics(all_stocks, await load_us_summary_history(), (
         "미국 상위 종목 중앙 Forward PER",
         "중앙 3년 EPS 성장 전망 (컨센서스)",
@@ -789,39 +1027,12 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
     }
 
     def _selected_badges():
-        """프리셋 → 배지 목록. (원본 selectbox/multiselect 분기 그대로)"""
-        preset = view['preset']
-        if "세부 뱃지" in preset:
-            return view['badges']
-        if "저평가 우량주" in preset:
-            return [b for b in all_badge_options if "저평가" in b and "고평가" not in b]
-        if "적정가" in preset:
-            return [b for b in all_badge_options if "적정가" in b]
-        if "고평가" in preset:
-            return [
-                b for b in all_badge_options
-                if ("고평가" in b or "역성장" in b or "위험" in b or "검증" in b)
-                and not any(nb in b for nb in _NON_WARNING_BADGES)
-            ]
-        return None
+        return select_badges_for_preset(view['preset'], view['badges'], all_badge_options)
 
     def _filtered():
-        stocks = all_stocks
-        query = view['search']
-        if query:
-            q = query.lower()
-            stocks = [
-                s for s in stocks
-                if q in (s.get("name") or "").lower()
-                or q in (s.get("name_kr") or "")
-                or q in (s.get("symbol") or "").lower()
-            ]
-        badges = _selected_badges()
-        if badges:
-            stocks = [s for s in stocks if s.get("badge") in badges]
-        if view['value_trap_only']:
-            stocks = [s for s in stocks if s.get("value_trap")]
-        return stocks
+        return apply_stock_filters(
+            all_stocks, view['search'], _selected_badges(), view['preset'], view['value_trap_only'],
+        )
 
     def _on_filter_change() -> None:
         view['page'] = 1              # 필터가 바뀌면 항상 1페이지부터 (원본과 동일)
@@ -833,8 +1044,10 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
             view['search'] = (event.value or '').strip()
             _on_filter_change()
 
+        # 2026-08-29 재감사 M9: debounce 없이 키 입력마다 바로 필터링 + 재렌더가 실행되던 것을
+        # dividend_page.py 의 검색창(M13)과 같은 방식으로 300ms debounce 를 둡니다.
         ui.input('🔍 종목명 / 티커 검색', placeholder='예: 엔비디아, NVIDIA, NVDA', on_change=_on_search) \
-            .props('clearable') \
+            .props('clearable debounce=300') \
             .style('flex: 1 1 220px;')
 
         with ui.column().classes('gap-2').style('flex: 1 1 260px;'):
@@ -998,17 +1211,63 @@ _TITLE_HEAD = """
     </div>
 """
 
-_TITLE_TAIL = """
-    <div style="font-size: 15.5px; color: #64748b; font-weight: 600;">미국(나스닥+뉴욕) 시가총액 상위 550개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외합니다. 모든 금액은 <b>미국 달러(USD)</b> 표기이며 원화 환산을 하지 않습니다)</span></div>
+# 2026-08-29 재감사 L3: "상위 550개" 를 문자열에 하드코딩하면 수집기의
+# US_TARGET_UNIVERSE_SIZE 를 나중에 바꿨을 때 이 문구만 조용히 틀려질 수 있습니다(§0-3-10).
+_TITLE_TAIL_TEMPLATE = """
+    <div style="font-size: 15.5px; color: #64748b; font-weight: 600;">미국(나스닥+뉴욕) 시가총액 상위 {universe_size}개 종목 Trailing vs Forward PEGY &amp; 퀀트 종합점수 리포트<br><span style="font-size: 13px; color: #475569;">(만점은 종목마다 다릅니다 — 수집하지 못한 지표는 점수를 지어내지 않고 배점에서 제외합니다. 모든 금액은 <b>미국 달러(USD)</b> 표기이며 원화 환산을 하지 않습니다)</span></div>
 </div>
 """
+_TITLE_TAIL = _TITLE_TAIL_TEMPLATE.format(universe_size=US_TARGET_UNIVERSE_SIZE)
 
 
 def _render_title() -> None:
     ui.html(compact(_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL)).classes('w-full')
 
 
-def _render_raw_downloads() -> None:
+def compute_stale_days(trading_date_iso: str, now_dt) -> float | None:
+    """거래일(YYYY-MM-DD)로부터 `now_dt`(tz-aware 또는 naive)까지 지난 달력일 수.
+
+    형식이 이상해 파싱할 수 없으면 None(화면은 계속 그리되 노후 경고만 건너뜁니다).
+    """
+    if not trading_date_iso:
+        return None
+    try:
+        trading_dt = datetime.strptime(trading_date_iso, "%Y-%m-%d")
+        now_naive = now_dt.replace(tzinfo=None) if now_dt.tzinfo else now_dt
+        return (now_naive - trading_dt).total_seconds() / 86400.0
+    except Exception:                                  # noqa: BLE001 — 형식이 달라도 화면은 계속 그립니다
+        return None
+
+
+def _snapshot_trading_date_iso(metadata: dict) -> str:
+    """스냅샷이 담고 있는 '실제 거래일'(YYYY-MM-DD)을 고릅니다. 없으면 빈 문자열.
+
+    2026-08-29 재감사 M3/M10: `last_updated_at_et`(=수집을 **돌린** 시각)와 실제 종목
+    데이터의 거래일은 다를 수 있습니다(휴장일에 크론이 돌면 전 거래일 종가를 오늘 시각으로
+    갱신). 우선순위: (1) 종목별 "At close: …" 원문에서 뽑은 session_dates_from_source 의
+    최빈값(가장 많은 종목이 실제로 담고 있는 거래일) → (2) last_updated_at_et 앞 10자리
+    (구버전 스냅샷 하위 호환) → (3) 없으면 빈 문자열(있지도 않은 날짜를 지어내지 않음).
+    """
+    session_dates = metadata.get("session_dates_from_source") or {}
+    if session_dates:
+        return max(session_dates.items(), key=lambda kv: kv[1])[0]
+    last_et = metadata.get("last_updated_at_et")
+    if last_et and len(last_et) >= 10:
+        return last_et[:10]
+    return ''
+
+
+def _snapshot_trading_date_str(metadata: dict) -> str:
+    """다운로드 파일명에 쓸 '스냅샷의 실제 거래일' 문자열(YYYYMMDD)을 고릅니다.
+
+    2026-08-29 재감사 M10: 예전에는 `datetime.now()`(배포 서버 로컬=UTC 기준, 스냅샷
+    내용의 거래일과 무관)를 그대로 파일명에 박아, 파일명이 주장하는 날짜와 실제 내용의
+    거래일이 어긋날 수 있었습니다(§0-1).
+    """
+    return _snapshot_trading_date_iso(metadata).replace('-', '')
+
+
+def _render_raw_downloads(metadata: dict) -> None:
     """가공 스냅샷 / 크롤링 원본(raw) 다운로드 (§0-3-3 — raw 도 사용자가 받을 수 있어야 함).
 
     ⚠️ 파일 내용은 **클릭한 순간에** 읽습니다. raw 스냅샷은 4MB 가 넘어서, 접속할 때마다
@@ -1016,23 +1275,31 @@ def _render_raw_downloads() -> None:
     """
     latest_path = data_path(US_SNAPSHOT_FILENAME)
     raw_path = data_path(US_RAW_SNAPSHOT_FILENAME)
-    date_str = datetime.now().strftime('%Y%m%d')
+    date_str = _snapshot_trading_date_str(metadata)
+    date_suffix = f'_{date_str}' if date_str else ''
 
+    # 2026-08-29 재감사 M11: read_download_bytes()/load_json_file_async() 는
+    # utils/data_source.read_text() 를 거쳐 원격(DATA_SOURCE_BASE_URL)에서도 읽습니다.
+    # 그런데 버튼을 그릴지를 로컬 파일 존재 여부만으로 정하면, 배포 이미지에
+    # data/*.json 이 없는 원격 모드에서는 화면에는 데이터가 정상 표시되면서 다운로드
+    # 버튼 2개만 조용히 사라지는 비대칭이 생겼습니다(§0-3-3 무력화). dividend_page.py 의
+    # M10 수정과 같은 방향으로, 존재 판정 없이 항상 버튼을 그리고 실패는
+    # download_button() 의 failure_text 알림에 맡깁니다.
     with ui.row().classes('w-full gap-3 items-center'):
-        if os.path.exists(latest_path):
-            download_button(
-                '📥 미국주식 최신 스냅샷 다운로드 (가공 데이터, JSON)',
-                f'us_stocks_latest_{date_str}.json',
-                lambda: read_download_bytes(latest_path),
-                media_type='application/json',
-            )
-        if os.path.exists(raw_path):
-            download_button(
-                '📥 크롤링 원본(raw) 다운로드 (JSON)',
-                f'us_stocks_raw_{date_str}.json',
-                lambda: read_download_bytes(raw_path),
-                media_type='application/json',
-            )
+        download_button(
+            '📥 미국주식 최신 스냅샷 다운로드 (가공 데이터, JSON)',
+            f'us_stocks_latest{date_suffix}.json',
+            lambda: read_download_bytes(latest_path),
+            media_type='application/json',
+            failure_text='미국주식 최신 스냅샷 파일을 읽지 못했습니다.',
+        )
+        download_button(
+            '📥 크롤링 원본(raw) 다운로드 (JSON)',
+            f'us_stocks_raw{date_suffix}.json',
+            lambda: read_download_bytes(raw_path),
+            media_type='application/json',
+            failure_text='크롤링 원본(raw) 파일을 읽지 못했습니다.',
+        )
 
 
 def _render_guide_box() -> None:

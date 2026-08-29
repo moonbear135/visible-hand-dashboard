@@ -173,6 +173,18 @@ US_HISTORY_FIELDS = [
     ("floor_price",        "PBR 기준 바닥가(USD)",          "num"),
     ("f_target",           "모델 목표주가(USD)",            "num"),
 ]
+# 2026-08-29 재감사 M13 — 되돌림: 감사 문서는 f_target_capped/f_target_floored/
+# f_target_uncapped/t_fair_capped/t_fair_floored/price_calculated/f_eps_calculated/
+# is_unverified 를 이력 CSV 에 추가하라고 권했지만, 이 파일의 `FORBIDDEN_KEYS`
+# (tests/test_stock_history.py) 가 이미 그중 f_target_capped/f_target_uncapped/
+# t_fair_capped/t_fair_uncapped/is_unverified 를 "오너가 명시적으로 빼라고 한 내부
+# 필드"로 지정해 두었습니다(다른 계열의 캡·소스 플래그 g_eff_capped/g_eff_uncapped/
+# dps_source 등도 전부 같은 이유로 빠져 있음 — 카드에 보이는 재무 데이터만, 이력 CSV엔
+# 내부 진단/출처 플래그를 넣지 않는다는 기존 정책). price_calculated/f_eps_calculated
+# 는 블록리스트에 명시돼 있진 않지만 같은 "값의 출처/파생 여부" 계열이라 정책 취지상
+# 함께 보류합니다. §0-3-6(다른 모듈 결정에 무단으로 손대지 않음)에 따라 이번 재감사에서
+# 새로 추가하지 않고, 정책을 바꿀지는 오너 확인 후 별도로 진행합니다.
+
 
 
 INDICATOR_HISTORY_FIELDS = [
