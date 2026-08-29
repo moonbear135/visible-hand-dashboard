@@ -2555,6 +2555,46 @@
      회귀 없음. 남은 실패는 이번 범위 밖(배당 모듈 이벤트루프 블로킹 관련
      `tests/test_event_loop_blocking.py` 작업분과 렌더 스모크·수집기 의존성/
      네트워크 이슈)이라 손대지 않았습니다.
+156. **🍝 레포 전체 스파게티 코드 감사 (2026-08-29, 오푸스 높음, 오너 요청 —**
+     **"전체 파일 스파게티 코드 한번 점검 해줄래?").** 프로덕션 Python 91,528줄
+     (106개 파일) + 테스트 스위트 33,280줄(29개 파일)을 8개 모듈(수집기/결투/
+     스코어카드/배당KR·US/매크로·PEGY·보조지표·리포트/미국주식/공유 인프라/테스트
+     스위트)로 나눠 Opus 서브에이전트가 각각 전 파일을 정독하고, 재현 실행·grep
+     전수확인·AST 함수길이 측정까지 동원해 교차검증. 전체 결과는
+     `SPAGHETTI_AUDIT_2026-08-29.md`(레포 루트, 커밋 `ba2b62b`)에 정리.
+     결과 요약 — 높음 41건 · 중간 73건 · 낮음 66건 · 죽은 코드 10건. 가장 심각한
+     5가지: ①`collector_kospi200.py`의 ETF 필터가 브랜드명 부분일치라 "BNK금융지주"
+     같은 실제 상장사가 매일 유니버스에서 조용히 빠짐(순위 전체가 밀리는 부수효과
+     포함), ②`utils/scoring_us.py`의 BPS 바닥값(floor) 보정이 목표가 2.5배 폭주
+     방지 캡을 우회하고 교차검증을 `PBR-1` 동어반복으로 만듦(재현 실행으로 확인),
+     ③결투 모듈 달러 계좌의 체결 실패 사유 문구에 "원" 단위가 그대로 남아있음
+     (`utils/duel_rules.py::calculate_fill`), ④배당 KR 달력이 `today.year`에 갇혀
+     12월 결산 배당의 지급예정일(보통 다음해 3~4월)에 도달할 방법이 없음
+     (`web/pages/dividend_page.py`), ⑤`web/auth_ui.py`의 회원가입/비밀번호
+     재설정·변경 4곳이 프로젝트 표준 블로킹 처리(`run_blocking`)를 우회해 요청이
+     취소돼도 "성공" 토스트가 뜸. 이 5개는 전부 격리 수정 가능하지만 실서비스
+     데이터·화면에 영향을 주는 항목이라 판단만으로 코드를 건드리지 않고 리포트에만
+     남김 — 오너 검토 후 다음 라운드로.
+     **바로 반영한 것(위험도 낮고 순수 격리된 항목만, 커밋 `ba2b62b`)**:
+     `scrape_daily.py` 수급 크롤링 요청 `timeout=5` 누락 수정(무기한 hang 위험
+     제거), `probe_indicator_universe_timing.py` 죽은 코드 제거, 배당 다운로드
+     파일명 `date.today()`→`today_kst()`(UTC 배포 서버 한국 새벽 어제자 파일 문제),
+     `duel_page.py`의 `ui.label`/`error_banner`에 박힌 마크다운 `**` 리터럴 7곳
+     제거(마크다운 미렌더링 위젯이라 별표가 그대로 화면에 보이던 문제) + 규칙 4
+     안내 문구 정정("코스피 상위 200종목뿐" → 실제 유니버스인 "코스피+코스닥
+     통합 상위 500종목"), `utils/data_validator.py`의 죽은 함수 `normalize_currency`
+     제거(미사용 + 실패 시 0.0을 돌려주는 형태로 방치돼 있었음), `utils/db.py`의
+     미참조 `RETIRED_METRIC_COLUMNS`·`backfill_missing_metrics` 별칭 제거,
+     `utils/gdrive_helper.py`의 개발자 로컬 Windows 경로가 박힌 `__main__` 블록
+     제거. 검증 — 7개 파일 전부 `py_compile` 통과, `test_duel_page_usd.py`(149
+     passed)·`test_dividend_us_page.py`·`test_duel.py`(176 passed, 무관한 픽스처
+     경로 문제 2건 제외) 회귀 없음 확인, 삭제한 식별자를 참조하는 테스트 0건 확인.
+     또한 매크로/PEGY/보조지표/리포트 모듈 감사에서 확인된 사실 — `main.py`가
+     예고한 Streamlit(`views/`)/NiceGUI 듀얼런 유예기간(2026-08-17 컷오버 + 2주)이
+     **2026-08-31로 이미 도래**했고, 그 안에 관리자 인증 로직의 두 번째 사본
+     (`views/admin_view.py`, 평문 비밀번호가 세션에 상주하는 문제 포함)이 살아
+     있어 삭제가 보안 개선도 겸함을 확인 — #157 후보로 아래 백로그에 기록.
+
 
 ## 진행 예정 (백로그)
 
@@ -2591,6 +2631,26 @@
   자리 4개가 실제로 잘 뜨는지 확인 후 `web/ads.py`의 `ADS_ADMIN_ONLY`를 `False`로
   바꿔 3단계(전체 공개) 전환.
 
+- 🆕 #156 스파게티 감사 Top 5 (`SPAGHETTI_AUDIT_2026-08-29.md` 1장) — 전부 격리
+  수정 가능으로 분류됐지만 실서비스 데이터/화면에 영향을 주어 오너 검토 없이는
+  손대지 않음: ①`collector_kospi200.py:892-912` ETF 필터가 "BNK금융지주" 같은
+  실제 상장사를 유니버스에서 매일 제외(순위 밀림 동반), ②`utils/scoring_us.py`의
+  BPS 바닥값(floor) 보정이 목표가 2.5배 캡을 우회 + 교차검증을 `PBR-1` 동어반복화,
+  ③`utils/duel_rules.py::calculate_fill()` 실패 사유에 달러 계좌인데도 "원" 단위
+  노출, ④`web/pages/dividend_page.py` KR 배당 달력이 `today.year`에 갇혀 12월
+  결산 배당 지급예정일(익년 3~4월)에 도달 불가, ⑤`web/auth_ui.py` 회원가입/
+  비밀번호 재설정·변경 4곳이 `run_blocking()` 미사용으로 취소된 요청도 "성공"
+  토스트를 띄움.
+- 🆕 #156 컷오버 유예 만료 — `main.py`가 예고한 Streamlit(`views/`)/NiceGUI
+  듀얼런 유예(2026-08-17 + 2주)가 **2026-08-31로 이미 도래**. `app.py`/
+  `visiblehand.py`/`views/`/`keep_awake_ping.py`(+ workflow의 streamlit_wake
+  job)를 `archive/`로 옮기면 매크로/PEGY 7,751줄 중복과 `views/admin_view.py`의
+  관리자 인증 두 번째 사본(평문 비밀번호 세션 상주 포함)이 함께 정리됨.
+- 🆕 #156 `tests/conftest.py` 부재 — 29개 테스트 파일이 전부 `sys.path` 부트스트랩을
+  복제하고, 6개 파일이 `test_duel_db.py`를 라이브러리처럼 import하며, `check()`/
+  `FAILURES` 무음 통과 방지 픽스처가 7개 파일에 완전히 동일하게 복제돼 있음.
+  `test_quant.py`는 함수명이 `run_golden_tests`라 pytest가 아예 수집하지 않아
+  8개 핵심 검증이 실행된 적 없음 — 이건 함수명 한 줄만 고치면 됨.
 (그 밖의 백로그 항목은 `PROJECT_STATUS.md`의 "지금 열려있는 일" 참고)
 
 ---
