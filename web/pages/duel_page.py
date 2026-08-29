@@ -56,7 +56,7 @@ Supabase 접근(`utils/duel_db.py`)은 **이미 완성돼 승인된 파일**이�
       판단하고, 한쪽이 없다고 다른 쪽을 안 그리는 경로를 만들지 않습니다.
 """
 
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from nicegui import ui
 
@@ -388,6 +388,54 @@ NOTICE_TWR_USD = (
 # =============================================================================
 # 1. 공통 표시 도우미 (전부 순수 함수 — 상태를 갖지 않습니다)
 # =============================================================================
+def _guard_double_click(handler):
+    """
+    처리기를 감싸 **처리 중에는 트리거 버튼을 잠급니다**(2026-08-29 재감사 M-3).
+
+    🔴 왜 필요한가: 이 화면의 모든 저장·수정·취소는 `await run_blocking(...)` 으로 Supabase
+       왕복을 기다리는데, 그동안 버튼이 그대로 눌립니다. 매도는 DB 부분 유니크 인덱스
+       (`duel_orders_one_sell_per_window`)가 두 번째를 막아 주지만 **매수에는 아무 멱등
+       장치가 없어**, 두 번 누르면 `duel_orders` 에 두 행이 그대로 들어가고 FIFO 로 차례차례
+       체결돼 사용자가 의도의 두 배를 삽니다.
+
+    ⚠️ 이 잠금은 **화면 쪽 방어일 뿐**입니다(§0-3-1 — 화면을 최종 판정자로 만들지 않습니다).
+       접수 시간대·보유 수량·창 소진 판정의 최종 권한은 여전히 `utils/duel_db.py` 와 DB
+       트리거에 있습니다.
+
+    사용법(이 파일의 8곳이 전부 같은 모양입니다)::
+
+        submit = _guard_double_click(_submit)
+        submit.bind_button(ui.button('...', on_click=submit).props('no-caps'))
+
+    ⚠️ `finally` 에서 반드시 되살립니다 — 예외가 났는데 버튼이 잠긴 채로 남으면 사용자는
+       화면을 새로고침하기 전까지 아무것도 할 수 없고, 그 이유도 알 수 없습니다.
+       (NiceGUI 의 `disable()`/`enable()` 은 props 만 바꾸므로, 그 사이에 `on_changed()` 가
+        화면을 다시 그려 이 버튼이 이미 사라졌더라도 안전합니다.)
+    """
+    state = {"running": False, "button": None}
+
+    async def wrapped(*_args, **_kwargs):
+        if state["running"]:
+            return                      # 이미 처리 중 — 두 번째 클릭은 버립니다
+        state["running"] = True
+        button = state["button"]
+        if button is not None:
+            button.disable()
+        try:
+            await handler()
+        finally:
+            state["running"] = False
+            if button is not None:
+                button.enable()
+
+    def bind_button(button):
+        state["button"] = button
+        return button
+
+    wrapped.bind_button = bind_button
+    return wrapped
+
+
 def _fail(exc, fallback: str) -> str:
     """예외 → 사용자에게 보여줄 한국어 한 문장. 원문·트레이스백은 화면에 내보내지 않습니다(§0-3-4).
 
@@ -611,6 +659,22 @@ def _rebalance_badge_text(state: dict) -> str:
     )
 
 
+def _format_share_quantity(quantity):
+    """보유 수량 표기 — 정수는 `10`, 소수는 `10.5` 로. **통화를 모르는 순수 함수**입니다.
+
+    🔴 2026-08-29 재감사 M-4 — 보유 종목 표(`_position_rows()` → `:,.6g`)와 매도 칸이 같은
+       수량을 다르게 보여 주던 것을 없애기 위한 단일 출처입니다. 값을 깎지 않고 **표기만**
+       다듬습니다(§0-1 — 화면이 실제 보유 수량과 다른 수량을 말하지 않기).
+    """
+    try:
+        number = float(quantity)
+    except (TypeError, ValueError):
+        return '—'
+    if number == int(number):
+        return f'{int(number):,}'
+    return f'{number:,.6g}'
+
+
 def _sellable_positions(positions):
     """보유 포지션 중 **실제로 팔 수 있는 것**(수량 > 0)만. 순수 함수 — 통화를 모릅니다.
 
@@ -622,7 +686,13 @@ def _sellable_positions(positions):
     rows = []
     for position in positions or []:
         try:
-            quantity = int(float((position or {}).get("quantity") or 0))
+            # 🔴 2026-08-29 재감사 M-4 — `int(float(...))` **절삭을 없앴습니다.**
+            #    기업행위(액면병합·감자) 조정은 소수 수량을 남길 수 있고, 규칙 계층
+            #    (`duel_rules.calculate_sell_fill()`)은 그것을 정상으로 봅니다. 여기서
+            #    깎으면 ① 0.4주 포지션이 목록에서 통째로 사라져 **팔 수도, 이유를 볼 수도**
+            #    없고 ② 10.5주가 보유 표에는 10.5, 매도 칸에는 10 으로 **다르게** 보였습니다.
+            #    표시용 반올림은 화면 포맷터가 하고, 값 자체는 여기서 보존합니다(§0-1).
+            quantity = float((position or {}).get("quantity") or 0)
         except (TypeError, ValueError):
             continue                                # 값을 지어내지 않고 그냥 뺍니다
         if quantity <= 0:
@@ -684,7 +754,7 @@ async def _load_kospi_universe() -> dict:
         "index": index,
         "metadata": metadata,
         # 종가 조회는 '내 성적표'와 같은 함수를 씁니다(같은 값·같은 결측 처리 — §0-3-10).
-        # 상위 200 밖으로 밀려난 보유 종목의 폴백(`kr_all_market_prices.json`, 3-3)은 v1
+        # 통합 상위 500 밖으로 밀려난 보유 종목의 폴백(`kr_all_market_prices.json`, 3-3)은 v1
         # 화면에서 쓰지 않습니다 — 그 판정(3개월 추적/500위 밖 정리)은 배치의 몫이고,
         # 화면이 두 번째 판정 경로를 만들면 두 곳이 서로 다른 답을 낼 수 있습니다.
         "price_lookup": make_price_lookup({MARKET_KR: index}),
@@ -726,7 +796,7 @@ async def _load_us_universe() -> dict:
 # -----------------------------------------------------------------------------
 #  🔴 왜 위 두 로더로는 부족한가 (2026-08-22 오너 실사용 버그):
 #     위 `_load_kospi_universe()` / `_load_us_universe()` 의 `price_lookup` 은 **좁은 것이
-#     정답**입니다 — 결투 계좌가 거래할 수 있는 종목이 코스피 상위 200 / 미국 상위 유니버스
+#     정답**입니다 — 결투 계좌가 거래할 수 있는 종목이 코스피+코스닥 통합 상위 500 / 미국 상위 유니버스
 #     안으로 못박혀 있고, 그 계좌의 포지션은 정의상 그 목록 안에만 존재하기 때문입니다.
 #     (그래서 그 로더들은 폴백을 **일부러** 쓰지 않습니다. 그 주석을 지우지 마세요.)
 #     그런데 계좌 카드 줄 맨 앞에 붙는 "내 성적표" 카드가 그리는 것은 결투 포지션이 아니라
@@ -1283,17 +1353,34 @@ async def _load_account_data(client, accounts) -> dict:
     bundles = {}
     for account in accounts or []:
         account_id = (account or {}).get("id")
+        # 🔴 2026-08-29 재감사 M-5 — **조회 3건을 각자 감쌉니다.** 예전에는 셋이 하나의
+        #    `try` 안에 있어서 주문 목록 하나만 실패해도 예수금·보유종목까지 `None` 이 되고
+        #    계좌 카드 전체가 "🚫 불러오지 못했습니다"로 바뀌었습니다. 실제로 필요한 격리
+        #    단위는 **조회 1건**입니다 — 실패한 것만 `None` + 사유로 남기고 나머지는 그립니다.
+        cash, positions, orders = None, None, None
+        errors = {}
         try:
             ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
             cash = sum_cash_balance(ledger)        # 순수 계산 — 왕복이 아닙니다
+        except Exception as exc:                   # noqa: BLE001
+            errors["cash"] = exc
+        try:
             positions = await run_blocking(fetch_my_positions, client, account_id)
+        except Exception as exc:                   # noqa: BLE001
+            errors["positions"] = exc
+        try:
             orders = await run_blocking(fetch_my_orders, client, account_id)
-        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
-            bundles[account_id] = {"cash": None, "positions": None, "orders": None,
-                                   "error": exc}
-            continue
-        bundles[account_id] = {"cash": cash, "positions": positions, "orders": orders,
-                               "error": None}
+        except Exception as exc:                   # noqa: BLE001
+            errors["orders"] = exc
+        bundles[account_id] = {
+            "cash": cash, "positions": positions, "orders": orders,
+            "cash_error": errors.get("cash"),
+            "positions_error": errors.get("positions"),
+            "orders_error": errors.get("orders"),
+            # `error` 는 **전부 실패했을 때만** 채웁니다 — 그때만 카드 전체가 실패이고,
+            # 일부 실패는 그 항목만 "못 읽음"으로 그려야 하기 때문입니다(옛 호출부 호환).
+            "error": (next(iter(errors.values())) if len(errors) == 3 else None),
+        }
     return bundles
 
 
@@ -1307,17 +1394,29 @@ async def _load_account_data_usd(client, accounts) -> dict:
     bundles = {}
     for account in accounts or []:
         account_id = (account or {}).get("id")
+        # 🔴 2026-08-29 재감사 M-5(원화 로더와 같은 이유) — 조회별로 따로 감쌉니다.
+        cash, positions, orders = None, None, None
+        errors = {}
         try:
             ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
             cash = sum_cash_balance(ledger)        # 순수 계산 — 원화와 공유
+        except Exception as exc:                   # noqa: BLE001
+            errors["cash"] = exc
+        try:
             positions = await run_blocking(fetch_my_positions_usd, client, account_id)
+        except Exception as exc:                   # noqa: BLE001
+            errors["positions"] = exc
+        try:
             orders = await run_blocking(fetch_my_orders_usd, client, account_id)
-        except Exception as exc:                   # noqa: BLE001 — 계좌 단위로만 실패시킵니다
-            bundles[account_id] = {"cash": None, "positions": None, "orders": None,
-                                   "error": exc}
-            continue
-        bundles[account_id] = {"cash": cash, "positions": positions, "orders": orders,
-                               "error": None}
+        except Exception as exc:                   # noqa: BLE001
+            errors["orders"] = exc
+        bundles[account_id] = {
+            "cash": cash, "positions": positions, "orders": orders,
+            "cash_error": errors.get("cash"),
+            "positions_error": errors.get("positions"),
+            "orders_error": errors.get("orders"),
+            "error": (next(iter(errors.values())) if len(errors) == 3 else None),
+        }
     return bundles
 
 
@@ -1333,7 +1432,8 @@ def _bundle_for(bundles, account_id) -> dict:
     """
     bundle = (bundles or {}).get(account_id)
     if not isinstance(bundle, dict):
-        return {"cash": None, "positions": None, "orders": None, "error": None}
+        return {"cash": None, "positions": None, "orders": None, "error": None,
+                "cash_error": None, "positions_error": None, "orders_error": None}
     return bundle
 
 
@@ -1418,10 +1518,16 @@ async def _render_duel_section(client, user_id: str, market: dict, window: dict,
     bundles = await _load_account_data(client, mine) if mine else {}
     bundles_usd = await _load_account_data_usd(client, mine_usd) if mine_usd else {}
 
+    # 📊 '내 성적표'(실제 자산) 보유 종목은 **여기서 한 번만** 읽어 두 성적표 카드가 나눠
+    #    씁니다(2026-08-29 재감사 L-11 — 예전에는 원화 카드와 달러 카드가 같은 데이터를
+    #    각각 읽어 왕복이 하나 더 있었습니다).
+    holdings_bundle = await _load_scorecard_holdings(client, user_id)
+
     await _render_accounts(client, user_id, mine, market, on_changed,
                            usd_accounts=mine_usd, usd_market=market_usd,
                            bundles=bundles, usd_bundles=bundles_usd,
-                           broad_prices=broad_prices)
+                           broad_prices=broad_prices,
+                           holdings_bundle=holdings_bundle)
 
     # 통화별 주문 창·주문 내역. 참여한 트랙의 것만 그립니다 — 원화만 참여한 사용자에게
     # 원화 부분은 예전과 **완전히 같은 순서**(계좌 → 주문 창 → 내 주문)로 이어집니다.
@@ -1665,9 +1771,26 @@ def _twr_display(snapshots) -> tuple:
     return '아직 계산할 수 없음', ''
 
 
+async def _load_scorecard_holdings(client, user_id: str) -> dict:
+    """'내 성적표'(실제 자산) 보유 종목을 **화면당 한 번** 읽습니다(2026-08-29 재감사 L-11).
+
+    원화·달러 성적표 카드는 **완전히 같은 목록**을 씁니다(통화 구분은 카드 안에서
+    `build_portfolio()` 결과를 통화별로 나눠 보는 것뿐입니다). 카드마다 읽으면 같은 데이터를
+    두 번 읽게 되고, 이 화면은 이미 이 저장소에서 왕복이 가장 많은 화면입니다(§0-3-2).
+
+    실패는 **삼키지 않고** 묶음에 담아 내려보냅니다 — 카드가 숫자 자리에 그대로 적습니다(§0-1).
+    """
+    try:
+        holdings = await run_blocking(fetch_holdings, client, user_id)
+    except Exception as exc:                       # noqa: BLE001
+        return {"holdings": None, "error": exc}
+    return {"holdings": holdings, "error": None}
+
+
 async def _render_accounts(client, user_id: str, accounts, market: dict, on_changed, *,
                            usd_accounts=(), usd_market=None,
-                           bundles=None, usd_bundles=None, broad_prices=None) -> None:
+                           bundles=None, usd_bundles=None, broad_prices=None,
+                           holdings_bundle=None) -> None:
     """계좌 비교 영역.
 
     💵 2026-08-21 — 달러 계좌가 하나라도 있으면 원화 구역 전체와 달러 구역 전체를 **위아래로
@@ -1704,7 +1827,8 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
             #    성적표 → 1개월 → 3개월 → 6개월 순). 계산 방식이 다르다는 사실은 카드 안의
             #    캡션이 직접 말합니다 — 여기서 두 수익률을 섞어 계산하는 자리는 없습니다.
             await _render_scorecard_summary_card_krw(client, user_id, market,
-                                                     broad_prices=broad_prices)
+                                                     broad_prices=broad_prices,
+                                                     holdings_bundle=holdings_bundle)
             for account in accounts:
                 await _render_account_card(client, user_id, account, market,
                                            bundle=_bundle_for(bundles, account.get("id")))
@@ -1746,7 +1870,8 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
         # 📊 맨 앞 칸은 **실제 자산**('내 성적표') 요약입니다 — 원화 전용 분기와 같은 자리·
         #    같은 순서(성적표 → 1개월 → 3개월 → 6개월).
         await _render_scorecard_summary_card_krw(client, user_id, market,
-                                                 broad_prices=broad_prices)
+                                                 broad_prices=broad_prices,
+                                                 holdings_bundle=holdings_bundle)
         for window_type in ordered:
             krw_account = krw_by_window.get(window_type)
             if krw_account is not None:
@@ -1775,7 +1900,8 @@ async def _render_accounts(client, user_id: str, accounts, market: dict, on_chan
         #    (환율 시계열이 없으므로 더하면 지어낸 값이 됩니다).
         if usd_market is not None:
             await _render_scorecard_summary_card_usd(client, user_id, usd_market,
-                                                     broad_prices=broad_prices)
+                                                     broad_prices=broad_prices,
+                                                     holdings_bundle=holdings_bundle)
         for window_type in ordered:
             usd_account = usd_by_window.get(window_type)
             if usd_account is not None:
@@ -1824,22 +1950,47 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
             error_banner(f'🚫 {_fail(bundle["error"], "계좌 정보를 불러오지 못했습니다.")}')
             return
 
-        try:
-            # 계좌 하나당 왕복 3회(묶음이 있으면 예수금·포지션 2회가 빠져 1회)입니다.
-            # 전부 `client` 를 인자로 받는 순수 조회 함수라 스레드로 넘겨도 안전합니다.
-            if bundle is not None and bundle.get("cash") is not None:
-                cash = bundle["cash"]              # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
-            else:
+        # 🔴 2026-08-29 재감사 M-6 — **조회별로 따로 감쌉니다.** 예전에는 예수금·포지션·
+        #    스냅샷이 하나의 `try` 안에 있어서, TWR 한 줄에만 쓰이는 스냅샷 조회가 실패하면
+        #    총자산·예수금·평가액·보유종목까지 **카드 전체가 사라졌습니다.** 실패한 것만
+        #    "계산 불가"로 적고 나머지는 정상적으로 그립니다(§0-1 — 실패는 드러내되,
+        #    필요 이상으로 크게 실패시키지 않기).
+        cash, positions, snapshots = None, None, None
+        cash_error = positions_error = snapshots_error = None
+        if bundle is not None and bundle.get("cash") is not None:
+            cash = bundle["cash"]                  # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
+        elif bundle is not None and bundle.get("cash_error") is not None:
+            cash_error = bundle["cash_error"]
+        else:
+            try:
                 ledger = await run_blocking(fetch_my_cash_ledger, client, account_id)
                 cash = sum_cash_balance(ledger)                 # 순수 계산 — 루프에서 그대로
-            if bundle is not None and bundle.get("positions") is not None:
-                positions = bundle["positions"]
-            else:
+            except Exception as exc:               # noqa: BLE001
+                cash_error = exc
+
+        if bundle is not None and bundle.get("positions") is not None:
+            positions = bundle["positions"]
+        elif bundle is not None and bundle.get("positions_error") is not None:
+            positions_error = bundle["positions_error"]
+        else:
+            try:
                 positions = await run_blocking(fetch_my_positions, client, account_id)
+            except Exception as exc:               # noqa: BLE001
+                positions_error = exc
+
+        try:
             snapshots = await run_blocking(fetch_my_snapshots, client, account_id)
         except Exception as exc:                   # noqa: BLE001
-            error_banner(f'🚫 {_fail(exc, "계좌 정보를 불러오지 못했습니다.")}')
+            snapshots_error = exc
+
+        if cash_error is not None and positions_error is not None:
+            # 둘 다 못 읽으면 그릴 숫자가 하나도 없습니다 — 예전과 같은 문구로 끝냅니다.
+            error_banner(f'🚫 {_fail(cash_error, "계좌 정보를 불러오지 못했습니다.")}')
             return
+        if cash_error is not None:
+            error_banner(f'🚫 {_fail(cash_error, "예수금을 불러오지 못했습니다.")}')
+        if positions_error is not None:
+            error_banner(f'🚫 {_fail(positions_error, "보유 종목을 불러오지 못했습니다.")}')
 
         # 🔁 리밸런싱 창 뱃지 — "몇 번째 창인지 · 며칠 남았는지 · 이번 창을 이미 썼는지".
         #    사용자 요청("리밸런싱 기간 중 1회만 가능하게 카운트를 표시")의 자리입니다.
@@ -1849,14 +2000,22 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
                                      datetime.now(KST).date())
             ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
 
-        summary = _position_rows(positions, market["price_lookup"])
-        total_value = cash + summary["position_value"]
-        twr_text, twr_note = _twr_display(snapshots)
+        summary = _position_rows(positions or [], market["price_lookup"])
+        # §0-1 — 못 읽은 값을 0 으로 위장하지 않습니다. 한쪽이라도 모르면 합계도 "—" 입니다.
+        total_value = (None if (cash is None or positions_error is not None)
+                       else cash + summary["position_value"])
+        if snapshots_error is not None:
+            twr_text = '계산 불가'
+            twr_note = _fail(snapshots_error, '스냅샷을 불러오지 못했습니다.')
+        else:
+            twr_text, twr_note = _twr_display(snapshots)
 
         with ui.row().classes('w-full gap-2 items-stretch'):
             metric_card('총자산', format_amount(total_value, CURRENCY))
             metric_card('예수금(현금)', format_amount(cash, CURRENCY))
-            metric_card('주식 평가액', format_amount(summary["position_value"], CURRENCY))
+            metric_card('주식 평가액',
+                        '—' if positions_error is not None
+                        else format_amount(summary["position_value"], CURRENCY))
         metric_card('누적 수익률 (TWR)', twr_text, twr_note)
 
         if summary["unpriced"]:
@@ -1867,14 +2026,16 @@ async def _render_account_card(client, user_id: str, account: dict, market: dict
                 '가격을 지어내지 않습니다 — 상장폐지로 확정된 것과는 다른 상태입니다.'
             )
 
-        if not duel_rules.is_buy_window_open(cash):
+        if cash is not None and not duel_rules.is_buy_window_open(cash):
             info_banner(
                 f'ℹ️ 이 계좌는 예수금이 0원이라 지금은 매수할 수 없습니다. '
                 f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다. '
                 '(리밸런싱 매도는 예수금과 상관없이, 보유 종목이 있으면 그대로 할 수 있습니다.)'
             )
 
-        if summary["rows"]:
+        if positions_error is not None:
+            pass                                   # 위에서 이미 실패를 배너로 알렸습니다
+        elif summary["rows"]:
             _render_positions_table(summary["rows"])
         else:
             ui.label('아직 보유 종목이 없습니다 — 아래 주문 창에서 첫 주문을 넣어 보세요.') \
@@ -2006,20 +2167,43 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
             error_banner(f'🚫 {_fail(bundle["error"], "달러 계좌 정보를 불러오지 못했습니다.")}')
             return
 
-        try:
-            if bundle is not None and bundle.get("cash") is not None:
-                cash = bundle["cash"]              # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
-            else:
+        # 🔴 2026-08-29 재감사 M-6(원화 카드와 같은 이유) — 조회별로 따로 감쌉니다.
+        #    스냅샷 조회 실패가 카드 전체를 지우지 않게 합니다.
+        cash, positions, snapshots = None, None, None
+        cash_error = positions_error = snapshots_error = None
+        if bundle is not None and bundle.get("cash") is not None:
+            cash = bundle["cash"]                  # 묶음이 이미 읽어 둔 값 — 다시 읽지 않습니다
+        elif bundle is not None and bundle.get("cash_error") is not None:
+            cash_error = bundle["cash_error"]
+        else:
+            try:
                 ledger = await run_blocking(fetch_my_cash_ledger_usd, client, account_id)
                 cash = sum_cash_balance(ledger)                 # 순수 계산 — 원화와 공유
-            if bundle is not None and bundle.get("positions") is not None:
-                positions = bundle["positions"]
-            else:
+            except Exception as exc:               # noqa: BLE001
+                cash_error = exc
+
+        if bundle is not None and bundle.get("positions") is not None:
+            positions = bundle["positions"]
+        elif bundle is not None and bundle.get("positions_error") is not None:
+            positions_error = bundle["positions_error"]
+        else:
+            try:
                 positions = await run_blocking(fetch_my_positions_usd, client, account_id)
+            except Exception as exc:               # noqa: BLE001
+                positions_error = exc
+
+        try:
             snapshots = await run_blocking(fetch_my_snapshots_usd, client, account_id)
         except Exception as exc:                   # noqa: BLE001
-            error_banner(f'🚫 {_fail(exc, "달러 계좌 정보를 불러오지 못했습니다.")}')
+            snapshots_error = exc
+
+        if cash_error is not None and positions_error is not None:
+            error_banner(f'🚫 {_fail(cash_error, "달러 계좌 정보를 불러오지 못했습니다.")}')
             return
+        if cash_error is not None:
+            error_banner(f'🚫 {_fail(cash_error, "달러 예수금을 불러오지 못했습니다.")}')
+        if positions_error is not None:
+            error_banner(f'🚫 {_fail(positions_error, "달러 보유 종목을 불러오지 못했습니다.")}')
 
         # 🔁 리밸런싱 창 뱃지 — 원화 카드와 같은 공유 계산, 달러 계좌의 주문만 봅니다.
         if bundle is not None and bundle.get("orders") is not None:
@@ -2027,14 +2211,22 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
                                      datetime.now(KST).date())
             ui.label(_rebalance_badge_text(state)).classes('vh-muted vh-keep-all')
 
-        summary = _position_rows_usd(positions, market["price_lookup"])
-        total_value = cash + summary["position_value"]          # 달러 + 달러 (통화 혼합 없음)
-        twr_text, twr_note = _twr_display(snapshots)
+        summary = _position_rows_usd(positions or [], market["price_lookup"])
+        # §0-1 — 못 읽은 값을 0 으로 위장하지 않습니다(원화 카드와 같은 규율).
+        total_value = (None if (cash is None or positions_error is not None)
+                       else cash + summary["position_value"])   # 달러 + 달러 (통화 혼합 없음)
+        if snapshots_error is not None:
+            twr_text = '계산 불가'
+            twr_note = _fail(snapshots_error, '스냅샷을 불러오지 못했습니다.')
+        else:
+            twr_text, twr_note = _twr_display(snapshots)
 
         with ui.row().classes('w-full gap-2 items-stretch'):
             metric_card('총자산 (달러)', format_amount(total_value, CURRENCY_USD))
             metric_card('예수금(현금)', format_amount(cash, CURRENCY_USD))
-            metric_card('주식 평가액', format_amount(summary["position_value"], CURRENCY_USD))
+            metric_card('주식 평가액',
+                        '—' if positions_error is not None
+                        else format_amount(summary["position_value"], CURRENCY_USD))
         metric_card('누적 수익률 (TWR)', twr_text, twr_note)
 
         if summary["unpriced"]:
@@ -2044,14 +2236,16 @@ async def _render_account_card_usd(client, user_id: str, account: dict, market: 
                 '가격을 지어내지 않습니다 — 상장폐지로 확정된 것과는 다른 상태입니다.'
             )
 
-        if not duel_rules.is_buy_window_open(cash):
+        if cash is not None and not duel_rules.is_buy_window_open(cash):
             info_banner(
                 f'ℹ️ 이 달러 계좌는 예수금이 $0이라 지금은 매수할 수 없습니다. '
                 f'다음 {MONTHLY_DEPOSIT_DAY}일 입금 뒤부터 다시 주문할 수 있습니다. '
                 '(리밸런싱 매도는 예수금과 상관없이, 보유 종목이 있으면 그대로 할 수 있습니다.)'
             )
 
-        if summary["rows"]:
+        if positions_error is not None:
+            pass                                   # 위에서 이미 실패를 배너로 알렸습니다
+        elif summary["rows"]:
             _render_positions_table_usd(summary["rows"])
         else:
             ui.label('아직 보유 종목이 없습니다 — 아래 달러 주문 창에서 첫 주문을 넣어 보세요.') \
@@ -2109,7 +2303,7 @@ def _render_positions_table_usd(rows) -> None:
 #    카드는 이 함수를 **두 번 따로** 부른 결과일 뿐이고, 두 호출 사이에 공유되는 변수도,
 #    두 통화 값이 만나는 산술식도 이 파일 어디에도 없습니다.
 async def _render_scorecard_summary_card(client, user_id: str, currency: str,
-                                         price_lookup) -> None:
+                                         price_lookup, *, holdings_bundle=None) -> None:
     """'내 성적표'(실제 증권계좌) 통화 1개짜리 요약 카드.
 
     🔒 §0-3-8 — `fetch_holdings(client, user_id)` 는 우리가 넘긴 `user_id` 로 서버에서
@@ -2118,7 +2312,7 @@ async def _render_scorecard_summary_card(client, user_id: str, currency: str,
        경로 자체가 없으므로, 성립하지 않는 소유자 재확인을 흉내 내지 않습니다.
 
     💰 2026-08-22 — 현재가 조회 함수를 **인자로 받습니다**(예전에는 결투 계좌용
-       `market["price_lookup"]` 을 그대로 썼습니다). 그 목록은 코스피 상위 200 / 미국 상위
+       `market["price_lookup"]` 을 그대로 썼습니다). 그 목록은 코스피+코스닥 통합 상위 500 / 미국 상위
        유니버스로 **일부러 좁혀 둔** 것이라, 무엇이든 담길 수 있는 실제 보유 종목을 거기서만
        찾으면 멀쩡히 상장된 종목이 "가격을 확인하지 못해 제외"로 빠졌습니다(2-B 절 참고).
        어느 목록으로 찾을지는 통화별 창구(바로 아래 두 함수)가 정합니다 — 이 함수는 통화도,
@@ -2127,17 +2321,29 @@ async def _render_scorecard_summary_card(client, user_id: str, currency: str,
     with ui.column().classes('vh-card gap-2').style('flex: 1 1 320px; min-width: 0;'):
         ui.markdown('##### 📊 내 성적표 (실제 자산)').classes('vh-keep-all')
 
-        try:
-            # DB 왕복 — 이 파일의 모든 Supabase 호출과 같이 스레드로 넘깁니다.
-            holdings = await run_blocking(fetch_holdings, client, user_id)
-        except Exception as exc:                   # noqa: BLE001
-            # §0-1 — 조회 실패를 "보유 종목 없음"으로 위장하지 않고 실패했다고 적습니다.
-            # 문구는 **이 카드 안**, 숫자가 있었어야 할 자리에 그대로 둡니다. 이 카드는
-            # 결투 계좌 카드들 옆에 붙는 보조 카드라, 실패했을 때 붉은 배너를 띄우면
-            # "결투 계좌 쪽이 실패했다"로 읽히기 쉽습니다(같은 줄에 나란히 있으므로).
-            ui.label(f'🚫 {_fail(exc, "내 성적표 보유 종목을 불러오지 못했습니다.")}') \
-                .classes('vh-muted vh-keep-all')
-            return
+        # 🔴 2026-08-29 재감사 L-11 — 보유 종목은 화면당 **한 번만** 읽습니다. 원화 카드와
+        #    달러 카드가 각자 `fetch_holdings(client, user_id)` 를 부르면 **완전히 같은
+        #    데이터**를 두 번 읽습니다(이 화면은 이 저장소에서 왕복이 가장 많은 화면입니다).
+        #    호출부가 미리 읽어 묶음으로 넘겨 주면 그것을 쓰고, 안 넘기면 예전처럼 여기서
+        #    직접 읽습니다(옛 호출부·테스트가 그대로 돌아가게 — 이 파일의 `bundle` 관례와 같음).
+        if holdings_bundle is not None:
+            if holdings_bundle.get("error") is not None:
+                ui.label(f'🚫 {_fail(holdings_bundle["error"], "내 성적표 보유 종목을 불러오지 못했습니다.")}') \
+                    .classes('vh-muted vh-keep-all')
+                return
+            holdings = holdings_bundle.get("holdings") or []
+        else:
+            try:
+                # DB 왕복 — 이 파일의 모든 Supabase 호출과 같이 스레드로 넘깁니다.
+                holdings = await run_blocking(fetch_holdings, client, user_id)
+            except Exception as exc:               # noqa: BLE001
+                # §0-1 — 조회 실패를 "보유 종목 없음"으로 위장하지 않고 실패했다고 적습니다.
+                # 문구는 **이 카드 안**, 숫자가 있었어야 할 자리에 그대로 둡니다. 이 카드는
+                # 결투 계좌 카드들 옆에 붙는 보조 카드라, 실패했을 때 붉은 배너를 띄우면
+                # "결투 계좌 쪽이 실패했다"로 읽히기 쉽습니다(같은 줄에 나란히 있으므로).
+                ui.label(f'🚫 {_fail(exc, "내 성적표 보유 종목을 불러오지 못했습니다.")}') \
+                    .classes('vh-muted vh-keep-all')
+                return
 
         # 순수 계산(입출력 없음) — `_position_rows()` 처럼 그대로 부릅니다.
         portfolio = build_portfolio(holdings, price_lookup)
@@ -2187,10 +2393,11 @@ async def _render_scorecard_summary_card(client, user_id: str, currency: str,
 #    다만 성적표 카드는 통화 상수 하나만 다르므로 **본문은 위 한 함수를 공유**합니다
 #    (§0-3-10 — 같은 계산을 두 벌 만들지 않습니다).
 async def _render_scorecard_summary_card_krw(client, user_id: str, market: dict,
-                                             *, broad_prices=None) -> None:
+                                             *, broad_prices=None,
+                                             holdings_bundle=None) -> None:
     """원화(내 성적표) 요약 카드 — 원화 값만 다룹니다.
 
-    💰 조회 목록은 **여기서** 만듭니다(2-B 절): 1차는 결투 계좌와 같은 코스피 상위 200
+    💰 조회 목록은 **여기서** 만듭니다(2-B 절): 1차는 결투 계좌와 같은 코스피+코스닥 통합 상위 500
        스냅샷, 없으면 2차로 코스피+코스닥 전 종목 종가 목록입니다. '내 성적표' 화면
        (`scorecard_page.py::_render_portfolio()`)이 쓰는 것과 **같은 폴백 순서**라 같은
        종목이 두 화면에서 다른 값으로 보이지 않습니다(§0-3-10).
@@ -2201,11 +2408,13 @@ async def _render_scorecard_summary_card_krw(client, user_id: str, market: dict,
         {MARKET_KR: market["index"]},
         broad_kr_prices=(broad_prices or {}).get("broad_kr_prices"),
     )
-    await _render_scorecard_summary_card(client, user_id, CURRENCY, price_lookup)
+    await _render_scorecard_summary_card(client, user_id, CURRENCY, price_lookup,
+                                         holdings_bundle=holdings_bundle)
 
 
 async def _render_scorecard_summary_card_usd(client, user_id: str, market: dict,
-                                             *, broad_prices=None) -> None:
+                                             *, broad_prices=None,
+                                             holdings_bundle=None) -> None:
     """달러(내 성적표) 요약 카드 — 달러 값만 다룹니다. 위 원화 카드와 공유하는 변수는 없습니다.
 
     💰 원화 창구와 **같은 모양**이고, 보는 목록만 미국 것입니다: 1차는 미국 상위 유니버스
@@ -2215,11 +2424,12 @@ async def _render_scorecard_summary_card_usd(client, user_id: str, market: dict,
         {MARKET_US: market["index"]},
         broad_us_prices=(broad_prices or {}).get("broad_us_prices"),
     )
-    await _render_scorecard_summary_card(client, user_id, CURRENCY_USD, price_lookup)
+    await _render_scorecard_summary_card(client, user_id, CURRENCY_USD, price_lookup,
+                                         holdings_bundle=holdings_bundle)
 
 
 # =============================================================================
-# 7. 주문 창 (2-4 — 매수 + 창당 1회 리밸런싱 매도, 수량 기준, 코스피 상위 200 안에서만)
+# 7. 주문 창 (2-4 — 매수 + 창당 1회 리밸런싱 매도, 수량 기준, 코스피+코스닥 통합 상위 500 안에서만)
 # =============================================================================
 def _render_order_form(client, user_id: str, accounts, market: dict, window: dict,
                        on_changed, *, bundles=None) -> None:
@@ -2231,7 +2441,7 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
 
     🔁 2026-08-21 — 매도 칸이 생기면서 두 가지가 달라졌습니다.
        ① 제목·버튼에서 "(매수 전용)"·"(매수)" 표기를 뺐습니다 — 이제 사실이 아닙니다.
-       ② 매도 칸은 **유니버스 목록이 없어도 그립니다.** 매수는 코스피 상위 목록 안에서만
+       ② 매도 칸은 **유니버스 목록이 없어도 그립니다.** 매수는 코스피+코스닥 통합 상위 목록 안에서만
           가능하지만, 매도에는 유니버스 검사가 아예 없습니다(`save_sell_order()` 독스트링:
           이미 보유한 종목이 목록에서 빠졌다고 "팔 수도 없는" 상태가 되면 그게 더 나쁩니다).
           그래서 목록을 못 읽어 매수 칸을 못 여는 날에도 매도 칸은 그대로 열립니다 —
@@ -2362,10 +2572,10 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
     estimate_caveat_label = ui.label('').classes('vh-muted')
 
     def _resolve_ticker():
-        """입력창 텍스트 → (티커, 종목명, 실패사유). 코스피 상위 200 **안에서만** 찾습니다.
+        """입력창 텍스트 → (티커, 종목명, 실패사유). 코스피+코스닥 통합 상위 500 **안에서만** 찾습니다.
 
         `resolve_stock_query()` 는 '내 성적표'가 쓰는 그 함수 그대로이고, `broad_index` 를
-        넘기지 않으므로 상위 200 밖 종목은 이름으로 잡히지 않습니다. 다만 "코드처럼 생긴"
+        넘기지 않으므로 통합 상위 500 밖 종목은 이름으로 잡히지 않습니다. 다만 "코드처럼 생긴"
         입력은 그 함수가 코드 자체를 그대로 돌려주므로(유니버스 밖 종목을 정직하게
         표시하려는 원래 용도), 여기서 유니버스 포함 여부를 한 번 더 확인합니다.
         """
@@ -2487,7 +2697,9 @@ def _render_order_form(client, user_id: str, accounts, market: dict, window: dic
         )
         on_changed()
 
-    ui.button('🛒 매수 주문 저장', on_click=_submit).props('no-caps color=primary')
+    _submit_guarded = _guard_double_click(_submit)          # M-3 — 중복 클릭 방어
+    _submit_guarded.bind_button(
+        ui.button('🛒 매수 주문 저장', on_click=_submit_guarded).props('no-caps color=primary'))
     ui.label(
         '※ 저장 시점에는 예수금이 충분한지 확정할 수 없습니다 — 체결가(다음 거래일 종가)를 '
         '아직 모르기 때문입니다. 체결 시점에 모자라면 살 수 있는 만큼만 체결되고 사유가 남습니다.'
@@ -2594,7 +2806,7 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
                           for row in sellable}
         options = {
             row["ticker"]: f'{row["ticker"]} · {row["stock_name"] or row["ticker"]} '
-                           f'(보유 {row["quantity"]:,}주)'
+                           f'(보유 {_format_share_quantity(row["quantity"])}주)'
             for row in sellable
         }
 
@@ -2632,8 +2844,9 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
                 message.text = f'🚫 {exc}'
                 return
             if quantity > held:
-                message.text = (f'🚫 보유 수량({held:,}주)보다 많은 {quantity:,}주는 매도할 수 '
-                                '없습니다. 보유한 수량 이하로 다시 입력해 주세요.')
+                message.text = (f'🚫 보유 수량({_format_share_quantity(held)}주)보다 많은 '
+                                f'{quantity:,}주는 매도할 수 없습니다. 보유한 수량 이하로 '
+                                '다시 입력해 주세요.')
                 return
 
             # 🔴 창 번호는 **누를 때 다시 계산합니다.** 화면을 열어둔 채 자정을 넘겨 창이
@@ -2681,8 +2894,10 @@ def _render_sell_panel(client, user_id: str, account: dict, window: dict, on_cha
             )
             on_changed()
 
-        ui.button('🔁 리밸런싱 매도 주문 저장', on_click=_submit_sell) \
-            .props('no-caps color=negative')
+        _submit_sell_guarded = _guard_double_click(_submit_sell)     # M-3
+        _submit_sell_guarded.bind_button(
+            ui.button('🔁 리밸런싱 매도 주문 저장', on_click=_submit_sell_guarded)
+            .props('no-caps color=negative'))
 
 
 # -----------------------------------------------------------------------------
@@ -2943,7 +3158,10 @@ def _render_order_form_usd(client, user_id: str, accounts, market: dict, window:
         )
         on_changed()
 
-    ui.button('💵 달러 매수 주문 저장', on_click=_submit_usd).props('no-caps color=primary')
+    _submit_usd_guarded = _guard_double_click(_submit_usd)  # M-3 — 중복 클릭 방어
+    _submit_usd_guarded.bind_button(
+        ui.button('💵 달러 매수 주문 저장', on_click=_submit_usd_guarded)
+        .props('no-caps color=primary'))
     ui.label(
         '※ 저장 시점에는 예수금이 충분한지 확정할 수 없습니다 — 체결가(그날 미국 정규장 '
         '마감가)를 아직 모르기 때문입니다. 체결 시점에 모자라면 살 수 있는 만큼만 체결되고 '
@@ -3044,7 +3262,7 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
                           for row in sellable}
         options = {
             row["ticker"]: f'{row["ticker"]} · {row["stock_name"] or row["ticker"]} '
-                           f'(보유 {row["quantity"]:,}주)'
+                           f'(보유 {_format_share_quantity(row["quantity"])}주)'
             for row in sellable
         }
 
@@ -3081,8 +3299,9 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
                 message.text = f'🚫 {exc}'
                 return
             if quantity > held:
-                message.text = (f'🚫 보유 수량({held:,}주)보다 많은 {quantity:,}주는 매도할 수 '
-                                '없습니다. 보유한 수량 이하로 다시 입력해 주세요.')
+                message.text = (f'🚫 보유 수량({_format_share_quantity(held)}주)보다 많은 '
+                                f'{quantity:,}주는 매도할 수 없습니다. 보유한 수량 이하로 '
+                                '다시 입력해 주세요.')
                 return
 
             # 🔴 원화와 같은 이유로 창 번호를 **누를 때 다시 계산**합니다(위 원화 판 주석 참고).
@@ -3127,8 +3346,10 @@ def _render_sell_panel_usd(client, user_id: str, account: dict, window: dict, on
             )
             on_changed()
 
-        ui.button('🔁 달러 리밸런싱 매도 주문 저장', on_click=_submit_sell_usd) \
-            .props('no-caps color=negative')
+        _submit_sell_usd_guarded = _guard_double_click(_submit_sell_usd)   # M-3
+        _submit_sell_usd_guarded.bind_button(
+            ui.button('🔁 달러 리밸런싱 매도 주문 저장', on_click=_submit_sell_usd_guarded)
+            .props('no-caps color=negative'))
 
 
 # =============================================================================
@@ -3301,10 +3522,15 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed,
                                       price_name='최근 종가',
                                       caveat='실제 체결가는 체결일 종가로 정해집니다')
 
+    # 🔴 2026-08-29 재감사 M-10 — 배치가 그날을 보류했으면 그 사실을 이 줄에 그대로 답니다.
+    hold_notice = _pending_hold_notice_text(order)
+
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
         with ui.column().classes('flex-1 min-w-0 gap-0'):
             ui.label(label).classes('vh-keep-all')
             ui.label(estimate).classes('vh-muted vh-keep-all')
+            if hold_notice:
+                ui.label(hold_notice).classes('vh-keep-all')
         if not window["is_open"]:
             return
 
@@ -3345,13 +3571,41 @@ def _render_pending_order_row(client, order: dict, window: dict, on_changed,
             ui.notify('✅ 주문을 취소했습니다 — 내역에는 취소 기록이 남습니다.', type='positive')
             on_changed()
 
-        ui.button('수량 저장', on_click=_save).props('flat dense no-caps').classes('shrink-0')
-        ui.button('취소', on_click=_cancel).props('flat dense no-caps color=negative') \
-            .classes('shrink-0')
+        _save_guarded = _guard_double_click(_save)           # M-3
+        _cancel_guarded = _guard_double_click(_cancel)       # M-3
+        _save_guarded.bind_button(
+            ui.button('수량 저장', on_click=_save_guarded)
+            .props('flat dense no-caps').classes('shrink-0'))
+        _cancel_guarded.bind_button(
+            ui.button('취소', on_click=_cancel_guarded)
+            .props('flat dense no-caps color=negative').classes('shrink-0'))
 
 
-def _order_status_text(order: dict) -> str:
-    """주문 상태 → 한국어. **부분체결은 요청·실제 수량을 둘 다** 보여줍니다(1-3 / 2-4-6)."""
+# 🔴 2026-08-29 재감사 M-10 — 보류 배지 문구는 **여기 한 곳**에만 둡니다. 상태 문구
+#    (`_order_status_text()`)와 대기 주문 줄(`_pending_hold_notice_text()`)이 같은 말을
+#    해야 하는데, 문자열을 두 번 적으면 언젠가 한쪽만 고쳐집니다(§0-3-10).
+PENDING_HOLD_BADGE = '⏸️ 판정 보류 — 관리자 확인 중'
+
+
+def _order_status_text(order: dict, *, today=None) -> str:
+    """주문 상태 → 한국어. **부분체결은 요청·실제 수량을 둘 다** 보여줍니다(1-3 / 2-4-6).
+
+    🔴 2026-08-29 재감사 H-8 — `pending` 을 두 가지로 갈라 보여줍니다. 체결 예정일이
+       **이미 지났는데도** pending 인 주문은 "체결 대기 중"이 아니라 **배치가 그날을
+       처리하지 못한 상태**입니다(배치가 하루라도 못 돌면 그날 주문은 체결도 취소도 되지
+       않은 채 남습니다). 같은 문구로 그리면 사용자는 자기 주문이 언제 처리될지 알 수 없고,
+       예수금은 계속 묶인 것처럼 보입니다 — 실패 사실은 화면까지 도달해야 합니다(§0-1).
+       배치는 다음 실행 맨 앞에서 이런 주문을 정리하므로, 문구도 그 사실을 그대로 적습니다.
+
+    🔴 2026-08-29 재감사 M-10 — **세 번째 갈래**가 있습니다. 배치가 `needs_review` /
+       `no_baseline` 로 그날을 보류하면 주문은 체결도 취소도 되지 않은 채 남는데, 예전에는
+       그 사실이 배치 로그에만 있어 화면에서는 일반 대기 주문과 구별되지 않았습니다.
+       이제 배치가 `fail_reason` 에 사유만 적어 두므로(상태는 pending 유지 —
+       `duel_db.annotate_pending_orders_with_hold_reason()`), 그 표식이 있으면 갈라
+       그립니다. 순서에 주의: **지연 판정이 먼저**입니다. 날짜가 이미 지난 보류 주문은
+       다음 배치가 정리하게 되므로, "관리자 확인 중"보다 "다음 배치에서 정리됩니다"가
+       그 주문에 실제로 일어날 일입니다(모르는 것을 지어내지 않기, §0-1).
+    """
     status = order.get("status")
     requested = order.get("requested_quantity")
     filled = order.get("filled_quantity")
@@ -3364,8 +3618,56 @@ def _order_status_text(order: dict) -> str:
     if status == "expired":
         return '🚫 체결 없음(예수금으로 1주도 사지 못함)'
     if status == ORDER_PENDING:
+        if _is_overdue_pending(order, today=today):
+            return '⚠️ 처리 지연 — 다음 배치에서 정리됩니다'
+        if _pending_hold_reason(order):
+            return PENDING_HOLD_BADGE
         return '⏳ 체결 대기'
     return str(status)
+
+
+def _is_overdue_pending(order: dict, *, today=None) -> bool:
+    """체결 예정일이 지났는데 아직 `pending` 인가(H-8). 날짜를 못 읽으면 **False**입니다 —
+    모르는 값을 "지연됨"으로 단정하지 않습니다(§0-1)."""
+    if (order or {}).get("status") != ORDER_PENDING:
+        return False
+    raw = str((order or {}).get("target_date") or "").strip()
+    if not raw:
+        return False
+    try:
+        target = date.fromisoformat(raw[:10])
+    except ValueError:
+        return False
+    return target < (today or datetime.now(KST).date())
+
+
+def _pending_hold_reason(order: dict) -> str:
+    """보류 표식이 붙은 pending 주문인가(M-10) — 붙어 있으면 **그 사유 문장**, 아니면 ''.
+
+    배치가 `needs_review` / `no_baseline` 로 그날을 보류하면 주문 상태는 `pending` 그대로
+    두고 `fail_reason` 에 사유만 적습니다(`duel_db.annotate_pending_orders_with_hold_reason()`).
+    "pending 인데 사유가 적혀 있다" 는 조합은 그 경로에서만 생깁니다 — 정상 대기 주문은
+    사유가 비어 있고, 종결된 주문은 status 가 pending 이 아닙니다.
+
+    통화를 모르는 순수 함수라 원화·달러 화면이 **공유**합니다(§5-11-1).
+    """
+    if (order or {}).get("status") != ORDER_PENDING:
+        return ''
+    return str((order or {}).get("fail_reason") or '').strip()
+
+
+def _pending_hold_notice_text(order: dict) -> str:
+    """대기 주문 줄에 붙일 보류 안내(M-10) — 보류가 아니면 ''.
+
+    ⚠️ 대기 주문은 **주문 내역 표에 나오지 않습니다**(그 표는 종결된 주문만 봅니다). 그래서
+       상태 문구만 고치면 보류 사실이 화면에 끝내 도달하지 않습니다 — 대기 목록의 줄에도
+       같은 말을 붙여야 사용자가 자기 주문이 왜 멈춰 있는지 알 수 있습니다(§0-1).
+       사유 문장은 배치가 쓴 것을 **그대로** 보여줍니다(요약하면 그게 왜 보류인지 사라집니다).
+    """
+    reason = _pending_hold_reason(order)
+    if not reason:
+        return ''
+    return f'{PENDING_HOLD_BADGE} · {reason}'
 
 
 def _render_order_history_table(orders) -> None:
@@ -3390,7 +3692,11 @@ def _render_order_history_table(orders) -> None:
             esc(format_amount(order.get("filled_amount"), CURRENCY)
                 if order.get("filled_amount") is not None else '—'),
             # 🔐 §0-3-9 — 사유 문장은 배치가 쓴 값이지만 예외 없이 이스케이프합니다.
-            esc(str(order.get("fail_reason") or '—')),
+            # 🗣️ 2026-08-29 오너 요청 — 사유 칸이 한 줄로 길게 늘어져 표를 밀어냈습니다.
+            #    종목명 칸이 이미 쓰는 것과 **같은 줄바꿈 패턴**을 그대로 재사용합니다.
+            (f'<div style="white-space: normal; overflow-wrap: anywhere; '
+             f'line-height: 1.3; max-width: 320px;">'
+             f'{esc(str(order.get("fail_reason") or chr(0x2014)))}</div>'),
         ])
     ui.html(holdings_table_html(headers, body_rows)).classes('w-full')
 
@@ -3485,11 +3791,15 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed,
     estimate = _pending_estimate_text(order, price_lookup, MARKET_US, CURRENCY_USD,
                                       price_name='최근 마감가',
                                       caveat='실제 체결가는 그날 미국 정규장 마감가로 정해집니다')
+    # 🔴 2026-08-29 재감사 M-10(원화와 같은 공유 함수) — 보류 사실을 이 줄에도 답니다.
+    hold_notice = _pending_hold_notice_text(order)
 
     with ui.row().classes('no-wrap items-center gap-2 w-full'):
         with ui.column().classes('flex-1 min-w-0 gap-0'):
             ui.label(label).classes('vh-keep-all')
             ui.label(estimate).classes('vh-muted vh-keep-all')
+            if hold_notice:
+                ui.label(hold_notice).classes('vh-keep-all')
         if not window["is_open"]:
             return
 
@@ -3530,9 +3840,15 @@ def _render_pending_order_row_usd(client, order: dict, window: dict, on_changed,
             ui.notify('✅ 달러 주문을 취소했습니다 — 내역에는 취소 기록이 남습니다.', type='positive')
             on_changed()
 
-        ui.button('수량 저장', on_click=_save_usd).props('flat dense no-caps').classes('shrink-0')
-        ui.button('취소', on_click=_cancel_usd).props('flat dense no-caps color=negative') \
-            .classes('shrink-0')
+        # (원화 대기 주문 줄과 같은 M-3 방어 — 미러를 빼 두면 바로 divergence 가 됩니다)
+        _save_usd_guarded = _guard_double_click(_save_usd)
+        _cancel_usd_guarded = _guard_double_click(_cancel_usd)
+        _save_usd_guarded.bind_button(
+            ui.button('수량 저장', on_click=_save_usd_guarded)
+            .props('flat dense no-caps').classes('shrink-0'))
+        _cancel_usd_guarded.bind_button(
+            ui.button('취소', on_click=_cancel_usd_guarded)
+            .props('flat dense no-caps color=negative').classes('shrink-0'))
 
 
 def _render_order_history_table_usd(orders) -> None:
@@ -3556,6 +3872,10 @@ def _render_order_history_table_usd(orders) -> None:
             esc(format_amount(order.get("filled_amount"), CURRENCY_USD)
                 if order.get("filled_amount") is not None else '—'),
             # 🔐 §0-3-9 — 사유 문장은 배치가 쓴 값이지만 예외 없이 이스케이프합니다.
-            esc(str(order.get("fail_reason") or '—')),
+            # 🗣️ 2026-08-29 오너 요청 — 사유 칸이 한 줄로 길게 늘어져 표를 밀어냈습니다.
+            #    종목명 칸이 이미 쓰는 것과 **같은 줄바꿈 패턴**을 그대로 재사용합니다.
+            (f'<div style="white-space: normal; overflow-wrap: anywhere; '
+             f'line-height: 1.3; max-width: 320px;">'
+             f'{esc(str(order.get("fail_reason") or chr(0x2014)))}</div>'),
         ])
     ui.html(holdings_table_html(headers, body_rows)).classes('w-full')

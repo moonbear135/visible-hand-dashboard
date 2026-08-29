@@ -104,6 +104,15 @@ class FakeQuery:
         self.filters.append(("lte", column, value))
         return self
 
+    def lt(self, column, value):
+        """`.lt()` — 2026-08-29 재감사 H-8 의 "그 이전 전부" 정리가 쓰는 필터입니다."""
+        self.filters.append(("lt", column, value))
+        return self
+
+    def gt(self, column, value):
+        self.filters.append(("gt", column, value))
+        return self
+
     def in_(self, column, values):
         self.filters.append(("in", column, list(values)))
         return self
@@ -1253,16 +1262,20 @@ def test_record_order_fill_persists_exactly_what_the_rules_computed():
     """
     체결 계산은 `duel_rules.calculate_fill()` 이 하고, 이 파일은 그 결과를 그대로 적습니다.
     (여기서 floor 나눗셈을 다시 하면 규칙이 두 곳에 생깁니다.)
+
+    ⚠️ 2026-08-29 재감사 L-4 — 단건 래퍼 `record_order_fill()` 은 **비테스트 호출부가 0**
+       이라 삭제됐습니다. 실제로 쓰이는 `record_order_fills()` 로 같은 것을 검사합니다.
     """
     outcome = duel_rules.calculate_fill(10, 70_000, 500_000)   # 7주만 체결되는 부분체결
     assert outcome["status"] == "partially_filled" and outcome["filled_quantity"] == 7
 
     client = FakeClient()
-    duel_db.record_order_fill(
-        client, "order-1", outcome["status"], outcome["filled_quantity"],
-        70_000, outcome["filled_amount"], outcome["fail_reason"],
-        filled_date=date(2026, 8, 20),
-    )
+    duel_db.record_order_fills(client, [{
+        "id": "order-1", "status": outcome["status"],
+        "filled_quantity": outcome["filled_quantity"], "filled_price": 70_000,
+        "filled_amount": outcome["filled_amount"], "filled_date": date(2026, 8, 20),
+        "fail_reason": outcome["fail_reason"],
+    }])
     call = client.only_call(duel_db.ORDERS_TABLE, "update")
     assert call.payload["status"] == "partially_filled"
     assert call.payload["filled_quantity"] == 7
@@ -1277,7 +1290,9 @@ def test_record_order_fill_requires_the_trading_day():
     """체결일을 모르면 오늘 날짜를 지어 넣지 않고 거절합니다(§0-1)."""
     client = FakeClient()
     with pytest.raises(DuelDbError) as excinfo:
-        duel_db.record_order_fill(client, "order-1", "filled", 3, 70_000, 210_000)
+        duel_db.record_order_fills(client, [{
+            "id": "order-1", "status": "filled", "filled_quantity": 3,
+            "filled_price": 70_000, "filled_amount": 210_000}])
     assert "함께" in str(excinfo.value)
     assert client.calls == []
 
@@ -1285,18 +1300,22 @@ def test_record_order_fill_requires_the_trading_day():
 def test_record_order_fill_requires_reason_for_non_filled_status():
     client = FakeClient()
     with pytest.raises(DuelDbError):
-        duel_db.record_order_fill(client, "order-1", "expired", 0, None, None, None)
+        duel_db.record_order_fills(client, [{
+            "id": "order-1", "status": "expired", "filled_quantity": 0}])
     with pytest.raises(DuelDbError):
-        duel_db.record_order_fill(client, "order-1", "pending", None, None, None, None)
+        duel_db.record_order_fills(client, [{
+            "id": "order-1", "status": "pending", "filled_quantity": None}])
     assert client.calls == []
 
 
 def test_record_order_fill_writes_empty_fill_fields_for_expired_orders():
     """0주 체결은 '0원에 체결'이 아니라 '체결 없음'입니다 — 네 필드 모두 NULL."""
     client = FakeClient()
-    duel_db.record_order_fill(client, "order-1", "expired", 0, 70_000, 0,
-                              "예수금이 부족해 1주도 체결되지 않았습니다.",
-                              filled_date=date(2026, 8, 20))
+    duel_db.record_order_fills(client, [{
+        "id": "order-1", "status": "expired", "filled_quantity": 0,
+        "filled_price": 70_000, "filled_amount": 0,
+        "filled_date": date(2026, 8, 20),
+        "fail_reason": "예수금이 부족해 1주도 체결되지 않았습니다."}])
     payload = client.only_call(duel_db.ORDERS_TABLE, "update").payload
     assert payload["filled_quantity"] is None
     assert payload["filled_price"] is None
@@ -1306,9 +1325,15 @@ def test_record_order_fill_writes_empty_fill_fields_for_expired_orders():
 
 
 def test_record_buy_ledger_entry_flips_the_sign_once():
-    """매수 원장은 음수. 부호를 뒤집는 자리는 이 파일 한 군데뿐이어야 합니다."""
+    """매수 원장은 음수. 부호를 뒤집는 자리는 이 파일 한 군데뿐이어야 합니다.
+
+    ⚠️ 2026-08-29 재감사 L-4 — 단건 래퍼 `record_buy_ledger_entry()` 는 삭제됐습니다
+       (비테스트 호출부 0건). 실제로 쓰이는 `record_buy_ledger_entries()` 로 검사합니다.
+    """
     client = FakeClient()
-    duel_db.record_buy_ledger_entry(client, "acc-1", "order-1", 490_000, date(2026, 8, 20))
+    duel_db.record_buy_ledger_entries(client, [{
+        "account_id": "acc-1", "order_id": "order-1",
+        "filled_amount": 490_000, "event_date": date(2026, 8, 20)}])
     row = client.only_call(duel_db.LEDGER_TABLE, "insert").rows[0]
     assert row["amount"] == -490_000
     assert row["event_type"] == "buy"
@@ -1329,32 +1354,10 @@ def test_record_buy_ledger_entry_rejects_zero_amount():
     """체결금액 0원짜리 원장 행은 만들지 않습니다(현금이 움직이지 않았으므로)."""
     client = FakeClient()
     with pytest.raises(DuelDbError):
-        duel_db.record_buy_ledger_entry(client, "acc-1", "order-1", 0, date(2026, 8, 20))
+        duel_db.record_buy_ledger_entries(client, [{
+            "account_id": "acc-1", "order_id": "order-1",
+            "filled_amount": 0, "event_date": date(2026, 8, 20)}])
     assert client.calls == []
-
-
-def test_upsert_position_weighted_average_uses_the_rules_function():
-    """평단가는 `duel_rules.apply_buy_fill_to_position()` 이 계산합니다(재구현 금지)."""
-    existing = {"quantity": 10, "avg_cost": 1000}
-    expected = duel_rules.apply_buy_fill_to_position(10, 1000, 5, 2000)
-
-    client = FakeClient()
-    duel_db.upsert_position_weighted_average(
-        client, "acc-1", "005930", "삼성전자", existing, 5, 2000)
-    call = client.only_call(duel_db.POSITIONS_TABLE, "upsert")
-    assert call.options["on_conflict"] == "account_id,ticker"
-    row = call.rows[0]
-    assert row["quantity"] == expected["quantity"] == 15
-    assert row["avg_cost"] == expected["avg_cost"]
-    assert row["avg_cost"] == pytest.approx(1333.333333, abs=1e-6)
-
-
-def test_upsert_position_weighted_average_handles_new_position():
-    client = FakeClient()
-    duel_db.upsert_position_weighted_average(
-        client, "acc-1", "005930", "삼성전자", None, 3, 70_000)
-    row = client.only_call(duel_db.POSITIONS_TABLE, "upsert").rows[0]
-    assert row["quantity"] == 3 and row["avg_cost"] == 70_000
 
 
 def test_upsert_positions_rejects_duplicate_conflict_keys():
@@ -1389,8 +1392,13 @@ def test_settle_sell_positions_calls_the_rpc_with_only_three_fields():
 
     보내는 필드는 셋뿐입니다 — `avg_cost` 를 보내지 않는 것이 규약의 일부입니다(매도는
     잔여 주식의 매입단가를 바꾸지 않으므로, 정산 경로로 원가를 다시 쓰는 길을 없앱니다).
+
+    ⚠️ 2026-08-29 재감사 H-4 — RPC **앞에** 현재 수량을 읽는 select 가 하나 붙었습니다
+       (이미 반영된 행을 다시 보내면 RPC 가 예외를 내 재시도를 막기 때문). 그래서
+       포지션 표에 대한 호출은 **select 만** 있고 쓰기(upsert/update)는 여전히 0 입니다.
     """
-    client = FakeClient()
+    client = FakeClient(responses={(duel_db.POSITIONS_TABLE, "select"): [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 10.0}]})
     settled = duel_db.settle_sell_positions(client, [
         {"account_id": "acc-1", "ticker": "005930", "stock_name": "삼성전자",
          "quantity": 6, "avg_cost": 70_000.0},
@@ -1402,17 +1410,50 @@ def test_settle_sell_positions_calls_the_rpc_with_only_three_fields():
     assert call.payload == {"p_rows": [
         {"account_id": "acc-1", "ticker": "005930", "quantity": 6.0}]}
     assert settled == 1
-    # 포지션 표를 직접 건드리지 않습니다(그 경로로는 통과할 수 없습니다).
-    assert client.calls_for(duel_db.POSITIONS_TABLE) == []
+    # 포지션 표에 **쓰지** 않습니다(그 경로로는 수량 감소가 통과할 수 없습니다).
+    assert [c.op for c in client.calls_for(duel_db.POSITIONS_TABLE)] == ["select"]
+
+
+def test_settle_sell_positions_skips_rows_already_settled_by_an_earlier_attempt():
+    """
+    🔴 2026-08-29 재감사 H-4 — 재실행 안전. 이전 시도에서 이미 목표 수량까지 줄어든 행을
+    다시 보내면 DB 함수가 "수량이 줄지 않았다"며 예외를 내고, 그 예외가 그날 밤 전체를
+    멈춥니다(= 재시도가 불가능해집니다). 호출 직전 현재 수량을 읽어 걸러 냅니다.
+    """
+    client = FakeClient(responses={(duel_db.POSITIONS_TABLE, "select"): [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 6.0},   # 이미 반영됨
+        {"account_id": "acc-1", "ticker": "000660", "quantity": 10.0},  # 아직 안 됨
+    ]})
+    settled = duel_db.settle_sell_positions(client, [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 6},
+        {"account_id": "acc-1", "ticker": "000660", "quantity": 4},
+    ])
+    assert settled == 1
+    call = client.only_call(duel_db.SETTLE_SELL_RPC, "rpc")
+    assert call.payload == {"p_rows": [
+        {"account_id": "acc-1", "ticker": "000660", "quantity": 4.0}]}
+
+
+def test_settle_sell_positions_sends_no_rpc_when_everything_is_already_settled():
+    """전부 이미 반영돼 있으면 RPC 자체를 보내지 않고 0 을 돌려줍니다."""
+    client = FakeClient(responses={(duel_db.POSITIONS_TABLE, "select"): [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 6.0}]})
+    assert duel_db.settle_sell_positions(
+        client, [{"account_id": "acc-1", "ticker": "005930", "quantity": 6}]) == 0
+    assert client.calls_for(duel_db.SETTLE_SELL_RPC, "rpc") == []
 
 
 def test_settle_sell_positions_sends_one_call_for_many_rows():
     """§0-3-2 — 계좌마다 부르지 않고 그날 매도 정산 전체를 한 번에 보냅니다."""
-    client = FakeClient()
     rows = [{"account_id": f"acc-{index}", "ticker": "005930", "quantity": 1}
             for index in range(1, 51)]
+    client = FakeClient(responses={(duel_db.POSITIONS_TABLE, "select"): [
+        {"account_id": row["account_id"], "ticker": "005930", "quantity": 5.0}
+        for row in rows]})
     assert duel_db.settle_sell_positions(client, rows) == 50
     assert len(client.calls_for(duel_db.SETTLE_SELL_RPC, "rpc")) == 1
+    # 사전 조회(H-4)도 **한 번**입니다 — 계좌마다 읽지 않습니다(§0-3-2).
+    assert len(client.calls_for(duel_db.POSITIONS_TABLE, "select")) == 1
 
 
 def test_settle_sell_positions_sends_nothing_for_an_empty_list():
@@ -1441,7 +1482,8 @@ def test_settle_sell_positions_refuses_duplicate_keys_and_missing_values():
 
 def test_settle_sell_positions_allows_a_zero_quantity():
     """전량 매도(잔여 0주)는 정상 상태입니다 — 여기서 막히면 안 됩니다."""
-    client = FakeClient()
+    client = FakeClient(responses={(duel_db.POSITIONS_TABLE, "select"): [
+        {"account_id": "acc-1", "ticker": "005930", "quantity": 5.0}]})
     duel_db.settle_sell_positions(client, [
         {"account_id": "acc-1", "ticker": "005930", "quantity": 0}])
     assert client.only_call(duel_db.SETTLE_SELL_RPC, "rpc").payload["p_rows"][0]["quantity"] == 0
@@ -1862,11 +1904,19 @@ def test_calling_service_client_without_package_raises_catchable_error(monkeypat
     lambda: duel_db.fetch_pending_orders_for_fill(None, date(2026, 8, 20)),
     lambda: duel_db.expire_or_cancel_all_pending_for_date(None, date(2026, 8, 20), "사유"),
     lambda: duel_db.write_daily_snapshots(None, date(2026, 8, 20), [_snapshot_row()]),
-    lambda: duel_db.record_order_fill(None, "o-1", "filled", 1, 100, 100,
-                                      filled_date=date(2026, 8, 20)),
-    lambda: duel_db.record_buy_ledger_entry(None, "acc-1", "o-1", 100, date(2026, 8, 20)),
-    lambda: duel_db.upsert_position_weighted_average(None, "acc-1", "005930", "삼성전자",
-                                                     None, 1, 100),
+    lambda: duel_db.record_order_fills(None, [{"id": "o-1", "status": "filled",
+                                               "filled_quantity": 1, "filled_price": 100,
+                                               "filled_amount": 100,
+                                               "filled_date": date(2026, 8, 20)}]),
+    lambda: duel_db.record_buy_ledger_entries(None, [{"account_id": "acc-1",
+                                                      "order_id": "o-1",
+                                                      "filled_amount": 100,
+                                                      "event_date": date(2026, 8, 20)}]),
+    lambda: duel_db.upsert_positions(None, [{"account_id": "acc-1", "ticker": "005930",
+                                             "stock_name": "삼성전자", "quantity": 1,
+                                             "avg_cost": 100}]),
+    lambda: duel_db.expire_stale_pending_orders_before(None, date(2026, 8, 20), "사유"),
+    lambda: duel_db.annotate_pending_orders_with_hold_reason(None, date(2026, 8, 20), "사유"),
 ])
 def test_none_client_raises_duel_db_error_not_attribute_error(call):
     """
@@ -1941,3 +1991,226 @@ def test_every_public_function_has_a_docstring():
                and not name.startswith("_")
                and not (function.__doc__ or "").strip()]
     assert missing == [], f"docstring 없는 공개 함수: {missing}"
+
+
+# =============================================================================
+# 16. 🔴 2026-08-29 재감사 H-6 — 배치 읽기 페이지네이션
+#
+#  예전에는 배치 조회 **어디에도 `.range()` 가 없었습니다.** PostgREST/Supabase 가 행을
+#  잘라 돌려주면 "일부만 읽고 전부 읽은 척" 하게 되고(잘린 성공 응답은 `_execute()` 의
+#  실패 방어를 그대로 통과합니다), 그 반쪽 원장으로 계산한 예수금이 "예수금 부족"이라는
+#  **사실이 아닌 만료 사유**를 사용자 주문에 적었습니다.
+# =============================================================================
+def test_execute_all_reads_every_page_and_stops_on_a_short_one():
+    """페이지가 꽉 차 있으면 계속 읽고, 짧은 페이지에서 멈춥니다."""
+    client = FakeClient()
+    pages = [[{"n": i} for i in range(3)], [{"n": 3}]]
+
+    def factory(offset, limit):
+        query = client.table("t").select("*").range(offset, limit)
+        query.execute = lambda q=query: FakeResponse(pages.pop(0)) if pages else FakeResponse([])
+        return query
+
+    calls = []
+
+    def spy(offset, limit):
+        calls.append((offset, limit))
+        return factory(offset, limit)
+
+    rows = duel_db._execute_all(spy, "테스트 조회", page=3)
+    assert [row["n"] for row in rows] == [0, 1, 2, 3]
+    assert calls == [(0, 2), (3, 5)]
+
+
+def test_execute_all_makes_exactly_one_round_trip_for_a_single_page():
+    """🔴 회귀 원칙 유지 — 페이지가 1개뿐이면 왕복은 **예전과 똑같이 1회**입니다(§0-3-2)."""
+    client = FakeClient(responses={(duel_db.ACCOUNTS_TABLE, "select"):
+                                   [{"id": f"acc-{i}"} for i in range(3)]})
+    duel_db.fetch_all_active_accounts(client)
+    assert len(client.calls_for(duel_db.ACCOUNTS_TABLE, "select")) == 1
+    assert client.calls[0].options["range"] == (0, 999)
+
+
+def test_execute_all_raises_instead_of_silently_returning_half_the_rows():
+    """
+    🔴 §0-1 — 상한에 걸린 채로 멈추면 **예외**입니다. 조용히 반쪽 데이터로 넘어가면
+    그 위에서 계산한 예수금이 사용자 주문의 체결·만료를 결정하게 됩니다.
+    """
+    client = FakeClient()
+
+    def factory(offset, limit):
+        query = client.table("t").select("*").range(offset, limit)
+        query.execute = lambda: FakeResponse([{"n": 0}, {"n": 1}])   # 언제나 가득 참
+        return query
+
+    with pytest.raises(DuelDbError) as excinfo:
+        duel_db._execute_all(factory, "테스트 조회", page=2, max_pages=3)
+    assert "페이지 상한" in str(excinfo.value)
+
+
+def test_batch_reads_all_use_range():
+    """배치 읽기 함수들이 실제로 `.range()` 를 붙여 보내는지(하나라도 빠지면 H-6 재발)."""
+    checks = [
+        (lambda c: duel_db.fetch_all_active_accounts(c), duel_db.ACCOUNTS_TABLE),
+        (lambda c: duel_db.fetch_cash_ledger_for_accounts(c, ["acc-1"]), duel_db.LEDGER_TABLE),
+        (lambda c: duel_db.fetch_positions_for_accounts(c, ["acc-1"]), duel_db.POSITIONS_TABLE),
+        (lambda c: duel_db.fetch_daily_snapshots_for_accounts(c, ["acc-1"]),
+         duel_db.DAILY_SNAPSHOTS_TABLE),
+        (lambda c: duel_db.fetch_pending_orders_for_fill(c, date(2026, 8, 20)),
+         duel_db.ORDERS_TABLE),
+        (lambda c: duel_db.fetch_publishable_consents(c), duel_db.CONSENT_TABLE),
+        (lambda c: duel_db.fetch_revoked_consent_accounts(c), duel_db.CONSENT_TABLE),
+        (lambda c: duel_db.fetch_bracket_assignments(c, "2026-H2"),
+         duel_db.BRACKET_ASSIGNMENTS_TABLE),
+    ]
+    for call, table in checks:
+        client = FakeClient()
+        call(client)
+        query = client.only_call(table, "select")
+        assert "range" in query.options, f"{table} 조회에 .range() 가 없습니다(H-6)"
+
+
+def test_revoke_consent_does_not_extend_the_block_when_another_tab_won():
+    """
+    🔴 L-12 — 두 탭에서 동시에 철회해도 `revoked_at` 을 덮어쓰지 않습니다(TOCTOU).
+
+    update 문 자체에 "아직 철회되지 않은 행만" 조건을 넣고, 0행이면 다른 요청이 먼저
+    끝냈다는 뜻이므로 그 결과를 다시 읽어 돌려줍니다(3개월 차단이 연장되지 않습니다).
+    """
+    already = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
+    client = FakeClient(responses={
+        # 1차 조회에서는 "아직 철회 전"으로 보이지만(다른 탭이 그 사이 철회),
+        # update 는 0행이고, 그 뒤 재조회에서 이미 철회된 행이 나옵니다.
+        (duel_db.CONSENT_TABLE, "select"): sequence(
+            [{"account_id": "acc-1", "revoked_at": None}], [already]),
+        (duel_db.CONSENT_TABLE, "update"): [],
+    })
+    result = duel_db.revoke_consent(client, "acc-1")
+    assert result["revoked_at"] == already["revoked_at"], "먼저 찍힌 철회 시각을 덮어썼습니다"
+    update = client.only_call(duel_db.CONSENT_TABLE, "update")
+    assert ("is", "revoked_at", "null") in update.filters
+
+
+def test_save_sell_order_accepts_a_fractional_holding():
+    """
+    🔴 M-4 — 소수 보유 수량이 **매도 자체를 막지 않습니다.**
+
+    `duel_rules.calculate_sell_fill()` 은 "액면병합·감자 같은 기업행위 조정이 소수 수량을
+    남길 수 있다"는 이유로 보유 수량에 정수를 요구하지 않는데, 이 계층에서만 거절해서
+    10.5주 보유 계좌는 한 주도 팔 수 없었고 0.4주 포지션은 영원히 정리할 수 없었습니다.
+    **파는 수량(quantity)의 정수 검증은 그대로**입니다(부분 주식을 팔 수는 없습니다).
+    """
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "insert"): [{"id": "o-1"}]})
+    saved = duel_db.save_sell_order(
+        client, "acc-1", "005930", "삼성전자", 1, 10.5, 0,
+        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    assert saved["id"] == "o-1"
+
+    # 보유량을 넘는 수량은 여전히 거절합니다.
+    with pytest.raises(DuelDbError):
+        duel_db.save_sell_order(
+            client, "acc-1", "005930", "삼성전자", 11, 10.5, 0,
+            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+    # 파는 수량은 여전히 정수여야 합니다.
+    with pytest.raises(DuelDbError):
+        duel_db.save_sell_order(
+            client, "acc-1", "005930", "삼성전자", 1.5, 10.5, 0,
+            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW)
+
+
+def test_expire_stale_pending_orders_before_uses_a_less_than_filter():
+    """
+    🔴 H-8 — "그 이전 전부"를 **한 번의 update** 로 정리합니다(집합 연산, §0-3-2).
+    기존 `expire_or_cancel_all_pending_for_date()` 는 정확히 그 날짜 하나만 봅니다.
+    """
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"):
+                                   [{"id": "old-1"}, {"id": "old-2"}]})
+    assert duel_db.expire_stale_pending_orders_before(
+        client, date(2026, 8, 20), "사유") == 2
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert ("lt", "target_date", "2026-08-20") in call.filters
+    assert ("eq", "status", "pending") in call.filters
+    assert call.payload["status"] == duel_db.ORDER_CANCELLED
+    assert call.payload["fail_reason"] == "사유"
+
+
+def test_expire_or_cancel_all_pending_for_date_can_be_limited_to_active_accounts():
+    """
+    🔴 M-11 — 실패일 일괄 취소도 **활성 계좌만** 대상으로 할 수 있어야 합니다.
+    체결 경로는 활성 계좌 목록에 없는 주문을 손대지 않고 경고로 올리는데, 이 경로만
+    계좌 상태를 보지 않아 같은 주문이 날에 따라 보호받거나 취소됐습니다.
+    """
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): [{"id": "o-1"}]})
+    duel_db.expire_or_cancel_all_pending_for_date(
+        client, date(2026, 8, 20), "사유", account_ids=["acc-1", "acc-2"])
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert ("in", "account_id", ["acc-1", "acc-2"]) in call.filters
+
+    # 대상이 비어 있으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
+    empty = FakeClient()
+    assert duel_db.expire_or_cancel_all_pending_for_date(
+        empty, date(2026, 8, 20), "사유", account_ids=[]) == 0
+    assert empty.calls == []
+
+
+# -----------------------------------------------------------------------------
+# 12-2. 보류 사유 표식 (2026-08-29 재감사 M-10)
+# -----------------------------------------------------------------------------
+def test_hold_reason_is_written_without_touching_the_status():
+    """
+    🔴 M-10 — 보류는 **결론이 아닙니다.** 그래서 `status` 는 `pending` 그대로 두고
+    `fail_reason` 만 적습니다. payload 에 status 가 섞여 들어가면 그날 주문이 조용히
+    종결되어 사용자가 다시 주문할 기회도, 관리자가 override 로 결론 낼 기회도 사라집니다.
+    """
+    affected = [{"id": f"o-{i}"} for i in range(5)]
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): affected})
+    reason = "2026-08-20 종가로 체결할지 판단하지 못해 보류 중입니다(관리자 확인 대기)."
+
+    count = duel_db.annotate_pending_orders_with_hold_reason(
+        client, date(2026, 8, 20), reason)
+
+    assert count == 5
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert call.payload == {"fail_reason": reason}, (
+        "보류 표식이 status 까지 건드립니다 — 보류를 종결로 바꿔 적는 셈입니다(§0-1)."
+    )
+    assert "status" not in call.payload
+    # 대상 집합은 보류 판단에 쓴 `fetch_pending_orders_for_fill()` 과 같은 필터입니다.
+    assert call.filter_map == {"status": "pending", "target_date": "2026-08-20"}
+    assert len(client.calls) == 1, "주문이 몇 건이든 update 질의는 1개입니다(§0-3-2)."
+
+
+def test_hold_reason_requires_a_sentence():
+    """사유 없는 표식은 화면에 "왜 멈췄는지"를 못 알려 줍니다 — 애초에 적을 이유가 없습니다."""
+    client = FakeClient()
+    for bad_reason in ("", "   ", None):
+        with pytest.raises(DuelDbError):
+            duel_db.annotate_pending_orders_with_hold_reason(
+                client, date(2026, 8, 20), bad_reason)
+    assert client.calls == []
+
+
+def test_a_later_fill_overwrites_the_hold_reason():
+    """
+    🔴 M-10 후속 — 보류 표식은 **임시**입니다. 나중에 그 주문이 실제로 체결되면
+    `record_order_fills()` 가 `fail_reason` 을 payload 에 **항상 다시 써서**(전량 체결이면
+    `None`) 덮어씁니다. 표식이 남아 화면에 "보류 중"이라고 계속 적히면 그게 새로운 거짓말이
+    됩니다 — 별도 정리 로직 없이 이 성질만으로 충분한지를 여기서 고정합니다.
+    """
+    client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): [{"id": "o-1"}]})
+    duel_db.record_order_fills(client, [{
+        "id": "o-1", "status": duel_rules.ORDER_FILLED, "filled_quantity": 2,
+        "filled_price": 10_000, "filled_amount": 20_000, "filled_date": date(2026, 8, 20),
+    }])
+    call = client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert "fail_reason" in call.payload and call.payload["fail_reason"] is None, (
+        "체결 기록이 fail_reason 을 다시 쓰지 않습니다 — 보류 표식이 체결된 주문에 그대로 "
+        "남아 화면이 '보류 중'이라고 계속 말하게 됩니다."
+    )
+    # 취소로 결론 나는 경우도 같은 자리(새 사유 문장)로 덮어써집니다.
+    cancel_client = FakeClient(responses={(duel_db.ORDERS_TABLE, "update"): [{"id": "o-1"}]})
+    duel_db.expire_or_cancel_all_pending_for_date(
+        cancel_client, date(2026, 8, 20), "관리자 확인 결과 취소했습니다.")
+    cancel_call = cancel_client.only_call(duel_db.ORDERS_TABLE, "update")
+    assert cancel_call.payload["fail_reason"] == "관리자 확인 결과 취소했습니다."
+    assert cancel_call.payload["status"] == duel_db.ORDER_CANCELLED

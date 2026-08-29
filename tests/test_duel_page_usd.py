@@ -2723,3 +2723,213 @@ def test_the_remaining_cash_line_is_filled_on_the_first_render_too():
                 < src.index("query_input = ")), (
             f"{name}() 의 남은 예수금 줄이 예수금 줄 바로 아래에 있지 않습니다."
         )
+
+
+# =============================================================================
+# 🔴 2026-08-29 재감사 — 화면 쪽 항목 (H-8 배지 · M-4 소수 수량 · 사유 칸 줄바꿈)
+# =============================================================================
+def test_an_overdue_pending_order_says_it_is_delayed_not_waiting():
+    """
+    🔴 H-8 — 체결 예정일이 지났는데 아직 `pending` 인 주문은 "체결 대기 중"이 아닙니다.
+
+    배치가 하루라도 못 돌면 그날 주문은 체결도 취소도 되지 않은 채 남습니다. 같은 문구로
+    그리면 사용자는 자기 주문이 언제 처리될지 알 수 없고, 예수금은 계속 묶인 것처럼
+    보입니다 — 실패 사실은 화면까지 도달해야 합니다(§0-1).
+    """
+    import web.pages.duel_page as page
+
+    today = date(2026, 8, 20)
+    overdue = {"status": "pending", "target_date": "2026-08-18", "requested_quantity": 1}
+    upcoming = {"status": "pending", "target_date": "2026-08-21", "requested_quantity": 1}
+    same_day = {"status": "pending", "target_date": "2026-08-20", "requested_quantity": 1}
+
+    assert page._order_status_text(overdue, today=today) == '⚠️ 처리 지연 — 다음 배치에서 정리됩니다'
+    assert page._order_status_text(upcoming, today=today) == '⏳ 체결 대기'
+    assert page._order_status_text(same_day, today=today) == '⏳ 체결 대기'
+
+    # 날짜를 못 읽으면 "지연됨"으로 단정하지 않습니다(§0-1 — 모르면 모른다고).
+    assert page._order_status_text(
+        {"status": "pending", "target_date": None}, today=today) == '⏳ 체결 대기'
+    assert page._order_status_text(
+        {"status": "pending", "target_date": "말도 안 되는 값"}, today=today) == '⏳ 체결 대기'
+
+    # 종결된 주문은 날짜와 무관하게 예전 문구 그대로입니다.
+    assert page._order_status_text(
+        {"status": "filled", "target_date": "2026-08-01", "filled_quantity": 3},
+        today=today) == '✅ 전량 체결 (3주)'
+
+
+def test_a_held_pending_order_says_it_is_on_hold_not_merely_waiting():
+    """
+    🔴 M-10 — 배치가 `needs_review` / `no_baseline` 로 보류한 주문은 상태가 `pending` 인 채
+    `fail_reason` 에 사유만 적혀 옵니다. 그 표식이 있으면 "⏳ 체결 대기"가 아니라 보류라고
+    말해야 합니다 — 로그에만 남은 보류는 사용자에게 도달하지 않은 것과 같습니다(§0-1).
+    """
+    import web.pages.duel_page as page
+
+    today = date(2026, 8, 20)
+    hold = "2026-08-20 종가로 체결할지 판단하지 못해 보류 중입니다(관리자 확인 대기)."
+    held = {"status": "pending", "target_date": "2026-08-20", "requested_quantity": 1,
+            "fail_reason": hold}
+    plain = {"status": "pending", "target_date": "2026-08-20", "requested_quantity": 1,
+             "fail_reason": None}
+
+    assert page._order_status_text(held, today=today) == '⏸️ 판정 보류 — 관리자 확인 중'
+    assert page._order_status_text(plain, today=today) == '⏳ 체결 대기'
+    # 빈 문자열·공백만 있는 값은 표식이 아닙니다(§0-1 — 없는 사유를 지어내지 않기).
+    assert page._order_status_text(
+        dict(plain, fail_reason="   "), today=today) == '⏳ 체결 대기'
+
+    # 날짜가 이미 지난 보류 주문은 **지연 문구가 이깁니다** — 그 주문에 실제로 일어날 일은
+    # "다음 배치가 정리"이지 "관리자 확인 대기"가 아닙니다.
+    assert page._order_status_text(
+        dict(held, target_date="2026-08-18"),
+        today=today) == '⚠️ 처리 지연 — 다음 배치에서 정리됩니다'
+
+    # 종결된 주문의 사유는 예전 그대로(사유 칸이 따로 보여 줍니다).
+    assert page._order_status_text(
+        {"status": "cancelled", "fail_reason": hold}, today=today) == '🚫 취소됨'
+
+
+def test_the_hold_reason_helpers_are_shared_by_both_currencies():
+    """§5-11-1 / §0-3-10 — 보류 판정·문구는 통화를 모르는 공유 함수 한 벌뿐입니다."""
+    for name in ("_pending_hold_reason", "_pending_hold_notice_text"):
+        assert name in FUNCTIONS, f"{name}() 가 없습니다."
+        assert f"{name}_usd" not in FUNCTIONS, (
+            f"{name}() 의 달러 복제본이 생겼습니다 — 문구가 갈라집니다."
+        )
+        used = _names_used(FUNCTIONS[name])
+        for constant in ("CURRENCY", "CURRENCY_USD", "MARKET_KR", "MARKET_US"):
+            assert constant not in used, f"공유 함수가 {constant} 를 직접 씁니다."
+
+
+def test_a_held_pending_row_tells_the_user_why_it_is_stuck_in_both_currencies():
+    """
+    🔴 M-10 — **대기 주문은 주문 내역 표에 나오지 않습니다**(그 표는 종결된 주문만 봅니다).
+    그래서 대기 목록의 줄 자체에 보류 배지와 사유가 붙어야 사용자가 이유를 알 수 있습니다.
+    """
+    hold = "2026-08-20 종가로 체결할지 판단하지 못해 보류 중입니다(관리자 확인 대기)."
+    from utils.scorecard_db import MARKET_KR, MARKET_US
+
+    for name, order, lookup in (
+        ("_render_pending_order_row", dict(PENDING_KRW_ORDER, fail_reason=hold),
+         {(MARKET_KR, "016360"): 164300}),
+        ("_render_pending_order_row_usd", dict(PENDING_USD_ORDER, fail_reason=hold),
+         {(MARKET_US, "MSFT"): 500.0}),
+    ):
+        blob, _asked = _render_pending_row(name, order, lookup)
+        assert "판정 보류" in blob, (
+            f"{name}() 이 보류 중인 주문을 일반 대기 주문과 똑같이 그립니다: {blob}"
+        )
+        assert hold in blob, (
+            f"{name}() 이 보류 사유를 보여주지 않습니다 — 배지만으로는 왜 멈췄는지 "
+            f"알 수 없습니다: {blob}"
+        )
+
+        # 사유가 없는 평범한 대기 주문에는 아무것도 붙지 않습니다(겁주지 않기).
+        plain_blob, _ = _render_pending_row(name, dict(order, fail_reason=None), lookup)
+        assert "판정 보류" not in plain_blob
+
+
+def test_sellable_positions_keep_fractional_quantities():
+    """
+    🔴 M-4 — 소수 보유 수량이 **조용히 사라지거나 절삭되지 않습니다.**
+
+    예전에는 `int(float(quantity))` 로 깎아서 ① 0.4주 포지션이 매도 목록에서 통째로
+    사라지고(팔 수도, 이유를 볼 수도 없음) ② 10.5주가 보유 표에는 10.5, 매도 칸에는 10 으로
+    다르게 보였습니다. `duel_rules.calculate_sell_fill()` 은 소수 보유를 정상으로 봅니다.
+    """
+    import web.pages.duel_page as page
+
+    rows = page._sellable_positions([
+        {"ticker": "AAA", "stock_name": "가", "quantity": 10.5, "status": "active"},
+        {"ticker": "BBB", "stock_name": "나", "quantity": 0.4, "status": "active"},
+        {"ticker": "CCC", "stock_name": "다", "quantity": 0, "status": "active"},
+    ])
+    by_ticker = {row["ticker"]: row["quantity"] for row in rows}
+    assert by_ticker == {"AAA": 10.5, "BBB": 0.4}, "소수 수량이 깎이거나 사라졌습니다"
+
+    # 표기는 정수·소수를 모두 사람이 읽는 모양으로(값 자체는 위에서 보존됐습니다).
+    assert page._format_share_quantity(10.5) == '10.5'
+    assert page._format_share_quantity(10) == '10'
+    assert page._format_share_quantity(1234) == '1,234'
+    assert page._format_share_quantity(None) == '—'
+
+
+def test_the_fail_reason_cell_wraps_like_the_stock_name_cell():
+    """
+    🗣️ 2026-08-29 오너 요청 — 사유 칸이 한 줄로 길게 늘어져 표를 밀어냈습니다.
+    종목명 칸이 이미 쓰는 것과 **같은 줄바꿈 패턴**을 재사용했는지 확인합니다(§0-3-10).
+    """
+    for name in ("_render_order_history_table", "_render_order_history_table_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert 'fail_reason' in src
+        assert 'overflow-wrap: anywhere' in src, f"{name}() 의 사유 칸이 줄바꿈하지 않습니다."
+        assert 'max-width: 320px' in src, f"{name}() 의 사유 칸에 폭 제한이 없습니다."
+
+
+def test_every_write_handler_is_guarded_against_double_clicks():
+    """
+    🔴 M-3 — 저장·수정·취소 처리기 전부가 **처리 중 버튼 잠금**을 거칩니다.
+
+    매도는 DB 부분 유니크 인덱스가 두 번째를 막아 주지만 **매수에는 아무 멱등 장치가
+    없어**, 두 번 누르면 주문 두 건이 그대로 들어가고 FIFO 로 차례차례 체결됩니다.
+    """
+    assert "_guard_double_click" in FUNCTIONS, "중복 클릭 방어 헬퍼가 없습니다."
+    guard_src = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_guard_double_click"])
+    assert "finally" in guard_src, "예외가 나면 버튼이 잠긴 채로 남습니다(반드시 finally 로 되살리기)."
+
+    for handler in ("_submit", "_submit_sell", "_submit_usd", "_submit_sell_usd",
+                    "_save", "_cancel", "_save_usd", "_cancel_usd"):
+        assert f"_guard_double_click({handler})" in PAGE_SRC, (
+            f"{handler}() 에 중복 클릭 방어가 걸려 있지 않습니다(M-3)."
+        )
+    # 원래 처리기를 **직접** on_click 으로 물려 두면 방어가 우회됩니다.
+    for handler in ("_submit", "_submit_sell", "_submit_usd", "_submit_sell_usd",
+                    "_save", "_cancel", "_save_usd", "_cancel_usd"):
+        assert f"on_click={handler})" not in PAGE_SRC, (
+            f"{handler}() 가 아직 버튼에 직접 물려 있습니다 — 방어를 우회합니다."
+        )
+
+
+def test_the_scorecard_holdings_are_read_once_per_render():
+    """
+    🔴 L-11 — 원화·달러 성적표 카드가 `fetch_holdings()` 를 **한 번만** 부릅니다
+    (두 카드가 완전히 같은 목록을 씁니다 — 카드마다 읽으면 같은 데이터를 두 번 읽습니다).
+    """
+    assert "_load_scorecard_holdings" in FUNCTIONS
+    loader = ast.get_source_segment(PAGE_SRC, FUNCTIONS["_load_scorecard_holdings"])
+    assert "fetch_holdings" in loader
+    # 카드 창구 두 곳은 스스로 읽지 않고 묶음을 받아 넘깁니다.
+    for wrapper in ("_render_scorecard_summary_card_krw", "_render_scorecard_summary_card_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[wrapper])
+        assert "fetch_holdings" not in src, f"{wrapper}() 이 보유 종목을 또 읽습니다."
+        assert "holdings_bundle" in src
+    # 묶음을 만드는 자리는 렌더 진입점 하나뿐이어야 합니다.
+    callers = {name for name, node in FUNCTIONS.items()
+               if "_load_scorecard_holdings" in _names_used(node)}
+    assert callers == {"_render_duel_section"}, callers
+
+
+def test_account_data_failures_are_isolated_per_query():
+    """
+    🔴 M-5 — 조회 3건 중 하나만 실패해도 **성공한 둘까지 버리지 않습니다.**
+    """
+    for name in ("_load_account_data", "_load_account_data_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert src.count("try:") == 3, f"{name}() 이 아직 조회 3건을 한 try 로 감싸고 있습니다."
+        for key in ("cash_error", "positions_error", "orders_error"):
+            assert key in src, f"{name}() 이 {key} 를 따로 담지 않습니다."
+
+
+def test_the_account_card_survives_a_snapshot_read_failure():
+    """
+    🔴 M-6 — 스냅샷 조회 실패가 **카드 전체를 지우지 않습니다.** 스냅샷은 TWR 한 줄에만
+    쓰이고, 그 자리에는 이미 "계산 불가 + 사유"를 정직하게 적을 수 있습니다.
+    """
+    for name in ("_render_account_card", "_render_account_card_usd"):
+        src = ast.get_source_segment(PAGE_SRC, FUNCTIONS[name])
+        assert "snapshots_error" in src, f"{name}() 이 스냅샷 실패를 따로 담지 않습니다."
+        assert "'계산 불가'" in src, f"{name}() 이 TWR 자리에 '계산 불가'를 적지 않습니다."
+        # 세 조회가 각자 try 를 갖습니다(예수금·포지션은 묶음에서 올 수도 있습니다).
+        assert src.count("try:") >= 3, f"{name}() 이 아직 광역 try 를 씁니다."

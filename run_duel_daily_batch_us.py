@@ -87,6 +87,10 @@ def _parse_args(argv=None):
 
 def _load_index_closes_usd(data_dir, log=print):
     """
+    ⚠️ 2026-08-29 재감사 L-2 — `log` 인자는 예전에 **한 번도 쓰이지 않았습니다**(원화판은
+       씁니다 — 미러 divergence 의 흔적). 인자를 없애는 대신 원화판과 같은 자리에서 실제로
+       로그를 찍게 했습니다: 어느 지수를 어느 날짜로 읽었는지가 매 실행 로그에 남습니다.
+
     점검에 넣을 미국 지수(추종 ETF) 종가 2개를 읽습니다. **읽기 전용**입니다.
 
     `data/us_index_history.json`(`report_db.load_us_index_closes()`)에서 두 벤치마크
@@ -110,6 +114,7 @@ def _load_index_closes_usd(data_dir, log=print):
         latest_day = max(series)
         closes[key] = series[latest_day]
         source_dates[key] = latest_day
+        log(f"  · {key} 종가 원천 기준일 {latest_day} (us_index_history.json)")
     if missing:
         raise DuelBatchError(
             f"미국 벤치마크 종가를 확보하지 못했습니다: {missing}"
@@ -152,27 +157,82 @@ def main(argv=None):
               " 않습니다).")
 
     # ── ② 오늘 점검표(지수 2개 + 상위 50종목) 만들기 ───────────────────────────
-    index_closes, index_source_dates = _load_index_closes_usd(data_dir, log=log)
-    for key, close in index_closes.items():
-        print(f"  · {key} 종가 {close} (us_index_history.json 기준 {index_source_dates[key]})")
+    #  🔴 2026-08-29 재감사 M-12(원화 스크립트의 같은 자리와 같은 이유) — 이 단계의 실패로
+    #     배치를 죽이지 않습니다. 실패 사유를 "우리 쪽 사정"으로 묶어 배치에 넘기면
+    #     신선도가 `no_baseline` 으로 강등돼 **보류**(체결·취소 둘 다 안 함)가 되고,
+    #     정기입금·정체 주문 정리처럼 신선도와 무관한 일은 정상적으로 돕니다.
+    today_probe = None
+    previous_probe = None
+    universe_index = {}
+    probe_error_reasons = []
+    index_stale_reason = None
+    try:
+        index_closes, index_source_dates = _load_index_closes_usd(data_dir, log=log)
+        for key, close in index_closes.items():
+            print(f"  · {key} 종가 {close}"
+                  f" (us_index_history.json 기준 {index_source_dates[key]})")
 
-    universe_index, _universe_meta = scorecard_db.load_universe_index(MARKET_US,
-                                                                      data_dir=data_dir)
-    today_probe = duel_batch_usd.build_freshness_probe(target_date, index_closes, universe_index)
-    print(f"  · 신선도 점검표 {len(today_probe['values'])}개 구성"
-          f" (지수 {len(today_probe['index_keys'])} + 상위 종목"
-          f" {len(today_probe['values']) - len(today_probe['index_keys'])})")
+        # 🔴 2026-08-29 재감사 H-1(USD 판) — 지수 원천이 처리 거래일보다 낡았는지 검사합니다.
+        #    원화와 달리 이 트랙은 지수가 2개라 **부분 낡음**이 가능합니다: 하나만 낡았으면 그
+        #    지수만 판정에서 빼고 나머지로 판정하고, 전부 낡았으면 판정 근거가 하나도 없다는
+        #    사실을 문장으로 만들어 배치에 넘깁니다(취소가 아니라 보류로 처리됩니다).
+        stale_keys = [k for k, d in index_source_dates.items() if d != target_date]
+        if stale_keys:
+            fresh_keys = [k for k in index_closes if k not in stale_keys]
+            detail = ", ".join(f"{k}({index_source_dates[k]})" for k in stale_keys)
+            if fresh_keys:
+                index_stale_reason = (
+                    f"지수 원천 일부가 처리 거래일({target_date})보다 낡았습니다 — {detail}."
+                    f" 나머지 지수({', '.join(fresh_keys)})만으로 판정합니다."
+                )
+                index_closes = {k: v for k, v in index_closes.items() if k not in stale_keys}
+            else:
+                index_stale_reason = (
+                    f"지수 원천이 전부 처리 거래일({target_date})보다 낡았습니다 — {detail}."
+                    " 이 지수들은 결투와 다른 파이프라인 산출물이라 그 파이프라인만"
+                    " 실패했을 수 있습니다."
+                )
+                index_closes = {}
+            print(f"  ⚠️ {index_stale_reason}")
 
-    previous_probe = duel_batch_usd.load_probe_state(state_path)
-    if previous_probe is None:
+        universe_index, _universe_meta = scorecard_db.load_universe_index(MARKET_US,
+                                                                          data_dir=data_dir)
+        today_probe = duel_batch_usd.build_freshness_probe(
+            target_date, index_closes, universe_index,
+            # 위에서 낡은 지수를 **의도적으로** 뺐을 수 있습니다(H-1). 그 사실은
+            # `index_stale_reason` 으로 배치까지 그대로 전달됩니다.
+            allow_empty_index=bool(index_stale_reason))
+        print(f"  · 신선도 점검표 {len(today_probe['values'])}개 구성"
+              f" (지수 {len(today_probe['index_keys'])} + 상위 종목"
+              f" {len(today_probe['values']) - len(today_probe['index_keys'])})")
+    except DuelBatchError as exc:
+        today_probe = None
+        probe_error_reasons.append(f"오늘 신선도 점검표를 만들지 못했습니다: {exc}")
+        print(f"  ⚠️ {probe_error_reasons[-1]}")
+
+    try:
+        previous_probe = duel_batch_usd.load_probe_state(state_path)
+    except DuelBatchError as exc:
+        previous_probe = None
+        probe_error_reasons.append(f"전일 기준값 파일을 읽지 못했습니다: {exc}")
+        print(f"  ⚠️ {probe_error_reasons[-1]}")
+    if previous_probe is None and not probe_error_reasons:
         print(f"  ⚠️ 전일 기준값 파일이 없습니다({state_path}) — 오늘은 판정 근거가 없어"
               " 체결하지 않고, 오늘 값을 기준값으로 남깁니다(다음 실행부터 정상 판정).")
-    else:
+    elif previous_probe is not None:
         print(f"  · 전일 기준값 {previous_probe.get('target_date')} 기준"
               f" {len(previous_probe.get('values') or {})}개")
 
-    # ── ③ 종가 조회 함수 — "내 성적표"·"리포트"와 **같은** 가격을 씁니다(§0-3-10) ──
-    price_lookup = report_db.build_price_lookup(data_dir=data_dir)
+    if probe_error_reasons:
+        index_stale_reason = " ".join(
+            ([index_stale_reason] if index_stale_reason else []) + probe_error_reasons)
+
+    # ── ③ 종가 조회 함수 — **화면 주문 폼과 같은 좁은 조회**를 씁니다(§0-3-10) ──
+    #  🔴 2026-08-29 재감사 M-13(원화 스크립트의 같은 자리와 같은 이유) — 넓은 폴백
+    #     (`us_all_market_prices.json` · `us_all_etf_prices.json`)은 신선도 점검이 보지 않는
+    #     파일이라, 그 값으로 체결하면 "아무도 확인하지 않은 가격"으로 체결하게 됩니다.
+    #     점검표용으로 이미 읽어 둔 `universe_index` 를 그대로 재사용합니다(추가 I/O 없음).
+    price_lookup = scorecard_db.make_price_lookup({MARKET_US: universe_index})
 
     def close_price_of(ticker):
         return price_lookup(MARKET_US, ticker)
@@ -186,6 +246,10 @@ def main(argv=None):
         close_price_of=close_price_of,
         today_kst=today_date,
         price_as_of_kst=price_stamps.get(MARKET_US),
+        # 🔴 2026-08-29 재감사 H-1/H-2/M-9 — "우리 쪽 자료가 낡았다"는 사실을 판정에
+        #    실제로 넣습니다(원화 스크립트와 같은 자리·같은 이유).
+        index_stale_reason=index_stale_reason,
+        session_date=us_session_date,
         override=args.override,
         dry_run=args.dry_run,
         log=log,
@@ -194,6 +258,10 @@ def main(argv=None):
     # ── ⑤ 내일의 기준값 남기기 (워크플로우가 이 파일을 커밋합니다) ──────────────
     if args.dry_run:
         print("  · (dry-run) 기준값 파일을 갱신하지 않았습니다.")
+    elif today_probe is None:
+        # M-12 — 점검표를 못 만든 날은 남길 기준값도 없습니다(예전 파일을 그대로 둡니다).
+        print("  ⚠️ 오늘 점검표를 만들지 못해 기준값 파일을 갱신하지 않았습니다"
+              " (예전 기준값을 그대로 둡니다).")
     else:
         duel_batch_usd.save_probe_state(state_path, today_probe)
         print(f"  ✅ 다음 비교용 기준값을 남겼습니다: {state_path}")

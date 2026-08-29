@@ -99,6 +99,7 @@ from utils.duel_db import (
     FORBIDDEN_PUBLISH_FIELDS,
     FORBIDDEN_USER_WRITE_PARAMS,
     _execute,
+    _execute_all,
     _require_client,
     _iso_date,
     _now_kst,
@@ -165,15 +166,14 @@ __all__ = [
     "create_duel_accounts_for_user_usd",
     "apply_monthly_deposits_usd",
     "fetch_pending_orders_for_fill_usd",
-    "record_order_fill_usd",
     "record_order_fills_usd",
-    "record_buy_ledger_entry_usd",
     "record_buy_ledger_entries_usd",
-    "upsert_position_weighted_average_usd",
     "upsert_positions_usd",
     "settle_sell_positions_usd",
     "set_first_holding_dates_usd",
+    "expire_stale_pending_orders_before_usd",
     "expire_or_cancel_all_pending_for_date_usd",
+    "annotate_pending_orders_with_hold_reason_usd",
     "write_daily_snapshots_usd",
     "fetch_publishable_consents_usd",
     "fetch_revoked_consent_accounts_usd",
@@ -398,12 +398,14 @@ def save_sell_order_usd(client, account_id, ticker, stock_name, requested_quanti
     code = _require_text(ticker, "종목코드")
     name = _require_text(stock_name, "종목명")
     quantity = _require_positive_int(requested_quantity, "매도 수량")
-    held = _require_positive_int(held_quantity, "보유 수량")
+    # 🔴 2026-08-29 재감사 M-4(원화 `save_sell_order()` 와 같은 이유) — 파는 수량은 정수,
+    #    보유 수량은 실수. 소수 보유 수량이 매도 자체를 막지 않게 합니다.
+    held = _require_amount(held_quantity, "보유 수량")
     window = _require_offset(window_index, "리밸런싱 창 번호")   # 0 부터 시작하므로 0 허용
 
     if quantity > held:
         raise DuelDbError(
-            f"보유 수량({held}주)보다 많은 {quantity}주는 매도할 수 없습니다."
+            f"보유 수량({held:,.6g}주)보다 많은 {quantity}주는 매도할 수 없습니다."
             " 보유한 수량 이하로 다시 입력해 주세요."
         )
 
@@ -688,10 +690,16 @@ def revoke_consent_usd(client, account_id, *, now_kst=None):
     payload["final_confirmed_at"] = None
     payload["revoked_at"] = _now_kst(now_kst).isoformat()
 
+    # 🔴 2026-08-29 재감사 L-12 — 원화 `revoke_consent()` 와 같은 TOCTOU 방어입니다
+    #    (아직 철회되지 않은 행만 update, 0행이면 다른 요청이 먼저 끝냈다는 뜻).
     rows = _execute(
-        client.table(CONSENT_TABLE_USD).update(payload).eq("account_id", account),
+        _filter_is_null(
+            client.table(CONSENT_TABLE_USD).update(payload).eq("account_id", account),
+            "revoked_at"),
         "공개 동의 철회",
     )
+    if not rows:
+        return fetch_my_consent_usd(client, account) or existing
     return _first_row(rows, "공개 동의 철회")
 
 
@@ -776,11 +784,13 @@ def fetch_all_active_accounts_usd(service_client):
        `duel_db.fetch_all_active_accounts()` 주석과 같습니다(따로 조회하면 왕복이 늘어남).
     """
     _require_client(service_client, batch=True)
-    rows = _execute(
-        service_client.table(ACCOUNTS_TABLE_USD)
-        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
-                "first_holding_date")
-        .eq("status", "active"),
+    # 2026-08-29 재감사 H-6(원화와 같은 이유): `.range()` 로 끝까지 읽습니다.
+    rows = _execute_all(
+        lambda offset, limit: (
+            service_client.table(ACCOUNTS_TABLE_USD)
+            .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
+                    "first_holding_date")
+            .eq("status", "active").range(offset, limit)),
         "USD 활성 계좌 전체 조회",
     )
     return [dict(row) for row in rows]
@@ -789,30 +799,43 @@ def fetch_all_active_accounts_usd(service_client):
 def fetch_cash_ledger_for_accounts_usd(service_client, account_ids=None, as_of_date=None):
     """(배치 전용) 여러 USD 계좌의 원장을 한 번에 읽습니다."""
     _require_client(service_client, batch=True)
-    query = service_client.table(LEDGER_TABLE_USD).select(
-        "account_id,event_type,amount,event_date")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []
-        query = query.in_("account_id", ids)
-    if as_of_date is not None:
-        query = query.lte("event_date", _iso_date(as_of_date, "기준일"))
-    rows = _execute(query, "현금 원장 일괄 조회")
+    as_of = None if as_of_date is None else _iso_date(as_of_date, "기준일")
+
+    def _query(offset, limit):
+        query = service_client.table(LEDGER_TABLE_USD).select(
+            "account_id,event_type,amount,event_date")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        if as_of is not None:
+            query = query.lte("event_date", as_of)
+        return query.range(offset, limit)
+
+    rows = _execute_all(_query, "현금 원장 일괄 조회")        # H-6
     return [dict(row) for row in rows]
 
 
 def fetch_positions_for_accounts_usd(service_client, account_ids=None):
     """(배치 전용) 여러 USD 계좌의 보유 포지션을 한 번의 질의로 읽습니다."""
     _require_client(service_client, batch=True)
-    query = service_client.table(POSITIONS_TABLE_USD).select(
-        "account_id,ticker,stock_name,quantity,avg_cost,status,delisted_date")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []
-        query = query.in_("account_id", ids)
-    rows = _execute(query.order("account_id").order("ticker"), "보유 포지션 일괄 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(POSITIONS_TABLE_USD).select(
+            "account_id,ticker,stock_name,quantity,avg_cost,status,delisted_date")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        return query.order("account_id").order("ticker").range(offset, limit)
+
+    rows = _execute_all(_query, "보유 포지션 일괄 조회")      # H-6
     return [dict(row) for row in rows]
 
 
@@ -820,18 +843,26 @@ def fetch_daily_snapshots_for_accounts_usd(service_client, account_ids=None,
                                            start_date=None, end_date=None):
     """(배치 전용) 여러 USD 계좌의 일별 스냅샷을 한 번의 질의로, 오래된 순으로 읽습니다."""
     _require_client(service_client, batch=True)
-    query = service_client.table(DAILY_SNAPSHOTS_TABLE_USD).select(
-        "account_id,snapshot_date,total_value,cash_flow_amount")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []
-        query = query.in_("account_id", ids)
-    if start_date is not None:
-        query = query.gte("snapshot_date", _iso_date(start_date, "조회 시작일"))
-    if end_date is not None:
-        query = query.lte("snapshot_date", _iso_date(end_date, "조회 종료일"))
-    rows = _execute(query.order("account_id").order("snapshot_date"), "일별 스냅샷 일괄 조회")
+    start = None if start_date is None else _iso_date(start_date, "조회 시작일")
+    end = None if end_date is None else _iso_date(end_date, "조회 종료일")
+
+    def _query(offset, limit):
+        query = service_client.table(DAILY_SNAPSHOTS_TABLE_USD).select(
+            "account_id,snapshot_date,total_value,cash_flow_amount")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        if start is not None:
+            query = query.gte("snapshot_date", start)
+        if end is not None:
+            query = query.lte("snapshot_date", end)
+        return query.order("account_id").order("snapshot_date").range(offset, limit)
+
+    rows = _execute_all(_query, "일별 스냅샷 일괄 조회")      # H-6
     return [dict(row) for row in rows]
 
 
@@ -936,9 +967,11 @@ def apply_monthly_deposits_usd(service_client, deposit_date):
     if not account_ids:
         return 0
 
-    already_rows = _execute(
-        service_client.table(LEDGER_TABLE_USD).select("account_id")
-        .eq("event_type", "monthly_deposit").eq("event_date", event_date),
+    already_rows = _execute_all(          # H-6
+        lambda offset, limit: (
+            service_client.table(LEDGER_TABLE_USD).select("account_id")
+            .eq("event_type", "monthly_deposit").eq("event_date", event_date)
+            .range(offset, limit)),
         "정기 입금 중복 조회",
     )
     already = {row.get("account_id") for row in already_rows}
@@ -968,28 +1001,14 @@ def fetch_pending_orders_for_fill_usd(service_client, target_date):
     """(배치 전용) 그 거래일에 귀속된 **전체 USD 계좌**의 pending 주문을 저장 순서로."""
     _require_client(service_client, batch=True)
     day = _iso_date(target_date, "체결 거래일")
-    rows = _execute(
-        service_client.table(ORDERS_TABLE_USD).select("*")
-        .eq("status", ORDER_PENDING).eq("target_date", day)
-        .order("saved_at"),
+    rows = _execute_all(                  # H-6
+        lambda offset, limit: (
+            service_client.table(ORDERS_TABLE_USD).select("*")
+            .eq("status", ORDER_PENDING).eq("target_date", day)
+            .order("saved_at").range(offset, limit)),
         "체결 대상 주문 조회",
     )
     return [dict(row) for row in rows]
-
-
-def record_order_fill_usd(service_client, order_id, status, filled_quantity, filled_price,
-                          filled_amount, fail_reason=None, *, filled_date=None):
-    """(배치 전용) 주문 1건의 체결 결과를 기록합니다. 여러 건은 `record_order_fills_usd()`로."""
-    record_order_fills_usd(service_client, [{
-        "id": order_id,
-        "status": status,
-        "filled_quantity": filled_quantity,
-        "filled_price": filled_price,
-        "filled_amount": filled_amount,
-        "filled_date": filled_date,
-        "fail_reason": fail_reason,
-    }])
-    return None
 
 
 def record_order_fills_usd(service_client, results):
@@ -1037,18 +1056,6 @@ def record_order_fills_usd(service_client, results):
     return written
 
 
-def record_buy_ledger_entry_usd(service_client, account_id, order_id, filled_amount, event_date,
-                                memo=None):
-    """(배치 전용) 매수 체결 1건의 현금 원장 행을 남깁니다. 여러 건은 아래 함수로."""
-    return record_buy_ledger_entries_usd(service_client, [{
-        "account_id": account_id,
-        "order_id": order_id,
-        "filled_amount": filled_amount,
-        "event_date": event_date,
-        "memo": memo,
-    }])
-
-
 def record_buy_ledger_entries_usd(service_client, entries):
     """
     (배치 전용) 체결 원장 행 여러 개를 한 번의 insert 로. 반환: 넣은 행 수.
@@ -1065,36 +1072,31 @@ def record_buy_ledger_entries_usd(service_client, entries):
 
     payload = _fill_ledger_payload(rows)
 
+    # 🔴 2026-08-29 재감사 H-4 — 원화 `record_buy_ledger_entries()` 와 **같은 재실행 안전
+    #    장치**입니다(같은 근거·같은 방식, 표 이름만 다릅니다): 배치가 원장을 먼저 쓰고 주문
+    #    상태를 마지막에 찍으므로, 중간에 죽은 뒤 재실행이 같은 주문을 다시 집었을 때 원장이
+    #    중복 계상되면 안 됩니다. DB 인덱스(`duel_cash_ledger_order_event_unique`)는 그 뒤의
+    #    마지막 방어선입니다.
+    order_ids = sorted({row["order_id"] for row in payload if row.get("order_id")})
+    if order_ids:
+        existing_rows = _execute_all(
+            lambda offset, limit: (
+                service_client.table(LEDGER_TABLE_USD).select("order_id, event_type")
+                .in_("order_id", order_ids).range(offset, limit)),
+            "체결 원장 중복 조회",
+        )
+        existing_keys = {(row.get("order_id"), row.get("event_type")) for row in existing_rows}
+        payload = [row for row in payload
+                   if (row["order_id"], row["event_type"]) not in existing_keys]
+    if not payload:
+        return 0
+
     inserted = 0
     for start in range(0, len(payload), CHUNK_SIZE):
         chunk = payload[start:start + CHUNK_SIZE]
         _execute(service_client.table(LEDGER_TABLE_USD).insert(chunk), "체결 원장 기록")
         inserted += len(chunk)
     return inserted
-
-
-def upsert_position_weighted_average_usd(service_client, account_id, ticker, stock_name,
-                                         existing_position, filled_quantity, fill_price):
-    """
-    (배치 전용) 매수 체결 1건을 USD 포지션에 반영합니다. 평단가 계산은 여기서 하지 않고
-    `duel_rules.apply_buy_fill_to_position()`(원화·달러 공유)를 그대로 씁니다.
-    """
-    _require_client(service_client, batch=True)
-    existing = existing_position or {}
-    updated = duel_rules.apply_buy_fill_to_position(
-        existing.get("quantity") if existing else None,
-        existing.get("avg_cost") if existing else None,
-        filled_quantity,
-        fill_price,
-    )
-    rows = upsert_positions_usd(service_client, [{
-        "account_id": _require_text(account_id, "계좌 ID"),
-        "ticker": _require_text(ticker, "종목코드"),
-        "stock_name": _require_text(stock_name, "종목명"),
-        "quantity": updated["quantity"],
-        "avg_cost": updated["avg_cost"],
-    }])
-    return _first_row(rows, "포지션 갱신")
 
 
 def upsert_positions_usd(service_client, rows):
@@ -1126,6 +1128,28 @@ def settle_sell_positions_usd(service_client, rows):
     """
     _require_client(service_client, batch=True)
     payload = _sell_settlement_payload(list(rows or []), "매도 정산 요청(USD)")
+    if not payload:
+        return 0
+
+    # 2026-08-29 재감사 H-4: 원화 `settle_sell_positions()` 와 같은 사전 필터링입니다 —
+    # 재실행 시 이미 목표 수량까지 줄어든 행(또는 포지션 행 자체가 없는 행)을 다시 보내면
+    # RPC 가 예외를 던져 그날 밤 전체를 멈춥니다.
+    account_ids = sorted({row["account_id"] for row in payload})
+    current = _execute_all(
+        lambda offset, limit: (
+            service_client.table(POSITIONS_TABLE_USD).select("account_id, ticker, quantity")
+            .in_("account_id", account_ids).range(offset, limit)),
+        "매도 정산 사전 조회(USD)",
+    )
+    current_qty = {}
+    for row in current:
+        try:
+            current_qty[(row.get("account_id"), row.get("ticker"))] = float(row.get("quantity"))
+        except (TypeError, ValueError):
+            continue
+    payload = [row for row in payload
+               if current_qty.get((row["account_id"], row["ticker"]), row["quantity"])
+               > row["quantity"]]
     if not payload:
         return 0
 
@@ -1165,8 +1189,34 @@ def set_first_holding_dates_usd(service_client, account_ids, first_holding_date)
 # -----------------------------------------------------------------------------
 # B-5. 체결 불가일 일괄 정리
 # -----------------------------------------------------------------------------
+def expire_stale_pending_orders_before_usd(service_client, before_date, reason,
+                                           *, status=ORDER_CANCELLED):
+    """(배치 전용) target_date < before_date 인 USD pending 주문을 전부 만료 처리합니다.
+    `utils.duel_db.expire_stale_pending_orders_before()` 의 미러 — 근거(2026-08-29 재감사
+    H-8: 배치가 못 돈 날의 주문이 무기한 대기로 남는 문제)와 update 방식은 그쪽 docstring 에
+    전부 있고, 다른 것은 표 이름 하나입니다. 반환: 실제로 바뀐 행 수.
+    """
+    _require_client(service_client, batch=True)
+    before = _iso_date(before_date, "기준일")
+    text = _require_text(reason, "실패 사유")
+    if status not in (ORDER_CANCELLED, ORDER_EXPIRED):
+        raise DuelDbError(
+            f"일괄 실패 처리에 쓸 수 없는 상태입니다: {status!r}"
+            f" (가능: {ORDER_CANCELLED} / {ORDER_EXPIRED})."
+        )
+
+    rows = _execute(
+        service_client.table(ORDERS_TABLE_USD)
+        .update({"status": status, "fail_reason": text})
+        .eq("status", ORDER_PENDING).lt("target_date", before),
+        "정체 주문 일괄 만료",
+    )
+    return len(rows)
+
+
 def expire_or_cancel_all_pending_for_date_usd(service_client, target_date, reason,
-                                              *, status=ORDER_CANCELLED):
+                                              *, status=ORDER_CANCELLED,
+                                              account_ids=None):
     """
     (배치 전용) 그 거래일에 귀속된 **모든 USD 계좌의** pending 주문을 한 번에 실패 처리합니다.
     `utils.duel_db.expire_or_cancel_all_pending_for_date()` 미러. 반환: 실제로 바뀐 행 수.
@@ -1180,11 +1230,35 @@ def expire_or_cancel_all_pending_for_date_usd(service_client, target_date, reaso
             f" (가능: {ORDER_CANCELLED} / {ORDER_EXPIRED})."
         )
 
+    query = (service_client.table(ORDERS_TABLE_USD)
+             .update({"status": status, "fail_reason": text})
+             .eq("status", ORDER_PENDING).eq("target_date", day))
+    if account_ids is not None:
+        # 2026-08-29 재감사 M-11(원화와 같은 이유) — 체결 경로와 대칭을 맞춥니다.
+        ids = [str(value) for value in account_ids]
+        if not ids:
+            return 0
+        query = query.in_("account_id", ids)
+    rows = _execute(query, "미체결 주문 일괄 정리")
+    return len(rows)
+
+
+def annotate_pending_orders_with_hold_reason_usd(service_client, target_date, reason):
+    """
+    (배치 전용) 그 거래일 USD pending 주문에 **보류 사유만** 적어 둡니다(상태는 pending 유지).
+    `utils.duel_db.annotate_pending_orders_with_hold_reason()` 의 미러 — 근거(2026-08-29
+    재감사 M-10)와 트리거·CHECK 확인 결과는 그쪽 docstring 에 전부 있고, 다른 것은 표
+    이름 하나입니다. 반환: 실제로 바뀐 행 수.
+    """
+    _require_client(service_client, batch=True)
+    day = _iso_date(target_date, "체결 거래일")
+    text = _require_text(reason, "보류 사유")
+
     rows = _execute(
         service_client.table(ORDERS_TABLE_USD)
-        .update({"status": status, "fail_reason": text})
+        .update({"fail_reason": text})          # ⚠️ status 는 절대 넣지 않습니다.
         .eq("status", ORDER_PENDING).eq("target_date", day),
-        "미체결 주문 일괄 정리",
+        "보류 사유 기록",
     )
     return len(rows)
 
@@ -1253,21 +1327,27 @@ def write_daily_snapshots_usd(service_client, snapshot_date, computed_rows):
 def fetch_publishable_consents_usd(service_client):
     """(배치 전용) **USD 발행 대상 계좌의 동의 행**을 한 번의 질의로 전부 읽습니다."""
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE_USD).select(
-        "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
-        "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
-    ).eq("final_confirmed", True)
-    query = _filter_is_null(query, "revoked_at")
-    rows = _execute(query, "발행 대상 동의 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE_USD).select(
+            "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
+            "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
+        ).eq("final_confirmed", True)
+        return _filter_is_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "발행 대상 동의 조회")        # H-6
     return [dict(row) for row in rows]
 
 
 def fetch_revoked_consent_accounts_usd(service_client):
     """(배치 전용) **철회된 USD 계좌의 account_id 목록**을 한 번의 질의로 읽습니다."""
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE_USD).select("account_id,revoked_at")
-    query = _filter_not_null(query, "revoked_at")
-    rows = _execute(query, "철회 계좌 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE_USD).select("account_id,revoked_at")
+        return _filter_not_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "철회 계좌 조회")             # H-6
     return [dict(row) for row in rows]
 
 
@@ -1280,9 +1360,11 @@ def fetch_bracket_assignments_usd(service_client, season_key):
     """
     _require_client(service_client, batch=True)
     season = _require_text(season_key, "시즌 식별자")
-    rows = _execute(
-        service_client.table(BRACKET_ASSIGNMENTS_TABLE_USD)
-        .select("account_id,season_key,bracket_key").eq("season_key", season),
+    rows = _execute_all(                  # H-6
+        lambda offset, limit: (
+            service_client.table(BRACKET_ASSIGNMENTS_TABLE_USD)
+            .select("account_id,season_key,bracket_key").eq("season_key", season)
+            .range(offset, limit)),
         "체급 배정 조회",
     )
     return {row["account_id"]: dict(row) for row in rows if (row or {}).get("account_id")}

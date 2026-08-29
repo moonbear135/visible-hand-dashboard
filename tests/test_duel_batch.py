@@ -26,7 +26,7 @@ DUEL_MODULE_WORK_ORDER.md 4단계에 따라, **가짜 Supabase 클라이언트**
 """
 
 import sys
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from pathlib import Path
 
 import pytest
@@ -41,6 +41,7 @@ sys.path.append(str(Path(__file__).parent))
 from test_duel_db import FakeClient  # noqa: E402
 from utils import duel_batch, duel_db, duel_rules  # noqa: E402
 from utils.duel_batch import DuelBatchError  # noqa: E402
+from utils.duel_db import DuelDbError  # noqa: E402
 from utils.duel_rules import KST  # noqa: E402
 
 TARGET_DATE = date(2026, 8, 20)          # 목요일 — 정기 입금일(10일)이 아닌 평범한 거래일
@@ -128,13 +129,19 @@ def _position(account_id, ticker, quantity, avg_cost, *, stock_name=None):
 
 
 def _client(*, accounts=None, ledger=None, orders=None, positions=None, snapshots=None,
-            deposits_already=None, cancelled_rows=None):
+            deposits_already=None, cancelled_rows=None, stale_pending_rows=None):
     """
     배치 한 판을 돌릴 수 있는 가짜 클라이언트.
 
     같은 표에 성격이 다른 select 가 두 번 가는 곳이 하나 있습니다(현금 원장: 정기 입금 중복
     조회 / 잔고 조회). 그래서 필터를 보고 갈라 줍니다 — `FakeClient` 가 callable 응답을
     지원하는 이유가 이것입니다.
+
+    🔴 2026-08-29 재감사 H-8 — 주문 표에도 성격이 다른 update 가 둘이 됐습니다:
+       ① 매 실행 맨 앞의 **정체 주문 스윕**(`target_date < 처리일`, `.lt` 필터)
+       ② 실패일의 그날짜 일괄 취소(`target_date = 처리일`, `.eq` 필터) / 체결 결과 기록
+       기본값은 ①이 **0행**(정리할 과거 주문 없음)입니다 — 그렇지 않으면 모든 테스트가
+       "매 실행마다 과거 주문 1건을 정리했다"는 거짓 상태로 돌아갑니다.
     """
     accounts = accounts if accounts is not None else _accounts()
     ledger = ledger if ledger is not None else _seed_ledger(accounts)
@@ -144,16 +151,48 @@ def _client(*, accounts=None, ledger=None, orders=None, positions=None, snapshot
             return list(deposits_already or [])
         return list(ledger)
 
+    def orders_update(query):
+        if any(op == "lt" and column == "target_date" for op, column, _v in query.filters):
+            return list(stale_pending_rows or [])          # ① 정체 주문 스윕
+        if cancelled_rows is not None:
+            return list(cancelled_rows)                    # ② 그날짜 일괄 취소
+        return [dict(row) for row in query.rows]           # PostgREST 기본(보낸 행 반환)
+
     responses = {
         (duel_db.ACCOUNTS_TABLE, "select"): list(accounts),
         (duel_db.LEDGER_TABLE, "select"): ledger_select,
         (duel_db.ORDERS_TABLE, "select"): list(orders or []),
+        (duel_db.ORDERS_TABLE, "update"): orders_update,
         (duel_db.POSITIONS_TABLE, "select"): list(positions or []),
         (duel_db.DAILY_SNAPSHOTS_TABLE, "select"): list(snapshots or []),
     }
-    if cancelled_rows is not None:
-        responses[(duel_db.ORDERS_TABLE, "update")] = list(cancelled_rows)
     return FakeClient(responses=responses)
+
+
+def _stale_sweep_calls(client):
+    """H-8 정체 주문 스윕 update 호출들(테스트가 다른 update 와 헷갈리지 않게)."""
+    return [call for call in client.calls_for(duel_db.ORDERS_TABLE, "update")
+            if any(op == "lt" and column == "target_date" for op, column, _v in call.filters)]
+
+
+def _hold_annotation_calls(client):
+    """M-10 보류 사유 기록 update 호출들 — payload 에 `status` 가 **없는** 것이 표식입니다.
+    (보류는 결론이 아니므로 상태를 바꾸지 않고 사유만 적습니다.)"""
+    return [call for call in client.calls_for(duel_db.ORDERS_TABLE, "update")
+            if "status" not in (call.payload or {})]
+
+
+def _order_updates_excluding_stale_sweep(client):
+    """**주문 상태를 바꾸는** update 호출들(체결 결과 기록 · 그날짜 일괄 취소).
+
+    스윕(H-8)과 보류 사유 기록(M-10)은 뺍니다 — 앞의 것은 과거 날짜를 정리하는 별도 단계이고,
+    뒤의 것은 status 를 건드리지 않는 표식이라 "그날 주문의 운명이 바뀌었는가"라는 이 헬퍼의
+    질문과 다른 이야기입니다(보류 표식 자체는 `_hold_annotation_calls()` 로 따로 봅니다).
+    """
+    ignored = set(id(call) for call in _stale_sweep_calls(client))
+    ignored |= set(id(call) for call in _hold_annotation_calls(client))
+    return [call for call in client.calls_for(duel_db.ORDERS_TABLE, "update")
+            if id(call) not in ignored]
 
 
 def _price_lookup(prices):
@@ -449,26 +488,57 @@ def test_batch_deposits_on_the_tenth_and_uses_the_money_the_same_day():
     summary = _run(client, target_date=DEPOSIT_DATE)
 
     assert summary["deposit_attempted"] is True
-    assert summary["deposit_applied"] == 2
-    deposit_insert = client.only_call(duel_db.LEDGER_TABLE, "insert")
-    assert all(row["amount"] == duel_rules.MONTHLY_DEPOSIT_KRW for row in deposit_insert.rows)
-    assert all(row["event_date"] == DEPOSIT_DATE.isoformat() for row in deposit_insert.rows)
+    # 🔴 2026-08-29 재감사 H-7 — 이제 "최근 구간의 모든 10일"을 봅니다(따라잡기). 이 가짜
+    #    클라이언트는 "이미 들어간 입금"이 없다고 답하므로 밀린 달까지 함께 들어갑니다.
+    pending = duel_batch._pending_monthly_deposit_dates(DEPOSIT_DATE)
+    assert DEPOSIT_DATE in pending
+    assert summary["deposit_applied"] == 2 * len(pending)
+
+    deposit_inserts = client.calls_for(duel_db.LEDGER_TABLE, "insert")
+    assert len(deposit_inserts) == len(pending)
+    rows = [row for call in deposit_inserts for row in call.rows]
+    assert all(row["amount"] == duel_rules.MONTHLY_DEPOSIT_KRW for row in rows)
+    # 그날짜분은 반드시 그날짜로 들어갑니다(날짜를 영업일로 밀지 않습니다 — 2-2-4).
+    assert DEPOSIT_DATE.isoformat() in {row["event_date"] for row in rows}
 
     # 입금 insert 가 잔고 조회(select)보다 **먼저** 일어났는지 호출 순서로 고정합니다.
     order_of_calls = [(call.table, call.op) for call in client.calls]
-    insert_at = order_of_calls.index((duel_db.LEDGER_TABLE, "insert"))
+    insert_at = max(index for index, call in enumerate(client.calls)
+                    if call.table == duel_db.LEDGER_TABLE and call.op == "insert")
+    assert order_of_calls[insert_at] == (duel_db.LEDGER_TABLE, "insert")
     balance_selects = [index for index, call in enumerate(client.calls)
                        if call.table == duel_db.LEDGER_TABLE and call.op == "select"
                        and call.filter_map.get("event_type") != "monthly_deposit"]
     assert balance_selects and min(balance_selects) > insert_at
 
 
-def test_batch_does_not_deposit_on_other_days():
-    client = _client()
+def test_batch_does_not_deposit_twice_for_a_month_already_paid():
+    """
+    🔴 2026-08-29 재감사 H-7 로 바뀐 자리입니다.
+
+    예전에는 "오늘이 10일인가" 하나로만 트리거해서, 10일에 배치가 실패한 달의 입금이
+    **영구히 누락**되고 아무 신호도 남지 않았습니다(그 다음 날 로그는 태연히 "오늘은
+    입금일이 아닙니다"를 찍었습니다). 이제는 매 실행이 최근 구간의 10일을 전부 보고,
+    **이미 들어간 달은 0행**으로 조용히 끝납니다(`apply_monthly_deposits()` 가 날짜 단위로
+    이미 멱등입니다). 그래서 10일이 아닌 날의 검증은 "시도조차 안 한다"가 아니라
+    **"새로 들어가는 돈이 없다"** 입니다.
+    """
+    accounts = _accounts(2)
+    client = _client(accounts=accounts,
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     summary = _run(client, target_date=TARGET_DATE)
-    assert summary["deposit_attempted"] is False
     assert summary["deposit_applied"] == 0
     assert client.calls_for(duel_db.LEDGER_TABLE, "insert") == []
+
+
+def test_batch_catches_up_deposits_missed_while_it_could_not_run():
+    """밀린 달이 있으면 다음 성공 실행이 함께 넣고, 그 사실을 요약 경고로 올립니다(H-7)."""
+    accounts = _accounts(1)
+    client = _client(accounts=accounts)
+    summary = _run(client, target_date=DEPOSIT_DATE)
+    pending = duel_batch._pending_monthly_deposit_dates(DEPOSIT_DATE)
+    assert len(pending) > 1                      # 60일 구간 안에 10일이 둘 이상
+    assert any("한 번에 처리했습니다" in warning for warning in summary["warnings"])
 
 
 def test_batch_deposit_is_idempotent_on_a_second_run():
@@ -494,7 +564,8 @@ def test_batch_deposits_even_when_the_crawl_failed():
         previous_probe=_probe(YESTERDAY, kospi=3200.0, stock_prices=same),
     )
     assert summary["freshness"]["status"] == duel_rules.CRAWL_FAILED_OR_HOLIDAY
-    assert summary["deposit_applied"] == 2
+    assert summary["deposit_applied"] == 2 * len(
+        duel_batch._pending_monthly_deposit_dates(DEPOSIT_DATE))
     assert summary["orders"]["orders"] == 0
 
 
@@ -621,7 +692,7 @@ def test_batch_fills_and_writes_everything_on_a_good_day():
     assert summary["positions_written"] == 1
     assert summary["snapshots_written"] == 1
 
-    fill_update = client.only_call(duel_db.ORDERS_TABLE, "update")
+    (fill_update,) = _order_updates_excluding_stale_sweep(client)   # 스윕(H-8)은 제외
     assert fill_update.payload["status"] == duel_rules.ORDER_FILLED
     assert fill_update.payload["filled_date"] == TARGET_DATE.isoformat()
     assert fill_update.filter_map["status"] == duel_rules.ORDER_PENDING
@@ -650,11 +721,13 @@ def test_batch_cancels_everything_when_the_crawl_failed():
     assert summary["pending_cancelled"] == 2
     assert summary["snapshots_written"] == 0
 
-    update = client.only_call(duel_db.ORDERS_TABLE, "update")     # 질의 1개 = 집합 연산
+    (update,) = _order_updates_excluding_stale_sweep(client)   # 질의 1개 = 집합 연산
     assert update.payload["status"] == duel_rules.ORDER_CANCELLED
     assert update.payload["fail_reason"]
+    # 2026-08-29 재감사 M-11 — 체결 경로와 대칭으로 **활성 계좌만** 대상입니다.
     assert update.filter_map == {"status": duel_rules.ORDER_PENDING,
-                                 "target_date": TARGET_DATE.isoformat()}
+                                 "target_date": TARGET_DATE.isoformat(),
+                                 "account_id": ["acc-1", "acc-2"]}
     # 스냅샷·포지션은 아예 건드리지 않습니다.
     assert client.calls_for(duel_db.DAILY_SNAPSHOTS_TABLE) == []
     assert client.calls_for(duel_db.POSITIONS_TABLE) == []
@@ -677,8 +750,92 @@ def test_batch_holds_orders_when_review_is_needed():
     assert summary["pending_held"] == 1
     assert summary["pending_cancelled"] == 0
     assert summary["snapshots_written"] == 0
-    assert client.calls_for(duel_db.ORDERS_TABLE, "update") == []      # 아무것도 안 바꿈
+    assert _order_updates_excluding_stale_sweep(client) == []          # 상태는 안 바꿈
     assert any("관리자" in warning for warning in summary["warnings"])
+
+
+def test_a_held_day_writes_the_reason_onto_the_orders_so_the_screen_can_show_it():
+    """
+    🔴 2026-08-29 재감사 M-10 — 보류 사실이 `summary["warnings"]`(= 배치 로그)에만 남으면
+    사용자 화면에는 일반 대기 주문과 **똑같이** 보입니다. §0-1 이 금지한 "로그만 남기는
+    조치"의 정확한 형태입니다. 배치는 상태를 그대로 둔 채 `fail_reason` 에 사유만 적어야
+    하고, 그 표식을 보고 화면이 "판정 보류"로 갈라 그립니다.
+    """
+    client = _client(orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(
+        client,
+        today_probe=_probe(TARGET_DATE, kospi=3210.0,
+                           stock_prices=_stock_prices(bump=5.0, unchanged=20)),
+        previous_probe=_probe(YESTERDAY, kospi=3200.0, stock_prices=_stock_prices()),
+    )
+
+    assert summary["freshness"]["status"] == duel_rules.CRAWL_NEEDS_REVIEW
+    (annotation,) = _hold_annotation_calls(client)
+    assert "status" not in annotation.payload, (
+        "보류인데 상태까지 바꿨습니다 — 아직 결론이 아닌 주문을 종결시킨 셈입니다(§0-1)."
+    )
+    assert annotation.filter_map == {"status": duel_rules.ORDER_PENDING,
+                                     "target_date": TARGET_DATE.isoformat()}
+    reason = annotation.payload["fail_reason"]
+    assert "보류" in reason and "관리자" in reason, f"사람이 읽을 사유가 아닙니다: {reason}"
+    assert summary["freshness"]["reason"] in reason, (
+        "왜 보류인지(판정 근거)가 사유 문장에 없습니다 — 사용자는 사유 칸만 보고 이유를 "
+        "알 수 있어야 합니다."
+    )
+
+
+def test_a_held_day_without_a_baseline_also_writes_the_reason():
+    """`no_baseline`(첫 실행 등)도 같은 표식을 남깁니다 — 두 보류 갈래가 갈라지면 안 됩니다."""
+    client = _client(orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, previous_probe=None)
+    assert summary["freshness"]["status"] == duel_batch.CRAWL_NO_BASELINE
+    (annotation,) = _hold_annotation_calls(client)
+    assert "보류" in annotation.payload["fail_reason"]
+
+
+def test_a_held_day_with_no_orders_sends_no_annotation_query():
+    """보류할 주문이 하나도 없으면 질의 자체를 보내지 않습니다(일하지 않은 왕복 금지)."""
+    client = _client(orders=[])
+    summary = _run(client, previous_probe=None)
+    assert summary["pending_held"] == 0
+    assert _hold_annotation_calls(client) == []
+
+
+def test_a_dry_run_does_not_write_the_hold_reason():
+    """dry-run 은 아무것도 쓰지 않습니다 — 표식도 쓰기입니다."""
+    client = _client(orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, previous_probe=None, dry_run=True)
+    assert summary["pending_held"] == 1
+    assert client.calls_for(op="update") == []
+
+
+def test_an_override_after_a_hold_replaces_the_hold_reason():
+    """
+    🔴 M-10 후속 — 보류 표식은 **임시**입니다. 관리자가 값을 확인하고 같은 날짜를 다시
+    돌리면, 체결이면 `fail_reason` 이 지워지고(None) 취소면 새 사유로 바뀝니다.
+    표식이 그대로 남으면 이미 결론이 난 주문에 대고 화면이 "보류 중"이라고 계속 말합니다.
+    """
+    held_order = dict(
+        _order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00"),
+        fail_reason="2026-08-20 종가로 체결할지 판단하지 못해 보류 중입니다(관리자 확인 대기).",
+    )
+
+    filled = _client(accounts=_accounts(1), orders=[dict(held_order)])
+    _run(filled, close_price_of=_price_lookup({"000001": 10_000.0}),
+         override=duel_batch.OVERRIDE_FILL)
+    (fill_update,) = _order_updates_excluding_stale_sweep(filled)
+    assert fill_update.payload["status"] == duel_rules.ORDER_FILLED
+    assert fill_update.payload["fail_reason"] is None, (
+        "체결됐는데 보류 사유가 그대로 남았습니다 — 화면이 계속 '보류 중'이라고 말합니다."
+    )
+    assert _hold_annotation_calls(filled) == []      # 체결한 날에는 표식을 새로 적지 않습니다
+
+    cancelled = _client(accounts=_accounts(1), orders=[dict(held_order)],
+                        cancelled_rows=[{"id": "o-1"}])
+    _run(cancelled, override=duel_batch.OVERRIDE_CANCEL)
+    (cancel_update,) = _order_updates_excluding_stale_sweep(cancelled)
+    assert cancel_update.payload["status"] == duel_rules.ORDER_CANCELLED
+    assert cancel_update.payload["fail_reason"] and "보류 중" not in cancel_update.payload["fail_reason"]
 
 
 def test_admin_override_can_resolve_a_held_day():
@@ -712,7 +869,8 @@ def test_orders_from_inactive_accounts_are_left_alone_not_expired():
     summary = _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
 
     assert summary["orders"]["orders"] == 1
-    updated_ids = [call.filter_map["id"] for call in client.calls_for(duel_db.ORDERS_TABLE, "update")]
+    updated_ids = [call.filter_map["id"]
+                   for call in _order_updates_excluding_stale_sweep(client)]
     assert updated_ids == ["o-1"]
     assert any("활성 계좌 목록에 없는" in warning for warning in summary["warnings"])
 
@@ -723,7 +881,7 @@ def test_batch_without_a_baseline_neither_fills_nor_cancels():
     summary = _run(client, previous_probe=None)
     assert summary["freshness"]["status"] == duel_batch.CRAWL_NO_BASELINE
     assert summary["pending_held"] == 1
-    assert client.calls_for(duel_db.ORDERS_TABLE, "update") == []
+    assert _order_updates_excluding_stale_sweep(client) == []
 
 
 def test_dry_run_writes_nothing():
@@ -759,8 +917,16 @@ def test_snapshot_row_for_a_cash_only_account():
 
 def test_snapshot_row_with_positions_and_an_unpriced_one():
     """
-    가격을 모르는 종목은 평가액에 **넣지 않고** `unpriced_count` 로 셉니다.
-    0원으로 치면 다음 날 가격이 들어오는 순간 "하루 만에 폭등"이 됩니다(§0-1).
+    🔴 2026-08-29 재감사 H-5 로 **뒤집힌 테스트**입니다.
+
+    예전에는 "가격을 모르는 종목은 평가액에서 빼고 `unpriced_count` 로 센다"만 확인했고,
+    그 결과 남는 `total_value`(= 현금 + 값을 아는 종목만)가 **거짓이라는 사실은 확인하지
+    않았습니다.** 실제로 보유 대부분의 종가가 결측이면 그날 총자산이 현금 수준으로 폭락한
+    행이 기록되고, 그 행이 −95% 짜리 TWR 로 공개 순위표까지 갔습니다.
+
+    이제는 `unpriced_count > 0` 인 계좌의 행을 **아예 만들지 않습니다**(날짜 단위로 이미
+    하던 "믿을 수 없으면 스냅샷을 쓰지 않는다"를 계좌 단위로 내린 것). 그 사실은 조용히
+    넘기지 않고 `warnings` 에 한 줄로 남습니다(§0-1).
     """
     positions = {"acc-1": [
         {"ticker": "000001", "stock_name": "합성1", "quantity": 10, "avg_cost": 9_000.0,
@@ -768,21 +934,39 @@ def test_snapshot_row_with_positions_and_an_unpriced_one():
         {"ticker": "000002", "stock_name": "합성2", "quantity": 5, "avg_cost": 4_000.0,
          "status": "active"},
     ]}
+    warnings = []
     rows = duel_batch.build_snapshot_rows(
         _accounts(1), positions, {"acc-1": 1_000.0},
-        {"000001": 10_000.0}, {}, TARGET_DATE)
-    row = rows[0]
+        {"000001": 10_000.0}, {}, TARGET_DATE, warnings=warnings)
 
-    assert row["position_value"] == 100_000.0                 # 000002 는 빠짐
-    assert row["priced_count"] == 1 and row["unpriced_count"] == 1
-    assert row["total_cost"] == 10 * 9_000.0 + 5 * 4_000.0
+    assert rows == [], "종가 결측 종목이 있는 계좌의 행은 만들지 않습니다"
+    assert any("acc-1" in warning and "스냅샷" in warning for warning in warnings)
+
+
+def test_snapshot_is_written_for_accounts_whose_prices_are_all_known():
+    """H-5 의 대조군 — 같은 밤에 값이 온전한 계좌의 행은 **정상적으로** 기록됩니다
+    (한 계좌의 결측이 다른 계좌를 삼키지 않습니다)."""
+    accounts = _accounts(2)
+    positions = {
+        "acc-1": [{"ticker": "000001", "stock_name": "합성1", "quantity": 10,
+                   "avg_cost": 9_000.0, "status": "active"}],
+        "acc-2": [{"ticker": "000002", "stock_name": "합성2", "quantity": 5,
+                   "avg_cost": 4_000.0, "status": "active"}],
+    }
+    warnings = []
+    rows = duel_batch.build_snapshot_rows(
+        accounts, positions, {"acc-1": 1_000.0, "acc-2": 2_000.0},
+        {"000001": 10_000.0}, {}, TARGET_DATE, warnings=warnings)
+
+    assert [row["account_id"] for row in rows] == ["acc-1"]
+    row = rows[0]
+    assert row["position_value"] == 100_000.0
+    assert row["priced_count"] == 1 and row["unpriced_count"] == 0
     assert row["total_value"] == 101_000.0
-    unpriced = [h for h in row["holdings"] if h["ticker"] == "000002"][0]
-    assert unpriced["priced"] is False
-    assert unpriced["close_price"] is None and unpriced["market_value"] is None
     duel_db._validate_daily_snapshot(row, TARGET_DATE.isoformat())
     for holding in row["holdings"]:
         duel_db._validate_holding_snapshot(holding, TARGET_DATE.isoformat())
+    assert any("acc-2" in warning for warning in warnings)
 
 
 def test_delisted_position_is_a_confirmed_zero_not_an_unknown():
@@ -949,22 +1133,38 @@ def test_batch_query_count_does_not_grow_with_accounts(account_count):
     쓰기는 스냅샷 합계 upsert 만(종목별은 보유가 없으니 0). 계좌가 900개여도 그대로입니다.
     (900행은 CHUNK_SIZE(200)로 잘려 upsert 가 5번이 됩니다 — 그건 요청 크기를 자르는 것이지
      계좌마다 부르는 것이 아닙니다.)
+
+    🔴 2026-08-29 재감사로 **고정된 숫자만** 늘었습니다(계좌 수 비례는 여전히 아닙니다):
+      · H-7 정기입금 따라잡기 — 최근 구간의 10일마다 `apply_monthly_deposits()` 가
+        (활성 계좌 1 + 그날 중복 조회 1) 을 봅니다. 그 수는 **달력**이 정하는 상수입니다.
+      · H-8 정체 주문 스윕 — update 1회(집합 연산).
+      · H-6 페이지네이션 — 페이지가 1개뿐이면 왕복은 예전과 똑같이 1회입니다(이 테스트가
+        900계좌에서도 select 수가 그대로임을 보여 그 사실을 고정합니다).
     """
     accounts = _accounts(account_count)
-    client = _client(accounts=accounts)
+    # 이미 들어간 입금이라고 답하게 해 두면 따라잡기가 0행으로 끝나, 이 테스트가 보려는
+    # "왕복 수" 자체에 집중할 수 있습니다(입금 insert 는 별도 테스트가 봅니다).
+    client = _client(accounts=accounts,
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     summary = _run(client)
 
     assert summary["snapshots_written"] == account_count
+    deposit_dates = duel_batch._pending_monthly_deposit_dates(TARGET_DATE)
+    # 정기입금 따라잡기가 보는 계좌·중복 조회(날짜당 2회)를 뺀 "배치 본체"의 읽기.
+    deposit_selects = 2 * len(deposit_dates)
     selects = client.calls_for(op="select")
-    assert len(selects) == 5, [(call.table, call.filters) for call in selects]
-    for table in (duel_db.ACCOUNTS_TABLE, duel_db.LEDGER_TABLE, duel_db.ORDERS_TABLE,
-                  duel_db.POSITIONS_TABLE, duel_db.DAILY_SNAPSHOTS_TABLE):
+    assert len(selects) == 5 + deposit_selects, [(c.table, c.filters) for c in selects]
+    assert len(client.calls_for(duel_db.ACCOUNTS_TABLE, "select")) == 1 + len(deposit_dates)
+    assert len(client.calls_for(duel_db.LEDGER_TABLE, "select")) == 1 + len(deposit_dates)
+    for table in (duel_db.ORDERS_TABLE, duel_db.POSITIONS_TABLE,
+                  duel_db.DAILY_SNAPSHOTS_TABLE):
         assert len(client.calls_for(table, "select")) == 1, table
 
     expected_chunks = -(-account_count // duel_db.CHUNK_SIZE)
     assert len(client.calls_for(duel_db.DAILY_SNAPSHOTS_TABLE, "upsert")) == expected_chunks
     assert client.calls_for(duel_db.HOLDING_SNAPSHOTS_TABLE) == []
-    assert len(client.calls) == 5 + expected_chunks
+    assert len(_stale_sweep_calls(client)) == 1          # H-8 스윕은 집합 연산 1회
+    assert len(client.calls) == 5 + deposit_selects + expected_chunks + 1
 
 
 def test_batch_reads_the_ledger_with_one_in_filter():
@@ -972,10 +1172,15 @@ def test_batch_reads_the_ledger_with_one_in_filter():
     accounts = _accounts(4)
     client = _client(accounts=accounts)
     _run(client)
+    expected = ("in", "account_id", [row["id"] for row in accounts])
     for table in (duel_db.LEDGER_TABLE, duel_db.POSITIONS_TABLE,
                   duel_db.DAILY_SNAPSHOTS_TABLE):
-        call = client.only_call(table, "select")
-        assert ("in", "account_id", [row["id"] for row in accounts]) in call.filters
+        # 원장 표에는 정기입금 따라잡기(H-7)의 중복 조회도 함께 갑니다 — 그건 계좌 목록을
+        # 쓰지 않는 다른 성격의 질의라, 잔고 조회만 골라서 봅니다.
+        calls = [call for call in client.calls_for(table, "select")
+                 if call.filter_map.get("event_type") != "monthly_deposit"]
+        assert len(calls) == 1, [(c.table, c.filters) for c in calls]
+        assert expected in calls[0].filters
 
 
 def test_fill_updates_scale_with_orders_not_with_accounts():
@@ -986,9 +1191,11 @@ def test_fill_updates_scale_with_orders_not_with_accounts():
     accounts = _accounts(20)
     orders = [_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00"),
               _order("o-2", "acc-2", "000001", 1, "2026-08-19T19:30:00+09:00")]
-    client = _client(accounts=accounts, orders=orders)
+    # 정기입금 따라잡기(H-7)의 insert 와 섞이지 않게 "이미 들어간 달"로 답하게 합니다.
+    client = _client(accounts=accounts, orders=orders,
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
-    assert len(client.calls_for(duel_db.ORDERS_TABLE, "update")) == len(orders)
+    assert len(_order_updates_excluding_stale_sweep(client)) == len(orders)
     # 원장·포지션 쓰기는 각각 한 번(집합 연산).
     assert len(client.calls_for(duel_db.LEDGER_TABLE, "insert")) == 1
     assert len(client.calls_for(duel_db.POSITIONS_TABLE, "upsert")) == 1
@@ -1067,11 +1274,19 @@ def test_summary_lines_are_readable_korean():
     assert TARGET_DATE.isoformat() in text
 
 
-def test_summary_shows_the_deposit_line_on_a_non_deposit_day():
-    client = _client()
+def test_summary_shows_the_deposit_line_every_run():
+    """
+    🔴 2026-08-29 재감사 H-7 로 바뀐 자리 — 이제 매 실행이 최근 구간의 10일을 전부 보므로
+    요약에는 항상 "정기 입금: N건 신규 입금" 줄이 나옵니다(밀린 달이 없으면 0건).
+    예전의 "오늘은 입금일이 아닙니다" 줄은 **누락을 감지할 장치가 0이라는 사실을 가리는
+    문장**이었습니다(다음 날 로그가 태연히 그렇게 찍혔습니다).
+    """
+    accounts = _accounts(2)
+    client = _client(accounts=accounts,
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     summary = _run(client)
     text = "\n".join(duel_batch.format_summary_lines(summary))
-    assert "정기 입금: 오늘은 입금일" in text
+    assert "정기 입금(매월 10일): 0건 신규 입금" in text
 
 
 def test_summary_shows_the_held_state_loudly():
@@ -1455,3 +1670,256 @@ def test_summary_shows_the_rebalancing_sell_line_only_when_there_was_one():
         "filled_amount_total": 10_000.0, "sold_amount_total": 48_000.0,
     })
     assert any("리밸런싱 매도 1건 중 1건 체결" in line for line in loud)
+
+
+# =============================================================================
+# 15. 🔴 2026-08-29 재감사 회귀 테스트
+#     (H-1/H-2/M-9 "우리 쪽 사정 → 보류" · H-3 평단가 · H-4 체결 원자성 · H-8 정체 주문)
+# =============================================================================
+def test_stale_index_source_holds_instead_of_cancelling_everyones_orders():
+    """
+    🔴 H-1 — 지수 종가 원천 하나가 낡았다고 **전원 주문을 취소하면 안 됩니다.**
+
+    그 지수는 결투가 아니라 매크로 파이프라인 산출물이라 한쪽만 실패하는 일이 정상적으로
+    있습니다. 예전에는 "지수 무변동"이 그대로 `failed` 판정이 되어, 종목 종가는 멀쩡한데도
+    그날 귀속 주문 전부에 **사실이 아닌 사유**("수집 실패로 판정했습니다")가 적혔습니다.
+    이제는 판정을 믿지 않고 `no_baseline` 과 같은 방식으로 보류합니다(오너 승인).
+    """
+    client = _client(orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, index_stale_reason="지수 원천이 낡았습니다(합성).")
+
+    assert summary["freshness"]["status"] == duel_batch.CRAWL_NO_BASELINE
+    assert summary["action"]["fill"] is False
+    assert summary["action"]["cancel_pending"] is False      # 취소하지 않습니다
+    assert summary["pending_held"] == 1
+    assert "지수 원천이 낡았습니다" in summary["freshness"]["reason"]
+    assert "보류" in summary["freshness"]["reason"]
+    assert _order_updates_excluding_stale_sweep(client) == []
+
+
+def test_a_price_snapshot_from_another_trading_day_holds_instead_of_filling():
+    """
+    🔴 H-2 — 가격 스냅샷의 실제 거래일이 처리 거래일과 다르면 **체결하지 않습니다.**
+
+    그 값은 사용자가 이미 아는 어제 종가라, 그대로 체결하면 대결의 공정성이 무너집니다
+    (§0-3-1). 예전에는 실행 스크립트가 경고만 찍고 배치에 전달조차 하지 않았습니다.
+    """
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, session_date=YESTERDAY.isoformat(),
+                   close_price_of=_price_lookup({"000001": 10_000.0}))
+
+    assert summary["freshness"]["status"] == duel_batch.CRAWL_NO_BASELINE
+    assert summary["action"]["fill"] is False
+    assert summary["action"]["cancel_pending"] is False
+    assert summary["pending_held"] == 1
+    assert YESTERDAY.isoformat() in summary["freshness"]["reason"]
+    assert summary["snapshots_written"] == 0
+
+
+def test_a_matching_session_date_still_fills_normally():
+    """H-2 의 대조군 — 거래일이 맞으면 예전과 **똑같이** 체결됩니다."""
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, session_date=TARGET_DATE.isoformat(),
+                   close_price_of=_price_lookup({"000001": 10_000.0}))
+    assert summary["freshness"]["status"] == duel_rules.CRAWL_OK
+    assert summary["orders"]["filled"] == 1
+
+
+def test_override_fill_is_refused_when_the_basis_is_stale():
+    """
+    🔴 M-9 — `--override fill` + 낡은 근거 조합은 **거절**합니다.
+
+    예전에는 `--target-date <과거> --override fill` 로 재실행하면 `resolve_action()` 이
+    신선도를 `ok` 로 덮어써, 그 과거 주문이 **지금 있는 가격 파일**로 체결되고 `filled_date`
+    에는 과거 날짜가 찍혔습니다("그날 종가로 체결"이라고 기록되지만 실제 값은 며칠 뒤 종가).
+    """
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    with pytest.raises(DuelBatchError) as excinfo:
+        _run(client, session_date=YESTERDAY.isoformat(),
+             close_price_of=_price_lookup({"000001": 10_000.0}),
+             override=duel_batch.OVERRIDE_FILL)
+    assert "override fill" in str(excinfo.value)
+    # 거절이 **쓰기 전에** 일어나야 합니다(반쪽 상태를 만들지 않기).
+    for op in ("insert", "upsert", "delete"):
+        assert client.calls_for(op=op) == [], op
+
+
+def test_a_probe_without_any_index_holds_instead_of_raising():
+    """
+    🔴 M-12/H-1 — 점검표에 지수가 하나도 없어도 배치는 **죽지 않고 보류**합니다.
+    (예전에는 `judge_crawl_freshness()` 가 예외를 던져 배치가 통째로 멈췄고, 그러면 그날
+     주문은 체결도 취소도 보류 기록도 없이 남았습니다 — H-8 로 합류.)
+    """
+    probe = _probe(TARGET_DATE, stock_prices=_stock_prices(bump=10.0))
+    probe["index_keys"] = []
+    probe["values"].pop("KOSPI")
+    client = _client(orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    summary = _run(client, today_probe=probe,
+                   index_stale_reason="지수 원천이 전부 낡아 판정에서 뺐습니다(합성).")
+    assert summary["freshness"]["status"] == duel_batch.CRAWL_NO_BASELINE
+    assert summary["pending_held"] == 1
+    # 정기입금처럼 신선도와 무관한 일은 그대로 돕니다(배치가 죽지 않았다는 증거).
+    assert summary["deposit_attempted"] is True
+
+
+def test_selling_then_rebuying_the_same_night_keeps_the_new_average_cost():
+    """
+    🔴 H-3 — 같은 밤 "전량 매도 → 재매수"로 최종 수량이 줄어든 포지션의 **새 평단가**가
+    DB 까지 살아 가는지.
+
+    매도 정산 RPC(`settle_sell_positions`)는 `quantity` 만 보내고 `avg_cost` 는 일부러 보내지
+    않습니다(순수 매도만 있을 때는 맞는 설계). 그래서 예전에는 재매수로 계산된 새 평단가가
+    **통째로 버려지고** 옛 평단가가 그대로 남았습니다 — 실제로 쓴 돈은 600원인데 원가가
+    20,000원으로 기록되고, 그 값이 다음 날 스냅샷·화면 수익률·순위표로 흘러갔습니다.
+
+    ⚠️ 기존 테스트는 `sell_position_rows[0]["avg_cost"]` 만 봤습니다(그 목록에는 값이 살아
+       있었으므로 통과했습니다). 여기서는 **실제 DB 로 가는 최종 payload** 까지 봅니다.
+    """
+    orders = [
+        _sell_order("o-sell", "acc-1", "AAA", 5, "2026-08-19T19:00:00+09:00"),
+        _order("o-buy", "acc-1", "AAA", 2, "2026-08-19T19:30:00+09:00"),
+    ]
+    existing = {"acc-1": [_position("acc-1", "AAA", 5, 10_000.0, stock_name="AAA")]}
+    plan = duel_batch.plan_order_fills(orders, {"acc-1": 0.0}, {"AAA": 300.0},
+                                       existing, TARGET_DATE)
+
+    # 최종 수량은 2주(5주 팔고 2주 다시 삼) — 줄었으므로 정산 RPC 경로입니다.
+    assert [row["ticker"] for row in plan["sell_position_rows"]] == ["AAA"]
+    assert plan["sell_position_rows"][0]["quantity"] == 2
+    # 🔴 새 평단가(300원)를 되살릴 별도 목록이 채워져 있어야 합니다.
+    assert plan["avg_cost_fixup_rows"] == [{
+        "account_id": "acc-1", "ticker": "AAA", "stock_name": "AAA",
+        "quantity": 2, "avg_cost": 300.0,
+    }]
+
+
+def test_a_pure_sell_does_not_produce_an_average_cost_fixup():
+    """H-3 의 대조군 — 매도만 있으면 평단가가 안 바뀌므로 보정 목록은 **비어 있어야** 합니다
+    (매도 정산 경로로 원가를 다시 쓰는 길을 새로 만들지 않기)."""
+    plan = duel_batch.plan_order_fills(
+        [_sell_order("o-sell", "acc-1", "AAA", 4, "2026-08-19T19:00:00+09:00")],
+        {"acc-1": 0.0}, {"AAA": 300.0},
+        {"acc-1": [_position("acc-1", "AAA", 10, 10_000.0, stock_name="AAA")]},
+        TARGET_DATE)
+    assert plan["sell_position_rows"][0]["avg_cost"] == 10_000.0
+    assert plan["avg_cost_fixup_rows"] == []
+
+
+def test_the_batch_repairs_the_average_cost_after_the_sell_settlement_rpc():
+    """
+    🔴 H-3 — 배치가 실제로 DB 로 보내는 것까지 확인합니다.
+
+    순서가 규약의 일부입니다: **매도 정산 RPC 뒤에** 보정 upsert 를 보내야 그 시점에 수량이
+    이미 줄어 있어 `duel_positions_buy_only()` 트리거를 통과합니다(정산 전에 보내면 "수량이
+    줄었다"로 보여 요청 전체가 거절됩니다).
+    """
+    accounts = _accounts(1)
+    accounts[0]["first_holding_date"] = "2026-07-01"
+    client = _client(
+        accounts=accounts,
+        positions=[_position("acc-1", "AAA", 5, 10_000.0, stock_name="AAA")],
+        orders=[_sell_order("o-sell", "acc-1", "AAA", 5, "2026-08-19T19:00:00+09:00"),
+                _order("o-buy", "acc-1", "AAA", 2, "2026-08-19T19:30:00+09:00")],
+    )
+    summary = _run(client, close_price_of=_price_lookup({"AAA": 300.0}))
+    assert summary["sell_positions_settled"] == 1
+
+    upserts = client.calls_for(duel_db.POSITIONS_TABLE, "upsert")
+    fixup_rows = [row for call in upserts for row in call.rows if row["ticker"] == "AAA"]
+    assert fixup_rows, "평단가 보정 upsert 가 아예 나가지 않았습니다"
+    assert all(row["avg_cost"] == 300.0 for row in fixup_rows), fixup_rows
+    assert all(row["quantity"] == 2 for row in fixup_rows), fixup_rows
+
+    order_of_calls = [(call.table, call.op) for call in client.calls]
+    rpc_at = order_of_calls.index((duel_db.SETTLE_SELL_RPC, "rpc"))
+    upsert_at = order_of_calls.index((duel_db.POSITIONS_TABLE, "upsert"))
+    assert rpc_at < upsert_at, "보정 upsert 가 매도 정산 RPC 보다 먼저 나갔습니다(트리거에 막힙니다)"
+
+
+def test_a_failing_ledger_insert_leaves_the_order_pending_for_the_next_run():
+    """
+    🔴 H-4 — 원장 insert 가 실패하면 주문은 **여전히 pending** 이어야 합니다.
+
+    예전 순서(주문 상태 → 원장 → 포지션)에서는 원장이 실패하면 "현금은 그대로인데 주식만
+    생긴 계좌"가 남고, 그 주문은 더 이상 `pending` 이 아니라 재실행이 다시 집지도 못했습니다.
+    이제 주문 상태는 **마지막**이라, 중간에 죽으면 다음 실행이 그 주문을 그대로 다시 집습니다.
+    """
+    client = _client(
+        accounts=_accounts(1),
+        orders=[_order("o-1", "acc-1", "000001", 3, "2026-08-19T19:00:00+09:00")],
+        deposits_already=[{"account_id": "acc-1"}],
+    )
+    client.responses[(duel_db.LEDGER_TABLE, "insert")] = RuntimeError("network reset")
+
+    with pytest.raises(DuelDbError):
+        _run(client, close_price_of=_price_lookup({"000001": 10_000.0}))
+
+    # 주문 상태를 찍는 update 가 **한 건도** 나가지 않았어야 합니다(스윕은 별개).
+    assert _order_updates_excluding_stale_sweep(client) == []
+    # 포지션도 아직 안 만들어졌습니다(원장이 먼저이므로).
+    assert client.calls_for(duel_db.POSITIONS_TABLE, "upsert") == []
+
+
+def test_the_ledger_is_not_recorded_twice_when_the_same_chunk_is_sent_again():
+    """
+    🔴 H-4 — 같은 체결 원장을 두 번 보내도 **중복 기록되지 않습니다**(재실행 안전).
+
+    (DB 쪽 마지막 방어선은 `sql/duel_schema_migration_2026-08-29_ledger_order_event_unique.sql`
+     의 부분 유니크 인덱스이고, 여기서 보는 것은 그 인덱스가 아직 없어도 동작하는
+     애플리케이션 레벨 필터링입니다.)
+    """
+    entries = [{"account_id": "acc-1", "order_id": "o-1", "filled_amount": 30_000.0,
+                "event_date": TARGET_DATE}]
+
+    first = FakeClient()
+    assert duel_db.record_buy_ledger_entries(first, entries) == 1
+    written = first.only_call(duel_db.LEDGER_TABLE, "insert").rows
+
+    # 2차 실행: 같은 (order_id, event_type) 이 이미 있다고 답합니다.
+    second = FakeClient(responses={(duel_db.LEDGER_TABLE, "select"): [
+        {"order_id": "o-1", "event_type": "buy"}]})
+    assert duel_db.record_buy_ledger_entries(second, entries) == 0
+    assert second.calls_for(duel_db.LEDGER_TABLE, "insert") == []
+    assert written[0]["amount"] == -30_000.0        # 1차 기록 자체는 그대로
+
+
+def test_the_batch_sweeps_pending_orders_the_batch_never_got_to_process():
+    """
+    🔴 H-8 — 배치가 못 돈 날의 pending 주문을 **매 실행 맨 앞에서** 정리합니다.
+
+    사유는 "수집 실패"가 아니라 **우리 쪽 사정**이라는 사실을 그대로 적습니다(§0-1).
+    """
+    client = _client(stale_pending_rows=[{"id": "old-1"}, {"id": "old-2"}])
+    summary = _run(client)
+
+    assert summary["stale_pending_expired"] == 2
+    (sweep,) = _stale_sweep_calls(client)
+    assert sweep.payload["status"] == duel_rules.ORDER_CANCELLED
+    assert "배치가 정상적으로 처리하지 못해" in sweep.payload["fail_reason"]
+    assert ("lt", "target_date", TARGET_DATE.isoformat()) in sweep.filters
+    text = "\n".join(duel_batch.format_summary_lines(summary))
+    assert "과거 주문 2건 정리" in text
+
+
+def test_the_summary_stays_quiet_when_there_are_no_stale_pending_orders():
+    """정상적인 밤에는 H-8 줄이 늘지 않습니다(요약이 조용해야 신호가 보입니다)."""
+    client = _client()
+    summary = _run(client)
+    assert summary["stale_pending_expired"] == 0
+    assert not any("과거 주문" in line for line in duel_batch.format_summary_lines(summary))
+
+
+def test_monthly_deposit_catch_up_dates_are_every_tenth_in_the_window():
+    """H-7 헬퍼 자체 — 구간 안의 '매월 10일'을 오래된 순으로, 빠짐없이."""
+    dates = duel_batch._pending_monthly_deposit_dates(date(2026, 9, 10))
+    assert dates == sorted(dates)
+    assert date(2026, 9, 10) in dates
+    assert all(d.day == duel_rules.MONTHLY_DEPOSIT_DAY for d in dates)
+    # 구간(기본 60일) 밖의 10일은 들어가지 않습니다.
+    assert all(d >= date(2026, 9, 10) - timedelta(days=60) for d in dates)
+    # 10일 당일에도 그날이 포함됩니다(경계 포함).
+    assert duel_batch._pending_monthly_deposit_dates(date(2026, 9, 10), lookback_days=0) \
+        == [date(2026, 9, 10)]

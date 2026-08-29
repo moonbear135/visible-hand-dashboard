@@ -406,8 +406,13 @@ def test_save_sell_order_usd_outside_the_window_shows_the_usd_time_range():
 
 
 def test_settle_sell_positions_usd_uses_the_usd_rpc_and_never_the_krw_one():
-    """매도 정산 RPC 도 표가 박혀 있어 통화별로 하나씩입니다(§5-11-1)."""
-    client = FakeClient()
+    """매도 정산 RPC 도 표가 박혀 있어 통화별로 하나씩입니다(§5-11-1).
+
+    ⚠️ 2026-08-29 재감사 H-4 — 원화와 같이 RPC **앞에** 현재 수량을 읽는 select 가 하나
+       붙었습니다. 포지션 표에 대한 **쓰기**는 여전히 0 입니다.
+    """
+    client = FakeClient(responses={(duel_db_usd.POSITIONS_TABLE_USD, "select"): [
+        {"account_id": "acc-1", "ticker": "AAPL", "quantity": 10.0}]})
     settled = duel_db_usd.settle_sell_positions_usd(client, [
         {"account_id": "acc-1", "ticker": "AAPL", "quantity": 6, "avg_cost": 190.0}])
 
@@ -417,7 +422,8 @@ def test_settle_sell_positions_usd_uses_the_usd_rpc_and_never_the_krw_one():
         {"account_id": "acc-1", "ticker": "AAPL", "quantity": 6.0}]}
     assert settled == 1
     assert client.calls_for(duel_db.SETTLE_SELL_RPC) == []
-    assert client.calls_for(duel_db_usd.POSITIONS_TABLE_USD) == []
+    assert client.calls_for(duel_db.POSITIONS_TABLE) == []      # 원화 표는 안 봅니다
+    assert [c.op for c in client.calls_for(duel_db_usd.POSITIONS_TABLE_USD)] == ["select"]
 
 
 def test_set_first_holding_dates_usd_updates_the_usd_accounts_table_once():
@@ -839,12 +845,15 @@ def test_record_order_fill_usd_persists_exactly_what_the_shared_rules_computed()
     outcome = duel_rules.calculate_fill(10, 200, 1_000)   # 5주만 체결
     assert outcome["status"] == "partially_filled" and outcome["filled_quantity"] == 5
 
+    # 2026-08-29 재감사 L-4 — 단건 래퍼 `record_order_fill_usd()` 는 삭제됐습니다
+    # (비테스트 호출부 0건). 실제로 쓰이는 복수형 API 로 같은 것을 검사합니다.
     client = FakeClient()
-    duel_db_usd.record_order_fill_usd(
-        client, "order-1", outcome["status"], outcome["filled_quantity"],
-        200, outcome["filled_amount"], outcome["fail_reason"],
-        filled_date=date(2026, 8, 20),
-    )
+    duel_db_usd.record_order_fills_usd(client, [{
+        "id": "order-1", "status": outcome["status"],
+        "filled_quantity": outcome["filled_quantity"], "filled_price": 200,
+        "filled_amount": outcome["filled_amount"], "filled_date": date(2026, 8, 20),
+        "fail_reason": outcome["fail_reason"],
+    }])
     call = client.only_call(duel_db_usd.ORDERS_TABLE_USD, "update")
     assert call.payload["status"] == "partially_filled"
     assert call.payload["filled_quantity"] == 5
@@ -875,7 +884,9 @@ def test_record_order_fills_usd_with_empty_list_writes_nothing():
 
 def test_record_buy_ledger_entry_usd_flips_the_sign_once():
     client = FakeClient()
-    duel_db_usd.record_buy_ledger_entry_usd(client, "acc-1", "order-1", 490, date(2026, 8, 20))
+    duel_db_usd.record_buy_ledger_entries_usd(client, [{
+        "account_id": "acc-1", "order_id": "order-1",
+        "filled_amount": 490, "event_date": date(2026, 8, 20)}])
     row = client.only_call(duel_db_usd.LEDGER_TABLE_USD, "insert").rows[0]
     assert row["amount"] == -490
     assert row["event_type"] == "buy"
@@ -894,23 +905,10 @@ def test_record_buy_ledger_entries_usd_is_a_single_insert():
 def test_record_buy_ledger_entry_usd_rejects_zero_amount():
     client = FakeClient()
     with pytest.raises(DuelDbError):
-        duel_db_usd.record_buy_ledger_entry_usd(client, "acc-1", "order-1", 0, date(2026, 8, 20))
+        duel_db_usd.record_buy_ledger_entries_usd(client, [{
+            "account_id": "acc-1", "order_id": "order-1",
+            "filled_amount": 0, "event_date": date(2026, 8, 20)}])
     assert client.calls == []
-
-
-def test_upsert_position_weighted_average_usd_uses_the_shared_rules_function():
-    """평단가는 (공유) `duel_rules.apply_buy_fill_to_position()` 이 계산합니다."""
-    existing = {"quantity": 10, "avg_cost": 100}
-    expected = duel_rules.apply_buy_fill_to_position(10, 100, 5, 200)
-
-    client = FakeClient()
-    duel_db_usd.upsert_position_weighted_average_usd(
-        client, "acc-1", "AAPL", "애플", existing, 5, 200)
-    call = client.only_call(duel_db_usd.POSITIONS_TABLE_USD, "upsert")
-    assert call.options["on_conflict"] == "account_id,ticker"
-    row = call.rows[0]
-    assert row["quantity"] == expected["quantity"] == 15
-    assert row["avg_cost"] == expected["avg_cost"]
 
 
 def test_upsert_positions_usd_rejects_duplicate_conflict_keys():
@@ -953,6 +951,30 @@ def test_expire_or_cancel_all_pending_for_date_usd_requires_a_reason():
     for bad_reason in ("", "   ", None):
         with pytest.raises(DuelDbError):
             duel_db_usd.expire_or_cancel_all_pending_for_date_usd(
+                client, date(2026, 8, 20), bad_reason)
+    assert client.calls == []
+
+
+def test_hold_reason_is_written_without_touching_the_status_usd():
+    """🔴 M-10(USD 미러) — 상태는 pending 그대로, 사유만 적습니다. 원화 표는 안 건드립니다."""
+    client = FakeClient(responses={(duel_db_usd.ORDERS_TABLE_USD, "update"):
+                                   [{"id": "o-1"}, {"id": "o-2"}]})
+    reason = "2026-08-20 마감가로 체결할지 판단하지 못해 보류 중입니다(관리자 확인 대기)."
+
+    assert duel_db_usd.annotate_pending_orders_with_hold_reason_usd(
+        client, date(2026, 8, 20), reason) == 2
+
+    call = client.only_call(duel_db_usd.ORDERS_TABLE_USD, "update")
+    assert call.payload == {"fail_reason": reason}
+    assert call.filter_map == {"status": "pending", "target_date": "2026-08-20"}
+    assert client.calls_for(duel_db.ORDERS_TABLE) == []      # 원화 표는 안 건드립니다
+
+
+def test_hold_reason_usd_requires_a_sentence():
+    client = FakeClient()
+    for bad_reason in ("", "   ", None):
+        with pytest.raises(DuelDbError):
+            duel_db_usd.annotate_pending_orders_with_hold_reason_usd(
                 client, date(2026, 8, 20), bad_reason)
     assert client.calls == []
 
@@ -1189,11 +1211,21 @@ def test_write_public_holdings_usd_rejects_identity_fields():
     lambda: duel_db_usd.fetch_pending_orders_for_fill_usd(None, date(2026, 8, 20)),
     lambda: duel_db_usd.expire_or_cancel_all_pending_for_date_usd(None, date(2026, 8, 20), "사유"),
     lambda: duel_db_usd.write_daily_snapshots_usd(None, date(2026, 8, 20), [_snapshot_row_usd()]),
-    lambda: duel_db_usd.record_order_fill_usd(None, "o-1", "filled", 1, 100, 100,
-                                               filled_date=date(2026, 8, 20)),
-    lambda: duel_db_usd.record_buy_ledger_entry_usd(None, "acc-1", "o-1", 100, date(2026, 8, 20)),
-    lambda: duel_db_usd.upsert_position_weighted_average_usd(None, "acc-1", "AAPL", "애플",
-                                                             None, 1, 100),
+    lambda: duel_db_usd.record_order_fills_usd(None, [{"id": "o-1", "status": "filled",
+                                                       "filled_quantity": 1,
+                                                       "filled_price": 100,
+                                                       "filled_amount": 100,
+                                                       "filled_date": date(2026, 8, 20)}]),
+    lambda: duel_db_usd.record_buy_ledger_entries_usd(None, [{"account_id": "acc-1",
+                                                              "order_id": "o-1",
+                                                              "filled_amount": 100,
+                                                              "event_date": date(2026, 8, 20)}]),
+    lambda: duel_db_usd.upsert_positions_usd(None, [{"account_id": "acc-1", "ticker": "AAPL",
+                                                     "stock_name": "애플", "quantity": 1,
+                                                     "avg_cost": 100}]),
+    lambda: duel_db_usd.expire_stale_pending_orders_before_usd(None, date(2026, 8, 20), "사유"),
+    lambda: duel_db_usd.annotate_pending_orders_with_hold_reason_usd(
+        None, date(2026, 8, 20), "사유"),
 ])
 def test_none_client_raises_duel_db_error_not_attribute_error_usd(call):
     with pytest.raises(DuelDbError):
@@ -1245,3 +1277,85 @@ def test_every_public_function_in_duel_db_usd_has_a_docstring():
                and not name.startswith("_")
                and not (function.__doc__ or "").strip()]
     assert missing == [], f"docstring 없는 공개 함수: {missing}"
+
+
+# =============================================================================
+# 16. 🔴 2026-08-29 재감사 (USD 미러) — H-6 페이지네이션 · H-4 원장 멱등 · L-12 TOCTOU
+# =============================================================================
+def test_batch_reads_all_use_range_usd():
+    """USD 배치 읽기 함수들도 `.range()` 를 붙여 끝까지 읽는지(H-6)."""
+    checks = [
+        (lambda c: duel_db_usd.fetch_all_active_accounts_usd(c),
+         duel_db_usd.ACCOUNTS_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_cash_ledger_for_accounts_usd(c, ["acc-1"]),
+         duel_db_usd.LEDGER_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_positions_for_accounts_usd(c, ["acc-1"]),
+         duel_db_usd.POSITIONS_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_daily_snapshots_for_accounts_usd(c, ["acc-1"]),
+         duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_pending_orders_for_fill_usd(c, date(2026, 8, 20)),
+         duel_db_usd.ORDERS_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_publishable_consents_usd(c),
+         duel_db_usd.CONSENT_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_revoked_consent_accounts_usd(c),
+         duel_db_usd.CONSENT_TABLE_USD),
+        (lambda c: duel_db_usd.fetch_bracket_assignments_usd(c, "2026-H2"),
+         duel_db_usd.BRACKET_ASSIGNMENTS_TABLE_USD),
+    ]
+    for call, table in checks:
+        client = FakeClient()
+        call(client)
+        query = client.only_call(table, "select")
+        assert "range" in query.options, f"{table} 조회에 .range() 가 없습니다(H-6)"
+
+
+def test_the_usd_ledger_is_not_recorded_twice_when_the_same_chunk_is_sent_again():
+    """H-4(USD) — 같은 체결 원장을 두 번 보내도 중복 기록되지 않습니다."""
+    entries = [{"account_id": "acc-1", "order_id": "o-1", "filled_amount": 300.0,
+                "event_date": date(2026, 8, 19)}]
+    first = FakeClient()
+    assert duel_db_usd.record_buy_ledger_entries_usd(first, entries) == 1
+
+    second = FakeClient(responses={(duel_db_usd.LEDGER_TABLE_USD, "select"): [
+        {"order_id": "o-1", "event_type": "buy"}]})
+    assert duel_db_usd.record_buy_ledger_entries_usd(second, entries) == 0
+    assert second.calls_for(duel_db_usd.LEDGER_TABLE_USD, "insert") == []
+
+
+def test_expire_stale_pending_orders_before_usd_uses_a_less_than_filter():
+    """H-8(USD) — '그 이전 전부'를 한 번의 update 로(집합 연산)."""
+    client = FakeClient(responses={(duel_db_usd.ORDERS_TABLE_USD, "update"):
+                                   [{"id": "old-1"}]})
+    assert duel_db_usd.expire_stale_pending_orders_before_usd(
+        client, date(2026, 8, 20), "사유") == 1
+    call = client.only_call(duel_db_usd.ORDERS_TABLE_USD, "update")
+    assert ("lt", "target_date", "2026-08-20") in call.filters
+    assert ("eq", "status", "pending") in call.filters
+    assert client.calls_for(duel_db.ORDERS_TABLE) == []      # 원화 표는 안 건드립니다
+
+
+def test_revoke_consent_usd_does_not_extend_the_block_when_another_tab_won():
+    """L-12(USD) — 원화와 같은 TOCTOU 방어."""
+    already = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
+    client = FakeClient(responses={
+        (duel_db_usd.CONSENT_TABLE_USD, "select"): sequence(
+            [{"account_id": "acc-1", "revoked_at": None}], [already]),
+        (duel_db_usd.CONSENT_TABLE_USD, "update"): [],
+    })
+    result = duel_db_usd.revoke_consent_usd(client, "acc-1")
+    assert result["revoked_at"] == already["revoked_at"]
+    update = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "update")
+    assert ("is", "revoked_at", "null") in update.filters
+
+
+def test_save_sell_order_usd_accepts_a_fractional_holding():
+    """M-4(USD) — 소수 보유 수량(기업행위 조정)이 매도 자체를 막지 않습니다."""
+    client = FakeClient(responses={(duel_db_usd.ORDERS_TABLE_USD, "insert"): [{"id": "o-1"}]})
+    saved = duel_db_usd.save_sell_order_usd(
+        client, "acc-1", "AAPL", "애플", 1, 10.5, 0,
+        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW_USD)
+    assert saved["id"] == "o-1"
+    with pytest.raises(DuelDbError):
+        duel_db_usd.save_sell_order_usd(
+            client, "acc-1", "AAPL", "애플", 11, 10.5, 0,
+            trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW_USD)

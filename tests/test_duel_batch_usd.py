@@ -142,7 +142,13 @@ def _order(order_id, account_id, ticker, quantity, saved_at, *, target_date=TARG
 
 
 def _client(*, accounts=None, ledger=None, orders=None, positions=None, snapshots=None,
-           deposits_already=None):
+           deposits_already=None, cancelled_rows=None, stale_pending_rows=None):
+    """배치 한 판을 돌릴 수 있는 가짜 클라이언트(원화 `tests/test_duel_batch.py` 의 미러).
+
+    🔴 2026-08-29 재감사 H-8 — 주문 표에 성격이 다른 update 가 둘입니다:
+       ① 매 실행 맨 앞의 정체 주문 스윕(`target_date < 처리일`, `.lt` 필터) — 기본 0행
+       ② 그날짜 일괄 취소 / 체결 결과 기록
+    """
     accounts = accounts if accounts is not None else _accounts()
     ledger = ledger if ledger is not None else []
 
@@ -151,13 +157,42 @@ def _client(*, accounts=None, ledger=None, orders=None, positions=None, snapshot
             return list(deposits_already or [])
         return list(ledger)
 
+    def orders_update(query):
+        if any(op == "lt" and column == "target_date" for op, column, _v in query.filters):
+            return list(stale_pending_rows or [])
+        if cancelled_rows is not None:
+            return list(cancelled_rows)
+        return [dict(row) for row in query.rows]
+
     return FakeClient(responses={
         (duel_db_usd.ACCOUNTS_TABLE_USD, "select"): list(accounts),
         (duel_db_usd.LEDGER_TABLE_USD, "select"): ledger_select,
         (duel_db_usd.ORDERS_TABLE_USD, "select"): list(orders or []),
+        (duel_db_usd.ORDERS_TABLE_USD, "update"): orders_update,
         (duel_db_usd.POSITIONS_TABLE_USD, "select"): list(positions or []),
         (duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD, "select"): list(snapshots or []),
     })
+
+
+def _stale_sweep_calls(client):
+    """H-8 정체 주문 스윕 update 호출들."""
+    return [call for call in client.calls_for(duel_db_usd.ORDERS_TABLE_USD, "update")
+            if any(op == "lt" and column == "target_date" for op, column, _v in call.filters)]
+
+
+def _hold_annotation_calls(client):
+    """M-10 보류 사유 기록 update 호출들(payload 에 `status` 가 없는 것이 표식) — 원화와 동일."""
+    return [call for call in client.calls_for(duel_db_usd.ORDERS_TABLE_USD, "update")
+            if "status" not in (call.payload or {})]
+
+
+def _order_updates_excluding_stale_sweep(client):
+    """**주문 상태를 바꾸는** update 호출들(체결 결과 기록 · 그날짜 일괄 취소).
+    스윕(H-8)과 보류 사유 기록(M-10)은 뺍니다 — 원화 파일과 같은 이유입니다."""
+    ignored = set(id(call) for call in _stale_sweep_calls(client))
+    ignored |= set(id(call) for call in _hold_annotation_calls(client))
+    return [call for call in client.calls_for(duel_db_usd.ORDERS_TABLE_USD, "update")
+            if id(call) not in ignored]
 
 
 def _run(client, **kwargs):
@@ -200,8 +235,11 @@ def test_batch_usd_reads_accounts_ledger_and_writes_snapshots_on_a_good_day():
     assert summary["freshness"]["status"] == duel_rules.CRAWL_OK
     assert summary["account_count"] == 2
     assert summary["snapshots_written"] == 2
-    assert client.only_call(duel_db_usd.ACCOUNTS_TABLE_USD, "select").filter_map == \
-        {"status": "active"}
+    # 정기입금 따라잡기(H-7)도 활성 계좌를 읽으므로 호출이 여럿입니다 — 전부 같은 필터인지
+    # (= 계좌 상태를 보는 조건이 한 가지인지) 확인합니다.
+    account_selects = client.calls_for(duel_db_usd.ACCOUNTS_TABLE_USD, "select")
+    assert account_selects
+    assert all(call.filter_map == {"status": "active"} for call in account_selects)
 
 
 # =============================================================================
@@ -209,26 +247,37 @@ def test_batch_usd_reads_accounts_ledger_and_writes_snapshots_on_a_good_day():
 # =============================================================================
 def test_deposit_uses_today_kst_not_target_date():
     """
-    정기입금 판정·event_date 는 `today_kst`(배치 실행일)를 씁니다. `target_date`가 10일이어도
-    `today_kst`가 10일이 아니면 입금하지 않고, 그 반대(오늘이 10일, target_date는 아님)면
-    입금해야 합니다 — 원화 배치라면 있을 수 없는 분기라 이 테스트로만 지킵니다.
+    정기입금 판정·event_date 는 `today_kst`(배치 실행일)를 씁니다 — 원화 배치라면 있을 수
+    없는 분기라 이 테스트로만 지킵니다.
+
+    🔴 2026-08-29 재감사 H-7 로 검사 방식이 바뀌었습니다. 이제 "그날이 10일인가" 하나가
+    아니라 **최근 구간의 모든 10일**을 보므로(밀린 달을 놓치지 않기 위해), 확인할 것은
+    "10일이 아니면 아예 시도하지 않는가"가 아니라 **"어느 날짜 축을 기준으로 구간을
+    잡는가"** 입니다: `today_kst`(실행일)이지 `target_date`(거래일)가 아닙니다.
     """
     accounts = _accounts(2)
 
-    # target_date 가 10일이지만 today_kst 는 10일이 아님 → 입금하지 않습니다.
+    # target_date 가 9/10 이어도 구간은 today_kst(8/20) 기준이라 9/10 은 들어가지 않습니다.
     client_a = _client(accounts=accounts)
     summary_a = _run(client_a, target_date=date(2026, 9, 10), today_kst=TODAY_KST)
-    assert summary_a["deposit_attempted"] is False
-    assert client_a.calls_for(duel_db_usd.LEDGER_TABLE_USD, "insert") == []
+    dates_a = {row["event_date"]
+               for call in client_a.calls_for(duel_db_usd.LEDGER_TABLE_USD, "insert")
+               for row in call.rows}
+    assert dates_a == {d.isoformat()
+                       for d in duel_batch._pending_monthly_deposit_dates(TODAY_KST)}
+    assert "2026-09-10" not in dates_a
 
-    # target_date 는 10일이 아니지만 today_kst 가 10일 → 입금합니다.
+    # today_kst 가 9/10 이면 그 날짜분이 들어갑니다(target_date 는 8/19 그대로).
     client_b = _client(accounts=accounts)
     summary_b = _run(client_b, target_date=TARGET_DATE, today_kst=DEPOSIT_TODAY_KST)
     assert summary_b["deposit_attempted"] is True
-    assert summary_b["deposit_applied"] == 2
-    deposit_rows = client_b.only_call(duel_db_usd.LEDGER_TABLE_USD, "insert").rows
-    # event_date 는 today_kst(입금 판정일) 이지 target_date(거래일) 가 아닙니다.
-    assert all(row["event_date"] == DEPOSIT_TODAY_KST.isoformat() for row in deposit_rows)
+    pending_b = duel_batch._pending_monthly_deposit_dates(DEPOSIT_TODAY_KST)
+    assert summary_b["deposit_applied"] == 2 * len(pending_b)
+    deposit_rows = [row for call in client_b.calls_for(duel_db_usd.LEDGER_TABLE_USD, "insert")
+                    for row in call.rows]
+    # event_date 는 today_kst 축의 날짜들이지 target_date(거래일) 가 아닙니다.
+    assert DEPOSIT_TODAY_KST.isoformat() in {row["event_date"] for row in deposit_rows}
+    assert TARGET_DATE.isoformat() not in {row["event_date"] for row in deposit_rows}
     assert all(row["amount"] == duel_rules.MONTHLY_DEPOSIT_USD == 500 for row in deposit_rows)
 
 
@@ -287,7 +336,7 @@ def test_batch_usd_cancels_pending_orders_on_a_failed_day():
     summary = _run(client, today_probe=today_probe, previous_probe=previous_probe)
     assert summary["freshness"]["status"] == duel_rules.CRAWL_FAILED_OR_HOLIDAY
     assert summary["pending_cancelled"] == 1
-    call = client.only_call(duel_db_usd.ORDERS_TABLE_USD, "update")
+    (call,) = _order_updates_excluding_stale_sweep(client)   # H-8 스윕은 제외
     assert "미국 정규장" in call.payload["fail_reason"]
 
 
@@ -298,7 +347,7 @@ def test_batch_usd_holds_orders_without_a_baseline():
     summary = _run(client, today_probe=today_probe, previous_probe=None)
     assert summary["freshness"]["status"] == duel_batch_usd.CRAWL_NO_BASELINE
     assert summary["pending_held"] == 1
-    assert client.calls_for(duel_db_usd.ORDERS_TABLE_USD, "update") == []
+    assert _order_updates_excluding_stale_sweep(client) == []
 
 
 def test_admin_override_fill_works_on_the_usd_batch():
@@ -322,29 +371,42 @@ def test_admin_override_fill_works_on_the_usd_batch():
 @pytest.mark.parametrize("account_count", [3, 50, 900])
 def test_batch_usd_query_count_does_not_grow_with_accounts(account_count):
     accounts = _accounts(account_count)
-    client = _client(accounts=accounts)
+    # 정기입금 따라잡기(H-7)가 0행으로 끝나게 해 두면, 이 테스트가 보려는 "왕복 수" 자체에
+    # 집중할 수 있습니다(입금 insert 는 위 전용 테스트가 봅니다).
+    client = _client(accounts=accounts,
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     summary = _run(client)
 
     assert summary["snapshots_written"] == account_count
+    # 🔴 2026-08-29 재감사로 **고정된 숫자만** 늘었습니다(계좌 수 비례는 여전히 아닙니다):
+    #    H-7 따라잡기(날짜당 계좌 1 + 중복 조회 1) · H-8 스윕 update 1 ·
+    #    H-6 페이지네이션(페이지 1개면 왕복 1회 그대로).
+    deposit_dates = duel_batch._pending_monthly_deposit_dates(TODAY_KST)
+    deposit_selects = 2 * len(deposit_dates)
     selects = client.calls_for(op="select")
-    assert len(selects) == 5, [(call.table, call.filters) for call in selects]
-    for table in (duel_db_usd.ACCOUNTS_TABLE_USD, duel_db_usd.LEDGER_TABLE_USD,
-                 duel_db_usd.ORDERS_TABLE_USD, duel_db_usd.POSITIONS_TABLE_USD,
+    assert len(selects) == 5 + deposit_selects, [(c.table, c.filters) for c in selects]
+    assert len(client.calls_for(duel_db_usd.ACCOUNTS_TABLE_USD, "select")) \
+        == 1 + len(deposit_dates)
+    assert len(client.calls_for(duel_db_usd.LEDGER_TABLE_USD, "select")) \
+        == 1 + len(deposit_dates)
+    for table in (duel_db_usd.ORDERS_TABLE_USD, duel_db_usd.POSITIONS_TABLE_USD,
                  duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD):
         assert len(client.calls_for(table, "select")) == 1, table
 
     expected_chunks = -(-account_count // duel_db_usd.CHUNK_SIZE)
     assert len(client.calls_for(duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD, "upsert")) == expected_chunks
-    assert len(client.calls) == 5 + expected_chunks
+    assert len(_stale_sweep_calls(client)) == 1
+    assert len(client.calls) == 5 + deposit_selects + expected_chunks + 1
 
 
 def test_fill_updates_scale_with_orders_not_with_accounts_usd():
     accounts = _accounts(20)
     orders = [_order("o-1", "acc-1", "AAPL", 1, "2026-08-19T19:00:00+09:00"),
               _order("o-2", "acc-2", "AAPL", 1, "2026-08-19T19:30:00+09:00")]
-    client = _client(accounts=accounts, orders=orders, ledger=_seed_ledger(accounts))
+    client = _client(accounts=accounts, orders=orders, ledger=_seed_ledger(accounts),
+                     deposits_already=[{"account_id": row["id"]} for row in accounts])
     _run(client, close_price_of=lambda ticker: 150.0 if ticker == "AAPL" else None)
-    assert len(client.calls_for(duel_db_usd.ORDERS_TABLE_USD, "update")) == len(orders)
+    assert len(_order_updates_excluding_stale_sweep(client)) == len(orders)
     assert len(client.calls_for(duel_db_usd.LEDGER_TABLE_USD, "insert")) == 1
     assert len(client.calls_for(duel_db_usd.POSITIONS_TABLE_USD, "upsert")) == 1
 
@@ -474,3 +536,135 @@ def test_summary_lines_usd_show_sell_proceeds_in_dollars():
     # ("재원" 같은 낱말에 '원' 글자가 들어가므로, 금액 표기 자체를 대조합니다.)
     assert "$800.00" in sell_line[0]
     assert "800원" not in sell_line[0] and "800.00원" not in sell_line[0]
+
+
+# =============================================================================
+# 8. 🔴 2026-08-29 재감사 회귀 테스트 (USD 미러)
+#    같은 결함을 두 트랙에 각각 고쳤으므로, 회귀 테스트도 양쪽에 각각 둡니다(§0-3-10 의
+#    비용이 이 자리에 그대로 드러납니다 — M-1 구조 통합은 별도 백로그입니다).
+# =============================================================================
+def test_stale_index_source_holds_instead_of_cancelling_everyones_orders_usd():
+    """H-1(USD) — 지수 원천이 낡았다고 전원 주문을 취소하지 않고 **보류**합니다."""
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    summary = _run(client, index_stale_reason="지수 원천 일부가 낡았습니다(합성).")
+    assert summary["freshness"]["status"] == duel_batch_usd.CRAWL_NO_BASELINE
+    assert summary["action"]["fill"] is False and summary["action"]["cancel_pending"] is False
+    assert summary["pending_held"] == 1
+    assert _order_updates_excluding_stale_sweep(client) == []
+
+
+def test_a_held_day_writes_the_reason_onto_the_orders_usd():
+    """
+    🔴 M-10(USD 미러) — 보류 사실을 주문 행에도 남깁니다(상태는 pending 그대로).
+    배치 로그에만 남기면 화면은 일반 대기 주문과 구분할 수단이 없습니다(§0-1).
+    """
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    summary = _run(client, index_stale_reason="지수 원천 일부가 낡았습니다(합성).")
+    assert summary["pending_held"] == 1
+    (annotation,) = _hold_annotation_calls(client)
+    assert "status" not in annotation.payload
+    assert annotation.filter_map == {"status": duel_rules.ORDER_PENDING,
+                                     "target_date": TARGET_DATE.isoformat()}
+    assert "보류" in annotation.payload["fail_reason"]
+    assert summary["freshness"]["reason"] in annotation.payload["fail_reason"]
+    assert client.calls_for(duel_db.ORDERS_TABLE) == []      # 원화 표는 안 건드립니다
+
+
+def test_a_dry_run_does_not_write_the_hold_reason_usd():
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    _run(client, index_stale_reason="지수 원천 일부가 낡았습니다(합성).", dry_run=True)
+    assert client.calls_for(op="update") == []
+
+
+def test_a_price_snapshot_from_another_trading_day_holds_instead_of_filling_usd():
+    """H-2(USD) — 가격 스냅샷 거래일이 처리 거래일과 다르면 체결하지 않습니다."""
+    client = _client(accounts=_accounts(1), ledger=_seed_ledger(_accounts(1)),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    summary = _run(client, session_date=YESTERDAY_TARGET.isoformat(),
+                   close_price_of=lambda ticker: 150.0 if ticker == "AAPL" else None)
+    assert summary["freshness"]["status"] == duel_batch_usd.CRAWL_NO_BASELINE
+    assert summary["pending_held"] == 1
+    assert summary["snapshots_written"] == 0
+
+
+def test_override_fill_is_refused_when_the_basis_is_stale_usd():
+    """M-9(USD) — `--override fill` + 낡은 근거 조합은 거절합니다(쓰기 전에)."""
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    with pytest.raises(DuelBatchError) as excinfo:
+        _run(client, session_date=YESTERDAY_TARGET.isoformat(),
+             override=duel_batch_usd.OVERRIDE_FILL)
+    assert "override fill" in str(excinfo.value)
+    for op in ("insert", "upsert", "delete"):
+        assert client.calls_for(op=op) == [], op
+
+
+def test_a_probe_without_any_index_holds_instead_of_raising_usd():
+    """H-1/M-12(USD) — 낡은 지수를 전부 뺀 점검표(지수 0개)여도 배치는 죽지 않고 보류합니다."""
+    probe = _index_probe(TARGET_DATE, stock_prices=_stock_prices(bump=5.0))
+    probe["index_keys"] = []
+    for key in ("SP500_PROXY_SPY", "NASDAQ_PROXY_ONEQ"):
+        probe["values"].pop(key, None)
+    client = _client(accounts=_accounts(1),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")])
+    summary = _run(client, today_probe=probe,
+                   index_stale_reason="지수 원천이 전부 낡아 판정에서 뺐습니다(합성).")
+    assert summary["freshness"]["status"] == duel_batch_usd.CRAWL_NO_BASELINE
+    assert summary["pending_held"] == 1
+
+
+def test_the_batch_repairs_the_average_cost_after_the_sell_settlement_rpc_usd():
+    """H-3(USD) — 같은 밤 매도 뒤 재매수의 새 평단가가 정산 **뒤** upsert 로 살아 갑니다."""
+    accounts = _accounts(1)
+    accounts[0]["first_holding_date"] = "2026-07-01"
+    sell = _order("o-sell", "acc-1", "AAPL", 5, "2026-08-18T18:00:00+09:00")
+    sell["side"] = "sell"
+    sell["rebalance_window_index"] = 0
+    client = _client(
+        accounts=accounts, ledger=_seed_ledger(accounts, amount=0.0),
+        positions=[{"account_id": "acc-1", "ticker": "AAPL", "stock_name": "애플",
+                    "quantity": 5, "avg_cost": 200.0, "status": "active",
+                    "delisted_date": None}],
+        orders=[sell, _order("o-buy", "acc-1", "AAPL", 2, "2026-08-18T18:30:00+09:00")],
+    )
+    summary = _run(client, close_price_of=lambda ticker: 10.0 if ticker == "AAPL" else None)
+    assert summary["sell_positions_settled"] == 1
+
+    rows = [row for call in client.calls_for(duel_db_usd.POSITIONS_TABLE_USD, "upsert")
+            for row in call.rows if row["ticker"] == "AAPL"]
+    assert rows, "평단가 보정 upsert 가 나가지 않았습니다"
+    assert all(row["avg_cost"] == 10.0 and row["quantity"] == 2 for row in rows), rows
+
+    order_of_calls = [(call.table, call.op) for call in client.calls]
+    assert order_of_calls.index((duel_db_usd.SETTLE_SELL_RPC_USD, "rpc")) < \
+        order_of_calls.index((duel_db_usd.POSITIONS_TABLE_USD, "upsert"))
+
+
+def test_a_failing_ledger_insert_leaves_the_order_pending_for_the_next_run_usd():
+    """H-4(USD) — 원장 insert 실패 시 주문은 여전히 pending(주문 상태가 마지막이므로)."""
+    from utils.duel_db import DuelDbError
+    accounts = _accounts(1)
+    client = _client(accounts=accounts, ledger=_seed_ledger(accounts),
+                     orders=[_order("o-1", "acc-1", "AAPL", 1, "2026-08-18T18:00:00+09:00")],
+                     deposits_already=[{"account_id": "acc-1"}])
+    client.responses[(duel_db_usd.LEDGER_TABLE_USD, "insert")] = RuntimeError("network reset")
+    with pytest.raises(DuelDbError):
+        _run(client, close_price_of=lambda ticker: 150.0 if ticker == "AAPL" else None)
+    assert _order_updates_excluding_stale_sweep(client) == []
+    assert client.calls_for(duel_db_usd.POSITIONS_TABLE_USD, "upsert") == []
+
+
+def test_the_batch_sweeps_pending_orders_the_batch_never_got_to_process_usd():
+    """H-8(USD) — 매 실행 맨 앞에서 과거 정체 주문을 정리하고 요약에 올립니다."""
+    client = _client(accounts=_accounts(1),
+                     stale_pending_rows=[{"id": "old-1"}, {"id": "old-2"}])
+    summary = _run(client)
+    assert summary["stale_pending_expired"] == 2
+    (sweep,) = _stale_sweep_calls(client)
+    assert "배치가 정상적으로 처리하지 못해" in sweep.payload["fail_reason"]
+    assert ("lt", "target_date", TARGET_DATE.isoformat()) in sweep.filters
+    text = "\n".join(duel_batch_usd.format_summary_lines_usd(summary))
+    assert "과거 주문 2건 정리" in text

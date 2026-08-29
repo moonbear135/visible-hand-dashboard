@@ -1062,3 +1062,37 @@ def test_twr_is_untouched_by_a_sell_because_it_is_an_internal_conversion():
     result = compute_twr([before, after])
     assert result["status"] == TWR_OK
     assert result["twr_pct"] == 0.0
+
+
+# =============================================================================
+# 🔴 2026-08-29 재감사 L-5 — 배치가 쓰는 금액 표기가 화면과 같은 규칙인지
+# =============================================================================
+def test_fail_reason_amounts_use_the_same_notation_as_the_screen():
+    """
+    `_fmt_currency()` 는 실패 사유 문장(배치가 주문 행에 적는 값)에 쓰입니다. 그 표기가
+    화면의 `scorecard_db.format_amount()` 와 다르면 **같은 금액이 두 곳에서 다르게** 보입니다
+    (실측: `_fmt_currency(0.5, "USD")` → `$0.5` vs 화면 `$0.50`).
+
+    규칙의 단일 출처는 `format_amount()` 입니다 — `duel_rules.py` 는 표준 라이브러리 말고는
+    아무것도 import 하지 않는다는 규율 때문에 그 함수를 부르지 못하므로, **여기서 두 곳이
+    실제로 같은 문자열을 내는지 대조**해 어긋남을 막습니다(§0-3-10).
+    """
+    from utils.scorecard_db import CURRENCY_KRW, CURRENCY_USD, format_amount
+
+    cases = [0.5, 1, 1051, 93_076.923, 12_345.0, 800.0]
+    for value in cases:
+        assert rules._fmt_currency(value, "USD") == format_amount(value, CURRENCY_USD), value
+        assert rules._fmt_currency(value, "KRW") == format_amount(value, CURRENCY_KRW), value
+
+    # 대표값 몇 개는 눈으로도 확인해 둡니다(회귀 시 바로 보이게).
+    assert rules._fmt_currency(0.5, "USD") == "$0.50"
+    assert rules._fmt_currency(93_076.923, "KRW") == "93,076원"
+    assert rules._fmt_currency(1051, "KRW") == "1,051원"
+
+
+def test_fill_failure_messages_carry_the_shared_notation():
+    """실제 사유 문장에도 그 표기가 그대로 들어가는지(문구를 통째로 검사하지는 않습니다)."""
+    outcome = rules.calculate_fill(1, 1051.0, 500.0, currency="KRW")
+    assert "1,051원" in outcome["fail_reason"] and "500원" in outcome["fail_reason"]
+    outcome_usd = rules.calculate_fill(1, 10.5, 4.0, currency="USD")
+    assert "$10.50" in outcome_usd["fail_reason"] and "$4.00" in outcome_usd["fail_reason"]

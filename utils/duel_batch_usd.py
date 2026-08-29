@@ -123,6 +123,7 @@ from utils.duel_batch import (
     _positive_price,
     _round6,
     is_monthly_deposit_date,
+    _pending_monthly_deposit_dates,
     select_probe_stocks,
     build_freshness_probe,
     load_probe_state,
@@ -182,6 +183,8 @@ def run_nightly_batch_usd(service_client, target_date, *,
                           unchanged_tolerance=duel_rules.CRAWL_UNCHANGED_TOLERANCE,
                           min_stock_overlap=MIN_PROBE_STOCK_OVERLAP,
                           price_as_of_kst=None,
+                          index_stale_reason=None,
+                          session_date=None,
                           override=None,
                           dry_run=False,
                           log=print):
@@ -200,6 +203,15 @@ def run_nightly_batch_usd(service_client, target_date, *,
         today_probe     : `build_freshness_probe(target_date, ...)` 결과(= X일 점검표).
         previous_probe  : `load_probe_state()` 결과(첫 실행이면 None).
         close_price_of  : `(ticker) -> 미국 정규장 마감가 또는 None`.
+        index_stale_reason : (2026-08-29 재감사 H-1/M-12) **우리 쪽 자료가 낡았거나 점검표를
+                          만들지 못했다**는 사실을 사람이 읽을 한 문장으로. 이 트랙은 지수가
+                          2개라 **부분 낡음**이 가능합니다 — 실행 스크립트가 낡은 지수만 빼고
+                          나머지로 판정하거나, 전부 낡았으면 지수 없이 점검표를 만들어
+                          이 문장과 함께 넘깁니다. 값이 있으면 판정을 믿지 않고 `no_baseline`
+                          과 같은 방식으로 **보류**합니다(체결도 취소도 하지 않음).
+        session_date    : (2026-08-29 재감사 H-2/M-9) 미국 가격 스냅샷의 실제 거래일.
+                          `target_date` 와 다르면 같은 보류 경로로 보내고,
+                          `--override fill` 과 겹치면 덮어쓰기 자체를 거부합니다.
         today_kst       : **정기입금 판정에만 쓰는, 배치가 실제로 도는 한국 날짜.** 생략하면
                           `datetime.now(KST).date()`. `target_date`(=X)와 **일부러 다른 값**을
                           받습니다 — 위 모듈 머리말 "날짜가 하나에서 둘로 갈라진 이유" 참고.
@@ -231,18 +243,72 @@ def run_nightly_batch_usd(service_client, target_date, *,
         "first_holding_dates_set": 0,
         "pending_cancelled": 0,
         "pending_held": 0,
+        "stale_pending_expired": 0,
         "snapshots_written": 0,
         "account_count": 0,
         "twr": {},
         "warnings": [],
     }
 
-    # ── ① 신선도 판정 (2-5-1 / 2-9, USD 미러) ─────────────────────────────────
-    freshness = judge_crawl_freshness(
-        today_probe, previous_probe,
-        unchanged_tolerance=unchanged_tolerance,
-        min_stock_overlap=min_stock_overlap,
+    # ── ⓪ 배치가 못 돈 날의 정체 주문 정리 (2026-08-29 재감사 H-8, 원화와 같은 자리) ──
+    stale_reason = (
+        "이 주문은 목표 거래일 이후 배치가 정상적으로 처리하지 못해 취소됐습니다"
+        "(이월 안 됨)."
     )
+    if not dry_run:
+        swept = duel_db_usd.expire_stale_pending_orders_before_usd(
+            service_client, day, stale_reason)
+        if swept:
+            summary["stale_pending_expired"] = swept
+            log(f"  ⚠️ [USD] 처리되지 못하고 남아 있던 과거 주문 {swept}건을 정리했습니다.")
+
+    # ── ① 신선도 판정 (2-5-1 / 2-9, USD 미러) ─────────────────────────────────
+    #  🔴 2026-08-29 재감사 H-1 — 이 트랙은 실행 스크립트가 **낡은 지수를 빼고** 점검표를
+    #     만들 수 있어서, 지수 키가 하나도 없는 점검표가 정상적으로 들어옵니다. 그 경우
+    #     `judge_crawl_freshness()` 는 예외를 던지는데(그러면 배치가 죽어 그날 주문이
+    #     체결도 취소도 보류도 없이 남습니다), 여기서 먼저 갈라 보류로 보냅니다.
+    if not (today_probe or {}).get("index_keys"):
+        freshness = {
+            "status": CRAWL_NO_BASELINE, "allows_fill": False,
+            "reason": index_stale_reason or "오늘 점검표에 지수가 하나도 없어 판정할 수 없습니다.",
+            "baseline_date": None, "index_keys": [], "compared_stocks": 0, "dropped_stocks": 0,
+        }
+    else:
+        freshness = judge_crawl_freshness(
+            today_probe, previous_probe,
+            unchanged_tolerance=unchanged_tolerance,
+            min_stock_overlap=min_stock_overlap,
+        )
+
+    # ⚠️ 2026-08-29 재감사 H-1/H-2/M-9: 지수 원천이 낡았거나 가격 스냅샷 거래일이
+    # 처리 거래일과 다르면, 그건 "그날 수집이 실패했다"가 아니라 "우리 배치가 보는
+    # 자료 자체가 낡았다"는 사실입니다. 판정 결과를 신뢰하지 않고 no_baseline과
+    # 같은 방식으로 보류합니다(취소도 체결도 하지 않음) — 오너 승인(2026-08-29).
+    our_side_stale = []
+    if index_stale_reason:
+        our_side_stale.append(index_stale_reason)
+    if session_date is not None and session_date != day.isoformat():
+        our_side_stale.append(
+            f"가격 스냅샷의 거래일({session_date})이 처리 거래일({day.isoformat()})과"
+            " 다릅니다 — 그 값으로 체결하면 사용자가 이미 아는 값으로 체결하게 됩니다."
+        )
+    if our_side_stale:
+        combined_reason = " ".join(our_side_stale)
+        if override == OVERRIDE_FILL:
+            raise DuelBatchError(
+                "판정 근거가 처리 거래일 기준으로 낡아 override fill을 거부합니다: "
+                + combined_reason
+            )
+        freshness = {
+            "status": CRAWL_NO_BASELINE,
+            "allows_fill": False,
+            "reason": combined_reason + " 자동으로 취소하지 않고 보류합니다.",
+            "baseline_date": freshness.get("baseline_date"),
+            "index_keys": freshness.get("index_keys", []),
+            "compared_stocks": freshness.get("compared_stocks", 0),
+            "dropped_stocks": freshness.get("dropped_stocks", 0),
+        }
+
     action = resolve_action(freshness, override)
     summary["freshness"] = freshness
     summary["action"] = action
@@ -260,19 +326,38 @@ def run_nightly_batch_usd(service_client, target_date, *,
     # ── ② 정기 입금 (2-2) — 신선도·target_date 와 무관하게, **오늘 한국 날짜** 기준 ──────
     #    🔴 여기서 `today`(배치 실행일)를 쓰고 `day`(target_date=X)를 쓰지 않는 것이 이
     #    파일의 핵심 차이입니다 — 모듈 머리말 참고.
-    if is_monthly_deposit_date(today):
+    #  🔴 2026-08-29 재감사 H-7(원화와 같은 이유) — "그날이 10일인가" 하나로만 트리거하면
+    #     10일에 배치가 실패한 달의 입금이 **영구히 누락**됩니다. 최근 구간의 10일을 전부
+    #     보고 밀린 달을 함께 채웁니다. 기준일이 `today`(배치 실행일)라는 점만 원화와
+    #     다릅니다 — 현금 이벤트는 처리 거래일이 아니라 실제 날짜를 따릅니다(M-1 참고).
+    pending_dates = _pending_monthly_deposit_dates(today)
+    if pending_dates:
         summary["deposit_attempted"] = True
         if dry_run:
             log("  · (dry-run) 정기 입금은 실행하지 않습니다.")
         else:
-            summary["deposit_applied"] = duel_db_usd.apply_monthly_deposits_usd(
-                service_client, today)
+            applied = 0
+            for deposit_day in pending_dates:
+                applied += duel_db_usd.apply_monthly_deposits_usd(service_client, deposit_day)
+            summary["deposit_applied"] = applied
             log(f"  ✅ [USD] 정기 입금 {summary['deposit_applied']}건"
                 f" (이미 들어간 계좌는 건너뜁니다 — 멱등)")
+        if len(pending_dates) > 1:
+            summary["warnings"].append(
+                f"정기 입금을 {len(pending_dates)}개월분 한 번에 처리했습니다"
+                f"(최근 실행 공백 의심): {[d.isoformat() for d in pending_dates]}"
+            )
 
-    # 입금 이후에 원장을 읽습니다(2-2-3 과 같은 순서 — 그날 입금을 그날 체결에 쓸 수 있게).
-    # 잔고는 **target_date(=X) 기준**으로 읽습니다 — X일 주문을 X일 시점의 예수금으로
-    # 체결해야 하므로, 혹시 X 와 today 사이에 시차가 있어도(있을 수 없지만) 안전합니다.
+    # ⚠️ 2026-08-29 재감사 M-2 — 여기 있던 "그날 입금을 그날 체결에 쓸 수 있게"라는 주석은
+    #    원화 파일에서 그대로 옮겨 온 것이었고 **이 트랙에서는 사실이 아닙니다.** USD 는
+    #    입금 기준일이 `today`(배치 실행일)인데 원장 조회는 `day`(= target_date, 보통
+    #    today − 1일) 기준으로 `.lte("event_date", day)` 를 걸기 때문에, **방금 넣은 입금은
+    #    이 실행의 원장 조회에 절대 포함되지 않습니다.** 즉 이 두 줄의 순서는 USD 에서
+    #    아무 의미가 없습니다(원화에서만 의미가 있습니다).
+    #    그래도 동작은 맞습니다: X일 주문은 X일 시점의 예수금으로 체결해야 하고, 그 입금은
+    #    다음 실행부터 잔고에 반영됩니다(`tests/test_duel_batch_usd.py::
+    #    test_snapshot_and_cash_balance_reads_use_target_date_not_today_kst` 가 고정).
+    #    코드를 바꾸지 않고 주석만 사실로 고칩니다.
     ledger_rows = duel_db_usd.fetch_cash_ledger_for_accounts_usd(
         service_client, account_ids, as_of_date=day)
     cash_balances = duel_db_usd.cash_balances_by_account(ledger_rows)
@@ -333,18 +418,28 @@ def run_nightly_batch_usd(service_client, target_date, *,
         if dry_run:
             log(f"  · (dry-run) 체결 결과 {len(fill_plan['fill_results'])}건을 기록하지 않습니다.")
         else:
-            written = duel_db_usd.record_order_fills_usd(service_client, fill_plan["fill_results"])
+            # 🔴 2026-08-29 재감사 H-4 — **쓰기 순서를 뒤집었습니다**(원화 `run_nightly_batch()`
+            #    의 같은 자리와 완전히 같은 이유·같은 순서): 원장·포지션을 먼저 쓰고 주문
+            #    상태를 **마지막에** 찍습니다. 중간에 죽으면 주문이 여전히 pending 이라
+            #    다음 실행이 다시 집습니다(앞 단계들은 멱등입니다 — duel_db_usd 참고).
             summary["ledger_rows_written"] = duel_db_usd.record_buy_ledger_entries_usd(
                 service_client, fill_plan["ledger_entries"])
-            # 🔴 매도 정산이 먼저 — 수량이 줄어드는 행은 전용 RPC 로만 통과합니다
-            #    (원화 `run_nightly_batch()` 의 같은 자리와 완전히 같은 이유).
+            # 🔴 매도 정산이 포지션 upsert 보다 먼저 — 수량이 줄어드는 행은 전용 RPC 로만
+            #    통과합니다(원화 `run_nightly_batch()` 의 같은 자리와 완전히 같은 이유).
             summary["sell_positions_settled"] = duel_db_usd.settle_sell_positions_usd(
                 service_client, fill_plan["sell_position_rows"])
+            # 2026-08-29 재감사 H-3: 같은 밤 매도 뒤 재매수로 평단가가 바뀐 행만, 정산
+            # 직후 같은 수량으로 한 번 더 upsert 해 avg_cost 를 바로잡습니다.
+            if fill_plan.get("avg_cost_fixup_rows"):
+                duel_db_usd.upsert_positions_usd(
+                    service_client, fill_plan["avg_cost_fixup_rows"])
             saved = duel_db_usd.upsert_positions_usd(service_client, fill_plan["position_rows"])
             summary["positions_written"] = len(saved)
             if first_holding["new_ids"]:
                 summary["first_holding_dates_set"] = duel_db_usd.set_first_holding_dates_usd(
                     service_client, first_holding["new_ids"], day)
+            # 🔴 주문 상태는 **반드시 마지막**입니다(위 H-4 주석 참고).
+            written = duel_db_usd.record_order_fills_usd(service_client, fill_plan["fill_results"])
             log(f"  ✅ [USD] 체결 결과 {written}건 기록 ·"
                 f" 체결 원장 {summary['ledger_rows_written']}행 · 포지션 {len(saved)}건 갱신"
                 + (f" · 매도 정산 {summary['sell_positions_settled']}건"
@@ -354,14 +449,16 @@ def run_nightly_batch_usd(service_client, target_date, *,
 
     elif action["cancel_pending"]:
         # ── ③' 실패일 처리 (2-4-5, USD 미러) ─────────────────────────────────
-        reason = (f"{day.isoformat()} 미국 정규장 확정 마감가를 신뢰할 수 없어 이 주문은"
-                  f" 체결되지 않고 취소되었습니다. {freshness['reason']}"
-                  " 다음 거래일로 이월하지 않습니다(작업지시서 2-4-5).")
+        # 문구는 짧게 (2026-08-29 오너 요청 — 사용자 문장에 내부 문서 번호를 넣지 않습니다;
+        # 근거는 작업지시서 2-4-5 "이월하지 않는다"이고 그 인용은 이 주석에만 남깁니다).
+        reason = (f"{day.isoformat()} 미국 정규장 마감가를 신뢰할 수 없어 취소됐습니다"
+                  f"(이월 안 됨). {freshness['reason']}")
         if dry_run:
             log("  · (dry-run) 미체결 주문 일괄 취소를 실행하지 않습니다.")
         else:
+            # 2026-08-29 재감사 M-11: 체결 경로와 대칭(활성 계좌만 대상).
             summary["pending_cancelled"] = duel_db_usd.expire_or_cancel_all_pending_for_date_usd(
-                service_client, day, reason)
+                service_client, day, reason, account_ids=account_ids)
             log(f"  ⚠️ [USD] 체결하지 않고 그날 귀속 주문 {summary['pending_cancelled']}건을"
                 " 취소했습니다(사유를 행에 남겼습니다).")
 
@@ -376,6 +473,20 @@ def run_nightly_batch_usd(service_client, target_date, *,
         )
         wait_for = ("관리자 확인 대기" if freshness["status"] == duel_rules.CRAWL_NEEDS_REVIEW
                     else "판정 기준값 없음")
+        # 🔴 2026-08-29 재감사 M-10(원화와 같은 자리·같은 이유) — 보류 사실을 행에도
+        #    남겨 화면이 일반 대기 주문과 갈라 그릴 수 있게 합니다. 상태는 pending 그대로.
+        hold_reason = (
+            f"{day.isoformat()} 종가로 체결할지 판단하지 못해 보류 중입니다"
+            f"({wait_for}). 관리자가 값을 확인한 뒤 체결 또는 취소로 결론을 냅니다."
+            f" 판정 근거: {freshness['reason']}"
+        )
+        if dry_run:
+            log("  · [USD] (dry-run) 보류 사유를 주문에 적지 않습니다.")
+        elif held:
+            annotated = duel_db_usd.annotate_pending_orders_with_hold_reason_usd(
+                service_client, day, hold_reason)
+            log(f"  · [USD] 보류 사유를 주문 {annotated}건에 적었습니다"
+                " (상태는 pending 그대로 — 화면이 '판정 보류'로 표시합니다).")
         log(f"  ⚠️ [USD] {wait_for} — pending 주문 {len(held)}건을 그대로 보류했습니다"
             " (자동으로 체결하지도, 취소하지도 않습니다).")
 
@@ -397,7 +508,8 @@ def run_nightly_batch_usd(service_client, target_date, *,
 
         rows = build_snapshot_rows(accounts, positions_by_account, cash_balances,
                                    snapshot_prices, flows, day,
-                                   price_as_of_kst=price_as_of_kst)
+                                   price_as_of_kst=price_as_of_kst,
+                                   warnings=summary["warnings"])       # H-5
         summary["twr"] = compute_twr_by_account(
             [row for row in history if _to_date(row.get("snapshot_date")) < day], rows)
         for account_id, twr in summary["twr"].items():
@@ -452,6 +564,11 @@ def format_summary_lines_usd(summary):
         lines.append(f"  ⚠️ 관리자 덮어쓰기: {action['override']}"
                      f" → 실제 적용 판정 {action.get('effective_status')}")
     lines.append(f"  · 활성 USD 계좌: {summary.get('account_count', 0)}개")
+
+    # 2026-08-29 재감사 H-8 — 0 이 아닐 때만 한 줄 늘립니다.
+    if summary.get("stale_pending_expired"):
+        lines.append(f"  ⚠️ 처리되지 못하고 남아 있던 과거 주문"
+                     f" {summary['stale_pending_expired']}건 정리")
 
     if summary.get("deposit_attempted"):
         lines.append(f"  · 정기 입금(매월 10일): {summary.get('deposit_applied', 0)}건 신규 입금")

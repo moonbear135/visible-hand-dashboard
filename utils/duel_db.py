@@ -219,6 +219,28 @@ def _execute(query, action):
     return data if data is not None else []
 
 
+def _execute_all(query_factory, action, page=1000, max_pages=1000):
+    """query_factory(offset, limit) -> query 객체. .range()로 끝까지 돌며 모든 행을 모읍니다.
+    2026-08-29 재감사 H-6: 배치 읽기에 페이지네이션이 없어 서버가 결과를 잘라 돌려주면
+    "일부만 읽고 전부 읽은 척" 하게 됩니다. 마지막 페이지가 꽉 찬 채로 max_pages에
+    도달하면(=끝없이 잘리고 있다는 뜻) 예외를 던집니다 — 조용히 반쪽 데이터로 넘어가지 않습니다.
+
+    ⚠️ §0-3-2 와 충돌하지 않습니다 — 왕복이 **계좌 수**가 아니라 **행 수**에 비례하는 것은
+       "일한 만큼"이고, `record_order_fills()` 가 이미 같은 근거로 허용돼 있습니다.
+       페이지가 1개뿐이면(대부분의 경우) 왕복은 예전과 똑같이 **1회**입니다.
+    """
+    rows = []
+    offset = 0
+    for _ in range(max_pages):
+        chunk = _execute(query_factory(offset, offset + page - 1), action)
+        rows.extend(chunk)
+        if len(chunk) < page:
+            return rows
+        offset += page
+    raise DuelDbError(f"{action}: {max_pages*page}행을 넘어도 계속 가득 찬 페이지가 반환됩니다"
+                      " — 페이지 상한에 걸렸습니다.")
+
+
 def _require_client(client, *, batch=False):
     """
     클라이언트가 없으면 **AttributeError 로 죽지 않고** 사람이 읽을 오류를 냅니다.
@@ -697,12 +719,18 @@ def save_sell_order(client, account_id, ticker, stock_name, requested_quantity,
     code = _require_text(ticker, "종목코드")
     name = _require_text(stock_name, "종목명")
     quantity = _require_positive_int(requested_quantity, "매도 수량")
-    held = _require_positive_int(held_quantity, "보유 수량")
+    # 🔴 2026-08-29 재감사 M-4 — **파는 수량은 정수, 보유 수량은 실수**입니다.
+    #    `duel_rules.calculate_sell_fill()` 은 "액면병합·감자 같은 기업행위 조정이 소수
+    #    수량을 남길 수 있다"는 이유로 보유 수량에 정수를 요구하지 않는데, 여기서만
+    #    `_require_positive_int()` 로 거절해서 10.5주 보유 계좌는 **한 주도 팔 수 없었고**
+    #    0.4주 포지션은 영원히 정리할 수 없었습니다. 한도·표시용인 `held_quantity` 만
+    #    양수 실수로 낮춥니다(부분 주식을 팔 수는 없으므로 `quantity` 는 그대로 정수).
+    held = _require_amount(held_quantity, "보유 수량")
     window = _require_offset(window_index, "리밸런싱 창 번호")   # 0 부터 시작하므로 0 허용
 
     if quantity > held:
         raise DuelDbError(
-            f"보유 수량({held}주)보다 많은 {quantity}주는 매도할 수 없습니다."
+            f"보유 수량({held:,.6g}주)보다 많은 {quantity}주는 매도할 수 없습니다."
             " 보유한 수량 이하로 다시 입력해 주세요."
         )
 
@@ -1131,10 +1159,20 @@ def revoke_consent(client, account_id, *, now_kst=None):
     payload["final_confirmed_at"] = None
     payload["revoked_at"] = _now_kst(now_kst).isoformat()
 
+    # 🔴 2026-08-29 재감사 L-12 — 위 "이미 철회됐으면 다시 쓰지 않는다"는 **읽고-쓰기**라
+    #    두 탭에서 동시에 누르면 둘 다 통과합니다(TOCTOU). 두 번째 쓰기가 `revoked_at` 을
+    #    지금 시각으로 덮어쓰면 3개월 재동의 차단이 그만큼 **연장**됩니다 — 버튼을 두 번
+    #    눌렀다는 이유로 불이익을 주는 일입니다. 조건을 update 문 자체에 넣어(아직 철회되지
+    #    않은 행만) DB 가 판정하게 하고, 0행이면 다른 요청이 먼저 끝냈다는 뜻이므로 그 결과를
+    #    다시 읽어 돌려줍니다(§0-3-9 — 조심이 아니라 구조로).
     rows = _execute(
-        client.table(CONSENT_TABLE).update(payload).eq("account_id", account),
+        _filter_is_null(
+            client.table(CONSENT_TABLE).update(payload).eq("account_id", account),
+            "revoked_at"),
         "공개 동의 철회",
     )
+    if not rows:
+        return fetch_my_consent(client, account) or existing
     return _first_row(rows, "공개 동의 철회")
 
 
@@ -1504,11 +1542,13 @@ def fetch_all_active_accounts(service_client):
        이미 계좌 전체를 읽는 이 질의에 컬럼 하나를 더하는 것이 정확히 같은 왕복 수입니다.
     """
     _require_client(service_client, batch=True)
-    rows = _execute(
-        service_client.table(ACCOUNTS_TABLE)
-        .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
-                "first_holding_date")
-        .eq("status", "active"),
+    # 2026-08-29 재감사 H-6: `.range()` 로 끝까지 읽습니다(잘린 결과를 "전부"로 쓰지 않기).
+    rows = _execute_all(
+        lambda offset, limit: (
+            service_client.table(ACCOUNTS_TABLE)
+            .select("id,user_id,window_type,seed_amount,currency,anchor_date,status,"
+                    "first_holding_date")
+            .eq("status", "active").range(offset, limit)),
         "활성 계좌 전체 조회",
     )
     return [dict(row) for row in rows]
@@ -1533,15 +1573,25 @@ def fetch_cash_ledger_for_accounts(service_client, account_ids=None, as_of_date=
     그 날짜까지의 행만 읽습니다(체결 시점의 가용 예수금을 구할 때 씁니다).
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(LEDGER_TABLE).select("account_id,event_type,amount,event_date")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []          # 대상이 없으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
-        query = query.in_("account_id", ids)
-    if as_of_date is not None:
-        query = query.lte("event_date", _iso_date(as_of_date, "기준일"))
-    rows = _execute(query, "현금 원장 일괄 조회")
+    as_of = None if as_of_date is None else _iso_date(as_of_date, "기준일")
+
+    def _query(offset, limit):
+        query = service_client.table(LEDGER_TABLE).select(
+            "account_id,event_type,amount,event_date")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        if as_of is not None:
+            query = query.lte("event_date", as_of)
+        return query.range(offset, limit)
+
+    # 2026-08-29 재감사 H-6: 원장은 append-only 라 가장 먼저 서버 행 상한을 넘습니다.
+    # 잘린 결과로 예수금을 계산하면 "예수금 부족" 만료 사유가 거짓말이 됩니다.
+    rows = _execute_all(_query, "현금 원장 일괄 조회")
     return [dict(row) for row in rows]
 
 
@@ -1575,14 +1625,20 @@ def fetch_positions_for_accounts(service_client, account_ids=None):
        `duel_rules.apply_buy_fill_to_position()` 의 결과를 담아서만 합니다.
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(POSITIONS_TABLE).select(
-        "account_id,ticker,stock_name,quantity,avg_cost,status,delisted_date")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []          # 대상이 없으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
-        query = query.in_("account_id", ids)
-    rows = _execute(query.order("account_id").order("ticker"), "보유 포지션 일괄 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(POSITIONS_TABLE).select(
+            "account_id,ticker,stock_name,quantity,avg_cost,status,delisted_date")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        return query.order("account_id").order("ticker").range(offset, limit)
+
+    rows = _execute_all(_query, "보유 포지션 일괄 조회")     # H-6
     return [dict(row) for row in rows]
 
 
@@ -1604,18 +1660,26 @@ def fetch_daily_snapshots_for_accounts(service_client, account_ids=None,
        아주 많아졌을 때 오너가 의도적으로 자를 수 있게 하려는 것뿐입니다.
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(DAILY_SNAPSHOTS_TABLE).select(
-        "account_id,snapshot_date,total_value,cash_flow_amount")
+    ids = None
     if account_ids is not None:
         ids = [str(value) for value in account_ids]
         if not ids:
             return []
-        query = query.in_("account_id", ids)
-    if start_date is not None:
-        query = query.gte("snapshot_date", _iso_date(start_date, "조회 시작일"))
-    if end_date is not None:
-        query = query.lte("snapshot_date", _iso_date(end_date, "조회 종료일"))
-    rows = _execute(query.order("account_id").order("snapshot_date"), "일별 스냅샷 일괄 조회")
+    start = None if start_date is None else _iso_date(start_date, "조회 시작일")
+    end = None if end_date is None else _iso_date(end_date, "조회 종료일")
+
+    def _query(offset, limit):
+        query = service_client.table(DAILY_SNAPSHOTS_TABLE).select(
+            "account_id,snapshot_date,total_value,cash_flow_amount")
+        if ids is not None:
+            query = query.in_("account_id", ids)
+        if start is not None:
+            query = query.gte("snapshot_date", start)
+        if end is not None:
+            query = query.lte("snapshot_date", end)
+        return query.order("account_id").order("snapshot_date").range(offset, limit)
+
+    rows = _execute_all(_query, "일별 스냅샷 일괄 조회")     # H-6
     return [dict(row) for row in rows]
 
 
@@ -1778,9 +1842,11 @@ def apply_monthly_deposits(service_client, deposit_date):
     if not account_ids:
         return 0
 
-    already_rows = _execute(
-        service_client.table(LEDGER_TABLE).select("account_id")
-        .eq("event_type", "monthly_deposit").eq("event_date", event_date),
+    already_rows = _execute_all(          # H-6
+        lambda offset, limit: (
+            service_client.table(LEDGER_TABLE).select("account_id")
+            .eq("event_type", "monthly_deposit").eq("event_date", event_date)
+            .range(offset, limit)),
         "정기 입금 중복 조회",
     )
     already = {row.get("account_id") for row in already_rows}
@@ -1820,10 +1886,11 @@ def fetch_pending_orders_for_fill(service_client, target_date):
     """
     _require_client(service_client, batch=True)
     day = _iso_date(target_date, "체결 거래일")
-    rows = _execute(
-        service_client.table(ORDERS_TABLE).select("*")
-        .eq("status", ORDER_PENDING).eq("target_date", day)
-        .order("saved_at"),
+    rows = _execute_all(                  # H-6
+        lambda offset, limit: (
+            service_client.table(ORDERS_TABLE).select("*")
+            .eq("status", ORDER_PENDING).eq("target_date", day)
+            .order("saved_at").range(offset, limit)),
         "체결 대상 주문 조회",
     )
     return [dict(row) for row in rows]
@@ -1864,33 +1931,6 @@ def _validate_fill_payload(status, filled_quantity, filled_price, filled_amount,
             f"{status} 상태에는 사람이 읽을 사유 문장이 반드시 필요합니다"
             " — 주문이 조용히 사라지는 경로를 만들지 않습니다(§0-1)."
         )
-
-
-def record_order_fill(service_client, order_id, status, filled_quantity, filled_price,
-                      filled_amount, fail_reason=None, *, filled_date=None):
-    """
-    (배치 전용) 주문 1건의 **체결 결과를 기록**합니다. 반환값은 없습니다.
-
-    ⚠️ 이 함수는 **계산하지 않습니다.** 체결 수량·부분체결 판정·사유 문구는 전부
-       `duel_rules.calculate_fill()` / `allocate_pending_orders()` 가 만든 값을 그대로
-       받아 적습니다. 여기서 다시 `floor(cash/price)` 같은 걸 쓰면 규칙이 두 곳에 생깁니다.
-
-    ⚠️ `filled_date` 는 **체결에 쓴 거래일**입니다. 기본값을 오늘로 두지 않았습니다 — 배치가
-       하루 늦게 돌면 체결일이 조용히 틀어지고, 그건 나중에 복원할 수 없는 오염입니다(§0-1).
-
-    ⚠️ 한 건씩 부르는 함수입니다. 배치는 주문 수만큼 이걸 반복하지 말고
-       `record_order_fills()`(아래)로 **한 번에** 보내세요(§0-3-2).
-    """
-    record_order_fills(service_client, [{
-        "id": order_id,
-        "status": status,
-        "filled_quantity": filled_quantity,
-        "filled_price": filled_price,
-        "filled_amount": filled_amount,
-        "filled_date": filled_date,
-        "fail_reason": fail_reason,
-    }])
-    return None
 
 
 def record_order_fills(service_client, results):
@@ -1954,27 +1994,6 @@ def record_order_fills(service_client, results):
     return written
 
 
-def record_buy_ledger_entry(service_client, account_id, order_id, filled_amount, event_date,
-                            memo=None):
-    """
-    (배치 전용) 매수 체결 1건의 현금 원장 행을 남깁니다. 2-4-6 참고.
-
-    ⚠️ 원장의 매수 금액은 **음수**입니다(`amount < 0` CHECK). 호출부는 체결금액을 **양수로**
-       넘기고, 부호는 여기서 한 번만 뒤집습니다 — 부호를 호출부마다 다루면 언젠가 한 곳에서
-       빠지고, 그 계좌의 잔고가 조용히 두 배가 됩니다.
-    ⚠️ 체결금액 0원짜리 행은 만들지 않습니다(만료된 주문은 원장에 아무 흔적도 남기지
-       않는 것이 맞습니다 — 현금이 움직이지 않았으니까요).
-    ⚠️ 여러 건은 `record_buy_ledger_entries()` 로 **한 번에** 보내세요(§0-3-2).
-    """
-    return record_buy_ledger_entries(service_client, [{
-        "account_id": account_id,
-        "order_id": order_id,
-        "filled_amount": filled_amount,
-        "event_date": event_date,
-        "memo": memo,
-    }])
-
-
 def _fill_ledger_payload(entries):
     """
     체결 원장 행(매수·매도)의 payload 를 만듭니다. `record_buy_ledger_entries()` 와 USD
@@ -2024,46 +2043,34 @@ def record_buy_ledger_entries(service_client, entries):
 
     payload = _fill_ledger_payload(rows)
 
+    # 🔴 2026-08-29 재감사 H-4 — **재실행 안전(멱등)**. 이제 배치는 원장을 **먼저** 쓰고
+    #    주문 상태를 마지막에 찍습니다. 중간에 죽으면 주문이 pending 으로 남아 다음 실행이
+    #    다시 집는데, 그때 이미 들어간 원장 행을 또 넣으면 사용자 잔고가 **중복 계상**됩니다.
+    #    upsert 로 넘기지 않는 이유: 원장은 append-only 트리거가 걸려 있어 ON CONFLICT 의
+    #    `do update` 자체가 막히고, 부분 유니크 인덱스는 PostgREST 가 충돌 대상으로 추론하지
+    #    못합니다(`apply_monthly_deposits()` 가 같은 이유로 이미 "미리 걸러 넣기"를 씁니다 —
+    #    §0-3-10, 이 파일에 이미 있는 방식을 그대로 따릅니다).
+    #    DB 인덱스(`duel_cash_ledger_order_event_unique`)는 그 뒤의 마지막 방어선입니다.
+    order_ids = sorted({row["order_id"] for row in payload if row.get("order_id")})
+    if order_ids:
+        existing_rows = _execute_all(
+            lambda offset, limit: (
+                service_client.table(LEDGER_TABLE).select("order_id, event_type")
+                .in_("order_id", order_ids).range(offset, limit)),
+            "체결 원장 중복 조회",
+        )
+        existing_keys = {(row.get("order_id"), row.get("event_type")) for row in existing_rows}
+        payload = [row for row in payload
+                   if (row["order_id"], row["event_type"]) not in existing_keys]
+    if not payload:
+        return 0
+
     inserted = 0
     for start in range(0, len(payload), CHUNK_SIZE):
         chunk = payload[start:start + CHUNK_SIZE]
         _execute(service_client.table(LEDGER_TABLE).insert(chunk), "체결 원장 기록")
         inserted += len(chunk)
     return inserted
-
-
-def upsert_position_weighted_average(service_client, account_id, ticker, stock_name,
-                                     existing_position, filled_quantity, fill_price):
-    """
-    (배치 전용) 매수 체결 1건을 포지션에 반영합니다(가중평균 평단가 갱신). 2-4-6 참고.
-
-    ⚠️ **평단가 계산은 여기서 하지 않습니다.** `duel_rules.apply_buy_fill_to_position()` 이
-       `holdings` 와 **같은 규칙**으로 계산하고, 이 함수는 그 결과를 담아 보낼 뿐입니다.
-       (같은 규칙을 두 번 구현하면 "내 성적표"의 평단가와 결투 평단가가 언젠가 갈라집니다.)
-
-    인자
-        existing_position : 기존 포지션 행 dict 또는 None(신규). None 이면 규칙 함수에
-                            수량·평단가를 **둘 다** None 으로 넘깁니다 — 한쪽만 아는 상태는
-                            복원 불가라 규칙 계층이 예외로 막습니다.
-
-    반환: 저장된 포지션 행 dict.
-    """
-    _require_client(service_client, batch=True)
-    existing = existing_position or {}
-    updated = duel_rules.apply_buy_fill_to_position(
-        existing.get("quantity") if existing else None,
-        existing.get("avg_cost") if existing else None,
-        filled_quantity,
-        fill_price,
-    )
-    rows = upsert_positions(service_client, [{
-        "account_id": _require_text(account_id, "계좌 ID"),
-        "ticker": _require_text(ticker, "종목코드"),
-        "stock_name": _require_text(stock_name, "종목명"),
-        "quantity": updated["quantity"],
-        "avg_cost": updated["avg_cost"],
-    }])
-    return _first_row(rows, "포지션 갱신")
 
 
 def upsert_positions(service_client, rows):
@@ -2144,6 +2151,32 @@ def settle_sell_positions(service_client, rows):
     if not payload:
         return 0
 
+    # 2026-08-29 재감사 H-4: 재실행 시 이미 목표 수량까지 줄어든 행을 다시 보내면
+    # RPC가 "수량이 줄지 않았다"며 예외를 던집니다(재시도를 막는 부작용). 호출 직전
+    # 현재 수량을 다시 조회해 이미 반영된 행은 걸러냅니다.
+    account_ids = sorted({row["account_id"] for row in payload})
+    current = _execute_all(
+        lambda offset, limit: (
+            service_client.table(POSITIONS_TABLE).select("account_id, ticker, quantity")
+            .in_("account_id", account_ids).range(offset, limit)),
+        "매도 정산 사전 조회",
+    )
+    current_qty = {}
+    for row in current:
+        try:
+            current_qty[(row.get("account_id"), row.get("ticker"))] = float(row.get("quantity"))
+        except (TypeError, ValueError):
+            continue
+    # ⚠️ 현재 수량이 이미 목표 이하인 행(= 이전 시도에서 반영 완료)과, 포지션 행 자체가
+    #    없는 행을 함께 걸러 냅니다. 후자는 DB 함수도 "없는 포지션"으로 예외를 내는데,
+    #    그 예외가 재시도 때마다 그날 밤 전체를 멈춥니다. 반영할 것이 하나도 남지 않으면
+    #    0 을 돌려주고, 그 사실은 호출부 요약의 "매도 정산 N건"에 그대로 드러납니다.
+    payload = [row for row in payload
+               if current_qty.get((row["account_id"], row["ticker"]), row["quantity"])
+               > row["quantity"]]
+    if not payload:
+        return 0
+
     settled = 0
     for start in range(0, len(payload), CHUNK_SIZE):
         chunk = payload[start:start + CHUNK_SIZE]
@@ -2189,8 +2222,43 @@ def set_first_holding_dates(service_client, account_ids, first_holding_date):
 # -----------------------------------------------------------------------------
 # B-5. 크롤링 실패일 처리 (2-4-5 / 2-5 의 1번 단계)
 # -----------------------------------------------------------------------------
+def expire_stale_pending_orders_before(service_client, before_date, reason,
+                                       *, status=ORDER_CANCELLED):
+    """(배치 전용) target_date < before_date 인 pending 주문을 전부 만료 처리합니다.
+    2026-08-29 재감사 H-8: 배치가 하루라도 못 돌면 그날 주문이 체결도 취소도 안 된 채
+    무기한 대기로 남습니다. 매 실행 시작에 과거 전체를 훑어 정리합니다(existing
+    expire_or_cancel_all_pending_for_date()는 정확히 그날짜 하나만 봅니다 — 이 함수는
+    '그 이전 전부'를 봅니다).
+
+    ⚠️ update 방식·컬럼·기본 상태값은 바로 아래 `expire_or_cancel_all_pending_for_date()`
+       와 **글자 그대로 같습니다**(다른 것은 날짜 필터가 `.eq` 가 아니라 `.lt` 인 것 하나).
+       사유 문장은 호출부가 넘깁니다 — "수집 실패"가 아니라 **우리 쪽 사정**이라는 사실을
+       그대로 적어야 하기 때문입니다(§0-1).
+    ⚠️ 주문이 몇 건이든 update 질의 **1개**입니다(§0-3-2).
+
+    반환: 실제로 바뀐 행 수.
+    """
+    _require_client(service_client, batch=True)
+    before = _iso_date(before_date, "기준일")
+    text = _require_text(reason, "실패 사유")
+    if status not in (ORDER_CANCELLED, ORDER_EXPIRED):
+        raise DuelDbError(
+            f"일괄 실패 처리에 쓸 수 없는 상태입니다: {status!r}"
+            f" (가능: {ORDER_CANCELLED} / {ORDER_EXPIRED})."
+        )
+
+    rows = _execute(
+        service_client.table(ORDERS_TABLE)
+        .update({"status": status, "fail_reason": text})
+        .eq("status", ORDER_PENDING).lt("target_date", before),
+        "정체 주문 일괄 만료",
+    )
+    return len(rows)
+
+
 def expire_or_cancel_all_pending_for_date(service_client, target_date, reason,
-                                          *, status=ORDER_CANCELLED):
+                                          *, status=ORDER_CANCELLED,
+                                          account_ids=None):
     """
     (배치 전용) 그 거래일에 귀속된 **모든 계좌의** pending 주문을 한 번에 실패 처리합니다.
     반환: 실제로 바뀐 행 수.
@@ -2222,11 +2290,65 @@ def expire_or_cancel_all_pending_for_date(service_client, target_date, reason,
             f" (가능: {ORDER_CANCELLED} / {ORDER_EXPIRED})."
         )
 
+    query = (service_client.table(ORDERS_TABLE)
+             .update({"status": status, "fail_reason": text})
+             .eq("status", ORDER_PENDING).eq("target_date", day))
+    if account_ids is not None:
+        # 2026-08-29 재감사 M-11: 체결 경로는 활성 계좌 목록에 없는 주문을 **손대지 않고**
+        # 경고로 올립니다(예수금을 확인할 수 없어 판정하지 않음). 실패일 경로만 계좌 상태를
+        # 보지 않아, 같은 주문이 그날의 판정에 따라 보호받기도 하고 취소되기도 했습니다.
+        # 호출부가 이미 조회해 둔 활성 계좌 목록을 넘기면 그 비대칭이 사라집니다.
+        ids = [str(value) for value in account_ids]
+        if not ids:
+            return 0        # 대상이 없으면 질의 자체를 보내지 않습니다(빈 in 필터 방지).
+        query = query.in_("account_id", ids)
+    rows = _execute(query, "미체결 주문 일괄 정리")
+    return len(rows)
+
+
+def annotate_pending_orders_with_hold_reason(service_client, target_date, reason):
+    """
+    (배치 전용) 그 거래일에 귀속된 pending 주문에 **보류 사유만** 적어 둡니다.
+    상태는 `pending` 그대로입니다. 반환: 실제로 바뀐 행 수.
+
+    🔴 2026-08-29 재감사 M-10 — `needs_review` / `no_baseline` 로 보류한 날의 주문은
+       체결도 취소도 하지 않고 그대로 두는데, 그 사실이 `summary["warnings"]`(= GitHub
+       Actions 로그)에만 남아 **사용자 화면에는 일반 대기 주문과 똑같이** 보였습니다.
+       §0-1 은 "로그만 남기는 것은 조치가 아니다 — 실패 사실은 사용자가 보는 화면까지
+       도달해야 한다"고 못박고 있습니다. 그래서 상태는 건드리지 않고(보류는 아직 결론이
+       아니므로 종결 상태로 바꾸면 **거짓말**입니다) 사유 문장만 행에 적어, 화면이
+       "⏸️ 판정 보류"로 갈라 그릴 수 있게 합니다(`web/pages/duel_page.py`).
+
+    ── 왜 상태를 그대로 둬도 되는가 (스키마·트리거 확인, sql/duel_schema.sql) ─────────
+      · `duel_orders_guard()` 트리거는 ① `old.status <> 'pending'` 이면 거절 ② 계좌·종목·
+        매매구분·최초저장시각 변경 거절 ③ 배치가 아닌 경로의 체결 컬럼 변경 거절 — 세 가지만
+        봅니다. 여기 update 는 old/new 모두 `pending` 이고 불변 컬럼도 건드리지 않으며
+        service_role 로 갑니다. **status 를 바꾸지 않는 순수 fail_reason 갱신을 막는 조건은
+        트리거에 없습니다.**
+      · CHECK `duel_orders_reason_required` 는 "pending/filled 가 **아닌** 상태에 사유가
+        반드시 있어야 한다"는 방향이라, pending 행에 사유가 **있는** 것은 막지 않습니다.
+        나머지 CHECK 는 체결 4필드에 관한 것이라 무관합니다.
+      → 즉 이 갱신은 스키마를 고치지 않고 그대로 통과합니다.
+
+    ⚠️ 여기 적은 사유는 **임시 표식**입니다. 나중에 그 주문이 실제로 체결·취소될 때
+       `record_order_fills()` / `expire_or_cancel_all_pending_for_date()` /
+       `expire_stale_pending_orders_before()` 가 `fail_reason` 을 payload 에 **항상 다시
+       써서** 최종 값으로 덮어씁니다(체결이면 `None` 으로 지워집니다). 그래서 이 표식을
+       나중에 지우는 별도 정리 로직은 두지 않습니다 — 정리 경로가 하나 더 생기면 그것이
+       실패했을 때 "왜 보류라고 적혀 있지?"를 아무도 설명하지 못하게 됩니다.
+
+    ⚠️ 주문이 몇 건이든 update 질의 **1개**입니다(§0-3-2). 대상 집합은 보류 판단에 쓴
+       `fetch_pending_orders_for_fill()` 과 **글자 그대로 같은 필터**입니다.
+    """
+    _require_client(service_client, batch=True)
+    day = _iso_date(target_date, "체결 거래일")
+    text = _require_text(reason, "보류 사유")
+
     rows = _execute(
         service_client.table(ORDERS_TABLE)
-        .update({"status": status, "fail_reason": text})
+        .update({"fail_reason": text})          # ⚠️ status 는 절대 넣지 않습니다.
         .eq("status", ORDER_PENDING).eq("target_date", day),
-        "미체결 주문 일괄 정리",
+        "보류 사유 기록",
     )
     return len(rows)
 
@@ -2414,12 +2536,15 @@ def fetch_publishable_consents(service_client):
        그건 데이터가 이상하다는 신호를 삼키는 일입니다(§0-1).
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE).select(
-        "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
-        "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
-    ).eq("final_confirmed", True)
-    query = _filter_is_null(query, "revoked_at")
-    rows = _execute(query, "발행 대상 동의 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE).select(
+            "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
+            "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
+        ).eq("final_confirmed", True)
+        return _filter_is_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "발행 대상 동의 조회")       # H-6
     return [dict(row) for row in rows]
 
 
@@ -2435,9 +2560,12 @@ def fetch_revoked_consent_accounts(service_client):
       · 삭제는 멱등이라 이미 지운 것을 다시 지워도 아무 일도 일어나지 않습니다.
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE).select("account_id,revoked_at")
-    query = _filter_not_null(query, "revoked_at")
-    rows = _execute(query, "철회 계좌 조회")
+
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE).select("account_id,revoked_at")
+        return _filter_not_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "철회 계좌 조회")            # H-6
     return [dict(row) for row in rows]
 
 
@@ -2497,9 +2625,11 @@ def fetch_bracket_assignments(service_client, season_key):
     """
     _require_client(service_client, batch=True)
     season = _require_text(season_key, "시즌 식별자")
-    rows = _execute(
-        service_client.table(BRACKET_ASSIGNMENTS_TABLE)
-        .select("account_id,season_key,bracket_key").eq("season_key", season),
+    rows = _execute_all(                  # H-6
+        lambda offset, limit: (
+            service_client.table(BRACKET_ASSIGNMENTS_TABLE)
+            .select("account_id,season_key,bracket_key").eq("season_key", season)
+            .range(offset, limit)),
         "체급 배정 조회",
     )
     return {row["account_id"]: dict(row) for row in rows if (row or {}).get("account_id")}
