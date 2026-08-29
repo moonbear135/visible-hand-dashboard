@@ -1,14 +1,14 @@
 {
   "summary": {
-    "generated_at_kst": "2026-08-28T13:26:34.330171+09:00",
+    "generated_at_kst": "2026-08-29T16:40:47.730613+09:00",
     "source": "DART 수시공시(거래소공시 pblntf_ty=I) 원문 document.xml",
-    "total_records": 93,
+    "total_records": 95,
     "by_parse_status": {
-      "OK": 73,
-      "PARTIAL": 20
+      "OK": 74,
+      "PARTIAL": 21
     },
     "records_without_record_date": 0,
-    "records_without_pay_date_expected": 26,
+    "records_without_pay_date_expected": 28,
     "records_with_correction_flag": 10,
     "records_with_subsidiary_notice_flag": 18,
     "missing_label_counts": {
@@ -22,28 +22,19 @@
       "report_nm 판정 규칙은 2026-08 실측 표본 6종에서만 도출했습니다. 규칙 밖의 표기는 UNRECOGNIZED_REPORT_TYPE 으로 아래 scan_stats 에 남고, 이벤트로 만들지 않았습니다(추측해서 넓히지 않았습니다).",
       "파일 이름의 연도는 '접수일이 그 해'라는 뜻일 뿐, 회사의 사업연도와 다를 수 있습니다(list.json 에는 사업연도로 거르는 조건이 없습니다)."
     ],
-    "date_range_checked": "20260827~20260827",
+    "date_range_checked": "20260828~20260828",
     "new_records_this_run": 2,
     "documents_failed_this_run": 0,
     "document_failures": [],
     "scan_stats": {
-      "pages": 2,
-      "seen_rows": 153,
+      "pages": 3,
+      "seen_rows": 217,
       "dividend_decisions": 2,
-      "shareholder_register_close": 2,
-      "unrecognized": 1,
+      "shareholder_register_close": 0,
+      "unrecognized": 0,
       "skipped_no_stock_code": 0,
       "skipped_bad_stock_code": 0,
-      "unrecognized_samples": [
-        {
-          "report_nm": "배당락              ",
-          "corp_name": "풍강",
-          "stock_code": "093380",
-          "rcept_no": "20260827900549",
-          "rcept_dt": "20260827",
-          "parse_status": "UNRECOGNIZED_REPORT_TYPE"
-        }
-      ]
+      "unrecognized_samples": []
     }
   },
   "records": [
@@ -2917,6 +2908,71 @@
       ],
       "parse_notes": [],
       "parse_status": "PARTIAL"
+    },
+    {
+      "rcept_no": "20260828800397",
+      "rcept_dt": "20260828",
+      "corp_code": "00544452",
+      "corp_name": "이리츠코크렙",
+      "stock_code": "088260",
+      "stock_code_raw": "088260",
+      "report_nm": "부동산투자회사금전배당결정              ",
+      "report_nm_extra": null,
+      "matched_prefix": "부동산투자회사금전배당결정",
+      "is_correction": false,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260828800397",
+      "collected_at_kst": "2026-08-29T16:40:44.417231+09:00",
+      "dividend_class": null,
+      "dividend_type": null,
+      "dps_common": 173,
+      "dps_preferred": null,
+      "yield_common": 5.0,
+      "yield_preferred": null,
+      "total_amount": 11006349578,
+      "record_date": "2026-06-30",
+      "pay_date_expected": null,
+      "board_resolution_date": "2026-08-28",
+      "notes": "1.상기 \"배당금총액\" 및 \"1주당 배당금\"은 감사전 재무제표를 기준으로 이사회 결의로 승인되었으므로, 추후 외부감사인의 감사결과 및 정기주주총회 승인과정에서 변경될 수 있습니다.\n\n2. 주당배당금은 소숫점이하가 존재하므로 실제 각주주의 배당금 계산을 위해서는\n\"(총배당금/63,341,590주)*보유주식수\"로 산출해야 합니다.\n\n3. 배당금 총액(11,006,349,578원)\n= 당기순이익(7,940,335,766원)+감가상각비(3,066,013,812원)\n\n* 감가상각비 : 부동산투자회사법 제28조, 상법 제462조 및 정관 제56조에 의거 초과배당이 가능합니다.\n\n4. 상기 \"시가배당률\"은 배당기준일 1거래일 전부터 과거 1주일간(2026.06.22 ~ 2026.06.26)의 유가증권시장에서 형성된 최종시세가격(종가)의 산술평균가격에 대한 주당배당금의 비율을 백분율로 산정하였습니다.\n\n5. 당사의 사업연도는 6개월(2026.01.01~2026.06.30)이며, 공모가(5,000원) 기준 연환산배당률은 7.01%입니다.",
+      "missing_labels": [],
+      "unparsed_values": [
+        {
+          "label": "5. 배당금지급 예정일",
+          "raw": "정기주주총회일로부터 1개월 이내"
+        }
+      ],
+      "parse_notes": [],
+      "parse_status": "PARTIAL"
+    },
+    {
+      "rcept_no": "20260828900940",
+      "rcept_dt": "20260828",
+      "corp_code": "00138747",
+      "corp_name": "아세아텍",
+      "stock_code": "050860",
+      "stock_code_raw": "050860",
+      "report_nm": "현금ㆍ현물배당결정              ",
+      "report_nm_extra": null,
+      "matched_prefix": "현금ㆍ현물배당결정",
+      "is_correction": false,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260828900940",
+      "collected_at_kst": "2026-08-29T16:40:47.730499+09:00",
+      "dividend_class": "결산배당",
+      "dividend_type": "현금배당",
+      "dps_common": 50,
+      "dps_preferred": null,
+      "yield_common": 2.7,
+      "yield_preferred": null,
+      "total_amount": 909437800,
+      "record_date": "2026-06-30",
+      "pay_date_expected": null,
+      "board_resolution_date": "2026-08-28",
+      "notes": "1) 상기 시가 배당율은 배당기준일(주주명부폐쇄일) 2거래일 전부터 과거1주간의 증권시장에서 형성된 최종가격의 산술평균에 대한 1주당 배당금의 비율입니다.\n\n2) 배당금 총액은 총발행주식 22,500,000주에서 자기주식 4,311,244주를 제외한 나머지\n18,188,756주의 배당금 총액입니다.\n\n3) 상기배당금지급 예정일자는 상법 제464조2의 규정에 의거하여 주주총회일로부터 1월\n이내에 지급할 예정입니다.\n\n4)상기 내용은 주주총회승인과정에서 변경될 수 있습니다.",
+      "missing_labels": [],
+      "unparsed_values": [],
+      "parse_notes": [],
+      "parse_status": "OK"
     }
   ]
 }
