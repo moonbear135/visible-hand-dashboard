@@ -1347,6 +1347,12 @@ def benchmark_closes_for_market(market, data_dir=None, csv_path=None):
             "is_proxy": bool(entry.get("is_etf_proxy", True)),
             "note": (f"지수 포인트가 아니라 추종 ETF({entry.get('proxy_symbol')}) 종가 기준입니다 "
                      "— 기간 수익률 비교용 근사치."),
+            # 2026-08-29 재감사 M16: `collector_us_indices.py` 가 last_error/value_conflicts 를
+            # 파일에는 남기지만 그동안 화면까지 전달되는 경로가 없었습니다(§0-1 — 실패 사실은
+            # 화면까지 도달해야 함). 기술적 원문(예외 메시지)은 서버 로그에만 남기고(§0-3-4),
+            # 여기서는 "문제가 있다는 사실"만 넘깁니다 — 문구는 report_page.py 가 만듭니다.
+            "has_last_error": bool(entry.get("last_error")),
+            "value_conflicts_count": len(entry.get("value_conflicts") or []),
         })
     return result
 

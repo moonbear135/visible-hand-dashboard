@@ -3577,7 +3577,153 @@
      `py_compile`로 수정 파일 전부 컴파일 확인.
 
 
+166. **🔧 재감사 4차 유예 항목 후속 처리 — 미국주식 8건 중 6건 반영, 1건 정책
+     재검토로 이관(공유인프라 모듈 예정), 1건 그대로 유예 (2026-08-29, 오푸스
+     높음, 오너 지시 — "유예한 것을 하나씩 해치워보자").** #165에서 남겨 둔
+     8건(M-13·M-16·L-11·S-1·S-2 일부·S-4 일부·S-6·S-7)을 하나씩 처리했습니다.
+
+     **0) 선행 조치 — `git push` 거부 해소.** #165 커밋(`e6055b0`) 이후
+     `github-actions[bot]`의 배당 자동 수집 커밋 2개(`ce474a1`·`bc92585`,
+     `data/dividend_kr_2026_*`·`data/cache/*` 파일만 변경)가 `origin/main`에
+     먼저 올라가 push가 거부됐습니다. `git show --stat`으로 두 커밋이 이번
+     변경 파일과 전혀 겹치지 않음을 먼저 확인한 뒤 `git rebase origin/main`을
+     실행 — 충돌 없이 재베이스됐고(`e6055b0` → `00fe083`), 관련 테스트
+     재실행으로 이상 없음을 확인했습니다.
+
+     **1) M-16 반영 — `collector_us_indices.py`에 장마감 게이트 추가.**
+     이 수집기에는 `collector_us_stocks.py`의 `resolve_collection_session_et()`
+     같은 장마감 게이트가 없어, 장중에 실행되면 그날의 미확정 종가가
+     `merge_closes()`의 "기록 개변 금지" 원칙에 의해 영구히 확정 종가 자리에
+     고정될 수 있었습니다. `resolve_collection_session_et()`로 "지금 담아도
+     되는 거래일"을 구하고, 그보다 미래인 행은 새 `trim_unconfirmed_rows()`로
+     잘라낸 뒤 병합하도록 고쳤습니다. 잘려나간 행은 다음 실행(장마감 이후)에서
+     정상적으로 다시 들어옵니다. 또한 `metadata.warnings`/`last_error`/
+     `value_conflicts`가 파일에만 남고 화면까지 전달되지 않던 것을,
+     `utils/report_db.py::benchmark_closes_for_market()`이 두 신호를 함께
+     반환하도록 하고 `web/pages/report_page.py::_render_benchmarks()`가
+     "⚠️ 벤치마크 데이터 확인 필요" 배너로(§0-3-13 — 항상 보이게) 띄우도록
+     배선했습니다. 리포트 모듈 파일을 다시 여는 것이라 §0-3-6에 따라 오너
+     확인을 먼저 구했고("지금 여기서 그냥 바로 진행을 해줘"), 승인 후
+     진행했습니다.
+
+     **1-1) 작업 중 추가 발견 — `run_us_index_history_collector()` 반환값
+     계약 재확인.** 이 함수가 실패해도 항상 파일 경로를 반환하는지 확인하려다
+     `test_us_index_collector_run`의 `result is None` 기대치 3곳이 이미 낡아
+     있었음을 발견했습니다. 실제로는 L8(전부 실패해도 실패 사유를 남기려고
+     파일은 항상 씀 — 그 근거의 회귀 테스트
+     `test_reaudit_total_failure_records_reason_without_touching_closes`가
+     이미 존재)이 의도적으로 "항상 경로 반환"을 요구하므로, **코드가 아니라
+     낡은 테스트 기대치와 docstring 쪽을 고쳤습니다**(반환값 대신
+     `metadata.fetched_any`로 신규 수집 여부를 구분하도록 문서화). 두 계약이
+     충돌한다는 걸 모르고 처음엔 반대로(코드를 `None` 반환하게) 고쳤다가
+     L8 회귀 테스트가 깨지는 것을 보고 원인을 추적해 바로잡았습니다.
+
+     **2) L-11 반영 — `iter_history_row_candidates()`의 `seen` 가드 주석
+     정정.** "devalue는 같은 객체를 공유하므로 순환·중복 방지"라는 주석이
+     실제로는 틀렸습니다(`_devalue_deref()`가 참조마다 매번 새 객체로
+     펼치므로 디코드 후에는 공유·순환이 없음 — 무한 재귀 방지는
+     `MAX_SEARCH_DEPTH`가 전담). 동작은 그대로 두고(디코더 구현이 바뀌면
+     다시 방어망 역할을 할 수 있어 §0-3-6상 범위 밖 리팩터링 없이 유지),
+     주석만 사실대로 정정했습니다.
+
+     **3) S-2 나머지 반영 — 화면 소스 판정 리터럴 금지 AST 테스트.**
+     `tests/test_us_stocks_page.py`에
+     `test_s2_no_hardcoded_threshold_literals_outside_import()`를 추가해
+     `us_stocks_page.py`의 비교식(Compare 노드)에 `constants_us.py`의
+     판정 임계값(ROE/ROIC/캡 상수 등)이 리터럴로 남아 있으면 잡아냅니다.
+     처음에는 int 리터럴까지 봐서 무관한 값(광고 위치 `offset == 9`, 문자열
+     길이 `>= 10`)과 우연히 값이 겹쳐 오탐이 났고, 이 코드베이스의 판정
+     임계값은 전부 float로 쓰인다는 점을 이용해 float 리터럴만 보도록
+     좁혀 해결했습니다. 실제로 하나(`t_roe < US_VALUE_TRAP_ROE_PCT`)를
+     일부러 `9.0`으로 되돌려 테스트가 진짜로 잡아내는지 확인한 뒤 원상
+     복구했습니다.
+
+     **4) S-4 나머지 반영 — M1 히스테리시스 프로덕션 배선 회귀 테스트.**
+     `run_us_collector()` 안에 인라인으로 있던 M1 수정(entry_rank가 아니라
+     exit_rank까지 넉넉히 뽑은 뒤 버퍼 적용)을 `build_hysteresis_tracked_
+     universe()`로 뽑아내 `run_us_collector()`가 그 함수를 그대로 호출하게
+     했습니다. `tests/test_us_stocks.py`에 700종목 합성 유니버스로 이 함수
+     자체(사본이 아님)를 호출하는
+     `test_reaudit_s4_hysteresis_production_wiring()`을 추가 — 직전 추적
+     종목이 561위로 밀려도 실제 배선에서 버퍼로 유지되는지 확인합니다.
+
+     **5) S-6 반영 — `us_stocks_latest.json` 공용 계약 문서화 + 자기검증.**
+     `utils/constants_us.py`의 `US_SNAPSHOT_FILENAME` 위에 실제 소비처 5곳
+     (미국주식 화면·배당 미국 화면(유일 입력)·결투 USD 배치·스코어카드
+     종목명·리포트 거래일 점검, grep으로 직접 확인)과 최소 보증을 문서화했고,
+     새 상수 `US_SNAPSHOT_MIN_GUARANTEED_COUNT = 400`을 추가했습니다.
+     `collector_us_stocks.py`에 `violates_snapshot_min_guarantee()`를
+     뽑아 `run_us_collector()`의 쓰기 직전에서 호출 — 기존 축소 가드(H1)가
+     "직전 스냅샷이 있을 때"만 보는 데 반해, 이 가드는 직전 스냅샷 유무와
+     무관하게 절대 하한을 봅니다. 단, `target_size`가 실제로
+     550(production) 규모를 노릴 때만 적용되도록 해 — 회귀 테스트가 쓰는
+     4종목 합성 유니버스 같은 의도된 소규모 수집까지 막지 않습니다.
+     `tests/test_us_stocks.py`에 `test_reaudit_s6_snapshot_min_guarantee()`로
+     경계값·소규모 target_size 면제까지 확인.
+
+     **6) S-7 반영 — 그레이엄 넘버 산출 불가 else 폴백 박스.** 코스피
+     화면(`pegy_page.py`)에는 있고 미국 화면에는 없던 마지막 방어(적자가
+     아닌 사유로 `graham_target`이 없을 때의 `else` 분기)를 추가했습니다.
+     실제 원인(BPS 미상 또는 BPS≤0)을 추적해 보니 코스피 쪽 원본 문구
+     ("적자 기업")를 그대로 베끼면 자사주 매입형 우량주(H2/H4에서 이미
+     구분해 둔 케이스)를 적자로 오진하는 결과가 됐을 것이라, BPS 값 자체를
+     명시하는 정확한 문구로 새로 썼습니다. `tests/test_us_stocks_page.py`에
+     `test_s7_graham_fallback_box_for_non_loss_reasons()` 추가(BPS 없음·
+     BPS 음수 두 경우 모두 "적자 기업"이라고 잘못 짚지 않는지까지 확인).
+     또한 `PROJECT_STATUS.md`에 §15(공개 화면 3개 최소 방어선 체크리스트)를
+     신설 — 코스피·미국주식·배당 세 화면이 공통으로 가져야 할 방어 장치
+     현황표를 한 곳에 두어, 다음에 화면 하나를 고칠 때 나머지와 대조하기
+     쉽게 했습니다.
+
+     **M-13 — 코드 미반영, 정책 방향은 확정(공유인프라 모듈에서 구현 예정).**
+     이력 CSV에 캡·바닥값·계산값 플래그 컬럼을 추가하라는 권고는
+     `tests/test_stock_history.py`의 `FORBIDDEN_KEYS`(오너가 이미 명시적으로
+     뺀 내부 진단 필드 목록, KOSPI 쪽 `g_eff_capped` 등도 같은 이유로 빠져
+     있음)와 정면으로 충돌해, 배경(카드에는 캡·바닥값 배지가 보이는데 같은
+     정보가 다운로드 CSV에는 빠진다는 점)을 다시 설명하고 오너 확인을
+     구했습니다. 오너 판단: "카드에는 표기가 되는데 CSV에 빠진다면 말이
+     안 되는데, 정보는 항상 같아야지 여기하고 저기하고 다르면 안 되는 것" —
+     즉 **기존 FORBIDDEN_KEYS 정책이 잘못됐다는 데 동의**하되, 지금 바로
+     고치기보다는 "나중에 작업 다 끝나고 그 정책 자체를 다시 손보자"는
+     뜻을 밝혔습니다. 코스피·미국 두 시장에 동일하게 걸린 공용 정책이라
+     한 시장만 먼저 고치면 §0-3-10(단일 출처) 위반이 되므로, **다음
+     공유인프라 모듈 차례에 KOSPI·US 이력 CSV 필드 정책을 한 번에
+     재정비**하기로 하고 이번 라운드에서는 코드를 건드리지 않았습니다.
+
+     **미룸 — S-1(320줄 함수 분해).** 이번 세션에서 `select_badges_for_
+     preset`·`apply_stock_filters`·`compute_stale_days`·
+     `_snapshot_trading_date_iso` 4개를 이미 뽑아냈고(#165), 나머지 전체
+     분해는 여전히 고위험 대규모 리팩터링이라 별도로 시간을 들여 진행하는
+     편이 낫다고 보고 이번 라운드에서는 손대지 않았습니다.
+
+     **검증** — 기기 저장소에서 이번에 바뀐 9개 파일(`collector_us_indices.py`·
+     `collector_us_stocks.py`·`utils/constants_us.py`·`utils/report_db.py`·
+     `web/pages/report_page.py`·`web/pages/us_stocks_page.py`·`PROJECT_STATUS.md`
+     ·테스트 3개: `tests/test_us_stocks.py`·`tests/test_us_stocks_page.py`·
+     `tests/test_report.py`)를 매번 동기화한 직후 `tests/` 전체
+     (`--ignore=archive`)를 실행해 FAILED/ERROR ID 집합을 사전 기록해 둔
+     베이스라인과 비교 — **새 실패 0건, 새로 고쳐진 기존 실패는
+     `test_us_index_collector_run` 1건**(위 1-1항의 반환값 계약 정정
+     결과)이고 그 외 그대로 남은 기존 결함 7건은 미국주식 모듈과 무관.
+     통과 수 1745 → 1749(+4, 이번에 추가한 신규 회귀 테스트 4개:
+     S4 배선·S6 하한·S2 AST·S7 폴백). 도중에 `collector_us_indices.py`·
+     `utils/report_db.py`·`web/pages/report_page.py`를 처음 편집할 때
+     클라우드 작업 사본이 기기의 실제 최신 커밋과 한 군데(`tests/
+     test_report.py`의 이미 삭제된 `keep_awake.yml` 참조 관련 낡은 3항목
+     루프) 어긋나 있던 것을 `git diff HEAD`로 발견 — 기기 쪽 정정된 버전을
+     기준으로 다시 맞춰 해결했습니다(다른 두 파일은 대조 결과 어긋남 없음).
+     `py_compile`로 수정 파일 전부 컴파일 확인.
+
+
 ## 진행 예정 (백로그)
+
+- 🆕 **이력 CSV의 캡/바닥값/계산값 플래그 정책 재검토** (#166, M-13) — 카드에는
+  "🧮 상한 적용값"/"🛡️ 장부가 바닥값" 배지로 보이는 정보가, 같은 종목을 내려받는
+  이력 CSV에는 빠져 있음(`tests/test_stock_history.py`의 `FORBIDDEN_KEYS` 정책).
+  오너 판단(2026-08-29): "카드에는 보이는데 CSV엔 빠지면 말이 안 됨 — 정보는
+  항상 같아야 한다", 다만 지금 당장이 아니라 **공유인프라 모듈 차례에** 코스피·
+  미국 두 시장을 한 번에 재정비하기로 함. 공유인프라 모듈 진행 시 이 항목부터
+  확인할 것.
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26
   workflow_dispatch(#37→#5, event≠schedule이라 정상 skip)와 2026-08-27 지연된

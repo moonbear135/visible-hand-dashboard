@@ -220,6 +220,14 @@ US_VALID_RATIO_DEGRADED = 0.70
 # valid_ratio/collect_ratio 의 DEGRADED 문턱과 같은 값으로 시작 — 실측 후 조정 가능.
 US_SNAPSHOT_SHRINK_GUARD_RATIO = 0.70
 
+# 2026-08-29 재감사 S6: 위 축소 가드는 "직전 스냅샷이 있을 때"만 발동합니다(previous_symbols
+# 가 비어 있으면 건너뜀 — 첫 실행 안전 목적). 그런데 그 말은 직전 스냅샷 자체가 비정상적으로
+# 작았거나 없었던 상태에서는 아무리 결과가 작아도 가드가 없다는 뜻입니다. `us_stocks_latest.json`
+# 을 읽는 5개 소비처(§7 문서 참고)가 항상 의지할 수 있는 **절대 하한**을 따로 둡니다 —
+# US_TARGET_UNIVERSE_SIZE(550)의 상당수 미만이면 소스가 심각하게 망가진 것으로 보고
+# 프로덕션 산출물을 덮어쓰지 않습니다.
+US_SNAPSHOT_MIN_GUARANTEED_COUNT = 400
+
 # 발행주식수 sanity range check 하한 (파싱 오염 탐지 — 코스피 MIN_OUTSTANDING_SHARES 와 같은 개념)
 US_MIN_OUTSTANDING_SHARES = 1_000_000
 
@@ -254,6 +262,30 @@ US_PAGE_SIZE = 30                  # 페이지네이션 30개씩 (코스피 페�
 # =============================================================================
 # 7. 산출물 경로
 # =============================================================================
+# 2026-08-29 재감사 S6: `us_stocks_latest.json`(US_SNAPSHOT_FILENAME) 은 이 수집기 하나가
+# 쓰고 여러 화면·배치가 읽는 **공용 계약**인데, 그 계약이 문서화된 곳이 없었습니다(그래서
+# H1의 "550종목 중 542종목 실패"가 미국주식 화면만이 아니라 결투 USD 야간배치까지 멈췄을 때,
+# 왜 배치가 영향받는지 코드를 다 뒤져야 알 수 있었습니다). 실제 소비처(2026-08-29 grep 확인,
+# archive/ 제외):
+#   · web/pages/us_stocks_page.py                — 화면 표시 (원 소비처)
+#   · web/pages/dividend_us_page.py / dividend_us_logic.py
+#       — 미국 배당 화면의 **유일한 입력**(새 수집기를 따로 만들지 않고 이 파일의 필드만 씀)
+#   · web/pages/duel_page.py / utils/duel_batch_usd.py
+#       — 결투 USD 배치의 신선도 점검·체결가(rank/price)
+#   · web/pages/scorecard_page.py (utils/scorecard_db.py 의 종목명 매핑 경유)
+#       — 스코어카드 종목명(name_kr) 표시
+#   · utils/report_db.py — 사장님 보고서의 거래일 정합성 점검(session_hint 만 읽음, 가벼운 참조)
+# 최소 보증(수집기 자기검증 — 아래 run_us_collector() 의 자기검증 블록이 강제):
+#   · `stocks` 는 최소 US_SNAPSHOT_MIN_GUARANTEED_COUNT 개 이상(첫 실행이라 직전 스냅샷이
+#     없어도 H1 축소 가드와 별개로 지켜지는 절대 하한 — 예: 소스가 완전히 바뀌어 1종목만
+#     긁혔는데 직전 스냅샷 자체가 없던 상황).
+#   · 각 종목 dict 는 최소 `symbol`·`rank`·`is_valid` 를 가짐(위 5개 소비처가 공통으로
+#     의존하는 필드).
+#   · `metadata.status` 는 "SUCCESS"/"DEGRADED"/"FAILED" 중 하나(값의 의미는 §5-4 위 참고 —
+#     valid_ratio·collect_ratio 를 둘 다 통과해야 SUCCESS).
+# "모델이 무엇을 목표가라고 부를 것인가"(BPS 바닥값 vs PEGY 역산값, H4)는 코드가 아니라
+# 오너 정책 결정 사안이라 이 계약에는 넣지 않았습니다(H4의 "두 값 병기"가 정책 확정 전
+# 임시 방어입니다).
 US_SNAPSHOT_FILENAME = "us_stocks_latest.json"          # 가공(processed) 스냅샷
 US_RAW_SNAPSHOT_FILENAME = "us_stocks_raw_latest.json"  # 크롤링 직후 raw 보관 (§0-3-3)
 US_UNIVERSE_FILENAME = "us_universe_latest.json"        # 필터링된 종목 유니버스

@@ -735,6 +735,20 @@ async def _render_benchmarks(report, market) -> None:
         # ⚠️ 이 고지는 §0-1 상 삭제 불가입니다(지수 자체가 아니라 ETF 종가라는 사실).
         _muted('지수 포인트가 아니라 추종 ETF 종가 기준입니다(기간 비교용 근사치).')
 
+    # 2026-08-29 재감사 M16: `collector_us_indices.py` 가 파일에만 남기던 실패·정정
+    # 신호를 화면까지 전달합니다(§0-1, §0-3-13 — 항상 보이게, 아코디언 안에 숨기지 않음).
+    # 기술적 원문은 서버 로그에만 있으므로(§0-3-4), 여기서는 사실만 짧게 알립니다.
+    trouble = [b for b in benchmarks if b.get("has_last_error") or b.get("value_conflicts_count")]
+    if trouble:
+        parts = []
+        for b in trouble:
+            label = _benchmark_short_label(b.get("label", ""))
+            if b.get("has_last_error"):
+                parts.append(f'{label}(최근 수집 실패 — 값이 최신이 아닐 수 있음)')
+            elif b.get("value_conflicts_count"):
+                parts.append(f'{label}(과거 기록과 다른 값이 발견돼 확인 필요)')
+        warning_banner('⚠️ 벤치마크 데이터 확인 필요: ' + ', '.join(parts))
+
 
 # =============================================================================
 # 6. 종목별 상세 · 비중 변화 · 스냅샷 원본

@@ -20,6 +20,7 @@
 
 실행: python tests/test_us_stocks_page.py
 """
+import ast
 import asyncio
 import os
 import sys
@@ -88,6 +89,40 @@ def test_h5_t_fair_badges():
     )
     check("🧮 상한 적용값" not in plain and "🛡️ 장부가 바닥값" not in plain,
           "캡/바닥값 플래그가 없으면 t_fair 자리에 배지가 붙지 않음")
+
+
+# =============================================================================
+# S7 (코스피↔미국 미러링 격차): 그레이엄 넘버 산출 불가 시 else 폴백 박스
+# =============================================================================
+def test_s7_graham_fallback_box_for_non_loss_reasons():
+    print("\n[재감사 S7] 그레이엄 넘버 산출 불가 — 적자가 아닌 사유(BPS 미상/음수)일 때도 "
+          "박스가 비지 않고 폴백 문구가 뜨는지(코스피 pegy_page.py 와의 미러링 격차)")
+
+    # f_pegy 를 안 줘서 forward_needs_mask=True 를 유도(포워드가 마스킹돼야 그레이엄 박스 자리가 그려짐).
+    # is_trailing_loss 는 아니고, bps 가 없어서 graham_target 을 계산 못 하는 상황 — 예전에는
+    # 이 경우 graham_box_html 이 그냥 빈 문자열이라 카드에 아무 것도 안 보였습니다.
+    missing_bps = build_stock_card_html(
+        {"symbol": "FFF", "name": "FFF Corp", "t_eps": 5.0, "bps": None,
+         "is_trailing_loss": False, "graham_target": None},
+        1,
+    )
+    check("그레이엄 넘버 산출 불가" in missing_bps,
+          "BPS 가 없어 그레이엄을 못 구해도 빈 자리가 아니라 산출 불가 박스가 뜸")
+    check("장부가(BPS) 정보 없음" in missing_bps, "사유가 BPS 미상이라고 정확히 밝힘")
+    check("적자 기업" not in missing_bps,
+          "적자가 원인이 아닌데 '적자 기업'이라고 잘못 짚지 않음(§0-1 — 틀린 진단 금지)")
+
+    # 자사주 매입형 우량주(H2/H4): BPS 가 음수라 그레이엄을 못 구하지만, 적자는 아님.
+    negative_bps = build_stock_card_html(
+        {"symbol": "GGG", "name": "GGG Corp", "t_eps": 12.0, "bps": -15.0,
+         "is_trailing_loss": False, "graham_target": None},
+        1,
+    )
+    check("그레이엄 넘버 산출 불가" in negative_bps, "BPS 가 음수인 경우도 박스가 뜸")
+    check("0 이하" in negative_bps and "-15" in negative_bps,
+          "음수 BPS 값 자체를 사유에 명시(0으로 감추거나 지어내지 않음)")
+    check("적자 기업" not in negative_bps,
+          "자사주 매입형 우량주를 '적자 기업'으로 오진하지 않음(H2/H4 와 같은 원칙)")
 
 
 # =============================================================================
@@ -363,6 +398,52 @@ def test_m7_failed_ticker_ratio_threshold_matches_constant():
           f"550종목 중 2종목 실패({low_failure_ratio:.1%})는 배너 승격 대상 아님(개별 실패는 아코디언만)")
 
 
+# =============================================================================
+# S2: 화면 소스에 판정용 숫자 리터럴이 남아있지 않은지 (constants_us.py 가 단일 출처)
+# =============================================================================
+def test_s2_no_hardcoded_threshold_literals_outside_import():
+    print("\n[재감사 S2] us_stocks_page.py 의 비교식(if/삼항)에 판정용 임계값이 "
+          "리터럴로 남아있지 않은지 — constants_us.py 를 단일 출처로 쓰는지 AST 로 확인")
+    # M5/M6/L3/L4/M7 이 실제로 하드코딩했던 값들. 값 자체가 흔한 숫자(0, 1, 2, 4, 100 등)가
+    # 아니라 이 파일의 판정 임계값과 정확히 겹치는 값만 골라, 우연한 리터럴과 헷갈리지 않게 합니다.
+    threshold_values = {
+        US_VALUE_TRAP_ROE_PCT,        # M5/M6 — roe_color 임계값
+        US_VALUE_TRAP_ROIC_PCT,       # M5/M6 — roic_color 임계값
+        float(US_TARGET_UNIVERSE_SIZE),  # L3 — 화면 제목 "상위 N개"
+        US_GROWTH_CAP_PCT,            # L4 — 실효성장률 캡 툴팁
+        US_SH_RETURN_CAP_PCT,         # L4 — 주주환원 캡 툴팁
+        US_GEFF_TOTAL_CAP_PCT,        # L4 — g_eff 총합 캡 툴팁
+        US_TARGET_PER_CAP,            # L4 — 모델 목표가 PER 캡 툴팁
+        US_TARGET_PRICE_CAP_MULTIPLE,  # L4 — 모델 목표가 배수 캡 툴팁
+        US_FAILED_TICKERS_BANNER_RATIO,  # M7 — 실패 비율 배너 문턱
+    }
+
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                         "web", "pages", "us_stocks_page.py")
+    tree = ast.parse(open(path, "r", encoding="utf-8").read(), filename=path)
+
+    # import 구문 안의 리터럴(상수 이름일 뿐 값이 아님)과, 함수 파라미터 기본값처럼 임계값
+    # 비교가 아닌 자리는 제외하고, "비교식(Compare)에 쓰인 숫자 리터럴"만 검사합니다 —
+    # 판정 로직이 아닌 곳(리스트 슬라이스, 반복 횟수 등)의 우연한 숫자와 구분하기 위함입니다.
+    # int 리터럴은 제외합니다(오프셋 `offset == 9`, 문자열 길이 `>= 10` 같은 무관한 정수와
+    # 9.0/10.0 같은 임계값이 값만 우연히 겹쳐 오탐이 났음 — 이 코드베이스의 임계값 상수는
+    # 전부 float 이므로 float 리터럴만 봐도 충분합니다).
+    offending = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Compare):
+            continue
+        operands = [node.left] + list(node.comparators)
+        for operand in operands:
+            if isinstance(operand, ast.Constant) and isinstance(operand.value, float):
+                if operand.value in threshold_values:
+                    offending.append((getattr(node, "lineno", "?"), operand.value))
+
+    check(not offending,
+          f"비교식에 하드코딩된 판정 임계값 리터럴 없음(constants_us.py 상수만 사용) "
+          f"— 발견: {offending}" if offending else
+          "비교식에 하드코딩된 판정 임계값 리터럴 없음(constants_us.py 상수만 사용)")
+
+
 def test_us_stocks_page_full_suite():
     test_h3_generic_harness_fail_shows_masked_panel()
     test_m2_index_header_shows_error_even_with_change_value()
@@ -370,6 +451,7 @@ def test_us_stocks_page_full_suite():
     test_m4_stale_days_computation()
     test_m7_failed_ticker_ratio_threshold_matches_constant()
     test_h5_t_fair_badges()
+    test_s7_graham_fallback_box_for_non_loss_reasons()
     test_m5_m6_roe_roic_thresholds_match_constants()
     test_l4_tooltip_numbers_match_constants()
     test_l3_title_uses_universe_size_constant()
@@ -378,6 +460,7 @@ def test_us_stocks_page_full_suite():
     test_l9_empty_custom_badge_selection_yields_zero_results()
     test_m11_summary_history_attempts_load_even_without_local_file()
     test_l13_summary_metric_delta_shows_comparison_date()
+    test_s2_no_hardcoded_threshold_literals_outside_import()
 
     print("\n" + "=" * 70)
     if FAILURES:

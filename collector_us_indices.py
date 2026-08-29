@@ -101,6 +101,7 @@ from collector_us_stocks import (
     _now_kst,
     _polite_sleep,
     decode_sveltekit_data_json,
+    resolve_collection_session_et,
 )
 
 # =============================================================================
@@ -225,7 +226,16 @@ def iter_history_row_candidates(value, depth=0, seen=None):
     if seen is None:
         seen = set()
     marker = id(value)
-    if marker in seen:  # devalue 는 같은 객체를 여러 곳에서 공유합니다(중복 순회·순환 방지)
+    # 2026-08-29 재감사 L11: 이 가드가 "devalue 는 같은 객체를 여러 곳에서 공유하므로
+    # 중복 순회·순환을 막는다"는 원래 의도의 주석이 붙어 있었지만, 실제로는 그렇지 않습니다.
+    # `_devalue_deref()`(collector_us_stocks.py)는 공유 인덱스를 참조할 때마다 **매번 새
+    # 객체로 펼치므로**, 디코드가 끝난 이 구조에는 객체 공유도 순환도 없습니다 — 즉 지금은
+    # `id()` 가 절대 겹치지 않아 이 가드가 실질적으로 아무것도 막지 못합니다(무한 재귀 방지는
+    # 위 MAX_SEARCH_DEPTH 가 전담). 무해하지만 devalue 응답이 통째로 복제되어 메모리를 더
+    # 씁니다. 그래도 남겨 두는 이유: 디코더 구현이 바뀌어 다시 객체를 공유하게 되면 이 가드가
+    # 그대로 방어망이 되므로, §0-3-6 상 이번 감사 범위를 벗어나는 디코더 리팩터링 없이 방어적
+    # 코드만 유지합니다.
+    if marker in seen:
         return
     seen.add(marker)
 
@@ -328,6 +338,32 @@ def normalize_history_rows(rows):
     return normalized
 
 
+def trim_unconfirmed_rows(rows, confirmed_through_date):
+    """
+    2026-08-29 재감사 M16 수정: `confirmed_through_date`(=`resolve_collection_session_et()`
+    가 계산한 "지금 담아도 되는 거래일", 장마감+30분 규칙)보다 **미래인 행은 버립니다.**
+
+    ⚠️ `merge_closes()` 는 "이미 저장된 날짜는 절대 덮어쓰지 않는다"는 원칙을 지키지만, 그
+    원칙은 **처음 저장되는 값이 확정 종가라는 것을 전제로 합니다.** 장중에 한 번이라도 실행되면
+    그날 행의 종가가 미확정 값일 수 있고, `merge_closes()` 는 그 값을 영구히 확정 종가 자리에
+    고정해 버립니다(그 뒤에는 `value_conflicts` 로 기록만 될 뿐 고칠 방법이 없음). 그래서
+    병합 **이전에** 이 함수로 미확정 구간을 잘라 냅니다 — 잘라낸 행은 다음 실행(장마감 이후나
+    다음 거래일)에서 정상적으로 다시 들어옵니다(그때는 `confirmed_through_date` 가 그 날짜까지
+    올라와 있으므로).
+
+    날짜 문자열이 YYYY-MM-DD 형식이라 문자열 비교가 곧 날짜 비교와 같습니다.
+
+    반환: (kept_rows, trimmed_rows)
+    """
+    kept, trimmed = [], []
+    for row in rows:
+        if row["date"] > confirmed_through_date:
+            trimmed.append(row)
+        else:
+            kept.append(row)
+    return kept, trimmed
+
+
 def merge_closes(existing, new_rows):
     """
     이미 저장돼 있던 {날짜: 종가} 에 새로 받은 행들을 합칩니다.
@@ -402,10 +438,20 @@ def run_us_index_history_collector(data_dir=None, delay=True):
     누적 저장합니다.
 
     · 지수 하나가 실패해도 나머지는 계속 진행하고, 실패 사유를 파일에 남깁니다(§0-1).
-    · 하나도 못 받았으면 **파일을 건드리지 않습니다**(기존 값 보존).
+    · 하나도 못 받았어도 **파일 자체는 씁니다**(L8 — 실패 사유를 남기기 위해). 다만 기존
+      `closes`(가격 이력)는 한 글자도 건드리지 않고 그대로 둡니다 — "건드리지 않는 것"은
+      가격 데이터이지 파일이 아닙니다. 새로 받은 게 하나라도 있는지는 반환값이 아니라
+      `metadata.fetched_any` 로 구분하세요.
     · 차단을 만나면 즉시 멈추고, 그때까지 받은 분량만 저장합니다(§0-3-2).
+    · 2026-08-29 재감사 M16: `collector_us_stocks.py` 와 달리 이 수집기에는 장마감 게이트가
+      없어, 장중에 실행되면 그날의 미확정 종가가 `merge_closes()` 의 "기록 개변 금지"
+      원칙에 의해 **영구히 확정 종가 자리에 고정**될 수 있었습니다. 이제
+      `resolve_collection_session_et()` 로 "지금 담아도 되는 거래일"을 구해, 그보다
+      미래인 행은 `trim_unconfirmed_rows()` 로 잘라내고 병합합니다.
 
-    반환: 저장한 파일 경로(아무것도 못 받았으면 None)
+    반환: 저장한 파일 경로. 실패 사유만 기록한 경우에도 파일은 쓰므로 **항상** 경로를
+    돌려줍니다(위 L8 참고) — "이번에 새로 받은 게 있는가"는 `metadata.fetched_any` 로
+    확인하세요.
     """
     resolved_dir = data_dir or default_data_dir()
     payload = load_index_history(resolved_dir) or {}
@@ -413,9 +459,13 @@ def run_us_index_history_collector(data_dir=None, delay=True):
     warnings = []
     blocked = False
     fetched_any = False
+    session = resolve_collection_session_et()
+    confirmed_through = session["session_date"]
 
     print("=" * 70)
     print("[미국 벤치마크 일별 종가] 추종 ETF 프록시에서 수집합니다(지수 포인트 아님)")
+    print(f"  확정 거래일 상한(장마감+30분 게이트): {confirmed_through} "
+          f"(현재 ET {session['now_et']} {session['tz_abbrev']})")
 
     for position, (key, label_ko, proxy_symbol) in enumerate(US_INDEX_BENCHMARKS):
         if blocked:
@@ -450,6 +500,23 @@ def run_us_index_history_collector(data_dir=None, delay=True):
             indices[key] = entry
             warnings.append(f"{key}: 수집 실패 — {exc}")
             print(f"  ⚠️ {label_ko}: 수집 실패 — {exc}")
+            continue
+
+        # 2026-08-29 재감사 M16: 확정 거래일보다 미래인 행(=장중 미확정 종가)은 병합 전에
+        # 잘라냅니다 — merge_closes() 는 "이미 저장된 값은 안 덮어씀"만 지킬 뿐, 처음
+        # 들어오는 값이 확정 종가인지는 보장하지 않기 때문입니다.
+        rows, trimmed = trim_unconfirmed_rows(rows, confirmed_through)
+        if trimmed:
+            note = (f"미확정 거래일 {len(trimmed)}건({', '.join(r['date'] for r in trimmed)})은 "
+                    f"장마감+30분 게이트({confirmed_through} 상한)에 걸려 이번엔 담지 않았습니다 "
+                    "— 다음 실행에서 확정되면 정상적으로 들어옵니다.")
+            warnings.append(f"{key}: {note}")
+            print(f"  ⏳ {label_ko}: {note}")
+        if not rows:
+            # 확정 종가가 하나도 없으면(예: 장마감+30분 전에 실행) 이번 지수는 조용히
+            # 건너뜁니다 — entry 는 건드리지 않아 last_error 도 남기지 않습니다(진짜 실패가
+            # 아니라 "아직 확정 안 됨"이라는 정상 상태이기 때문).
+            print(f"  ⏭️ {label_ko}: 이번 응답에 확정 거래일 행이 없어 건너뜁니다")
             continue
 
         # 엉뚱한 ETF 를 담고 있지 않은지 확인합니다(§0-1 — 소스가 바뀌면 조용히 틀린 값을
@@ -539,6 +606,15 @@ def run_us_index_history_collector(data_dir=None, delay=True):
         print("⚠️ 한 지수도 수집하지 못했습니다 — 기존 종가는 그대로 두고 실패 사유만 "
               f"기록했습니다(metadata.fetched_any=False) -> {json_path}")
     print("=" * 70)
+    # 2026-08-29 재감사(M16 작업 중 추가 발견 → 조사 후 원복): 처음엔 "fetched_any=False 면
+    # None" 으로 고쳐 함수 docstring 과 맞추려 했지만, 그러면 L8 회귀 테스트
+    # (test_reaudit_total_failure_records_reason_without_touching_closes)가 깨집니다 — L8은
+    # "전부 실패해도 실패 사유를 남기려면 파일을 반드시 써야 한다"를 의도적으로 요구하고,
+    # 그 근거로 반환값이 not None 이어야 한다고 명시합니다. 즉 **코드가 아니라 docstring 이
+    # 낡은 쪽**입니다(파일은 실패해도 항상 씀 — 위 L8 주석 참고). 아래 docstring 을
+    # 고쳐 실제 계약(항상 경로를 반환, "아무것도 못 받았다"는 metadata.fetched_any 로 구분)에
+    # 맞췄습니다. `test_us_index_collector_run` 의 `result is None` 기대치 3곳도 이 계약대로
+    # 함께 고쳤습니다(그 기대치가 L8 이전에 쓰여 낡아 있었습니다).
     return json_path
 
 

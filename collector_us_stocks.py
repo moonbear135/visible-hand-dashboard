@@ -103,6 +103,7 @@ from utils.constants_us import (
     US_VALID_RATIO_SUCCESS,
     US_VALID_RATIO_DEGRADED,
     US_SNAPSHOT_SHRINK_GUARD_RATIO,
+    US_SNAPSHOT_MIN_GUARANTEED_COUNT,
     US_INDEX_PROXY_URL_TEMPLATE,
     US_INDEX_DEFINITIONS,
     # 2026-08-12 신설(TASK_HISTORY #92) — 미국 전 종목 현재가(가격 전용) 수집용 (constants_us §9)
@@ -548,6 +549,39 @@ def apply_us_hysteresis_buffer(candidates, previous_symbols,
     if buffer_count:
         print(f"📎 히스테리시스 버퍼: {entry_rank}위 밖 {buffer_count}개 종목을 화면 비노출로 계속 추적")
     return tracked
+
+
+def build_hysteresis_tracked_universe(rows, target_size, previous_symbols):
+    """
+    2026-08-29 재감사 M1 수정을 `run_us_collector()` 밖으로 뽑아 낸 함수(§0-3-10).
+
+    filter_universe 를 entry_rank(=target_size) 까지만 뽑으면 이탈 순위(exit_rank)
+    구간의 후보가 애초에 목록에 없어 히스테리시스 버퍼가 구조적으로 죽은 코드가 됩니다.
+    exit_rank 까지 넉넉히 뽑은 뒤에 버퍼를 적용해야 "직전 회차에 추적 중이던 종목은
+    entry~exit 구간에서도 유지"가 실제로 발동합니다.
+
+    `run_us_collector()` 가 이 함수를 그대로 호출하므로, 여기 회귀 테스트를 붙이면
+    프로덕션 배선(S4)을 직접 검증하는 셈입니다 — 별도 사본을 만들어 테스트하지 않습니다.
+
+    반환: (tracked, uni_stats) — uni_stats 는 print_universe_stats() 에 그대로 넘길 수 있습니다.
+    """
+    universe_fetch_size = max(target_size, US_HYSTERESIS_EXIT_RANK)
+    selected, uni_stats = filter_universe(rows, target_size=universe_fetch_size)
+    tracked = apply_us_hysteresis_buffer(selected, previous_symbols, entry_rank=target_size)
+    return tracked, uni_stats
+
+
+def violates_snapshot_min_guarantee(visible_count, target_size):
+    """
+    2026-08-29 재감사 S6: `us_stocks_latest.json` 을 읽는 5개 소비처(constants_us.py
+    US_SNAPSHOT_FILENAME 위 계약 문서 참고)가 항상 의지할 수 있는 절대 하한 자기검증.
+
+    ⚠️ `target_size >= US_SNAPSHOT_MIN_GUARANTEED_COUNT` 일 때만 봅니다 — 프로토타입/테스트가
+    `target_size` 를 작게 줘서 일부러 소규모 유니버스를 수집하는 경우(예: 회귀 테스트의 4종목
+    합성 유니버스)까지 "프로덕션 550종목 기준 절대 하한"을 들이대면 의도된 소규모 수집이 전부
+    막힙니다 — "지금 진짜 550종목을 노리고 있었는가"를 target_size 로 판단합니다.
+    """
+    return target_size >= US_SNAPSHOT_MIN_GUARANTEED_COUNT and visible_count < US_SNAPSHOT_MIN_GUARANTEED_COUNT
 
 
 # =============================================================================
@@ -1537,14 +1571,11 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
 
     # 2) 유니버스
     rows = fetch_universe_rows()
-    # 2026-08-29 재감사 M1: 히스테리시스 이탈 구간(entry_rank~exit_rank)의 후보가 애초에
-    # 목록에 존재해야 버퍼가 발동할 수 있습니다. filter_universe 를 entry_rank(=target_size)
-    # 까지만 뽑으면 551위 이상이 아예 없어 버퍼가 구조적으로 죽은 코드가 됩니다 —
-    # 이탈 순위(기본 600위)까지 넉넉히 뽑은 뒤에 버퍼를 적용합니다.
-    universe_fetch_size = max(target_size, US_HYSTERESIS_EXIT_RANK)
-    selected, uni_stats = filter_universe(rows, target_size=universe_fetch_size)
+    # 2026-08-29 재감사 M1(+S4 배선 검증): build_hysteresis_tracked_universe() 가
+    # "이탈 순위까지 넉넉히 뽑은 뒤 버퍼 적용" 규칙을 갖고 있습니다 — 정의는 tests/test_us_stocks.py
+    # 의 [재감사 S4] 배선 테스트가 바로 이 함수를 호출해 검증합니다(사본 아님, §0-3-10).
+    tracked, uni_stats = build_hysteresis_tracked_universe(rows, target_size, previous_symbols)
     print_universe_stats(uni_stats)
-    tracked = apply_us_hysteresis_buffer(selected, previous_symbols, entry_rank=target_size)
     if not tracked:
         raise RuntimeError("히스테리시스 적용 후 추적 대상이 0개입니다 — 수집을 중단합니다(기존 스냅샷 유지)")
     universe_by_symbol = {r["symbol"]: r for r in tracked}
@@ -1721,6 +1752,20 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
                 f"기존 스냅샷을 덮어쓰지 않고 중단합니다(§0-1). 의도된 축소라면 "
                 f"--allow-overwrite 로 강제할 수 있습니다."
             )
+
+    # 2026-08-29 재감사 S6: 위 축소 가드는 "직전 스냅샷이 있을 때"만 봅니다. 직전 스냅샷이
+    # 없었거나(첫 실행) 그 자체가 비정상적으로 작았던 경우까지 방어하려고, `us_stocks_latest.json`
+    # 을 읽는 5개 소비처(constants_us.py US_SNAPSHOT_FILENAME 위 계약 문서 참고)가 항상 의지할
+    # 수 있는 절대 하한을 자기검증으로 둡니다 — previous_symbols 유무와 무관하게 항상 확인합니다.
+    # `violates_snapshot_min_guarantee()` 로 뽑아 둔 이유는 회귀 테스트(§0-3-10)가 네트워크
+    # 목업 없이 이 판정 조건 자체를 직접 검증할 수 있게 하기 위해서입니다.
+    if write_outputs and not allow_overwrite and violates_snapshot_min_guarantee(len(visible), target_size):
+        raise RuntimeError(
+            f"이번 수집 결과가 절대 하한({US_SNAPSHOT_MIN_GUARANTEED_COUNT}종목) 미만입니다"
+            f"(노출 {len(visible)}종목) — 소스 대량 실패 가능성이 높아 기존 스냅샷을 덮어쓰지 "
+            f"않고 중단합니다(§0-1, S6 — 이 파일을 읽는 배당·결투·스코어카드 화면까지 영향을 "
+            f"받습니다). 의도된 축소라면 --allow-overwrite 로 강제할 수 있습니다."
+        )
 
     now_et = _now_et()
     elapsed_min = (time.perf_counter() - started_at) / 60.0

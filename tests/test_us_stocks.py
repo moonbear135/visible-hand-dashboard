@@ -43,7 +43,10 @@ from collector_us_stocks import (
     apply_us_hysteresis_buffer,
     fetch_one_index_quote,
     build_index_proxy_url,
+    build_hysteresis_tracked_universe,
+    violates_snapshot_min_guarantee,
 )
+from utils.constants_us import US_SNAPSHOT_MIN_GUARANTEED_COUNT, US_TARGET_UNIVERSE_SIZE
 
 ET = ZoneInfo("America/New_York")
 
@@ -220,6 +223,48 @@ def test_hysteresis():
     check(sum(1 for t in tracked if t["is_visible"]) == 550, "화면 노출은 정확히 550개")
     tracked2 = apply_us_hysteresis_buffer(candidates, set(), entry_rank=550, exit_rank=600)
     check(len(tracked2) == 550, "직전 목록이 없으면 단순 550위 컷과 동일(첫 실행 안전)")
+
+
+def test_reaudit_s4_hysteresis_production_wiring():
+    print("\n[재감사 S4] 히스테리시스(M1) 프로덕션 배선 — run_us_collector() 가 실제로 부르는 "
+          "build_hysteresis_tracked_universe() 자체를 검증(사본 아님)")
+    # 700개 합성 유니버스 — filter_universe 의 US_UNIVERSE_MIN_RAW_ROWS(700) 문턱을 실제로 통과시킨
+    # 뒤 apply_us_hysteresis_buffer 까지 실제 배선 그대로 이어지는지 봅니다.
+    rows = [
+        {
+            "symbol": f"S{i:04d}",
+            "name": f"Synthetic Company {i:04d} Inc",
+            "csv_market_cap": float(700 - i) * 1_000_000_000.0,
+            "volume": 1000,
+            "industry": "Technology",
+        }
+        for i in range(700)
+    ]
+    # 어제 추적 중이던 종목이 시총 하락으로 561위(entry~exit 구간)까지 밀린 상황.
+    previous_symbols = {"S0560"}
+    tracked, uni_stats = build_hysteresis_tracked_universe(rows, target_size=550, previous_symbols=previous_symbols)
+    symbols = {t["symbol"] for t in tracked}
+    check(uni_stats["target_size"] == 600, "filter_universe 에는 entry(550)가 아니라 exit_rank(600)까지 요청됨 — M1의 핵심")
+    check(len(tracked) == 551, f"추적 551개(550 + 버퍼 1) — run_us_collector 배선 그대로 재현 (실제 {len(tracked)})")
+    check("S0560" in symbols, "직전 추적 종목이 561위로 밀려도 실제 배선에서 버퍼로 유지됨")
+    check(not any(t["symbol"] == "S0560" and t["is_visible"] for t in tracked), "버퍼 구간 종목은 화면 비노출(is_visible=False)")
+    tracked_no_prev, _ = build_hysteresis_tracked_universe(rows, target_size=550, previous_symbols=set())
+    check(len(tracked_no_prev) == 550, "직전 추적 목록이 없으면(첫 실행) 실제 배선도 단순 550위 컷과 동일")
+
+
+def test_reaudit_s6_snapshot_min_guarantee():
+    print("\n[재감사 S6] us_stocks_latest.json 절대 하한 자기검증(run_us_collector() 가 실제로 "
+          "부르는 violates_snapshot_min_guarantee() 자체를 검증)")
+    floor = US_SNAPSHOT_MIN_GUARANTEED_COUNT
+    check(violates_snapshot_min_guarantee(floor - 1, US_TARGET_UNIVERSE_SIZE) is True,
+          f"프로덕션 규모(target_size={US_TARGET_UNIVERSE_SIZE})에서 절대 하한({floor}) 미만이면 위반")
+    check(violates_snapshot_min_guarantee(floor, US_TARGET_UNIVERSE_SIZE) is False,
+          "절대 하한과 정확히 같으면 위반 아님(경계값)")
+    check(violates_snapshot_min_guarantee(0, 4) is False,
+          "target_size 가 작으면(테스트·프로토타입 등 의도된 소규모 수집) 결과가 0이어도 이 가드는 "
+          "적용 안 됨 — 4종목 합성 유니버스를 쓰는 다른 회귀 테스트들이 이 가드에 걸리지 않는 이유")
+    check(violates_snapshot_min_guarantee(floor - 1, floor) is True,
+          "target_size 가 절대 하한과 같아도(=550이 아니어도 400을 노렸다면) 그 기준으로 검사됨")
 
 
 def test_url_builder():
@@ -838,6 +883,8 @@ def main():
     test_filter_universe()
     test_parse_universe_csv()
     test_hysteresis()
+    test_reaudit_s4_hysteresis_production_wiring()
+    test_reaudit_s6_snapshot_min_guarantee()
     test_url_builder()
     test_field_mapping()
     test_number_parsers()

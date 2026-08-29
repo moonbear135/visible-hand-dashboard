@@ -751,15 +751,20 @@ def test_us_index_collector_run():
                 raise cui.USSourceBlockedError("HTTP 429")
             cui._http_get = _blocked
             result = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
-            check(result is None, "전부 차단되면 파일을 다시 쓰지 않음(기존 값 보존)")
+            # 2026-08-29 재감사 M16 작업 중 발견: 예전 기대치는 "전부 차단되면 None"이었지만,
+            # 이 함수는 L8(위 test_reaudit_total_failure_records_reason_without_touching_closes
+            # 참고)에 따라 실패해도 사유를 남기려고 **항상 파일을 씁니다** — 그래서 반환값도
+            # 항상 경로입니다. "건드리지 않는 것"은 반환값이 아니라 아래에서 보듯 기존
+            # closes(가격 이력)입니다. docstring 도 이 계약에 맞게 함께 고쳤습니다.
+            check(result is not None, "차단돼도 실패 사유를 남기려고 파일은 씀(경로 반환)")
             payload3 = json.loads(Path(path).read_text(encoding="utf-8"))
             check(payload3["indices"]["NASDAQ_PROXY_ONEQ"]["closes"]["2026-08-11"] == 104.16,
-                  "차단 이후에도 기존 데이터가 그대로 남아 있음")
+                  "차단 이후에도 기존 종가 데이터는 그대로 남아 있음(반환값이 아니라 이 값으로 확인)")
 
             # 응답 구조가 깨졌을 때 — 값을 지어내지 않고 사유만 남김
             cui._http_get = lambda url, timeout=None: _FakeResponse('{"type":"data","nodes":[]}')
             result2 = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
-            check(result2 is None, "노드를 못 찾으면 파일을 쓰지 않음(빈 값으로 덮지 않음)")
+            check(result2 is not None, "노드를 못 찾아도 실패 사유를 남기려고 파일은 씀(경로 반환)")
 
             # 노드는 멀쩡한데 '지금 시세(quote)'만 있고 일별 이력이 없을 때 —
             # 키 글자가 겹친다고 오늘 값 하나를 이력으로 둔갑시키지 않습니다(#96).
@@ -769,11 +774,11 @@ def test_us_index_collector_run():
             ]}]})
             cui._http_get = lambda url, timeout=None: _FakeResponse(quote_only)
             result3 = cui.run_us_index_history_collector(data_dir=tmp, delay=False)
-            check(result3 is None,
-                  "quote 스키마만 있는 응답은 '수집 실패'로 처리(엉뚱한 값을 이력으로 담지 않음)")
+            check(result3 is not None,
+                  "quote 스키마만 있는 응답도 '수집 실패'로 처리하되 사유를 남기려고 파일은 씀")
             payload4 = json.loads(Path(path).read_text(encoding="utf-8"))
             check(payload4["indices"]["SP500_PROXY_SPY"]["closes"].get("2026-08-11") == 770.56,
-                  "그 뒤에도 기존 데이터는 그대로 남아 있음")
+                  "그 뒤에도 기존 데이터는 그대로 남아 있음(엉뚱한 값을 이력으로 담지 않음)")
         finally:
             cui._http_get = original_http_get
 

@@ -455,6 +455,19 @@ def build_stock_card_html(s, rank_num) -> str:      # noqa: C901 — 원본 화�
             graham_box_html = graham_financial_box(fmt_usd(graham_target), "은행/보험/자산운용")
         elif graham_target is not None:
             graham_box_html = graham_reference_box(fmt_usd(graham_target))
+        else:
+            # 2026-08-29 재감사 S7(코스피↔미국 미러링 격차): `is_trailing_loss` 가 아닌데도
+            # graham_target 이 없는 경우(BPS 미상 또는 BPS≤0)가 여기 else 로 옵니다. BPS가
+            # 음수인 건 자사주 매입형 우량주일 수 있어(H2/H4) "적자 기업"이라고 쓰면 틀린
+            # 진단이 됩니다 — 실제 계산 불가 사유(BPS)를 정확히 밝힙니다(§0-1).
+            bps_val = s.get("bps")
+            reason = ("장부가(BPS) 정보 없음" if bps_val is None
+                      else f"장부가(BPS)가 0 이하({fmt_usd(bps_val)}) — 제곱근 안이 음수가 됩니다")
+            graham_box_html = graham_unavailable_box(
+                "🧮 그레이엄 넘버 산출 불가",
+                esc(reason),
+                headline_color="#64748b",
+            )
 
     # ── 모델 목표가 대비 갭 ───────────────────────────────────────────────
     f_target = s.get("f_target")
