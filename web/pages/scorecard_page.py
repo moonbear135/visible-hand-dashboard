@@ -561,18 +561,26 @@ async def _render_portfolio(client, user_id: str, market: dict, on_changed) -> N
 # 6. 보유 종목 입력
 # =============================================================================
 def _candidate_options(market_code: str, market: dict) -> dict:
-    """빠른 검색 후보 {티커: "티커 · 종목명"}.
+    """빠른 검색 후보 {티커: "티커 · 종목명(한글명)"}.
 
     후보는 §0-1 대로 **실제 상장종목 목록에서만** 뽑습니다. 한국은 코스피+코스닥 통합
     상위 500 유니버스 + 전체 상장종목 마스터(코스피·코스닥·ETF), 미국은 상위 550 유니버스입니다.
     라벨에 티커를 앞세우는 이유(2026-08-13 오너 지적): 종목명만 넣으면 "XOM" 같은 티커 검색이
     이름의 철자 순서에 우연히 걸리는 종목들까지 잡아버립니다.
+
+    2026-08-29 수정 — 결투 달러 주문창과 같은 버그: `ui.select(with_input=True)` 는 라벨
+    텍스트를 그대로 부분일치 검색하는데, 미국 종목은 영문명(`name`)만 라벨에 있어 한글로는
+    전혀 검색이 안 됐습니다(`web/pages/duel_page.py::_universe_options()` 참고 — 같은 방식으로
+    고침, §0-3-10). `us_stocks_latest.json`에 이미 있는 `name_kr`(없으면 None — §0-1, 지어내지
+    않음)이 있으면 라벨 끝에 괄호로 덧붙입니다. 한국 종목은 `name` 자체가 이미 한글이라 영향 없음.
     """
     options = {}
     for ticker, stock in (market["indexes"].get(market_code) or {}).items():
         name = stock.get("name")
         if name:
-            options[ticker] = f"{ticker} · {name}"
+            name_kr = stock.get("name_kr")
+            kr_part = f"({name_kr})" if name_kr and name_kr != name else ""
+            options[ticker] = f"{ticker} · {name}{kr_part}"
     if market_code == MARKET_KR:
         for code, stock in (market["kr_master"] or {}).items():
             name = stock.get("name")
