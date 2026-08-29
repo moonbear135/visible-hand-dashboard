@@ -58,6 +58,7 @@ REPO_ROOT = Path(__file__).parent.parent
 sys.path.append(str(REPO_ROOT))
 sys.path.append(str(Path(__file__).parent))          # from test_duel_db import FakeClient
 
+from _render_helpers import run_render                                   # noqa: E402
 from test_duel_db import FakeClient                                      # noqa: E402
 from utils import duel_rules, scorecard_db, scorecard_publish_db         # noqa: E402
 from utils.duel_rules import DuelRuleError                               # noqa: E402
@@ -286,24 +287,13 @@ def _function_nodes(name):
 #  (`nicegui.slot.Slot.stacks` — 키가 `id(current_task())`). `asyncio.run()` 은 새 태스크를
 #  만드니 그 안에서는 슬롯 스택이 비어 있고, `ui.markdown(...)` 한 줄에서 바로 터집니다.
 #  그래서 바깥 컨텍스트의 슬롯 스택을 새 태스크에 복사해 준 뒤 코루틴을 돌립니다.
-def _run(coro):
-    """비동기 화면 함수를 끝까지 실행합니다 (NiceGUI 슬롯 컨텍스트를 함께 넘겨서)."""
-    try:
-        from nicegui import context as nicegui_context
-        from nicegui.slot import Slot, get_task_id
-    except ImportError:                            # 스텁 환경(nicegui 미설치)
-        return asyncio.run(coro)
-
-    outer = list(nicegui_context.slot_stack)
-
-    async def _main():
-        Slot.stacks[get_task_id()] = list(outer)
-        try:
-            return await coro
-        finally:
-            Slot.stacks.pop(get_task_id(), None)
-
-    return asyncio.run(_main())
+#
+#  2026-08-29 재감사 M-6 — 이 헬퍼는 `tests/_render_helpers.py::run_render()`로 옮겼습니다
+#  (§0-3-10 — `tests/test_scorecard_ocr.py`의 렌더 스모크가 이 슬롯 전파 없이 맨
+#  `asyncio.run()`을 썼다가, 프로세스당 한 번뿐인 "유사 클라이언트"를 먼저 소진해서
+#  이 파일의 렌더 스모크 8건을 실행 순서에 따라 연쇄 실패시켰습니다 — 두 파일이 같은
+#  함수를 쓰면 그 문제가 사라집니다). `_run`은 하위호환을 위해 별칭으로 남깁니다.
+_run = run_render
 
 
 _install_stubs()

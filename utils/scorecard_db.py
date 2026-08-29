@@ -3,8 +3,9 @@
 📊 "내 성적표" 모듈 — 데이터 계층 단일 출처 (Supabase 래퍼 + 순수 계산 로직)
 
 SCORECARD_WORK_ORDER.md §6-2 에 따라 만든 모듈입니다.
-화면(`views/scorecard_view.py`)은 Supabase 호출을 직접 하지 않고 **전부 이 모듈을 통해서만**
-접근합니다(§4-3 계층 분리).
+화면(`web/pages/scorecard_page.py` 등 — 2026-08-29 Streamlit 은퇴 전에는
+`views/scorecard_view.py` 였고, 그 파일은 `archive/streamlit_views/` 로 옮겨졌습니다)은
+Supabase 호출을 직접 하지 않고 **전부 이 모듈을 통해서만** 접근합니다(§4-3 계층 분리).
 
 이 파일은 크게 네 부분으로 나뉩니다.
     A. 상수 / 정규화        — 시장·통화·티커 (원/달러 혼용 차단)
@@ -14,8 +15,9 @@ SCORECARD_WORK_ORDER.md §6-2 에 따라 만든 모듈입니다.
     D. Supabase 래퍼        — 클라이언트 생성, 회원가입/로그인/로그아웃, holdings CRUD
 
 ⚠️ 크레덴셜 규칙 (ENGINEERING_SPEC.md §0-1 / 작업지시서 §4-2)
-    - `SUPABASE_URL` / `SUPABASE_ANON_KEY` 는 `st.secrets`(Streamlit Cloud → Settings →
-      Secrets) 또는 동명의 환경변수에서만 읽습니다. 소스코드에 값을 적지 않습니다.
+    - `SUPABASE_URL` / `SUPABASE_ANON_KEY` 는 동명의 환경변수에서만 읽습니다(Render
+      배포 방식 — Streamlit 은퇴(2026-08-29) 전에는 `st.secrets` 경로도 있었지만 지금은
+      없습니다). 소스코드에 값을 적지 않습니다.
     - anon key 는 **설계상 클라이언트에 노출되는 게 정상인 키**라서 KRX 인증키와 성격이
       다릅니다. 실제 방어선은 DB의 Row Level Security(`sql/scorecard_schema.sql`)입니다.
       그래도 로그·에러메시지에 키 값을 찍지 않습니다(습관적 유출 방지).
@@ -54,16 +56,15 @@ try:  # pragma: no cover - 환경에 따라 갈리는 import
 except Exception:  # pragma: no cover
     KST = None
 
-# streamlit 은 st.secrets 를 읽을 때만 씁니다. 오프라인 테스트(스트림릿 미설치)에서도
-# 이 모듈을 그대로 import 할 수 있어야 하므로 선택적 의존성으로 감쌉니다.
-try:  # pragma: no cover - 환경에 따라 갈리는 import
-    import streamlit as st
-    STREAMLIT_AVAILABLE = True
-except ImportError:  # pragma: no cover
-    st = None
-    STREAMLIT_AVAILABLE = False
+# 2026-08-29 재감사(스코어카드 모듈) S-2 — 여기 있던 `import streamlit as st` try/except
+# 블록을 지웠습니다. Streamlit 은 2026-08-29 에 은퇴했고(views/ → archive/streamlit_views/,
+# `requirements.txt` 에서도 제거 — `tests/test_scorecard.py::test_requirements_and_docs`
+# 가 그것을 회귀로 고정합니다) 운영에서 `STREAMLIT_AVAILABLE` 은 영원히 False 라, 아래
+# `_read_secret()` 의 `st.secrets` 경로는 도달 불가능한 죽은 코드였습니다(§0-3-10).
+# `SUPABASE_URL`/`SUPABASE_ANON_KEY` 는 이제 환경변수로만 읽습니다(Render 배포 방식과
+# 일치 — Streamlit Cloud 는 더 이상 이 앱의 배포 대상이 아닙니다).
 
-# supabase 파이썬 패키지도 선택적 의존성입니다.
+# supabase 파이썬 패키지는 선택적 의존성입니다.
 # requirements.txt 에 추가돼 있지만, 아직 설치 안 된 환경(또는 설치 실패)에서도
 # **기존 두 모듈(코스피/미국주식)이 정상 동작해야** 하므로 여기서 죽으면 안 됩니다.
 try:  # pragma: no cover
@@ -76,6 +77,18 @@ except ImportError:  # pragma: no cover
 
 class ScorecardError(RuntimeError):
     """내 성적표 데이터 계층에서 사용자에게 보여줄 오류(조용히 삼키지 않습니다)."""
+
+
+class ScorecardDbError(ScorecardError):
+    """2026-08-29 재감사 H-1 — `_execute()`가 DB 왕복 실패를 감쌀 때만 쓰는 하위형.
+
+    `ScorecardError`는 그 자체로 "이미 사람이 읽는 한국어 문장"이라는 계약이 있어
+    `web/auth_ui.py::fail_message()`가 그대로 화면에 보여줍니다. 그런데 `_execute()`가
+    만드는 문구에는 PostgREST 응답 원문(테이블명·오류코드·역할 등)이 섞여 있어, 그 계약을
+    깨고 있었습니다. `OcrQuotaExceeded`처럼 "우리가 쓴 한국어 규칙 예외"와 "DB 왕복이
+    실패했다는 사실만 아는 예외"를 타입으로 갈라, 후자만 `fail_message()`가 원문 노출 없이
+    일반 안내로 바꾸게 합니다.
+    """
 
 
 # =============================================================================
@@ -434,7 +447,7 @@ SORT_FIELD_OPTIONS = [
 ]
 
 
-def sort_holding_rows(rows, field, ascending=True):
+def sort_holding_rows(rows, field, ascending=True, label_fn=None):
     """
     보유 종목 표를 지정한 필드로 정렬합니다(원본 리스트는 바꾸지 않고 새 리스트를 돌려줍니다).
 
@@ -442,9 +455,18 @@ def sort_holding_rows(rows, field, ascending=True):
     바꿀 때마다 그 종목들이 위로 갔다 아래로 갔다 하면 혼란스럽고, 없는 값에 순위를 매기는
     것 자체가 지어내는 셈이라 — **값이 없는 행은 오름차순/내림차순과 무관하게 항상 맨 뒤**에
     둡니다.
+
+    :param label_fn: 2026-08-29 재감사 M-8 — `field="_label"` 정렬이 기본으로 쓰는
+        `stock_name`은 미국 종목의 경우 **저장된 영문명**입니다. 그런데 화면은 미국 종목을
+        한글 음역명으로 보여주므로("애플" 등), 영문명 기준 정렬 순서가 화면에 보이는
+        가나다 순서와 어긋납니다. 이 계산 계층은 화면의 표시명 규칙(음역 사전 등)을 몰라야
+        하므로(§6 계층 분리) 직접 계산하지 않고, 호출부가 표시명을 돌려주는 함수를
+        주입하면 그걸로 정렬합니다. `None`이면(기본값) 예전과 같이 `stock_name`으로 정렬합니다.
     """
     def key_of(row):
         if field == "_label":
+            if label_fn is not None:
+                return label_fn(row) or row.get("stock_name") or row.get("ticker") or ""
             return row.get("stock_name") or row.get("ticker") or ""
         return row.get(field)
 
@@ -608,7 +630,9 @@ def load_us_all_etf_prices(data_dir=None):
     ⚠️ 왜 주식 파일과 나눠져 있는가 — 소스(스크리너)가 주식용·ETF용 두 개라, 한 파일에 합치면
     한쪽만 성공한 회차에 다른 쪽이 통째로 사라지거나 수집 시각이 뒤섞입니다. 파일별 metadata가
     그 파일 내용과 1:1로 맞도록 나눠 두고, **읽는 쪽에서 합칩니다**
-    (`views/scorecard_view.py` — 티커 공간이 겹치지 않아 그냥 합쳐도 안전합니다).
+    (`web/pages/scorecard_page.py::_load_market_data()` — 티커 공간이 겹치지 않아 그냥
+    합쳐도 안전합니다. 2026-08-29 재감사 S-2 — Streamlit 은퇴 전엔 `views/scorecard_view.py`
+    가 이 역할이었습니다).
 
     ⚠️ 여기에도 밸류에이션은 없습니다. ETF에는 EPS/ROE 같은 기업 재무제표가 아예 없어서
     PEGY/퀀트점수를 만들어내면 §0-1(지어내지 않기) 위반입니다 — 화면에서 ETF는 "현재가는 있고
@@ -881,18 +905,17 @@ SECRET_ANON_KEY = "SUPABASE_ANON_KEY"
 
 
 def _read_secret(name):
-    """환경변수 → st.secrets 순으로 읽습니다. 없으면 None(예외 아님)."""
+    """환경변수에서 읽습니다. 없으면 None(예외 아님).
+
+    2026-08-29 재감사 S-2 — 예전엔 환경변수 다음으로 `st.secrets` 도 봤습니다(Streamlit
+    Cloud 배포 시절). Streamlit 은퇴 후 이 앱은 Render 환경변수로만 배포되므로 그 경로는
+    죽은 코드였습니다. 지금은 이 함수가 사실상 `os.environ.get(name).strip() or None` 과
+    같지만, 함수로 남겨 둔 이유는 호출부(`get_supabase_config()`)가 "어디서 읽는지"를
+    몰라도 되게 하기 위해서입니다 — 나중에 다시 다른 배포 방식으로 바뀌어도 이 한 곳만
+    고치면 됩니다.
+    """
     value = os.environ.get(name)
-    if value:
-        return value.strip()
-    if STREAMLIT_AVAILABLE:
-        try:
-            value = st.secrets.get(name)  # secrets.toml 이 아예 없으면 예외가 납니다
-        except Exception:
-            value = None
-        if value:
-            return str(value).strip()
-    return None
+    return value.strip() if value else None
 
 
 def get_supabase_config():
@@ -950,9 +973,13 @@ def create_supabase_client():
     (에러가 아닙니다 — 화면은 "준비중" 안내를 띄우고, 기존 두 모듈은 아무 영향 없이 동작).
     실제 생성 과정에서 예외가 나면 그건 진짜 문제이므로 ScorecardError 로 올립니다.
 
-    ⚠️ 이 클라이언트를 `@st.cache_resource` 로 캐시하면 **로그인 세션이 모든 방문자에게
-       공유**됩니다(클라이언트 객체가 auth 세션을 들고 있음). 절대 캐시하지 말고,
-       방문자별 `st.session_state` 에만 보관하세요. — views/scorecard_view.py 참고
+    ⚠️ 이 클라이언트를 프로세스 전역·접속자 단위로 캐시하면 **로그인 세션이 모든 방문자에게
+       공유**됩니다(클라이언트 객체가 auth 세션을 들고 있음). 절대 캐시하지 말고, 접속
+       하나에만 묶어 보관하세요 — `web/auth.py::get_client()` 가 `app.storage.client`
+       (NiceGUI 의 "이 접속에서만" 저장소)에만 넣는 것이 그 실천입니다. (2026-08-29 재감사
+       S-2 — 이 경고는 원래 `@st.cache_resource`/`st.session_state`(Streamlit)를 가리켰지만,
+       Streamlit 이 은퇴한 지금도 경고 자체는 여전히 유효합니다 — `web/auth.py` 머리말이
+       "그대로, 오히려 더 쉽게 재현된다"고 밝혀 둔 그 위험입니다.)
     """
     status = supabase_status()
     if not status.available:
@@ -1045,6 +1072,16 @@ _USER_EXISTS_MARKERS = (
     "email_exists", "already exists", "already registered",
 )
 
+# 2026-08-29 재감사 H-4 — `current_user()` 가 "세션이 정말 없다"와 "세션이 있는지 물어보지
+# 못했다(네트워크 장애 등)"를 구분하는 데 씁니다. Supabase/gotrue 계열 라이브러리가 실제
+# 세션 부재를 알릴 때 쓰는 표현들이고, 매칭에 실패해도(=목록이 낡아도) **안전한 쪽으로
+# 실패**합니다 — 아래 `current_user()` 의 재분류를 참고하세요.
+_SESSION_MISSING_MARKERS = (
+    "session missing", "session_not_found", "session not found",
+    "invalid refresh token", "refresh_token_not_found", "invalid_grant",
+    "jwt expired", "token is expired", "session expired", "invalid jwt",
+)
+
 
 def _exception_text(exc):
     """예외를 소문자 문자열로 — **분기 판정에만** 씁니다.
@@ -1084,9 +1121,11 @@ def _auth_error(action, exc):
     """Auth 예외 → 사용자에게 보여줄 `ScorecardError`.
 
     ⚠️ 예외 원문(`exc`)은 **메시지에 절대 넣지 않습니다.** 서버 로그로만 보냅니다.
-       반환 타입·호출 방식은 예전과 같아서(`raise _auth_error(...) from exc`)
-       Streamlit 쪽(`views/scorecard_view.py`)도 그대로 동작하며, 그쪽 화면에서도
-       똑같이 영문 원문이 사라집니다.
+       (2026-08-29 재감사 S-2 — 이 함수는 Streamlit·NiceGUI 듀얼런 시절 두 화면
+       (`views/scorecard_view.py` · `web/auth_ui.py`)이 같은 반환 타입·호출 방식으로
+       똑같이 이 안전한 문구를 받게 하려고 만들어졌습니다. Streamlit 은퇴 후 지금은
+       `web/auth_ui.py` 하나만 호출하지만, 이유는 그대로 유효합니다 — 예외 원문을
+       화면에 흘리지 않는다는 계약을 함수 하나가 지킵니다(§0-3-4·§0-3-10).)
     """
     _log_auth_failure(action, exc)
     if _matches(exc, _RATE_LIMIT_MARKERS):
@@ -1114,9 +1153,9 @@ def sign_up(client, email, password):
        서버 오류·정책 위반)는 그대로 `ScorecardError` 로 올라갑니다. 삼킨 경우에도
        서버 로그에는 반드시 흔적을 남깁니다(아래 `_log_auth_failure`).
 
-    반환: Supabase 응답 객체 / 중복 가입이면 `None`. **호출하는 두 화면
-          (`views/scorecard_view.py`, `web/auth_ui.py`) 모두 반환값을 쓰지 않습니다** —
-          성공 여부는 예외 발생 여부로만 판단합니다.
+    반환: Supabase 응답 객체 / 중복 가입이면 `None`. **호출하는 화면(`web/auth_ui.py` —
+          2026-08-29 Streamlit 은퇴 전에는 `views/scorecard_view.py` 도 있었습니다)은
+          반환값을 쓰지 않습니다** — 성공 여부는 예외 발생 여부로만 판단합니다.
     """
     _require_client(client)
     if not email or not password:
@@ -1151,13 +1190,28 @@ def sign_out(client):
 
 
 def current_user(client):
-    """현재 로그인 사용자. 미로그인 상태면 None."""
+    """현재 로그인 사용자. 미로그인 상태면 None.
+
+    ⚠️ 2026-08-29 재감사 H-4 — 원래는 `client.auth.get_user()` 의 예외를 전부(네트워크 장애·
+       타임아웃·Supabase 5xx 포함) `None` 으로 삼켰습니다. "토큰이 없다"(정상적인 미로그인)와
+       "토큰이 유효한지 물어보지 못했다"(외부 장애)가 같은 `None` 이 되면서, 세 화면
+       (`scorecard_page.py`·`scorecard_consent_page.py`·`scorecard_leaderboard_page.py`)의
+       `if not user_id: await logout_async()` 가 **외부 장애 때마다 멀쩡한 토큰을 지우고**
+       사용자를 강제 로그아웃시켰습니다(§0-1 — 실패를 빈 값으로 위장 금지). 세 화면이 이미
+       갖고 있는 `except Exception` 블록("로그인 상태를 확인하지 못했습니다")이 정확히 이
+       경우를 위한 것이었는데, 예외가 여기서 먼저 삼켜져 그 블록에 도달한 적이 없었습니다.
+       이제 "세션이 실제로 없다"(`_SESSION_MISSING_MARKERS`)만 `None` 으로 판정하고, 그 밖의
+       예외는 그대로 올려 화면이 원인에 맞는 안내를 보여주게 합니다.
+    """
     if client is None:
         return None
     try:
         response = client.auth.get_user()
-    except Exception:
-        return None
+    except Exception as exc:  # noqa: BLE001
+        if _matches(exc, _SESSION_MISSING_MARKERS):
+            return None
+        _log_auth_failure("로그인 상태 확인", exc)
+        raise
     return getattr(response, "user", None) if response is not None else None
 
 
@@ -1344,8 +1398,10 @@ def reset_password_with_code(client, email, code, new_password, confirm_password
        `verify_otp()` 가 성공하면 그 클라이언트에 **재설정 대상 계정의 로그인 세션이 붙습니다.**
        화면이 쓰는 공용 클라이언트를 그대로 넘기면, 같은 브라우저에서 다른 사람이 로그인해
        있는 상태를 덮어써 남의 데이터를 보게 될 수 있습니다. 그래서 화면 쪽
-       (`views/scorecard_view.py._new_auth_client()`)은 이 호출에만 1회용 클라이언트를 만들어
-       넘기고, 이 함수는 끝날 때 그 세션을 반드시 로그아웃시킵니다(아래 finally).
+       (`web/auth.py::new_auth_client()` — 2026-08-29 Streamlit 은퇴 전에는
+       `views/scorecard_view.py._new_auth_client()` 였습니다)은 이 호출에만 1회용
+       클라이언트를 만들어 넘기고, 이 함수는 끝날 때 그 세션을 반드시 로그아웃시킵니다
+       (아래 finally).
 
     검증 순서도 의미가 있습니다 — **코드를 서버로 보내기 전에** 비밀번호 입력값부터 확인합니다.
     OTP 는 1회용이라, 확인란 오타 때문에 코드가 먼저 소모되면 사용자가 메일을 다시 받아야
@@ -1400,23 +1456,62 @@ def _execute(query, action):
     try:
         response = query.execute()
     except Exception as exc:  # noqa: BLE001 - 조용히 빈 값으로 넘기지 않습니다(§0-1)
-        raise ScorecardError(f"{action} 실패: {exc}") from exc
+        # 2026-08-29 재감사 H-1 — 원래는 `f"{action} 실패: {exc}"`로 PostgREST 응답 원문을
+        # 예외 문구에 그대로 붙였습니다. `create_supabase_client()`가 이미 쓰는 패턴대로
+        # 원문은 로그로만 보내고, 화면까지 가는 문구는 "실패했다는 사실 + 행동 안내"만
+        # 남깁니다(§0-3-4). `ScorecardDbError`로 던져 `fail_message()`가 원문을 걸러내게
+        # 합니다.
+        print(f"⚠️ [scorecard_db] {action} 실패: {type(exc).__name__}: {exc}")
+        raise ScorecardDbError(f"{action}에 실패했습니다. 잠시 후 다시 시도해 주세요.") from exc
     data = getattr(response, "data", None)
     if data is None and isinstance(response, dict):
         data = response.get("data")
     return data if data is not None else []
 
 
+def _execute_all(query_factory, action, page=1000, max_pages=1000):
+    """query_factory(offset, limit) -> query 객체. `.range()` 로 끝까지 돌며 모든 행을 모읍니다.
+
+    2026-08-29 재감사(스코어카드 모듈) L-6 — `utils.duel_db._execute_all()` 과 같은
+    패턴이지만, 이 파일 고유의 `_execute()`(→ `ScorecardDbError`)를 그대로 씁니다. `duel_db`
+    의 것을 직접 import 하면 실패했을 때 `DuelDbError` 가 새어 나와, 이 모듈의 화면 계층
+    (`web/auth_ui.py::fail_message()` 가 `ScorecardError` 만 안전하게 통과시키는 계약)이
+    깨집니다(§4-3 계층 분리) — 그래서 알고리즘만 같고 예외 타입은 이 모듈 것을 씁니다.
+
+    마지막 페이지가 꽉 찬 채로 `max_pages` 에 도달하면(=끝없이 잘리고 있다는 뜻) 조용히
+    반쪽 데이터로 넘어가지 않고 예외를 던집니다(§0-1).
+    """
+    rows = []
+    offset = 0
+    for _ in range(max_pages):
+        chunk = _execute(query_factory(offset, offset + page - 1), action)
+        rows.extend(chunk)
+        if len(chunk) < page:
+            return rows
+        offset += page
+    raise ScorecardDbError(f"{action}: {max_pages*page}행을 넘어도 계속 가득 찬 페이지가 반환됩니다"
+                            " — 페이지 상한에 걸렸습니다.")
+
+
 def fetch_holdings(client, user_id):
     """
     보유 종목 조회.
     ⚠️ RLS가 이미 남의 행을 막지만, 앱에서도 `user_id` 필터를 명시적으로 겁니다(이중 방어).
+
+    🔴 2026-08-29 재감사(스코어카드 모듈) L-6 — 예전엔 이 조회에 페이지네이션이 없어서,
+       보유 종목이 서버 응답 상한(보통 1000행)을 넘으면 **일부만 읽고 전부 읽은 척**
+       했습니다. 그 목록으로 `add_lot()` 이 "이미 있는 종목인가"를 판정하므로, 못 읽은
+       종목을 다시 넣으려다 unique 제약 위반(→ H-1 경로로 안전하게 걸러지긴 하지만 원래는
+       "이미 있다"고 정확히 알려줘야 할 자리에서 "실패했습니다"만 보이는) 사고가 납니다.
+       개인 포트폴리오가 1,000종목을 넘을 가능성은 낮아 낮음(L)으로 분류돼 있습니다.
     """
     _require_client(client)
     if not user_id:
         raise ScorecardError("로그인 정보가 없어 보유 종목을 조회할 수 없습니다.")
-    rows = _execute(
-        client.table(HOLDINGS_TABLE).select("*").eq("user_id", user_id),
+    rows = _execute_all(
+        lambda start, end: (
+            client.table(HOLDINGS_TABLE).select("*").eq("user_id", user_id).range(start, end)
+        ),
         "보유 종목 조회",
     )
     result = []
@@ -1466,8 +1561,18 @@ def insert_holding(client, user_id, holding):
     return _execute(client.table(HOLDINGS_TABLE).insert(payload), "보유 종목 저장")
 
 
-def update_holding(client, user_id, holding_id, quantity, avg_purchase_price, stock_name=None):
-    """기존 보유 1행의 수량/평균단가 갱신."""
+def update_holding(client, user_id, holding_id, quantity, avg_purchase_price, stock_name=None,
+                    expected_quantity=None):
+    """기존 보유 1행의 수량/평균단가 갱신.
+
+    :param expected_quantity: 2026-08-29 재감사 M-1 — 넘기면 **낙관적 잠금**을 겁니다
+        (`.eq("quantity", expected_quantity)`). `guard_double_click`(화면 쪽 방어)이
+        같은 탭의 중복 클릭은 막지만, 다른 탭·다른 기기에서 그 사이 값이 바뀌는 경우까지는
+        못 막습니다 — 이 조건이 그 경우를 잡습니다. 갱신 대상 행이 0개로 돌아오면(=이미
+        누가 먼저 바꿨거나 지웠음) 값을 그냥 덮어쓰지 않고 `ScorecardError` 로 멈춥니다
+        (§0-1 — 다른 곳에서 이미 바뀐 값을 조용히 되돌리지 않습니다). `None` 이면(기본값)
+        예전과 같은 무조건 갱신입니다 — 이 함수를 호출하는 다른 자리를 깨지 않습니다.
+    """
     _require_client(client)
     if not holding_id:
         raise ScorecardError("갱신할 보유 종목 id 가 없습니다.")
@@ -1477,10 +1582,16 @@ def update_holding(client, user_id, holding_id, quantity, avg_purchase_price, st
     }
     if stock_name:
         payload["stock_name"] = stock_name
-    return _execute(
-        client.table(HOLDINGS_TABLE).update(payload).eq("id", holding_id).eq("user_id", user_id),
-        "보유 종목 갱신",
-    )
+    query = client.table(HOLDINGS_TABLE).update(payload).eq("id", holding_id).eq("user_id", user_id)
+    if expected_quantity is not None:
+        query = query.eq("quantity", expected_quantity)
+    result = _execute(query, "보유 종목 갱신")
+    if expected_quantity is not None and not result:
+        raise ScorecardError(
+            "이 종목이 다른 곳에서 먼저 수정되거나 삭제된 것 같습니다."
+            " 새로고침 후 다시 확인해 주세요."
+        )
+    return result
 
 
 def delete_holding(client, user_id, holding_id):
@@ -1513,10 +1624,15 @@ def add_lot(client, user_id, market, ticker, quantity, purchase_price, stock_nam
         insert_holding(client, user_id, lot)
         return "insert", lot
     merged = merge_lot_into_holding(existing, lot)
+    # 2026-08-29 재감사 M-1 — `existing`은 이 함수 시작에서 막 읽은 값이라, 그 사이(예:
+    # 다른 탭에서 먼저 저장) 실제 DB 값이 바뀌었으면 이 update 는 그 변경을 덮어씁니다.
+    # `expected_quantity`로 낙관적 잠금을 걸어, 바뀌었으면 값을 추측해서 합치지 않고
+    # 예외로 멈춥니다.
     update_holding(
         client, user_id, existing.get("id"),
         merged["quantity"], merged["avg_purchase_price"],
         stock_name=merged.get("stock_name"),
+        expected_quantity=existing.get("quantity"),
     )
     return "merge", merged
 
@@ -1586,7 +1702,19 @@ def ocr_usage_today():
        (`web/pages/macro_page.py` 의 오늘 날짜 계산과 동일한 한 줄).
        같은 이유로 DB 의 `now()`/`current_date`(UTC)로 세지 않고, 앱이 정한 날짜를
        `usage_date` 컬럼에 명시적으로 넣습니다.
+
+    ⚠️ 2026-08-29 재감사(스코어카드 모듈) L-5 — `KST` 를 못 구했을 때(`zoneinfo`/`tzdata`
+       가 없는 환경) 예전엔 조용히 서버 로컬 시간(Render 는 UTC)으로 물러섰습니다. 바로 위
+       독스트링이 "UTC 는 오전 9시에 리셋되는 것처럼 보여서 일부러 안 썼다"고 명시한 그
+       동작이 폴백에서 그대로 재현되는 셈이라 §0-1 위반입니다. 운영 환경(Render 컨테이너)
+       에는 tzdata 가 항상 있어 이 분기를 평소에는 타지 않지만, 혹시 타면 최소한 **왜 하루
+       한도가 오전 9시에 풀리는지** 서버 로그에 남깁니다(import 시점에 죽이지 않는 이유는
+       이 함수가 첫 화면 로드보다 훨씬 나중에, 사용자가 OCR 을 실제로 쓸 때만 불려서 —
+       모듈 import 자체를 막으면 OCR 과 무관한 화면까지 전부 죽습니다).
     """
+    if KST is None:
+        print("⚠️ [scorecard_db] zoneinfo(Asia/Seoul) 를 찾지 못해 서버 로컬 시간(보통 UTC)으로"
+              " OCR 하루 한도 '오늘'을 계산합니다 — 한국 자정이 아니라 서버 자정에 리셋됩니다.")
     return (datetime.now(KST) if KST else datetime.now()).date()
 
 

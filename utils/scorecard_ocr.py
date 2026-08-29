@@ -101,7 +101,11 @@ def extract_holdings_from_image(image_bytes: bytes) -> dict:
     브로커 앱 스크린샷 1장(bytes) → 종목명/수량/매입가 추출 결과.
 
     반환: {"items": [{"raw_name": str, "quantity": float|None,
-                       "avg_price": float|None, "confidence": "high"|"low"}, ...]}
+                       "avg_price": float|None, "confidence": "high"|"low"}, ...],
+           "dropped": int}
+    (2026-08-29 재감사 M-5 — `items`가 빈 리스트인 것은 이제 예외가 아니라 정상 응답입니다
+    — "스크린샷에서 아무 종목도 못 찾았다"는 뜻이고, 호출부가 그 사실을 안내합니다.
+    `dropped`는 응답에는 있었지만 종목명을 못 읽어 `items`에서 제외한 개수입니다.)
 
     - provider 선택은 `OCR_PROVIDER` 환경변수(기본값 "gemini")로 매 호출마다 다시 읽습니다
       (macro_ai.py 가 `GEMINI_API_KEY` 를 매 호출마다 다시 읽는 것과 같은 이유 — 서버
@@ -242,12 +246,21 @@ def _parse_response_text(text: str) -> dict:
             "스크린샷 인식 결과 형식이 올바르지 않습니다 — 직접 입력해 주세요."
         )
 
+    # 2026-08-29 재감사 M-5 — 아래 두 continue 는 원래 이름을 못 읽은 항목을 **조용히
+    # 버렸습니다**(§0-1). 모델이 5종목을 읽었는데 이름 없는 2건이 사라지면, 사용자는
+    # 목록에 3건만 보고 "이 스크린샷엔 3종목뿐이구나"라고 믿게 됩니다. 화면 쪽에는 이런
+    # 항목을 위한 처리(대량 등록의 "종목명을 읽지 못했습니다" 건너뜀 등)가 이미 준비돼
+    # 있는데, 이 계층이 그런 항목을 애초에 만들지 않아 도달 불가능했습니다. 이제 버린
+    # 개수를 세어 `dropped` 로 돌려주고, 화면이 그 사실을 알릴 수 있게 합니다.
     cleaned_items = []
+    dropped = 0
     for raw in payload["items"]:
         if not isinstance(raw, dict):
+            dropped += 1
             continue
         name = str(raw.get("raw_name") or "").strip()
         if not name:
+            dropped += 1
             continue
         cleaned_items.append({
             "raw_name": name,
@@ -256,10 +269,12 @@ def _parse_response_text(text: str) -> dict:
             "confidence": raw.get("confidence") if raw.get("confidence") in _ALLOWED_CONFIDENCE else "low",
         })
 
-    if not cleaned_items:
-        raise OcrError("스크린샷에서 보유종목을 찾지 못했습니다 — 직접 입력해 주세요.")
-
-    return {"items": cleaned_items}
+    # 2026-08-29 재감사 M-5 — `cleaned_items`가 비었다고 예외로 바꾸지 않습니다. `_PROMPT`
+    # (:90)는 모델에게 "하나도 못 찾으면 {"items": []}를 반환하라"고 명시적으로 지시했고,
+    # 그건 **정상 응답**입니다. 예전에는 그 정상 응답을 예외로 바꿔서, 호출부
+    # (`scorecard_page.py`)가 이 경우를 위해 준비해 둔 "이 스크린샷에서는 종목을 하나도
+    # 인식하지 못했습니다" 안내가 한 번도 렌더링된 적이 없었습니다(죽은 분기).
+    return {"items": cleaned_items, "dropped": dropped}
 
 
 def _safe_number(value) -> "float | None":

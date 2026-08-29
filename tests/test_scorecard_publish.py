@@ -36,6 +36,7 @@ import inspect
 import sys
 from datetime import date, datetime
 from pathlib import Path
+from unittest import mock
 
 import pytest
 
@@ -1190,6 +1191,70 @@ def test_publish_batch_full_rewrite_deletes_todays_rows_before_inserting():
     assert max(date_deletes) < min(inserts), "삭제가 삽입보다 먼저여야 합니다"
 
 
+def test_h3_missing_price_snapshots_aborts_before_touching_history():
+    """
+    🔴 2026-08-29 재감사 H-3 회귀 고정 — 가격 스냅샷(data/*.json)이 전혀 없어서 거래일조차
+    확인 못 하는 상태(예: 수집기가 완전히 멈췄거나 파일 형식이 바뀜)는 "참가자가 부족하다"
+    는 정상 상태가 아닙니다. `price_lookup` 을 생략(=`report_db.build_price_lookup()` 을
+    실제로 부르게)하고 `resolve_session_dates()` 가 거래일을 하나도 못 찾게 만들어, 옛
+    발행 이력을 지우기 **전에** 멈추는지 확인합니다.
+    """
+    client = _publish_client(user_count=500)
+    with mock.patch.object(scorecard_publish, "resolve_session_dates", return_value=([], [])):
+        with pytest.raises(ScorecardPublishError, match="거래일도 확인하지 못했습니다"):
+            scorecard_publish.run_publish_batch(client, TODAY)   # price_lookup 생략(§H-3)
+    assert client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "delete") == [], \
+        "원인을 확인하기 전에는 과거 발행 이력을 지우면 안 됩니다"
+    assert client.calls_for(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "delete") == [], \
+        "원인을 확인하기 전에는 과거 발행 이력을 지우면 안 됩니다"
+
+
+def test_h3_everyone_skipped_for_no_return_aborts_instead_of_wiping_history():
+    """
+    🔴 H-3 회귀 고정 — 동의자가 있는데(500명) **전원**이 가격을 못 구해(`SKIP_NO_RETURN`)
+    발행 대상이 0명이 되는 경우는 "정상적인 인원 미달"이 아니라 데이터 문제입니다(예:
+    한쪽 시장 스냅샷만 손상). 이 경우도 과거 발행 이력을 지우지 않고 멈춰야 합니다.
+
+    (인원 미달 자체는 정상 동작입니다 — `test_publish_batch_publishes_nothing_below_the_
+    threshold` 가 그 경로를 이미 지킵니다. 여기는 "인원은 충분한데 전원 계산 실패"만
+    다룹니다.)
+    """
+    client = _publish_client(user_count=500)
+    with pytest.raises(ScorecardPublishError, match="수익률을 계산하지 못해"):
+        _run(client, price_lookup=_prices({}))    # 가격표가 비어 전원 SKIP_NO_RETURN
+    assert client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "delete") == [], \
+        "전원 계산 실패는 과거 이력을 지울 이유가 아닙니다"
+    assert client.calls_for(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "delete") == [], \
+        "전원 계산 실패는 과거 이력을 지울 이유가 아닙니다"
+
+
+def test_h3_dry_run_does_not_trip_the_safety_brake():
+    """🔴 H-3 — `dry_run=True` 는 애초에 아무것도 쓰지 않으므로, 안전장치가 굳이
+    예외를 던져 "무엇이 발행될 뻔했는지" 미리 보는 것까지 막으면 안 됩니다."""
+    client = _publish_client(user_count=500)
+    summary = _run(client, dry_run=True, price_lookup=_prices({}))
+    assert summary["leaderboard_rows"] == 0
+
+
+def test_m2_holdings_are_written_before_the_leaderboard():
+    """
+    🔴 2026-08-29 재감사 M-2 회귀 고정 — 예전엔 순위표(leaderboard)를 먼저 쓰고 보유종목
+    (holdings)을 나중에 썼습니다. 그 순서면 두 삽입 사이에 배치가 죽었을 때 "순위표에는
+    있는데 보유종목 상세를 열면 아무것도 없다"는 어중간한 상태가 화면에 노출됩니다.
+    반대 순서(holdings 먼저)면 같은 사고가 나도 "순위표에 아직 없음"(=화면에 아예 안 보임)
+    으로만 보여 덜 이상합니다.
+    """
+    client = _publish_client(user_count=500)
+    _run(client)
+    holdings_inserts = [i for i, call in enumerate(client.calls)
+                        if call.op == "insert" and call.table == scorecard_publish_db.PUBLIC_HOLDINGS_TABLE]
+    leaderboard_inserts = [i for i, call in enumerate(client.calls)
+                           if call.op == "insert" and call.table == scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE]
+    assert holdings_inserts and leaderboard_inserts
+    assert max(holdings_inserts) < min(leaderboard_inserts), \
+        "holdings 삽입이 leaderboard 삽입보다 먼저 끝나야 합니다(M-2)"
+
+
 def test_running_twice_on_the_same_day_does_not_duplicate_rows():
     for _run_index in range(2):
         client = _publish_client(user_count=500)
@@ -1319,6 +1384,39 @@ def test_bracket_assignment_duplicate_is_absorbed_not_raised():
     assert scorecard_publish_db.insert_bracket_assignments(client, [
         {"user_id": "u1", "currency": KRW, "season_key": SEASON,
          "bracket_key": "krw_1m_3m"}]) == 0
+
+
+def test_m3_chunk_level_duplicate_retries_row_by_row_keeping_new_rows():
+    """
+    🔴 2026-08-29 재감사 M-3 회귀 고정 — 청크(최대 200명)에 중복 키 1건이 섞여 있으면,
+    Postgres 의 insert 는 한 statement 단위로 원자적이라 **청크 전체가 롤백**됩니다.
+    예전엔 그 실패를 그냥 `continue` 로 넘겨서, 청크 안에 있던 최대 199건의 **진짜 새
+    배정까지 함께 사라졌습니다.** 지금은 청크가 실패하면 행 단위로 재시도해 진짜
+    중복(`u-dup`)만 건너뛰고 나머지는 살립니다.
+    """
+    duplicate_row = {"user_id": "u-dup", "currency": KRW, "season_key": SEASON,
+                      "bracket_key": "krw_1m_3m"}
+    new_rows = [{"user_id": f"u-{i}", "currency": KRW, "season_key": SEASON,
+                 "bracket_key": "krw_1m_3m"} for i in range(2)]
+    payload = [duplicate_row] + new_rows
+
+    def resolve(query):
+        if len(query.rows) > 1:
+            # 청크 전체 insert — 안에 중복이 섞여 있으니 statement 전체가 실패합니다.
+            raise Exception("duplicate key value violates unique constraint")
+        row = query.rows[0]
+        if row["user_id"] == "u-dup":
+            raise Exception("duplicate key value violates unique constraint")
+        return [dict(row)]
+
+    client = FakeClient(responses={
+        (scorecard_publish_db.BRACKET_ASSIGNMENTS_TABLE, "insert"): resolve,
+    })
+    inserted = scorecard_publish_db.insert_bracket_assignments(client, payload)
+    assert inserted == 2, "청크 안의 진짜 새 배정 2건은 살아남아야 합니다(M-3)"
+    single_row_calls = [c for c in client.calls_for(
+        scorecard_publish_db.BRACKET_ASSIGNMENTS_TABLE, "insert") if len(c.rows) == 1]
+    assert len(single_row_calls) == 3, "청크 실패 후 3건 모두 행 단위로 재시도해야 합니다"
 
 
 def test_unrelated_insert_errors_are_not_swallowed():
@@ -1696,6 +1794,95 @@ def _names_used(node):
 
 
 NEW_MODULES = ("scorecard_publish.py", "scorecard_publish_db.py")
+
+
+def test_any_module_mirroring_duel_db_execute_also_imports_execute_all():
+    """
+    🏗️ 2026-08-29 재감사(스코어카드 모듈) S-3 회귀 고정.
+
+    `utils/scorecard_publish_db.py`(그리고 `utils/duel_db_usd.py`)가 `utils/duel_db.py`
+    에서 비공개 함수를 여러 개 손으로 골라 import 하는 방식 자체는 §0-3-10 상 옳은
+    판단입니다(그 이유가 각 파일 머리말에 잘 적혀 있습니다). 문제는 **그 목록이 사람 손
+    으로 유지된다**는 것이고, 실제로 이 목록에서 `_execute_all` 하나가 빠져 H-2(배치
+    조회에 페이지네이션이 없어 "일부만 읽고 전부 읽은 척"하는 사고)가 생겼습니다.
+
+    이 검사가 하는 일은 단 하나입니다 — `utils/*.py` 아무 파일이나 `utils.duel_db` 에서
+    `_execute` 를 import 하면, **같은 import 문에서 `_execute_all` 도 함께** import 해야
+    합니다. 다음에 또 같은 모양의 미러 모듈이 생겨도(예: 결투 3번째 통화 트랙 등) 이 검사
+    하나가 같은 누락을 자동으로 막습니다. (`_execute` 만 쓰고 배치 조회가 전혀 없는 모듈
+    이라면 애초에 `_execute_all` 을 import 할 이유도 없어야 정상이라, 이 규칙은 "혹시
+    모를 배치 조회"에 대비한 **최소 방어선**입니다 — 실제로 배치 조회가 필요 없는 아주
+    작은 미러 모듈에는 다소 과할 수 있다는 뜻이고, 그런 경우가 생기면 그때 이 검사를
+    좁히면 됩니다.)
+    """
+    utils_dir = REPO_ROOT / "utils"
+    checked_modules = []
+    for path in sorted(utils_dir.glob("*.py")):
+        tree = ast.parse(path.read_text(encoding="utf-8"), filename=str(path))
+        for node in ast.walk(tree):
+            if not (isinstance(node, ast.ImportFrom) and node.module == "utils.duel_db"):
+                continue
+            imported_names = {alias.name for alias in node.names}
+            if "_execute" not in imported_names:
+                continue
+            checked_modules.append(path.name)
+            assert "_execute_all" in imported_names, (
+                f"{path.name} 이 utils.duel_db 에서 _execute 를 import 하면서 "
+                "_execute_all 은 import 하지 않습니다 — 이 모듈에 배치(다건) 조회가 있다면 "
+                "H-2 처럼 페이지네이션 없이 '일부만 읽고 전부 읽은 척' 할 위험이 있습니다."
+            )
+    # 검사 자체가 대상을 하나도 못 찾으면 (예: 두 미러 모듈이 모두 리팩터로 사라지면)
+    # 이 테스트가 조용히 "항상 통과"하는 죽은 검사가 됩니다 — 그것도 §0-1 위반이라 확인합니다.
+    assert set(checked_modules) >= {"scorecard_publish_db.py", "duel_db_usd.py"}, (
+        f"예상한 미러 모듈을 찾지 못했습니다(실제로 찾은 목록: {checked_modules}) — "
+        "검사 대상이 사라졌다면 이 검사 자체를 다시 봐야 합니다."
+    )
+
+
+def test_h2_batch_reads_all_use_range():
+    """
+    🔴 2026-08-29 재감사 H-2 회귀 고정 — 예전엔 이 다섯 함수 중 어느 것도 `.range()` 를
+    보내지 않아서, 서버 응답 상한에 걸리면 "일부만 읽고 전부 읽은 척" 했습니다
+    (`tests/test_duel_db.py::test_batch_reads_all_use_range()` 와 같은 검사를 이 모듈의
+    다섯 함수에 적용합니다).
+    """
+    checks = [
+        (lambda c: scorecard_publish_db.fetch_publishable_consents(c),
+         scorecard_publish_db.CONSENT_TABLE),
+        (lambda c: scorecard_publish_db.fetch_revoked_consent_users(c),
+         scorecard_publish_db.CONSENT_TABLE),
+        (lambda c: scorecard_publish_db.fetch_bracket_assignments(c, "2026-H2"),
+         scorecard_publish_db.BRACKET_ASSIGNMENTS_TABLE),
+        (lambda c: scorecard_publish_db.fetch_holdings_for_users(c, ["user-1"]),
+         scorecard_db.HOLDINGS_TABLE),
+        (lambda c: scorecard_publish_db.fetch_published_group_index(c, "KRW", "krw_under_1m"),
+         scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE),
+    ]
+    for call, table in checks:
+        client = FakeClient()
+        call(client)
+        query = client.only_call(table, "select")
+        assert "range" in query.options, f"{table} 조회에 .range() 가 없습니다(H-2 재발)"
+
+
+def test_h2_fetch_holdings_for_users_reads_every_page_per_chunk():
+    """
+    🔴 H-2 — 한 청크(최대 200명)의 총 보유종목 행 수가 서버 상한(`_execute_all` 기본
+    페이지 크기 1000행)을 넘어도 전부 읽습니다. 첫 페이지를 **꽉 채워** 돌려주고, 두
+    번째(짧은) 페이지까지 실제로 이어서 읽는지 확인합니다 — 페이지가 짧으면 멈추므로
+    첫 페이지가 짧으면 애초에 두 번째 호출 자체가 없어 이 검사가 무의미해집니다.
+    """
+    full_page = [{"user_id": "user-1", "ticker": f"T{i:04d}"} for i in range(1000)]
+    pages = [full_page, [{"user_id": "user-1", "ticker": "000660"}]]
+
+    def _holdings_select(query):
+        return pages.pop(0) if pages else []
+
+    client = FakeClient(responses={(scorecard_db.HOLDINGS_TABLE, "select"): _holdings_select})
+    rows = scorecard_publish_db.fetch_holdings_for_users(client, ["user-1"])
+    assert len(rows) == 1001, "짧은 페이지가 나올 때까지 계속 읽어 1001행 전부를 모아야 합니다"
+    calls = client.calls_for(scorecard_db.HOLDINGS_TABLE, "select")
+    assert len(calls) == 2, "페이지 2개(1000행 가득 참 + 1행 짧음)를 읽었어야 합니다"
 
 
 def test_no_account_or_window_concept_leaked_into_the_user_currency_model():

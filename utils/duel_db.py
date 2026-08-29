@@ -212,7 +212,24 @@ def _execute(query, action):
     try:
         response = query.execute()
     except Exception as exc:  # noqa: BLE001
-        raise DuelDbError(f"{action} 실패: {exc}") from exc
+        # 2026-08-29 재감사(스코어카드 모듈) H-1 — 원래는 `f"{action} 실패: {exc}"` 로
+        # PostgREST 응답 원문(테이블명·오류코드·역할 등)을 예외 문구에 그대로 붙였습니다.
+        # `DuelDbError` 는 "이미 사람이 읽는 한국어"라는 계약이라(취소 사유 등 실제 그런
+        # 경우가 많습니다), 이 예외를 그대로 화면에 보여주는 호출부(`scorecard_consent_page.py`
+        # ·`scorecard_leaderboard_page.py` 의 `except (DuelDbError, DuelRuleError):` 블록
+        # 등)는 그 계약을 믿고 원문까지 그대로 노출했습니다(§0-3-4).
+        # `scorecard_db.py::_execute()` 와 같은 방식으로, 원문은 로그로만 보내고 문구
+        # 자체를 처음부터 안전하게 만듭니다 — 호출부를 전부 찾아 타입 검사를 추가하는 것보다,
+        # 이 한 곳에서 계약을 실제로 지키게 만드는 편이 §0-3-10 에 맞습니다.
+        print(f"⚠️ [duel_db] {action} 실패: {type(exc).__name__}: {exc}")
+        # ⚠️ 원문은 위 로그로만 보내고, 화면까지 올라가는 문구 자체는 처음부터 안전하게
+        # 만듭니다. 하지만 원문을 완전히 버리지는 않습니다 — `from exc` 로 체이닝해 두면
+        # `_is_duplicate_key_error()`/`_translate_order_guard_error()`/`_translate_opt_in_error()`
+        # 같은 **이 파일 내부의** 번역기들이 `exc.__cause__` 로 원문을 계속 들여다보고
+        # "이미 매도 주문을 한 번 사용했습니다" 같은 더 구체적인 한국어 문장으로 바꿀 수
+        # 있습니다(아래 `_raw_cause_text()` 참고) — 화면에 그대로 새는 것과 이 파일
+        # 안에서만 원문을 읽는 것은 다릅니다.
+        raise DuelDbError(f"{action}에 실패했습니다. 잠시 후 다시 시도해 주세요.") from exc
     data = getattr(response, "data", None)
     if data is None and isinstance(response, dict):
         data = response.get("data")
@@ -365,8 +382,24 @@ def _first_row(rows, action):
     return dict(rows[0])
 
 
+def _raw_cause_text(exc):
+    """`exc` 가 안전하게 다시 쓴 문구라도, 원래 원인(`__cause__`)이 있으면 그 원문을 돌려줍니다.
+
+    2026-08-29 재감사(H-1) — `_execute()` 가 이제 `DuelDbError` 문구 자체를 처음부터
+    안전하게 만들고 원문은 `raise ... from exc` 로 체이닝만 해 둡니다(화면에 새지 않게).
+    하지만 `_is_duplicate_key_error()` 등 **이 파일 내부의** 번역기들은 여전히 진짜
+    Postgres 오류 문구(예: "duplicate key value violates unique constraint", DB 트리거의
+    한국어 거절 문구)를 보고 판단해야 합니다 — 그래서 `str(exc)` 대신 `exc.__cause__` 를
+    우선 봅니다. `__cause__` 가 없으면(예: 테스트가 예외를 직접 만들어 넘기는 경우)
+    `exc` 자체를 그대로 봅니다.
+    """
+    cause = getattr(exc, "__cause__", None)
+    source = cause if cause is not None else exc
+    return str(source or "")
+
+
 def _error_text(exc):
-    return str(exc or "").lower()
+    return _raw_cause_text(exc).lower()
 
 
 def _is_duplicate_key_error(exc):
@@ -389,8 +422,14 @@ def _translate_order_guard_error(exc, action):
     방어선이 아니다" — 스키마 머리말 (d)). 거절당했다는 사실은 반드시 사용자에게 도달해야
     하고, 동시에 Postgres 원문(함수명·SQLSTATE)을 그대로 화면에 뿌리면 §0-3-4 위반입니다.
     그래서 **사실은 유지하고 표현만** 바꿉니다.
+
+    ⚠️ 2026-08-29 재감사(H-1) — `exc` 자체(=`_execute()` 가 이미 안전하게 다시 쓴 문구)가
+    아니라 `_raw_cause_text(exc)`(원래 원인, 즉 DB 트리거의 진짜 한국어 거절 문구)를 보고
+    판단합니다. 아무 패턴도 못 알아본 경우의 대체 문구도 `exc` 를 그대로 다시 감싸
+    "OO 실패: OO에 실패했습니다..." 처럼 두 번 겹치지 않게, `exc` 의 문구를 그대로 씁니다
+    (`_execute()` 가 이미 안전하고 충분히 구체적인 문구를 만들어 뒀습니다).
     """
-    text = str(exc or "")
+    text = _raw_cause_text(exc)
     if "종결된 주문" in text:
         return DuelDbError(
             "이미 처리가 끝난 주문이라 수정·취소할 수 없습니다."
@@ -402,7 +441,7 @@ def _translate_order_guard_error(exc, action):
         )
     if "계좌·종목·매매구분" in text:
         return DuelDbError("주문의 종목·계좌는 바꿀 수 없습니다. 취소 후 새로 주문해 주세요.")
-    return DuelDbError(f"{action} 실패: {exc}")
+    return DuelDbError(str(exc))
 
 
 def _translate_opt_in_error(exc, action):
@@ -412,8 +451,11 @@ def _translate_opt_in_error(exc, action):
     `_translate_order_guard_error()` 와 같은 규약입니다 — 실패 사실은 그대로 올리고
     표현만 바꿉니다(§0-1 은 실패를 숨기지 말라고 하고, §0-3-4 는 Postgres 원문을 화면에
     그대로 뿌리지 말라고 합니다).
+
+    ⚠️ 2026-08-29 재감사(H-1) — `_translate_order_guard_error()` 와 같은 이유로
+    `_raw_cause_text(exc)`(원래 원인)를 보고 판단하고, 대체 문구도 `exc` 를 그대로 씁니다.
     """
-    text = str(exc or "")
+    text = _raw_cause_text(exc)
     lowered = text.lower()
     if "로그인한 사용자만" in text or "28000" in text:
         return DuelDbError(
@@ -432,7 +474,7 @@ def _translate_opt_in_error(exc, action):
             f"{action} 실패: 이 계정에는 참여 권한이 없습니다"
             " (로그인 상태와 데이터베이스 권한 설정을 확인하세요)."
         )
-    return DuelDbError(f"{action} 실패: {exc}")
+    return DuelDbError(str(exc))
 
 
 def _assert_unique_keys(rows, key_fields, label):

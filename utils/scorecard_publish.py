@@ -93,7 +93,7 @@ from utils.duel_rules import DuelRuleError
 #    없으면 전 종목 가격 파일 → 미국은 ETF 목록까지 합침). 함수 하나만 좁게 가져옵니다 —
 #    `report_db` 라는 이름을 이 모듈에 묶어 두면 같은 모듈의 `fetch_all_holdings()`
 #    (**전체 사용자**의 보유종목을 읽는 함수)가 이 파일에서 손에 닿는 거리에 놓입니다.
-from utils.report_db import build_price_lookup
+from utils.report_db import build_price_lookup, resolve_session_dates
 
 
 class ScorecardPublishError(DuelRuleError):
@@ -743,9 +743,17 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
                          파일 없이 이 배치 전체를 돌릴 수 있어야 하고, ② 결투 배치들도
                          같은 방식으로 가격 조회를 **호출부에서 주입**받습니다
                          (`utils/duel_batch.py`).
-                         ⚠️ 가격을 하나도 못 구하면 아무도 수익률이 나오지 않아 그날 발행이
-                            0행이 됩니다. 그 사실은 요약(`skipped` 사유 `no_return`)에
-                            그대로 드러나며, 조용히 0% 로 채우지 않습니다(§0-1).
+                         ⚠️ 2026-08-29 재감사 H-3 — 원래 이 문단은 "가격을 하나도 못 구하면
+                            그날 발행이 0행이 된다"고만 적혀 있었는데, 사실이 아니었습니다.
+                            0행 발행은 곧바로 "발행 대상이 하나도 없다"로 읽혀 5단계에서
+                            **과거 발행 이력 전체가 영구 삭제**됐습니다(수집 실패와 "이
+                            구간 인원 미달"이 코드상 구분되지 않았기 때문). 지금은 그 전에
+                            멈춥니다 — `price_lookup` 미지정 호출은 스냅샷을 실제로 확인
+                            (`resolve_session_dates()`)하고, 그래도 못 읽으면
+                            `ScorecardPublishError` 로 중단합니다(값을 추측해서 저장하거나
+                            지우지 않습니다, §0-1 — `report_db.run_daily_snapshot_batch()`
+                            와 같은 판단). 그 아래 5단계에도 "동의자는 있는데 전원
+                            `no_return`" 상황을 한 번 더 잡는 안전장치를 뒀습니다.
 
     반환: 요약 dict(로그·작업보고용). `format_summary_lines()` 로 사람이 읽는 줄로 바꿉니다.
 
@@ -773,6 +781,20 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         )
     day_iso = _to_date(published_date, "발행일").isoformat()
     season_key = duel_rules.season_key_for_date(day_iso)
+
+    # 2026-08-29 재감사 H-3 — `price_lookup` 을 안 넘긴 실제 배치 실행에서는, 가격 스냅샷
+    # (`data/*.json`) 을 하나도 못 읽는 것과 "이 구간에 사람이 500명 미만이다"(정상적인
+    # 익명성 게이팅)가 **코드상 완전히 같은 상태**(전원 `no_return`)가 됩니다. 그 상태가
+    # 아래 5단계에서 "발행 대상이 없다"로 읽혀 **과거 발행 이력 전체를 영구 삭제**합니다.
+    # `report_db.run_daily_snapshot_batch()` 가 같은 상황에서 이미 하는 것처럼, 스냅샷을
+    # 아예 못 읽었으면 값을 추측해서 진행하지 않고 여기서 멈춥니다(§0-1).
+    if price_lookup is None:
+        available_dates, _notes = resolve_session_dates()
+        if not available_dates:
+            raise ScorecardPublishError(
+                "어느 시장의 거래일도 확인하지 못했습니다 — 가격 스냅샷(data/*.json)이 "
+                "없거나 형식이 바뀌었습니다. 값을 추측해서 발행하지 않고 중단합니다."
+            )
     lookup = price_lookup if price_lookup is not None else build_price_lookup()
 
     summary = {
@@ -868,6 +890,21 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
     #    된 그룹뿐 아니라 **참가자가 전부 사라진 그룹**까지 포함해야 과거 행이 안 남습니다.
     #    ⚡ 발행표가 아직 완전히 비어 있으면(초기 운영 기간) 18번이 전부 헛걸음이라,
     #       질의 하나로 먼저 확인하고 건너뜁니다.
+    #
+    # 2026-08-29 재감사 H-3 — 위쪽 스냅샷 확인이 "완전히 못 읽음"은 잡아 주지만, "일부만
+    # 읽혔는데 하필 오늘 발행 대상 전원의 종목만 못 읽음" 같은 경계 상황은 못 잡습니다.
+    # 그래서 여기 한 번 더 확인합니다: 동의자가 있는데(자격 문제가 아닌데) 아무도 발행
+    # 대상이 못 됐고 그 이유가 전부 "수익률 계산 불가"뿐이면, 그건 인원 미달(정상)이 아니라
+    # 데이터 문제이므로 과거 이력을 지우지 않고 멈춥니다(§0-1).
+    if (not dry_run and summary["consent_count"] > 0 and not publishable
+            and built["skipped"]
+            and all(item.get("reason") == SKIP_NO_RETURN for item in built["skipped"])):
+        raise ScorecardPublishError(
+            f"동의자 {summary['consent_count']}명 전원의 수익률을 계산하지 못해 발행 대상이 "
+            "0명입니다 — 정상적인 인원 미달이 아니라 데이터 문제로 보여, 과거 발행 이력을 "
+            "지우지 않고 중단합니다(가격 스냅샷을 확인해 주세요)."
+        )
+
     to_prune = [key for key in all_possible_groups() if key not in publishable]
     if not dry_run and to_prune and scorecard_publish_db.leaderboard_has_any_rows(service_client):
         for currency, bracket_key in to_prune:
@@ -886,8 +923,19 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         return summary
 
     scorecard_publish_db.delete_published_rows_for_date(service_client, day_iso)
-    scorecard_publish_db.write_public_leaderboard(service_client, day_iso, leaderboard_rows)
+    # 2026-08-29 재감사 M-2 — 원래는 순위표를 먼저, 보유종목을 나중에 썼습니다. 두 표는
+    # 트랜잭션으로 묶이지 않고(Supabase REST 의 한계) 보유종목은 청크 단위로 여러 번
+    # insert 되므로, "순위표 write 완료 ~ 보유종목 write 완료" 사이에는 순위표는 있는데
+    # 그날 보유종목 행은 아직 0개인 창이 생깁니다. 그동안 "📄 보유종목 보기"를 누른
+    # 방문자는 실제로 동의·보유가 있는데도 "공개되어 있지 않습니다"라는 **거짓 문장**을
+    # 봅니다(§0-1). 순서를 바꾸면 그 창에는 "보유종목만 있고 순위표가 아직 없음"이 되는데,
+    # `fetch_public_leaderboard_latest_date()`가 최신 발행일을 순위표 존재로 판정하므로
+    # 그 상태는 발견 경로(순위표) 자체가 안 열려 있어 아무에게도 보이지 않습니다 —
+    # `report_db.save_holding_snapshots()`가 "합계 먼저, 종목별 나중"을 쓰는 것과 반대
+    # 방향이지만, 그쪽은 두 표 다 항상 함께 발견되고 여기는 순위표가 "문"이라는 점이
+    # 다릅니다.
     scorecard_publish_db.write_public_holdings(service_client, day_iso, holdings_rows)
+    scorecard_publish_db.write_public_leaderboard(service_client, day_iso, leaderboard_rows)
     return summary
 
 

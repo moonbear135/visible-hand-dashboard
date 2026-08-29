@@ -109,6 +109,7 @@ from utils.duel_db import (
     _require_amount,
     _first_row,
     _is_duplicate_key_error,
+    _raw_cause_text,
     _assert_unique_keys,
     _fill_ledger_payload,
     _sell_settlement_payload,
@@ -289,8 +290,15 @@ def _translate_order_guard_error_usd(exc, action):
     **트리거는 같지만 문구가 다릅니다** — 원화 버전은 오류 문장에 "18:00~22:00"을
     그대로 박아 두어서, 그대로 재사용하면 USD 사용자에게 원화 시간대를 보여주는
     사고가 납니다. 그래서 이 함수만 새로 정의합니다.
+
+    ⚠️ 2026-08-29 재감사(스코어카드 모듈) H-1 — `utils.duel_db._execute()` 가 이제
+    `DuelDbError` 문구 자체를 처음부터 안전하게 만들고 원문은 `__cause__` 로만 체이닝합니다
+    (`utils.duel_db._translate_order_guard_error()` 와 같은 이유). 그래서 `exc` 가 아니라
+    `_raw_cause_text(exc)`(원래 원인, 즉 DB 트리거의 진짜 한국어 거절 문구)를 보고 판단하고,
+    대체 문구도 `exc` 를 그대로 씁니다("OO 실패: OO에 실패했습니다..." 처럼 두 번 겹치지
+    않게 — `_execute()` 가 이미 안전하고 충분히 구체적인 문구를 만들어 뒀습니다).
     """
-    text = str(exc or "")
+    text = _raw_cause_text(exc)
     if "종결된 주문" in text:
         return DuelDbError(
             "이미 처리가 끝난 주문이라 수정·취소할 수 없습니다."
@@ -303,7 +311,7 @@ def _translate_order_guard_error_usd(exc, action):
         )
     if "계좌·종목·매매구분" in text:
         return DuelDbError("주문의 종목·계좌는 바꿀 수 없습니다. 취소 후 새로 주문해 주세요.")
-    return DuelDbError(f"{action} 실패: {exc}")
+    return DuelDbError(str(exc))
 
 
 # -----------------------------------------------------------------------------

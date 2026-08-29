@@ -26,6 +26,14 @@ _BANNER_PALETTE = {
     # 2026-08-17 (6단계) — `st.success` 대체. 매크로 화면이 "지금 보는 데이터가 최신 마감분인가"
     # (초록) / "아닌가"(파랑)를 색으로 구분해서 알려주는데, 그 신호를 잃지 않으려면 필요합니다.
     'success': ('rgba(6, 78, 59, 0.35)', '#22c55e', '#bbf7d0'),
+    # 2026-08-29 재감사(스코어카드 모듈) L-4 — "내 평균매입가 vs 현재가"(오르면 빨강/내리면
+    # 파랑, 국내 증시 관례)를 예전엔 `error_banner`/`info_banner` 로 재사용했습니다. 이 배너는
+    # **DB 실패 알림**과 글자 그대로 같은 모양이라, 수익이 났다는 좋은 소식이 "뭔가 고장났다"는
+    # 신호처럼 보였습니다. `pct_html()`(등락률 표시 전역 색 규칙 — #f87171 오름/#60a5fa 내림,
+    # TASK_HISTORY #79·#80)과 같은 색으로 **전용** 배너 종류를 둡니다(§0-3-10 — 색 규칙의
+    # 단일 출처는 여전히 `pct_html()` 이고, 여기는 그 색을 그대로 가져다 씁니다).
+    'price_up': ('rgba(127, 29, 29, 0.30)', '#f87171', '#fecaca'),
+    'price_down': ('rgba(30, 58, 138, 0.30)', '#60a5fa', '#bfdbfe'),
 }
 
 
@@ -85,6 +93,17 @@ def info_banner(text: str) -> None:
 
 def success_banner(text: str) -> None:
     _plain('success', text)
+
+
+def price_up_banner(text: str) -> None:
+    """"내 평균매입가 대비 현재가가 올랐다" 전용 배너(국내 관례상 빨강). L-4 — `error_banner`
+    가 아닙니다: DB 실패와 헷갈리지 않게 분리된 종류입니다."""
+    _plain('price_up', text)
+
+
+def price_down_banner(text: str) -> None:
+    """`price_up_banner()` 의 짝(내렸을 때, 파랑). L-4 참고."""
+    _plain('price_down', text)
 
 
 def metric_card(label: str, value: str, delta: str = '', *, delta_html: str = '') -> None:

@@ -64,6 +64,7 @@ from utils.duel_db import (
     _assert_no_identity_fields,
     _assert_unique_keys,
     _execute,
+    _execute_all,
     _filter_is_null,
     _filter_not_null,
     _first_row,
@@ -686,11 +687,18 @@ def fetch_publishable_consents(service_client):
        신호를 삼키는 일입니다(§0-1).
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE).select(
-        "user_id," + ",".join(CONSENT_ITEM_FLAGS) + ",final_confirmed,revoked_at"
-    ).eq("final_confirmed", True)
-    query = _filter_is_null(query, "revoked_at")
-    rows = _execute(query, "발행 대상 동의 조회")
+
+    # 2026-08-29 재감사 H-2 — `duel_db.py` 미러(:66-86)에서 `_execute_all` 만 빠져 있었습니다
+    # (`DUEL_REAUDIT_FINDINGS.md` H-6). `.range()` 없는 `_execute()` 는 서버 행 상한에
+    # 걸리면 "일부만 읽고 전부 읽은 척"을 합니다 — `duel_db.py::fetch_publishable_consents()`
+    # (`:2521-2547`)와 글자 그대로 같은 모양으로 고칩니다.
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE).select(
+            "user_id," + ",".join(CONSENT_ITEM_FLAGS) + ",final_confirmed,revoked_at"
+        ).eq("final_confirmed", True)
+        return _filter_is_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "발행 대상 동의 조회")      # H-2
     return [dict(row) for row in rows]
 
 
@@ -706,9 +714,15 @@ def fetch_revoked_consent_users(service_client):
       · 삭제는 멱등이라 이미 지운 것을 다시 지워도 아무 일도 일어나지 않습니다.
     """
     _require_client(service_client, batch=True)
-    query = service_client.table(CONSENT_TABLE).select("user_id,revoked_at")
-    query = _filter_not_null(query, "revoked_at")
-    rows = _execute(query, "철회 사용자 조회")
+
+    # 2026-08-29 재감사 H-2 — 이 함수 자신의 독스트링이 "이 모듈에서 가장 나쁜 실패"라고
+    # 부르는 상태(철회한 사람의 공개 기록이 영원히 안 지워짐)가 페이지네이션 부재로 실제로
+    # 발생합니다. `duel_db.py::fetch_revoked_consent_accounts()`(:2551-2569)와 같은 모양.
+    def _query(offset, limit):
+        query = service_client.table(CONSENT_TABLE).select("user_id,revoked_at")
+        return _filter_not_null(query, "revoked_at").range(offset, limit)
+
+    rows = _execute_all(_query, "철회 사용자 조회")         # H-2
     return [dict(row) for row in rows]
 
 
@@ -756,11 +770,16 @@ def fetch_bracket_assignments(service_client, season_key):
     """
     _require_client(service_client, batch=True)
     season = _require_text(season_key, "시즌 식별자")
-    rows = _execute(
-        service_client.table(BRACKET_ASSIGNMENTS_TABLE)
-        .select("user_id,currency,season_key,bracket_key").eq("season_key", season),
-        "체급 배정 조회",
-    )
+
+    # 2026-08-29 재감사 H-2 — 페이지네이션 없이 일부만 읽히면, 이미 배정된 체급이 "배정
+    # 안 됨"으로 보여 그날 밤 **다른 체급으로 재배정**됩니다(시즌 고정 규칙이 조용히
+    # 깨짐 — 재현 확인: `krw_under_1m` → `krw_30m_60m`).
+    def _query(offset, limit):
+        query = (service_client.table(BRACKET_ASSIGNMENTS_TABLE)
+                 .select("user_id,currency,season_key,bracket_key").eq("season_key", season))
+        return query.range(offset, limit)
+
+    rows = _execute_all(_query, "체급 배정 조회")           # H-2
     index = {}
     for row in rows:
         user_id = str((row or {}).get("user_id") or "").strip()
@@ -779,7 +798,16 @@ def insert_bracket_assignments(service_client, rows):
        으로 바꿀 수 없습니다.** "체급은 시즌 동안 고정"이 앱의 조심성이 아니라 DB 권한으로
        강제되는 자리입니다.
     ⚠️ 그래서 중복 키 충돌은 **사고가 아니라 정상**입니다(두 배치가 겹쳐 돌거나, 같은 날 두 번
-       실행). 조용히 흡수하고 그 청크를 세지 않습니다 — 이미 있는 값이 이깁니다.
+       실행). 조용히 흡수합니다 — 이미 있는 값이 이깁니다.
+
+    ⚠️ 2026-08-29 재감사 M-3 — 청크 안에 중복이 **섞여** 있을 수 있습니다(배치가 중간에
+       죽었다가 재실행되는 사이 새 사용자가 동의했다면, 재실행의 새 배정 목록은 "이미 넣은
+       것 + 새 것"이 한 청크에 섞입니다). Postgres 의 insert 는 문장 단위로 원자적이라
+       중복 1건 때문에 청크 전체(최대 199건의 **정상** 배정 포함)를 그냥 버리면, 새로
+       동의한 사용자의 체급이 기록되지 않은 채 그날 발행에는 쓰이고 다음 밤 다른 체급으로
+       재배정됩니다(H-2 와 같은 결과, 다른 원인). 그래서 청크가 중복 키로 실패하면 그
+       청크만 **1건씩** 재시도합니다 — 청크 단위 실패는 드물어 §0-3-2 상 비용은 무시할
+       수 있습니다.
     """
     _require_client(service_client, batch=True)
     payload = []
@@ -803,7 +831,19 @@ def insert_bracket_assignments(service_client, rows):
         except DuelDbError as exc:
             if not _is_duplicate_key_error(exc):
                 raise
-            continue        # 이미 배정된 시즌 — 기존 값이 이깁니다(위 주석 참고).
+            # M-3 — 청크 전체를 버리지 않고 행별로 재시도합니다. 진짜 중복인 행만 조용히
+            # 넘어가고(위 주석 참고 — 이미 있는 값이 이김), 섞여 있던 정상 배정은 그대로
+            # 기록됩니다.
+            for single_row in chunk:
+                try:
+                    _execute(service_client.table(BRACKET_ASSIGNMENTS_TABLE)
+                             .insert([single_row]), "체급 배정 기록(개별 재시도)")
+                except DuelDbError as row_exc:
+                    if not _is_duplicate_key_error(row_exc):
+                        raise
+                    continue
+                inserted += 1
+            continue
         inserted += len(chunk)
     return inserted
 
@@ -843,14 +883,20 @@ def fetch_holdings_for_users(service_client, user_ids):
     if not ids:
         return []               # 🔴 동의자가 없으면 holdings 를 **한 번도 건드리지 않습니다.**
 
+    # 2026-08-29 재감사 H-2 — `user_id` 를 CHUNK_SIZE(200명) 단위로 자르는 것과, 그 한 청크의
+    # 응답이 서버 행 상한 안에 들어오는 것은 **별개**입니다(한 사람이 보유종목을 많이 가진
+    # 경우 200명 청크의 총 행 수가 상한을 넘을 수 있음). 청크마다 `_execute_all` 로 끝까지
+    # 읽습니다 — 일부만 읽으면 그 사용자들의 수익률·체급이 보유종목 일부만으로 계산됩니다.
     result = []
     for start in range(0, len(ids), CHUNK_SIZE):
-        rows = _execute(
-            service_client.table(scorecard_db.HOLDINGS_TABLE).select(
+        chunk_ids = ids[start:start + CHUNK_SIZE]
+
+        def _query(offset, limit, _chunk_ids=chunk_ids):
+            return service_client.table(scorecard_db.HOLDINGS_TABLE).select(
                 "user_id,market,ticker,stock_name,quantity,avg_purchase_price,currency"
-            ).in_("user_id", ids[start:start + CHUNK_SIZE]),
-            "발행용 보유종목 조회",
-        )
+            ).in_("user_id", _chunk_ids).range(offset, limit)
+
+        rows = _execute_all(_query, "발행용 보유종목 조회")     # H-2
         result.extend(dict(row) for row in rows)
     return result
 
@@ -953,11 +999,17 @@ def fetch_published_group_index(service_client, currency, bracket_key):
     _require_client(service_client, batch=True)
     code = _require_currency(currency)
     bracket = _require_text(bracket_key, "체급 식별자")
-    rows = _execute(
-        service_client.table(PUBLIC_LEADERBOARD_TABLE).select("published_date,nickname")
-        .eq("currency", code).eq("bracket_key", bracket),
-        "발행 이력 조회",
-    )
+
+    # 2026-08-29 재감사 H-2 — 한 그룹이 아무리 미달(500명 미만)이어도, **과거 모든 날짜**의
+    # 행을 한 번에 읽으므로 날짜가 쌓이면 총 행 수는 상한을 넘을 수 있습니다. 일부만 읽으면
+    # 청소(`delete_published_group`)가 일부 날짜를 놓칩니다.
+    def _query(offset, limit):
+        query = (service_client.table(PUBLIC_LEADERBOARD_TABLE)
+                 .select("published_date,nickname")
+                 .eq("currency", code).eq("bracket_key", bracket))
+        return query.range(offset, limit)
+
+    rows = _execute_all(_query, "발행 이력 조회")           # H-2
     index = {}
     for row in rows:
         day = (row or {}).get("published_date")

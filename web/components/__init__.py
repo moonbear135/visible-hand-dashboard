@@ -45,6 +45,8 @@ from web.components.widgets import (  # noqa: F401
     info_banner,
     metric_card,
     pager,
+    price_down_banner,
+    price_up_banner,
     render_summary_metrics,
     scroll_to_top,
     success_banner,

@@ -287,10 +287,32 @@ def test_empty_text_response_raises_ocr_error(ocr_module, monkeypatch):
         ocr_module.extract_holdings_from_image(PNG_MAGIC)
 
 
-def test_no_items_found_raises_ocr_error(ocr_module, monkeypatch):
+def test_no_items_found_returns_empty_items_not_an_error(ocr_module, monkeypatch):
+    """2026-08-29 재감사 M-5 — `{"items": []}`는 `_PROMPT`(:90)가 명시적으로 지시한 **정상
+    응답**입니다("화면에서 보유종목을 하나도 찾을 수 없으면 {"items": []}를 반환하세요").
+    예전에는 이 정상 응답을 여기서 `OcrError`로 바꿔서, 호출부(`scorecard_page.py`)가 이
+    경우를 위해 준비해 둔 "이 스크린샷에서는 종목을 하나도 인식하지 못했습니다" 안내가
+    한 번도 렌더링된 적이 없었습니다(죽은 분기) — 예외를 던지지 않고 빈 목록을 그대로
+    돌려줘야 그 분기가 실행됩니다."""
     _wire_fake_gemini(ocr_module, monkeypatch, response_text=json.dumps({"items": []}))
-    with pytest.raises(ocr_module.OcrError):
-        ocr_module.extract_holdings_from_image(PNG_MAGIC)
+    result = ocr_module.extract_holdings_from_image(PNG_MAGIC)
+    assert result["items"] == []
+    assert result["dropped"] == 0
+
+
+def test_items_with_unreadable_names_are_dropped_and_counted_not_silently_lost(ocr_module):
+    """2026-08-29 재감사 M-5 — 이름을 못 읽은 항목은 조용히 사라지지 않고 `dropped`로
+    셉니다(§0-1). 모델이 5종목을 읽었는데 이름 없는 2건이 그냥 사라지면, 사용자는 목록에
+    3건만 보고 "이 스크린샷엔 3종목뿐이구나"라고 잘못 믿게 됩니다."""
+    payload = ocr_module._parse_response_text(json.dumps({"items": [
+        {"raw_name": "삼성전자", "quantity": 10, "avg_price": 70000, "confidence": "high"},
+        {"raw_name": "", "quantity": 3, "avg_price": 5000},
+        {"raw_name": None, "quantity": 1, "avg_price": 1000},
+        "이건 dict 가 아님",
+    ]}))
+    assert len(payload["items"]) == 1
+    assert payload["items"][0]["raw_name"] == "삼성전자"
+    assert payload["dropped"] == 3
 
 
 def test_malformed_json_raises_ocr_error(ocr_module, monkeypatch):
@@ -434,9 +456,21 @@ def test_upload_widget_is_really_not_rendered_when_flag_is_off():
     **한 번도 불리지 않는지** 셉니다(= 업로드 위젯이 화면에 없음).
     (`tests/test_web_session_isolation.py::test_render_smoke` 가 쓰는 것과 같은 방식 —
     fetch_holdings 만 합성 데이터로 바꿔 끼우고 나머지는 실제 코드를 그대로 실행.)
+
+    ⚠️ 2026-08-29 재감사(M-6) — 이 테스트는 원래 `asyncio.run(page._render_body(...))` 를
+    직접 썼습니다. 같은 테스트 함수 안에서 이걸 **두 번**(flag=None, flag="true") 부르는데,
+    NiceGUI 의 "유사 클라이언트"는 프로세스당 딱 한 번만 만들어지므로 두 번째 호출은
+    슬롯 스택이 비어 `RuntimeError` 로 죽습니다 — 즉 "플래그 ON일 때 위젯이 그려지는가"
+    부분은 이 테스트 안에서조차 한 번도 실행된 적이 없었습니다(다른 파일과의 실행 순서와
+    무관하게, 이 함수 하나만 단독 실행해도 재현됩니다). 게다가 이 파일이 먼저 돌면 프로세스의
+    유일한 유사 클라이언트를 여기서 소진해 버려서, 뒤이어 도는 `test_scorecard_public_ui.py`
+    쪽 렌더 스모크까지 연쇄로 실패했습니다(실행 순서에 따라 실패 수가 9건 ↔ 1건으로 갈리던
+    원인). `tests/_render_helpers.py::run_render()` 로 슬롯 컨텍스트를 전파해 같은 유사
+    클라이언트를 여러 번 재사용하도록 고칩니다.
     """
     pytest.importorskip("nicegui", reason="렌더 스모크는 nicegui 가 있어야 실행 가능")
     import web.pages.scorecard_page as page
+    from _render_helpers import run_render
 
     synthetic = [dict(market="KR", ticker="005930", stock_name="삼성전자",
                       quantity=10, avg_purchase_price=70000)]
@@ -461,7 +495,10 @@ def test_upload_widget_is_really_not_rendered_when_flag_is_off():
             # 2026-08-21 — `_render_body()` 가 `async def` 가 되었습니다(스냅샷 6개를
             # `run.io_bound` 로 읽어 이벤트 루프를 막지 않게 한 수정). 검사 내용은 그대로이고
             # **부르는 방법만** 바뀝니다.
-            asyncio.run(page._render_body(object(), "uid-test", "a@example.com"))
+            # 2026-08-29(M-6) — `asyncio.run(...)` 직접 호출 대신 `run_render()` 를 써서
+            # NiceGUI 슬롯 컨텍스트를 전파합니다(위 docstring 참고). 이 함수 안에서 두 번
+            # 호출되므로, 이 전파가 없으면 두 번째 호출(flag="true")이 죽습니다.
+            run_render(page._render_body(object(), "uid-test", "a@example.com"))
         finally:
             page.ui.upload = original_upload
             page.fetch_holdings = original_fetch
@@ -1050,3 +1087,36 @@ def test_quota_layer_does_not_leak_into_the_ocr_module(quota_db):
     )
     assert not re.search(r"^\s*(from|import)\s+\S*supabase", ocr_src, re.M | re.I)
     assert "consume_ocr_quota" not in ocr_src
+
+
+def test_every_write_button_in_scorecard_page_is_guarded_against_double_clicks():
+    """
+    🔴 2026-08-29 재감사(스코어카드 모듈) M-1 회귀 고정.
+
+    `scorecard_page.py` 의 쓰기 처리기(추가/OCR 일괄등록/전체삭제 확인 두 단계/개별삭제/
+    수정저장)에 `guard_double_click` 이 실제로 걸려 있는지. (`tests/test_duel_page_usd.py::
+    test_every_write_handler_is_guarded_against_double_clicks()` 와 같은 검사를 이 화면에
+    적용합니다 — 공용 헬퍼는 이미 `web/components/widgets.py::guard_double_click` 하나이고
+    `tests/test_web_components.py` 가 그 동작 자체를 검증하므로, 여기서는 "이 화면의 어느
+    버튼들이 실제로 그 헬퍼로 감싸졌는가"만 확인합니다.)
+    """
+    page_src = _page_source()
+    assert "guard_double_click" in page_src and "from web.components import" in page_src, (
+        "중복 클릭 방어 헬퍼(guard_double_click)를 web.components 에서 import 하지 않습니다."
+    )
+    for handler in ("_submit", "_bulk_add_all_ocr_items", "_confirm_delete_all_holdings",
+                    "_do_delete_all", "_delete_this_row", "_save"):
+        assert f"guard_double_click({handler})" in page_src, (
+            f"{handler}() 에 중복 클릭 방어가 걸려 있지 않습니다(M-1)."
+        )
+
+
+def test_every_write_button_in_scorecard_consent_page_is_guarded_against_double_clicks():
+    """M-1 — `scorecard_consent_page.py` 의 저장/최종확인/철회 버튼도 같은 방어가 필요합니다."""
+    consent_src = (REPO_ROOT / "web" / "pages" / "scorecard_consent_page.py").read_text(
+        encoding="utf-8")
+    assert "guard_double_click" in consent_src and "from web.components import" in consent_src
+    for handler in ("_save_items", "_save_final", "_revoke"):
+        assert f"guard_double_click({handler})" in consent_src, (
+            f"{handler}() 에 중복 클릭 방어가 걸려 있지 않습니다(M-1)."
+        )

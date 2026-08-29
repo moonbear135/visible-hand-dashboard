@@ -36,6 +36,15 @@ def fail_message(exc, fallback: str, *, context: str) -> str:
     `ScorecardError`(우리가 직접 만든 한국어 메시지)는 그대로 보여주고, 그 밖의 예상 못 한
     예외는 **원문을 화면에 흘리지 않고**(§0-3-4) 서버 로그로만 보냅니다.
 
+    ⚠️ 2026-08-29 재감사 H-1 — `utils/scorecard_db.py::_execute()`가 예전엔 PostgREST 응답
+       원문을 `ScorecardError` 문구에 그대로 붙였습니다(`f"{action} 실패: {exc}"`). 그
+       계약("`ScorecardError` 는 이미 사람이 읽는 한국어 문장이다")을 이 함수가 그대로
+       믿고 통과시켜서 원문이 화면까지 도달했습니다. 수정은 여기가 아니라 `_execute()`
+       자신입니다 — 원문은 로그로만 보내고 화면 문구는 처음부터 안전하게 만듭니다
+       (`create_supabase_client()` 가 이미 쓰는 패턴). 이 함수는 그 계약이 지켜진다는
+       전제로 계속 `str(exc)` 를 그대로 씁니다 — **새 `ScorecardError` 하위형을 추가할
+       때는 반드시 원문이 안 섞이는지 먼저 확인하세요.**
+
     :param context: 서버 로그에만 찍히는 화면 이름(예: '내 성적표'). 화면에는 나오지 않습니다.
     """
     if isinstance(exc, ScorecardError):

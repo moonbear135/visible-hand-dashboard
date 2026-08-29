@@ -175,13 +175,34 @@ class FakeQuery:
         self.payload = payload
         self.filters = []
         self.fail = fail
+        self._range = None
 
     def eq(self, column, value):
         self.filters.append((column, value))
         return self
 
+    def range(self, start, end):
+        """PostgREST 페이지네이션(양끝 포함). 2026-08-29 재감사(L-6) —
+        `fetch_holdings()` 가 `_execute_all()` 로 바뀌며 `.range()` 를 걸기 시작해서 추가.
+        (`tests/test_duel_db.py::FakeQuery.range()` 와 같은 규약.)
+        """
+        self._range = (start, end)
+        return self
+
     def _matches(self, row):
-        return all(str(row.get(col)) == str(val) for col, val in self.filters)
+        def same(stored, wanted):
+            # 2026-08-29 재감사(스코어카드 모듈) M-1 — 낙관적 잠금(`expected_quantity`)이
+            # `.eq("quantity", 10.0)` 처럼 **앱이 정규화한 float** 로 거는데, 이 가짜 저장소는
+            # `"10"`(문자열)을 그대로 들고 있습니다. 실제 PostgREST/Postgres numeric 컬럼은
+            # `10` 과 `10.0` 을 같은 값으로 비교하지만, 예전 코드처럼 `str(10.0) == str("10")`
+            # (`"10.0" == "10"`) 로 비교하면 항상 거짓이 되어, 실제로는 아무것도 바뀌지 않았는데
+            # "다른 곳에서 먼저 수정됐다" 는 오탐이 납니다. 숫자로 먼저 비교를 시도해 실제
+            # DB 와 같은 결과를 흉내내고, 숫자로 못 바꾸는 값(문자열 id 등)만 문자열로 비교합니다.
+            try:
+                return float(stored) == float(wanted)
+            except (TypeError, ValueError):
+                return str(stored) == str(wanted)
+        return all(same(row.get(col), val) for col, val in self.filters)
 
     def execute(self):
         self.store["calls"].append((self.op, list(self.filters), self.payload))
@@ -189,7 +210,11 @@ class FakeQuery:
             raise RuntimeError("네트워크 오류(합성)")
         rows = self.store["rows"]
         if self.op == "select":
-            return FakeResponse([dict(r) for r in rows if self._matches(r)])
+            matched = [dict(r) for r in rows if self._matches(r)]
+            if self._range is not None:
+                start, end = self._range
+                matched = matched[start:end + 1]      # PostgREST range() 는 양끝 포함
+            return FakeResponse(matched)
         if self.op == "insert":
             new_row = dict(self.payload)
             new_row.setdefault("id", f"row-{len(rows) + 1}")
@@ -1029,6 +1054,41 @@ def test_supabase_fallback():
     check(sdb.SUPABASE_PACKAGE_AVAILABLE == original_flag, "테스트 후 모듈 상태 원복")
 
 
+def test_m1_add_lot_merge_uses_optimistic_locking_and_rejects_stale_reads():
+    """
+    🔴 2026-08-29 재감사 M-1 회귀 고정 — 두 탭(또는 두 요청)이 **같은 종목을 거의 동시에**
+    수정하면, `add_lot()` 의 병합은 자신이 시작할 때 읽은 `existing["quantity"]` 를 기준으로
+    "그 사이에 남이 먼저 바꿨는지"를 확인해야 합니다. 확인 없이 그냥 덮어쓰면 먼저 저장된
+    변경이 조용히 사라집니다(§0-1).
+    """
+    client = FakeClient(rows=[
+        {"id": "row-1", "user_id": "user-uuid-1", "market": "KR", "ticker": "005930",
+         "stock_name": "삼성전자", "quantity": "10", "avg_purchase_price": "100000",
+         "currency": "KRW"},
+    ])
+    holdings = fetch_holdings(client, "user-uuid-1")   # quantity=10.0 을 이 시점에 읽어 둠
+
+    # ① 다른 탭이 먼저 수량을 20으로 바꿔 저장했다고 가정합니다(같은 행, DB 값이 바뀜).
+    client.store["rows"][0]["quantity"] = "20"
+
+    # ② 처음에 읽었던 holdings(quantity=10.0 그대로)를 근거로 병합을 시도하면, DB 의 실제
+    #    값(20)과 달라 낙관적 잠금이 걸려야 합니다 — 10을 기준으로 3을 더해 13으로
+    #    덮어쓰면 방금 저장된 '20'이 사라집니다.
+    expect_raises(lambda: add_lot(client, "user-uuid-1", MARKET_KR, "5930", 3, 70000,
+                                  holdings=holdings),
+                  ScorecardError, "낙관적 잠금 — 그 사이 바뀐 값을 모르고 덮어쓰지 않음(M-1)")
+    check(client.store["rows"][0]["quantity"] == "20",
+          "잠금에 걸렸으면 DB 값(다른 탭이 저장한 20)이 그대로 보존되어야 함")
+
+    # ③ 반대로, 다시 읽어서(fresh) 병합하면 정상적으로 성공해야 합니다(잠금이 항상 막는
+    #    것이 아니라 "그 사이 안 바뀌었을 때만" 통과시킴을 확인).
+    fresh_holdings = fetch_holdings(client, "user-uuid-1")
+    action, merged = add_lot(client, "user-uuid-1", MARKET_KR, "5930", 3, 70000,
+                             holdings=fresh_holdings)
+    check(action == "merge" and client.store["rows"][0]["quantity"] == 23,
+          "다시 읽은 최신 값 기준이면 병합이 정상적으로 성공함")
+
+
 # =============================================================================
 # 7. 가짜 클라이언트로 holdings CRUD 배선 검증
 # =============================================================================
@@ -1095,7 +1155,15 @@ def test_crud_with_fake_client():
     try:
         fetch_holdings(failing, "user-uuid-1")
     except ScorecardError as exc:
-        check("실패" in str(exc) and "네트워크 오류" in str(exc), "원인 메시지를 그대로 전달")
+        # 2026-08-29 재감사(H-1) — 예전엔 여기서 "네트워크 오류(합성)" 같은 원문이
+        # `ScorecardError` 문구에 그대로 들어있는지를 확인했는데, 그게 정확히 H-1이 고친
+        # 버그입니다(§0-3-4 — Postgres/드라이버 원문을 화면에 그대로 흘리지 않기). 지금은
+        # 반대를 확인합니다: 화면 문구는 안전한 한국어 한 줄이고, 원문은 `__cause__` 로
+        # 체이닝만 되어(로그용) 화면 문구 안에는 섞이지 않습니다.
+        check("실패" in str(exc), "실패 사실은 여전히 한국어로 전달됨")
+        check("네트워크 오류" not in str(exc), "Postgres/드라이버 원문은 화면 문구에 섞이지 않음(H-1)")
+        check(exc.__cause__ is not None and "네트워크 오류" in str(exc.__cause__),
+              "원문은 __cause__ 체이닝으로 남아있음(로그·내부 재번역용)")
     expect_raises(lambda: sign_in(failing, "a@b.c", "pw"), ScorecardError, "로그인 실패도 예외")
 
     # 인증 래퍼
@@ -1110,6 +1178,53 @@ def test_crud_with_fake_client():
     check(ok_client.auth.signed_out is True, "로그아웃 호출 전달")
     check(sdb.current_user(None) is None, "클라이언트 없으면 current_user None (예외 아님)")
     expect_raises(lambda: sign_in(ok_client, "", "pw"), ScorecardError, "이메일 없으면 거부")
+
+
+def test_current_user_h4_distinguishes_session_missing_from_real_failure():
+    """
+    🔴 2026-08-29 재감사 H-4 회귀 고정.
+
+    예전엔 `client.auth.get_user()` 가 예외를 내면 **원인을 가리지 않고** "세션 없음"
+    (`None`)으로 재분류했습니다. 그러면 네트워크 장애·서버 오류(Supabase 가 잠깐 응답을
+    못 하는 상황) 때도 "로그인 안 된 사용자"로 보여 **정상 로그인 사용자를 강제 로그아웃**
+    시킵니다. 지금은 진짜 세션 부재(리프레시 토큰 만료 등, `_SESSION_MISSING_MARKERS`)만
+    `None` 으로 재분류하고, 그 밖의 실패는 예외를 그대로 올립니다.
+    """
+
+    class _RaisingAuth:
+        def __init__(self, exc):
+            self._exc = exc
+
+        def get_user(self):
+            raise self._exc
+
+    class _RaisingClient:
+        def __init__(self, exc):
+            self.auth = _RaisingAuth(exc)
+
+    # ① 진짜 세션 부재 — None 을 돌려줘야 합니다(예외 아님).
+    for marker_exc in (
+        Exception("Session missing!"),
+        Exception("invalid refresh token: refresh_token_not_found"),
+        Exception("JWT expired"),
+    ):
+        check(sdb.current_user(_RaisingClient(marker_exc)) is None,
+              f"세션 부재({marker_exc}) 는 None 으로 재분류됨")
+
+    # ② 네트워크/서버 실패 — 세션 부재가 아니므로 **예외를 그대로 올려야** 합니다
+    #    (조용히 None 으로 바꾸면 정상 로그인 사용자가 강제 로그아웃됩니다).
+    for other_exc in (
+        Exception("Connection timed out"),
+        Exception("503 Service Unavailable"),
+        Exception("네트워크 오류(합성)"),
+    ):
+        raised = []
+        try:
+            sdb.current_user(_RaisingClient(other_exc))
+        except Exception as exc:                     # noqa: BLE001 - 재현용
+            raised.append(exc)
+        check(len(raised) == 1 and raised[0] is other_exc,
+              f"세션 부재가 아닌 실패({other_exc})는 삼키지 않고 그대로 올림(H-4)")
 
 
 # =============================================================================

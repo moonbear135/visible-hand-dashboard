@@ -103,7 +103,7 @@ from web.auth import (
 )
 from web.auth_ui import fail_message, render_auth
 from web.blocking import run_blocking
-from web.components import error_banner, esc, info_banner, warning_banner
+from web.components import error_banner, esc, guard_double_click, info_banner, warning_banner
 from web.layout import (
     SCORECARD_CONSENT_ENABLED,
     SCORECARD_CONSENT_MENU_ADMIN_ONLY,
@@ -358,6 +358,25 @@ def revoke_guard(confirmed):
     )
 
 
+def _kst_display(value):
+    """저장된 시각(ISO 문자열 등) → 사람이 읽을 `'YYYY-MM-DD HH:MM (KST)'`.
+
+    2026-08-29 재감사(스코어카드 모듈) L-3 — 예전엔 `str(state["final_confirmed_at"])` 를
+    그대로 보여줘서 `2026-08-23T14:02:11.482913+09:00` 같은 내부 표현(ISO 8601 원문 +
+    마이크로초)이 그대로 노출됐습니다(§0-3-4). `duel_rules._to_kst()`(이미 이 파일이 같은
+    목적으로 쓰는 함수)로 파싱해 분 단위까지만 보여줍니다 — 시간대 표기는 반드시 남깁니다
+    (§0-3-1). 파싱에 실패하면(값이 진짜로 이상하면) 값을 지어내지 않고 원본을 그대로
+    보여줍니다(§0-1) — 화면이 죽는 것보다는 못생긴 원문이 낫습니다.
+    """
+    if not value:
+        return ''
+    try:
+        moment = duel_rules._to_kst(value, "표시 시각")  # noqa: SLF001 - 같은 파일 관례상 허용
+    except DuelRuleError:
+        return str(value)
+    return f"{moment.strftime('%Y-%m-%d %H:%M')} (KST)"
+
+
 def consent_state(consent_row):
     """
     동의 행(없으면 None) → 화면이 그릴 **상태 요약** dict. 값을 지어내지 않습니다(§0-1).
@@ -597,9 +616,9 @@ def _render_current_state(state: dict, nickname_row) -> None:
             ui.label(f'{mark} {name}').classes('vh-muted')
 
     if state["final_confirmed_at"]:
-        ui.label(f'최종 확인 시각: {esc(str(state["final_confirmed_at"]))}').classes('vh-muted')
+        ui.label(f'최종 확인 시각: {esc(_kst_display(state["final_confirmed_at"]))}').classes('vh-muted')
     if state["revoked_at"]:
-        ui.label(f'철회 시각: {esc(str(state["revoked_at"]))}').classes('vh-muted')
+        ui.label(f'철회 시각: {esc(_kst_display(state["revoked_at"]))}').classes('vh-muted')
 
 
 # =============================================================================
@@ -647,8 +666,12 @@ def _render_consent_form(client, user_id: str, state: dict, on_changed) -> None:
                     f'✅ 공개 항목 {CONSENT_ITEM_COUNT}개를 저장했습니다.'
                     ' 아래 2단계(최종 확인)까지 마쳐야 발행 대상이 됩니다.')
 
-    ui.button('1단계 저장 (아직 공개되지 않습니다)', on_click=_save_items) \
+    # 2026-08-29 재감사 M-1 — save_consent 왕복이 있는 버튼입니다.
+    _save_items_guarded = guard_double_click(_save_items)
+    _save_items_guarded.bind_button(
+        ui.button('1단계 저장 (아직 공개되지 않습니다)', on_click=_save_items_guarded)
         .props('no-caps outline')
+    )
 
     # ── 2층 — 별도의 최종 확인 ────────────────────────────────────────────────
     ui.separator()
@@ -682,7 +705,12 @@ def _render_consent_form(client, user_id: str, state: dict, on_changed) -> None:
         await _save(client, user_id, payload, final_message, on_changed,
                     '✅ 최종 확인이 끝났습니다. 다음 발행 배치부터 공개 순위표 대상이 됩니다.')
 
-    ui.button('🔓 최종 확인하고 공개 신청', on_click=_save_final).props('no-caps color=primary')
+    # M-1 — save_consent + ensure_nickname 왕복이 있는 버튼입니다.
+    _save_final_guarded = guard_double_click(_save_final)
+    _save_final_guarded.bind_button(
+        ui.button('🔓 최종 확인하고 공개 신청', on_click=_save_final_guarded)
+        .props('no-caps color=primary')
+    )
 
 
 # =============================================================================
@@ -722,7 +750,11 @@ def _render_revoke(client, user_id: str, on_changed) -> None:
             )
             on_changed()
 
-        ui.button('철회합니다', on_click=_revoke).props('no-caps color=negative')
+        # M-1 — revoke_consent 왕복이 있는 버튼입니다.
+        _revoke_guarded = guard_double_click(_revoke)
+        _revoke_guarded.bind_button(
+            ui.button('철회합니다', on_click=_revoke_guarded).props('no-caps color=negative')
+        )
 
 
 # =============================================================================

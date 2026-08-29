@@ -1,9 +1,11 @@
 """
 📊 내 성적표 — 내 보유 종목 입력 + 손익/비중 + 밸류에이션 대조 (로그인 필요, URL `/scorecard`).
 
-`views/scorecard_view.py`(Streamlit, 1,206줄)의 NiceGUI 이식본입니다 (이전 계획서 4단계).
-컷오버(2026-08-17)가 끝나 **지금 사용자가 보는 화면은 이 파일**이고, Streamlit 쪽 원본은
-즉시 롤백에 대비해 최소 2주간만 살려둡니다(듀얼런 — 계획서 §11-1 · §0-3-10).
+원래 `views/scorecard_view.py`(Streamlit, 1,206줄)의 NiceGUI 이식본이었습니다(이전 계획서
+4단계). 컷오버(2026-08-17) 뒤 즉시 롤백에 대비해 Streamlit 쪽 원본을 듀얼런으로 살려
+뒀었는데(계획서 §11-1·§0-3-10), 2026-08-29 재감사 S-2 시점엔 그 듀얼런도 끝나
+Streamlit 자체가 은퇴했습니다(옛 파일은 `archive/streamlit_views/scorecard_view.py`).
+**지금 사용자가 보는 화면, 그리고 유일하게 유지되는 화면은 이 파일입니다.**
 
 🔴 이 화면은 이 프로젝트에서 **유일하게 사용자의 실제 자산 정보를 다루는 화면**입니다.
    ENGINEERING_SPEC.md §0-3-8(최상위 금지사항)을 먼저 읽고 고치세요. 요약하면:
@@ -93,8 +95,9 @@ from web.auth import current_user_async, get_client_async, has_supabase_session,
 from web.auth_ui import fail_message, render_auth
 from web.blocking import run_blocking
 from web.components import (
-    chart_layout, compact, error_banner, esc, holdings_table_html, info_banner,
-    metric_card, pct_html, pct_text, warning_banner,
+    chart_layout, compact, error_banner, esc, guard_double_click, holdings_table_html,
+    info_banner, metric_card, pct_html, pct_text, price_down_banner, price_up_banner,
+    warning_banner,
 )
 from web.layout import layout
 from web.state import (
@@ -122,7 +125,8 @@ CURRENCY_TITLES = {
 # (sql/scorecard_schema.sql). 그보다 큰 값은 Postgres 가 `numeric field overflow` 로 거절하는데,
 # 그 원문을 사용자에게 보여주는 대신 화면에서 먼저 막고 한국어로 설명합니다.
 # ⚠️ 이 상수는 DB 정의에서 그대로 유도한 값이지 임의로 정한 값이 아닙니다
-#    (views/scorecard_view.py 의 MAX_INPUT_VALUE 와 동일 — 컷오버 때 옛 파일이 사라지며 일원화됩니다).
+#    (Streamlit 은퇴 전 `views/scorecard_view.py` 의 MAX_INPUT_VALUE 와 같은 값이었고,
+#    그 파일이 은퇴하며 지금은 이 파일 하나로 일원화됐습니다).
 MAX_INPUT_VALUE = 10 ** 14  # 이 값 **이상**은 저장 불가
 
 # 2026-08-17 — "성적표 v2" 스크린샷 OCR 프리필 기능의 스테이징 플래그
@@ -273,7 +277,8 @@ def _parse_positive_number(raw, label):
     ⚠️ 값을 지어내지 않습니다 — 비어있거나 숫자가 아니면 예외를 던집니다(§0-1).
     🔐 `float()` 는 `"nan"`·`"inf"`·`"1e400"` 을 **모두 성공적으로 파싱**하고, `nan <= 0` 과
        `inf <= 0` 은 둘 다 거짓이라 단순한 양수 검사를 그냥 통과해버립니다(2026-08-13 공개
-       전환 전 점검에서 실제로 발견된 문제 — views/scorecard_view.py 의 같은 함수 주석 참고).
+       전환 전 점검에서 실제로 발견된 문제 — `archive/streamlit_views/scorecard_view.py`
+       의 같은 함수 주석 참고).
        그래서 유한성과 DB 상한을 여기서 함께 확인합니다. 추가 폼과 수정 폼이 이 함수 하나를
        공유하므로 두 경로 모두 잘못된 값이 네트워크 밖으로 나가지 않습니다.
     """
@@ -352,16 +357,24 @@ def _ocr_value_text(value) -> str:
 # =============================================================================
 
 async def _load_index(filename: str, market: str):
-    """(인덱스, 메타데이터). 파일이 없거나 깨졌으면 ({}, None) — 화면은 그대로 동작합니다.
+    """(인덱스, 메타데이터, 실패사유). 파일이 없거나 깨졌으면 ({}, None, 사유) — 화면은
+    그대로 동작합니다(빈 인덱스로 "밸류에이션 정보 없음" 경로를 탑니다).
 
     🔴 2026-08-21 — `async def` 로 바뀌었습니다. 반환값은 그대로이고, 파일을 읽는 동안
        이벤트 루프를 붙잡지 않습니다(이유는 `web/state.load_json_file_async` 주석 참고).
        이 화면은 스냅샷을 **6개** 읽으므로 원격 모드에서 가장 오래 루프를 막던 화면이었습니다.
+
+    🔴 2026-08-29 재감사(스코어카드 모듈) L-1 — 예전엔 실패사유(`_load_error`)를 그냥
+       버렸습니다. `dividend_page.py`/`indicator_page.py` 는 같은 반환값의 두 번째 원소를
+       화면에 쓰는데, 여기만 KR·US 인덱스가 **둘 다** 비었을 때만 배너를 띄워서, 한쪽
+       스냅샷만 깨진 경우(예: 미국 스냅샷만 손상) 아무 실패 표시 없이 조용히 그 시장만
+       "밸류에이션 정보 없음"으로 보였습니다(§0-1). 이제 실패사유를 그대로 돌려주고,
+       `_load_market_data()` 가 모아서 화면에 알립니다.
     """
-    payload, _load_error = await load_json_file_async(data_path(filename))
+    payload, load_error = await load_json_file_async(data_path(filename))
     if payload is None:
-        return {}, None
-    return build_universe_index(payload, market), (payload or {}).get("metadata")
+        return {}, None, load_error
+    return build_universe_index(payload, market), (payload or {}).get("metadata"), None
 
 
 async def _load_market_data() -> dict:
@@ -370,26 +383,44 @@ async def _load_market_data() -> dict:
     ⚠️ 반환값에는 **사용자 데이터가 한 조각도 들어있지 않습니다** — 시세/종목명뿐입니다.
        그래서 이 dict 는 함수 사이로 자유롭게 넘겨도 §0-3-8 위반이 아닙니다.
     """
-    kr_index, kr_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_KR], MARKET_KR)
-    us_index, us_meta = await _load_index(SNAPSHOT_FILENAMES[MARKET_US], MARKET_US)
+    kr_index, kr_meta, kr_error = await _load_index(SNAPSHOT_FILENAMES[MARKET_KR], MARKET_KR)
+    us_index, us_meta, us_error = await _load_index(SNAPSHOT_FILENAMES[MARKET_US], MARKET_US)
 
     # 상위 500(한국)/550(미국) 유니버스 **밖** 종목을 위한 보조 목록들. 밸류에이션은 없고 이름/가격만
     # 있습니다 — `indexes` 와 절대 섞지 않습니다(섞으면 "밸류에이션 정보 없음"이라는 정직한
     # 메시지 대신 빈 값투성이 카드가 "찾음"으로 표시됩니다. scorecard_db 주석 참고).
-    kr_master, _ = await _load_index(KR_TICKER_MASTER_FILENAME, MARKET_KR)
-    kr_all_prices, _ = await _load_index(KR_ALL_MARKET_PRICES_FILENAME, MARKET_KR)
-    us_all_prices, _ = await _load_index(US_ALL_MARKET_PRICES_FILENAME, MARKET_US)
-    us_etf_prices, _ = await _load_index(US_ALL_ETF_PRICES_FILENAME, MARKET_US)
+    kr_master, _, kr_master_error = await _load_index(KR_TICKER_MASTER_FILENAME, MARKET_KR)
+    kr_all_prices, _, kr_all_error = await _load_index(KR_ALL_MARKET_PRICES_FILENAME, MARKET_KR)
+    us_all_prices, _, us_all_error = await _load_index(US_ALL_MARKET_PRICES_FILENAME, MARKET_US)
+    us_etf_prices, _, us_etf_error = await _load_index(US_ALL_ETF_PRICES_FILENAME, MARKET_US)
     if us_etf_prices:
         # 수집기가 주식/ETF 파일을 나눠 저장하므로(한쪽 실패가 다른 쪽을 지우지 않도록)
         # 합치는 일은 읽는 쪽에서 합니다. 티커 공간이 겹치지 않지만 겹치면 보통주 우선.
         us_all_prices = {**us_etf_prices, **us_all_prices}
+
+    # 2026-08-29 재감사(스코어카드 모듈) L-1 — 파일별 실패사유를 모읍니다. KR·US 인덱스가
+    # 둘 다 비었을 때는 호출부(`scorecard_page()`)가 이미 `error_banner` 로 크게 알리므로,
+    # 여기서는 **그 이외의(부분적인) 실패**를 알리는 용도입니다(예: 미국 인덱스만 깨졌거나,
+    # 보조 목록 하나만 못 읽은 경우) — 이런 경우 예전엔 아무 표시 없이 조용히 그 부분만
+    # "정보 없음"으로 보였습니다(§0-1).
+    load_errors = [
+        label for label, error in (
+            (f"{SNAPSHOT_FILENAMES[MARKET_KR]}(코스피 스냅샷)", kr_error),
+            (f"{SNAPSHOT_FILENAMES[MARKET_US]}(미국 스냅샷)", us_error),
+            (f"{KR_TICKER_MASTER_FILENAME}(코스피 전체 종목)", kr_master_error),
+            (f"{KR_ALL_MARKET_PRICES_FILENAME}(코스피 전체 시세)", kr_all_error),
+            (f"{US_ALL_MARKET_PRICES_FILENAME}(미국 전체 시세)", us_all_error),
+            (f"{US_ALL_ETF_PRICES_FILENAME}(미국 ETF 시세)", us_etf_error),
+        )
+        if error
+    ]
 
     return {
         "indexes": {MARKET_KR: kr_index, MARKET_US: us_index},
         "kr_master": kr_master,
         "kr_all_prices": kr_all_prices,
         "us_all_prices": us_all_prices,
+        "load_errors": load_errors,
         # ⚠️ 초(seconds) 단위는 표시하지 않습니다 — 수집기 메타데이터 자체가 분 단위까지만
         #    기록합니다. 없는 정밀도를 ':00' 으로 지어내지 않습니다(§0-1).
         "sync_labels": {
@@ -506,6 +537,15 @@ async def _render_body(client, user_id: str, email) -> None:
     if not indexes[MARKET_KR] and not indexes[MARKET_US]:
         error_banner(
             '🚫 밸류에이션 스냅샷(data/*.json)을 읽지 못했습니다. 현재가·수익률을 계산할 수 없습니다.'
+        )
+    elif market.get("load_errors"):
+        # 2026-08-29 재감사(L-1) — 위 조건(둘 다 실패)이 아니어도, 스냅샷 6개 중 일부만
+        # 실패했을 수 있습니다(예: 미국 스냅샷만 손상). 그 경우도 조용히 넘어가지 않고
+        # 어떤 파일이 문제인지 알립니다 — 실제 원격 장애는 `web/layout.py` 의 전역
+        # 배너가 이미 잡으므로, 여기서는 **로컬 파일 손상/누락**만 해당됩니다.
+        warning_banner(
+            '⚠️ 일부 시세 스냅샷을 읽지 못했습니다 — 관련 종목은 현재가·수익률이 비어 보일 수 '
+            f'있습니다: {", ".join(market["load_errors"])}'
         )
 
     # 보유종목 목록은 **이 refreshable 안에서 매번 새로 조회**합니다. 추가/수정/삭제 후
@@ -860,16 +900,27 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                     # 실제 중복이 하나라도 있을 때만 정리 버튼을 보여줍니다 — 없는데도
                     # 늘 보이면 눌러도 아무 일도 안 일어나는 버튼이 됩니다.
                     has_duplicates = any(count > 1 for count in signature_counts.values())
+                    # H-5 — 버튼 개수 표기를 실제로 등록을 시도할 항목 수(확신도가 낮지
+                    # 않고, 이름을 읽은 항목)로 맞춥니다. "N개 전부 등록"이라 적어 놓고
+                    # 실제로는 그중 일부만 저장하면 그 자체가 사실과 다른 문구입니다(§0-1).
+                    pending_count = sum(
+                        1 for item in extracted_items
+                        if item.get('raw_name') and item.get('confidence') != 'low'
+                    )
                     with ui.row().classes('w-full justify-end gap-2'):
                         if has_duplicates:
                             ui.button(
                                 '🧹 중복 의심 정리', on_click=_clear_duplicate_ocr_items,
                             ).props('flat dense no-caps color=warning') \
                                 .tooltip('종목·수량·매입가가 완전히 같은 항목을 하나만 남기고 지웁니다.')
-                        ui.button(
-                            f'🚀 인식된 종목 {len(extracted_items)}개 전부 등록',
-                            on_click=_bulk_add_all_ocr_items,
-                        ).props('no-caps color=primary')
+                        # M-1 — 종목 수만큼 Supabase 왕복이 나가는 버튼이라 특히 위험합니다
+                        # (10종목이면 두 번 눌러 왕복 20회, 각 항목이 add_lot 의 읽고-고쳐
+                        # -쓰기를 그대로 탐).
+                        _bulk_add_guarded = guard_double_click(_bulk_add_all_ocr_items)
+                        _bulk_add_guarded.bind_button(ui.button(
+                            f'🚀 확인된 종목 {pending_count}개 등록',
+                            on_click=_bulk_add_guarded,
+                        ).props('no-caps color=primary'))
 
         def _clear_duplicate_ocr_items() -> None:
             """"🔁 중복 의심" 항목을 조합(이름·수량·매입가)당 하나만 남기고 지웁니다.
@@ -915,6 +966,15 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
             전에 아래 "⚠️ 전체 삭제" 버튼으로 먼저 기존 종목을 지워 주세요.
             종목을 못 찾거나 값이 빠진 항목은 조용히 건너뛰지 않고 끝에 전부 알려줍니다
             (§0-1). 완전히 같은 이름·수량·매입가 항목("🔁 중복 의심")은 한 번만 등록합니다.
+
+            ⚠️ 2026-08-29 재감사 H-5·M-7 — 이 함수는 원래 `confidence`(카드 배지용,
+            :813 참고)를 한 번도 읽지 않았습니다. 그래서 `utils/scorecard_ocr.py` 모듈
+            독스트링이 약속한 "확신할 수 없으면 재확인을 유도"가 "채우기" 버튼에만
+            지켜지고, 이 대량 등록 버튼은 저확신도 항목까지 그대로 저장해 공개 순위표까지
+            발행했습니다(H-5). 같은 이유로 `resolve_stock_query()` 4단계가 "이름을 못 찾았지만
+            코드 형태라 그대로 받아들인" 항목(`resolved_name is None`)도 사람이 확인한 적
+            없이 저장되고 있었습니다(M-7) — 수동 입력 화면은 사용자가 직접 보고 판단하지만,
+            OCR 경로에는 그 판단이 없습니다. 아래에서 두 경우를 저장 전에 건너뜁니다.
             """
             if not extracted_items:
                 ui.notify('등록할 인식된 종목이 없습니다.', type='info')
@@ -934,6 +994,13 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 if not raw_name:
                     skipped.append(f'{label} — 종목명을 읽지 못했습니다')
                     continue
+                # H-5 — 확신도가 낮은 항목은 자동 등록하지 않고 직접 확인을 유도합니다.
+                # (§0-1 — `utils/scorecard_ocr.py` 가 약속한 재확인 단계를 이 경로만 건너뛰고
+                # 있었습니다. "채우기" 버튼과 달리 여기는 사용자가 값을 본 적이 없습니다.)
+                if item.get('confidence') == 'low':
+                    skipped.append(f'{label} — 확신도가 낮아 자동 등록하지 않았습니다. '
+                                   '"입력창에 채우기"로 값을 확인한 뒤 등록해 주세요')
+                    continue
                 if quantity is None or avg_price is None:
                     skipped.append(f'{label} — 수량 또는 매입가를 읽지 못했습니다')
                     continue
@@ -952,6 +1019,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 )
                 if not resolved_ticker:
                     skipped.append(f'{label} — {resolve_error}')
+                    continue
+                # M-7 — `resolve_stock_query()` 4단계는 "종목 목록 어디에도 없지만 코드
+                # 형태"인 값을 이름 없이(`resolved_name=None`) 그대로 채택합니다(수동 입력
+                # 에서는 의도된 정직한 동작). OCR 은 사람이 그 값을 승인한 적이 없으므로,
+                # 여기서만 확인을 유도하고 저장하지 않습니다.
+                if not resolved_name:
+                    skipped.append(f'{label} — 종목 목록에서 확인되지 않는 코드입니다. '
+                                   '"입력창에 채우기"로 직접 확인해 주세요')
                     continue
 
                 try:
@@ -1050,9 +1125,11 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 ).classes('vh-muted')
                 with ui.row().classes('w-full justify-end gap-2'):
                     ui.button('취소', on_click=dialog.close).props('flat no-caps')
-                    ui.button(
-                        f'예, {len(targets)}개 삭제합니다', on_click=_do_delete_all,
-                    ).props('no-caps color=negative')
+                    # M-1 — 되돌릴 수 없는 다건 삭제(delete_holding × N)라 특히 위험합니다.
+                    _do_delete_all_guarded = guard_double_click(_do_delete_all)
+                    _do_delete_all_guarded.bind_button(ui.button(
+                        f'예, {len(targets)}개 삭제합니다', on_click=_do_delete_all_guarded,
+                    ).props('no-caps color=negative'))
             dialog.open()
 
         async def _on_ocr_upload(event) -> None:
@@ -1152,6 +1229,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                 # 새로 인식된 항목을 기존 누적 목록에 "추가"합니다(교체가 아님).
                 extracted_items.extend(result['items'])
                 _render_ocr_items()
+                # 2026-08-29 재감사 M-5 — `utils/scorecard_ocr.py`가 이름을 못 읽어 제외한
+                # 항목 수를 이제 알려줍니다(§0-1 — 조용히 사라지지 않게).
+                if result.get('dropped'):
+                    ui.notify(
+                        f"ℹ️ {result['dropped']}개 항목은 종목명을 읽지 못해 목록에서 "
+                        "제외했습니다.",
+                        type='info',
+                    )
             # 남은 횟수는 매번 갱신되는 전용 라벨 하나에만 반영합니다 — 장마다 새 라벨을
             # 쌓지 않으므로 여러 장을 올려도 "오늘 남은 ..." 문구는 한 줄로 최신값만 보입니다.
             _set_quota_label(quota)
@@ -1163,8 +1248,12 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
         with ui.row().classes('w-full items-center gap-2'):
             ui.label('스크린샷이 계좌 전체 잔고라면, 올리기 전에 기존 종목을 먼저 지울 수 있어요.') \
                 .classes('vh-muted flex-1 min-w-0')
-            ui.button('⚠️ 현재 시장 종목 전체 삭제', on_click=_confirm_delete_all_holdings) \
+            # M-1 — fetch_holdings 왕복이 들어 있는 버튼입니다.
+            _confirm_delete_all_guarded = guard_double_click(_confirm_delete_all_holdings)
+            _confirm_delete_all_guarded.bind_button(
+                ui.button('⚠️ 현재 시장 종목 전체 삭제', on_click=_confirm_delete_all_guarded)
                 .props('flat dense no-caps color=negative').classes('shrink-0')
+            )
 
         ui.upload(
             label='📷 브로커 앱 스크린샷 업로드',
@@ -1276,7 +1365,14 @@ def _render_input_form(client, user_id: str, market: dict, on_changed) -> None:
                   classes='text-lg whitespace-pre-line')
         on_changed()
 
-    ui.button('➕ 추가 / 평균단가 재계산', on_click=_submit).props('no-caps')
+    # 2026-08-29 재감사 M-1 — `add_lot()`은 조회→합산→저장(읽고-고쳐-쓰기)이라, 왕복이
+    # 끝나기 전 두 번째 클릭이 들어가면 두 클릭이 같은 스냅샷을 읽어 하나가 사라지거나
+    # (lost update), 반대로 둘 다 반영돼 수량이 두 배가 됩니다(§0-1 — 재현 확인).
+    # `duel_page.py`·`indicator_page.py`가 쓰는 공용 헬퍼를 그대로 재사용합니다(§0-3-10).
+    _submit_guarded = guard_double_click(_submit)
+    _submit_guarded.bind_button(
+        ui.button('➕ 추가 / 평균단가 재계산', on_click=_submit_guarded).props('no-caps')
+    )
     # 실패 사유는 이 버튼 바로 밑에 둡니다 — 방금 누른 버튼과 같은 화면 안에 있어야
     # 스크롤 없이 바로 보입니다(2026-08-18 오너 피드백, 위 `form = {...}` 옆 주석 참고).
     # `whitespace-pre-line` — _submit() 안에서 상세 사유에 넣는 "\n" 이 실제 줄바꿈으로
@@ -1323,14 +1419,24 @@ def _render_currency_block(client, user_id: str, group: dict, market: dict, on_c
                 f'🕒 {esc(sync_label)} — 실시간 시세가 아닙니다.</div>'
             ).classes('vh-keep-all').style('flex: 1 1 260px; min-width: 0;')
 
+    # 2026-08-29 재감사 M-4 — '매입원가 합계'는 전 종목을 더하고, '평가금액 합계'·'평가손익'은
+    # 현재가를 아는 종목만 더합니다(계산 자체는 옳습니다 — 분자·분모 모집단을 맞추는 이유는
+    # `resolve_portfolio_return_pct()` 독스트링 참고). 문제는 화면이 그 모집단 차이를 말하지
+    # 않아, 사용자가 세 숫자로 직접 뺄셈을 해 보면 맞지 않는 것처럼 보이는 것입니다(§0-3-13).
+    # 숫자는 하나도 바꾸지 않고, 다른 모집단이라는 사실만 각 카드 아래 한 줄로 밝힙니다.
+    unpriced_note = f' ({group["unpriced_count"]}종목 가격 미확인 포함)' if group["unpriced_count"] else ''
     with ui.row().classes('w-full gap-4 items-stretch'):
-        metric_card('매입원가 합계', format_amount(group["total_cost"], currency))
+        metric_card('매입원가 합계', format_amount(group["total_cost"], currency),
+                    f'전 종목 기준{unpriced_note}' if unpriced_note else '')
         if group["total_value"] is not None:
             base = group["total_cost_priced"]
             profit = group["total_profit"]
-            metric_card('평가금액 합계', format_amount(group["total_value"], currency))
-            metric_card('평가손익', format_amount(profit, currency),
-                        pct_text(profit / base * 100 if base else None))
+            metric_card('평가금액 합계', format_amount(group["total_value"], currency),
+                        '가격 확인 종목 기준' if unpriced_note else '')
+            profit_delta = pct_text(profit / base * 100 if base else None)
+            if unpriced_note:
+                profit_delta = f'{profit_delta} · 가격 확인 종목 기준' if profit_delta else '가격 확인 종목 기준'
+            metric_card('평가손익', format_amount(profit, currency), profit_delta)
         else:
             metric_card('평가금액 합계', '—')
             metric_card('평가손익', '—')
@@ -1349,7 +1455,11 @@ def _render_currency_block(client, user_id: str, group: dict, market: dict, on_c
         if view['sort'] == _SORT_NONE:
             return rows_all
         field = dict(SORT_FIELD_OPTIONS)[view['sort']]
-        return sort_holding_rows(rows_all, field, ascending=view['ascending'])
+        # M-8 — "종목명" 정렬은 화면에 실제로 보이는 이름(미국은 한글 음역명)으로 해야
+        # 사용자가 기대하는 가나다순이 됩니다. 저장된 영문명(`stock_name`)으로 정렬하면
+        # 화면 순서와 어긋납니다.
+        return sort_holding_rows(rows_all, field, ascending=view['ascending'],
+                                 label_fn=lambda r: _display_name(r, indexes))
 
     with ui.row().classes('w-full gap-4 items-center'):
         def _on_sort(event) -> None:
@@ -1428,9 +1538,17 @@ def _render_row_manager(client, user_id: str, rows, indexes, view: dict, redraw,
             ui.html(_row_label_html(row, indexes)).classes('flex-1 min-w-0 vh-keep-all')
             ui.button(icon='edit', on_click=lambda _=None, rid=row_id: _toggle_edit(view, rid, redraw)) \
                 .props('flat dense').classes('shrink-0').tooltip('수정')
-            ui.button(icon='delete',
-                      on_click=lambda _=None, r=row: _delete(client, user_id, r, indexes, on_changed)) \
+
+            # 2026-08-29 재감사 M-1 — delete_holding 왕복이 끝나기 전 두 번째 클릭이
+            # 들어가면 같은 삭제가 두 번 시도됩니다(멱등이라 데이터 손상은 아니지만,
+            # `duel_page.py`·`indicator_page.py`와 같은 자리라 통일합니다).
+            async def _delete_this_row(r=row):
+                await _delete(client, user_id, r, indexes, on_changed)
+            _delete_guarded = guard_double_click(_delete_this_row)
+            _delete_guarded.bind_button(
+                ui.button(icon='delete', on_click=_delete_guarded)
                 .props('flat dense').classes('shrink-0').tooltip('삭제')
+            )
 
         if view['editing'] == row_id and row_id:
             _render_edit_card(client, user_id, row, indexes, view, redraw, on_changed)
@@ -1484,7 +1602,11 @@ def _render_edit_card(client, user_id: str, row, indexes, view: dict, redraw, on
                 _notify_fail(message, f'🚫 {exc}')
                 return
             try:
-                await run_blocking(update_holding, client, user_id, row.get("id"), quantity, price)
+                # 2026-08-29 재감사 M-1 — `row["quantity"]`는 이 수정 카드를 그릴 때 읽은
+                # 값입니다. `expected_quantity`로 낙관적 잠금을 걸어, 그 사이 다른 곳에서
+                # 이 종목이 먼저 바뀌었으면 값을 덮어쓰지 않고 멈춥니다.
+                await run_blocking(update_holding, client, user_id, row.get("id"), quantity, price,
+                                   expected_quantity=row.get("quantity"))
             except Exception as exc:               # noqa: BLE001
                 _notify_fail(message, f'🚫 {_fail(exc, "수정하지 못했습니다. 잠시 후 다시 시도해 주세요.")}')
                 return
@@ -1497,7 +1619,9 @@ def _render_edit_card(client, user_id: str, row, indexes, view: dict, redraw, on
             redraw()
 
         with ui.row().classes('no-wrap gap-2'):
-            ui.button('저장', on_click=_save).props('no-caps')
+            # M-1 — update_holding 왕복이 있는 버튼입니다.
+            _save_guarded = guard_double_click(_save)
+            _save_guarded.bind_button(ui.button('저장', on_click=_save_guarded).props('no-caps'))
             ui.button('취소', on_click=_cancel).props('flat no-caps')
 
 
@@ -1660,12 +1784,16 @@ def _render_valuation_picker(rows, indexes, currency: str) -> None:
             # ⚠️ Streamlit 에서는 마크다운(KaTeX)이 "$147.80 VS $159.80" 의 $ 두 개 사이를 수식으로
             #    오인해 `\$` 이스케이프가 필요했지만, 여기서는 마크다운을 거치지 않는 HTML 이라
             #    그 우회가 필요 없습니다(값은 동일).
+            # 2026-08-29 재감사(L-4) — 예전엔 이 자리에 `error_banner`/`info_banner` 를 그대로
+            # 재사용해서, 수익이 났다는 좋은 소식이 화면 어디의 "DB 실패" 배너와 완전히 같은
+            # 모양으로 나왔습니다. 전용 배너(`price_up_banner`/`price_down_banner`, `pct_html()`
+            # 과 같은 색 규칙)로 바꿔 실패 알림과 시각적으로 분리합니다.
             price = summary.get("price")
             avg_price = row.get("avg_purchase_price")
             if price is not None and avg_price:
                 diff_pct = (price - avg_price) / avg_price * 100
                 up = diff_pct >= 0
-                (error_banner if up else info_banner)(
+                (price_up_banner if up else price_down_banner)(
                     f'{"📈" if up else "📉"} 내 평균매입가 {format_amount(avg_price, currency)} VS '
                     f'현재가 {format_amount(price, currency)} ({diff_pct:+.2f}%)'
                 )

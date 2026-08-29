@@ -706,7 +706,14 @@ def _render_participant(client, published_date: str, row: dict, readers: dict) -
                 return
             slot["loaded"] = True                  # 두 번 눌러도 두 번 읽지 않습니다
             with slot["body"]:
-                await _render_holdings(client, published_date, nickname, readers)
+                ok = await _render_holdings(client, published_date, nickname, readers)
+            if not ok:
+                # 2026-08-29 재감사(L-2) — 조회가 실패했는데도 위에서 이미 `loaded=True`
+                # 를 걸어 버리면, DB 오류가 한 번 나는 순간 그 참가자의 상세는 **페이지를
+                # 새로고침해야만** 다시 시도할 수 있습니다("두 번 눌러도 두 번 읽지 않는다"는
+                # 원래 의도가 실패한 시도까지 잠가버린 것). 실패했을 때만 되돌려서 다시
+                # 눌러볼 수 있게 합니다 — 성공한 렌더는 여전히 한 번만 읽습니다.
+                slot["loaded"] = False
 
         with ui.row().classes('no-wrap items-center gap-2 w-full'):
             ui.label(header).classes('flex-1 min-w-0 vh-keep-all')
@@ -715,8 +722,13 @@ def _render_participant(client, published_date: str, row: dict, readers: dict) -
         slot["body"] = ui.column().classes('w-full gap-1')
 
 
-async def _render_holdings(client, published_date: str, nickname: str, readers: dict) -> None:
+async def _render_holdings(client, published_date: str, nickname: str, readers: dict) -> bool:
     """한 참가자의 공개 보유종목 표(없으면 그 사실을 그대로 알립니다).
+
+    반환값(2026-08-29 재감사 L-2): 실제로 표를 그렸으면(또는 "공개 안 함" 등 **정상** 빈
+    상태를 확인했으면) `True`, 조회 자체가 실패했으면 `False` — 호출부(`_open()`)가 이
+    값으로 "다시 눌러볼 수 있게 할지"를 판단합니다. 실패와 "정상적으로 비어 있음"은
+    다른 말입니다(§0-1) — 후자는 다시 눌러도 같은 결과이므로 `True` 를 돌려줍니다.
 
     💵 조회 통화도, 금액 서식 통화도 `readers` 에서 옵니다. 둘이 어긋나면(예: 달러 행을 읽고
        원화로 서식) 화면이 조용히 "1,234원"이라고 말하게 됩니다 — 그래서 **한 dict 에서 함께
@@ -731,32 +743,36 @@ async def _render_holdings(client, published_date: str, nickname: str, readers: 
     """
     if not nickname:
         error_banner('🚫 닉네임을 확인하지 못해 보유종목을 불러오지 않았습니다.')
-        return
+        return False
     try:
         rows = await run_blocking(
             readers["detail_rows"],
             client, nickname, published_date=published_date, currency=readers["currency"])
     except (DuelDbError, DuelRuleError) as exc:
         error_banner(f'🚫 {exc}')
-        return
+        return False
     except Exception as exc:                       # noqa: BLE001
         error_banner(f'🚫 {_fail(exc, "보유종목을 불러오지 못했습니다.")}')
-        return
+        return False
 
     table = holdings_table(rows, readers["amount"])
     if table is None:
         # 행이 아예 없는 것은 "보유종목을 공개하지 않았다" 또는 "그 통화로는 아직 아무것도
         # 등록하지 않았다"입니다. 둘 중 무엇인지 이 표만 보고는 알 수 없으므로 **단정하지
-        # 않습니다**(§0-1).
+        # 않습니다**(§0-1). 2026-08-29 재감사 M-2 — 발행 배치가 순위표·보유종목 두 표를
+        # 순서대로 쓰는 동안(트랜잭션으로 묶이지 않음) 아주 잠깐 이 상태가 될 수 있다는
+        # 것도 함께 밝힙니다 — 그 경우 실제로는 두 조건 다 아닙니다.
         ui.label(
-            '이 참가자의 보유종목은 공개되어 있지 않거나, 아직 등록된 종목이 없습니다.'
+            '이 참가자의 보유종목은 공개되어 있지 않거나, 아직 등록된 종목이 없습니다. '
+            '(발행 직후라면 잠시 후 다시 확인해 주세요.)'
         ).classes('vh-muted')
-        return
+        return True             # 정상적으로 "비어 있음"을 확인한 것 — 다시 눌러도 결과는 같음(L-2)
     ui.html(table).classes('w-full')
     ui.label(
         f'※ "{NOT_PUBLISHED_TEXT}" 로 표시된 항목은 그 참가자가 공개에 동의하지 않은 값입니다 '
         '— 0 이라는 뜻이 아닙니다.'
     ).classes('vh-muted')
+    return True
 
 
 def resolve_jump_target(raw_value, max_pages):
