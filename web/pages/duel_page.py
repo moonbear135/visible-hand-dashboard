@@ -778,7 +778,7 @@ _MARKET_SUFFIX_TEXT = {"KOSPI": " [코스피]", "KOSDAQ": " [코스닥]"}
 
 
 def _universe_options(index: dict) -> dict:
-    """빠른 검색 후보 {티커: "티커 · 종목명"} — 코스피+코스닥 상위 500 **안에서만**.
+    """빠른 검색 후보 {티커: "티커 · 종목명(한글명)"} — 코스피+코스닥 상위 500 **안에서만**.
 
     라벨에 티커를 앞세우는 이유는 '내 성적표'의 `_candidate_options()` 와 같습니다(이름만
     넣으면 코드 검색이 철자 순서에 우연히 걸리는 종목까지 잡습니다).
@@ -788,13 +788,21 @@ def _universe_options(index: dict) -> dict:
     "[코스피]"/"[코스닥]" 텍스트 접미사를 붙입니다. 미국 유니버스(이 함수를 통화 무관하게
     재사용 — 아래 참고)나 이 필드가 없는 구버전 스냅샷은 접미사 없이 그대로입니다(§0-1 —
     모르는 값을 지어내지 않음).
+
+    2026-08-29 수정 — 해외(미국) 유니버스는 영문명(`name`)만 라벨에 있어 `ui.select(with_input=True)`
+    의 기본 부분일치 검색이 한글로는 전혀 안 걸렸습니다("아~ 해외주식이 한국어로 검색을 하면 아에
+    안나오는구나" 오너 확인). `data/us_stocks_latest.json`에 이미 있는 `name_kr`(한글명, 없으면
+    None — §0-1, 지어내지 않음)이 있으면 라벨 끝에 괄호로 덧붙여 검색 대상 텍스트에 포함시킵니다.
+    한국 유니버스는 애초에 `name` 자체가 한글이라 영향 없습니다.
     """
     options = {}
     for ticker, stock in (index or {}).items():
         name = (stock or {}).get("name")
         if name:
+            name_kr = (stock or {}).get("name_kr")
+            kr_part = f"({name_kr})" if name_kr and name_kr != name else ""
             suffix = _MARKET_SUFFIX_TEXT.get((stock or {}).get("market"), "")
-            options[ticker] = f"{ticker} · {name}{suffix}"
+            options[ticker] = f"{ticker} · {name}{kr_part}{suffix}"
     return dict(sorted(options.items(), key=lambda kv: kv[1]))
 
 

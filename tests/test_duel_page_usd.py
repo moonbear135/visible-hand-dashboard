@@ -1010,6 +1010,32 @@ def test_usd_render_functions_take_client_and_user_id_as_arguments():
 
 
 # =============================================================================
+# 7-1. 종목 검색 — 해외 유니버스도 한글명으로 검색되는지 (2026-08-29)
+# =============================================================================
+def test_universe_options_includes_korean_name_so_us_stocks_are_searchable_in_korean():
+    """"아~ 해외주식이 한국어로 검색을 하면 아에 안나오는구나" — 오너 확인 버그.
+
+    `ui.select(with_input=True)` 는 라벨 텍스트 자체를 부분일치 검색하므로, 라벨에
+    `name_kr` 이 들어있어야 한글 검색이 걸립니다.
+    """
+    import web.pages.duel_page as page
+
+    index = {
+        "NVDA": {"name": "NVIDIA Corporation", "name_kr": "엔비디아"},
+        "AAPL": {"name": "Apple Inc.", "name_kr": None},  # §0-1 — 없으면 지어내지 않음
+        "005930": {"name": "삼성전자", "market": "KOSPI"},  # 한국 종목은 애초에 한글
+    }
+    options = page._universe_options(index)
+
+    assert "엔비디아" in options["NVDA"]
+    assert options["NVDA"].startswith("NVDA · NVIDIA Corporation(엔비디아)")
+    # 한글명이 없으면(§0-1) 괄호를 지어내 붙이지 않습니다.
+    assert options["AAPL"] == "AAPL · Apple Inc."
+    # 한국 종목은 원래 한글이라 영향이 없어야 합니다(회귀).
+    assert options["005930"] == "005930 · 삼성전자 [코스피]"
+
+
+# =============================================================================
 # 8. 상수 — 화면이 시드·입금액을 스스로 적어두지 않고 규칙 계층에서 가져오는지
 # =============================================================================
 def test_usd_amounts_come_from_the_rule_layer_single_source():
