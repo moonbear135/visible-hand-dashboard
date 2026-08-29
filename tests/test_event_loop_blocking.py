@@ -531,6 +531,13 @@ SYNC_CALL_ALLOWED = {
         "download_button 에 넘기는 람다 안. 실행 시점은 클릭이고, 그때 run.io_bound 를 탑니다.",
     ("web/pages/us_stocks_page.py", "_render_raw_downloads"):
         "위와 동일(다운로드 버튼 람다).",
+    ("web/pages/dividend_page.py", "_render_raw_downloads"):
+        "위와 동일(다운로드 버튼 람다) — 배당 원본·가공·기준선 파일 3개를 받는 자리도 "
+        "pegy_page.py·us_stocks_page.py와 같은 download_button 컴포넌트를 그대로 씁니다. "
+        "2026-08-27 다른 세션이 이 자리 3줄을 새 위반으로 지적했는데, 실제로는 이 함수 "
+        "자체가 2026-08-24부터 이미 이 컴포넌트를 쓰고 있었고 그때 이 표에 등록만 "
+        "빠졌던 것 — download_button 쪽 실행 코드(web/components/widgets.py::_click)를 "
+        "직접 읽어 run.io_bound 로 감싸져 있는 것을 재확인(2026-08-29)한 뒤 등록.",
     ("web/pages/macro_page.py", "_render_trend_chart"):
         "위와 동일(_csv_bytes 람다 → download_button → run.io_bound).",
     ("web/pages/macro_page.py", "fetch_verified_market_data"):

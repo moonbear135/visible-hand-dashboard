@@ -378,14 +378,27 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
    여전히 유효한 오너 지시(중단 상태 유지)만 남아있습니다 — 필요할 때만 개별 대조하세요.
 9. **🔴 미해결 — `pytest tests/` 전수 실행 중 새로 발견한 것 2건 (2026-08-29, 결투 화면
    작업 중 곁다리로 발견 — 처리는 보류, 기록만 남김. 결투 모듈 자체와는 무관).**
-   - 🔴 **(심각) `web/pages/dividend_page.py` 이벤트 루프 블로킹** —
-     `tests/test_event_loop_blocking.py::test_no_blocking_call_is_left_on_the_event_loop`가
-     `_render_raw_downloads()` 안의 `read_download_bytes(...)` 호출 3곳(1534·1542·1550행)이
-     `run_blocking()`으로 감싸지지 않은 채 이벤트 루프 위에서 그대로 동기 실행되는 것을
-     잡아냅니다. **2026-08-21 실제 접속 전원 끊김 사고와 같은 유형**입니다(`web/blocking.py`
-     모듈 독스트링 참고). 배당금(6번째 모듈) 파일이라 이 세션에서 직접 고치지 않았습니다
-     — 그 모듈 세션에서 `await run_blocking(read_download_bytes, ...)`로 감싸는 수정이
-     필요합니다.
+   - ✅ **[해결 완료, 2026-08-29 — 배당금 모듈 세션이 직접 확인·수정]
+     `web/pages/dividend_page.py` "이벤트 루프 블로킹" — 실제로는 블로킹이 아니었습니다,
+     정정합니다.** 다른 세션이 `tests/test_event_loop_blocking.py::
+     test_no_blocking_call_is_left_on_the_event_loop`가 `_render_raw_downloads()` 안의
+     `read_download_bytes(...)` 3곳(1534·1542·1550행)을 잡아낸 것을 "2026-08-21 접속
+     끊김 사고와 같은 유형"으로 보고했으나, 직접 코드를 읽어 확인한 결과 **실제 실행
+     경로는 이미 안전했습니다.** 이 3곳은 전부 `download_button(...)`에 넘기는
+     **람다**(`lambda: read_download_bytes(...)`) — 즉시 실행되는 게 아니라 다운로드
+     버튼을 클릭한 순간에만 실행됩니다. 그리고 `download_button`
+     (`web/components/widgets.py::_click`, 2026-08-21 사고 이후 만든 공용 컴포넌트)이
+     그 순간을 이미 `await run.io_bound(_build)`로 별도 스레드에 넘기고 있어, 이벤트
+     루프를 붙잡지 않습니다 — `pegy_page.py`·`us_stocks_page.py`의 같은 다운로드 자리와
+     정확히 같은, 이미 검증된 안전한 패턴입니다. 진짜 원인은 코드가 아니라
+     **`tests/test_event_loop_blocking.py`의 `SYNC_CALL_ALLOWED` 등록표에 이 자리만
+     빠져 있던 것**(pegy_page.py·us_stocks_page.py의 동일 패턴은 이미 등록돼 있었음) —
+     `dividend_page.py`가 이 다운로드 기능을 만든 2026-08-24 당시 그 표 등록을
+     빠뜨린 것으로 보입니다. `web/pages/dividend_page.py` 코드는 **한 글자도 고치지
+     않았고**, `tests/test_event_loop_blocking.py`에 사유와 함께 등록만 추가해
+     재실행으로 통과 확인(`13 passed, 1 skipped`). 실 서비스에 이 파일이 배포된
+     이후로 이 다운로드 버튼 때문에 접속이 끊긴 사고는 없었고(§11-4에 그런 기록
+     없음), 이 정정은 테스트의 오탐(false positive) 하나를 바로잡은 것뿐입니다.
    - 🟡 **(경미) `tests/test_stock_history.py::test_export_end_to_end` 헤더 순서 불일치** —
      CSV 헤더 5번째 칸이 테스트 기대값("현재가(원)")과 실제 값("시장구분(KOSPI/KOSDAQ)")이
      다릅니다. `utils/stock_history.py`의 `KOSPI_HISTORY_FIELDS` 컬럼 순서와 이 테스트의
