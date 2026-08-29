@@ -22,6 +22,7 @@ import io
 import json
 import os
 import sys
+import time
 import zipfile
 
 import pytest
@@ -603,7 +604,7 @@ def test_collect_one_stops_at_first_usable_report(monkeypatch):
     """
     calls = []
 
-    def fake_get(url, params, timeout, session):
+    def fake_get(url, params, timeout, session, request_counter=None):
         calls.append(params["reprt_code"])
         if params["reprt_code"] in ("11011", "11014"):
             return 200, REAL_NO_DATA
@@ -691,7 +692,7 @@ def test_fetch_never_leaks_api_key_in_error_message(monkeypatch):
 def test_raw_response_is_written_separately_from_processed(tmp_path, monkeypatch):
     """§0-3-3: 원본 응답이 손대지 않은 상태로 별도 파일에 남아야 합니다."""
     monkeypatch.setattr(cdk, "_http_get_json",
-                        lambda url, params, timeout, session:
+                        lambda url, params, timeout, session, request_counter=None:
                         (200, REAL_SAMSUNG_2026_Q1 if params["reprt_code"] == "11013"
                          else REAL_NO_DATA))
     raw_path = tmp_path / "raw.jsonl"
@@ -707,16 +708,27 @@ def test_raw_response_is_written_separately_from_processed(tmp_path, monkeypatch
 # =============================================================================
 # 10. 전체 실행 오케스트레이션 (run_collection) — 여전히 소켓은 열지 않습니다
 # =============================================================================
+def _fake_alot_matter_response(url, params, timeout, session, request_counter=None):
+    """`faked_network`/`faked_network_widened` 공용 alotMatter 가짜 응답.
+
+    🔴 M15(2026-08-29) — 이 가짜가 `request_counter`를 그냥 받기만 하고 안 세면(예:
+    `lambda ...: None`처럼 무시), `run_collection()`이 실제로 몇 번 요청했는지 세는
+    회귀 테스트(`requests_used` 검증)들이 전부 0을 보게 됩니다 — `_http_get_json()`이
+    통째로 갈아끼워졌으니까요. 진짜 `_http_get_json()`과 같은 자리에서 같은 방식으로
+    셉니다(이 가짜는 재시도를 흉내 내지 않으므로 호출 횟수 = 실제 요청 수).
+    """
+    if request_counter is not None:
+        request_counter["count"] += 1
+    return (200, REAL_SAMSUNG_2026_Q1 if params["reprt_code"] == "11013" else REAL_NO_DATA)
+
+
 @pytest.fixture
 def faked_network(monkeypatch):
     """corpCode ZIP 과 alotMatter 응답을 전부 가짜로 갈아끼웁니다(딜레이도 0으로)."""
     zip_bytes = _make_corpcode_zip(SAMPLE_XML)
     monkeypatch.setattr(ccm, "_http_get_bytes",
                         lambda url, params, timeout, session: (200, zip_bytes))
-    monkeypatch.setattr(cdk, "_http_get_json",
-                        lambda url, params, timeout, session:
-                        (200, REAL_SAMSUNG_2026_Q1 if params["reprt_code"] == "11013"
-                         else REAL_NO_DATA))
+    monkeypatch.setattr(cdk, "_http_get_json", _fake_alot_matter_response)
     monkeypatch.setattr(cdk, "polite_sleep", lambda rng=None: 0.0)
     monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
 
@@ -1136,9 +1148,9 @@ def _counting_alot_calls(monkeypatch):
     calls = {"n": 0}
     inner = cdk._http_get_json
 
-    def counting(url, params, timeout, session):
+    def counting(url, params, timeout, session, request_counter=None):
         calls["n"] += 1
-        return inner(url, params, timeout, session)
+        return inner(url, params, timeout, session, request_counter=request_counter)
 
     monkeypatch.setattr(cdk, "_http_get_json", counting)
     return calls
@@ -2792,10 +2804,7 @@ def faked_network_widened(monkeypatch):
     zip_bytes = _make_corpcode_zip(E2E_XML)
     monkeypatch.setattr(ccm, "_http_get_bytes",
                         lambda url, params, timeout, session: (200, zip_bytes))
-    monkeypatch.setattr(cdk, "_http_get_json",
-                        lambda url, params, timeout, session:
-                        (200, REAL_SAMSUNG_2026_Q1 if params["reprt_code"] == "11013"
-                         else REAL_NO_DATA))
+    monkeypatch.setattr(cdk, "_http_get_json", _fake_alot_matter_response)
     monkeypatch.setattr(cdk, "polite_sleep", lambda rng=None: 0.0)
     monkeypatch.setenv("DART_API_KEY", "FAKE-KEY-FOR-TEST")
 
@@ -4081,7 +4090,10 @@ def watch_end_to_end(tmp_path, monkeypatch):
     fixed_now = _dt(2026, 8, 24, 5, 0, 0, tzinfo=ccm.KST)
     monkeypatch.setattr(cdk, "_now_kst", lambda: fixed_now)
 
-    def fake_get(url, params, timeout, session):
+    def fake_get(url, params, timeout, session, request_counter=None):
+        # ⚠️ M15(2026-08-29) — 이 fake_get 은 list.json 뿐 아니라 alotMatter 경로도
+        # 대신하므로(아래), fetch_alot_matter() 가 항상 넘기는 request_counter 키워드를
+        # 받아야 합니다(안 받으면 TypeError로 재시도 경로를 계속 타 테스트가 느려집니다).
         if url == cdk.DART_DISCLOSURE_LIST_URL:
             if params["pblntf_detail_ty"] != "A002":
                 return 200, REAL_LIST_NO_DATA
@@ -4394,3 +4406,260 @@ def test_reaudit_probe_dead_fail_codes_removed():
            / "probe_indicator_universe_timing.py").read_text(encoding="utf-8")
     code_only = "\n".join(ln for ln in src.split("\n") if not ln.strip().startswith("#"))
     assert "fail_codes" not in code_only
+
+
+# =============================================================================
+# 🔴 M8(2026-08-29) 회귀 테스트 — out_dir 배타 락 (동시 실행 방지)
+# =============================================================================
+def test_locked_output_dir_basic_acquire_and_release(tmp_path):
+    lock_path = tmp_path / ".collector_dividend_kr.lock"
+    with cdk._locked_output_dir(str(tmp_path)):
+        assert lock_path.exists()
+    assert not lock_path.exists()  # 정상 종료 시 락 파일을 지웁니다.
+
+
+def test_locked_output_dir_rejects_concurrent_acquire(tmp_path):
+    with cdk._locked_output_dir(str(tmp_path)):
+        with pytest.raises(RuntimeError, match="다른 실행이 이미"):
+            with cdk._locked_output_dir(str(tmp_path)):
+                pass  # pragma: no cover — 여기 들어오면 락이 동작하지 않는 것
+
+
+def test_locked_output_dir_releases_even_when_body_raises(tmp_path):
+    lock_path = tmp_path / ".collector_dividend_kr.lock"
+
+    class _Boom(Exception):
+        pass
+
+    with pytest.raises(_Boom):
+        with cdk._locked_output_dir(str(tmp_path)):
+            raise _Boom("작업 중 실패")
+    assert not lock_path.exists()  # 예외로 빠져나가도 락은 풀려야 다음 실행이 막히지 않음
+
+
+def test_locked_output_dir_steals_stale_lock(tmp_path):
+    lock_path = tmp_path / ".collector_dividend_kr.lock"
+    lock_path.write_text("pid=99999 started=옛날\n", encoding="utf-8")
+    stale_mtime = time.time() - cdk._STALE_LOCK_SECONDS - 60
+    os.utime(str(lock_path), (stale_mtime, stale_mtime))
+    with cdk._locked_output_dir(str(tmp_path)):
+        assert lock_path.exists()  # 죽은 락을 지우고 자기 락을 새로 잡음
+
+
+def test_locked_output_dir_does_not_steal_a_fresh_lock(tmp_path):
+    with cdk._locked_output_dir(str(tmp_path)):
+        with pytest.raises(RuntimeError):
+            with cdk._locked_output_dir(str(tmp_path)):
+                pass  # pragma: no cover
+
+
+def test_main_exits_with_code_2_when_out_dir_is_already_locked(tmp_path):
+    """🔴 main() CLI 진입점 통합 검증 — 락을 못 잡으면 실제 수집을 시도조차 하지 않고
+    종료코드 2(§0-3-4 관례)로 끝나야 합니다."""
+    universe_path = tmp_path / "universe.json"
+    universe_path.write_text(json.dumps(["005930"]), encoding="utf-8")
+    out_dir = tmp_path / "out"
+    out_dir.mkdir()
+    with cdk._locked_output_dir(str(out_dir)):
+        rc = cdk.main([
+            "--universe", str(universe_path), "--year", "2026",
+            "--out-dir", str(out_dir),
+        ])
+    assert rc == 2
+
+
+# =============================================================================
+# 🔴 2026-08-29 재감사 회귀 테스트 — 이번 세션이 고친 나머지 항목들
+# (H1/L6/L7/M11/M12/M15 — 지금까지는 코드에만 반영되고 전용 테스트가 없었습니다)
+# =============================================================================
+def test_watch_update_skips_replacing_when_delta_status_is_not_ok(tmp_path):
+    """🔴 H1(2026-08-29) — 델타가 OK 가 아니면(예: 일시적 DART 오류로 ERROR) 그 값으로
+    기존 OK 레코드를 덮어쓰면 안 됩니다. 기존 값을 지키고, 건너뛴 사실을 남깁니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930", dps=746, stlm_dt="2026-06-30")],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", status="ERROR")], raw_entries=[])
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+    by_code = {r["stock_code"]: r for r in records}
+    assert by_code["005930"]["dps_cash_common"] == 746     # 기존 OK 값을 그대로 지킴
+    assert by_code["005930"]["status"] == "OK"
+    assert summary["watch_replaced_stock_codes"] == []
+    assert summary["watch_skipped_replacements"] == [
+        {"stock_code": "005930", "kept_status": "OK", "delta_status": "ERROR",
+         "delta_status_reason": "데이터 없음"},
+    ]
+
+
+def test_watch_update_still_adds_a_brand_new_stock_even_if_its_status_is_error(tmp_path):
+    """이전에 없던 종목이면 '교체'가 아니라 '추가'라 위 방어와는 다른 상황입니다 — 덮어쓸
+    기존 레코드가 없으므로 그대로 추가되고, status=ERROR 라는 사실도 감춰지지 않습니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("999999", status="ERROR")], raw_entries=[])
+    records, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                              log=lambda *a: None)
+    by_code = {r["stock_code"]: r for r in records}
+    assert by_code["999999"]["status"] == "ERROR"
+    assert summary["watch_added_stock_codes"] == ["999999"]
+    assert summary["watch_skipped_replacements"] == []
+
+
+def test_cli_watch_does_not_advance_watermark_when_a_delta_record_is_error(
+        watch_cli, monkeypatch, capsys):
+    """🔴 H1(2026-08-29) — apply_watch_update() 가 ERROR 델타로 기존 값을 안 덮어써도,
+    상태 파일(last_checked_de)이 전진해 버리면 다음 실행이 이 구간을 다시 안 보고 그
+    종목은 영원히 재시도되지 않습니다. CLI 통합 레벨에서 이걸 막는지 확인합니다."""
+    ctx = watch_cli
+    ctx["filings"] = {"005930": {"corp_code": "00126380", "report_nm": "반기보고서",
+                                 "rcept_no": "1", "rcept_dt": "20260823"}}
+
+    def fake_run_with_error(universe_codes, year, delta_out_dir, **kwargs):
+        return ([{"stock_code": "005930", "status": "ERROR"}],
+                {"completed": True, "stopped_reason": None})
+
+    monkeypatch.setattr(cdk, "run_collection", fake_run_with_error)
+    rc = cdk.main(_watch_argv(ctx))
+    assert rc == 2
+    out = capsys.readouterr().out
+    assert "005930" in out and "ERROR" in out
+    assert not os.path.exists(ctx["state_path"])   # 워터마크가 전진하지 않았어야 함
+
+
+def test_cli_watch_passes_outside_universe_codes_to_apply_watch_update(watch_cli):
+    """🔴 M11(2026-08-29) — 유니버스 밖 종목(신규 배당회사 등)이 공시를 냈다는 사실도
+    apply_watch_update 에 전달돼야 merged summary 에 남습니다."""
+    ctx = watch_cli
+    ctx["filings"] = {
+        "000660": {"corp_code": "00164779", "report_nm": "분기보고서",
+                  "rcept_no": "2", "rcept_dt": "20260823"},
+        "999999": {"corp_code": "z", "report_nm": "분기보고서",
+                  "rcept_no": "3", "rcept_dt": "20260823"},
+    }
+    cdk.main(_watch_argv(ctx))
+    assert ctx["apply_calls"][0]["kwargs"]["outside_universe_codes"] == ["999999"]
+
+
+def test_apply_watch_update_records_outside_universe_codes_in_summary(tmp_path):
+    """🔴 M11(2026-08-29) — `apply_watch_update()` 자체(CLI 를 거치지 않고)가 이 인자를
+    받아 summary 에 그대로 남기는지."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("005930")], raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("005930", "11014")], raw_entries=[])
+    _, summary = cdk.apply_watch_update(
+        str(main_dir), str(delta_dir), "2026", log=lambda *a: None,
+        outside_universe_codes=["777777", "888888"])
+    assert summary["watch_filings_outside_universe"] == ["777777", "888888"]
+
+
+def test_watch_update_dedupes_unmapped_detail_when_same_code_appears_in_both(tmp_path):
+    """🔴 M12(2026-08-29) — 감시 델타 유니버스는 기존 유니버스의 부분집합이라, 같은
+    종목이 기존·델타 양쪽 unmapped_detail 에 함께 들어올 수 있습니다. dedupe 안 하면
+    레코드는 1건(교체)인데 unmapped_detail 은 2건이 되어 숫자가 어긋납니다. 델타 쪽
+    (최신)이 이겨야 합니다."""
+    main_dir, delta_dir = tmp_path / "m", tmp_path / "d"
+    _write_run_output(main_dir, [_watch_record("111111")],
+                      unmapped=[{"stock_code": "999999", "stock_code_input": "999999",
+                                 "reason": "기존: corp_code 없음"}],
+                      raw_entries=[])
+    _write_run_output(delta_dir, [_watch_record("111111", "11014")],
+                      unmapped=[{"stock_code": "999999", "stock_code_input": "999999",
+                                 "reason": "델타: 여전히 없음"}],
+                      raw_entries=[])
+    _, summary = cdk.apply_watch_update(str(main_dir), str(delta_dir), "2026",
+                                        log=lambda *a: None)
+    assert summary["unmapped_stock_codes"] == 1        # 2건이 아니라 1건으로 합쳐짐
+    assert len(summary["unmapped_detail"]) == 1
+    assert summary["unmapped_detail"][0]["reason"] == "델타: 여전히 없음"   # 델타가 이김
+
+
+def test_request_counter_counts_every_http_attempt_including_retries(monkeypatch):
+    """🔴 M15(2026-08-29) — 예산(request_counter)은 재시도까지 포함해 **실제 나간 HTTP
+    요청 수**를 세야 합니다. 함수 호출 1회를 1건으로 세면(예전 방식) 재시도 시 실제
+    트래픽을 과소집계해 max_requests 예산을 넘길 수 있습니다."""
+    calls = {"n": 0}
+
+    class _FakeResponse:
+        def __init__(self, status_code, payload):
+            self.status_code = status_code
+            self._payload = payload
+
+        def json(self):
+            return self._payload
+
+    class _FakeSession:
+        def get(self, url, params, timeout):
+            calls["n"] += 1
+            if calls["n"] == 1:
+                return _FakeResponse(503, None)       # 첫 시도는 서버 오류
+            return _FakeResponse(200, REAL_SAMSUNG_2026_Q1)   # 재시도는 성공
+
+    monkeypatch.setattr(cdk.time, "sleep", lambda *_: None)
+    counter = {"count": 0}
+    cdk.fetch_alot_matter("00126380", "2026", "11013", "KEY",
+                          session=_FakeSession(), request_counter=counter)
+    assert calls["n"] == 2               # 실제 HTTP 요청 2건(실패 1 + 재시도 성공 1)
+    assert counter["count"] == 2         # request_counter 가 재시도까지 포함해 세었는가
+
+
+def test_run_collection_dedupes_universe_entries_that_normalize_to_same_code(
+        tmp_path, faked_network, capsys):
+    """🟡 L6(2026-08-29) — 유니버스에 "5930"과 "005930"이 함께 있으면 둘 다 같은 종목으로
+    정규화되는데, dedupe 하지 않으면 같은 종목을 두 번 조회하고 레코드도 2건 남습니다."""
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["5930", "005930"]), encoding="utf-8")
+    records, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path), log=print)
+    assert len([r for r in records if r["stock_code"] == "005930"]) == 1
+    assert summary["requests_used"] == 4     # 1종목분(우선순위 4단계)만 — 2배가 아님
+    out = capsys.readouterr().out
+    assert "중복 등록" in out
+
+
+def test_save_checkpoint_returns_false_and_counts_failure_on_write_error(tmp_path):
+    """🟡 L7(2026-08-29) — 저장 실패는 로그 한 줄로 끝나면 안 되고, False 를 돌려주고
+    failure_counter 에 세어져야 리포트(summary)에 반영될 수 있습니다."""
+    counter = {"count": 0}
+    # tmp_path(디렉터리) 자체를 파일 경로로 주면 os.replace() 단계에서 확실히 실패합니다.
+    ok = cdk.save_checkpoint(str(tmp_path), "run1", [], [], 0, failure_counter=counter)
+    assert ok is False
+    assert counter["count"] == 1
+
+
+def test_save_checkpoint_succeeds_and_returns_true_without_a_counter(tmp_path):
+    """failure_counter 를 안 줘도(하위 호환) 정상 저장은 그대로 True 를 돌려줍니다."""
+    path = tmp_path / "ckpt.json"
+    assert cdk.save_checkpoint(str(path), "run1", [], [], 0) is True
+    assert path.exists()
+
+
+def test_append_raw_returns_false_and_counts_failure_on_write_error(tmp_path):
+    counter = {"count": 0}
+    ok = cdk.append_raw(str(tmp_path), {"a": 1}, failure_counter=counter)
+    assert ok is False
+    assert counter["count"] == 1
+
+
+def test_append_raw_succeeds_and_returns_true_without_a_counter(tmp_path):
+    raw_path = tmp_path / "raw.jsonl"
+    assert cdk.append_raw(str(raw_path), {"a": 1}) is True
+    assert raw_path.exists()
+
+
+def test_run_collection_reports_write_failures_in_summary(tmp_path, faked_network, monkeypatch):
+    """🟡 L7(2026-08-29) 통합 — run_collection() 전체를 통해서도 raw 쓰기 실패가
+    summary 에 반영되는지(호출부가 실제로 raw_write_failure_counter 를 넘기고 있는지)."""
+    uni = tmp_path / "u.json"
+    uni.write_text(json.dumps(["005930"]), encoding="utf-8")
+
+    real_append_raw = cdk.append_raw
+
+    def failing_append_raw(raw_path, entry, failure_counter=None):
+        if failure_counter is not None:
+            failure_counter["count"] += 1
+        return False   # 실제로 쓰지는 않되, 실패로 표시만 함(다른 산출물은 그대로 진행)
+
+    monkeypatch.setattr(cdk, "append_raw", failing_append_raw)
+    _, summary = cdk.run_collection(
+        cdk.load_universe(str(uni)), "2026", str(tmp_path), log=lambda *a: None)
+    assert summary["raw_write_failures"] > 0

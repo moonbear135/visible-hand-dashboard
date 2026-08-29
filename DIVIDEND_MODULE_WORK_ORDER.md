@@ -89,8 +89,19 @@ fi
 0회입니다. 이 모듈이 화면에 그릴 문자열은 거의 전부 **우리가 만들지 않은 값**입니다 —
 `corp_name`(DART가 준 회사명), `status_reason`, `parse_notes`, `unknown_se_labels`(DART 원문
 라벨). `web/components/html.py`의 docstring이 "크롤링해 온 종목명·사유 문구 등 외부 문자열이
-섞이는 자리는 반드시 `esc()`"라고 이미 규정했고, `tests/test_web_session_isolation.py`가 화면
-파일마다 `esc(` 사용을 **자동으로 강제 검사**합니다(안 쓰면 곧바로 테스트 빨간불). 화면을 만들기
+섞이는 자리는 반드시 `esc()`"라고 이미 규정했고, `tests/test_web_session_isolation.py`가
+**일부 화면 파일(스코어카드·리포트·결투 등, `check("esc(" in src, ...)`로 이름을 하나씩 지정한
+파일만)**에서 `esc(` 사용을 강제 검사합니다.
+
+🔴 L12(2026-08-29) 정정 — 위 문장은 원래 "화면 파일마다 자동으로 강제 검사"라고 적혀 있었는데
+**사실이 아닙니다**(2026-08-29 재감사로 확인). 저 테스트는 화면 파일을 훑어 전부 검사하는 게
+아니라, 파일 이름을 하나하나 나열해 그 파일에만 검사를 겁니다 — 이 모듈이 만든
+`web/pages/dividend_page.py`·`web/pages/dividend_us_page.py`는 그 나열에 들어있지 않아
+`esc(` 강제 검사의 **대상이 아닙니다**(실제로는 두 파일 모두 `esc()`를 올바르게 쓰고 있다는
+것을 이번 재감사에서 코드를 직접 읽어 확인했습니다 — 테스트가 지켜준 게 아니라 우연히
+맞았던 것). 새 화면 파일을 만들 때 "테스트가 잡아주겠지"라고 믿지 말고, 그 파일 이름을
+`tests/test_web_session_isolation.py`의 해당 `check("esc(" in src, ...)` 목록에 **직접
+추가**하거나, 최소한 이 문서처럼 사람이 직접 `esc()` 사용처를 읽어 확인하세요. 화면을 만들기
 전에 이 프로젝트의 다른 화면 파일(`web/pages/scorecard_leaderboard_page.py` 등)이 `esc()`를 어떻게
 쓰는지 먼저 보고 따라 하세요.
 

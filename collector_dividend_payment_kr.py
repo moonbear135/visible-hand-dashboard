@@ -165,7 +165,6 @@ import sys
 import time
 import zipfile
 from datetime import datetime, timedelta
-from utils.expiry_alarms import warn_if_expiring
 from html.parser import HTMLParser
 
 try:
@@ -175,8 +174,13 @@ except ImportError:  # pragma: no cover
 
 # 같은 폴더의 모듈. GitHub Actions 에서 `python -m` 없이 직접 실행돼도 import 되도록
 # 스크립트 자신의 디렉터리를 sys.path 에 넣습니다(collector_dividend_kr.py 와 같은 관례).
+# 🔴 L4(2026-08-29) 수정 — `utils.expiry_alarms` import 를 이 append **뒤**로 옮겼습니다.
+# 예전에는 앞에 있어서, 스크립트 자기 디렉터리가 파이썬이 자동으로 넣어주는
+# `sys.path[0]` 밖인 방식으로 실행되면(`python -m` 등 다른 cwd 에서) `utils` 를 못 찾고
+# ImportError 가 났을 수 있습니다.
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
+from utils.expiry_alarms import KRX_VERIFIED_LAST_YEAR, warn_if_expiring  # noqa: E402
 from corp_code_mapper import (  # noqa: E402
     DART_API_KEY_ENV,
     DART_DISCLOSURE_LIST_URL,
@@ -890,7 +894,12 @@ def fetch_dividend_decision_disclosures(bgn_de, end_de, api_key, session=None, l
 
     `stats`: dict 를 넘기면 집계를 담아 줍니다(호출부가 리포트에 남기기 위함).
         seen_rows, dividend_decisions, shareholder_register_close, unrecognized,
-        skipped_no_stock_code, skipped_bad_stock_code, pages, unrecognized_samples
+        skipped_no_stock_code, kept_with_unnormalized_stock_code, pages, unrecognized_samples
+
+    🟡 L3(2026-08-29) 수정 — `kept_with_unnormalized_stock_code`는 예전에
+       `skipped_bad_stock_code`였습니다. 이름과 달리 실제로는 **건너뛰지 않고**
+       `stock_code=None`으로 이벤트를 그대로 추가합니다(로그 문구는 정확했습니다) — 이
+       카운터만 보면 "N건을 버렸다"로 오해하기 쉬워 실제 동작에 맞게 이름을 바꿨습니다.
     """
     counters = {
         "pages": 0,
@@ -899,7 +908,8 @@ def fetch_dividend_decision_disclosures(bgn_de, end_de, api_key, session=None, l
         "shareholder_register_close": 0,
         "unrecognized": 0,
         "skipped_no_stock_code": 0,
-        "skipped_bad_stock_code": 0,
+        "kept_with_unnormalized_stock_code": 0,
+        "missing_rcept_no": 0,
         "unrecognized_samples": [],
     }
     events = []
@@ -987,16 +997,23 @@ def fetch_dividend_decision_disclosures(bgn_de, end_de, api_key, session=None, l
             if code is None:
                 # 조용히 버리지 않습니다. 처음 보는 표기라면 사람이 알아야 합니다(§0-1).
                 # 이벤트 자체는 살려 두되 stock_code 는 None 으로 남깁니다(지어내지 않기).
-                counters["skipped_bad_stock_code"] += 1
+                counters["kept_with_unnormalized_stock_code"] += 1
                 log(f"  ⚠️ 종목코드를 6자리로 정규화하지 못했습니다: {str(raw_code)!r} "
                     f"(rcept_no={row.get('rcept_no')}) — 레코드는 stock_code=None 으로 "
                     "남기고 원문은 stock_code_raw 에 보존합니다.")
 
             rcept_no = row.get("rcept_no")
-            if rcept_no in seen_rcept_no:
+            # 🟡 L10(2026-08-29) 수정 — `rcept_no`가 없는(None) 행이 2건 이상이면 예전
+            # 코드는 `None in seen_rcept_no`가 두 번째부터 True가 되어 **서로 다른
+            # 공시인데 "중복"으로 오판해 조용히 지웠습니다**(§0-1). 접수번호가 있을 때만
+            # dedupe 대상으로 삼고, 없는 행은 dedupe 하지 않되 몇 건인지는 남깁니다.
+            if not rcept_no:
+                counters["missing_rcept_no"] += 1
+            elif rcept_no in seen_rcept_no:
                 # 같은 접수번호가 페이지 경계에서 두 번 오는 경우 방어(중복 이벤트 방지).
                 continue
-            seen_rcept_no.add(rcept_no)
+            else:
+                seen_rcept_no.add(rcept_no)
 
             counters["dividend_decisions"] += 1
             events.append({
@@ -1026,6 +1043,10 @@ def fetch_dividend_decision_disclosures(bgn_de, end_de, api_key, session=None, l
     if counters["skipped_no_stock_code"]:
         log(f"  · 종목코드가 없는 배당결정 {counters['skipped_no_stock_code']:,}건은 "
             "건너뛰었습니다(비상장 법인 등).")
+    if counters["missing_rcept_no"]:
+        log(f"  ⚠️ 접수번호(rcept_no)가 없는 행 {counters['missing_rcept_no']:,}건 — "
+            "중복 판정 대상에서 제외하고 그대로 두었습니다(§0-1: 서로 다른 공시를 "
+            "'중복'으로 오판해 지우지 않기 위함).")
     if counters["unrecognized"]:
         log(f"  ⚠️ report_nm 에 '배당'이 들어 있지만 우리 판정 규칙(실측 표본 6종)에 없는 표기 "
             f"{counters['unrecognized']:,}건을 발견했습니다 — "
@@ -1667,7 +1688,7 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
     if not fresh:
         log("ℹ️ 새로 추가할 배당결정 공시가 없습니다.")
         total = _flush_payment_output(events_path, existing_records, [], scan_stats,
-                                      bgn_de, end_de, [], log=log)
+                                      bgn_de, end_de, [], log=log, raw_write_failures=0)
         return {"new_records": 0, "failures": [], "first_failed_date": None,
                 "total": total}
 
@@ -1682,6 +1703,7 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
     failures = []
     first_failed_date = None
     document_requests = 0
+    raw_write_failures = 0     # 🟡 L7(2026-08-29) — append_raw() 실패 건수(리포트에 남김)
 
     for item in fresh:
         rcept_no = item.get("rcept_no")
@@ -1694,7 +1716,8 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
             # 키·IP·한도·차단 — 지금까지 받은 것만 저장하고 실행을 중단합니다(재시도 금지).
             log(f"  🛑 치명적 응답을 받아 원문 수집을 여기서 멈춥니다(rcept_no={rcept_no}).")
             _flush_payment_output(events_path, existing_records, new_records, scan_stats,
-                                  bgn_de, end_de, failures, log=log)
+                                  bgn_de, end_de, failures, log=log,
+                                  raw_write_failures=raw_write_failures)
             raise
         except DartPaymentApiError as e:
             # 이 건 하나만 실패 — 레코드를 만들지 않습니다(값을 지어내지 않기, §0-1).
@@ -1717,7 +1740,7 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
         document_requests += 1
 
         # §0-3-3 — 원문은 가공본과 **다른 파일**에 그대로 보관합니다.
-        append_raw(raw_path, {
+        if not append_raw(raw_path, {
             "rcept_no": rcept_no,
             "rcept_dt": item.get("rcept_dt"),
             "corp_code": item.get("corp_code"),
@@ -1726,7 +1749,10 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
             "report_nm": item.get("report_nm"),
             "fetched_at_kst": _now_kst().isoformat(),
             "document_html": html_text,
-        })
+        }):
+            # 🟡 L7(2026-08-29) — append_raw()는 실패해도 예외를 던지지 않고 로그만 남기는
+            # 설계입니다(수집을 막지 않기 위해). 그 실패가 리포트에도 남도록 여기서 셉니다.
+            raw_write_failures += 1
 
         # matched_prefix 는 fetch_dividend_decision_disclosures() 가 classify_report_nm()
         # 판정 그대로 이벤트에 넣어 둔 값입니다(리츠 서식이면 REIT_CASH_DIVIDEND_PREFIX).
@@ -1747,16 +1773,19 @@ def _collect_payment_events_in_range(bgn_de, end_de, api_key, events_path, raw_p
 
     # ── 저장 (append-only) ───────────────────────────────────────────────────
     total = _flush_payment_output(events_path, existing_records, new_records, scan_stats,
-                                  bgn_de, end_de, failures, log=log)
+                                  bgn_de, end_de, failures, log=log,
+                                  raw_write_failures=raw_write_failures)
     log(f"   저장: {events_path} (총 {total:,}건, 이번 실행 추가 {len(new_records):,}건, "
         f"원문 실패 {len(failures):,}건)")
+    if raw_write_failures:
+        log(f"   🚨 raw 원본 보관 실패 {raw_write_failures:,}건 (디스크·권한 확인 필요)")
 
     return {"new_records": len(new_records), "failures": failures,
             "first_failed_date": first_failed_date, "total": total}
 
 
 def _flush_payment_output(events_path, existing_records, new_records, scan_stats,
-                          bgn_de, end_de, failures, log=print):
+                          bgn_de, end_de, failures, log=print, raw_write_failures=0):
     """
     append-only 저장. 기존 레코드 + 이번에 새로 만든 레코드를 원자적으로 씁니다.
 
@@ -1766,11 +1795,20 @@ def _flush_payment_output(events_path, existing_records, new_records, scan_stats
        generated_at 만 바뀐 파일을 매일 커밋하면, 레코드가 쌓일수록 같은 내용의 큰 파일이
        저장소 이력에 매일 한 벌씩 더 들어갑니다(§0-3-2 와 같은 취지 — 불필요한 부하).
        "이 구간을 확인했다"는 사실은 상태 파일이 이미 담고 있습니다.
+
+    🔴 M1(2026-08-29) 수정 — "내용이 같으면 다시 안 쓴다"는 취지는 맞지만, 예전에는
+       `new_records`가 비었다는 것만 보고 건너뛰었습니다. `failures`(원문 조회 실패)와
+       `scan_stats`(우리 판정 규칙 밖의 새 report_nm 표기)는 새 레코드가 0건이어도 이번
+       실행에서 실제로 값이 생길 수 있는데, 그러면 이번 실행의 실패·미인식 신호가
+       **통째로 유실**됐습니다(§0-1). 이제 실패·미인식 표기가 하나라도 있으면 새
+       레코드가 0건이어도 다시 씁니다 — "내용이 완전히 같을 때만" 건너뜁니다.
     """
     merged = list(existing_records) + list(new_records)
-    if not new_records and os.path.exists(events_path):
-        log(f"  ℹ️ 추가된 레코드가 없어 {os.path.basename(events_path)} 를 다시 쓰지 "
-            "않습니다(내용이 같은 파일을 매일 커밋하지 않기 위함입니다).")
+    has_new_signal = (bool(new_records) or bool(failures) or bool(raw_write_failures)
+                      or bool((scan_stats or {}).get("unrecognized")))
+    if not has_new_signal and os.path.exists(events_path):
+        log(f"  ℹ️ 추가된 레코드·실패·미인식 표기가 모두 없어 {os.path.basename(events_path)} "
+            "를 다시 쓰지 않습니다(내용이 같은 파일을 매일 커밋하지 않기 위함입니다).")
         return len(merged)
     payload = {
         "summary": summarize_payment_events(merged, extra={
@@ -1779,6 +1817,8 @@ def _flush_payment_output(events_path, existing_records, new_records, scan_stats
             "documents_failed_this_run": len(failures),
             "document_failures": failures,
             "scan_stats": scan_stats,
+            # 🟡 L7(2026-08-29) 추가 — raw 원본 보관(append_raw) 실패 건수.
+            "raw_write_failures": raw_write_failures,
         }),
         "records": merged,
     }
@@ -1820,13 +1860,15 @@ def main(argv=None):
     #    통째로 사라집니다(설계 의도 — 파일 상단 주석 참고).
     args = parser.parse_args(argv)
 
-    # 🔴 2026-08-25 추가 — 이 스크립트는 매일 도는 감시 배치라(watch_dividend_payment_events.yml),
-    #    web/pages/dividend_page.py 의 배당락일 계산용 KRX 휴장일 표 만료를 가장 확실히
-    #    미리 알아챌 수 있는 자리입니다. last_verified_year 값은 그 파일의
-    #    KRX_VERIFIED_YEARS 를 손으로 미러링한 것이니, 그 표를 갱신할 때 이 숫자도
-    #    함께 올리세요(안 올려도 동작이 깨지진 않습니다 — 그냥 알람 시점만 어긋납니다).
+    # 🔴 2026-08-25 추가, L5(2026-08-29) 수정 — 이 스크립트는 매일 도는 감시 배치라
+    #    (watch_dividend_payment_events.yml), web/pages/dividend_page.py 의 배당락일 계산용
+    #    KRX 휴장일 표 만료를 가장 확실히 미리 알아챌 수 있는 자리입니다. 예전에는
+    #    last_verified_year=2026 을 그 파일의 KRX_VERIFIED_YEARS 에서 **손으로 미러링**
+    #    했는데(§0-3-10 위반 — 표를 갱신할 때 이 숫자를 함께 올리는 걸 잊어도 아무 에러가
+    #    안 나서 알람 시점만 조용히 어긋났습니다), 이제 두 파일이 같은 값
+    #    (`utils.expiry_alarms.KRX_VERIFIED_LAST_YEAR`)을 봅니다.
     warn_if_expiring('배당락일 계산용 KRX 휴장일 표 (web/pages/dividend_page.py)',
-                      last_verified_year=2026)
+                      last_verified_year=KRX_VERIFIED_LAST_YEAR)
 
     # 한쪽만 준 것은 거의 확실히 실수입니다. 조용히 감시 모드로 돌면 사람이 의도한 구간이
     # 아니라 "어제까지 3일"만 훑고 끝나 버립니다 — 무엇이 잘못됐는지 말하고 멈춥니다(§0-1).

@@ -611,8 +611,37 @@ def test_fetch_disclosures_keeps_unnormalizable_code_as_none_and_warns(
     assert len(events) == 1
     assert events[0]["stock_code"] is None
     assert events[0]["stock_code_raw"] == "12345678"
-    assert stats["skipped_bad_stock_code"] == 1
+    assert stats["kept_with_unnormalized_stock_code"] == 1  # L3(2026-08-29): 이름 변경(버리지 않음)
     assert any("정규화하지 못했습니다" in message for message in messages)
+
+
+def test_fetch_disclosures_counts_missing_rcept_no_without_deduping_them_together(
+        monkeypatch, no_sleep):
+    """🟡 L10(2026-08-29) — 접수번호(rcept_no)가 없는 행끼리 "같은 접수번호(None)"로
+    취급해 서로를 중복이라고 버리면 안 됩니다(둘 다 진짜 별개의 공시일 수 있습니다).
+    대신 몇 건이 없었는지 세어 둡니다."""
+    rows = [
+        _row("현금ㆍ현물배당결정", "", stock_code="011170", corp_name="롯데케미칼"),
+        _row("현금ㆍ현물배당결정", "", stock_code="004990", corp_name="롯데지주"),
+    ]
+    _patch_list_pages(monkeypatch, [_list_payload(rows)])
+    messages = []
+    stats = {}
+    events = cp.fetch_dividend_decision_disclosures(
+        "20260820", "20260820", "FAKE-KEY", log=messages.append, stats=stats)
+    assert len(events) == 2                          # 둘 다 살아남아야 함(서로를 중복 취급 안 함)
+    assert stats["missing_rcept_no"] == 2
+    assert any("접수번호" in message for message in messages)
+
+
+def test_fetch_disclosures_does_not_count_missing_rcept_no_when_all_present(
+        monkeypatch, no_sleep):
+    rows = [_row("현금ㆍ현물배당결정", "20260820800655")]
+    _patch_list_pages(monkeypatch, [_list_payload(rows)])
+    stats = {}
+    cp.fetch_dividend_decision_disclosures(
+        "20260820", "20260820", "FAKE-KEY", log=lambda *_: None, stats=stats)
+    assert stats["missing_rcept_no"] == 0
 
 
 def test_fetch_disclosures_carries_flags_into_events(monkeypatch, no_sleep):

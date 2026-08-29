@@ -160,6 +160,7 @@ GET https://opendart.fss.or.kr/api/alotMatter.json
   · 코스닥/코넥스 종목의 `corp_cls` 실제 값(문서상 K/N 이지만 우리가 본 건 삼성전자의 Y 뿐).
 """
 import argparse
+import contextlib
 import json
 import os
 import random
@@ -238,7 +239,9 @@ REPRT_CODE_PRIORITY = ("11011", "11014", "11012", "11013")
 REPRT_CODE_PRIORITY_OWNER_ORDER = ("11014", "11012", "11013")
 
 # 12월 결산법인 기준 법정 제출기한 (자본시장법: 분기·반기 45일, 사업보고서 90일).
-# (기간종료 월, 기간종료 일, 기한까지의 일수, 사업연도 대비 기한이 넘어가는 해 오프셋)
+# 🟡 L2(2026-08-29) 수정 — 예전 주석은 4-튜플이라고 적었지만 실제 값·언패킹
+# (`plausible_reprt_codes()`의 `month, day, grace_days = spec`) 은 모두 3개뿐입니다.
+# (기간종료 월, 기간종료 일, 기한까지의 일수)
 _REPRT_PERIOD_END = {
     "11013": (3, 31, 45),
     "11012": (6, 30, 45),
@@ -1117,11 +1120,20 @@ def summarize_results(records, unmapped, extra=None):
 # =============================================================================
 # 8. 네트워크 (테스트에서는 _http_get_json 하나만 monkeypatch 합니다)
 # =============================================================================
-def _http_get_json(url, params, timeout, session):
-    """실제 네트워크 호출 지점. 반환: (status_code, parsed_json 또는 None)"""
+def _http_get_json(url, params, timeout, session, request_counter=None):
+    """실제 네트워크 호출 지점. 반환: (status_code, parsed_json 또는 None)
+
+    🔴 M15(2026-08-29) 추가 — `request_counter`가 있으면 **실제로 나간 HTTP 요청 한 번마다**
+    여기서 셉니다. 예전에는 호출부(`fetch_alot_matter` 등)가 함수 호출 1회를 1건으로
+    셌는데, 그 함수 안에서 5xx·네트워크 오류로 재시도가 일어나면 실제 HTTP 요청은
+    최대 `DART_NETWORK_RETRY + 1`배까지 나갑니다 — 예산(`max_requests`)이 실제 요청 수를
+    과소집계해 DART 일 한도를 넘길 수 있었습니다.
+    """
     if session is None and requests is None:
         raise DartApiError("`requests` 패키지가 없어 DART 를 호출할 수 없습니다.")
     getter = session.get if session is not None else requests.get
+    if request_counter is not None:
+        request_counter["count"] += 1
     res = getter(url, params=params, timeout=timeout)
     status = getattr(res, "status_code", None)
     try:
@@ -1131,13 +1143,18 @@ def _http_get_json(url, params, timeout, session):
     return status, payload
 
 
-def fetch_alot_matter(corp_code, bsns_year, reprt_code, api_key, session=None):
+def fetch_alot_matter(corp_code, bsns_year, reprt_code, api_key, session=None,
+                      request_counter=None):
     """
     alotMatter 단건 조회. 성공/데이터없음 모두 **응답 dict 를 그대로** 반환합니다.
 
     · 종목 하나만 실패하는 상황 → DartApiError
     · 실행 전체를 멈춰야 하는 상황(키·IP·요청한도·점검, HTTP 403/429) → DartFatalError
       (§0-3-2: 차단되면 무한 재시도 금지 — 즉시 중단합니다)
+
+    request_counter : M15(2026-08-29) — 주면 **재시도 포함, 실제 나간 HTTP 요청마다**
+        `_http_get_json()` 안에서 셉니다(호출부가 함수 호출 1회=1건으로 셌던 예전 방식은
+        재시도 시 예산을 과소집계했습니다).
     """
     params = {"crtfc_key": api_key, "corp_code": corp_code,
               "bsns_year": str(bsns_year), "reprt_code": reprt_code}
@@ -1146,7 +1163,8 @@ def fetch_alot_matter(corp_code, bsns_year, reprt_code, api_key, session=None):
     for attempt in range(DART_NETWORK_RETRY + 1):
         try:
             status_code, payload = _http_get_json(
-                DART_ALOT_MATTER_URL, params, DART_REQUEST_TIMEOUT_SEC, session)
+                DART_ALOT_MATTER_URL, params, DART_REQUEST_TIMEOUT_SEC, session,
+                request_counter=request_counter)
         except (DartApiError, DartFatalError):
             raise
         except Exception as e:
@@ -1644,7 +1662,13 @@ def peek_checkpoint_run_key(path):
         return None
 
 
-def save_checkpoint(path, run_key, records, done_codes, request_count):
+def save_checkpoint(path, run_key, records, done_codes, request_count, failure_counter=None):
+    """
+    :param failure_counter: L7(2026-08-29) 추가. `{"count": N}` 모양의 dict 를 주면
+        저장이 실패할 때마다 여기 셉니다 — 예전에는 실패해도 로그 한 줄만 남고 리포트에는
+        아무 흔적이 없어(§0-3-3 원본 보관이 통째로 실패해도 `completed: true`), 디스크
+        가득참·권한 문제가 조용히 반복돼도 아무도 모를 수 있었습니다.
+    """
     try:
         os.makedirs(os.path.dirname(os.path.abspath(path)) or ".", exist_ok=True)
         tmp = f"{path}.tmp"
@@ -1653,8 +1677,12 @@ def save_checkpoint(path, run_key, records, done_codes, request_count):
                        "records": records, "done_codes": done_codes,
                        "request_count": request_count}, f, ensure_ascii=False)
         os.replace(tmp, path)
+        return True
     except Exception as e:
         print(f"  ⚠️ 체크포인트 저장 실패(수집은 계속): {type(e).__name__}: {e}")
+        if failure_counter is not None:
+            failure_counter["count"] += 1
+        return False
 
 
 def clear_checkpoint(path):
@@ -1665,17 +1693,24 @@ def clear_checkpoint(path):
         print(f"  ⚠️ 체크포인트 정리 실패(수집 완료엔 지장 없음): {type(e).__name__}: {e}")
 
 
-def append_raw(raw_path, entry):
+def append_raw(raw_path, entry, failure_counter=None):
     """
     §0-3-3: **원본 응답을 가공본과 다른 파일에** 그대로 누적합니다(JSON Lines).
     파싱 규칙을 나중에 바꿔도 2,700종목을 다시 긁지 않아도 되게 하는 것이 목적입니다.
+
+    :param failure_counter: L7(2026-08-29) 추가 — `save_checkpoint()`와 같은 이유로
+        실패 건수를 셉니다.
     """
     try:
         os.makedirs(os.path.dirname(os.path.abspath(raw_path)) or ".", exist_ok=True)
         with open(raw_path, "a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
+        return True
     except Exception as e:
         print(f"  ⚠️ raw 보관 실패(수집은 계속): {type(e).__name__}: {e}")
+        if failure_counter is not None:
+            failure_counter["count"] += 1
+        return False
 
 
 # =============================================================================
@@ -1683,7 +1718,7 @@ def append_raw(raw_path, entry):
 # =============================================================================
 def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
                 priority=REPRT_CODE_PRIORITY, raw_path=None, sleep_fn=polite_sleep,
-                request_counter=None, kind_baseline_index=None):
+                request_counter=None, kind_baseline_index=None, raw_write_failure_counter=None):
     """
     한 종목의 배당 레코드를 만듭니다.
 
@@ -1703,14 +1738,15 @@ def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
         if idx > 0 and sleep_fn:
             sleep_fn()
         try:
-            payload = fetch_alot_matter(corp_code, bsns_year, reprt_code, api_key, session=session)
+            # 🔴 M15(2026-08-29) 수정 — 예산 카운터를 여기서 함수 호출당 1건으로 세지
+            # 않고 `fetch_alot_matter()` 안(재시도 포함, 실제 HTTP 요청마다)으로 내렸습니다.
+            payload = fetch_alot_matter(corp_code, bsns_year, reprt_code, api_key,
+                                        session=session, request_counter=request_counter)
         except DartFatalError:
             raise
         except DartApiError as e:
             probe_log.append({"reprt_code": reprt_code, "status": None,
                               "usable": False, "why": str(e)})
-            if request_counter is not None:
-                request_counter["count"] += 1
             # 진짜 에러는 '데이터 없음'과 다릅니다. 다음 보고서로 넘어가지 않고 이 종목을
             # 에러로 확정합니다 — 넘어가면 "에러였는데 무배당으로 보이는" 사고가 납니다.
             record = build_dividend_record(
@@ -1719,8 +1755,6 @@ def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
                                               f"조회 중 오류: {e}")
             return record, probe_log
 
-        if request_counter is not None:
-            request_counter["count"] += 1
         status = dart_status_of(payload)
         usable, why = is_usable_alot_response(payload)
         probe_log.append({"reprt_code": reprt_code, "status": status,
@@ -1732,7 +1766,7 @@ def collect_one(stock_code, corp_info, bsns_year, api_key, session=None,
                 "bsns_year": str(bsns_year), "reprt_code": reprt_code,
                 "fetched_at_kst": _now_kst().isoformat(),
                 "response": payload,            # ← 손대지 않은 원본
-            })
+            }, failure_counter=raw_write_failure_counter)
 
         if not usable:
             continue
@@ -1938,6 +1972,9 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
     records = list(ckpt["records"])
     done = set(ckpt["done_codes"])
     counter = {"count": ckpt["request_count"]}
+    # 🟡 L7(2026-08-29) 추가 — raw 보관·체크포인트 저장 실패를 리포트에 남기기 위한 카운터.
+    raw_write_failures = {"count": 0}
+    checkpoint_write_failures = {"count": 0}
     if done:
         log(f"  ↻ 체크포인트에서 {len(done):,}종목을 이어받았습니다(요청 {counter['count']:,}건 사용됨).")
 
@@ -1952,8 +1989,27 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
             kind_baseline_index=kind_baseline_index))
         done.add(code)
 
-    targets = [c for c in (normalize_stock_code(x) for x in universe)
-               if c and c in mapping and c not in done]
+    # 🟡 L6(2026-08-29) 수정 — `corp_code_mapper.map_stock_codes()`는 정규화 후 중복
+    # 코드를 이미 걸러(`seen` 집합) `mapping`에 1건만 남기는데, 여기 `targets`는 원문
+    # 코드마다 하나씩 뽑아 dedupe 를 하지 않았습니다. 유니버스에 "5930"과 "005930"이
+    # 함께 있으면 둘 다 "005930"으로 정규화되어 **같은 종목을 두 번 조회하고 레코드도
+    # 2건** 남았습니다(§0-3-2 낭비 + 리포트 왜곡). 여기서도 dedupe 하고, 버린 중복
+    # 건수는 로그로 남깁니다.
+    seen_targets = set()
+    targets = []
+    duplicate_target_count = 0
+    for raw_code in universe:
+        c = normalize_stock_code(raw_code)
+        if not c or c not in mapping or c in done:
+            continue
+        if c in seen_targets:
+            duplicate_target_count += 1
+            continue
+        seen_targets.add(c)
+        targets.append(c)
+    if duplicate_target_count:
+        log(f"  ⚠️ 유니버스에 같은 종목이 다른 표기로 중복 등록돼 있어 "
+            f"{duplicate_target_count:,}건을 건너뛰었습니다(정규화 후 같은 종목코드).")
     log(f"② 배당 수집 시작 — 남은 대상 {len(targets):,}종목 "
         f"(보고서 우선순위 {effective_priority}, 종목당 최대 {len(effective_priority)}요청)")
 
@@ -1975,10 +2031,12 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
                 code, corp_info, bsns_year, key, session=session,
                 priority=effective_priority, raw_path=raw_path,
                 sleep_fn=polite_sleep, request_counter=counter,
-                kind_baseline_index=kind_baseline_index)
+                kind_baseline_index=kind_baseline_index,
+                raw_write_failure_counter=raw_write_failures)
         except DartFatalError as e:
             # 실행 전체 중단. 지금까지의 결과는 반드시 저장합니다.
-            save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"])
+            save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"],
+                            failure_counter=checkpoint_write_failures)
             log(f"  🛑 {e}")
             stopped_reason = f"DART 차단/치명적 상태로 중단: {e}"
             break
@@ -1994,7 +2052,8 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
                 f"{record['status']}: {record['status_reason'][:80]}")
 
         if i % CHECKPOINT_EVERY == 0:
-            save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"])
+            save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"],
+                            failure_counter=checkpoint_write_failures)
 
         polite_sleep()      # 다음 종목으로 넘어가기 전 §0-3-2 딜레이
 
@@ -2026,6 +2085,11 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         "name_fallback_universe_names": len(universe_name_map),
         "name_fallback_index_stats": name_index_stats,
         "checkpoint_max_age_days": checkpoint_max_age_days,
+        # 🟡 L7(2026-08-29) 추가 — 디스크 가득참·권한 문제로 원본 보관·체크포인트 저장이
+        # 실패해도 수집 자체는 끝까지 도는데, 예전에는 그 실패가 로그에만 남고 리포트에는
+        # 흔적이 없었습니다(§0-3-3 원본 보관이 통째로 실패해도 completed: true).
+        "raw_write_failures": raw_write_failures["count"],
+        "checkpoint_write_failures": checkpoint_write_failures["count"],
         "verification_status": (
             "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. "
             "첫 GitHub Actions 실행 로그로 반드시 확인하세요."),
@@ -2042,7 +2106,17 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
         # (남겨두면 다음 실행이 '이미 다 했다'고 착각할 수 있습니다.)
         clear_checkpoint(ckpt_path)
     else:
-        save_checkpoint(ckpt_path, run_key, records, sorted(done), counter["count"])
+        final_checkpoint_ok = save_checkpoint(
+            ckpt_path, run_key, records, sorted(done), counter["count"],
+            failure_counter=checkpoint_write_failures)
+        if not final_checkpoint_ok:
+            # 🟡 L7(2026-08-29) — 이번 실행이 중단됐는데(completed=False) **마지막**
+            # 체크포인트 저장까지 실패하면, 다음 실행이 이어할 근거가 아예 없어 처음부터
+            # 다시 돕니다. summary 는 이미 위에서 파일로 썼으므로 그 안의 카운터를 고칠
+            # 수는 없지만(§0-1: 이미 커밋된 값을 조용히 되돌리지 않음), 최소한 로그에는
+            # 크게 남깁니다 — 다음 사람이 "왜 처음부터 다시 도나"를 알 수 있게.
+            log("  🚨 마지막 체크포인트 저장까지 실패했습니다 — 다음 실행이 이어하지 못하고 "
+                "처음부터 다시 돕니다(summary.checkpoint_write_failures 참고).")
 
     log("─" * 78)
     log(f"③ 완료 여부: {'전수 완료' if completed else '중단(이어하기 가능)'}")
@@ -2064,6 +2138,9 @@ def run_collection(universe, bsns_year, out_dir, cache_dir=None, api_key=None, s
     if summary["records_with_unit_mismatch"]:
         log(f"   ⚠️ 단위 검증 미통과 레코드: {summary['records_with_unit_mismatch']:,}건 "
             "(값은 원문 그대로 두었습니다 — 각 레코드의 unit_mismatch_notes 참고)")
+    if summary["raw_write_failures"] or summary["checkpoint_write_failures"]:
+        log(f"   🚨 저장 실패 — raw 보관 {summary['raw_write_failures']:,}건 / "
+            f"체크포인트 {summary['checkpoint_write_failures']:,}건 (디스크·권한 확인 필요)")
     if kind_baseline_index:
         log(f"   §0-3-3 교차검증: 기준선 {len(kind_baseline_index):,}건과 대조 → 불일치 "
             f"{summary['records_with_cross_source_mismatch']:,}건 "
@@ -2441,7 +2518,8 @@ def _reprt_priority_index(reprt_code):
 
 
 def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
-                       date_range_checked=None, matched_stock_codes=None):
+                       date_range_checked=None, matched_stock_codes=None,
+                       outside_universe_codes=None):
     """
     daily watch 델타(새 보고서를 낸 회사만 다시 돌린 별도 out_dir)를 기존 전체 결과에 반영합니다.
 
@@ -2449,8 +2527,10 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
     · 없는 종목      → 추가
     · raw.jsonl      → 이어붙이기만(append-only)
 
-    date_range_checked / matched_stock_codes 는 감사 로그에 남길 실행 맥락입니다(선택).
-    주지 않으면 델타 산출물에서 알 수 있는 만큼만 기록합니다 — 지어내지 않습니다.
+    date_range_checked / matched_stock_codes / outside_universe_codes 는 감사 로그·리포트에
+    남길 실행 맥락입니다(선택). 주지 않으면 델타 산출물에서 알 수 있는 만큼만 기록합니다 —
+    지어내지 않습니다. outside_universe_codes(M11, 2026-08-29)는 이번 감시가 훑은 구간에서
+    새 정기보고서를 냈지만 우리 유니버스 밖이라 수집 대상이 아니었던 종목코드입니다.
 
     ⚠️ 델타 산출물이 아예 없으면(그날 매칭 0건이라 `run_collection()` 을 안 돌린 경우) 이
        함수를 부르지 마세요. 그 판단은 호출부(CLI)가 합니다.
@@ -2488,6 +2568,10 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
 
     merged_records = list(main_records)
     replaced_codes, added_codes, regression_notes = [], [], []
+    # 🔴 H1(2026-08-29) 추가 — 델타 레코드가 "OK가 아닌데" 기존 OK 레코드를 덮어써 버린
+    # 사건의 재발 방지용 기록입니다(교체를 건너뛴 종목 목록). 리포트·watch_log 양쪽에
+    # 남겨 "값을 조용히 지켰다"가 아니라 "왜 안 바꿨는지"가 항상 눈에 보이게 합니다.
+    skipped_replacements = []
 
     for new_rec in delta_records:
         code = new_rec.get("stock_code")
@@ -2508,6 +2592,25 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
             continue
 
         old_rec = merged_records[position]
+
+        # 🔴 H1(2026-08-29) — 델타 레코드의 status 가 "OK"가 아니면(예: 일시적 DART 5xx로
+        # ERROR 가 났거나 NO_DATA/UNMAPPED 로 나온 경우) 교체하지 않고 기존 레코드를 그대로
+        # 지킵니다. 예전에는 이 판단이 없어, 확정 배당 레코드(OK)가 일시적 조회 실패
+        # 레코드(ERROR)로 그대로 덮어써져 사라지는 사고가 있었습니다(실측 재현 —
+        # dps_cash_common 746.0 → None). "값을 조용히 지킨다"가 아니라 왜 안 바꿨는지를
+        # skipped_replacements 로 남깁니다.
+        if new_rec.get("status") != "OK":
+            reason = new_rec.get("status_reason") or "사유 미기록"
+            log(f"  ⏭️ 종목코드 {code}: 델타 결과가 status={new_rec.get('status')!r} 이라 "
+                f"기존 {old_rec.get('status')!r} 레코드를 교체하지 않았습니다(사유: {reason}).")
+            skipped_replacements.append({
+                "stock_code": code,
+                "kept_status": old_rec.get("status"),
+                "delta_status": new_rec.get("status"),
+                "delta_status_reason": new_rec.get("status_reason"),
+            })
+            continue
+
         # §0-1: 조용히 덮어쓰지 않습니다 — 무엇이 무엇으로 바뀌었는지 한 줄씩 남깁니다.
         log(f"  ↻ 종목코드 {code}: "
             f"{old_rec.get('reprt_name') or '(보고서 미상)'}"
@@ -2533,8 +2636,22 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
         replaced_codes.append(code)
 
     # ── ④ 리포트 재계산 — 손으로 더하지 않고 summarize_results() 에 다시 먹입니다 ──
-    merged_unmapped = (list(main_summary.get("unmapped_detail") or [])
-                       + list(delta_summary.get("unmapped_detail") or []))
+    # 🔴 M12(2026-08-29) 수정 — merge_delta_output() 과 달리 여기서는 델타 유니버스가
+    # 기존 유니버스의 **부분집합**이라(감시는 이미 있는 종목만 다시 봅니다), 같은 종목이
+    # 기존·델타 양쪽 unmapped_detail 에 함께 들어 있을 수 있습니다. 그러면 레코드는 1건
+    # (교체)인데 unmapped_detail 은 2건이 되어 `unmapped_stock_codes`(=len(unmapped))와
+    # `by_status['UNMAPPED']` 가 서로 다른 숫자를 말했습니다. 종목코드 기준으로
+    # dedupe 하고, 델타가 최신이므로 **델타 쪽을 우선**합니다.
+    def _dedupe_unmapped(entries):
+        by_code = {}
+        for item in entries:
+            code = (item or {}).get("stock_code") or (item or {}).get("stock_code_input")
+            by_code[code or id(item)] = item     # code 가 없으면(이론상) 각각 별개로 둡니다
+        return list(by_code.values())
+
+    merged_unmapped = _dedupe_unmapped(
+        list(main_summary.get("unmapped_detail") or [])
+        + list(delta_summary.get("unmapped_detail") or []))
 
     both_completed, stopped_reason = _combine_completion(main_summary, delta_summary, "감시 델타")
 
@@ -2561,7 +2678,9 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
         "watch_date_range_checked": date_range_checked,
         "watch_replaced_stock_codes": replaced_codes,
         "watch_added_stock_codes": added_codes,
+        "watch_skipped_replacements": skipped_replacements,
         "watch_unexpected_report_regressions": regression_notes,
+        "watch_filings_outside_universe": list(outside_universe_codes or []),
         # 델타 실행의 원래 리포트를 원문 그대로 남깁니다(merged_from 과 같은 취지).
         # ⚠️ 여기 남는 건 **가장 최근 감시 1회분**입니다. 누적 이력은 watch_log 파일입니다.
         "watch_delta_summary": delta_summary,
@@ -2604,6 +2723,7 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
                                        else "미전달 — 델타 산출물의 종목으로 대신 기록"),
         "replaced_stock_codes": list(replaced_codes),
         "added_stock_codes": list(added_codes),
+        "skipped_replacements": list(skipped_replacements),
         "delta_raw_lines_appended": len(delta_raw_lines),
         "unexpected_report_regressions": list(regression_notes),
         "delta_out_dir": delta_out_dir,
@@ -2618,6 +2738,9 @@ def apply_watch_update(main_out_dir, delta_out_dir, bsns_year, log=print,
     log("② 감시 반영 완료")
     log(f"   교체 {len(replaced_codes):,}종목 / 추가 {len(added_codes):,}종목 → "
         f"총 {merged_summary['total_records']:,}레코드 / 상태별 {merged_summary['by_status']}")
+    if skipped_replacements:
+        log(f"   ⏭️ OK가 아닌 델타로 교체를 건너뛴 종목 {len(skipped_replacements):,}건 — "
+            "summary.watch_skipped_replacements 참고(기존 값을 그대로 지켰습니다)")
     if regression_notes:
         log(f"   ⚠️ 예상 밖(더 과거 보고서로 교체) {len(regression_notes):,}건 — "
             "summary.watch_unexpected_report_regressions 참고")
@@ -2824,9 +2947,14 @@ def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
 
     matched_norm = sorted(code for code in filings if code in universe_by_norm)
     matched_input_codes = [universe_by_norm[code] for code in matched_norm]
+    # 🔴 M11(2026-08-29) 추가 — 유니버스 밖 회사가 새 정기보고서를 냈다는 사실이 예전에는
+    # 로그에만 남고 산출물에는 흔적이 없었습니다(§0-1 "로그만 남기는 것은 조치가 아니다").
+    # 이제 종목코드 목록까지 `apply_watch_update()` 에 넘겨 리포트·화면에 남깁니다.
+    outside_universe_codes = sorted(code for code in filings if code not in universe_by_norm)
 
     log(f"  → 새 정기보고서 {len(filings):,}종목 중 우리 유니버스"
-        f"({len(universe_by_norm):,}종목)에 있는 종목: {len(matched_norm):,}건")
+        f"({len(universe_by_norm):,}종목)에 있는 종목: {len(matched_norm):,}건"
+        + (f" / 유니버스 밖: {len(outside_universe_codes):,}건" if outside_universe_codes else ""))
 
     if not matched_norm:
         log("ℹ️ 새로 접수된 정기보고서 중 우리 유니버스에 해당하는 종목 없음 — "
@@ -2870,7 +2998,8 @@ def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
     # ── ⑤ 본 산출물에 반영 ───────────────────────────────────────────────────
     apply_watch_update(out_dir, delta_out_dir, bsns_year, log=log,
                        date_range_checked=date_range_checked,
-                       matched_stock_codes=matched_norm)
+                       matched_stock_codes=matched_norm,
+                       outside_universe_codes=outside_universe_codes)
 
     # ── ⑥ 여기까지 왔을 때만 "확인 끝"으로 기록합니다 ────────────────────────
     # 2026-08-29 재감사 H9: 델타 수집이 전수 완료되지 않았으면 워터마크를 전진시키지 않습니다.
@@ -2888,9 +3017,90 @@ def run_watch_disclosures(universe_path, bsns_year, out_dir, cache_dir=None,
             "확인합니다. 이미 반영된 종목은 그대로 남아 있습니다.")
         return 2
 
+    # 🔴 H1(2026-08-29) 추가 — `run_collection()` 은 개별 종목의 `DartApiError` 를 예외로
+    # 올리지 않고 status="ERROR" 레코드로 바꿔 계속 진행하므로, 위 `completed` 플래그만으로는
+    # "이 종목은 아직 확인 못 했다"는 사실이 드러나지 않습니다(그래서 워터마크가 그대로
+    # 전진해 다음 실행이 이 종목을 다시 보지 않는 사고가 났습니다 — 실측 재현). 델타 레코드
+    # 중 하나라도 ERROR 면, 그 종목은 이번 감시에서 "확인 끝"이 아니므로 전체 워터마크를
+    # 전진시키지 않습니다(apply_watch_update() 는 이미 그 ERROR 레코드로 기존 값을 덮어쓰지
+    # 않았습니다 — 여기서는 "다음 실행이 이 구간을 다시 봐야 한다"만 추가로 보장합니다).
+    delta_error_codes = sorted(
+        rec.get("stock_code") for rec in (_delta_records or [])
+        if rec.get("status") == "ERROR" and rec.get("stock_code"))
+    if delta_error_codes:
+        log(f"  🚨 델타 결과 중 {len(delta_error_codes):,}종목이 ERROR 로 끝났습니다"
+            f"({_format_code_list(set(delta_error_codes))}) — 상태 파일을 전진시키지 "
+            f"않습니다(last_checked_de 유지). 다음 실행이 {date_range_checked} 구간을 다시 "
+            "확인해 이 종목들을 재시도합니다. 이미 OK 로 반영된 다른 종목은 그대로 남아 "
+            "있습니다.")
+        return 2
+
     _write_watch_state(state_path, end_de)
     log(f"   상태 파일 갱신: {state_path} (last_checked_de={end_de})")
     return 0
+
+
+#: 🔴 M8(2026-08-29) 추가 — 같은 `--out-dir`을 전체수집(run_collection)ㆍ병합
+#: (merge_delta_output)ㆍ감시(run_watch_disclosures → apply_watch_update)가 동시에
+#: 건드리면, 서로의 읽기-수정-쓰기(체크포인트ㆍ최종 산출물 JSON)가 겹쳐 한쪽 결과가
+#: 사라지거나 파일이 반쯤 쓰인 채로 깨질 수 있습니다(실제로 자동화(GitHub Actions)가
+#: 전체수집과 매일 감시를 겹치는 시간대에 돌릴 가능성이 있다는 감사 지적).
+#:
+#: `fcntl.flock`(POSIX 전용) 대신 `os.O_CREAT | os.O_EXCL`(원자적 생성 — 이미 있으면
+#: 실패)로 만든 이유는 이 스크립트가 GitHub Actions(Linux)뿐 아니라 오너의 Windows 로컬
+#: 환경(device_bash)에서도 그대로 실행되기 때문입니다 — 플랫폼마다 다른 락 코드를 두 벌
+#: 만들지 않습니다.
+#: ⚠️ 이 방식은 "프로세스가 죽으면 OS 가 자동으로 풀어 주는" `fcntl.flock`과 달리, 비정상
+#: 종료(강제 종료ㆍOOM 등) 시 락 파일이 그대로 남을 수 있습니다. 그래서 락 파일이
+#: `_STALE_LOCK_SECONDS`(기본 `--max-runtime-sec`인 5시간보다 넉넉히 긴 값)보다 오래됐으면
+#: 죽은 락으로 보고 지운 뒤 다시 시도하고, 그보다 최근이면 진짜 동시 실행 중이라고 보고
+#: **그 자리에서 실패**합니다(§0-1 — 조용히 진행해 나중에 산출물이 깨지는 것보다, 지금
+#: 시끄럽게 멈추는 편이 낫습니다).
+_STALE_LOCK_SECONDS = 6 * 60 * 60  # 6시간
+
+
+@contextlib.contextmanager
+def _locked_output_dir(out_dir, log=print):
+    """`out_dir`에 대한 배타 락을 잡고 with 블록 동안 유지합니다.
+
+    :raises RuntimeError: 다른 실행이 이미 이 디렉터리를 쓰고 있는 것으로 보이면(락 파일이
+        존재하고 아직 `_STALE_LOCK_SECONDS`보다 새로우면) — 호출부(`main()`)가 이 예외를
+        사람이 읽을 문장으로 바꿔 종료코드 2로 끝냅니다.
+    """
+    os.makedirs(out_dir, exist_ok=True)
+    lock_path = os.path.join(out_dir, ".collector_dividend_kr.lock")
+
+    try:
+        age = time.time() - os.path.getmtime(lock_path)
+    except OSError:
+        age = None
+    if age is not None and age > _STALE_LOCK_SECONDS:
+        log(f"⚠️ 락 파일({lock_path})이 {age / 3600:.1f}시간째 남아 있어(기준 "
+            f"{_STALE_LOCK_SECONDS / 3600:.0f}시간) 죽은 락으로 보고 지웁니다 — 이전 실행이 "
+            "정상 종료하지 못한 것으로 보입니다.")
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass  # 그 사이 다른 프로세스가 이미 지웠거나 새로 잡았을 수 있음 — 아래에서 다시 판정
+
+    try:
+        fd = os.open(lock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+    except FileExistsError:
+        raise RuntimeError(
+            f"다른 실행이 이미 이 디렉터리({out_dir})를 쓰고 있는 것으로 보입니다"
+            f"(락 파일: {lock_path}). 동시에 두 실행이 같은 산출물을 건드리면 결과가 "
+            "깨질 수 있어 지금 멈춥니다 — 먼저 실행 중인 작업이 끝난 뒤 다시 시도하거나, "
+            "그 실행이 이미 죽었다고 확신하면 이 락 파일을 직접 지워 주세요."
+        )
+    try:
+        with os.fdopen(fd, "w") as fh:
+            fh.write(f"pid={os.getpid()} started={datetime.now().isoformat()}\n")
+        yield
+    finally:
+        try:
+            os.remove(lock_path)
+        except OSError:
+            pass  # 이미 없어졌어도(수동 삭제 등) with 블록은 정상 종료로 취급
 
 
 def main(argv=None):
@@ -2947,67 +3157,79 @@ def main(argv=None):
                         help="watch 상태 파일이 아직 없을 때(최초 실행) 며칠 전부터 확인할지")
     args = parser.parse_args(argv)
 
-    # ── 병합 모드: 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──────────────
-    if args.merge_delta:
+    def _run():
+        # ── 병합 모드: 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──────────
+        if args.merge_delta:
+            try:
+                merge_delta_output(args.out_dir, args.merge_delta, args.year,
+                                   force=args.force_merge)
+            except (FileNotFoundError, ValueError) as e:
+                # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로 끝내되, 조용히 성공하지 않습니다.
+                print(f"🛑 병합하지 않았습니다 — {e}")
+                return 2
+            return 0
+
+        if args.force_merge:
+            parser.error("--force-merge 는 --merge-delta 와 함께 쓸 때만 의미가 있습니다.")
+
+        # ── 공시목록 감시 모드: 이것도 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──
+        #    (평소 수집은 유니버스 전체를 다시 훑지만, 이 모드는 "어제 새 보고서를 낸 회사"만
+        #     콕 집어 다시 돕니다 — 아래 run_watch_disclosures() 참고.)
+        if args.watch_disclosures:
+            if not args.universe:
+                parser.error("--universe 가 필요합니다 (watch 모드). 어제 새로 접수된 정기보고서 "
+                             "중 '우리 유니버스에 있는 종목'만 골라내야 하기 때문입니다.")
+            try:
+                return run_watch_disclosures(
+                    args.universe, args.year, args.out_dir, cache_dir=args.cache_dir,
+                    lookback_days=args.watch_lookback_days, log=print)
+            except (DartFatalError, DartCorpCodeError, DartApiError) as e:
+                # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로. 다만 '조용히 성공'하지 않습니다.
+                # ⚠️ 상태 파일은 갱신되지 않은 상태입니다 — 다음 실행이 같은 구간을 다시 확인합니다.
+                print(f"🛑 공시목록 감시를 중단했습니다 — {e}")
+                return 2
+            except (FileNotFoundError, ValueError) as e:
+                print(f"🛑 감시 결과를 반영하지 못했습니다 — {e}")
+                return 2
+
+        if not args.universe:
+            parser.error("--universe 가 필요합니다 (수집 모드). "
+                         "델타 병합만 하려면 --merge-delta DELTA_OUT_DIR 을 쓰세요.")
+
+        universe = load_universe(args.universe)
+        # 회사명 2차 매칭은 **새 플래그 없이** 켜집니다: 유니버스 파일에 이름 컬럼이 있으면
+        # 그대로 쓰고, 없으면 빈 dict 가 넘어가 2차 매칭이 알아서 꺼집니다.
+        # (`run_collection()` 은 경로가 아니라 이미 읽은 종목 목록을 받으므로, 파일을 아는
+        #  main() 이 이름 맵도 함께 읽어 넘깁니다.)
+        universe_name_map = load_universe_name_map(args.universe)
+        priority = REPRT_CODE_PRIORITY_OWNER_ORDER if args.owner_order else REPRT_CODE_PRIORITY
         try:
-            merge_delta_output(args.out_dir, args.merge_delta, args.year,
-                               force=args.force_merge)
-        except (FileNotFoundError, ValueError) as e:
-            # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로 끝내되, 조용히 성공하지 않습니다.
-            print(f"🛑 병합하지 않았습니다 — {e}")
+            run_collection(
+                universe, args.year, args.out_dir, cache_dir=args.cache_dir,
+                priority=priority, skip_not_yet_due=args.skip_not_yet_due,
+                max_requests=args.max_requests, max_runtime_sec=args.max_runtime_sec,
+                force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit,
+                history_baseline_path=args.history_baseline,
+                checkpoint_max_age_days=args.checkpoint_max_age_days,
+                allow_overwrite=args.allow_overwrite,
+                universe_name_map=universe_name_map)
+        except (DartFatalError, DartCorpCodeError) as e:
+            # §0-3-4: 스택트레이스를 그대로 뿌리지 않고 사람이 읽을 문장으로 끝냅니다.
+            # (⚠️ 그래도 '조용히 성공'하지는 않습니다 — 종료코드 2 로 Actions 를 빨간불로 만듭니다.)
+            print(f"🛑 수집을 중단했습니다 — {e}")
             return 2
         return 0
 
-    if args.force_merge:
-        parser.error("--force-merge 는 --merge-delta 와 함께 쓸 때만 의미가 있습니다.")
-
-    # ── 공시목록 감시 모드: 이것도 수집 경로로 절대 흘러들지 않는 별개의 모드입니다 ──
-    #    (평소 수집은 유니버스 전체를 다시 훑지만, 이 모드는 "어제 새 보고서를 낸 회사"만
-    #     콕 집어 다시 돕니다 — 아래 run_watch_disclosures() 참고.)
-    if args.watch_disclosures:
-        if not args.universe:
-            parser.error("--universe 가 필요합니다 (watch 모드). 어제 새로 접수된 정기보고서 "
-                         "중 '우리 유니버스에 있는 종목'만 골라내야 하기 때문입니다.")
-        try:
-            return run_watch_disclosures(
-                args.universe, args.year, args.out_dir, cache_dir=args.cache_dir,
-                lookback_days=args.watch_lookback_days, log=print)
-        except (DartFatalError, DartCorpCodeError, DartApiError) as e:
-            # §0-3-4: 스택트레이스 대신 사람이 읽을 문장으로. 다만 '조용히 성공'하지 않습니다.
-            # ⚠️ 상태 파일은 갱신되지 않은 상태입니다 — 다음 실행이 같은 구간을 다시 확인합니다.
-            print(f"🛑 공시목록 감시를 중단했습니다 — {e}")
-            return 2
-        except (FileNotFoundError, ValueError) as e:
-            print(f"🛑 감시 결과를 반영하지 못했습니다 — {e}")
-            return 2
-
-    if not args.universe:
-        parser.error("--universe 가 필요합니다 (수집 모드). "
-                     "델타 병합만 하려면 --merge-delta DELTA_OUT_DIR 을 쓰세요.")
-
-    universe = load_universe(args.universe)
-    # 회사명 2차 매칭은 **새 플래그 없이** 켜집니다: 유니버스 파일에 이름 컬럼이 있으면
-    # 그대로 쓰고, 없으면 빈 dict 가 넘어가 2차 매칭이 알아서 꺼집니다.
-    # (`run_collection()` 은 경로가 아니라 이미 읽은 종목 목록을 받으므로, 파일을 아는
-    #  main() 이 이름 맵도 함께 읽어 넘깁니다.)
-    universe_name_map = load_universe_name_map(args.universe)
-    priority = REPRT_CODE_PRIORITY_OWNER_ORDER if args.owner_order else REPRT_CODE_PRIORITY
+    # 🔴 M8(2026-08-29) — 위 세 모드(병합ㆍ감시ㆍ전체수집) 전부 같은 --out-dir 을 읽고
+    # 씁니다. 락을 여기 CLI 진입점 한 곳에서만 잡는 이유는 세 모드가 서로 어떤 조합으로
+    # 겹쳐도(예: 전체수집 도중 감시가 같은 out_dir 로 겹쳐 돎) 전부 이 한 관문을 지나기
+    # 때문입니다 — 함수마다 각자 락을 걸면 어느 하나라도 빠뜨리기 쉽습니다(§0-3-10).
     try:
-        run_collection(
-            universe, args.year, args.out_dir, cache_dir=args.cache_dir,
-            priority=priority, skip_not_yet_due=args.skip_not_yet_due,
-            max_requests=args.max_requests, max_runtime_sec=args.max_runtime_sec,
-            force_corpcode_refresh=args.force_corpcode_refresh, limit=args.limit,
-            history_baseline_path=args.history_baseline,
-            checkpoint_max_age_days=args.checkpoint_max_age_days,
-            allow_overwrite=args.allow_overwrite,
-            universe_name_map=universe_name_map)
-    except (DartFatalError, DartCorpCodeError) as e:
-        # §0-3-4: 스택트레이스를 그대로 뿌리지 않고 사람이 읽을 문장으로 끝냅니다.
-        # (⚠️ 그래도 '조용히 성공'하지는 않습니다 — 종료코드 2 로 Actions 를 빨간불로 만듭니다.)
-        print(f"🛑 수집을 중단했습니다 — {e}")
+        with _locked_output_dir(args.out_dir):
+            return _run()
+    except RuntimeError as e:
+        print(f"🛑 {e}")
         return 2
-    return 0
 
 
 if __name__ == "__main__":

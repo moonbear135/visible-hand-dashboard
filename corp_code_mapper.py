@@ -139,6 +139,27 @@ DART_REQUEST_DELAY_MAX = 3.0
 DART_NETWORK_RETRY = 1              # 네트워크/5xx 만 1회 재시도
 DART_RETRY_DELAY_SEC = 5.0
 
+# 🏗️ S1(2026-08-29) 이동 — 원래 `collector_dividend_kr.py`에만 있었는데,
+# `collector_dividend_payment_kr.py`가 "완전히 독립"이라고 선언한 파일 머리말과
+# 달리 이 상수/함수를 가져다 쓰고 있었습니다(2단 경유: 여기 → collector_dividend_kr
+# → collector_dividend_payment_kr). 위 DART_STATUS_MESSAGES·DART_DISCLOSURE_LIST_URL
+# 등을 이 파일로 모은 것(M11)과 같은 이유로, 두 수집기가 같은 곳을 보게 여기로
+# 올립니다 — 의존 방향이 collector_dividend_kr → corp_code_mapper ←
+# collector_dividend_payment_kr 로 단순해집니다(collector_dividend_kr 은 하위
+# 호환을 위해 여기서 다시 import해 이름을 그대로 유지합니다).
+DART_DOCUMENT_URL_TEMPLATE = "https://dart.fss.or.kr/dsaf001/main.do?rcpNo={rcept_no}"
+
+
+def dart_document_url(rcept_no):
+    """rcept_no → DART 공시 원문 URL. 값이 없으면 None(빈 링크를 만들지 않습니다)."""
+    if not rcept_no:
+        return None
+    text = str(rcept_no).strip()
+    if not text:
+        return None
+    return DART_DOCUMENT_URL_TEMPLATE.format(rcept_no=text)
+
+
 KST = timezone(timedelta(hours=9))
 
 

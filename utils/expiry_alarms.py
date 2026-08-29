@@ -19,6 +19,16 @@ utils/expiry_alarms.py
 
 from datetime import date
 
+#: 🔴 L5(2026-08-29) 추가 — KRX 휴장일 표(`web/pages/dividend_page.py::KRX_VERIFIED_YEARS`
+#: · `KRX_VERIFIED_RANGE`)가 검증된 마지막 연도입니다. 예전에는 이 숫자를
+#: `collector_dividend_payment_kr.py` 가 `last_verified_year=2026` 으로 **손으로
+#: 미러링**했는데(§0-3-10 "같은 사실을 두 곳에 적지 않기" 위반), 표를 갱신하면서 이 숫자
+#: 갱신을 잊어도 아무 에러도 나지 않아 알람 시점만 조용히 어긋났습니다. `collector_*`
+#: 쪽은 `web/` 을 import 할 수 없어(무거운 nicegui 의존성) 표 자체는 여전히
+#: `dividend_page.py` 에 두지만, "몇 년까지 검증됐는가"라는 숫자 하나만은 두 파일이
+#: 함께 볼 수 있는 이 파일(순수 datetime만 씀)로 올려 양쪽이 같은 값을 보게 합니다.
+KRX_VERIFIED_LAST_YEAR = 2026
+
 
 def warn_if_expiring(label: str, last_verified_year: int, *, lead_days: int = 60) -> bool:
     """

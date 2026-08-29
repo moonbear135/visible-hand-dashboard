@@ -1828,13 +1828,34 @@ def test_pages_import_cleanly():
     for module_name in ("web.auth", "web.auth_ui", "web.layout",
                         "web.pages.admin_page", "web.pages.macro_page",
                         "web.pages.scorecard_page", "web.pages.report_page",
-                        "web.pages.duel_page"):
+                        "web.pages.duel_page",
+                        # 🟠 M16(2026-08-29) 추가 — 배당 화면 2개가 이 검증 대상에서
+                        # 빠져 있었습니다(재감사 확인, grep 0건).
+                        "web.pages.dividend_page", "web.pages.dividend_us_page"):
         try:
             __import__(module_name)
         except Exception as exc:                   # noqa: BLE001
             check(False, f"{module_name} import", f"({type(exc).__name__}: {exc})")
         else:
             check(True, f"{module_name} import")
+
+
+def test_dividend_pages_use_esc_for_external_strings():
+    """🔴 L12(2026-08-29) — `DIVIDEND_MODULE_WORK_ORDER.md` [항목 5]가 "화면 파일마다
+    `esc(` 사용을 자동으로 강제 검사한다"고 적어 놨지만, 실제로는 그 검사가 스코어카드ㆍ
+    리포트ㆍ결투 등 **이름을 하나하나 지정한 화면 파일에만** 걸려 있고 배당 화면 2개는
+    빠져 있었습니다(재감사로 확인, 문서도 같이 정정함). 문서 정정만으로 끝내지 않고, 이
+    화면 2개에 대해서만이라도 같은 검사를 실제로 걸어 둡니다 — "esc() 를 쓰고 있다는
+    사실을 사람이 코드를 읽어서만 아는" 상태를 "테스트가 지켜주는" 상태로 바꿉니다.
+
+    ⚠️ 이 검사는 "esc( 라는 글자가 파일에 있는가"만 봅니다(다른 화면 파일들의 (d) 검사와
+    같은 얕은 방식) — 실제로 모든 외부 문자열이 빠짐없이 esc()를 거치는지까지는 보장하지
+    않습니다. 그래도 "esc() 를 아예 안 쓰는 새 화면"이 조용히 들어오는 것은 막습니다.
+    """
+    print("\n[3-c] 배당 화면 esc() 사용 검사 (L12)")
+    for module_name in ("dividend_page", "dividend_us_page"):
+        src = (REPO_ROOT / "web" / "pages" / f"{module_name}.py").read_text(encoding="utf-8")
+        check("esc(" in src, f"web/pages/{module_name}.py 가 esc() 를 사용함")
 
 
 # =============================================================================
@@ -1860,6 +1881,7 @@ def main():
     test_duel_page_wiring()
     test_duel_render_smoke()
     test_pages_import_cleanly()
+    test_dividend_pages_use_esc_for_external_strings()
 
     print("\n" + "=" * 74)
     if FAILURES:

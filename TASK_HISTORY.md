@@ -3220,6 +3220,180 @@
      될 만합니다(오너 판단).
 
 
+164. **🔧 재감사 4차 — 배당(KR/US) 모듈 버그 수정 37건 반영, 4건 유예 (2026-08-29,
+     오푸스 높음, 오너 지시 — "한번 할 때 전부 다").** `DIVIDEND_REAUDIT_FINDINGS.md`
+     (신규 감사) 41건(🔴 High 7·🟠 Medium 17·🟡 Low 12·🏗️ Structural 5) 중 37건을
+     반영하고, 나머지 4건(H-2·S-2·S-3·S-4)은 각기 다른 이유로 백로그에 남겼습니다
+     (아래 "의도적으로 손대지 않은 것" 참고).
+
+     **🔴 High 7건 중 6건(H-2 제외)** — **①H-1** `apply_watch_update()`가 감시
+     델타의 `status`를 확인하지 않고 그대로 교체해, 일시적 DART 오류(ERROR)로 끝난
+     델타가 확정된 배당(OK, 실측 dps_cash_common 746.0)을 조용히 지워 버렸습니다 —
+     델타 `status != "OK"`면 교체를 건너뛰고 `watch_skipped_replacements`로 남기도록
+     수정, CLI 감시 경로도 델타 레코드 중 하나라도 ERROR면 워터마크(last_checked_de)를
+     전진시키지 않도록 추가 방어(그래야 다음 실행이 그 종목을 다시 봅니다). **②H-3**
+     KR 배당 캘린더의 "배당락일 전까지 매수하세요" 큰 배너가 조건 없이 항상 떠서,
+     이전 달로 넘겨 이미 지난 배당락일을 보고 있어도 "지금부터 준비하라"는 배너가
+     그대로 보였습니다 — 미국 배당 화면이 이미 방어해 둔 패턴(`future_count`)을
+     그대로 이식(`count_future_ex_events()`), 달력 칸·상세 블록도 지난 날짜는
+     색을 죽이고 "(지남)"을 붙임. **③H-4** 미국 배당 화면의 "주당 배당금"이 실은
+     최근 1년(TTM) 합계인데 그 사실이 어디에도 없어 분기·월 배당 회사에서 실제
+     받는 금액의 최대 4~12배로 오독될 수 있었습니다 — `DPS_ANNUAL_NOTICE` 상시
+     배너 + 표·달력 값 아래 "연간 합계(TTM) — 1회 지급액 아님" 문구 추가. **④H-5**
+     KRX 휴장일 게이트가 **연도 단위**로만 막아, 표가 실제로는 "2025년 12월 두
+     날짜 + 2026년 전체"만 덮는데도 `2025-01-01`·`2025-05-05` 같은 날짜가 전부
+     "개장일"로 조용히 오판됐습니다 — 게이트를 `KRX_VERIFIED_RANGE`(실제 표가
+     덮는 날짜 구간)로 교체. **⑤H-6/H-7** 수집기가 이미 기록해 둔 실패·경고
+     신호(`completed`/`stopped_reason`/`unit_mismatch_notes`/`cross_source_notes`/
+     `watch_skipped_replacements`/`watch_filings_outside_universe`)가 화면
+     어디에도 안 보였습니다(§0-1) — `_render_completion_status()` 신설 + 배지
+     헬퍼 2개(`unit_mismatch_badge_html`/`cross_source_badge_html`) 추가해 전부
+     화면에 노출.
+
+     **🟠 Medium 17건 전부** — **M-1** 지급일정 수집기가 "신규 레코드 0건"이면
+     `failures`/`raw_write_failures`/`scan_stats.unrecognized`가 있어도 산출물
+     갱신을 건너뛰어 그 신호들이 사라졌던 문제 — 건너뛰기 조건을 네 신호 전부를
+     보도록 확장. **M-2** 파일 없음과 파일 읽기 실패를 화면이 구분하지 않던 문제
+     — 오류 문구의 "읽지 못했습니다" 부분 문자열로 실제 읽기 실패만 경고 배너로
+     승격. **M-3** 주식종류 구분 없이("-") 들어온 2026년 배당액(`dps_cash_
+     unspecified`)이 미확정 목록 어디에도 안 보였던 문제 — 자동 승격은 하지 않고
+     (오너 판단 유보) 배지로만 노출. **M-4** ERROR 상태 레코드가 요약 카드·문구
+     어디에도 잡히지 않고 조용히 다른 분류로 흡수되던 문제 — 전용 상태 문구 +
+     6번째 요약 카드 추가. **M-5** "주당 현금배당금"이 1분기보고서면 1분기분만,
+     3분기보고서면 9개월 누적인데 그 차이가 안 보여 종목 간 비교가 위험했던 문제
+     — 열 제목에 "(해당 보고서까지 누적)" 추가 + `CUMULATIVE_DPS_NOTICE` 상시
+     노출. **M-6** `UNIVERSE_NOTICE`·`YIELD_SOURCE_NOTICE`가 접이식 패널 안에
+     숨어 있던 문제(§0-3-13 위반) — 요약 카드 바로 아래 상시 노출로 이동. **M-7**
+     KR·US 두 화면 모두 표시 금액이 세전이라는 사실이 어디에도 없던 문제 — 두
+     화면 모두 `TAX_NOTICE` 상시 배너 추가(세후 예상액은 개인마다 세율이 달라
+     계산하지 않음, §0-1). **M-8** 같은 out_dir을 전체수집·병합·감시가 동시에
+     건드리면 결과가 깨질 수 있던 문제(동시성 방어 없음) — CLI 진입점에
+     `_locked_output_dir()`(원자적 파일 락, Windows·Linux 양쪽에서 동작하도록
+     `fcntl` 대신 `os.O_EXCL` 사용, 6시간 넘은 락은 죽은 락으로 간주해 자동 해제)
+     추가, 락을 못 잡으면 종료코드 2로 즉시 실패. **M-9/S-5** raw.jsonl이
+     append-only라 계속 커지는데(실측 9.4MB→18.5MB, 5일 만에 거의 2배) 다운로드
+     버튼이 무제한으로 전체를 메모리에 올리던 문제 — 50MB 상한 추가, 넘으면 GitHub
+     저장소 링크로 안내(롤오버 전략 자체는 여전히 미정, `PROJECT_STATUS.md` §11-4
+     5번 참고). **M-10** raw.jsonl의 상한 로직을 넣으면서 `_render_raw_downloads()`
+     가 latest.json·raw.jsonl·history.json 세 버튼 전부를 `os.path.exists()`
+     (로컬 파일 존재)로 게이트했는데, 실제 다운로드 함수(`read_download_bytes()`)는
+     원격(Render 배포 환경)에서도 `data_source.read_text()`로 읽을 수 있어 —
+     배포 환경에서는 데이터가 실제로 존재해도 버튼 자체가 안 보였던 문제.
+     latest.json·history.json은 존재 확인 없이 항상 버튼을 그리도록 하고(클릭
+     실패 시 기존 `download_button`의 토스트가 처리), raw.jsonl만 로컬에 있으면
+     상한 검사를, 없으면 상한 없이 버튼만 그리도록 분리. **M-11** 유니버스 밖
+     종목의 공시 접수 사실이 병합 결과에 안 남던 문제 — `apply_watch_update()`에
+     `outside_universe_codes` 매개변수 추가. **M-12** 감시 델타 유니버스가 기존
+     유니버스의 부분집합이라 같은 종목이 `unmapped_detail`에 두 번(기존+델타)
+     들어가 레코드 수와 안 맞던 문제 — 종목코드 기준 dedupe(`_dedupe_unmapped()`,
+     델타가 이김). **M-13** 검색창에 debounce가 없어 키 입력마다 2,734건 필터링
+     + 3개 구획 재렌더가 실행되던 문제 — Quasar `debounce=300` 추가. **M-14**
+     오타·손상된 날짜(예: `2062-09-18`) 하나가 섞이면 월 선택기가 440개까지
+     부풀 수 있던 문제 — 오늘 기준 ±24개월 밖은 목록에서 빼고 제외 건수를 화면에
+     그대로 밝힘(`available_months()`가 `(months, out_of_range_count)` 튜플을
+     돌려주도록 시그니처 변경). **M-15** 요청 예산 카운터가 재시도를 빼고 세어
+     실제 DART 트래픽을 과소집계하던 문제 — 카운터 증가 위치를 호출부
+     (`fetch_alot_matter`)에서 실제 HTTP 호출 지점(`_http_get_json()`)으로 이동.
+     **M-16** H-5를 그대로 통과시킨 원인 — 달력 순수 함수(`is_krx_trading_day`·
+     `ex_dividend_date`·`count_future_ex_events` 등)에 테스트가 0건이었던 문제 —
+     `tests/test_dividend_page_calendar.py` 신설 + `dividend_page`/`dividend_us_
+     page`를 `test_pages_import_cleanly()` 대상에 추가. **M-17** 지급일정
+     수집기의 리포트(`by_parse_status`·`documents_failed_this_run`·`scan_stats.
+     unrecognized` 등)가 산출물 파일에만 있고 화면에 없던 문제 —
+     `_render_payment_report_block()` 신설.
+
+     **🟡 Low 12건 전부** — **L-1** 이 화면에서 호출부가 없는 죽은 함수
+     `shift_month()`(미국 배당 화면 것과 이름만 같음) 삭제. **L-2** 3-tuple인데
+     4-tuple이라고 잘못 적힌 주석 정정. **L-3** `skipped_bad_stock_code` 카운터가
+     실은 버리지 않고 유지하는 건인데 이름이 반대로 읽혀 `kept_with_
+     unnormalized_stock_code`로 개명. **L-4** `utils.expiry_alarms` import가
+     `sys.path.append`보다 먼저 있어 `python -m` 없이 직접 실행 시 못 찾을 수
+     있던 순서 버그 정정. **L-5** KRX 마지막 검증 연도(2026) 상수가
+     `dividend_page.py`·`collector_dividend_payment_kr.py` 두 곳에 손으로
+     중복 — `utils/expiry_alarms.KRX_VERIFIED_LAST_YEAR` 한 곳으로 통합. **L-6**
+     유니버스에 "5930"·"005930"이 함께 있으면 둘 다 같은 종목으로 정규화되는데
+     dedupe를 안 해 두 번 조회·레코드 2건이 남던 문제 — `seen_targets` 집합으로
+     dedupe, 건너뛴 건수는 로그로 밝힘. **L-7** 체크포인트·raw 저장 실패가
+     로그 한 줄로만 끝나고 리포트에 안 남던 문제 — `save_checkpoint()`/
+     `append_raw()`가 True/False를 돌려주고 실패 건수를 `raw_write_failures`/
+     `checkpoint_write_failures`로 summary에 남기도록 수정. **L-8** KR 화면의
+     월 선택 핸들러엔 있는 방어적 범위 검사(`0 <= picked < len(months)`)가 US
+     화면엔 없던 비대칭 — 같은 가드 추가. **L-9** 페이지가 1개뿐이어도 pager가
+     항상 그려지던 문제(형제 함수는 이미 조건부) — 조건부로 통일. **L-10**
+     접수번호(rcept_no)가 없는 행끼리 "같은 접수번호(None)"로 취급해 서로를
+     중복이라고 버리던 문제 — 빈 rcept_no는 dedupe 대상에서 빼고
+     `missing_rcept_no` 카운터로 별도 집계. **L-11** US 화면에는 있는 "매수
+     마지막 날"이 KR 화면엔 없던 비대칭 — `last_buy_html_kr()`(배당락일의
+     1영업일 전을 한 번 더 계산, 이미 있는 "🧮 계산값" 배지 재사용) 추가,
+     배당락일 상세 블록의 ex 행에만 붙임(배당기준일·지급예정일 행은 배당락일
+     축이 아니라 대상이 아님). **L-12** `DIVIDEND_MODULE_WORK_ORDER.md`가 "화면
+     파일마다 esc() 사용을 자동으로 강제 검사한다"고 적어 놨지만 실제로는
+     스코어카드·리포트·결투 등 이름을 하나하나 지정한 파일에만 걸려 있고 배당
+     화면 2개는 빠져 있던 문제 — 문서를 정정하고, `test_dividend_pages_use_
+     esc_for_external_strings()` 신규 검사를 실제로 추가해 그 화면 2개도 커버.
+
+     **🏗️ Structural 5건 중 2건(S-1·S-5, S-5는 M-9와 병합)** — **S-1**
+     `collector_dividend_payment_kr.py`가 "완전 독립"을 표방하면서도 실제로는
+     `normalize_stock_code`·`dart_document_url`을 `collector_dividend_kr.py`
+     경유(2-hop)로 import하고 있어, 독립 선언과 실제 import 그래프가 어긋나 있던
+     구조적 문제 — `DART_DOCUMENT_URL_TEMPLATE`/`dart_document_url()`을 두 수집기의
+     공통 하위 모듈인 `corp_code_mapper.py`로 옮기고, 두 수집기 모두 거기서 직접
+     import하도록 정리(동작 변화 없음, 순수 구조 정리).
+
+     **의도적으로 손대지 않은 것(4건)** — **H-2**(정정 공시 중 "어느 것이 최종본인가"
+     판정)와 그와 짝인 **S-3**(그 판정의 소유권)은 감사 문서 자신이 "정책 결정이
+     먼저 필요합니다 — 정책 없이 화면에서 임의로 원본을 숨기면 §0-1 위반이 새로
+     생깁니다"라고 명시한 항목이라 손대지 않았습니다(오너 정책 결정 필요). **S-2**
+     (KR·US 두 화면의 거래일 계산 로직 중복 — 감사가 "H-3·H-5가 서로 다르게
+     구현된 근본 원인"이라고 지적할 만큼 가치가 있다고 밝힌 구조 개선)는 가치를
+     인정하면서도 이번 회차에는 의도적으로 유예했습니다 — 두 화면 모두 이미
+     실서비스 중이고 방금 이번 회차에서 검증까지 마친 휴장일 계산 로직을, 41건
+     짜리 같은 커밋 안에서 또 건드리면 결합 리스크가 커진다고 판단했습니다(다음
+     감사 후보 1순위). **S-4**(`_render_body()` 210줄짜리 단일 함수가 로딩·검증·
+     렌더링을 다 섞고 있는 문제)는 감사 자신의 우선순위표에서도 구조 리팩터 그룹
+     중 상대적으로 낮은 순위로 분류돼 이번 회차에는 미루었습니다.
+
+     **🚨 이번 회차 자체 검증 중 발견한 회귀(스스로 잡고 스스로 고침)** — M-15를
+     구현하며 `_http_get_json()`이 `request_counter=` 키워드를 항상 받게
+     바꿨는데, `tests/test_dividend_collector.py`의 여러 네트워크 가짜 함수
+     (`faked_network`·`faked_network_widened` 픽스처 등 8곳)가 그 키워드를
+     받지 못하는 좁은 시그니처(`lambda url, params, timeout, session: ...`)라
+     실제로는 **`run_collection()`을 쓰는 기존 테스트 전부가 TypeError로
+     깨지는 회귀**였습니다(compile 통과만으로는 못 잡고, 이번 세션 마지막
+     `pytest tests/test_dividend_collector.py -q` 전수 실행에서 드러남 —
+     "compile만 확인하고 pytest 전수 실행을 생략하면 안 된다"는 교훈). 가짜
+     함수 8곳 전부 `request_counter=None` 키워드를 받도록 고치고, `faked_
+     network`/`faked_network_widened`는 진짜 `_http_get_json()`처럼 실제로
+     카운터를 증가시키도록(`_fake_alot_matter_response()` 공용 헬퍼 신설)
+     고쳐 `requests_used` 검증 테스트들도 원래 의미 그대로 복구했습니다.
+
+     **신규 회귀 테스트** — `tests/test_dividend_page_calendar.py`(H-5 계산
+     함수 12건 + H-3 과거/미래 판정 2건 + L-11 매수 마지막 날 5건 + M-14 월
+     범위 상한 3건 + M-9/S-5 다운로드 상한 4건 + M-10 다운로드 버튼 게이트
+     검사 1건, 기존 2건 포함 총 29건 전부 통과) + `tests/test_web_session_
+     isolation.py`(M-16 페이지 import 검사 2개 모듈 추가, L-12 esc() 검사
+     신규 1건) + `tests/test_dividend_collector.py`(H-1 3건·M-8 락 6건·M-11
+     2건·M-12 1건·M-15 1건·L-6 1건·L-7 4건 = 신규 18건, 기존 8곳 시그니처
+     수정) + `tests/test_dividend_payment_collector.py`(L-10 신규 2건). S-1은
+     동작 변화가 없는 순수 구조 정리라 별도 신규 테스트 없이 기존 스위트
+     전체(수집기 두 개 관련 테스트 포함)로 회귀 여부만 확인.
+
+     **검증** — 기기 저장소에서 `git stash -u`로 이번에 바뀐 12개 파일(수정만,
+     신규 파일 없음: `web/pages/dividend_page.py`·`dividend_us_page.py`·
+     `collector_dividend_kr.py`·`collector_dividend_payment_kr.py`·
+     `corp_code_mapper.py`·`utils/expiry_alarms.py`·`DIVIDEND_MODULE_WORK_
+     ORDER.md`·`PROJECT_STATUS.md`·테스트 4개) 전부를 정확히 되돌려 진짜
+     베이스라인으로 삼고, `tests/` 전체를 두 번(수정 전/후) 직접 실행해
+     FAILED/ERROR ID 집합을 통째로 diff — **새 실패 0건, 새로 고쳐진 기존
+     실패도 0건**(그대로 남은 기존 결함 8건은 #163에서 이미 "이번 감사 범위
+     밖"으로 기록된 매크로·리포트·결투 렌더 스모크 4건 + 결투 표기 통일성
+     2건 + 리포트 2건 — 전부 배당 모듈과 무관). 통과 수 1684 → 1729(+45).
+     배당 전용 테스트 파일 4개(`test_dividend_collector.py`·`test_dividend_
+     payment_collector.py`·`test_dividend_page_calendar.py`·`test_dividend_
+     us_page.py`)만 따로 돌리면 455건 전부 통과, 에러 0건. `py_compile`로
+     수정 파일 전부 컴파일 확인.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26

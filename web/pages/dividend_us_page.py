@@ -139,7 +139,7 @@ ITEMS_PER_PAGE = 50
 
 #: 날짜를 눌렀을 때 나오는 표의 열 제목.
 DAY_HEADERS = (
-    '종목 (티커)', '주당 배당금 (DPS)', '배당수익률', '배당락일', '매수 마지막 날', '업종',
+    '종목 (티커)', '주당 배당금 (연간 합계)', '배당수익률', '배당락일', '매수 마지막 날', '업종',
 )
 
 #: "배당 없음이 확인된 종목" 표의 열 제목.
@@ -175,6 +175,35 @@ DATA_ORIGIN_NOTICE = (
     '거짓 정보가 됩니다. 그래서 발표가 없는 종목은 "미확정"이라고 얼버무리지 않고 '
     '"아직 다음 배당 발표 안 됨"이라고 그대로 적습니다.\n'
     '🎯 대상은 미국 전 상장사가 아니라, 이 서비스가 추적 중인 **상위 시가총액 종목**뿐입니다.'
+)
+
+#: 🔴 2026-08-29 추가(H4) — `dps` 는 stockanalysis "Statistics" 페이지의 **연간(최근 1년
+#:    합계, TTM)** 주당배당금입니다. 그런데 이 값을 특정 배당락일 1건 옆에 그대로 붙이면
+#:    분기 배당 회사는 실제 그 배당락일에 받는 금액의 **최대 4배**, 월 배당 회사는
+#:    **최대 12배** 과대하게 보입니다(배당 주기 정보를 이 스냅샷에서 얻을 수 없어 몇
+#:    배인지조차 화면이 알 수 없습니다). §0-1·§0-3-13 — 지어내지 않되, 오해할 수 있는
+#:    숫자는 그 옆에서 바로 경고합니다.
+DPS_ANNUAL_NOTICE = (
+    '💵 표·달력의 "주당 배당금"은 **최근 1년(TTM) 합계**입니다 — 이 배당락일에 실제로 '
+    '받는 금액이 아닙니다.\n'
+    '분기마다 배당하는 회사라면 이 날 실제로 받는 돈은 표시된 값의 **약 1/4**, '
+    '매달 배당하는 회사라면 **약 1/12** 수준일 수 있습니다. 이 화면은 배당 주기(분기/월/반기 '
+    '등) 정보를 갖고 있지 않아 정확한 배수를 계산해 드릴 수 없습니다 — 실제 1회 지급액은 '
+    '증권사 앱이나 회사 IR 자료로 확인해 주세요.'
+)
+
+#: 🔴 M7(2026-08-29) 추가 — 표·달력의 모든 금액은 **세전**인데 그 사실을 어디에도 적지
+#: 않았습니다. 세후 금액은 계좌 종류(일반/ISA/연금 등)·거주자 여부·조세조약 적용 여부에
+#: 따라 사람마다 달라서, 이 화면이 일괄 세율(예: 15%)을 곱해 "세후 예상액"을 계산해
+#: 보여드리면 그 자체가 틀린 안내가 될 수 있습니다(§0-1) — 그래서 계산하지 않고, 세전
+#: 금액이라는 사실만 명확히 밝힙니다.
+TAX_NOTICE = (
+    '💸 이 화면의 모든 금액(주당 배당금ㆍ배당수익률 계산에 쓰인 원천 수치)은 **세전** '
+    '금액입니다. 미국 배당소득에는 원천징수세가 붙는데(한미 조세조약 적용 시 통상 15%, '
+    '계좌 종류ㆍ개인 상황에 따라 달라질 수 있음), 실제 입금액은 이보다 적습니다.\n'
+    '세율은 계좌 종류ㆍ거주자 여부 등 개인 상황에 따라 달라서, 이 화면은 세후 예상액을 '
+    '계산해 보여드리지 않습니다 — 정확한 세후 금액은 증권사 앱이나 세무 전문가를 통해 '
+    '확인해 주세요.'
 )
 
 #: ⏰ "매수 마지막 날" 규칙 — 미래 날짜가 있는 종목에만 쓰는 큰 글자 배너.
@@ -259,11 +288,17 @@ def stock_name_html(stock_or_entry) -> str:
 
 
 def dps_html(entry) -> str:
-    """주당 배당금 — 소스가 달러로 주는 값 그대로. 없으면 '데이터 없음'(0 아님)."""
+    """주당 배당금 — 소스가 달러로 주는 값 그대로. 없으면 '데이터 없음'(0 아님).
+
+    🔴 H4(2026-08-29): 이 값은 **연간(TTM) 합계**이지 이 배당락일 1회 지급액이 아닙니다
+    (`DPS_ANNUAL_NOTICE` 참고). 배지 없이 숫자만 보여주면 분기·월 배당 회사에서 그대로
+    오독되므로, 값 아래 항상 "연간 합계" 를 작게 함께 적습니다.
+    """
     value = entry.get('dps')
     if not isinstance(value, (int, float)):
         return f'<span style="color:#94a3b8;">{esc(NA_TEXT)}</span>'
-    return f'<span style="font-weight:800; color:#f8fafc;">${fmt_num(value, digits=2)}</span>'
+    return (f'<span style="font-weight:800; color:#f8fafc;">${fmt_num(value, digits=2)}</span>'
+            f'<div style="font-size:10px; color:#94a3b8;">연간 합계(TTM) — 1회 지급액 아님</div>')
 
 
 def yield_html(entry) -> str:
@@ -349,9 +384,9 @@ def cell_range_text(day_entries) -> tuple:
     if dps_min is None:
         dps_text = ''
     elif dps_min == dps_max:
-        dps_text = f'💵 ${fmt_num(dps_min, digits=2)}'
+        dps_text = f'💵 ${fmt_num(dps_min, digits=2)}(연간)'
     else:
-        dps_text = f'💵 ${fmt_num(dps_min, digits=2)}~${fmt_num(dps_max, digits=2)}'
+        dps_text = f'💵 ${fmt_num(dps_min, digits=2)}~${fmt_num(dps_max, digits=2)}(연간)'
 
     if yield_min is None:
         yield_text = ''
@@ -430,6 +465,8 @@ async def _render_body() -> None:
     # ── 🔴 정직성 고지 — 달력을 보기 **전에** 반드시 읽어야 하는 것 ─────────
     warning_banner(CALENDAR_SOURCE_NOTICE)
     warning_banner(DATA_ORIGIN_NOTICE)
+    warning_banner(DPS_ANNUAL_NOTICE)
+    warning_banner(TAX_NOTICE)
 
     # ── 🔵 오늘은 며칠(미국 동부 시간) ────────────────────────────────────
     today_weekday_label = WEEKDAY_LABELS[(today.weekday() + 1) % 7]
@@ -612,7 +649,11 @@ def _render_calendar(view, entries, total_entries, months, today,
 
         def _on_month(event) -> None:
             picked = event.value
-            if picked is None:
+            # 🟡 L8(2026-08-29) 추가 — 한국 배당 화면의 같은 자리
+            # (`_render_calendar`)는 `not 0 <= picked < len(months)`를 방어선으로 두는데
+            # 여기는 없었습니다. 지금은 `choices`의 키가 항상 `0..len(months)-1`이라
+            # 실제로 범위 밖 값이 오지 않지만, 방어선이 한쪽에만 있는 비대칭을 없앱니다.
+            if picked is None or not 0 <= picked < len(months):
                 return
             view['year'], view['month'] = shift_month(*months[0], picked)
             view['selected_date'] = None
@@ -700,7 +741,8 @@ def _render_calendar(view, entries, total_entries, months, today,
     # 🔵/🟢/⚪ 가 무슨 뜻인지 격자 바로 아래에 항상 적습니다 — 색만 두고 뜻을 안 적으면
     #    그건 화면이 아니라 암호입니다.
     ui.label('🟢 아직 안 지난 배당락일 · ⚪ 이미 지난 배당락일 · 🔵 파란 테두리는 오늘'
-             '(미국 동부 시간) · 💵 그 날 종목들의 주당 배당금 범위 · 📈 배당수익률 범위'
+             '(미국 동부 시간) · 💵 그 날 종목들의 주당 배당금 범위(연간 합계, 이 날 받는 '
+             '금액 아님) · 📈 배당수익률 범위'
              ).classes('vh-muted vh-keep-all')
 
 

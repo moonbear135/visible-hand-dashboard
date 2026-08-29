@@ -141,6 +141,22 @@ DATA_FILENAME = 'dividend_kr_2026_latest.json'
 RAW_FILENAME = 'dividend_kr_2026_raw.jsonl'
 HISTORY_FILENAME = 'dividend_history_kr_2023_2025.json'
 
+#: 🔴 M9/S5(2026-08-29) 추가 — `RAW_FILENAME`은 **append-only**라 재실행마다 커집니다
+#: (실측: 2026-08-24 9.4MB → 2026-08-29 18.5MB, 5일 만에 거의 2배 — `PROJECT_STATUS.md`
+#: §11-4 5번). NiceGUI 다운로드 버튼(`download_button`)은 파일 전체를 메모리에 올려
+#: 브라우저로 보내는데, 이 크기가 계속 커지면 다른 접속의 이벤트 루프까지 함께 막힐
+#: 위험이 있습니다(2026-08-21 접속 끊김 사고와 같은 유형). 그래서 상한을 두고, 상한을
+#: 넘으면 다운로드 버튼 대신 GitHub 저장소 링크로 안내합니다(파일이 사라지는 게 아니라
+#: 받는 경로만 바뀝니다 — 이 저장소는 공개(public)라 로그인 없이 그대로 받을 수
+#: 있습니다, §0-1 — 못 받게 막는 게 아니라 다른 경로를 그대로 알려 줍니다).
+RAW_DOWNLOAD_MAX_BYTES = 50 * 1024 * 1024  # 50MB — 실측치(18.5MB)의 약 2.7배 여유
+
+#: `PROJECT_STATUS.md` §0-2 확인 값(`github.com/moonbear135/visible-hand-dashboard`,
+#: public repo, 기본 브랜치 main).
+GITHUB_REPO_BLOB_BASE = (
+    'https://github.com/moonbear135/visible-hand-dashboard/blob/main/data'
+)
+
 #: 🟢 2026-08-25 추가 — DART 수시공시("현금ㆍ현물배당결정")를 매일 감시해 모은 **진짜
 #: 지급일정**(배당기준일·지급예정일자). `collector_dividend_payment_kr.py` 가 만드는 파일로,
 #: 위 세 파일(정기보고서 기반)과는 데이터 출처·수집 코드가 **완전히 분리**돼 있습니다.
@@ -157,8 +173,8 @@ WEEKDAY_LABELS = ('일', '월', '화', '수', '목', '금', '토')
 
 #: 달력에서 고른 날짜의 종목 표 열 제목.
 CONFIRMED_HEADERS = (
-    '회사명 (종목코드)', '시장', '주당 현금배당금', '배당수익률 (DART 원문)',
-    '근거 보고서', '결산기준일', '원문 공시',
+    '회사명 (종목코드)', '시장', '주당 현금배당금 (해당 보고서까지 누적)',
+    '배당수익률 (DART 원문)', '근거 보고서', '결산기준일', '원문 공시',
 )
 
 #: "아직 2026년 배당 미확정 (작년 참고)" 표 열 제목.
@@ -220,6 +236,35 @@ PENDING_SECTION_NOTICE = (
 
 #: 배당수익률 옆 경고 배지의 제목(본문은 레코드의 `yield_reliability_note` 원문).
 YIELD_WARN_LABEL = '⚠️ 원문값'
+
+#: 🔴 M5(2026-08-29) 추가 — "주당 현금배당금" 칸이 어느 보고서에서 왔는지("근거 보고서"
+#: 칸)에 따라 **같은 종목이라도 성격이 다른 숫자**입니다. 1분기보고서는 1분기분만, 3분기
+#: 보고서는 1~3분기 **누적**을 담습니다(DART 정기보고서 "배당에 관한 사항"의 원문 관행).
+#: 열 제목에 "(해당 보고서까지 누적)"을 넣는 것만으로는 "그래서 종목끼리 못 비교한다"는
+#: 결론까지는 안 보이므로, 상시 안내로 한 번 더 명시적으로 밝힙니다(§0-3-13).
+CUMULATIVE_DPS_NOTICE = (
+    '🧮 "주당 현금배당금"은 해당 보고서가 다루는 회계기간 **누적** 금액입니다 — 1분기보고서면 '
+    '1분기분만, 3분기보고서면 1~3분기 누적, 사업보고서면 1년 전체 누적입니다("근거 보고서" '
+    '칸에서 어느 보고서인지 확인할 수 있습니다).\n'
+    '그래서 서로 다른 "근거 보고서"를 가진 두 종목의 이 숫자를 그대로 비교하면 안 됩니다 — '
+    '3분기보고서(9개월 누적)와 1분기보고서(3개월분)를 나란히 비교하면 실제로는 배당 규모가 '
+    '비슷하거나 더 작은 회사가 훨씬 많이 주는 것처럼 보일 수 있습니다.'
+)
+
+#: 🔴 M7(2026-08-29) 추가 — 표의 모든 금액은 **세전**인데 그 사실을 어디에도 적지
+#: 않았습니다. 국내 배당소득세율은 기본 15.4%(지방소득세 포함)이지만 배당소득이 많아
+#: 금융소득종합과세 대상이 되면 사람마다 실제 세율이 달라져서, 이 화면이 일괄 세율을
+#: 곱해 "세후 예상액"을 계산해 보여드리면 그 자체가 틀린 안내가 될 수 있습니다(§0-1)
+#: — 그래서 계산하지 않고, 세전 금액이라는 사실만 명확히 밝힙니다(미국 배당 화면의
+#: `dividend_us_page.TAX_NOTICE`와 같은 원칙, §0-3-10).
+TAX_NOTICE = (
+    '💸 이 화면의 모든 배당금액(주당 현금배당금 등)은 **세전** 금액입니다. 국내 배당소득에는 '
+    '원천징수세(기본 15.4% — 소득세 14% + 지방소득세 1.4%)가 붙는데, 실제 입금액은 이보다 '
+    '적습니다.\n'
+    '배당소득을 포함한 금융소득이 연 2천만원을 넘으면 금융소득종합과세 대상이 되어 세율이 '
+    '더 높아질 수 있습니다 — 개인마다 다른 세율을 이 화면이 일괄 적용해 세후 예상액을 계산해 '
+    '보여드리지는 않습니다. 정확한 세후 금액은 증권사 앱이나 세무 전문가를 통해 확인해 주세요.'
+)
 
 #: DART 원문 수익률을 우리가 다시 계산하지 않는 이유.
 YIELD_SOURCE_NOTICE = (
@@ -290,6 +335,19 @@ EX_DATE_CALC_NOTE = (
     '1영업일 전(한국거래소 휴장일 제외)입니다. 배당기준일 자체가 개장일이 아니면 그 '
     '직전 개장일을 실제 기준일로 보정한 뒤 다시 1영업일을 뺍니다.<br>'
     '⚠️ 휴장일 표는 확인된 연도만 있습니다 — 그 밖의 연도는 계산하지 않고 값을 비웁니다'
+    '(추측 금지).'
+)
+
+#: 🔴 L11(2026-08-29) 추가 — 미국 배당 화면(`dividend_us_page.LAST_BUY_CALC_NOTE`)에는
+#: "매수 마지막 날"이 있는데 이 화면(한국)에는 없었습니다(비대칭). 배당락일 자체가 이미
+#: `ex_dividend_date()`로 계산한 값이니, 그 배당락일의 1영업일 전을 한 번 더 계산하면
+#: 됩니다 — 새 계산 규칙이 아니라 같은 규칙을 한 번 더 적용하는 것뿐입니다.
+LAST_BUY_CALC_NOTE_KR = (
+    '"매수 마지막 날"은 소스에 없는 값이라 이 화면이 직접 계산합니다 — 배당락일의 '
+    '<b>직전 한국거래소 개장일</b>입니다(주말·휴장일 제외).<br>'
+    '배당락일 당일에 사면 이번 배당은 받지 못하기 때문에, 하루 앞의 거래일이 실제 '
+    '마감입니다.<br>'
+    '⚠️ 휴장일 표는 확인된 구간만 있습니다 — 그 밖의 날짜는 계산하지 않고 비웁니다'
     '(추측 금지).'
 )
 
@@ -447,17 +505,29 @@ def build_payment_event_index(payload):
 #: 반드시 같은 방식(라이브러리 + 뉴스 교차확인)으로 다시 조사해서 채워야 합니다 — 채우지
 #: 않은 해에 대한 계산은 `is_krx_trading_day()`가 **일부러 예외를 던져** 조용히 틀린 값을
 #: 내지 않습니다(§0-1 — 확인 안 된 걸 확인한 척하지 않기).
-KRX_VERIFIED_YEARS = (2025, 2026)
-
 # 🔴 2026-08-25 추가 — 위 표가 검증 안 된 연도로 넘어가기 전에 미리 시끄럽게 경고합니다
 #    (2027-01-01 부터는 is_krx_trading_day() 가 ValueError 를 던지며 멈추는데, 그 전까지
 #    아무도 미리 알려주지 않는 게 문제였습니다). 마감 60일 전부터 서버 로그(Render)에
 #    찍히기 시작합니다. 실제 매일 도는 배당 배치(`collector_dividend_payment_kr.py`)에도
 #    같은 알람을 별도로 걸어 뒀습니다(이 파일은 nicegui 를 물고 있어 배치가 직접
 #    import 할 수 없어서 `utils/expiry_alarms.py` 로 로직만 공유합니다).
-from utils.expiry_alarms import warn_if_expiring
+from utils.expiry_alarms import KRX_VERIFIED_LAST_YEAR, warn_if_expiring
+
+#: 🔴 L5(2026-08-29) 수정 — 마지막 검증 연도는 `utils/expiry_alarms.KRX_VERIFIED_LAST_YEAR`
+#: 한 곳에서만 관리합니다(collector_dividend_payment_kr.py 도 같은 값을 봅니다) — 여기서
+#: 숫자를 다시 적지 않는 것 자체가 "두 곳에 같은 사실을 적지 않기"(§0-3-10)의 목적입니다.
+KRX_VERIFIED_YEARS = (KRX_VERIFIED_LAST_YEAR - 1, KRX_VERIFIED_LAST_YEAR)
+
+#: 🔴 H5(2026-08-29) 수정 — 예전 게이트(`is_krx_trading_day`)는 **연도 단위**로만 막았습니다.
+#: 그런데 위 주석이 스스로 밝히듯 표는 "2025년 전체"가 아니라 **2025년 12월 두 날짜뿐**입니다.
+#: 연도 게이트로는 `2025-01-01`(신정)·`2025-05-05`(어린이날) 같은 날짜가 전부 "개장일"로
+#: 조용히 오판됐습니다(실측 확인 — H5). 이제 게이트는 **표가 실제로 덮는 날짜 구간**으로
+#: 검사합니다. 이 구간을 넓히려면(예: 2025년 전체를 채우면) 이 튜플과 위
+#: `KRX_HOLIDAYS_2025_2026` 을 함께 넓히세요 — 한쪽만 넓히면 다시 이번과 같은 틈이 생깁니다.
+KRX_VERIFIED_RANGE = (date(2025, 12, 1), date(KRX_VERIFIED_LAST_YEAR, 12, 31))
+
 warn_if_expiring('배당락일 계산용 KRX 휴장일 표 (dividend_page.py: KRX_VERIFIED_YEARS)',
-                 max(KRX_VERIFIED_YEARS))
+                 KRX_VERIFIED_LAST_YEAR)
 
 KRX_HOLIDAYS_2025_2026 = frozenset((
     # 2025년 12월 — 2026년 초 배당기준일의 역산 여유분으로만 확보(2025년 전체 표는 아님)
@@ -479,13 +549,15 @@ KRX_HOLIDAYS_2025_2026 = frozenset((
 def is_krx_trading_day(d) -> bool:
     """`date` → 그 날이 KRX 개장일인가(주말 아님 + 위 표에 없음).
 
-    :raises ValueError: `d`의 연도가 `KRX_VERIFIED_YEARS`에 없으면 — 확인 안 된 해를
-        "아마 열렸겠지"로 조용히 넘기지 않기 위해서입니다(§0-1).
+    :raises ValueError: `d`가 `KRX_VERIFIED_RANGE`(표가 실제로 덮는 구간) 밖이면 — 확인 안
+        된 날짜를 "아마 열렸겠지"로 조용히 넘기지 않기 위해서입니다(§0-1, H5).
     """
-    if d.year not in KRX_VERIFIED_YEARS:
+    start, end = KRX_VERIFIED_RANGE
+    if not (start <= d <= end):
         raise ValueError(
-            f'{d.year}년 KRX 휴장일 표가 아직 확인되지 않았습니다 — 배당락일을 계산할 수 '
-            '없습니다(값을 추측하지 않습니다).'
+            f'{d.isoformat()} 은 KRX 휴장일 표가 확인된 구간({start.isoformat()} ~ '
+            f'{end.isoformat()}) 밖입니다 — 배당락일을 계산할 수 없습니다(값을 추측하지 '
+            '않습니다).'
         )
     if d.weekday() >= 5:      # 5=토, 6=일 (`date.weekday()`: 월=0 … 일=6)
         return False
@@ -529,6 +601,30 @@ def ex_dividend_date(record_date_str):
         return previous_krx_trading_day(effective), None
     except ValueError as exc:
         return None, str(exc)
+
+
+def last_buy_html_kr(ex_date, is_future) -> str:
+    """🧮 매수 마지막 날 한 줄 — 배당락일(ex_date, `date` 또는 `None`) 기준으로 그 1영업일
+    전을 계산합니다(L11, 2026-08-29). 미국 배당 화면의 `last_buy_html()`과 같은 원칙입니다.
+
+    🔴 이미 지난 배당락일에는 날짜를 적지 않습니다 — 지난 날을 두고 "이때까지 사세요"라고
+       쓰면 그 자체가 틀린 안내입니다(§0-1).
+    🔴 계산이 불가능하면(확인 안 된 구간 등) 아무 날짜나 넣지 않고 이유를 그대로 적습니다.
+    """
+    if not is_future:
+        return ('<div style="color:#94a3b8; font-size:12px; margin-top:4px;">'
+                '이미 지난 배당락일이라 매수 안내를 하지 않습니다</div>')
+    if ex_date is None:
+        return ('<div style="color:#fbbf24; font-size:12px; margin-top:4px;">'
+                '배당락일을 계산하지 못해 매수 마지막 날도 계산할 수 없습니다</div>')
+    try:
+        last_buy = previous_krx_trading_day(ex_date)
+    except ValueError as exc:
+        return f'<div style="color:#fbbf24; font-size:12px; margin-top:4px;">{esc(str(exc))}</div>'
+    text = f'{last_buy.year}년 {last_buy.month}월 {last_buy.day}일'
+    badge = warn_badge('🧮 계산값', LAST_BUY_CALC_NOTE_KR)
+    return (f'<div style="color:{PAYMENT_FUTURE_COLOR}; font-weight:800; font-size:12px; '
+            f'margin-top:4px;">🛒 매수 마지막 날: {esc(text)} 까지</div>{badge}')
 
 
 def payment_event_summary_text(event) -> str:
@@ -590,6 +686,30 @@ def build_payment_date_index(payload):
         if ex_date is not None:
             _bucket(ex_date.isoformat())['ex'].append(record)
     return index
+
+
+#: 🔴 H3(2026-08-29) 추가 — 지난 배당락일과 앞으로의 배당락일을 색으로 가르는 두 색.
+#: 미국 배당 화면의 `FUTURE_COLOR`·`PAST_COLOR`와 **같은 값**입니다(§0-3-10 — 같은 뜻은
+#: 같은 색으로). `PAYMENT_EX_COLOR`(🔴)는 "이게 배당락일 축이다"라는 종류를 나타내고,
+#: 이 두 색은 "그 배당락일이 지났는가"라는 시간 축을 나타냅니다 — 서로 다른 질문이라 겹쳐
+#: 씁니다(예: 지난 배당락일도 여전히 🔴 배당락일이지만, 글자색은 회색으로 죽입니다).
+PAYMENT_FUTURE_COLOR = '#4ade80'   # 🟢 아직 안 지난 배당락일 — 지금부터 준비할 수 있음
+PAYMENT_PAST_COLOR = '#94a3b8'     # ⚪ 이미 지난 배당락일 — 기록일 뿐, 행동할 게 없음
+
+
+def count_future_ex_events(payment_date_index, today) -> int:
+    """`payment_date_index`의 'ex'(배당락일) 축에서 오늘(포함) 이후 이벤트 건수.
+
+    🔴 H3(2026-08-29) — "배당락일 전까지 매수하세요" 배너를 조건 없이 띄우면, 이전 달로
+    넘겨 이미 지난 배당락일을 보고 있는 사용자에게도 그 배너가 앞으로의 마감처럼 읽힙니다
+    (§0-1). 미국 배당 화면이 이미 이 판정(`dividend_us_logic.build_view_data`의
+    `future_count`)을 하고 있어 같은 원칙을 한국 화면에도 이식합니다 — 배너는 이 건수가
+    1건 이상일 때만, 그리고 건수를 함께 밝힙니다.
+    """
+    today_key = today.isoformat()
+    return sum(len(bucket.get('ex') or ())
+               for key, bucket in (payment_date_index or {}).items()
+               if key >= today_key)
 
 
 def market_group(label) -> str:
@@ -671,6 +791,12 @@ def display_entry(record, history_row):
             'status': data.get('status'),
             'status_reason': data.get('status_reason'),
             'parse_notes': tuple(data.get('parse_notes') or ()),
+            # 🔴 H7(2026-08-29) 추가 — 수집기가 이미 §2-4 를 지키려고 남겨 둔 두 신호를
+            # 이제 이 화면도 옮겨 담습니다(예전에는 `parse_notes` 만 옮겨서, 배지 인프라는
+            # 있는데 이 두 필드만 화면에 한 번도 안 닿았습니다).
+            'unit_mismatch_notes': tuple(data.get('unit_mismatch_notes') or ()),
+            'cross_source_notes': tuple(data.get('cross_source_notes') or ()),
+            'dps_unspecified': to_float(data.get('dps_cash_unspecified')),
             'value_source': 'DART 정기보고서 원문 (alotMatter.json)',
         }
 
@@ -700,6 +826,12 @@ def display_entry(record, history_row):
         'status': data.get('status'),
         'status_reason': data.get('status_reason'),
         'parse_notes': tuple(data.get('parse_notes') or ()),
+        'unit_mismatch_notes': tuple(data.get('unit_mismatch_notes') or ()),
+        'cross_source_notes': tuple(data.get('cross_source_notes') or ()),
+        # 🔴 M3(2026-08-29) 추가 — 주식종류 구분 없이("-") 온 배당액. `is_confirmed_this_year`
+        # 가 보통주 기준이라 이 값만 있는 종목은 여기(미확정 목록)로 옵니다 — 자동으로
+        # 보통주 승격은 하지 않되(수집기와 같은 원칙), 값 자체는 숨기지 않고 옮겨 둡니다.
+        'dps_unspecified': to_float(data.get('dps_cash_unspecified')),
         'value_source': ('KIND 연간 배당 집계 (2023~2025 기준선)' if dps is not None else None),
     }
 
@@ -795,9 +927,24 @@ def date_key(year, month, day) -> str:
     return f'{year:04d}-{month:02d}-{day:02d}'
 
 
+#: 🔴 M14(2026-08-29) 추가 — 오타·손상된 날짜 하나(예: `2062-09-18`)가 `settle_date`나
+#: 지급일정에 섞여 들어오면, 아래 while 루프가 그 연도까지 한 달씩 다 채워 월 선택기가
+#: 수백 개(재현: 440개)로 부풀어 오릅니다. §0-1은 "실패를 정상 상태로 위장하지 않기"이지
+#: "검증 안 된 입력을 무한정 믿기"가 아닙니다 — 오늘 기준 앞뒤 이 개월수를 벗어난 날짜는
+#: 월 목록에서 빼고 건수를 세어 호출부가 화면에 그대로 밝히게 합니다(조용히 버리지
+#: 않습니다). 2년(24개월)은 이 화면이 다루는 실제 데이터(올해 정기보고서 + 다음 해
+#: 지급예정일)보다 넉넉히 넓게 잡은 값입니다.
+AVAILABLE_MONTHS_MAX_MONTHS_FROM_TODAY = 24
+
+
 def available_months(entries, payment_date_index, today):
     """달력에서 오갈 수 있는 달 목록 `[(연, 월), …]` — 결산기준일ㆍ지급예정일 데이터가
     실제로 덮는 범위 전체(연도 경계 포함).
+
+    :return: `(months, out_of_range_count)` 튜플. `out_of_range_count`는 오늘로부터
+        `AVAILABLE_MONTHS_MAX_MONTHS_FROM_TODAY`개월을 벗어나 목록에서 뺀 날짜 개수입니다
+        (M14, 2026-08-29) — 손상된 날짜를 조용히 버리지 않고, 몇 건을 뺐는지 그대로
+        돌려줘서 호출부가 화면에 밝힐 수 있게 합니다.
 
     🔴 2026-08-29(오푸스 감사 Top-5 #4) — 이전에는 `_render_calendar()`의 `_shift()`/
        `_on_month()`가 `1 <= month <= 12`로 **한 해 안에서만** 움직여서, 12월 결산 배당의
@@ -814,17 +961,30 @@ def available_months(entries, payment_date_index, today):
     오늘이 속한 달은 데이터가 없어도 항상 포함합니다 — 기본으로 여는 달이 목록에 없으면
     화면이 열리자마자 엉뚱한 달로 튕기기 때문입니다.
     """
+    def _in_range(year, month) -> bool:
+        distance = (year - today.year) * 12 + (month - today.month)
+        return abs(distance) <= AVAILABLE_MONTHS_MAX_MONTHS_FROM_TODAY
+
     months = {(today.year, today.month)}
+    out_of_range_count = 0
     for entry in entries or ():
         parsed = parse_iso_date((entry or {}).get('settle_date'))
-        if parsed is not None:
+        if parsed is None:
+            continue
+        if _in_range(parsed.year, parsed.month):
             months.add((parsed.year, parsed.month))
+        else:
+            out_of_range_count += 1
     for date_str in (payment_date_index or {}).keys():
         parsed = parse_iso_date(date_str)
-        if parsed is not None:
+        if parsed is None:
+            continue
+        if _in_range(parsed.year, parsed.month):
             months.add((parsed.year, parsed.month))
+        else:
+            out_of_range_count += 1
     if not months:
-        return []
+        return [], out_of_range_count
     (start_year, start_month) = min(months)
     (end_year, end_month) = max(months)
 
@@ -833,15 +993,14 @@ def available_months(entries, payment_date_index, today):
     while (year, month) <= (end_year, end_month):
         ordered.append((year, month))
         year, month = (year + 1, 1) if month == 12 else (year, month + 1)
-    return ordered
+    return ordered, out_of_range_count
 
 
-def shift_month(year, month, delta):
-    """`(연, 월)`에서 `delta`달만큼 이동한 `(연, 월)`. 연도 경계를 알아서 넘어갑니다.
-    (2026-08-29 오푸스 감사 Top-5 #4 — `dividend_us_logic.py::shift_month()`와 동일 로직.)
-    """
-    index = year * 12 + (month - 1) + delta
-    return index // 12, index % 12 + 1
+# 🟡 L1(2026-08-29) 삭제 — 이 화면은 `months.index()` + `_go(index±1)`로 달을 옮기므로
+# `shift_month()`는 정의만 있고 호출부가 없는 죽은 함수였습니다(§0-3-10 YAGNI). 미국
+# 배당 화면(`dividend_us_logic.py::shift_month()`)은 실제로 이 방식을 쓰므로 그대로
+# 남아 있습니다 — 이 파일에서만 지웠습니다. 이 함수를 검증하던
+# `test_shift_month_crosses_year_boundary_both_directions`도 함께 지웠습니다.
 
 
 def month_label(year, month) -> str:
@@ -903,6 +1062,12 @@ def status_summary_text(entry) -> str:
         return '해당 사업연도의 정기보고서 배당 표를 찾지 못했습니다'
     if status == 'UNMAPPED':
         return '종목코드를 DART 고유번호와 연결하지 못했습니다'
+    if status == 'ERROR':
+        # 🔴 M4(2026-08-29) 추가 — ERROR 는 "확인 못 함"이 아니라 "조회하다 실패한 것이
+        # 확인된" 상태입니다(수집기 :980). 예전에는 이 분기가 없어 아래 기본 문구
+        # ("확인하지 못했습니다")로 빠졌는데, 그 문구는 정반대 인상을 줍니다 — 실패
+        # 자체는 확인됐다는 사실을 숨기지 않습니다.
+        return '2026년 정기보고서를 조회하다 오류가 나서 이 종목은 확인하지 못했습니다'
     return '수집 상태를 확인하지 못했습니다'
 
 
@@ -1016,6 +1181,32 @@ def parse_note_badge_html(entry) -> str:
     return warn_badge(f'📝 파싱 메모 {len(notes)}건', body)
 
 
+def unit_mismatch_badge_html(entry) -> str:
+    """🔴 H7(2026-08-29) 추가 — `unit_mismatch_notes`가 있으면 배지로 알립니다.
+
+    `parse_note_badge_html()`과 정확히 대칭인 자리입니다 — 수집기는 라벨의 단위 토큰이
+    기대와 다르면(예: "주당 현금배당금(천원)") 값을 임의로 변환하지 않고 이 필드에
+    사유만 남깁니다. 화면이 이 필드를 안 읽으면 1,000배 틀린 숫자가 배지 없이 그대로
+    나갑니다(§0-1).
+    """
+    notes = entry.get('unit_mismatch_notes') or ()
+    if not notes:
+        return ''
+    body = '<br>'.join(esc(note) for note in notes)
+    return warn_badge('⚠️ 단위 검증 미통과', body)
+
+
+def cross_source_badge_html(entry) -> str:
+    """🔴 H7(2026-08-29) 추가 — `cross_source_notes`(DART ↔ KIND 교차검증 불일치)가 있으면
+    배지로 알립니다. 값을 고치지 않고 "사람이 확인해야 한다"는 사실만 밝힙니다.
+    """
+    notes = entry.get('cross_source_notes') or ()
+    if not notes:
+        return ''
+    body = '<br>'.join(esc(note) for note in notes)
+    return warn_badge('🔎 출처 간 불일치', body)
+
+
 def _payment_event_notes_html(event) -> str:
     """이벤트 1건의 부가 안내(정정 여부는 `payment_event_summary_text`가 이미 앞에 붙이므로
     여기서는 다루지 않음) — 자회사 대리공시ㆍ파싱 일부 실패ㆍ원문 링크. 없으면 빈 문자열.
@@ -1068,7 +1259,7 @@ def payment_badge_html(entry, payment_index) -> str:
     return info_badge(label, body)
 
 
-def payment_date_block_html(key, payment_date_index) -> str:
+def payment_date_block_html(key, payment_date_index, today) -> str:
     """선택한 날짜(`key`, 'YYYY-MM-DD') → 그 날짜에 걸리는 지급일정 이벤트를 **바로 보이는
     HTML**로(툴팁 아님 — 2026-08-25 오너 요청: "툴팁 말고 달력에 바로 표시해달라").
 
@@ -1076,6 +1267,10 @@ def payment_date_block_html(key, payment_date_index) -> str:
     다름) — 같은 이벤트가 두 날짜 모두 이 날일 수도 있어(드묾) 그럴 땐 두 번 나오는데,
     그때도 "이 줄이 어느 날짜 자격으로 여기 있는지"를 라벨로 밝힙니다(§0-1). 아무 이벤트도
     없으면 **빈 문자열**(빈 카드를 그리지 않습니다 — 배지와 같은 원칙).
+
+    🔴 H3(2026-08-29) 추가 — `today`(KST)를 받아 `key`가 이미 지난 날짜인지 계산합니다.
+    지난 날짜면 색을 죽이고 "(이미 지난 날짜)"를 헤더에 밝혀, 과거 배당락일 상세를 보면서도
+    "지금부터 준비할 수 있는 일정"으로 오독하지 않게 합니다.
     """
     bucket = (payment_date_index or {}).get(key) or {}
     ex_events = bucket.get('ex') or ()
@@ -1084,7 +1279,10 @@ def payment_date_block_html(key, payment_date_index) -> str:
     if not ex_events and not record_events and not pay_events:
         return ''
 
-    def _row(event, kind_label, color, is_calculated=False):
+    is_future = key >= today.isoformat()
+
+    def _row(event, kind_label, color, is_calculated=False, extra_html=''):
+        row_color = color if is_future else PAYMENT_PAST_COLOR
         name = esc(event.get('corp_name') or '회사명 없음')
         code = esc(event.get('stock_code') or event.get('stock_code_raw') or NA_TEXT)
         detail = esc(payment_event_summary_text(event))
@@ -1092,23 +1290,34 @@ def payment_date_block_html(key, payment_date_index) -> str:
             detail += warn_badge('🧮 계산값', EX_DATE_CALC_NOTE)
         detail += _payment_event_notes_html(event)
         return (
-            f'<div style="margin: 6px 0; padding: 8px 10px; border-left: 3px solid {color}; '
+            f'<div style="margin: 6px 0; padding: 8px 10px; border-left: 3px solid {row_color}; '
             f'background: rgba(255,255,255,0.03); border-radius: 4px;">'
-            f'<span style="color:{color};font-weight:800;">{esc(kind_label)}</span> '
-            f'<b>{name}</b>({code})<br>{detail}</div>'
+            f'<span style="color:{row_color};font-weight:800;">{esc(kind_label)}</span> '
+            f'<b>{name}</b>({code})<br>{detail}{extra_html}</div>'
         )
+
+    # 🔴 L11(2026-08-29) — 이 칸(`key`)이 바로 'ex' 축이면 그 날짜 자체가 배당락일입니다.
+    # 배당락일이 이미 있는데 "매수 마지막 날"만 없는 것이 비대칭이라(미국 화면엔 있음),
+    # 여기서 한 번 더 계산해 ex 행에만 붙입니다(배당기준일·지급예정일 행에는 붙이지
+    # 않습니다 — 그 행들은 배당락일 축이 아니라서 "매수 마지막 날"의 기준이 될 수 없음).
+    ex_key_date = parse_iso_date(key) if ex_events else None
+    last_buy_extra = last_buy_html_kr(ex_key_date, is_future) if ex_events else ''
 
     # 🔴 순서는 시간순(락일 → 기준일 → 지급일)입니다 — 배당락일이 실제로 가장 먼저
     # 오는 날짜라 "이 날 이후로는 사도 소용없다"를 자연스럽게 먼저 보게 됩니다.
-    rows = [_row(event, '🔴 배당락일', PAYMENT_EX_COLOR, is_calculated=True)
+    rows = [_row(event, '🔴 배당락일', PAYMENT_EX_COLOR, is_calculated=True,
+                 extra_html=last_buy_extra)
             for event in ex_events]
     rows += [_row(event, '🟡 배당기준일', PAYMENT_RECORD_COLOR) for event in record_events]
     rows += [_row(event, '🟢 지급예정일', PAYMENT_DATE_COLOR) for event in pay_events]
 
+    header = '💰 이 날짜에 걸리는 실제 지급일정 공시'
+    if not is_future:
+        header += ' <span style="color:#94a3b8;font-weight:700;">(이미 지난 날짜)</span>'
+
     return (
         '<div style="margin: 8px 0;">'
-        '<div style="font-weight:800;margin-bottom:4px;">💰 이 날짜에 걸리는 실제 지급일정 '
-        '공시</div>'
+        f'<div style="font-weight:800;margin-bottom:4px;">{header}</div>'
         f'<div class="vh-muted" style="margin-bottom:6px;">{esc(PAYMENT_BADGE_TOOLTIP_INTRO)}'
         '</div>'
         + ''.join(rows) + '</div>'
@@ -1124,6 +1333,7 @@ def confirmed_row_cells(entry, payment_index=None):
     """
     return [
         name_cell_html(entry) + parse_note_badge_html(entry)
+        + unit_mismatch_badge_html(entry) + cross_source_badge_html(entry)
         + payment_badge_html(entry, payment_index),
         esc(entry.get('market_text') or MARKET_UNKNOWN),
         dps_cell_html(entry),
@@ -1158,8 +1368,20 @@ def pending_row_cells(entry, payment_index=None):
             '2023~2025년 KIND 연간 집계에도 이 종목의 배당액이 없습니다.<br>'
             '값을 지어내지 않고 "데이터 없음"으로 둡니다 — 0원이라는 뜻이 아닙니다.',
         )
+    # 🔴 M3(2026-08-29) 추가 — 주식종류 구분 없이("-") 온 2026년 배당액이 있으면, 미확정
+    # 판정 자체는 그대로 두되(보통주 기준, 자동 승격 안 함) 그 값이 있다는 사실은 숨기지
+    # 않고 배지로 밝힙니다.
+    unspecified = entry.get('dps_unspecified')
+    if unspecified is not None:
+        year_cell += warn_badge(
+            '📎 종류구분 없는 배당액 있음',
+            f'2026년 정기보고서에 주식종류 구분 없이(원문 "-") 1주당 {fmt_num(unspecified, "원", 0)}'
+            '이 기재돼 있습니다.<br>보통주 배당으로 자동 승격하지 않아 이 종목은 여전히 '
+            '"미확정"으로 분류됩니다 — 값 자체는 숨기지 않고 여기 밝혀 둡니다.',
+        )
     return [
         name_cell_html(entry) + parse_note_badge_html(entry)
+        + unit_mismatch_badge_html(entry) + cross_source_badge_html(entry)
         + payment_badge_html(entry, payment_index),
         esc(entry.get('market_text') or MARKET_UNKNOWN),
         year_cell,
@@ -1182,11 +1404,21 @@ def summary_cards(summary, confirmed_count, pending_count):
     without_dps = to_int(data.get('ok_without_common_dps'))
     no_data = to_int(by_status.get('NO_DATA'))
     unmapped = to_int(by_status.get('UNMAPPED'))
+    # 🔴 M4(2026-08-29) 추가 — ERROR 상태 카드. 예전에는 이 상태가 어느 카드에도 안 잡혀서
+    # "미확정 + 데이터없음 + 매핑실패" 합이 실제 pending_count 와 어긋났습니다(ERROR 가
+    # 1건이라도 있으면 산식이 안 맞음). 카드를 하나 추가해 숫자를 다 보여주고, 아래 산식
+    # 문구에도 포함시킵니다.
+    error_count = to_int(by_status.get('ERROR'))
 
     def count_text(value):
         return f'{value:,}건' if value is not None else NA_TEXT
 
-    return (
+    formula = '이 건수 + 데이터없음 + 매핑실패'
+    if error_count:
+        formula += ' + 조회오류'
+    formula += f' = {pending_count:,}건'
+
+    cards = [
         ('🎯 이번 수집 대상 종목',
          f'{universe:,}개' if universe is not None else NA_TEXT,
          '2023~2025년 배당 집계 파일에 실린 종목만 (전 상장사가 아닙니다)'),
@@ -1195,15 +1427,21 @@ def summary_cards(summary, confirmed_count, pending_count):
          '달력에 실제로 찍히는 건수 (이 화면이 직접 셌습니다)'),
         ('⏳ 아직 2026년 미확정',
          count_text(without_dps),
-         '정기보고서는 찾았지만 배당 표가 없음 '
-         f'(아래 "작년 참고" 목록은 이 건수 + 데이터없음 + 매핑실패 = {pending_count:,}건)'),
+         f'정기보고서는 찾았지만 배당 표가 없음 (아래 "작년 참고" 목록은 {formula})'),
         ('❔ 배당 표를 찾지 못함',
          count_text(no_data),
          '무배당인지 조회 실패인지 DART 응답만으로는 구분되지 않습니다'),
         ('🚫 종목코드 매핑 실패',
          count_text(unmapped),
          'DART 고유번호와 연결하지 못한 종목'),
-    )
+    ]
+    if error_count:
+        cards.append((
+            '🚨 조회 중 오류',
+            count_text(error_count),
+            'DART 조회 자체가 실패한 것이 확인된 종목 — "미확정"과 달리 실패 원인이 있습니다',
+        ))
+    return tuple(cards)
 
 
 # =============================================================================
@@ -1241,10 +1479,23 @@ async def _render_body() -> None:
     history_payload, history_error = await load_json_file_async(data_path(HISTORY_FILENAME))
 
     # 🟢 "실제 지급일정" 배지용 — 완전히 별도 수집기(`collector_dividend_payment_kr.py`)가
-    #    만드는 파일입니다. 위 두 파일과 달리 **못 읽어도 에러 배너를 띄우지 않습니다** —
-    #    이 파일은 덧붙는 정보일 뿐이라, 없으면 배지만 안 붙고 달력은 예전과 똑같이
-    #    그려집니다(첫 수집이 아직 안 돈 상태에서도 화면이 정상 동작해야 하므로).
-    payment_payload, _payment_error = await load_json_file_async(data_path(PAYMENT_EVENTS_FILENAME))
+    #    만드는 파일입니다. 위 두 파일과 달리 **파일이 아직 없을 때는 에러 배너를 띄우지
+    #    않습니다** — 이 파일은 덧붙는 정보일 뿐이라, 없으면 배지만 안 붙고 달력은 예전과
+    #    똑같이 그려집니다(첫 수집이 아직 안 돈 상태에서도 화면이 정상 동작해야 하므로).
+    # 🔴 M2(2026-08-29) 수정 — 예전에는 `_payment_error`를 이름에 밑줄까지 붙여 통째로
+    # 버렸습니다. "파일이 아직 없다"(첫 실행 전, 정상)와 "읽다가 실패했다"(네트워크
+    # 타임아웃 등, 비정상)는 다른 사실인데(§0-1), 둘 다 조용히 같은 빈 결과로 취급되면
+    # 원격 소스가 일시적으로 오류를 내도 달력의 🔴락일·🟡기준일·🟢지급일 표시가 그냥
+    # 조용히 사라져 "이번 달엔 일정이 없다"로 오독됩니다. `data_source._read_local()` 은
+    # 파일이 없을 때 "…이 없습니다"를, 읽기 자체가 실패했을 때 "…을 읽지 못했습니다"를
+    # 돌려주므로 그 문구로 두 경우를 구분합니다.
+    payment_payload, payment_error = await load_json_file_async(data_path(PAYMENT_EVENTS_FILENAME))
+    if payment_error and '읽지 못했습니다' in payment_error:
+        warning_banner(
+            f'⚠️ 지급일정 공시 파일을 읽지 못했습니다({payment_error}) — 이번에는 배당기준일 · '
+            '지급예정일 · 배당락일 표시를 하지 않습니다(일정이 없다는 뜻이 아닙니다). '
+            '결산기준일 기준 배당 확정 목록·달력은 평소대로 보입니다.'
+        )
     payment_index = (
         build_payment_event_index(payment_payload)
         if isinstance(payment_payload, dict) else {}
@@ -1303,6 +1554,7 @@ async def _render_body() -> None:
     #    ⚠️ CALENDAR_DATE_NOTICE 만은 예외입니다 — 이 파일 머리말 ① 의 제품 결정대로
     #       접이식에 넣지 않고 달력 바로 위 상시 배너로 그대로 둡니다.
     _render_data_timestamp(summary)
+    _render_completion_status(summary)
     _render_summary(summary, confirmed, pending, grouped)
 
     # ── 상태는 전부 이 함수의 지역 변수입니다 (§0-3-8) ───────────────────
@@ -1332,7 +1584,15 @@ async def _render_body() -> None:
     #    목록 + 지급일정 색인**에서 한 번만 계산합니다(필터를 걸어도 이동 가능한 범위 자체는
     #    줄어들지 않아야 하므로, `_visible_confirmed()`가 아니라 `confirmed`를 씁니다 —
     #    `dividend_us_page.py`가 `data['entries']`를 쓰는 것과 같은 이유).
-    months = available_months(confirmed, payment_date_index, today)
+    months, out_of_range_month_count = available_months(confirmed, payment_date_index, today)
+    # 🔴 M14(2026-08-29) — 손상된 날짜를 조용히 버리지 않고 그대로 밝힙니다(§0-1).
+    if out_of_range_month_count:
+        warning_banner(
+            f'⚠️ 날짜가 오늘로부터 {AVAILABLE_MONTHS_MAX_MONTHS_FROM_TODAY}개월 넘게 벗어난 '
+            f'레코드 {out_of_range_month_count:,}건을 월 선택기에서 제외했습니다 — 원본 데이터의 '
+            '결산기준일ㆍ지급예정일이 잘못 기록됐을 가능성이 있습니다. 값은 지우지 않았고, '
+            '이 화면의 달력 이동 범위에서만 뺐습니다.'
+        )
 
     all_entries = confirmed + pending
     markets = market_choices(all_entries)
@@ -1361,8 +1621,14 @@ async def _render_body() -> None:
             view['market'] = event.value or MARKET_ALL
             _on_filter_changed()
 
+        # 🔴 M13(2026-08-29) — 예전에는 debounce 가 없어 키 한 번 누를 때마다(2,734건
+        # 필터링 + 확정/미확정/달력 세 구획 재렌더) 바로 실행됐습니다. Quasar 의 `debounce`
+        # prop(ms 단위)으로 입력이 잠깐 멈춘 뒤에만 이벤트를 내보내게 해, 타이핑 도중
+        # NiceGUI 이벤트 루프가 매 글자마다 무거운 재렌더를 하지 않게 합니다(§0-3-8과는
+        # 별개로 순수 성능 이슈지만, 이벤트 루프를 막으면 다른 접속의 반응성에도 영향을
+        # 줄 수 있어 여기서 고칩니다).
         ui.input('🔍 회사명 / 종목코드 검색', placeholder='예: BNK금융지주, 138930',
-                 on_change=_on_query).props('clearable').style('flex: 1 1 260px;')
+                 on_change=_on_query).props('clearable debounce=300').style('flex: 1 1 260px;')
         ui.select(markets, value=MARKET_ALL, label='🏛️ 시장',
                   on_change=_on_market).style('flex: 1 1 240px;')
 
@@ -1373,14 +1639,29 @@ async def _render_body() -> None:
 
     # ── 🔴 "배당락일 전까지 매수해야 받는다" — 실전 행동 요령, 큰 글자 상시 노출 ──────
     # (오너 요청, 2026-08-25) 달력 바로 위, 위 배너 바로 아래. 접이식이 아니라 항상 보임.
-    ui.html(
-        f'<div style="text-align:center; margin: 4px 0 16px 0; padding: 16px 20px; '
-        f'background: rgba(127, 29, 29, 0.35); border: 2px solid {PAYMENT_EX_COLOR}; '
-        f'border-radius: 10px;">'
-        f'<span style="font-size: 1.5rem; font-weight: 900; color: {PAYMENT_EX_COLOR}; '
-        f'line-height: 1.4;">{EX_DATE_BUY_DEADLINE_WARNING}</span>'
-        f'</div>'
-    ).classes('w-full')
+    # 🔴 H3(2026-08-29) 수정 — 예전에는 조건 없이 항상 떴습니다. 이 화면은 지급일정
+    # 이벤트의 과거/미래를 전혀 구분하지 않았는데, 그런 상태에서 이 배너만 상시 노출되면
+    # 이전 달로 넘겨 이미 지난 배당락일을 볼 때도 "지금부터 매수하라"는 안내로 오독됩니다
+    # (미국 배당 화면이 이미 방어해 둔 문제 — `dividend_us_page.py:451` 참고). 이제
+    # **앞으로 남은 배당락일이 1건 이상일 때만** 그리고, 몇 건 남았는지 문구에 그대로
+    # 적습니다(지어내지 않되, 근거 없이 숨기지도 않습니다).
+    future_ex_count = count_future_ex_events(payment_date_index, today)
+    if future_ex_count:
+        ui.html(
+            f'<div style="text-align:center; margin: 4px 0 16px 0; padding: 16px 20px; '
+            f'background: rgba(127, 29, 29, 0.35); border: 2px solid {PAYMENT_EX_COLOR}; '
+            f'border-radius: 10px;">'
+            f'<span style="font-size: 1.5rem; font-weight: 900; color: {PAYMENT_EX_COLOR}; '
+            f'line-height: 1.4;">{EX_DATE_BUY_DEADLINE_WARNING}</span>'
+            f'<div style="font-size: 0.85rem; color:#cbd5e1; margin-top:6px;">'
+            f'앞으로 남은 배당락일 {future_ex_count:,}건이 있어요(지급일정 공시 기준).</div>'
+            f'</div>'
+        ).classes('w-full')
+    else:
+        ui.label(
+            '⚪ 지급일정 공시로 확인된 배당락일 중 앞으로 남은 건이 없어요 — 지난 배당락일은 '
+            '기록으로만 아래 달력에 남아 있습니다.'
+        ).classes('vh-muted vh-keep-all')
 
     # ── 🔵 "오늘은 며칠" — 위 빨간 배너와 세트로 보이는 큰 박스, 달력 바로 위 ──────────
     # (오너 요청, 2026-08-27) "저기 배당락일 전까지 매수해주세요 저거 잘보여서 좋아 /
@@ -1421,7 +1702,7 @@ async def _render_body() -> None:
     @ui.refreshable
     def _day_section() -> None:
         _render_selected_day(view, _visible_confirmed(), payment_index, payment_date_index,
-                             on_changed=_day_section.refresh)
+                             today, on_changed=_day_section.refresh)
 
     _calendar_section()
     _day_section()
@@ -1429,7 +1710,7 @@ async def _render_body() -> None:
     ui.separator()
 
     # ── 배경 설명 · 알려진 한계 · 원본 다운로드 (기본 접힘) ───────────────
-    _render_notice_panel(summary, confirmed, pending)
+    _render_notice_panel(summary, confirmed, pending, payment_payload)
 
     @ui.refreshable
     def _pending_section() -> None:
@@ -1462,6 +1743,75 @@ def _render_data_timestamp(summary) -> None:
     )
 
 
+def _render_completion_status(summary) -> None:
+    """🔴 H6(2026-08-29) 추가 — 수집이 **중간에 끊긴 결과**·**부분 갱신된 결과**임을
+    이 화면이 상시 배너로 밝힙니다.
+
+    수집기는 §0-1 을 지키려고 `completed`·`stopped_reason`·`watch_update_performed_at_kst`·
+    `limit_applied`·`verification_status` 를 성실히 남기는데, 예전에는 이 화면 어디도 이
+    필드들을 읽지 않았습니다(`grep` 0건 — 재감사 확인). 그래서 5시간 예산을 넘겨 절반만
+    돌고 중단된 결과나, daily watch 로 일부 종목만 갱신된 결과가 **전수 정상 수집**처럼
+    보였습니다. 이 함수는 그 신호들을 그대로(의역하지 않고) 화면 맨 위, 요약 카드보다도
+    먼저 밝힙니다 — 사용자가 숫자를 보기 전에 "이 숫자가 전체인지 일부인지"부터 알아야
+    하기 때문입니다.
+    """
+    data = summary or {}
+
+    completed = data.get('completed')
+    if completed is False:
+        reason = data.get('stopped_reason') or '사유 미기록'
+        error_banner(
+            f'🚨 이번 수집은 끝까지 돌지 못하고 중단됐습니다({reason}).\n\n'
+            '아래 종목 수·건수는 **끝까지 돈 만큼만**입니다 — 나머지 종목은 이번 수집에 '
+            '아예 포함되지 않았고, 값을 지어내 채우지 않았습니다.'
+        )
+
+    watch_performed_at = data.get('watch_update_performed_at_kst')
+    if watch_performed_at:
+        replaced = len(data.get('watch_replaced_stock_codes') or ())
+        added = len(data.get('watch_added_stock_codes') or ())
+        skipped = len(data.get('watch_skipped_replacements') or ())
+        detail = (f'이번 daily watch({watch_performed_at})가 교체 {replaced:,}종목 · '
+                  f'추가 {added:,}종목을 반영했습니다.')
+        if skipped:
+            detail += (f' 델타 결과가 OK 가 아니어서 교체하지 않고 기존 값을 지킨 종목도 '
+                       f'{skipped:,}건 있습니다.')
+        warning_banner(
+            '⚠️ 이 파일은 단일 전수 수집의 결과가 아니라 daily watch로 **부분 갱신**된 '
+            f'결과입니다.\n\n{detail} 나머지 종목의 값은 직전 전수 수집 그대로입니다.'
+        )
+
+    limit_applied = data.get('limit_applied')
+    if limit_applied:
+        warning_banner(
+            f'⚠️ 이 결과는 `--limit {limit_applied}` 로 대상 종목 수를 제한한 '
+            '**시범 실행** 결과입니다 — 정식 전수 수집이 아닙니다.'
+        )
+
+    unit_mismatch = to_int(data.get('records_with_unit_mismatch'))
+    cross_source = to_int(data.get('records_with_cross_source_mismatch'))
+    if unit_mismatch or cross_source:
+        parts = []
+        if unit_mismatch:
+            parts.append(f'단위 검증 미통과 {unit_mismatch:,}건')
+        if cross_source:
+            parts.append(f'출처 간(DART↔KIND) 불일치 {cross_source:,}건')
+        warning_banner(
+            '⚠️ ' + ' · '.join(parts) + ' — 값은 원문 그대로 두었고, 어느 종목인지는 '
+            '아래 표에서 해당 행의 배지로 표시됩니다(§0-1: 값을 임의로 고치지 않습니다).'
+        )
+
+    outside_universe = data.get('watch_filings_outside_universe') or ()
+    if outside_universe:
+        codes = ', '.join(str(item) for item in outside_universe[:20])
+        more = f' 외 {len(outside_universe) - 20:,}건' if len(outside_universe) > 20 else ''
+        warning_banner(
+            f'⚠️ 이번 daily watch에서 우리 유니버스 밖의 신규 배당 공시 '
+            f'{len(outside_universe):,}건을 확인했지만 수집 대상이 아니라 이 화면에는 '
+            f'넣지 않았습니다 ({codes}{more}).'
+        )
+
+
 def _render_summary(summary, confirmed, pending, grouped) -> None:
     """요약 카드 5장 + 수치가 어긋날 때의 정합성 경고 (§0-1).
 
@@ -1475,6 +1825,22 @@ def _render_summary(summary, confirmed, pending, grouped) -> None:
     with ui.row().classes('w-full gap-3 items-stretch'):
         for label, value, note in summary_cards(summary, len(confirmed), len(pending)):
             metric_card(label, value, note)
+
+    # 🔴 M6(2026-08-29) 수정 — §0-3-13(2026-08-24 신설)은 "사용자가 화면을 잘못 해석하거나
+    # 잘못된 판단을 내릴 수 있는 유의사항은 툴팁·작은 회색 글씨·접힌 아코디언 안에 숨기지
+    # 않는다"고 명시합니다. 이 두 문구(UNIVERSE_NOTICE·YIELD_SOURCE_NOTICE)는 2026-08-24
+    # UX 개선 때 접이식 패널(`_render_notice_panel`) 안으로 옮겨졌는데, 그 이동 자체가
+    # §0-3-13 이 금지하는 "숨김"이었습니다. 문구는 그대로 두고(§0-1 삭제 금지) 자리만
+    # 요약 카드 바로 아래(상시 노출)로 다시 꺼냅니다. `PREFERRED_NOTICE`·`PAYMENT_NOTICE`
+    # 같은 순수 배경 설명만 접이식에 남습니다.
+    ui.label(UNIVERSE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+    ui.label(YIELD_SOURCE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+    # 🔴 M5(2026-08-29) — 위 두 문구와 같은 이유(§0-3-13)로 상시 노출. "주당 현금배당금"이
+    # 보고서마다 누적 범위가 달라 종목 간 비교가 위험하다는 사실은 열 제목만으로는 다
+    # 전달되지 않습니다.
+    ui.label(CUMULATIVE_DPS_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+    # 🔴 M7(2026-08-29) — 세전 금액이라는 사실도 같은 이유로 상시 노출.
+    ui.label(TAX_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
 
     # 🔴 수집기 요약과 화면이 센 수가 어긋나면 조용히 넘어가지 않고 그대로 알립니다.
     reported = to_int((summary or {}).get('ok_with_common_dps'))
@@ -1495,7 +1861,7 @@ def _render_summary(summary, confirmed, pending, grouped) -> None:
         )
 
 
-def _render_notice_panel(summary, confirmed, pending) -> None:
+def _render_notice_panel(summary, confirmed, pending, payment_payload=None) -> None:
     """달력 아래 접이식 패널 하나 — 배경 설명 · 알려진 한계 · 원본 다운로드.
 
     2026-08-24 (오너 피드백: "정보량이 너무 많아서 열자마자 한숨부터 나온다") — 예전에는
@@ -1516,9 +1882,10 @@ def _render_notice_panel(summary, confirmed, pending) -> None:
         '📋 데이터 안내 및 알려진 한계 — 수집 범위 · 배당수익률 산정 방식 · '
         '우선주 표시 방식 (누르면 펼치기)'
     ).classes('w-full vh-card'):
-        # 🔴 유니버스 정직성 고지 — "전체 상장사"라고 말하지 않습니다(머리말 ②).
-        ui.label(UNIVERSE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
-        ui.label(YIELD_SOURCE_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
+        # 🔴 M6(2026-08-29) — UNIVERSE_NOTICE·YIELD_SOURCE_NOTICE 는 §0-3-13 때문에
+        # 더 이상 여기(접이식) 안에 두지 않고 `_render_summary()`에서 상시 노출로
+        # 옮겼습니다. 이 접이식에는 순수 배경 설명(우선주 표기 방식·지급일정 배지
+        # 안내)만 남습니다.
 
         # 🟣 우선주 배당 안내 — 아래 `_render_known_limitations()` 가 싣는 **수집기 원문**과
         #    우리가 쓴 화면 설명이 섞여 보이지 않도록, 우리 설명을 먼저 두고 수집기 원문은
@@ -1545,9 +1912,57 @@ def _render_notice_panel(summary, confirmed, pending) -> None:
         ui.label(PAYMENT_NOTICE).classes('vh-notice-text vh-keep-all whitespace-pre-line')
 
         _render_known_limitations(summary)
+        _render_payment_report_block(payment_payload)
 
         ui.separator()
         _render_raw_downloads()
+
+
+def _render_payment_report_block(payment_payload) -> None:
+    """🔴 M17(2026-08-29) 추가 — 지급일정 수집기(`collector_dividend_payment_kr.py`)가
+    §0-1 을 지키려고 남긴 리포트(`by_parse_status`·`records_without_*`·`document_failures`·
+    `scan_stats.unrecognized`)를 이 화면이 그대로 옮깁니다.
+
+    예전에는 이 화면이 `payment_payload`에서 `records`만 읽었습니다 — "우리 판정 규칙 밖의
+    새 report_nm 표기 7건" 같은 신호가 사람 눈에 닿을 길이 서버 로그밖에 없었습니다.
+    `PAYMENT_NOTICE`의 일반론이 이 숫자들을 대신하지 못하므로, H6 과 같은 취지로 원문
+    숫자를 그대로 노출합니다(의역하지 않습니다 — §0-1).
+    """
+    payment_summary = (payment_payload or {}).get('summary')
+    if not isinstance(payment_summary, dict):
+        return
+
+    ui.markdown('**📋 지급일정 수집기(daily watch) 리포트**')
+
+    by_parse_status = payment_summary.get('by_parse_status') or {}
+    if by_parse_status:
+        status_text = ' · '.join(f'{status}: {count:,}건' for status, count in by_parse_status.items())
+        ui.label(f'파싱 상태별 건수 — {status_text}').classes('vh-notice-text')
+
+    without_record = to_int(payment_summary.get('records_without_record_date'))
+    without_pay = to_int(payment_summary.get('records_without_pay_date_expected'))
+    if without_record or without_pay:
+        ui.label(
+            f'배당기준일이 비어 있는 레코드 {without_record or 0:,}건 · '
+            f'지급예정일이 비어 있는 레코드 {without_pay or 0:,}건'
+        ).classes('vh-notice-text')
+
+    documents_failed = to_int(payment_summary.get('documents_failed_this_run'))
+    if documents_failed:
+        ui.label(
+            f'⚠️ 이번 실행에서 원문 조회 자체가 실패한 공시 {documents_failed:,}건 — '
+            '해당 접수번호는 다음 실행에서 다시 시도합니다.'
+        ).classes('vh-notice-text')
+
+    scan_stats = payment_summary.get('scan_stats') or {}
+    unrecognized = to_int(scan_stats.get('unrecognized'))
+    if unrecognized:
+        samples = scan_stats.get('unrecognized_samples') or []
+        sample_text = ', '.join(str(s) for s in samples[:5])
+        ui.label(
+            f'⚠️ 우리 판정 규칙 밖의 report_nm 표기 {unrecognized:,}건(이벤트로 만들지 '
+            f'않았습니다)' + (f' — 예: {sample_text}' if sample_text else '')
+        ).classes('vh-notice-text')
 
 
 def _render_known_limitations(summary) -> None:
@@ -1564,6 +1979,32 @@ def _render_known_limitations(summary) -> None:
     ui.markdown(f'**📋 이 데이터의 알려진 한계 {len(limitations)}가지 (수집기 원문)**')
     for line in limitations:
         ui.label(str(line)).classes('vh-notice-text vh-keep-all')
+
+
+def raw_download_exceeds_cap(raw_size_bytes) -> bool:
+    """🔴 M9/S5(2026-08-29) — raw 파일 크기(바이트)가 `RAW_DOWNLOAD_MAX_BYTES`를 넘는가.
+
+    NiceGUI 위젯을 만들지 않는 순수 함수라(§1 관례) 렌더링 없이 이 판정 로직만 따로
+    검증할 수 있습니다.
+    """
+    return raw_size_bytes > RAW_DOWNLOAD_MAX_BYTES
+
+
+def raw_download_oversize_link_html(raw_size_bytes) -> str:
+    """🔴 M9/S5(2026-08-29) — 상한을 넘었을 때 다운로드 버튼 대신 보여줄 GitHub 링크 한 줄.
+
+    파일 경로 조각(`GITHUB_REPO_BLOB_BASE`·`RAW_FILENAME`)은 이 화면이 직접 쓴 상수라
+    `esc()`가 원칙상 필요 없지만(§0-3-9는 외부 값에 대한 규칙), 이 자리에 나중에 실수로
+    외부 값이 흘러들어도 안전하도록 그대로 씌워 둡니다.
+    """
+    size_mb = raw_size_bytes / (1024 * 1024)
+    return (
+        f'<a href="{esc(GITHUB_REPO_BLOB_BASE)}/{esc(RAW_FILENAME)}" '
+        f'target="_blank" rel="noopener noreferrer" '
+        f'style="color:#38bdf8; font-weight:700;">📦 2026년 수집 원본 (raw, '
+        f'JSONL, {size_mb:.1f}MB) — 파일이 커서 이 화면 대신 GitHub 저장소에서 '
+        '직접 받아 주세요 ↗</a>'
+    )
 
 
 def _render_raw_downloads() -> None:
@@ -1591,13 +2032,19 @@ def _render_raw_downloads() -> None:
                 failure_text='2026년 수집 결과 파일을 읽지 못했습니다.',
             )
         if os.path.exists(raw_path):
-            download_button(
-                '2026년 수집 원본 (raw, JSONL)',
-                f'dividend_kr_2026_raw_{today}.jsonl',
-                lambda: read_download_bytes(raw_path),
-                media_type='application/x-ndjson',
-                failure_text='2026년 원본 파일을 읽지 못했습니다.',
-            )
+            raw_size = os.path.getsize(raw_path)
+            if not raw_download_exceeds_cap(raw_size):
+                download_button(
+                    '2026년 수집 원본 (raw, JSONL)',
+                    f'dividend_kr_2026_raw_{today}.jsonl',
+                    lambda: read_download_bytes(raw_path),
+                    media_type='application/x-ndjson',
+                    failure_text='2026년 원본 파일을 읽지 못했습니다.',
+                )
+            else:
+                # 🔴 M9/S5(2026-08-29) — 상한을 넘으면 이 화면에서 직접 내려받게 하지 않고
+                # GitHub 저장소 링크로 안내합니다(위 RAW_DOWNLOAD_MAX_BYTES 주석 참고).
+                ui.html(raw_download_oversize_link_html(raw_size))
         if os.path.exists(history_path):
             download_button(
                 '2023~2025년 배당 기준선 (JSON)',
@@ -1791,21 +2238,38 @@ def _render_calendar(view, entries, total_confirmed, payment_date_index, months,
                         button = ui.button(f'{day}일', on_click=_pick(key)).classes('w-full')
                         button.props('unelevated no-caps dense color=primary' if selected
                                      else 'flat no-caps dense outline')
+                    # 🔴 H3(2026-08-29) 추가 — 이 칸의 날짜가 오늘(포함) 이후인지로
+                    # 지급일정 라벨의 색을 죽입니다(미국 배당 화면의 FUTURE/PAST 구분과
+                    # 같은 판정). "종류"(🔴락일·🟡기준일·🟢지급일 아이콘·이름)는 그대로 두고
+                    # "이미 지났다"는 사실만 글자색+문구로 덧붙입니다 — 색만으로 구분하면
+                    # 색맹인 분들에게는 정보가 아니므로 "(지남)" 글자를 항상 함께 답니다.
+                    key_is_future = key >= today.isoformat()
+                    past_suffix = '' if key_is_future else '(지남)'
                     if ex_count:
-                        ui.label(f'🔴 락일 {ex_count}건') \
+                        color = PAYMENT_EX_COLOR if key_is_future else PAYMENT_PAST_COLOR
+                        ui.label(f'🔴 락일 {ex_count}건{past_suffix}') \
                             .classes('text-center text-xs') \
-                            .style(f'color:{PAYMENT_EX_COLOR};font-weight:700;')
+                            .style(f'color:{color};font-weight:700;')
                     if record_count:
-                        ui.label(f'🟡 기준일 {record_count}건') \
+                        color = PAYMENT_RECORD_COLOR if key_is_future else PAYMENT_PAST_COLOR
+                        ui.label(f'🟡 기준일 {record_count}건{past_suffix}') \
                             .classes('text-center text-xs') \
-                            .style(f'color:{PAYMENT_RECORD_COLOR};font-weight:700;')
+                            .style(f'color:{color};font-weight:700;')
                     if pay_count:
-                        ui.label(f'🟢 지급일 {pay_count}건') \
+                        color = PAYMENT_DATE_COLOR if key_is_future else PAYMENT_PAST_COLOR
+                        ui.label(f'🟢 지급일 {pay_count}건{past_suffix}') \
                             .classes('text-center text-xs') \
-                            .style(f'color:{PAYMENT_DATE_COLOR};font-weight:700;')
+                            .style(f'color:{color};font-weight:700;')
+
+    # 🔴 H3(2026-08-29) 추가 — "(지남)" 글자가 무엇을 뜻하는지 격자 바로 아래 항상 적습니다
+    # (색만 두고 뜻을 안 적으면 그건 화면이 아니라 암호입니다 — 미국 배당 화면의 같은 자리
+    # 안내와 같은 원칙).
+    ui.label('🔴 배당락일 · 🟡 배당기준일 · 🟢 지급예정일 — 밝은 색은 앞으로, 회색+"(지남)"은 '
+             '이미 지난 지급일정 공시입니다.').classes('vh-muted vh-keep-all')
 
 
-def _render_selected_day(view, entries, payment_index, payment_date_index, on_changed) -> None:
+def _render_selected_day(view, entries, payment_index, payment_date_index, today,
+                         on_changed) -> None:
     """고른 날짜의 종목 목록(없으면 안내만). 표는 페이지로 나눠 그립니다.
 
     🟢 2026-08-25 — `payment_date_index`로 이 날짜에 걸리는 지급일정 이벤트(배당기준일ㆍ
@@ -1823,7 +2287,7 @@ def _render_selected_day(view, entries, payment_index, payment_date_index, on_ch
     grouped = group_by_settle_date(entries)
     day_entries = grouped.get(key, [])
 
-    date_block = payment_date_block_html(key, payment_date_index)
+    date_block = payment_date_block_html(key, payment_date_index, today)
     if date_block:
         ui.html(date_block).classes('w-full')
 
@@ -1875,11 +2339,20 @@ def _render_pending(view, entries, total_pending, payment_index, on_changed) -> 
         return
 
     with_previous = sum(1 for entry in entries if entry['data_quality'] == QUALITY_PREVIOUS)
-    ui.label(
+    # 🔴 M3(2026-08-29) 추가 — 주식종류 구분 없이 온 배당액이 있는 건수. 자동 승격은 안
+    # 하지만(오너 판단으로 남겨 둠) 몇 건이나 있는지는 숨기지 않습니다.
+    unspecified_count = sum(1 for entry in entries if entry.get('dps_unspecified') is not None)
+    summary_line = (
         f'표시 대상 {len(entries):,}건 (전체 {total_pending:,}건 중) · '
         f'지난 연도 배당을 보여드릴 수 있는 종목 {with_previous:,}건 · '
         f'기준선에도 배당액이 없어 "데이터 없음" {len(entries) - with_previous:,}건'
-    ).classes('vh-muted')
+    )
+    if unspecified_count:
+        summary_line += (
+            f' · 주식종류 구분 없이 온 2026년 배당액이 있는 종목 {unspecified_count:,}건 '
+            '(보통주로 자동 승격하지 않아 미확정으로 둡니다 — 각 행의 배지 참고)'
+        )
+    ui.label(summary_line).classes('vh-muted')
 
     total_pages = max(1, (len(entries) + ITEMS_PER_PAGE - 1) // ITEMS_PER_PAGE)
     current_page = min(view['pending_page'], total_pages)
@@ -1892,8 +2365,12 @@ def _render_pending(view, entries, total_pending, payment_index, on_changed) -> 
         [pending_row_cells(entry, payment_index) for entry in page_entries],
     )).classes('w-full')
 
-    def _on_page(page: int) -> None:
-        view['pending_page'] = page
-        on_changed()
+    # 🟡 L9(2026-08-29) 수정 — `_render_selected_day()`와 같은 규칙으로 맞춥니다: 1페이지뿐일
+    # 때는 pager를 그리지 않습니다(전에는 여기만 무조건 그려서 뒤로/앞으로 버튼이 항상 있는데
+    # 아무 데도 못 가는 상태였습니다).
+    if total_pages > 1:
+        def _on_page(page: int) -> None:
+            view['pending_page'] = page
+            on_changed()
 
-    pager(total_pages, current_page, _on_page)
+        pager(total_pages, current_page, _on_page)
