@@ -41,6 +41,9 @@ from utils.data_validator import DataValidator, PERIOD_KEYWORDS, INDICATOR_TARGE
 # 임계값·캡 상수는 utils/constants.py 단일 출처에서만 가져옵니다 (2차 감사 6-3: 중복 제거).
 from utils.constants import (
     PER_EXTREME_MAX,
+    GROWTH_CAP_PCT,
+    SH_RETURN_CAP_PCT,
+    GEFF_TOTAL_CAP_PCT,
     TARGET_PER_CAP,
     TARGET_PRICE_CAP_MULTIPLE,
     ROE_PREMIUM_BASELINE_PCT,
@@ -1610,11 +1613,30 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         # g_eff = 성장률 + 주주환원율. 주주환원율을 '모르는' 종목(sh_yield=None)에 0을
         # 대입하면 그건 "무배당이라고 단정"하는 것과 같으므로(§0-1 위반), 산출하지 않습니다.
         if growth is not None and sh_yield is not None:
+            # geff(트레일링용)는 캡을 걸지 않습니다 — SPEC §5-1의 t_pegy 공식이 원래도
+            # `growth + sh_yield`를 그대로(캡 없이) 쓰도록 설계돼 있고, 실측 트레일링
+            # 값이라 미래 추정처럼 완화할 근거가 없습니다(utils/constants.py 1-1 참고).
             geff = growth + sh_yield
-            growth_eff = geff / vol_penalty
+            # 2026-08-30(TASK_HISTORY #175/#176) — Forward 쪽(growth_eff → f_pegy·목표가)
+            # 에만 SPEC §5-1의 2중 캡을 적용합니다. 이전엔 이 캡이 코스피 경로에
+            # 아예 빠져 있어(미국 경로엔 있었음) 고성장 종목의 실효성장률이 부풀려져
+            # PEGY가 인위적으로 낮아지고(=저평가처럼 보임) 있었습니다 — 오너 확인
+            # 결과 의도된 시장별 차이가 아니라 놓친 구현으로 확정, 이번에 반영합니다.
+            growth_capped = min(growth, GROWTH_CAP_PCT)
+            sh_return_capped = min(sh_yield, SH_RETURN_CAP_PCT)
+            g_eff_capped_value = min(growth_capped + sh_return_capped, GEFF_TOTAL_CAP_PCT)
+            g_eff_capped = bool(
+                growth > GROWTH_CAP_PCT
+                or sh_yield > SH_RETURN_CAP_PCT
+                or (growth_capped + sh_return_capped) > GEFF_TOTAL_CAP_PCT
+            )
+            g_eff_uncapped = round(geff, 2)
+            growth_eff = g_eff_capped_value / vol_penalty
         else:
             geff = None
             growth_eff = None
+            g_eff_capped = False
+            g_eff_uncapped = None
             if growth is not None and sh_yield is None:
                 data_issues.append("실효성장률(g_eff) 산출 불가 — 주주환원율(배당) 미수집")
 
@@ -1788,6 +1810,12 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             "growth": growth,
             "growth_source": growth_source,
             "f_pegy": f_pegy,
+            # 2026-08-30(TASK_HISTORY #175/#176) — 실효성장률이 §5-1 2중 캡에 걸렸는지와
+            # 캡을 적용하지 않은 원값. tests/test_stock_history.py의 FORBIDDEN_KEYS 정책이
+            # 이미 이 두 필드명을 "카드가 실제로 읽는 필드"로 취급하고 있었습니다(2026-08-29
+            # M-13, 미국 화면 기준) — 코스피 쪽만 이제 실제로 값을 채웁니다.
+            "g_eff_capped": g_eff_capped,
+            "g_eff_uncapped": g_eff_uncapped,
             "f_target": f_target,
             # 2차 감사 1-3: 목표가가 '계산 결과'가 아니라 '캡 상수'인지 여부와 그 사유
             "f_target_capped": f_target_capped,
