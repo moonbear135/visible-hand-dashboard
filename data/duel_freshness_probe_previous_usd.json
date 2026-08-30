@@ -1,10 +1,7 @@
 {
-  "generated_at_kst": "2026-08-29T18:39:50.012902+09:00",
-  "index_keys": [
-    "NASDAQ_PROXY_ONEQ",
-    "SP500_PROXY_SPY"
-  ],
-  "target_date": "2026-08-28",
+  "generated_at_kst": "2026-08-30T17:51:59.525908+09:00",
+  "index_keys": [],
+  "target_date": "2026-08-29",
   "values": {
     "AAPL": 319.7,
     "ABBV": 255.48,
@@ -40,7 +37,6 @@
     "MS": 214.77,
     "MSFT": 513.53,
     "MU": 932.86,
-    "NASDAQ_PROXY_ONEQ": 104.06,
     "NFLX": 81.72,
     "NVDA": 217.55,
     "ORCL": 150.85,
@@ -49,7 +45,6 @@
     "PLTR": 186.29,
     "PM": 191.89,
     "RTX": 211.71,
-    "SP500_PROXY_SPY": 769.35,
     "SPCX": 141.5,
     "TSLA": 348.75,
     "TXN": 258.64,
