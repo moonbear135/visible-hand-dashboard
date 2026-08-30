@@ -931,13 +931,19 @@ def test_short_indicators_reclassified():
     check("8개 중 6개" not in view_src, "화면 경고문이 옛 개수('8개 중 6개')를 말하지 않음")
     check("2026-08-10 기준 8개 지표" not in view_src, "거버넌스 선언문의 지표 개수가 갱신됨")
 
-    # ⑨ 문서에도 기록이 남았는가 (TASK_HISTORY / PROJECT_STATUS)
+    # ⑨ 문서에도 기록이 남았는가 (TASK_HISTORY / 아카이브 / PROJECT_STATUS)
+    #    2026-08-30(TASK_HISTORY #172) — 오래된 완료 항목(#1~#153, 이 #72 포함)이
+    #    `TASK_HISTORY_ARCHIVE.md`로 옮겨졌습니다(ENGINEERING_SPEC.md §0-3-14).
+    #    내용은 그대로라 아카이브까지 합쳐서 검사합니다 — 앞으로 또 아카이브가
+    #    분리(`TASK_HISTORY_ARCHIVE_2.md` 등)돼도 계속 잡히도록 glob으로 전부 모음.
     task_history = (REPO_ROOT / "TASK_HISTORY.md").read_text(encoding="utf-8")
+    for archive_path in sorted(REPO_ROOT.glob("TASK_HISTORY_ARCHIVE*.md")):
+        task_history += "\n" + archive_path.read_text(encoding="utf-8")
     check("72." in task_history and "공매도" in task_history,
-          "TASK_HISTORY.md 에 72번 항목이 기록됨")
+          "TASK_HISTORY.md(+아카이브) 에 72번 항목이 기록됨")
     status = (REPO_ROOT / "PROJECT_STATUS.md").read_text(encoding="utf-8")
     check("85.48" in task_history or "85.48" in status,
-          "재분배 계산 근거(85.48)가 문서에 남아 있음")
+          "재분배 계산 근거(85.48)가 문서(+아카이브)에 남아 있음")
 
 
 def test_friendly_names_single_source():
