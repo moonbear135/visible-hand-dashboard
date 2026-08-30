@@ -259,12 +259,6 @@ def _to_kst(value, label="시각"):
     return moment.astimezone(KST)
 
 
-def _fmt_money(value):
-    """금액을 사람이 읽는 문자열로(천 단위 콤마, 불필요한 소수점 0 제거). 문구 전용입니다."""
-    text = f"{float(value):,.6f}".rstrip("0").rstrip(".")
-    return text if text else "0"
-
-
 def _fmt_currency(value, currency="KRW"):
     """금액을 통화 표기까지 포함한 문자열로 (문구 전용).
 
@@ -274,11 +268,26 @@ def _fmt_currency(value, currency="KRW"):
     "가용 예수금 1,051원" 같은 문구를 보게 됩니다. KRW="12,345원"(접미), USD="$12,345"
     (접두) — `utils/duel_rules.py`의 체급 문구("$750 이상")·
     `duel_batch_usd.py::format_summary_lines_usd()`("$"를 금액 앞에)와 같은 표기 관례.
+
+    🔴 2026-08-30(TASK_HISTORY #171) — 예전 구현(`_fmt_money()`가 `.6f`로 찍고
+    trailing 0을 그냥 지우는 방식)이 화면이 실제로 쓰는 단일 출처
+    `utils/scorecard_db.format_amount()`와 **다른 문자열**을 내고 있었습니다
+    (실측: KRW `93,076.923원` vs 화면 `93,076원` — 화면은 소수점을 내림해서 정수로
+    보여주는데 이 함수는 소수점을 그대로 남김. USD `$10.5` vs 화면 `$10.50` — 화면은
+    항상 소수점 둘째 자리까지 고정하는데 이 함수는 끝자리 0을 지워버림). 같은 금액이
+    배치의 실패 사유 문구와 화면에서 다르게 보이는 사용자 체감 불일치였습니다.
+    이 파일은 표준 라이브러리 말고는 아무것도 import하지 않는다는 규율이 있어
+    `format_amount()`를 직접 부르지 못하므로(이 파일 상단 독스트링 참고), 그 함수가
+    쓰는 규칙(원화=소수점 내림 후 정수 표기, 달러=항상 소수점 둘째 자리 고정)을
+    여기서 표준 라이브러리만으로 그대로 재구현합니다 — `tests/test_duel.py`의
+    회귀 테스트가 두 곳이 실제로 같은 문자열을 내는지 계속 대조합니다(§0-3-10).
     """
-    text = _fmt_money(value)
+    number = float(value)
     if currency == "USD":
-        return f"${text}"
-    return f"{text}원"
+        return f"${number:,.2f}"
+    # 원화는 화면(format_amount)과 같은 내림(절사) 규칙 — 반올림이 아닙니다.
+    truncated = math.floor(number) if number >= 0 else -math.floor(-number)
+    return f"{truncated:,}원"
 
 
 # =============================================================================
