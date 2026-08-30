@@ -484,6 +484,7 @@ def test_us_stocks_page_full_suite():
     test_m11_summary_history_attempts_load_even_without_local_file()
     test_l13_summary_metric_delta_shows_comparison_date()
     test_s2_no_hardcoded_threshold_literals_outside_import()
+    test_us_stocks_index_page_render_smoke()
 
     print("\n" + "=" * 70)
     if FAILURES:
@@ -495,6 +496,46 @@ def test_us_stocks_page_full_suite():
     print("✅ 전체 통과")
     print("=" * 70)
 
+
+# =============================================================================
+# 🚪 진입점 렌더 스모크 — `@ui.page('/us')` 함수 **자체**를 실제로 실행 (2026-08-30 추가)
+# =============================================================================
+#  위 테스트들은 전부 **순수 함수**(카드 조립·필터·배지·날짜 계산)만 부릅니다. 그래서
+#  `us_stocks_index_page()` 와 그 안의 `_render_body()` 몸통 — 스냅샷 로드, 지수 헤더,
+#  요약 이력, 필터, 카드 루프, 다운로드 도구 — 은 지금까지 **어떤 테스트로도 한 번도
+#  실행된 적이 없었습니다**. 화면 함수 안의 오타·참조 오류는 그 함수를 실제로
+#  실행해봐야만 잡힙니다(TASK_HISTORY_ARCHIVE.md `#128`/`#129` 사고 참고).
+#
+#  데이터는 저장소의 **실제 스냅샷을 그대로** 읽습니다(가짜로 만들지 않습니다 — §0-1).
+#  실행 방법은 공용 헬퍼 `tests/_render_helpers.py::run_render()` 를 그대로 씁니다.
+# =============================================================================
+def test_us_stocks_index_page_render_smoke():
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))   # tests/ (공용 렌더 헬퍼)
+    from _render_helpers import run_render
+
+    import web.pages.us_stocks_page as page
+
+    drawn = []
+    original = page.error_banner
+    page.error_banner = lambda text: drawn.append(str(text))
+    try:
+        run_render(page.us_stocks_index_page())
+        check(True, "us_stocks_index_page() 가 예외 없이 끝까지 실행됨")
+    except Exception as exc:                               # noqa: BLE001
+        check(False, "us_stocks_index_page() 가 예외 없이 끝까지 실행됨 "
+                     f"({type(exc).__name__}: {exc})")
+    finally:
+        page.error_banner = original
+
+    # 실제 스냅샷이 있는데 §0-1 조기 반환 배너가 떴다면, 본문을 거의 안 그리고 얻은
+    # 초록불이라 스모크의 의미가 없습니다.
+    snapshot = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "us_stocks_latest.json")
+    if os.path.exists(snapshot):
+        early = [b for b in drawn if "스냅샷을 불러오지 못했습니다" in b]
+        check(not early,
+              "실제 스냅샷이 있으므로 §0-1 조기 반환이 아니라 본문 전체가 그려짐"
+              + (f" — 배너: {early}" if early else ""))
 
 if __name__ == "__main__":
     test_us_stocks_page_full_suite()

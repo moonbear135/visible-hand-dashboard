@@ -195,3 +195,49 @@ def test_default_preset_returns_none_meaning_no_filter():
         "🌐 전체 종목 보기 (500개 코스피+코스닥)", [], all_badges
     )
     check(matched is None, "전체 보기는 필터 없음(None) — 빈 선택([])과 구분됨")
+
+
+# =============================================================================
+# 🚪 진입점 렌더 스모크 — `@ui.page('/')` 함수 **자체**를 실제로 실행 (2026-08-30 추가)
+# =============================================================================
+#  이 파일의 다른 테스트는 전부 **순수 함수**(`build_stock_card_html` /
+#  `resolve_preset_badges`)만 부릅니다. 그래서 `pegy_index_page()` 와 그 안의
+#  `_render_body()` 몸통 — 스냅샷 로드, 요약 카드, 필터, 카드 루프, 다운로드 도구 —
+#  은 지금까지 **어떤 테스트로도 한 번도 실행된 적이 없었습니다**. 이 화면은 이 앱의
+#  기본 화면(`/`)이라, 여기서 이름 오타 하나가 나면 사이트 전체가 안 열립니다.
+#  실제로 그 사고가 있었습니다 — TASK_HISTORY_ARCHIVE.md `#128`/`#129`
+#  (CSS f-string 안 중괄호 하나가 빠져 배포 직후 전 화면이 `UnboundLocalError`).
+#
+#  확인하는 것은 "끝까지 예외 없이 그려지는가" 하나입니다(화면 **내용**의 정확성은 이
+#  파일의 나머지 테스트와 `tests/test_quant.py` 가 이미 봅니다 — §0-3-10).
+#  데이터는 **저장소의 실제 스냅샷을 그대로** 읽습니다(가짜로 만들지 않습니다 — §0-1).
+#
+#  실행 방법은 새로 만들지 않고 공용 헬퍼 `tests/_render_helpers.py::run_render()` 를
+#  그대로 씁니다(`tests/` 가 패키지가 아니라 `sys.path` 에 얹은 뒤 가져옵니다).
+# =============================================================================
+def test_pegy_index_page_render_smoke():
+    sys.path.append(str(Path(__file__).parent))            # tests/ (공용 렌더 헬퍼)
+    from _render_helpers import run_render
+
+    import web.pages.pegy_page as page
+
+    drawn = []
+    original = page.error_banner
+    page.error_banner = lambda text: drawn.append(str(text))
+    try:
+        run_render(page.pegy_index_page())
+        check(True, "pegy_index_page() 가 예외 없이 끝까지 실행됨")
+    except Exception as exc:                               # noqa: BLE001
+        check(False, "pegy_index_page() 가 예외 없이 끝까지 실행됨 "
+                     f"({type(exc).__name__}: {exc})")
+    finally:
+        page.error_banner = original
+
+    # 저장소에 실제 스냅샷이 있는데도 §0-1 조기 반환 배너가 떴다면, 위 "예외 없음"은
+    # 본문을 거의 안 그리고 얻은 초록불입니다 — 그건 스모크 테스트의 의미가 없습니다.
+    snapshot = Path(__file__).parent.parent / "data" / "kospi200_pegy_latest.json"
+    if snapshot.exists():
+        early = [b for b in drawn if "스냅샷을 불러오지 못했습니다" in b]
+        check(not early,
+              "실제 스냅샷이 있으므로 §0-1 조기 반환이 아니라 본문 전체가 그려짐"
+              + (f" — 배너: {early}" if early else ""))

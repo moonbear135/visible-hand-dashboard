@@ -109,3 +109,71 @@ def test_recent_trend_no_data_date_falls_back_to_no_today_label():
 def test_recent_trend_single_row_renders_nothing():
     html = _build_recent_trend_html([_row('2026-08-29', 65.0)], data_date='2026-08-29')
     assert html == ''
+
+
+# =============================================================================
+# 🚪 진입점 렌더 스모크 — `@ui.page('/indicator')` 함수 **자체**를 실제로 실행
+#    (2026-08-30 추가)
+# =============================================================================
+#  위 테스트들은 전부 **순수 함수**(HTML 조립·정렬·라벨)만 부릅니다. 그래서
+#  `indicator_page()` 와 그 안의 `_render_body()` 몸통 — 3단계 공개 게이트, 수집 결과
+#  로드, 경고 배너, 카드 루프, 페이저, 다운로드 도구 — 은 지금까지 **어떤 테스트로도 한
+#  번도 실행된 적이 없었습니다**. 화면 함수 안의 오타·참조 오류는 그 함수를 실제로
+#  실행해봐야만 잡힙니다(TASK_HISTORY_ARCHIVE.md `#128`/`#129` 사고 참고).
+#
+#  데이터는 저장소의 **실제 수집 결과**(`data/indicator_kr_latest.json`)를 그대로
+#  읽습니다(가짜로 만들지 않습니다 — §0-1). AI 해설은 버튼을 눌러야 생성되는 구조라
+#  렌더만으로는 외부 API 호출이 일어나지 않습니다.
+# =============================================================================
+def _run_indicator_page():
+    """진입점을 실제로 실행하고 (예외, error_banner 로 그려진 문구 목록) 을 돌려줍니다."""
+    sys.path.append(str(Path(__file__).parent))            # tests/ (공용 렌더 헬퍼)
+    from _render_helpers import run_render
+
+    import web.pages.indicator_page as page
+
+    drawn = []
+    original = page.error_banner
+    page.error_banner = lambda text: drawn.append(str(text))
+    error = None
+    try:
+        run_render(page.indicator_page())
+    except Exception as exc:                               # noqa: BLE001
+        error = exc
+    finally:
+        page.error_banner = original
+    return error, drawn
+
+
+def test_indicator_page_render_smoke_when_flag_is_off():
+    """🚧 1단계(전체 숨김) — URL 로 직접 들어와도 준비중 안내만 그리고 끝납니다."""
+    import web.pages.indicator_page as page
+
+    saved = page.INDICATOR_ENABLED
+    page.INDICATOR_ENABLED = False
+    try:
+        error, _drawn = _run_indicator_page()
+    finally:
+        page.INDICATOR_ENABLED = saved
+    assert error is None, f"indicator_page()(플래그 꺼짐)가 예외를 던졌습니다: {error!r}"
+
+
+def test_indicator_page_render_smoke_with_real_snapshot():
+    """🔓 플래그가 켜진 상태에서 **본문 전체**를 실제 수집 결과로 그려 봅니다."""
+    import web.pages.indicator_page as page
+
+    saved = (page.INDICATOR_ENABLED, page.INDICATOR_MENU_ADMIN_ONLY)
+    page.INDICATOR_ENABLED = True
+    page.INDICATOR_MENU_ADMIN_ONLY = False
+    try:
+        error, drawn = _run_indicator_page()
+    finally:
+        (page.INDICATOR_ENABLED, page.INDICATOR_MENU_ADMIN_ONLY) = saved
+    assert error is None, f"indicator_page()(플래그 켜짐)가 예외를 던졌습니다: {error!r}"
+
+    # 실제 수집 결과가 있는데 §0-1 조기 반환 배너가 떴다면, 본문을 거의 안 그리고 얻은
+    # 초록불이라 스모크의 의미가 없습니다.
+    snapshot = Path(__file__).parent.parent / "data" / "indicator_kr_latest.json"
+    if snapshot.exists():
+        early = [b for b in drawn if "불러오지 못했습니다" in b or "0건입니다" in b]
+        assert not early, f"실제 수집 결과가 있는데 조기 반환 배너가 떴습니다: {early}"

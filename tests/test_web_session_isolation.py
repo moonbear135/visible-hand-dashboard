@@ -1885,6 +1885,479 @@ def test_dividend_pages_use_esc_for_external_strings():
 
 
 # =============================================================================
+# [10] 🚪 `@ui.page` **진입점 함수 자체** 렌더 스모크 — 2026-08-30 추가
+#
+#  🔴 왜 이 절이 생겼는가 (사각지대의 정체)
+#     위 [4]/[6]/[9-b] 는 전부 **안쪽 헬퍼**만 직접 불렀습니다 —
+#       · [4]  `scorecard_page._render_body(...)`
+#       · [6]  `report_page._render_report_body(...)`
+#       · [9-b] `duel_page._render_body(...)` / `_render_duel_section(...)`
+#     즉 `@ui.page` 가 붙은 **진짜 진입점**(`scorecard_page()` · `report_page()` ·
+#     `duel_page()`)의 몸통 — 공개 플래그 게이트, Supabase 준비 확인, 로그인 게이트,
+#     세션 만료 처리, 본문 호출을 감싼 try/except — 은 지금까지 **한 줄도 실행된 적이
+#     없었습니다**. [8-b] 매크로만 유일하게 `run_render(macro.macro_page())` 로 진입점
+#     자체를 돌리고 있었고, 이 절은 그 패턴을 나머지 화면 전부로 넓힌 것입니다.
+#
+#     이 저장소는 실제로 이 사각지대 때문에 사고를 겪었습니다 —
+#     TASK_HISTORY_ARCHIVE.md `#128`/`#129`: CSS f-string 안 중괄호 하나가 빠져서 배포
+#     직후 전 화면이 `UnboundLocalError` 로 죽었는데, 로컬 테스트는 전부 초록불이었습니다.
+#     화면 함수 안의 오타·참조 오류는 **그 함수를 실제로 실행해봐야만** 잡힙니다.
+#
+#  ⚠️ 로그인이 필요한 화면 5개(scorecard/report/duel/consent/leaderboard)의 진입점은
+#     본문 호출을 `try: ... except Exception: error_banner(...)` 로 감싸고 있습니다.
+#     그래서 "예외가 안 났다"만 보면 **본문이 통째로 터져도 초록불**이 됩니다
+#     (§0-1 — 실패를 정상 상태로 위장). 그 catch-all 이 쓰는 **폴백 문구를 그대로**
+#     감시해서, 배너로 삼켜진 실패까지 테스트 실패가 되게 합니다.
+#
+#  ⚠️ 이 절이 확인하는 것은 "끝까지 예외 없이 그려지는가" 하나입니다. 화면 **내용**의
+#     정확성(금액 서식·XSS 이스케이프·계산 결과)은 [4]/[6]/[9-b] 가 이미 안쪽 헬퍼를
+#     직접 불러서 훨씬 촘촘하게 보고 있습니다 — 여기서 그걸 다시 검사하지 않습니다
+#     (§0-3-10 같은 검증을 두 번 만들지 않기).
+# =============================================================================
+
+#: 진입점의 catch-all 이 화면에 그리는 **폴백 문구**들. 이 중 하나라도 배너로 나왔다면
+#: 본문 어딘가에서 예외가 났는데 진입점이 그걸 삼킨 것입니다(§0-1).
+_ENTRY_SWALLOWED_MARKERS = (
+    "화면을 그리는 중 문제가 발생했습니다",
+    "순위표를 그리는 중 문제가 발생했습니다",
+    "로그인 상태를 확인하지 못했습니다",
+)
+
+
+class _EntryFakeClient:
+    """진입점이 `get_client_async()` 로 받는 객체 자리.
+
+    아무 일도 하지 않습니다 — DB 조회 함수는 전부 아래에서 합성 데이터로 대체하므로
+    이 객체의 메서드는 한 번도 불리지 않습니다(§0-1 — 실제 Supabase 에 접속하지 않고,
+    실데이터를 지어내지도 않습니다).
+    """
+
+
+def _entry_run(page, coro_factory, label):
+    """진입점을 **실제로 실행**하고, 그 함수의 catch-all 이 삼킨 실패까지 잡아냅니다.
+
+    :returns: 렌더 도중 `error_banner()` 로 그려진 문자열 목록.
+    """
+    drawn = []
+    original = getattr(page, "error_banner", None)
+    if original is not None:
+        page.error_banner = lambda text: drawn.append(str(text))
+    try:
+        run_render(coro_factory())
+        check(True, f"{label} 가 예외 없이 끝까지 실행됨")
+    except Exception as exc:                       # noqa: BLE001
+        check(False, f"{label} 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
+    finally:
+        if original is not None:
+            page.error_banner = original
+
+    blob = "\n".join(drawn)
+    swallowed = [m for m in _ENTRY_SWALLOWED_MARKERS if m in blob]
+    check(not swallowed,
+          f"{label} — 진입점의 catch-all 배너가 뜨지 않음(본문이 조용히 실패하지 않음)",
+          f"(배너: {blob[:400]})")
+    return drawn
+
+
+def _entry_supabase_ready(page):
+    """`supabase_status()` 를 '준비됨'으로 바꿉니다.
+
+    테스트 프로세스에는 Supabase 접속 정보가 없으므로 진입점이 맨 앞의 "준비중" 안내에서
+    그냥 끝나 버립니다 — 그러면 정작 검증하려는 로그인 게이트 아래쪽이 한 줄도 안 돕니다.
+    **원래 값을 돌려주니 호출부는 반드시 finally 에서 되돌립니다.**
+    """
+    from utils.scorecard_db import SupabaseStatus
+    original = page.supabase_status
+    page.supabase_status = lambda: SupabaseStatus(
+        available=True, reason="", package_available=True, config_present=True)
+    return original
+
+
+def _entry_open_session(page, user=None):
+    """진입점의 로그인 게이트를 '정상 로그인' 상태로 통과시킵니다.
+
+    저장소(`app.storage.*`)를 흉내내지 않고 **화면이 실제로 부르는 함수 3개**를 갈아
+    끼웁니다 — [8-b] 매크로 스모크가 `macro.is_admin` 하나만 바꾼 것과 같은 판단입니다
+    (진짜 요청 컨텍스트 밖에서는 `app.storage.user` 가 매번 다른 사전이라 값을 넣어도
+    화면 쪽에는 보이지 않습니다). 되돌릴 원래 값 4개를 튜플로 돌려줍니다.
+    """
+    saved = (page.supabase_status, page.has_supabase_session,
+             page.get_client_async, page.current_user_async)
+    who = dict(user or {"id": "uid-entry-test", "email": "entry@example.com"})
+
+    async def _client():
+        return _EntryFakeClient()
+
+    async def _user(_client_arg):
+        return dict(who)
+
+    _entry_supabase_ready(page)
+    page.has_supabase_session = lambda: True
+    page.get_client_async = _client
+    page.current_user_async = _user
+    return saved
+
+
+def _entry_restore_session(page, saved):
+    (page.supabase_status, page.has_supabase_session,
+     page.get_client_async, page.current_user_async) = saved
+
+
+def test_admin_page_entrypoint_render_smoke():
+    """🚪 `/admin` — 이 저장소에서 **유일한 동기 화면 함수**의 진입점 스모크."""
+    print("\n[10-a] /admin 진입점 렌더 스모크 (관리자 게이트 양쪽)")
+    _install_nicegui_stub()
+    import web.pages.admin_page as page
+
+    # `admin_page()` 는 `async def` 가 아닙니다 — 데이터·네트워크를 전혀 쓰지 않아
+    # `tests/test_event_loop_blocking.py` 의 `NO_IO_PAGES` 예외로 등록된 유일한 화면입니다.
+    # `run_render()` 는 코루틴을 받으므로 얇은 async 껍데기 하나로 감싸서 **다른 화면과
+    # 똑같은 슬롯 컨텍스트**에서 돌립니다(§0-3-10 — 실행 방법을 새로 만들지 않습니다).
+    async def _call():
+        page.admin_page()
+
+    seen = []
+    saved = (page.is_admin, page.render_admin_login, page._render_console)
+    try:
+        page.render_admin_login = lambda: seen.append("login")
+        page._render_console = lambda: seen.append("console")
+
+        page.is_admin = lambda: False
+        _entry_run(page, _call, "admin_page() (비관리자)")
+        check(seen == ["login"], "🔒 비관리자 → 비밀번호 폼만, 관리자 콘솔 렌더 0회",
+              f"실제: {seen}")
+
+        seen.clear()
+        page.is_admin = lambda: True
+        _entry_run(page, _call, "admin_page() (관리자)")
+        check(seen == ["console"], "🔓 관리자 → 관리자 콘솔 렌더", f"실제: {seen}")
+    finally:
+        (page.is_admin, page.render_admin_login, page._render_console) = saved
+
+    # 대체 없이 **진짜 폼·진짜 콘솔**까지 전부 실행합니다 — f-string·분기·파일 존재 확인이
+    # 여기서 처음으로 진짜로 돕니다(#128/#129 부류의 오타를 잡는 자리).
+    saved_is_admin = page.is_admin
+    try:
+        page.is_admin = lambda: False
+        _entry_run(page, _call, "admin_page() 본문 전체 (비관리자 · 실제 로그인 폼)")
+        page.is_admin = lambda: True
+        _entry_run(page, _call, "admin_page() 본문 전체 (관리자 · 실제 콘솔)")
+    finally:
+        page.is_admin = saved_is_admin
+
+
+def test_privacy_page_entrypoint_render_smoke():
+    """🚪 `/privacy` — 로그인·플래그가 전혀 없는 상시 공개 화면."""
+    print("\n[10-b] /privacy 진입점 렌더 스모크")
+    _install_nicegui_stub()
+    import web.pages.privacy_page as page
+
+    _entry_run(page, lambda: page.privacy_page(), "privacy_page()")
+    # 본문이 통째로 f-string 상수라, 그 상수가 실제로 완성되는지(#128/#129 부류)까지가
+    # 이 화면에서 확인할 수 있는 전부입니다.
+    check(page.CONTACT_EMAIL in page._BODY_MARKDOWN,
+          "본문 f-string 이 문의처 이메일까지 정상적으로 조립됨")
+
+
+def test_scorecard_page_entrypoint_render_smoke():
+    """🚪 `/scorecard` — [4] 가 건너뛴 **진입점 몸통**(로그인 게이트 포함)."""
+    print("\n[10-c] /scorecard 진입점 렌더 스모크 (로그인 게이트 양쪽)")
+    _install_nicegui_stub()
+    import web.pages.scorecard_page as page
+
+    # ── ① 비로그인 — 로그인 폼만 그리고 본문은 한 번도 안 불려야 합니다 ──────
+    seen = []
+    saved_status = _entry_supabase_ready(page)
+    saved = (page.has_supabase_session, page.render_auth, page._render_body)
+    try:
+        page.has_supabase_session = lambda: False
+        page.render_auth = lambda: seen.append("auth")
+
+        async def _no_body(*_a, **_k):
+            seen.append("body")
+
+        page._render_body = _no_body
+        _entry_run(page, lambda: page.scorecard_page(), "scorecard_page() (비로그인)")
+        check(seen == ["auth"], "🔒 비로그인 → 로그인 폼만, 본문 렌더 0회", f"실제: {seen}")
+    finally:
+        (page.has_supabase_session, page.render_auth, page._render_body) = saved
+        page.supabase_status = saved_status
+
+    # ── ② 정상 로그인 — 게이트를 지나 **본문 전체**까지 진짜로 그립니다 ──────
+    saved_session = _entry_open_session(page)
+    saved_fetch = page.fetch_holdings
+    page.fetch_holdings = lambda client, user_id: [dict(h) for h in SYNTHETIC_HOLDINGS]
+    try:
+        _entry_run(page, lambda: page.scorecard_page(),
+                   "scorecard_page() (정상 로그인 · 합성 보유종목)")
+    finally:
+        page.fetch_holdings = saved_fetch
+        _entry_restore_session(page, saved_session)
+
+
+def test_report_page_entrypoint_render_smoke():
+    """🚪 `/report` — [6] 이 건너뛴 **진입점 몸통**(로그인 게이트 포함)."""
+    print("\n[10-d] /report 진입점 렌더 스모크 (로그인 게이트 양쪽)")
+    _install_nicegui_stub()
+    import web.pages.report_page as page
+
+    # ── ① 비로그인 ────────────────────────────────────────────────────────
+    seen = []
+    saved_status = _entry_supabase_ready(page)
+    saved = (page.has_supabase_session, page.render_auth, page._render_signed_in)
+    try:
+        page.has_supabase_session = lambda: False
+        page.render_auth = lambda: seen.append("auth")
+
+        async def _no_body(*_a, **_k):
+            seen.append("body")
+
+        page._render_signed_in = _no_body
+        _entry_run(page, lambda: page.report_page(), "report_page() (비로그인)")
+        check(seen == ["auth"], "🔒 비로그인 → 로그인 폼만, 본문 렌더 0회", f"실제: {seen}")
+    finally:
+        (page.has_supabase_session, page.render_auth, page._render_signed_in) = saved
+        page.supabase_status = saved_status
+
+    # ── ② 정상 로그인 — [6] 과 **같은 합성 스냅샷**을 같은 정규화를 거쳐 넣습니다 ──
+    from utils.report_db import sort_holding_snapshots, sort_snapshots
+    saved_session = _entry_open_session(page)
+    saved_fetch = (page.fetch_user_snapshots, page.fetch_user_holding_snapshots)
+    page.fetch_user_snapshots = \
+        lambda client, user_id, **kw: sort_snapshots(SYNTHETIC_SNAPSHOTS)
+    page.fetch_user_holding_snapshots = \
+        lambda client, user_id, **kw: sort_holding_snapshots(SYNTHETIC_HOLDING_SNAPSHOTS)
+    try:
+        _entry_run(page, lambda: page.report_page(),
+                   "report_page() (정상 로그인 · 합성 스냅샷)")
+    finally:
+        (page.fetch_user_snapshots, page.fetch_user_holding_snapshots) = saved_fetch
+        _entry_restore_session(page, saved_session)
+
+
+def test_duel_page_entrypoint_render_smoke():
+    """🚪 `/duel` — [9-b] 가 건너뛴 **진입점 몸통**(3단계 공개 게이트 + 로그인 게이트)."""
+    print("\n[10-e] /duel 진입점 렌더 스모크 (공개 게이트 · 로그인 게이트)")
+    _install_nicegui_stub()
+    import web.pages.duel_page as page
+
+    saved_flags = (page.DUEL_ENABLED, page.DUEL_MENU_ADMIN_ONLY)
+    try:
+        # ── ① 플래그 꺼짐(1단계 전체 숨김) → "준비중" 안내만, 본문 0회 ──────
+        seen = []
+        saved = (page._render_coming_soon, page._render_header, page._render_body)
+        try:
+            page.DUEL_ENABLED = False
+            page._render_coming_soon = lambda: seen.append("soon")
+            page._render_header = lambda: seen.append("header")
+
+            async def _no_body(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body
+            _entry_run(page, lambda: page.duel_page(), "duel_page() (플래그 꺼짐)")
+            check(seen == ["soon"], "🚧 플래그가 꺼져 있으면 URL 로 들어와도 준비중 안내만",
+                  f"실제: {seen}")
+        finally:
+            (page._render_coming_soon, page._render_header, page._render_body) = saved
+
+        # ── ② 플래그 켜짐 + 비로그인 → 로그인 폼만 ─────────────────────────
+        seen = []
+        page.DUEL_ENABLED = True
+        page.DUEL_MENU_ADMIN_ONLY = False
+        saved_status = _entry_supabase_ready(page)
+        saved = (page.has_supabase_session, page.render_auth, page._render_body)
+        try:
+            page.has_supabase_session = lambda: False
+            page.render_auth = lambda: seen.append("auth")
+
+            async def _no_body2(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body2
+            _entry_run(page, lambda: page.duel_page(), "duel_page() (플래그 켜짐 · 비로그인)")
+            check(seen == ["auth"], "🔒 비로그인 → 로그인 폼만, 본문 렌더 0회", f"실제: {seen}")
+        finally:
+            (page.has_supabase_session, page.render_auth, page._render_body) = saved
+            page.supabase_status = saved_status
+
+        # ── ③ 플래그 켜짐 + 정상 로그인 → [9-b] 와 같은 합성 계좌로 본문 전체 ──
+        saved_session = _entry_open_session(page, {"id": "uid-duel", "email": "duel@example.com"})
+        saved_krw = (page.fetch_my_accounts, page.fetch_my_cash_ledger, page.fetch_my_positions,
+                     page.fetch_my_orders, page.fetch_my_snapshots)
+        saved_usd = (page.fetch_my_accounts_usd, page.fetch_my_cash_ledger_usd,
+                     page.fetch_my_positions_usd, page.fetch_my_orders_usd,
+                     page.fetch_my_snapshots_usd)
+
+        def _for_account(rows):
+            return lambda client, account_id: [
+                dict(r) for r in rows if r.get("account_id") == account_id
+            ]
+
+        page.fetch_my_accounts = lambda client, user_id: [dict(a) for a in DUEL_SYNTHETIC_ACCOUNTS]
+        page.fetch_my_cash_ledger = _for_account(DUEL_SYNTHETIC_LEDGER)
+        page.fetch_my_positions = _for_account(DUEL_SYNTHETIC_POSITIONS)
+        page.fetch_my_orders = _for_account(DUEL_SYNTHETIC_ORDERS)
+        page.fetch_my_snapshots = (
+            lambda client, account_id, start_date=None, end_date=None:
+            [dict(r) for r in DUEL_SYNTHETIC_SNAPSHOTS if r.get("account_id") == account_id]
+        )
+        # 💵 달러 트랙은 **계좌 0개**(참여 안 함)로 둡니다 — 원화만 참여한 사용자가 실제로
+        #    존재하는 정상 상태이고(모듈 머리말 6번), 그 경로도 진입점을 통해 돌아 봅니다.
+        page.fetch_my_accounts_usd = lambda client, user_id: []
+        page.fetch_my_cash_ledger_usd = lambda client, account_id: []
+        page.fetch_my_positions_usd = lambda client, account_id: []
+        page.fetch_my_orders_usd = lambda client, account_id: []
+        page.fetch_my_snapshots_usd = (
+            lambda client, account_id, start_date=None, end_date=None: []
+        )
+        try:
+            _entry_run(page, lambda: page.duel_page(),
+                       "duel_page() (플래그 켜짐 · 정상 로그인 · 합성 계좌)")
+        finally:
+            (page.fetch_my_accounts, page.fetch_my_cash_ledger, page.fetch_my_positions,
+             page.fetch_my_orders, page.fetch_my_snapshots) = saved_krw
+            (page.fetch_my_accounts_usd, page.fetch_my_cash_ledger_usd,
+             page.fetch_my_positions_usd, page.fetch_my_orders_usd,
+             page.fetch_my_snapshots_usd) = saved_usd
+            _entry_restore_session(page, saved_session)
+    finally:
+        (page.DUEL_ENABLED, page.DUEL_MENU_ADMIN_ONLY) = saved_flags
+
+
+def test_scorecard_consent_page_entrypoint_render_smoke():
+    """🚪 `/scorecard/consent` — 지금까지 **어떤 테스트도 실행해 본 적 없는** 화면."""
+    print("\n[10-f] /scorecard/consent 진입점 렌더 스모크")
+    _install_nicegui_stub()
+    import web.pages.scorecard_consent_page as page
+
+    saved_flags = (page.SCORECARD_CONSENT_ENABLED, page.SCORECARD_CONSENT_MENU_ADMIN_ONLY)
+    try:
+        # ── ① 플래그 꺼짐 → 준비중 안내만 ─────────────────────────────────
+        seen = []
+        saved = (page._render_coming_soon, page._render_header, page._render_body)
+        try:
+            page.SCORECARD_CONSENT_ENABLED = False
+            page._render_coming_soon = lambda: seen.append("soon")
+            page._render_header = lambda: seen.append("header")
+
+            async def _no_body(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body
+            _entry_run(page, lambda: page.scorecard_consent_page(),
+                       "scorecard_consent_page() (플래그 꺼짐)")
+            check(seen == ["soon"], "🚧 플래그가 꺼져 있으면 준비중 안내만", f"실제: {seen}")
+        finally:
+            (page._render_coming_soon, page._render_header, page._render_body) = saved
+
+        page.SCORECARD_CONSENT_ENABLED = True
+        page.SCORECARD_CONSENT_MENU_ADMIN_ONLY = False
+
+        # ── ② 비로그인 → 로그인 폼만 ──────────────────────────────────────
+        seen = []
+        saved_status = _entry_supabase_ready(page)
+        saved = (page.has_supabase_session, page.render_auth, page._render_body)
+        try:
+            page.has_supabase_session = lambda: False
+            page.render_auth = lambda: seen.append("auth")
+
+            async def _no_body2(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body2
+            _entry_run(page, lambda: page.scorecard_consent_page(),
+                       "scorecard_consent_page() (비로그인)")
+            check(seen == ["auth"], "🔒 비로그인 → 로그인 폼만, 본문 렌더 0회", f"실제: {seen}")
+        finally:
+            (page.has_supabase_session, page.render_auth, page._render_body) = saved
+            page.supabase_status = saved_status
+
+        # ── ③ 정상 로그인 → 본문 전체 (동의 기록이 아직 없는 신규 사용자) ──
+        saved_session = _entry_open_session(page)
+        saved_fetch = (page.fetch_my_consent, page.fetch_my_nickname)
+        page.fetch_my_consent = lambda client, user_id: None
+        page.fetch_my_nickname = lambda client, user_id: None
+        try:
+            _entry_run(page, lambda: page.scorecard_consent_page(),
+                       "scorecard_consent_page() (정상 로그인 · 동의 기록 없음)")
+        finally:
+            (page.fetch_my_consent, page.fetch_my_nickname) = saved_fetch
+            _entry_restore_session(page, saved_session)
+    finally:
+        (page.SCORECARD_CONSENT_ENABLED, page.SCORECARD_CONSENT_MENU_ADMIN_ONLY) = saved_flags
+
+
+def test_scorecard_leaderboard_page_entrypoint_render_smoke():
+    """🚪 `/scorecard/leaderboard` — 지금까지 **어떤 테스트도 실행해 본 적 없는** 화면."""
+    print("\n[10-g] /scorecard/leaderboard 진입점 렌더 스모크")
+    _install_nicegui_stub()
+    import web.pages.scorecard_leaderboard_page as page
+
+    saved_flags = (page.SCORECARD_LEADERBOARD_ENABLED,
+                   page.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY)
+    try:
+        # ── ① 플래그 꺼짐 → 준비중 안내만 ─────────────────────────────────
+        seen = []
+        saved = (page._render_coming_soon, page._render_fixed_notice, page._render_body)
+        try:
+            page.SCORECARD_LEADERBOARD_ENABLED = False
+            page._render_coming_soon = lambda: seen.append("soon")
+            page._render_fixed_notice = lambda: seen.append("notice")
+
+            async def _no_body(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body
+            _entry_run(page, lambda: page.scorecard_leaderboard_page(),
+                       "scorecard_leaderboard_page() (플래그 꺼짐)")
+            check(seen == ["soon"], "🚧 플래그가 꺼져 있으면 준비중 안내만", f"실제: {seen}")
+        finally:
+            (page._render_coming_soon, page._render_fixed_notice, page._render_body) = saved
+
+        page.SCORECARD_LEADERBOARD_ENABLED = True
+        page.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY = False
+
+        # ── ② 비로그인 → 로그인 폼만 ──────────────────────────────────────
+        seen = []
+        saved_status = _entry_supabase_ready(page)
+        saved = (page.has_supabase_session, page.render_auth, page._render_body)
+        try:
+            page.has_supabase_session = lambda: False
+            page.render_auth = lambda: seen.append("auth")
+
+            async def _no_body2(*_a, **_k):
+                seen.append("body")
+
+            page._render_body = _no_body2
+            _entry_run(page, lambda: page.scorecard_leaderboard_page(),
+                       "scorecard_leaderboard_page() (비로그인)")
+            check(seen == ["auth"], "🔒 비로그인 → 로그인 폼만, 본문 렌더 0회", f"실제: {seen}")
+        finally:
+            (page.has_supabase_session, page.render_auth, page._render_body) = saved
+            page.supabase_status = saved_status
+
+        # ── ③ 정상 로그인 → 본문 전체 (발행된 순위표가 없는 그룹 = 정상 상태) ──
+        #    ⚠️ "발행된 순위표가 있는" 경로는 발행표 행 모양을 지어내야 해서 여기서는
+        #       다루지 않습니다(§0-1 — 모양을 추측해 만든 가짜 행으로 초록불을 만들지
+        #       않습니다). 진입점 몸통·게이트·선택 위젯·그룹 조회까지는 전부 실행됩니다.
+        saved_session = _entry_open_session(page)
+        saved_fetch = page.fetch_public_leaderboard_latest_date
+        page.fetch_public_leaderboard_latest_date = (
+            lambda client, currency=None, bracket_key=None: None
+        )
+        try:
+            _entry_run(page, lambda: page.scorecard_leaderboard_page(),
+                       "scorecard_leaderboard_page() (정상 로그인 · 발행분 없음)")
+        finally:
+            page.fetch_public_leaderboard_latest_date = saved_fetch
+            _entry_restore_session(page, saved_session)
+    finally:
+        (page.SCORECARD_LEADERBOARD_ENABLED,
+         page.SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY) = saved_flags
+
+
+# =============================================================================
 def main():
     print("=" * 74)
     print("🔴 동시 접속 세션 격리 검증 (ENGINEERING_SPEC.md §0-3-8 / 계획서 §9 완료기준 ⑦)")
@@ -1908,6 +2381,14 @@ def main():
     test_duel_render_smoke()
     test_pages_import_cleanly()
     test_dividend_pages_use_esc_for_external_strings()
+    # [10] @ui.page 진입점 함수 자체 렌더 스모크 (2026-08-30 추가)
+    test_admin_page_entrypoint_render_smoke()
+    test_privacy_page_entrypoint_render_smoke()
+    test_scorecard_page_entrypoint_render_smoke()
+    test_report_page_entrypoint_render_smoke()
+    test_duel_page_entrypoint_render_smoke()
+    test_scorecard_consent_page_entrypoint_render_smoke()
+    test_scorecard_leaderboard_page_entrypoint_render_smoke()
 
     print("\n" + "=" * 74)
     if FAILURES:

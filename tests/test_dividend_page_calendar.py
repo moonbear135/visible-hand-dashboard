@@ -316,6 +316,71 @@ def test_raw_download_oversize_link_html_points_to_github_and_shows_size():
     assert 'target="_blank"' in html
 
 
+# =============================================================================
+# 🚪 진입점 렌더 스모크 — `@ui.page('/dividend')` 함수 **자체**를 실제로 실행
+#    (2026-08-30 추가)
+# =============================================================================
+#  위 테스트들은 전부 **순수 함수**(달력 격자·색인·집계·다운로드 상한)만 부릅니다.
+#  그래서 `dividend_page()` 와 그 안의 `_render_body()` 몸통 — 3단계 공개 게이트,
+#  수집 결과 3종 로드, 정직성 고지, 달력 렌더, 미확정 목록 — 은 지금까지 **어떤
+#  테스트로도 한 번도 실행된 적이 없었습니다**. 화면 함수 안의 오타·참조 오류는 그
+#  함수를 실제로 실행해봐야만 잡힙니다(TASK_HISTORY_ARCHIVE.md `#128`/`#129`).
+#
+#  데이터는 저장소의 **실제 수집 결과**를 그대로 읽습니다(가짜로 만들지 않습니다 — §0-1).
+#  실행 방법은 공용 헬퍼 `tests/_render_helpers.py::run_render()` 를 그대로 씁니다.
+# =============================================================================
+def _run_dividend_page():
+    """진입점을 실제로 실행하고 (예외, error_banner 로 그려진 문구 목록) 을 돌려줍니다."""
+    sys.path.append(os.path.dirname(os.path.abspath(__file__)))   # tests/ (공용 렌더 헬퍼)
+    from _render_helpers import run_render
+
+    import web.pages.dividend_page as page
+
+    drawn = []
+    original = page.error_banner
+    page.error_banner = lambda text: drawn.append(str(text))
+    error = None
+    try:
+        run_render(page.dividend_page())
+    except Exception as exc:                               # noqa: BLE001
+        error = exc
+    finally:
+        page.error_banner = original
+    return error, drawn
+
+
+def test_dividend_page_render_smoke_when_flag_is_off():
+    """🚧 1단계(전체 숨김) — URL 로 직접 들어와도 준비중 안내만 그리고 끝납니다."""
+    import web.pages.dividend_page as page
+
+    saved = page.DIVIDEND_ENABLED
+    page.DIVIDEND_ENABLED = False
+    try:
+        error, _drawn = _run_dividend_page()
+    finally:
+        page.DIVIDEND_ENABLED = saved
+    assert error is None, f"dividend_page()(플래그 꺼짐)가 예외를 던졌습니다: {error!r}"
+
+
+def test_dividend_page_render_smoke_with_real_snapshot():
+    """🔓 플래그가 켜진 상태에서 **달력 본문 전체**를 실제 수집 결과로 그려 봅니다."""
+    import web.pages.dividend_page as page
+
+    saved = (page.DIVIDEND_ENABLED, page.DIVIDEND_MENU_ADMIN_ONLY)
+    page.DIVIDEND_ENABLED = True
+    page.DIVIDEND_MENU_ADMIN_ONLY = False
+    try:
+        error, drawn = _run_dividend_page()
+    finally:
+        (page.DIVIDEND_ENABLED, page.DIVIDEND_MENU_ADMIN_ONLY) = saved
+    assert error is None, f"dividend_page()(플래그 켜짐)가 예외를 던졌습니다: {error!r}"
+
+    snapshot = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                            "data", "dividend_kr_2026_latest.json")
+    if os.path.exists(snapshot):
+        early = [b for b in drawn if "불러오지 못했습니다" in b or "0건입니다" in b]
+        assert not early, f"실제 수집 결과가 있는데 조기 반환 배너가 떴습니다: {early}"
+
 if __name__ == "__main__":
     import pytest as _pytest
     raise SystemExit(_pytest.main([__file__, "-v"]))
