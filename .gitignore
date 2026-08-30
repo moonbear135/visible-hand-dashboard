@@ -10,3 +10,4 @@ token.json
 archive/
 check_*.py
 data/us_sample/
+.coverage
