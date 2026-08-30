@@ -2312,9 +2312,8 @@ def test_scorecard_leaderboard_page_entrypoint_render_smoke():
             page.supabase_status = saved_status
 
         # ── ③ 정상 로그인 → 본문 전체 (발행된 순위표가 없는 그룹 = 정상 상태) ──
-        #    ⚠️ "발행된 순위표가 있는" 경로는 발행표 행 모양을 지어내야 해서 여기서는
-        #       다루지 않습니다(§0-1 — 모양을 추측해 만든 가짜 행으로 초록불을 만들지
-        #       않습니다). 진입점 몸통·게이트·선택 위젯·그룹 조회까지는 전부 실행됩니다.
+        #    진입점 몸통·게이트·선택 위젯·그룹 조회까지 전부 실행됩니다. "발행분이 있는"
+        #    경로는 바로 아래 ④ 가 이어서 봅니다.
         saved_session = _entry_open_session(page)
         saved_fetch = page.fetch_public_leaderboard_latest_date
         page.fetch_public_leaderboard_latest_date = (
@@ -2325,6 +2324,81 @@ def test_scorecard_leaderboard_page_entrypoint_render_smoke():
                        "scorecard_leaderboard_page() (정상 로그인 · 발행분 없음)")
         finally:
             page.fetch_public_leaderboard_latest_date = saved_fetch
+            _entry_restore_session(page, saved_session)
+
+        # ── ④ 정상 로그인 · **발행분 있음** → 위/아래 두 구간까지 끝까지 ─────
+        #    ⚠️ §0-1 위반이 아닙니다. 아래 행은 "실제처럼 보이게 지어낸 값"이 아니라
+        #       누가 봐도 합성인 테스트 픽스처(닉네임1/2/3)이고, 발행표 행의 **모양은
+        #       추측이 아니라** `scorecard_publish_db.PUBLIC_LEADERBOARD_COLUMNS` 와
+        #       같은 컬럼입니다. 게다가 똑같은 픽스처 패턴을
+        #       `tests/test_scorecard_public_ui.py::_leaderboard_client()` 가 이미
+        #       "발행분 있음" 렌더 검증에 쓰고 있습니다 — 여기서 관례를 새로 만드는 것이
+        #       아니라 그대로 재사용합니다(§0-3-10).
+        #    🔴 그래서 이 분기가 **새로 보는 것은 딱 하나**입니다: 진입점 함수
+        #       `scorecard_leaderboard_page()` 자체의 배선(로그인 게이트 → `_render_body`
+        #       → 위/아래 두 구간)이 "발행분 있음" 상태에서 끝까지 도는가. 화면 내용의
+        #       정확성(금액 서식·이스케이프)은 [4]/[9-b] 가 안쪽 헬퍼를 직접 불러 봅니다.
+        saved_session = _entry_open_session(page)
+        saved_published = (page.fetch_public_leaderboard_latest_date,
+                           page.fetch_public_leaderboard,
+                           page.fetch_public_holdings_for_nickname,
+                           page._render_participant)
+        ordered = []                               # 어느 구간을 어떤 정렬로 읽었는가
+        painted = []                               # 실제로 그려진 행의 닉네임 차례
+        preloaded = []                             # 펼치기 전에 보유종목을 읽었는가
+        real_participant = page._render_participant
+
+        def _published_rows(client, *, currency, bracket_key, published_date=None,
+                            limit=None, offset=0, order_desc=False):
+            """발행표 한 페이지 대역 — 실제 시그니처(키워드 전용)를 그대로 받습니다.
+
+            🔴 통화·체급은 지어내지 않고 **화면이 요청한 값을 그대로 되돌려 넣습니다** —
+               합성 행이 "화면이 안 고른 그룹"으로 슬쩍 바뀌지 않게.
+            """
+            ordered.append(bool(order_desc))
+            return [{"published_date": published_date, "currency": currency,
+                     "bracket_key": bracket_key, "rank": rank,
+                     "nickname": f"닉네임{rank}",
+                     "return_pct": None if rank == 2 else 5.5 - rank}  # 2위는 비공개
+                    for rank in (1, 2, 3)]
+
+        def _spy_participant(client, published_date, row, readers):
+            painted.append((row or {}).get("nickname"))
+            return real_participant(client, published_date, row, readers)
+
+        def _no_preload(*args, **kwargs):
+            preloaded.append((args, kwargs))
+            return []
+
+        page.fetch_public_leaderboard_latest_date = (
+            lambda client, currency=None, bracket_key=None: "2026-08-22"
+        )
+        page.fetch_public_leaderboard = _published_rows
+        page.fetch_public_holdings_for_nickname = _no_preload
+        page._render_participant = _spy_participant
+        try:
+            banners = _entry_run(page, lambda: page.scorecard_leaderboard_page(),
+                                 "scorecard_leaderboard_page() (정상 로그인 · 발행분 있음)")
+            # `_render_section()` 의 catch-all 문구는 위 진입점 마커에 없습니다 — 구간이
+            # 통째로 터져도 초록불이 되지 않게, 배너가 **한 건도** 없어야 한다고 봅니다.
+            check(not banners, "🟢 발행분이 있으면 오류 배너가 한 건도 뜨지 않음",
+                  f"(배너: {banners})")
+            check(ordered == [False, True],
+                  "🔼🔽 위(1위부터)·아래(꼴찌부터) 두 구간을 각각 한 번씩 읽음",
+                  f"실제: {ordered}")
+            # 아래쪽 목록은 꼴찌부터 읽어 와 화면에서 뒤집으므로 3·2·1 차례가 맞습니다.
+            check(painted == ["닉네임1", "닉네임2", "닉네임3",
+                              "닉네임3", "닉네임2", "닉네임1"],
+                  "🧾 두 구간 모두 발행 행 3개를 실제로 그림(아래쪽은 뒤집어서)",
+                  f"실제: {painted}")
+            check(not preloaded,
+                  "📄 보유종목은 펼치기 전에는 한 번도 읽지 않음(§0-3-2)",
+                  f"실제: {preloaded}")
+        finally:
+            (page.fetch_public_leaderboard_latest_date,
+             page.fetch_public_leaderboard,
+             page.fetch_public_holdings_for_nickname,
+             page._render_participant) = saved_published
             _entry_restore_session(page, saved_session)
     finally:
         (page.SCORECARD_LEADERBOARD_ENABLED,
