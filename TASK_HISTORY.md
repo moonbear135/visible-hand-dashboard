@@ -2428,15 +2428,13 @@ RESP=$(gh api ".../${FILE}/runs?event=schedule&per_page=5" 2>/dev/null || echo '
   로그 라인이 연속 8회 실패 직후 정확히 1회 출력되고 이후 EV/EBITDA 요청이 전혀
   없음을 확인. 핵심 수집 시간도 57분(03:14→04:11 KST)으로 실측 — 수정 전 2시간
   7분 대비 큰 폭 개선을 로그로 직접 검증 완료.
-- 🆕 #154 `watch_schedule_health.yml` 워치독 — 핵심 판정 로직은 #182(2026-08-30)
-  회귀 테스트 21건으로 상시 검증됨. **오너가 직접 `workflow_dispatch`로 실전
-  확인하다가 진짜 버그를 하나 찾음 → #183에서 수정**(`gh api` 실패 시 stdout에
-  남은 에러 응답과 폴백 JSON이 이어 붙어 `JSONDecodeError`로 잡 전체가 죽던 문제,
-  회귀 테스트 4건 추가). 다만 **이슈 생성 경로**(`gh issue create` + assignee
-  지정, 디스코드 웹훅) 자체는 이번에도 예외로 그 앞에서 멈춰서 실행되지 못함 —
-  테스트 브랜치의 TARGETS를 존재하지 않는 파일명 대신 **저장소에 실제로 있지만
-  schedule로는 안 도는 파일명**(예: `test_suite.yml`)으로 바꿔서 오너가 한 번 더
-  `workflow_dispatch`를 돌려봐야 이슈 생성까지 확인됨.
+- ✅ #154 `watch_schedule_health.yml` 워치독 → #182(핵심 판정 로직 테스트 21건) +
+  #183(오너 실전 확인 중 발견한 JSON 이어붙기 버그 수정)을 거쳐, 2026-08-30 오너가
+  `test/watchdog-issue-check` 브랜치(`test_suite.yml`을 임시 감시 대상으로 지정)로
+  `workflow_dispatch` 재실행 → 판정·이슈 생성(issues/1)·디스코드 알림·assignee
+  이메일까지 **실전 전 구간 정상 동작 최종 확인 완료**(이메일은 처음엔 안 보였지만
+  GitHub 쪽 발송 지연이었을 뿐 결국 정상 수신됨 — 코드 문제 아니었음). 이걸로 이
+  워치독은 코드·실전 양쪽 다 검증 끝. 테스트 브랜치는 확인 후 삭제.
 - GitHub Actions schedule 트리거 자체의 지연·누락(2026-08-27~28, scrape.yml 등
   여러 워크플로우에서 관측)의 근본 원인은 여전히 미확인 — GitHub 쪽 스케줄러
   인프라 문제로 추정되나 저장소 설정으로 원인을 특정하거나 고칠 수 있는 부분이
