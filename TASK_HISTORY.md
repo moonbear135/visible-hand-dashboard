@@ -2174,6 +2174,75 @@ Infinity·-Infinity 3종 회귀 추가 — 가드를 되돌려 정확히 같은 
 
 **검증.** 전체 스위트 `2040 passed` → `2041 passed`(+1), 회귀 0건.
 
+### #180 — `tests/conftest.py` 신설: FAILURES/check() 하네스 공용화 + Check A 동시 갱신 (2026-08-30)
+
+**배경.** 백로그에 "#156 `tests/conftest.py` 부재"로 오래 남아있던 항목입니다.
+29개 테스트 파일이 각자 `sys.path` 부트스트랩을 복제하고, 그중 10개는 추가로
+"check() 실패를 pytest 실패로 승격시키는" FAILURES/check()/autouse 픽스처
+하네스까지 손으로 복사해 두고 있었습니다. 이 복제 방식 자체가 이미 한 번
+실제 사고를 냈습니다(#168 H-1 — `test_us_stocks_page.py` 하나가 그 복사에서
+빠져 있던 게 뒤늦게 발견). 29개 파일 전체에 손을 대는 범위라 여러 재감사
+라운드에서 "별도 계획 필요"로 계속 유예돼 있었는데, 오너의 "전부 다 오푸스
+엑스트라로 신중하게" 지시로 이번에 처리했습니다.
+
+**⚠️ 이 리팩터의 핵심 위험 — 미리 알고 있던 함정.** 백로그 자체에 이미 경고가
+적혀 있었습니다: "`tests/test_suite_integrity.py`의 Check A는 하네스가 각
+파일 최상위에 있다는 전제로 짜여 있다. FAILURES/check를 공용 모듈로 옮기면
+Check A가 그 공용 모듈을 보지 못해 **조용히 무력화된다**." 이번 작업은 이
+경고를 정확히 실현시키지 않기 위해 하네스 이동과 Check A 갱신을 **하나의
+변경**으로 묶어 처리했습니다.
+
+**한 일.**
+- `tests/conftest.py` 신설(89줄) — `sys.path` 부트스트랩, 공유 `FAILURES = []`,
+  `check(condition, label, detail="")`, `@pytest.fixture(autouse=True)`
+  `_assert_no_check_failures()`를 한 곳에서만 정의.
+- 9개 파일(`test_data_source`·`test_macro_scoring`·`test_pegy_page`·
+  `test_report`·`test_scorecard`·`test_stock_history`·`test_us_stocks`·
+  `test_us_stocks_page`·`test_web_session_isolation`)에서 중복 제거,
+  `from conftest import FAILURES, check`로 교체.
+- **`test_us_scoring.py`는 의도적으로 제외**했습니다 — 이 파일의 유일한
+  테스트 함수가 첫 줄에서 `FAILURES.clear()`를 부릅니다. 공용 픽스처는
+  "테스트 시작 시점 길이 대비 증가분만" 검사하는 설계라, 도중에 `clear()`로
+  목록이 비면 그 앞에 기록된 실패가 슬라이싱에서 빠져 조용히 사라집니다 —
+  정확히 이 리팩터가 막으려는 결함을 새로 만드는 꼴이라 자기 파일 안
+  하네스를 그대로 남겨뒀습니다.
+- `tests/test_suite_integrity.py`의 Check A(`_uses_check_failures_harness`
+  계열)를 갱신 — 파일 자신의 AST에 FAILURES/check 정의가 없어도, conftest에서
+  가져다 쓰는 파일이면 **실제로 `import conftest`해서 그 안에 FAILURES·
+  check·autouse 픽스처 3종이 진짜 있는지, 그리고 그 픽스처 이름이 지금 이
+  테스트의 활성 픽스처 목록(`request.fixturenames`)에 실제로 들어 있는지**까지
+  3중으로 확인하도록 강화(이름 하드코딩 없이 동작 확인).
+
+**검증 — 오푸스 자체 검증.**
+- `git stash -u` 베이스라인 대비 FAILED/ERROR/**SKIPPED** ID 집합 전부 동일
+  (통과 개수 비교로 대체하지 않음 — 이 리팩터의 회귀는 실패가 아니라 스킵으로
+  나타날 수 있어서), 판정 결과 줄 2,106개 완전 일치.
+- Check A 무력화를 하네스만 옮기고 갱신 전 상태로 먼저 재현 — 감시 대상이
+  10개 → 1개로 조용히 줄어드는 것을 실측으로 확인(위험이 실재함을 먼저 증명).
+- 갱신 후 사보타주 5종(autouse 픽스처 삭제·`autouse=False`·**정의는 멀쩡한데
+  이름만 `None`으로 덮어써 실제 등록만 무력화**·`check()` 정의 제거·구버전
+  Check A로 되돌리기) 전부 정확히 잡힘, 매번 원복 후 diff로 확인.
+
+**검증 — 제 독립 재검증(오푸스가 안 건드린 방식으로 재현).**
+- `tests/test_scorecard.py`에 직접 `check(False, "__DELIBERATE_MUTATION_TEST__")`를
+  주입 → 정확히 그 실패로 에러, 원복 후 바이트 단위 동일 확인.
+- `tests/conftest.py`의 autouse 픽스처 정의 직후에 `_assert_no_check_failures = None`
+  한 줄만 추가(오푸스의 E3과 유사하지만 독립적으로 직접 재현) → conftest 경유
+  9개 파일 전부 정확히 실패, `test_us_scoring.py`만 영향 없음(설계대로) 확인,
+  원복 후 바이트 단위 동일 확인.
+- `python tests/test_scorecard.py`·`python tests/test_report.py` 직접 실행
+  둘 다 exit 0, 정상 출력 확인.
+- 전체 스위트 재실행: `2041 passed, 65 skipped`, 회귀 0건(순수 리팩터라
+  테스트 개수 자체는 불변).
+
+**부수 발견 — 알아둘 사소한 동작 변화(무해).** `test_us_stocks_page.py`의
+`test_us_stocks_page_full_suite()`는 끝에서 `FAILURES`가 남아있으면
+`SystemExit(1)`을 던지는데, `FAILURES`가 이제 디렉터리 공유라 **이미
+빨간불인 스위트**에서는 다른 파일이 남긴 실패 때문에 이 테스트도 함께
+실패로 보일 수 있습니다. 초록불 상태에서는 절대 발생하지 않고(이번 검증
+전체가 그 상태), 방향이 과다 보고일 뿐 무음 통과가 되는 것은 아니라
+문제로 보지 않았습니다.
+
 ## 진행 예정 (백로그)
 
 - 🆕 #177 `scorecard_leaderboard_page()`의 "발행된 순위표가 있는" 경로는 렌더 스모크가 아직 안 다룸(가짜 발행 데이터를 만들면 §0-1 위반이라 일부러 보류) — 실제 발행 배치를 한 번 돌린 뒤 그 결과로 테스트 보강 검토, 급하지 않음.
@@ -2239,19 +2308,17 @@ Infinity·-Infinity 3종 회귀 추가 — 가드를 되돌려 정확히 같은 
   재확인 — `ls app.py visiblehand.py views/` 전부 없음, `archive/`에 이동
   확인). 이 항목이 그동안 완료 처리가 안 된 채 백로그에 남아있던 것 자체가
   #172/#173 같은 부류의 문서 동기화 누락이었음 — 뒤늦게 바로잡음.
-- 🆕 #156 `tests/conftest.py` 부재 — 29개 테스트 파일이 전부 `sys.path` 부트스트랩을
-  복제하고, 6개 파일이 `test_duel_db.py`를 라이브러리처럼 import함(2026-08-30
-  테스트 스위트 재감사 #168에서 S-2로 재확인·갱신 — `test_quant.py`의
-  `run_golden_tests` 미수집 문제는 2026-08-29 M-14에서 이미 해결돼 이 목록에서
-  뺌). `check()`/`FAILURES` 무음 통과 방지 픽스처는 이번 #168의 H-1 수정으로
-  1개 늘어 이제 8개 파일(`test_data_source.py`·`test_duel.py`·`test_duel_page_usd.py`
-  등 계열)에 완전히 동일하게 복제돼 있음. 공용 `conftest.py`로 옮기는 리팩터는
-  29개 파일 전부에 손을 대는 범위라 스팟 감사보다는 별도 계획이 필요.
-  ⚠️ **이 리팩터를 실행할 때 반드시 같이 할 일**(#169) — `tests/test_suite_integrity.py`의
-  Check A(무음 통과 방지 장치 검사)는 하네스가 각 파일 최상위에 있다는 전제로
-  짜여 있음. `FAILURES`/`check()`를 공용 모듈로 옮기면 Check A가 그 공용 모듈을
-  보지 못해 **조용히 무력화됨** — 리팩터와 같은 PR에서 Check A의 하네스 인식
-  로직도 함께 갱신할 것.
+- ✅ #156 `tests/conftest.py` 부재 → #180에서 완료(2026-08-30). 9개 파일
+  (`test_data_source`·`test_macro_scoring`·`test_pegy_page`·`test_report`·
+  `test_scorecard`·`test_stock_history`·`test_us_stocks`·`test_us_stocks_page`·
+  `test_web_session_isolation`)의 FAILURES/check()/autouse 하네스 중복을 공용
+  `tests/conftest.py`로 제거. `test_us_scoring.py`는 `FAILURES.clear()` 설계
+  충돌로 의도적으로 제외, 자기 파일 하네스 유지. 경고(#169)대로 같은 변경에서
+  `test_suite_integrity.py` Check A도 함께 갱신(실제 `import conftest` +
+  `request.fixturenames` 확인으로 강화)해 조용한 무력화 위험을 실현 전에 차단—
+  갱신 전 상태로 먼저 재현해 위험이 실재함도 확인했음. 사보타주 5종(오푸스) +
+  독립 재현 2종(직접) 전부 정확히 잡힘, git-stash 베이스라인 대비 FAILED/ERROR/
+  SKIPPED ID 2,106개 완전 일치, 전체 스위트 2041 passed/65 skipped, 회귀 0건.
 - 🆕 #168 `.count("문자열") == N` 형태의 브리틀한 테스트 단언 여러 곳(M-1,
   2026-08-30 테스트 스위트 재감사) — 소스에 무해한 리팩터(예: 설명 주석
   한 줄 추가)만 있어도 개수가 달라져 깨질 수 있는 검사 방식. 지금 당장
