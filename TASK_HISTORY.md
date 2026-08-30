@@ -2327,6 +2327,74 @@ startup_failure), 진행 중(`conclusion: null`), 실행 0건, `workflow_runs` �
 확인되는 부분입니다.
 
 
+### #183 — [실전 버그] `watch_schedule_health.yml` 이슈 생성 경로 실전 확인 중 진짜 결함 발견·수정 (2026-08-30)
+
+**어떻게 발견했는가.** #182에서 판정 로직(핵심 window 검사)을 테스트 21건으로 검증한 뒤,
+오너가 직접 GitHub Actions에서 `workflow_dispatch`로 이 워치독을 실행해 이슈 생성 경로까지
+실전 확인해보기로 했습니다. 존재하지 않는 워크플로우 파일명(`__watchdog_issue_path_test__.yml`)을
+TARGETS에 임시로 추가한 테스트 브랜치(`test/watchdog-issue-check`)를 만들어 실행했는데,
+**이슈가 생성되지 않고 잡 자체가 파이썬 예외로 죽었습니다**:
+```
+json.decoder.JSONDecodeError: Extra data: line 1 column 146 (char 145)
+```
+8개 정상 대상은 전부 ✅로 확인된 뒤, 9번째(존재하지 않는 파일명) 차례에서 죽었습니다.
+
+**근본 원인.** 판정 로직 앞의 셸 코드가 이렇게 한 줄이었습니다:
+```bash
+RESP=$(gh api ".../${FILE}/runs?event=schedule&per_page=5" 2>/dev/null || echo '{"workflow_runs":[]}')
+```
+`gh api`가 실패하면서 에러 응답 몸통을 **stderr가 아니라 stdout에** 이미 찍어 놓은
+경우(이번처럼 워크플로우 파일 자체가 없어 404가 난 경우 관측됨), `2>/dev/null`은 stdout은
+전혀 못 막습니다. 그 뒤 `||`의 `echo` 출력까지 **그대로 이어 붙어서** RESP가 JSON 두
+덩어리가 나란히 붙은 문자열이 됐고, 그걸 `json.load(sys.stdin)`이 파싱하다 "Extra data"로
+죽었습니다. 예외가 파이썬 스크립트 안에서 잡히지 않으니 `run:` 스텝 전체가 비정상 종료,
+`has_failures` 출력 자체가 만들어지지 못해 **이슈 생성 단계로 아예 못 넘어갔습니다** —
+워치독이 "놓친 걸 놓치는" 정확히 그 실패 모양이었습니다.
+
+로컬에서 정확히 같은 실패를 그대로 재현해 원인을 확정했습니다(가짜 `gh api` 함수가 stdout에
+에러 JSON을 찍고 실패 종료하도록 만들어 `RESP=$(... || echo ...)` 한 줄로 돌려보니 실제로
+두 JSON이 이어 붙었고, `json.loads()`에 그 문자열을 그대로 먹여보니 원본과 같은
+`JSONDecodeError: Extra data`가 재현됨).
+
+**고친 것 — 2중 안전장치.**
+1. 셸 쪽: `RESP=$(cmd1 || cmd2)` 한 줄을 `if ! RESP=$(cmd1); then RESP=cmd2; fi`로 나눠,
+   실패 시 RESP를 **통째로 덮어써서** 이어붙기 자체가 물리적으로 불가능하게 함.
+2. 파이썬 쪽: `json.load(sys.stdin)`을 `try/except json.JSONDecodeError`로 감싸고,
+   최상위가 dict가 아닌 경우(배열·문자열 등)도 `{}`로 처리 — "파싱 실패 = 확인 못 함 = no"
+   로 안전한 쪽(이슈를 생성하는 쪽)으로 떨어지게 함. 셸 쪽 수정만으로 이번 사례는 막히지만,
+   앞으로 다른 경로로 RESP가 오염될 가능성까지 대비한 벨트-앤-서스펜더입니다.
+
+**검증.**
+- 실제 실패를 그대로 재현하는 입력(에러 JSON + 폴백 JSON이 이어 붙은 문자열)을 수정 전/후
+  스크립트에 각각 먹여봄 — 수정 전: `JSONDecodeError: Extra data`로 그대로 재현.
+  수정 후: 예외 없이 `"no"` 출력.
+- bash 조각만 따로 떼어 `if ! RESP=$(...); then RESP=...; fi` 패턴이 `set -euo pipefail`
+  아래에서도 안전한지(조건문 안의 명령 실패는 `set -e`를 안 건드림) 직접 실행해 확인 —
+  가짜 실패 함수가 stdout에 뭘 찍어놔도 RESP가 폴백 값으로 완전히 덮어써짐을 확인.
+- `tests/test_watch_schedule_health_window.py`에 신규 회귀 테스트 4건 추가(이어붙은
+  JSON·완전히 무효한 문자열·빈 stdin·유효하지만 dict가 아닌 JSON) — 전부 이번에 고친
+  코드에서는 통과, **고치기 전 코드로 되돌려서 돌려보면 정확히 4건 다 실패**함을 직접
+  확인해 테스트가 실제로 이 결함을 잡아낸다는 것을 검증한 뒤 다시 원복.
+- `python3 -m pytest tests/test_watch_schedule_health_window.py` → 25 passed(기존 21 +
+  신규 4). `python3 -m pytest --ignore=archive -q` 전체 스위트 → 2068 passed, 66 skipped,
+  회귀 0건.
+- 수정한 YAML을 PyYAML로 다시 파싱해 두 스텝의 셸 스크립트를 뽑아 각각 `bash -n`으로
+  문법 검사 통과 확인(간접 수정이라 YAML 들여쓰기가 깨지지 않았는지 별도 확인).
+
+**의미.** #182에서 만든 21건짜리 테스트는 판정 로직(성공 실행이 window 안에 있는가) 자체는
+정확히 검증했지만, 그 앞단의 `gh api` 호출·실패 처리 셸 코드는 테스트 범위 밖이었습니다 —
+바로 그 사각지대에서 실제 버그가 나왔고, 오너가 직접 실전 확인을 요청하지 않았다면 발견하지
+못했을 결함입니다. "테스트가 통과한다"와 "실전에서 안전하다"가 다르다는 걸 보여준 사례라
+기록해 둡니다.
+
+**여전히 남은 것.** 이슈 생성(`gh issue create` + assignee)·디스코드 알림 자체는 이번에도
+실행되지 못했습니다(예외로 그 앞에서 멈춰서). 이 수정을 테스트 브랜치에도 반영한 뒤,
+존재하지 않는 파일명 대신 **저장소에 실제로 있지만 schedule로는 안 도는 워크플로우
+파일명**(예: `test_suite.yml`)으로 바꿔서 다시 실행하면, 이번엔 `gh api` 자체는 200으로
+성공하고 그냥 `workflow_runs: []`가 돌아와 정상적으로 "누락" 판정 → 이슈 생성 단계까지
+갈 것으로 예상됩니다. 이 재확인은 오너가 다시 `workflow_dispatch`를 눌러야 하는 부분입니다.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
@@ -2360,13 +2428,15 @@ startup_failure), 진행 중(`conclusion: null`), 실행 0건, `workflow_runs` �
   로그 라인이 연속 8회 실패 직후 정확히 1회 출력되고 이후 EV/EBITDA 요청이 전혀
   없음을 확인. 핵심 수집 시간도 57분(03:14→04:11 KST)으로 실측 — 수정 전 2시간
   7분 대비 큰 폭 개선을 로그로 직접 검증 완료.
-- 🆕 #154 `watch_schedule_health.yml` 워치독 — 핵심 판정 로직(window 안 성공 실행
-  존재 여부)은 #182(2026-08-30)에서 회귀 테스트 21건으로 상시 검증됨(워크플로우
-  YAML에서 실제 소스를 추출해 그대로 실행하는 방식이라 사본 드리프트 위험 없음).
-  다만 그 뒤의 **이슈 생성 경로**(`gh issue create` + assignee 지정, 디스코드
-  웹훅)는 실제 GitHub 부수효과(오너에게 실제 이메일 알림)가 있어 여전히 코드로는
-  검증 못 함 — 오너가 Actions 탭에서 `workflow_dispatch`로 한 번 수동 실행해서
-  정상 동작까지 확인해 주면 좋음.
+- 🆕 #154 `watch_schedule_health.yml` 워치독 — 핵심 판정 로직은 #182(2026-08-30)
+  회귀 테스트 21건으로 상시 검증됨. **오너가 직접 `workflow_dispatch`로 실전
+  확인하다가 진짜 버그를 하나 찾음 → #183에서 수정**(`gh api` 실패 시 stdout에
+  남은 에러 응답과 폴백 JSON이 이어 붙어 `JSONDecodeError`로 잡 전체가 죽던 문제,
+  회귀 테스트 4건 추가). 다만 **이슈 생성 경로**(`gh issue create` + assignee
+  지정, 디스코드 웹훅) 자체는 이번에도 예외로 그 앞에서 멈춰서 실행되지 못함 —
+  테스트 브랜치의 TARGETS를 존재하지 않는 파일명 대신 **저장소에 실제로 있지만
+  schedule로는 안 도는 파일명**(예: `test_suite.yml`)으로 바꿔서 오너가 한 번 더
+  `workflow_dispatch`를 돌려봐야 이슈 생성까지 확인됨.
 - GitHub Actions schedule 트리거 자체의 지연·누락(2026-08-27~28, scrape.yml 등
   여러 워크플로우에서 관측)의 근본 원인은 여전히 미확인 — GitHub 쪽 스케줄러
   인프라 문제로 추정되나 저장소 설정으로 원인을 특정하거나 고칠 수 있는 부분이

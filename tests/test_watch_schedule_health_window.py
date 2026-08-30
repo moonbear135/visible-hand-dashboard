@@ -318,6 +318,73 @@ def test_future_timestamps_are_not_rejected():
     assert run_window_check(payload(run_entry(-1)), window_hours=30) == "yes"
 
 
+def run_window_check_raw(raw_stdin, now_ts=NOW_TS, window_hours=30):
+    """`run_window_check()`와 같지만 stdin에 **가공하지 않은 원본 문자열**을 그대로 넣습니다.
+
+    RESP가 유효한 JSON이 아니게 되는 경로(2026-08-30 오너 실전 확인 중 발견한 버그 —
+    아래 회귀 테스트들 참고)를 재현하려면 `json.dumps()`를 거치지 않은 임의의 문자열을
+    stdin으로 보낼 수 있어야 합니다.
+    """
+    source = load_window_check_source()
+    proc = subprocess.run(
+        [sys.executable, "-c", source, str(now_ts), str(window_hours)],
+        input=raw_stdin,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    return proc
+
+
+# =====================================================================================
+# 3. 방어적 파싱 — RESP가 유효한 JSON이 아닐 때도 죽지 않고 "no" (2026-08-30 실전 발견)
+# =====================================================================================
+#
+# 배경: 오너가 실제로 `workflow_dispatch`를 존재하지 않는 워크플로우 파일명으로 돌려보다가
+# 발견한 진짜 프로덕션 버그입니다. 당시 코드는
+#     RESP=$(gh api ... 2>/dev/null || echo '{"workflow_runs":[]}')
+# 한 줄이었는데, `gh api`가 실패하면서 에러 응답 몸통을 stderr가 아니라 **stdout에** 이미
+# 찍어 놓은 경우 `2>/dev/null`이 그걸 못 막고, 뒤이어 `|| echo`의 출력까지 이어 붙어 RESP가
+# JSON 두 덩어리가 나란히 붙은 문자열이 됐습니다. 그 결과 `json.load`가
+# `JSONDecodeError: Extra data`로 죽고 **잡 전체가 예외로 중단** — `has_failures` 출력
+# 자체가 안 만들어져서 이슈 생성 단계로 아예 못 넘어갔습니다(워치독이 놓친 걸 놓침).
+#
+# 고친 방식 — bash 쪽은 `if ! RESP=$(...); then RESP=...; fi`로 나눠 실패 시 RESP를
+# 통째로 덮어쓰게 했고(이어붙기 자체를 막음), python 쪽도 2중 안전장치로
+# `json.load` → `json.loads(...)` + try/except를 추가해 **어떤 이유로든** RESP가 유효한
+# JSON이 아니게 되면 예외로 죽는 대신 "확인 못 함 = no"로 안전한 쪽으로 떨어지게 했습니다.
+def test_concatenated_json_blobs_says_no_instead_of_crashing():
+    """실제로 관측된 그 모양 그대로 — 에러 JSON 뒤에 폴백 JSON이 그대로 이어 붙은 입력."""
+    raw = ('{"message": "Not Found", "documentation_url": '
+           '"https://docs.github.com/rest", "status": "404"}'
+           '{"workflow_runs":[]}')
+    proc = run_window_check_raw(raw)
+    assert proc.returncode == 0, f"죽으면 안 됩니다.\nstderr: {proc.stderr}"
+    assert proc.stdout.strip() == "no"
+
+
+def test_completely_invalid_json_says_no_instead_of_crashing():
+    """JSON이 전혀 아닌 임의의 문자열(예: 사람이 읽는 에러 메시지)도 죽지 않고 "no"."""
+    proc = run_window_check_raw("Internal Server Error: rate limit exceeded")
+    assert proc.returncode == 0, f"죽으면 안 됩니다.\nstderr: {proc.stderr}"
+    assert proc.stdout.strip() == "no"
+
+
+def test_empty_stdin_says_no_instead_of_crashing():
+    """stdin이 완전히 빈 문자열이어도(예: gh api가 아무것도 못 찍고 죽은 경우) "no"."""
+    proc = run_window_check_raw("")
+    assert proc.returncode == 0, f"죽으면 안 됩니다.\nstderr: {proc.stderr}"
+    assert proc.stdout.strip() == "no"
+
+
+def test_valid_json_that_is_not_a_dict_says_no():
+    """유효한 JSON이지만 최상위가 dict가 아닌 경우(배열·문자열 등)도 "no"."""
+    for raw in ("[]", '"hello"', "42", "null"):
+        proc = run_window_check_raw(raw)
+        assert proc.returncode == 0, f"입력 {raw!r} 에서 죽으면 안 됩니다.\nstderr: {proc.stderr}"
+        assert proc.stdout.strip() == "no", f"입력 {raw!r} 에서 no 가 아니었습니다: {proc.stdout!r}"
+
+
 def test_output_is_exactly_yes_or_no():
     """
     셸이 `[ "$LATEST_OK" = "yes" ]` 로 문자열을 그대로 비교하므로, 출력이 정확히

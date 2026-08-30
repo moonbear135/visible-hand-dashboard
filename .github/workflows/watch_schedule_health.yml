@@ -128,13 +128,32 @@ jobs:
               WINDOW_HOURS=$DAILY_WINDOW_HOURS
             fi
 
-            RESP=$(gh api "repos/${REPO}/actions/workflows/${FILE}/runs?event=schedule&per_page=5" 2>/dev/null || echo '{"workflow_runs":[]}')
+            # 2026-08-30 실전 확인 중 발견한 버그(오너 실측) — 아래처럼 `cmd1 || cmd2` 형태로
+            # 한 줄에 쓰면, `gh api`가 실패하면서 stderr가 아니라 **stdout에** 에러 응답 몸통을
+            # 이미 찍어 놓은 경우(관측됨 — 존재하지 않는 워크플로우 파일명으로 호출 시) `2>/dev/null`
+            # 은 그 stdout 출력을 못 막고, 뒤이어 `|| echo` 의 출력까지 **이어 붙어서** RESP가
+            # JSON 두 덩어리가 연달아 붙은 문자열이 됩니다 — 그러면 아래 python `json.load`가
+            # `JSONDecodeError: Extra data`로 죽고, 잡 전체가 예외로 멈춰 **has_failures 출력
+            # 자체가 안 만들어져서 이슈 생성 단계로 아예 못 넘어갑니다**(워치독이 조용히 실패).
+            # if/else 로 나눠 실패 시 RESP를 통째로 덮어써서 이 이어붙기 자체를 막습니다.
+            if ! RESP=$(gh api "repos/${REPO}/actions/workflows/${FILE}/runs?event=schedule&per_page=5" 2>/dev/null); then
+              RESP='{"workflow_runs":[]}'
+            fi
 
             LATEST_OK=$(echo "$RESP" | python3 -c '
           import json, sys, datetime
           now = int(sys.argv[1])
           window = int(sys.argv[2]) * 3600
-          data = json.load(sys.stdin)
+          # 방어적 파싱(2중 안전장치) — 위 bash 쪽 수정으로 RESP가 더는 두 JSON이 이어붙은
+          # 모양이 되지는 않지만, 혹시 모를 다른 경로로 RESP가 유효한 JSON이 아니게 되는
+          # 경우에도 워치독 자체가 예외로 죽어 이슈 생성 단계를 통째로 건너뛰지 않도록,
+          # "파싱 실패 = 확인 못 함 = 실행 기록 없음"으로 안전한 쪽(no)으로 처리합니다.
+          try:
+              data = json.loads(sys.stdin.read())
+          except json.JSONDecodeError:
+              data = {}
+          if not isinstance(data, dict):
+              data = {}
           found = False
           for run in data.get("workflow_runs", []):
               created = datetime.datetime.strptime(run["created_at"], "%Y-%m-%dT%H:%M:%SZ").replace(tzinfo=datetime.timezone.utc).timestamp()
