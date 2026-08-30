@@ -1,0 +1,97 @@
+# .github/workflows/test_suite.yml
+# =============================================================================
+# 🧪 pytest 전체 스위트를 push마다 자동 실행 + 실패 시 디스코드 알림
+#
+#   왜 필요한가 (2026-08-30):
+#     이 저장소에는 지금까지 pytest를 **자동으로** 돌리는 워크플로우가 하나도
+#     없었습니다 — 전부 로컬(개발 기기)에서 사람이 직접 돌려서만 확인해 왔습니다.
+#     `tests/test_suite_integrity.py`(TASK_HISTORY #169)처럼 "매 실행마다 재검사"를
+#     전제로 설계한 안전장치도, 애초에 그 실행 자체가 자동으로 안 일어나면
+#     아무 의미가 없습니다. 오너 요청으로 이 간극을 메웁니다 — 오너가 로컬에서
+#     확인 후 push하는 지금 흐름은 그대로 두되, push된 코드에서도 **한 번 더**
+#     같은 검사를 자동으로 돌려 이중 안전망을 만듭니다.
+#
+#   알림 방식:
+#     실패하면 (1) 이 잡 자체가 실패(exit 1) 처리돼 Actions 탭에 빨간 X로 남고,
+#     (2) 저장소에 `DISCORD_WEBHOOK_URL` 시크릿이 등록돼 있으면 디스코드 채널로도
+#     같은 내용을 보냅니다 — `watch_schedule_health.yml`(2026-08-28 오너 요청으로
+#     신설)이 이미 쓰고 있는 것과 **같은 시크릿을 그대로 재사용**합니다. 이미
+#     등록돼 있다면 이 워크플로우를 위해 **새로 설정할 게 없습니다.** 시크릿이
+#     없으면 이 단계는 조용히 건너뜁니다 — 필수는 아닙니다.
+#     통과했을 때는 아무 알림도 보내지 않습니다(문제가 있을 때만 알리는 편이
+#     낫다는 판단 — 매 push마다 "정상입니다" 알림은 소음).
+#
+#   비밀키: 기본 `GITHUB_TOKEN`도 필요 없습니다(이슈를 만들지 않고 잡 실패 +
+#   디스코드 알림만 하는 구성이라). `DISCORD_WEBHOOK_URL`(저장소 Settings →
+#   Secrets and variables → Actions)만 선택 사항입니다. 웹훅 URL 자체가 비밀
+#   값이라 반드시 시크릿으로만 등록해야 합니다(코드에 하드코딩 금지).
+#
+#   검증: `requirements.txt` + `pytest`만 새로 설치한 **완전히 새 가상환경**에서
+#   (기존 개발 기기의 이미 설치된 패키지에 기대지 않고) 이 워크플로우와 똑같은
+#   순서로 미리 돌려봤습니다 — 결과가 로컬 개발 환경과 완전히 동일(2 failed
+#   [무관한 기존 결함, 아래 참고] · 1807 passed · 53 skipped)했습니다. 테스트
+#   코드가 실제 Supabase/KRX 접속 없이 가짜 클라이언트(FakeClient 등)로 돌아가고
+#   프로덕션 코드도 `os.getenv()`(값이 없으면 None, KeyError 없음)만 쓰는 설계가
+#   실제로 맞아떨어진 결과입니다. 다만 GitHub Actions의 실제 러너는 이 가상환경
+#   시뮬레이션과 완전히 같지는 않으므로(OS 패키지·네트워크 환경 차이 가능), 배포
+#   후 Actions 탭에서 실제 첫 실행 한 번은 오너가 확인해 주시면 좋습니다.
+#
+#   일부러 하지 않은 것: 실패마다 이슈를 자동으로 만들지는 않습니다(잡 실패
+#   빨간 X + 디스코드 알림으로 이미 놓치기 어렵고, push마다 이슈가 쌓이면
+#   오히려 소음이 될 수 있어서). 원하시면 나중에 언제든 추가할 수 있습니다.
+# =============================================================================
+
+name: 테스트 스위트
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    # 깃허브 웹 화면에서 수동으로 즉시 실행할 수 있는 버튼 활성화
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v3
+
+      - uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 의존성 설치
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          # pytest는 앱 실행에는 필요 없는 테스트 전용 도구라 requirements.txt에는
+          # 넣지 않고 여기서만 설치합니다.
+          pip install pytest
+
+      - name: "pytest 전체 실행 (저장소 관례와 동일: archive/ 제외)"
+        run: pytest --ignore=archive -q
+
+      - name: 실패 시 디스코드 알림
+        if: failure()
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+        run: |
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            RUN_URL="https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
+            MSG=$(printf '🔴 **테스트 스위트 실패** (%s KST)\n커밋: `%s`\n%s' \
+              "$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" \
+              "${GITHUB_SHA:0:7}" \
+              "$RUN_URL")
+            # 디스코드 JSON 페이로드는 python3 -c 로 만듭니다 — 커밋 메시지 등에
+            # 따옴표·개행이 섞여도 셸에서 깨지지 않게 안전하게 이스케이프하기 위함
+            # (watch_schedule_health.yml과 같은 방식).
+            PAYLOAD=$(python3 -c '
+          import json, sys
+          print(json.dumps({"content": sys.argv[1]}))
+          ' "$MSG")
+            curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL" >/dev/null \
+              && echo "✅ 디스코드 알림 전송됨" \
+              || echo "⚠️ 디스코드 알림 전송 실패(Actions 탭의 빨간 X는 이미 남았으니 계속 진행)"
+          else
+            echo "ℹ️ DISCORD_WEBHOOK_URL 시크릿이 없어 디스코드 알림을 건너뜁니다(선택 사항)."
+          fi
