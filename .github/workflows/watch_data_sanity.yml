@@ -1,0 +1,186 @@
+# .github/workflows/watch_data_sanity.yml
+# =============================================================================
+# 📏 수집 결과 산티체크 감시 — "실행은 됐는데 결과 값이 이상한" 날을 잡아 디스코드로 알림
+#
+#   왜 필요한가 (2026-08-30 오너 지시):
+#     지금 이 저장소의 감시망에는 정확히 한 칸이 비어 있었습니다.
+#       · watch_schedule_health.yml — **"오늘 이 워크플로우가 실행됐는가"** 만 봅니다
+#         (그 파일 머리말이 스스로 그렇게 못 박아 두었습니다). "안 돌았다"는 잡지만
+#         "돌긴 돌았는데 결과가 이상하다"는 전혀 못 잡습니다.
+#       · test_suite.yml — pytest 를 돌립니다. 즉 **이미 알려진 검사**만 지켜줍니다.
+#         오늘 소스 HTML 이 바뀌어 가격이 전부 0으로 들어와도 pytest 는 초록불입니다.
+#     그 사이의 공백 — 수집 종목 수 급감 / 핵심 숫자 컬럼이 전부 결측·0 / 값이 전부 같은
+#     상수 / 어제 대비 값 수준이 말이 안 되게 튐 — 이 워크플로우가 담당합니다.
+#
+#   ⚠️ watch_schedule_health.yml 은 **건드리지 않았습니다.** 그 파일은 "실행 여부"라는
+#      다른 관심사를 스스로 명시한 별개 감시이고, 이번 건은 완전히 새로운 검사입니다.
+#
+#   판정은 누가 하나:
+#     각 수집기가 **자기 결과를 저장한 뒤** `utils/data_sanity.check_dataset()` 을 불러
+#     `data/<dataset>_sanity.json` 에 판정 결과와 '내일의 기준값'을 남깁니다. 그 파일은
+#     각 수집기 워크플로우가 이미 하고 있는 `git add data/` 커밋에 그대로 실려 옵니다
+#     (`utils/duel_batch.py` 의 신선도 기준값 파일이 커밋되는 것과 같은 방식).
+#     이 워크플로우는 **판정을 다시 하지 않고** 그 파일들을 읽어 알리기만 합니다
+#     (ENGINEERING_SPEC §0-3-10 — 같은 판정을 두 곳에서 구현하지 않기).
+#
+#   왜 수집기 워크플로우마다 스텝을 넣지 않고 이 통합 워크플로우 하나로 했는가:
+#     ① **기존 파일을 가장 적게 건드립니다.** 이 방식은 기존 워크플로우 중 딱 하나
+#        (indicator_kr.yml 의 `git add` 목록에 산티체크 파일 2개 경로 추가)만 손대면
+#        됩니다. scrape.yml(`git add data/`)·scrape_us.yml(`git add -A data/`)은 이미
+#        data/ 전체를 커밋하고 있어 **한 글자도 고치지 않았습니다.** 반대로 수집기마다
+#        스텝을 넣는 방식은 실제 자산 데이터를 수집하는 프로덕션 워크플로우 3개를
+#        전부 열어 각각 20여 줄씩 고쳐야 합니다.
+#     ② **더 안전합니다.** 이 워크플로우가 어떻게 실패하든 수집은 영향을 받지 않습니다.
+#        수집기 워크플로우 안에 알림 스텝을 넣으면, 그 스텝의 사소한 셸 실수 하나가
+#        수집·커밋 잡 자체를 빨간 X 로 만들 수 있습니다.
+#     ③ 알림이 데이터셋별로 흩어지지 않고 **하루 한 번, 한 메시지**로 모입니다.
+#     🔻 대신 포기한 것(정직하게): 수집 직후 즉시가 아니라 **최대 하루까지 늦게** 알게
+#        됩니다. 그리고 이 워크플로우도 결국 GitHub schedule 로 도는 물건이라,
+#        watch_schedule_health.yml 이 자기 머리말에 적어 둔 한계(스케줄러 지연·누락
+#        가능성)를 똑같이 가집니다. 100% 보장이 아니라는 점만 알고 있으면 됩니다.
+#
+#   확인 대상: `data/*_sanity.json` 전부. **파일 목록을 여기에 적지 않습니다** —
+#     적어 두면 수집기 쪽과 두 개의 출처가 생겨서 어긋납니다(§0-3-10). 지금 이 파일을
+#     만드는 수집기는 collector_kospi200.py / collector_us_stocks.py /
+#     collector_indicator_kr.py 세 개입니다.
+#     🔻 이 방식의 한계(정직하게): 목록을 안 적으므로 "세 개 중 하나가 조용히 파일을
+#        안 쓰게 된" 경우는 못 잡습니다. 그건 "그 워크플로우가 성공했는가"의 문제라
+#        watch_schedule_health.yml 의 관심사입니다. 다만 파일이 **하나도** 없는 경우는
+#        명백한 이상이라 알립니다(배포 직후 첫 실행은 아직 수집기가 안 돌아 이 알림이
+#        한 번 올 수 있는데, 그건 오탐이 아니라 "감시가 살아 있다"는 확인입니다).
+#
+#   알림 방식:
+#     의심/판정 오류가 있으면 (1) 저장소에 `DISCORD_WEBHOOK_URL` 시크릿이 있으면
+#     디스코드로 보내고 — `watch_schedule_health.yml`·`test_suite.yml` 이 이미 쓰는
+#     **같은 시크릿을 그대로 재사용**합니다(새로 설정할 것 없음), (2) 이 잡 자체를
+#     실패(exit 1) 처리해 Actions 탭에 빨간 X 로 남깁니다. 페이로드는 두 파일과
+#     **완전히 같은 방식**(`python3 -c` 로 JSON 이스케이프 후 curl)이라 한글·이모지·
+#     따옴표가 섞여도 깨지지 않습니다. 정상인 날에는 아무 알림도 보내지 않습니다.
+#     이슈는 만들지 않습니다(test_suite.yml 과 같은 판단 — 빨간 X + 디스코드로 충분히
+#     눈에 띄고, 매일 이슈가 쌓이면 오히려 소음).
+#
+#   🔴 이 감시는 아무 데이터도 고치지 않습니다. 의심스러운 값도 그대로 두고 사람에게
+#      알리기만 합니다(§0-1).
+# =============================================================================
+
+name: Data Sanity Watch
+
+on:
+  workflow_dispatch: {}
+
+  # 매일 00:30 UTC = KST 09:30.
+  #   · 전날 코스피(16:05 KST)·보조지표(17:00 KST)·당일 새벽 미국주식(05:35/06:35 KST)
+  #     수집이 전부 끝나고 커밋까지 올라온 뒤입니다.
+  #   · watch_schedule_health.yml(00:00 UTC)과 같은 분에 겹치지 않게 30분 뒤로 뒀습니다
+  #     (§0-3-2 — 상대 서버에 한꺼번에 몰리지 않게).
+  schedule:
+    - cron: '30 0 * * *'
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: 저장소 코드 체크아웃
+        uses: actions/checkout@v3
+
+      - name: 파이썬 환경 설정
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: 산티체크 상태 파일 확인
+        id: check
+        # utils/data_sanity.py 는 표준 라이브러리만 씁니다 — 여기서 requirements.txt 를
+        # 설치하지 않는 이유입니다(§0-3-2 · 필요 없는 일은 하지 않음).
+        run: |
+          python3 - <<'PYCHECK'
+          import glob
+          import json
+          import os
+          import sys
+
+          sys.path.insert(0, os.getcwd())
+          from utils.data_sanity import alert_lines, format_status_line
+
+          paths = sorted(glob.glob("data/*_sanity.json"))
+          entries = []          # 읽는 데 성공한 (경로, payload) 짝. 경로와 내용을 절대 따로
+                                # 들고 다니지 않습니다 — 하나가 빠지면 짝이 밀려서 엉뚱한
+                                # 파일 이름에 남의 판정이 붙습니다(§0-1: 사실과 다른 표시 금지).
+          lines = []
+
+          for path in paths:
+              try:
+                  with open(path, encoding="utf-8") as handle:
+                      entries.append((path, json.load(handle)))
+              except Exception as exc:
+                  # 상태 파일을 못 읽는 것 자체가 알려야 할 이상입니다(조용히 넘기지 않음).
+                  lines.append(f"• {path} — 상태 파일을 읽을 수 없습니다: {type(exc).__name__}: {exc}")
+
+          # Actions 로그에는 정상까지 전부 남깁니다(무엇을 봤는지 사람이 확인할 수 있게).
+          print(f"확인한 상태 파일: {len(paths)}개 (읽기 성공 {len(entries)}개)")
+          for path, payload in entries:
+              print(f"  {path}: {format_status_line(payload)}")
+
+          if not paths:
+              lines.append("• data/*_sanity.json 상태 파일이 하나도 없습니다 — 수집기가 산티체크를 "
+                           "기록하지 못했거나 커밋되지 않았습니다.")
+
+          lines.extend(alert_lines([payload for _path, payload in entries]))
+
+          # 디스코드의 content 한도는 2000자입니다. 넘기면 요청이 거부되는데 curl 은 그걸
+          # 실패로 보지 않아 "전송됨"만 찍히고 **아무것도 안 갑니다.** 위 Actions 로그에는
+          # 이미 전부 남겼으니, 알림 문구만 안전하게 줄이고 줄였다는 사실을 밝힙니다(§0-1).
+          MAX_ALERT_CHARS = 1500
+          alert_text = "\n".join(lines)
+          if len(alert_text) > MAX_ALERT_CHARS:
+              alert_text = (alert_text[:MAX_ALERT_CHARS].rstrip()
+                            + f"\n… 너무 길어 여기서 줄였습니다 — 전체 {len(lines)}건은 Actions 로그에서 확인하세요.")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as out:
+              out.write(f"has_alerts={'true' if lines else 'false'}\n")
+              out.write("alert_text<<GHOUTPUT_EOF\n")
+              out.write(alert_text + ("\n" if lines else ""))
+              out.write("GHOUTPUT_EOF\n")
+
+          if lines:
+              print("::warning::산티체크 의심 항목이 있습니다 — 아래 알림 스텝에서 처리합니다.")
+              for line in lines:
+                  print(line)
+          else:
+              print("✅ 의심 항목 없음.")
+          PYCHECK
+
+      - name: 의심이면 디스코드 알림 + 잡 실패 처리
+        if: steps.check.outputs.has_alerts == 'true'
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          ALERTS: ${{ steps.check.outputs.alert_text }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          if [ -n "${DISCORD_WEBHOOK_URL:-}" ]; then
+            RUN_URL="https://github.com/${REPO}/actions/runs/${RUN_ID}"
+            MSG=$(printf '📏 **수집 결과 산티체크 — 의심 발견** (%s KST)\n%s\n\n값은 그대로 두었습니다(고치거나 지우지 않음). 확인 후 판단해 주세요.\n%s' \
+              "$(TZ=Asia/Seoul date '+%Y-%m-%d %H:%M')" \
+              "$ALERTS" \
+              "$RUN_URL")
+            # 디스코드 JSON 페이로드는 python3 -c 로 만듭니다 — 사유 문장에 따옴표·개행·
+            # 이모지가 섞여도 셸에서 깨지지 않게 안전하게 이스케이프하기 위함
+            # (watch_schedule_health.yml · test_suite.yml 과 같은 방식).
+            PAYLOAD=$(python3 -c '
+          import json, sys
+          print(json.dumps({"content": sys.argv[1]}))
+          ' "$MSG")
+            curl -s -H "Content-Type: application/json" -d "$PAYLOAD" "$DISCORD_WEBHOOK_URL" >/dev/null \
+              && echo "✅ 디스코드 알림 전송됨" \
+              || echo "⚠️ 디스코드 알림 전송 실패(Actions 탭의 빨간 X는 이미 남으니 계속 진행)"
+          else
+            echo "ℹ️ DISCORD_WEBHOOK_URL 시크릿이 없어 디스코드 알림을 건너뜁니다(선택 사항)."
+          fi
+
+          echo "::error::수집 결과 산티체크에서 의심 항목이 나와 이 잡을 실패 처리합니다(Actions 탭에서 바로 보이도록)."
+          exit 1

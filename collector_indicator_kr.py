@@ -33,6 +33,7 @@ except Exception:
     KST = None
 
 from utils import stock_history
+from utils import data_sanity
 from utils.indicators import calculate_rsi, calculate_macd, calculate_bollinger, combine_verdict
 from utils.indicator_universe import update_universe_for_today, select_top_n_stock_codes, get_tracked_codes
 from utils.constants import INDICATOR_FETCH_DAYS, INDICATOR_REQUEST_DELAY_SECONDS
@@ -312,6 +313,24 @@ def run(limit=500, days=INDICATOR_FETCH_DAYS, delay=INDICATOR_REQUEST_DELAY_SECO
             "failed_count": len(failures),
             "stocks": rows,
         }, f, ensure_ascii=False, indent=2)
+
+    # ── 수집 결과 산티체크 (2026-08-30 신설, utils/data_sanity.py) ─────────────────
+    # 위 저장(이력 CSV + 최신 스냅샷)이 전부 끝난 뒤에만 돕니다. 값을 고치지 않고 판정만
+    # 해서 data/indicator_kr_sanity.json 에 남깁니다(§0-1).
+    # 핵심 컬럼 rsi·bb_mid: 2026-08-29 자 스냅샷 실측 결측 둘 다 0.0%(500행 중 0건).
+    # verdict_score 는 81%가 0(중립)이라 넣지 않았습니다 — 넣었으면 매일 울립니다.
+    # 중앙값 급변 검사(level_fields)는 bb_mid 에만 겁니다: bb_mid 는 20일 이동평균이라
+    # 가격 수준을 그대로 반영해 단위 오류에 민감한 반면, rsi 는 0~100 으로 갇힌
+    # 오실레이터라 진짜 폭락장에서 시장 전체 중앙값이 반토막 날 수 있어 "시장이 움직인 것"을
+    # "데이터가 깨진 것"으로 오해하게 만듭니다.
+    data_sanity.check_dataset(
+        "indicator_kr", rows, ("rsi", "bb_mid"),
+        target_date=today_str,
+        level_fields=("bb_mid",),
+        # 상태 파일은 최신 스냅샷과 같은 디렉터리에 둡니다 — 테스트가
+        # LATEST_SNAPSHOT_PATH 를 임시 폴더로 바꿔치우면 상태 파일도 함께 따라갑니다.
+        data_dir=os.path.dirname(LATEST_SNAPSHOT_PATH),
+    )
 
     print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 완료 — 성공 {len(rows)} / 실패 {len(failures)} "
           f"/ 교차검증 불일치 {cross_mismatches}건")

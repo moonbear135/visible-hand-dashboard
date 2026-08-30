@@ -129,6 +129,7 @@ from utils.stock_history import (
     record_daily_history,
 )
 from utils.company_names_kr import resolve_korean_name
+from utils import data_sanity
 
 # =============================================================================
 # 0. 타임존 헬퍼 (US_STOCKS_WORK_ORDER.md §5-2 — 이번 작업 최대 함정)
@@ -1874,6 +1875,25 @@ def run_us_collector(target_size=None, limit=None, delay=True, skip_indices=Fals
     else:
         print("⏭️  테스트 모드(--limit)라 종목별 시계열 이력에 쓰지 않았습니다 "
               "— 부분 수집이 이력에 구멍을 내지 않도록 막습니다.")
+
+    # ── 수집 결과 산티체크 (2026-08-30 신설, utils/data_sanity.py) ─────────────────
+    # 위 저장이 전부 끝난 뒤에만 돕니다. 값을 고치지 않고 판정만 해서
+    # data/us_stocks_sanity.json 에 남깁니다(§0-1).
+    # 핵심 컬럼 price·market_cap: 2026-08-29 자 스냅샷 실측 결측 0.0%(548행 중 0건).
+    # volume 은 이 스냅샷에서 100% 비어 있어(실측) 넣지 않았습니다 — 넣었으면 매일 울립니다.
+    # ⚠️ write_outputs 일 때만 돕니다: --limit 테스트 실행의 부분 수집 결과를 내일의
+    #    기준값으로 남기면, 그 다음 날 정상 수집이 '건수 급증'으로 잘못 걸립니다.
+    if write_outputs:
+        data_sanity.check_dataset(
+            "us_stocks", enriched, ("price", "market_cap"),
+            target_date=history_date,
+            level_fields=("price", "market_cap"),
+            # 상태 파일은 이 수집기의 산출물과 같은 디렉터리(_data_path 기준)에 둡니다 —
+            # 테스트가 _data_path 를 임시 폴더로 바꿔치우면 상태 파일도 함께 따라갑니다.
+            data_dir=os.path.dirname(_data_path(US_HISTORY_FILENAME)),
+        )
+    else:
+        print("⏭️  테스트 모드(--limit)라 산티체크 기준값도 건드리지 않았습니다.")
 
     print("=" * 70)
     print(f"[완료] {len(visible)}종목 노출 (+버퍼 {metadata['hidden_buffer_count']}) / "

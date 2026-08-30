@@ -55,6 +55,15 @@ jobs:
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
           git add data/indicator_universe_kr.json data/indicator_kr_latest.json data/indicator_kr_history.csv
+          # 산티체크 상태 파일(2026-08-30 신설, utils/data_sanity.py). 이 파일에는 오늘 판정
+          # 결과와 '내일의 기준값'이 함께 들어 있어, 커밋되지 않으면 매일 기준값이 없어
+          # 영영 '판정 불가'가 됩니다. scrape.yml(`git add data/`)·scrape_us.yml
+          # (`git add -A data/`)은 이미 data/ 전체를 커밋해 이 처리가 필요 없습니다.
+          # 파일이 아직 없을 수 있어(첫 실행 전 · 수집기 조기 종료) 존재할 때만 add 합니다
+          # — 없는 경로를 add 하면 이 커밋 스텝 자체가 실패합니다.
+          if [ -f data/indicator_kr_sanity.json ]; then
+            git add data/indicator_kr_sanity.json
+          fi
           git commit -m "Auto Update(보조지표): $(date +'%Y-%m-%d') [무인 자동화 로봇]" || exit 0
 
           # scrape.yml과 같은 재시도 패턴 — 다른 워크플로우가 먼저 push했으면 받아와서 재시도

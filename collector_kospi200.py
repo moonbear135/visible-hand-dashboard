@@ -55,6 +55,7 @@ from utils.stock_history import (
     record_daily_history,
     stock_history_path,
 )
+from utils import data_sanity
 
 # =============================================================================
 # 데이터 무결성 상수 (ENGINEERING_SPEC §0-1 "하드코딩 및 더미 데이터 금지" 준수)
@@ -2122,6 +2123,27 @@ def run_kospi200_collector():
             print(f"⚠️ 종목별 시계열 이력 미기록: {history_result['reason']}")
     except Exception as e:
         print(f"⚠️ 종목별 시계열 이력 기록 실패(수집 결과에는 영향 없음): {e}")
+
+    # ── 수집 결과 산티체크 (2026-08-30 신설, utils/data_sanity.py) ─────────────────
+    # 위 저장이 **전부 끝난 뒤**에만 돕니다. 이 판정은 값을 하나도 고치거나 지우지 않고
+    # "오늘 결과가 그럴듯한가"만 보고 data/kospi200_sanity.json 에 남깁니다(§0-1 —
+    # 의심스러운 값도 그대로 두고 경고만 추가). 상태가 '의심/판정 오류'면
+    # .github/workflows/watch_data_sanity.yml 이 디스코드로 알립니다.
+    #
+    # 핵심 컬럼으로 price·market_cap 만 고른 이유: 2026-08-29 자 스냅샷을 직접 세어 보니
+    # 둘 다 결측 0.0%(507행 중 0건)였습니다. 반대로 t_per(19.3% 결측)·quant_score(24.7%)
+    # 처럼 **정상적으로 자주 비는** 컬럼을 넣으면 매일 울려서 알람이 무의미해집니다.
+    # 대상은 visible_stocks(정확히 500개로 고정)가 아니라 enriched_stocks 입니다 —
+    # 고정된 수를 세면 '건수 급감'을 영영 못 잡습니다.
+    data_sanity.check_dataset(
+        "kospi200", enriched_stocks, ("price", "market_cap"),
+        target_date=_now_kst().strftime('%Y-%m-%d'),
+        level_fields=("price", "market_cap"),
+        # 상태 파일은 이 실행이 스냅샷을 쓴 바로 그 디렉터리에 둡니다(위 data_dir).
+        # 별도로 경로를 다시 계산하면 테스트가 임시 폴더로 우회시켰을 때 실제 data/ 를
+        # 오염시키게 됩니다(§0-3-10 — 같은 경로를 두 곳에서 만들지 않기).
+        data_dir=data_dir,
+    )
 
     print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피+코스닥 통합 시가총액 순 {total_count}개(+버퍼 {hidden_buffer_count}개) 실데이터 저장 완료! -> {json_path}")
     return json_path
