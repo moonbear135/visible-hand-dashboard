@@ -236,7 +236,16 @@ def download_button(label: str,
        **스레드에 넘기지 않고** 원래 이벤트 루프에서 그대로 실행합니다.
     """
     def _build():
-        """별도 스레드에서 도는 부분 — 파일 내용과 파일명을 만들기만 합니다."""
+        """별도 스레드에서 도는 부분 — 파일 내용과 파일명을 만들기만 합니다.
+
+        🔴 2026-08-30 재감사(공유인프라) Low-4 — 아래 `_click()`이 `run.io_bound`를
+        `web/blocking.py`를 거치지 않고 직접 쓰는 이유는, 이 함수가 **항상 튜플**
+        `(payload, name)`을 반환하기 때문입니다. `web/blocking._boxed()`가 막으려는
+        건 "감싼 함수가 정상적으로 bare None을 반환해 취소와 구별이 안 되는" 경우인데,
+        이 함수는 그 경우에 해당하지 않습니다. 나중에 이 함수의 반환 계약을 튜플이
+        아닌 값 하나로 바꾼다면, 이 안전 근거가 깨지므로 `run_blocking()` 사용을
+        재검토하세요.
+        """
         payload = data() if callable(data) else data
         name = filename() if callable(filename) else filename
         return payload, name

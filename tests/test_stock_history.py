@@ -44,6 +44,7 @@ from utils.stock_history import (  # noqa: E402
     read_history_rows,
     record_daily_history,
     stock_history_path,
+    write_history_rows,
 )
 from utils.stock_export import (  # noqa: E402
     build_export_filename,
@@ -101,20 +102,27 @@ def _load_snapshot(filename):
 # 1. 필드 스펙 — "카드에 보이는 재무 데이터만, 한국어 라벨로"
 # =============================================================================
 # 오너가 명시적으로 빼라고 한 내부 필드들(색상 hex / 진단 / 사유 / 내부 플래그).
+# 2026-08-30 재감사(공유인프라) M-13 정책 재정비 — 오너 결정: "카드에는 보이는데
+# CSV엔 빠지면 말이 안 됨 — 정보는 항상 같아야 한다"(TASK_HISTORY #166 백로그 항목).
+# 그래서 이 목록은 더 이상 "카드에 보이는 것 vs 안 보이는 것"을 가르는 기준이 아니라,
+# **화면 어디에도 사용자에게 보여주지 않는 순수 내부 필드**만 남깁니다(색상 hex, 관리자
+# 전용 진단, 화면 코드가 아예 읽지 않는 필드). 아래에서 빠진 항목(is_valid/is_unverified/
+# reject_reason/unverified_reason/forward_data_missing/forward_missing_fields/
+# score_excluded_items/growth_score_capped/f_target_capped/f_target_cap_reason/
+# f_target_uncapped/t_fair_capped/t_fair_uncapped/g_eff_capped/g_eff_uncapped/
+# dps_source/growth_source/sh_return_basis)는 KOSPI_HISTORY_FIELDS/US_HISTORY_FIELDS에 실제로
+# 추가됐습니다 — grep으로 web/pages/pegy_page.py·us_stocks_page.py가 각각을 실제로
+# 화면 문구 생성에 쓰는지 하나씩 확인한 뒤 옮겼습니다.
 FORBIDDEN_KEYS = [
-    "badge_bg", "badge_fg",
-    "is_visible", "is_valid", "is_unverified",
+    "badge_bg", "badge_fg",                              # 색상 hex, 정보 아님
+    "is_visible",                                         # 노출 여부는 목록 존재로 이미 드러남
     "data_issues", "collect_errors", "consistency_warnings", "missing_fields",
     "paywalled_fields", "validation_error",
     "value_trap_severity", "value_trap_basis",
-    "score_excluded_items", "growth_score_capped",
-    "t_roe_inherited_from", "dps_inherited_from",
-    "f_target_cap_reason", "f_target_capped", "f_target_uncapped",
-    "t_fair_capped", "t_fair_uncapped", "target_per_capped",
-    "g_eff_capped", "g_eff_uncapped",
-    "dps_source", "growth_source", "t_eps_source", "f_eps_source", "price_source",
-    "name_kr_source", "sector_basis", "sh_return_basis", "url", "raw_score",
-    "forward_missing_fields", "forward_data_missing", "reject_reason", "unverified_reason",
+    "t_roe_inherited_from", "dps_inherited_from",         # 어느 화면도 읽지 않음
+    "target_per_capped",                                  # 어느 화면도 읽지 않음
+    "t_eps_source", "f_eps_source", "price_source",
+    "name_kr_source", "sector_basis", "url", "raw_score",
 ]
 
 
@@ -358,6 +366,49 @@ def test_append_and_dedup():
 # =============================================================================
 # 6. 실제 스냅샷 → 이력 1건 적재 → CSV/JSON 내보내기 (end-to-end)
 # =============================================================================
+def test_reaudit_medium2_dropped_column_warns_before_data_loss():
+    print("\n[5-b] 재감사(공유인프라) Medium-2 — 필드 목록에서 컬럼이 빠지면 서버 로그에 경고")
+    import contextlib
+
+    tmpdir = tempfile.mkdtemp(prefix="stock_history_dropcol_test_")
+    path = os.path.join(tmpdir, "hist.csv")
+
+    # 1일차: t_per 컬럼을 포함해 정상 기록
+    append_daily_history(path, _fake_stocks(), "2026-08-09", KOSPI_HISTORY_FIELDS)
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        header_before = next(csv.reader(f))
+    check("t_per" in header_before, "1일차 기록에는 t_per 컬럼이 있음")
+
+    # 2일차: 누군가 필드 목록에서 t_per를 실수로 지운 상태로 재기록
+    trimmed_fields = [f for f in KOSPI_HISTORY_FIELDS if f[0] != "t_per"]
+    check(len(trimmed_fields) == len(KOSPI_HISTORY_FIELDS) - 1, "사전조건: t_per 하나만 뺀 필드 목록")
+
+    buf = io.StringIO()
+    with contextlib.redirect_stdout(buf):
+        append_daily_history(path, _fake_stocks(day_price=1100), "2026-08-10", trimmed_fields)
+    printed = buf.getvalue()
+
+    check("t_per" in printed and "경고" in printed,
+          "🔴 컬럼이 빠진다는 경고가 서버 로그(print)에 남음(§0-1 — 조용히 사라지지 않기)",
+          f"실제 출력: {printed!r}")
+
+    with open(path, "r", encoding="utf-8-sig", newline="") as f:
+        header_after = next(csv.reader(f))
+    check("t_per" not in header_after,
+          "경고는 뜨지만 실제 동작(재작성)은 그대로 — 이 테스트는 경고 유무만 검증",
+          f"실제 헤더: {header_after}")
+
+    # 대조군: 컬럼을 빼지 않으면 경고가 없어야 함(오탐 방지 확인)
+    buf2 = io.StringIO()
+    with contextlib.redirect_stdout(buf2):
+        write_history_rows(path, read_history_rows(path), trimmed_fields)
+    check("경고" not in buf2.getvalue(),
+          "대조군: 같은 필드 목록으로 다시 쓰면 경고 없음(오탐 아님)",
+          f"실제 출력: {buf2.getvalue()!r}")
+
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_export_end_to_end():
     print("\n[6] 실데이터 end-to-end (임시 파일에 이력 적재 → CSV/JSON 내보내기)")
     snap = _load_snapshot("kospi200_pegy_latest.json")
@@ -407,7 +458,7 @@ def test_export_end_to_end():
     check(parsed[1][per_col] == str(target["t_per"]), f"PER 값 원본 그대로 ({parsed[1][per_col]})")
     trap_col = parsed[0].index("착시 저평가(가치주 덫)")
     check(parsed[1][trap_col] in ("예", "아니오"), f"bool은 예/아니오로 표기 ({parsed[1][trap_col]})")
-    for internal in ("badge_bg", "badge_fg", "data_issues", "is_visible", "f_target_cap_reason"):
+    for internal in ("badge_bg", "badge_fg", "data_issues", "is_visible", "value_trap_basis"):
         check(internal not in text, f"내부 필드 '{internal}' 가 CSV에 없음")
 
     # --- JSON --------------------------------------------------------------
@@ -457,6 +508,109 @@ def test_export_end_to_end():
 # =============================================================================
 # 7. 화면 배선 + 저장 위치
 # =============================================================================
+def test_reaudit_m13_card_and_csv_information_parity():
+    """
+    2026-08-30 재감사(공유인프라) M-13 — 오너 결정: "카드에는 보이는데 CSV엔 빠지면
+    말이 안 됨 — 정보는 항상 같아야 한다"(TASK_HISTORY #166 백로그 항목).
+
+    카드의 배지/사유 박스에 쓰이는 필드(is_valid/reject_reason/score_excluded_items 등)가
+    이력 CSV에도 실제로 실려서 나오는지, 리스트값(score_excluded_items 등)이 깨지지 않고
+    사람이 읽을 수 있는 문자열로 나오는지를 코스피·미국 양쪽에서 검증합니다.
+    """
+    print("\n[6-b] 재감사(공유인프라) M-13 — 카드·CSV 정보 일치(리스트값 포함)")
+    tmpdir = tempfile.mkdtemp(prefix="stock_history_m13_test_")
+
+    kospi_stock = {
+        "rank": 1, "name": "테스트종목", "code": "999999", "price": 50000,
+        "t_per": 12.3, "value_trap": False, "badge": "🟢 강력 저평가",
+        "quant_score": 60, "score_max": 80,
+        "is_valid": True, "is_unverified": False,
+        "reject_reason": None, "unverified_reason": None,
+        "forward_data_missing": True,
+        "forward_missing_fields": ["f_per", "growth"],
+        "score_excluded_items": ["배당(35점)", "그레이엄 넘버(20점)"],
+        "loss_evidence": ["Trailing EPS -120", "순이익(TTM) 적자"],
+        "is_trailing_loss": True,
+        "dps_source": "no_dividend_confirmed",
+        "sh_return_basis": "배당수익률만 반영 (자사주 매입 공시 미수집)",
+        "f_target_capped": True, "f_target_cap_reason": "PER 상한 적용",
+        "f_target_uncapped": 123456.0,
+    }
+    path = os.path.join(tmpdir, "kospi_m13.csv")
+    append_daily_history(path, [kospi_stock], "2026-08-30", KOSPI_HISTORY_FIELDS)
+    rows = load_stock_history(path, KOSPI_KEY_FIELD, "999999")
+    check(len(rows) == 1, "코스피 M-13 합성 종목 1건 기록")
+    row = rows[0]
+
+    check(row["is_valid"] == "true" and row["is_unverified"] == "false",
+          "[코스피] is_valid/is_unverified 이(가) CSV에 실제로 실림", f"실제: {row}")
+    check(row["forward_data_missing"] == "true",
+          "[코스피] forward_data_missing 이 CSV에 실제로 실림")
+    check(row["forward_missing_fields"] == "f_per; growth",
+          "[코스피] 리스트값(forward_missing_fields)이 '; '로 이어붙어 사람이 읽는 문자열이 됨",
+          f"실제: {row['forward_missing_fields']!r}")
+    check(row["score_excluded_items"] == "배당(35점); 그레이엄 넘버(20점)",
+          "[코스피] 리스트값(score_excluded_items)도 동일하게 이어붙음",
+          f"실제: {row['score_excluded_items']!r}")
+    check(row["loss_evidence"] == "Trailing EPS -120; 순이익(TTM) 적자",
+          "[코스피] loss_evidence 리스트도 이어붙음", f"실제: {row['loss_evidence']!r}")
+    check(row["is_trailing_loss"] == "true", "[코스피] is_trailing_loss 이(가) CSV에 실림")
+    check(row["dps_source"] == "no_dividend_confirmed",
+          "[코스피] dps_source(내부 코드값)가 CSV에 실림 — 카드의 자연어 문구와는 다르지만"
+          " 같은 근거 정보(§0-3-10, 렌더링 중복 금지)")
+    check(row["sh_return_basis"] == "배당수익률만 반영 (자사주 매입 공시 미수집)",
+          "[코스피] sh_return_basis(툴팁 문구)가 CSV에 그대로 실림")
+    check(row["f_target_capped"] == "true" and row["f_target_cap_reason"] == "PER 상한 적용",
+          "[코스피] f_target_capped/f_target_cap_reason 이 CSV에 실림")
+    check(row["f_target_uncapped"] == "123456.0", "[코스피] f_target_uncapped(원본값) 이 CSV에 실림")
+    check(row["reject_reason"] == "" and row["unverified_reason"] == "",
+          "[코스피] None 값은 '데이터 없음' 문구가 아니라 빈 칸(§0-1)", f"실제: {row}")
+
+    us_stock = {
+        "rank": 1, "name_kr": "테스트US", "name_en_clean": "Test US", "symbol": "TESTUS",
+        "price": 100.0, "quant_score": 60, "score_max": 80, "badge": "🟢 강력 저평가",
+        "is_valid": True, "is_unverified": False,
+        "forward_data_missing": False, "forward_per_extreme": True,
+        "g_eff_capped": True, "g_eff_uncapped": 45.5,
+        "f_target_floored": True, "t_fair_floored": False,
+        "price_calculated": True, "f_eps_calculated": False,
+        "score_excluded_items": ["전 항목 (데이터 검증 실패)"],
+        "dividend_data_unverified": True,
+        "dividend_unverified_reason": "배당·자사주 수익률을 수집하지 못했습니다.",
+    }
+    us_path = os.path.join(tmpdir, "us_m13.csv")
+    append_daily_history(us_path, [us_stock], "2026-08-30", US_HISTORY_FIELDS)
+    us_rows = load_stock_history(us_path, US_KEY_FIELD, "TESTUS")
+    check(len(us_rows) == 1, "미국 M-13 합성 종목 1건 기록")
+    us_row = us_rows[0]
+
+    check(us_row["forward_per_extreme"] == "true", "[미국] forward_per_extreme 이 CSV에 실림")
+    check(us_row["g_eff_capped"] == "true" and us_row["g_eff_uncapped"] == "45.5",
+          "[미국] g_eff_capped/g_eff_uncapped 이 CSV에 실림")
+    check(us_row["f_target_floored"] == "true" and us_row["t_fair_floored"] == "false",
+          "[미국] f_target_floored/t_fair_floored 이 CSV에 실림(둘 다 명시적 기록)")
+    check(us_row["price_calculated"] == "true" and us_row["f_eps_calculated"] == "false",
+          "[미국] price_calculated/f_eps_calculated 이 CSV에 실림")
+    check(us_row["score_excluded_items"] == "전 항목 (데이터 검증 실패)",
+          "[미국] score_excluded_items(항목 1개짜리 리스트)도 정상 처리")
+    check(us_row["dividend_data_unverified"] == "true"
+          and us_row["dividend_unverified_reason"] == "배당·자사주 수익률을 수집하지 못했습니다.",
+          "[미국] dividend_data_unverified/dividend_unverified_reason 이 CSV에 실림")
+
+    # 다운로드 CSV/JSON 변환까지 실제로 통과하는지(리스트값이 헤더·값에서 깨지지 않는지)
+    csv_bytes = build_history_csv_bytes(rows, KOSPI_HISTORY_FIELDS)
+    csv_text = csv_bytes.decode("utf-8-sig")
+    check("f_per; growth" in csv_text,
+          "다운로드 CSV에도 리스트값(forward_missing_fields)이 '; '로 이어붙어 그대로 실림",
+          f"실제: {[ln for ln in csv_text.splitlines() if '999999' in ln]}")
+    json_bytes = build_history_json_bytes(rows, KOSPI_HISTORY_FIELDS)
+    payload = json.loads(json_bytes.decode("utf-8"))
+    check(payload[0]["Forward 데이터 중 없는 항목"] == "f_per; growth",
+          "다운로드 JSON에서도 리스트값이 문자열로 정상 노출", f"실제: {payload[0]}")
+
+    shutil.rmtree(tmpdir, ignore_errors=True)
+
+
 def test_wiring():
     print("\n[7] 화면·워크플로우 배선")
     kp = stock_history_path(KOSPI_HISTORY_FILENAME)
@@ -1029,7 +1183,9 @@ def main():
     test_us_etf_screener_devalue_decoder()
     test_us_all_market_etf_prices_collector()
     test_append_and_dedup()
+    test_reaudit_medium2_dropped_column_warns_before_data_loss()
     test_export_end_to_end()
+    test_reaudit_m13_card_and_csv_information_parity()
     test_wiring()
     test_value_round_trip()
 

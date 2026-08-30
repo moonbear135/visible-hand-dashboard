@@ -172,6 +172,8 @@ def _new_entry() -> dict:
         'failure_reason': None,    # 사람이 읽는 짧은 사유(예: '응답 시간 초과'). None = 정상
         'local_fallback': False,   # 원격을 한 번도 못 받아 이미지 사본을 쓰는 중인지
         'fetching': False,         # 다른 스레드가 이미 받아오는 중인지
+        'fetch_event': None,       # 2026-08-30 재감사 Medium-1: fetching 중 도착한 다른
+                                    # 요청이 새 HTTP GET을 내지 않고 이 완료를 기다리는 용도
     }
 
 
@@ -399,6 +401,7 @@ def _read_remote(rel_path: str, local_path: str, base: str,
 
     etag = None
     backoff_reason = None
+    wait_event = None
     with _LOCK:
         entry = _CACHE.get(rel_path)
         if entry is None:
@@ -422,10 +425,33 @@ def _read_remote(rel_path: str, local_path: str, base: str,
                 return _hit(entry, known_version)     # 캐시 유효(또는 백오프 중) → 네트워크 0회
             backoff_reason = entry['failure_reason'] or '원인 미상'
         else:
-            if entry['fetching'] and entry['text'] is not None:
-                return _hit(entry, known_version)     # 다른 요청이 이미 받아오는 중
-            entry['fetching'] = True
-            etag = entry['etag']
+            if entry['fetching']:
+                if entry['text'] is not None:
+                    return _hit(entry, known_version)  # 다른 요청이 이미 받아오는 중 + 성공 이력 있음
+                # 🔴 2026-08-30 재감사(공유인프라) Medium-1 수정 — 성공 이력이 아직 없는
+                # 콜드 스타트 상태에서 동시 요청이 들어오면, 예전엔 위 조건(text가 있을 때만
+                # 걸림)에 안 걸려 그대로 아래 else와 똑같이 새 HTTP 요청을 또 내보냈습니다.
+                # 실측: 재배포 직후 접속 N개가 겹치면 같은 파일에 GET이 N번 나갔습니다
+                # (§0-3-2 "원격 서버에 무리 주지 않기" 위반). 지금은 새 요청을 내보내지
+                # 않고, 이미 진행 중인 요청이 끝나면서 채워 줄 `fetch_event`를 기다립니다.
+                wait_event = entry.get('fetch_event') or threading.Event()
+                entry['fetch_event'] = wait_event
+            else:
+                entry['fetching'] = True
+                entry['fetch_event'] = threading.Event()
+                etag = entry['etag']
+
+    if wait_event is not None:
+        # 락 밖에서 기다립니다 — 락을 쥔 채 기다리면, 먼저 시작된 요청이 끝나고 다시
+        # 락을 잡으려는 순간 서로 막힙니다(교착). 타임아웃은 HTTP 타임아웃보다 여유
+        # 있게 잡아, 만에 하나 이벤트가 울리지 않아도 여기서 영원히 멈추지 않게 합니다.
+        wait_timeout = _positive_float(ENV_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS) + 3.0
+        wait_event.wait(timeout=wait_timeout)
+        with _LOCK:
+            if entry['text'] is not None:
+                return _hit(entry, known_version)
+            reason = entry['failure_reason'] or '동시 요청이 먼저 받아오는 중 대기했지만 원인 미상으로 실패'
+        return _fallback_to_local(entry, local_path, encoding, known_version, reason)
 
     if backoff_reason is not None:
         # 네트워크를 건드리지 않고 사본으로 (위 주석의 "즉시 실패/폴백" 경로).
@@ -436,6 +462,10 @@ def _read_remote(rel_path: str, local_path: str, base: str,
     finally:
         with _LOCK:
             entry['fetching'] = False
+            _woken_event = entry.get('fetch_event')
+            entry['fetch_event'] = None
+        if _woken_event is not None:
+            _woken_event.set()          # 기다리던 요청들을 깨움(위 Medium-1 수정)
 
     with _LOCK:
         if outcome['kind'] == 'ok':
@@ -582,8 +612,16 @@ def get_staleness_status() -> Optional[dict]:
         ]
 
     if config_reason:
+        # ⚠️ 2026-08-30 재감사(공유인프라) Low-5 — 이 분기는 설정 오류(base=None) 상황이라
+        # `_read_local()` 결과가 이 함수가 보는 `_CACHE`에 남지 않습니다. 즉 "로컬 사본을
+        # 실제로 읽어냈는지"를 여기서는 알 수 없습니다 — 사본조차 없는 화면이 섞여 있어도
+        # 이 전역 배너만은 "사본을 보여주고 있다"고 단정하면 안 됩니다(§0-1). 그래서 문구를
+        # "보이는 값이 있다면 사본" 식으로 조건부로 두고, 값 자체가 안 보이는 화면은 그
+        # 화면 자신의 실패 배너를 보라고 안내합니다.
         return {
-            'message': f'🚨 {config_reason} — 지금 보이는 값은 서버에 함께 배포된 사본입니다.',
+            'message': (f'🚨 {config_reason} — 화면에 값이 보인다면 서버에 함께 배포된 '
+                        f'사본이고, 값 자체가 안 보이는 화면은 그 화면의 개별 실패 안내를 '
+                        f'확인하세요.'),
             'as_of': None, 'as_of_text': None, 'reason': config_reason,
             'local_fallback': True, 'files': [], 'config_error': True,
         }

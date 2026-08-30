@@ -1013,6 +1013,61 @@ def test_pages_never_block_the_event_loop():
 
 
 # =============================================================================
+# [10] 재감사(공유인프라) Medium-1 — 콜드 스타트 동시 요청 시 중복 HTTP GET 방지
+# =============================================================================
+def test_reaudit_medium1_concurrent_cold_start_no_duplicate_fetch():
+    print("\n[10] 콜드 스타트에서 동시 요청 2개 — HTTP GET이 1번만 나가는지 (§0-3-2)")
+    import threading
+    import time as real_time
+
+    base = "https://raw.githubusercontent.com/moonbear135/visible-hand-dashboard/main"
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.write_local("us_summary_history.json", '{"source": "local"}')
+        path = box.path("us_summary_history.json")
+
+        release = threading.Event()
+        started = threading.Event()
+
+        class SlowFakeRequests(FakeRequests):
+            """실제 GET 자리에서 잠깐 멈춰, 그 사이 두 번째 요청이 끼어들 틈을 만듭니다."""
+            def get(self, url, headers=None, timeout=None, stream=False):
+                started.set()
+                release.wait(timeout=5)
+                return super().get(url, headers=headers, timeout=timeout, stream=stream)
+
+        box.requests = SlowFakeRequests(FakeResponse(200, content=b'{"source": "remote"}',
+                                                      etag='"v1"', content_type="application/json",
+                                                      content_length="auto"))
+        data_source.requests = box.requests
+
+        results = []
+
+        def caller():
+            results.append(data_source.read_text(path))
+
+        t1 = threading.Thread(target=caller)
+        t1.start()
+        started.wait(timeout=5)          # t1이 진짜 HTTP GET(가짜) 안에 들어갈 때까지 대기
+        check(started.is_set(), "사전조건: 첫 요청이 HTTP GET 단계에 도달함")
+
+        t2 = threading.Thread(target=caller)
+        t2.start()
+        real_time.sleep(0.15)            # t2가 read_text()에 진입해 대기 상태로 들어갈 시간을 줌
+        release.set()                    # 이제 t1의 (유일해야 할) HTTP GET을 풀어줌
+
+        t1.join(timeout=5)
+        t2.join(timeout=5)
+
+        check(len(box.requests.calls) == 1,
+              "🔴 HTTP GET이 딱 1번만 나감(재감사 전에는 동시 접속 수만큼 중복 요청)",
+              f"실제 호출 수: {len(box.requests.calls)}")
+        check(len(results) == 2 and all(r[0] == '{"source": "remote"}' for r in results),
+              "두 호출 모두 같은 원격 성공값을 받음(대기했던 쪽도 결과를 정상 수신)",
+              f"실제: {results}")
+        check(all(r[1] is None for r in results), "두 호출 모두 에러 없음", f"실제: {results}")
+
+
+# =============================================================================
 def main():
     print("=" * 74)
     print("🌐 데이터 원격 로드 검증 (NICEGUI_MIGRATION_PLAN.md §8-5 · ENGINEERING_SPEC §0-1)")
@@ -1033,6 +1088,7 @@ def main():
     test_response_size_and_type_guards()
     test_bypass_files_go_through_data_source()
     test_pages_never_block_the_event_loop()
+    test_reaudit_medium1_concurrent_cold_start_no_duplicate_fetch()
 
     print("\n" + "=" * 74)
     if FAILURES:

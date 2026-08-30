@@ -114,16 +114,47 @@ KOSPI_HISTORY_FIELDS = [
     ("t_pbr",         "PBR(배)",                      "num"),
     ("ev_ebitda",     "EV/EBITDA(배)",                "num"),
     ("dps",           "주당배당금 DPS(원)",            "num"),
+    # ⬇️ 2026-08-30 재감사(공유인프라) M-13 반영 — 카드에는 배지·툴팁으로 보이는데
+    # 이력 CSV에는 없던 필드들. 오너 결정(2026-08-30): "카드에는 보이는데 CSV엔
+    # 빠지면 말이 안 됨 — 정보는 항상 같아야 한다"(TASK_HISTORY #166 백로그 항목).
+    # 값 자체는 내부 코드/사유 문자열이라(예: dps_source="derived_from_div_yield")
+    # 카드의 자연어 문구를 그대로 복제하진 않지만(§0-3-10, 렌더링 로직 중복 금지),
+    # 같은 정보(왜 이 값인지)는 CSV에서도 확인할 수 있습니다.
+    ("dps_source",    "DPS 값 출처(코드)",             "text"),
     ("sh_return",     "배당수익률(%)",                 "num"),
+    ("sh_return_basis", "배당수익률 산출 기준",          "text"),
     ("return_total",  "배당 총 규모",                  "text"),
+    ("dividend_data_unverified", "배당 데이터 미확정 여부", "bool"),
+    ("dividend_unverified_reason", "배당 데이터 미확정 사유", "text"),
     ("t_pegy",        "PEGY(Trailing)",               "num"),
     ("t_fair",        "과거 적정가(Trailing, 원)",      "num"),
+    ("t_fair_capped", "과거 적정가 상한 적용 여부",      "bool"),
+    ("t_fair_uncapped", "과거 적정가(상한 적용 전, 원)", "num"),
+    ("t_per_measured", "PER(Trailing) 원본값(부호 보존)", "num"),
+    ("is_trailing_loss", "Trailing 적자 여부",          "bool"),
+    ("loss_evidence", "적자 판정 근거",                "text"),
+    ("t_eps_calculated", "EPS(Trailing) 역산값 여부",   "bool"),
     ("graham_target", "그레이엄 넘버(원)",             "num"),
+    ("graham_is_financial_sector", "그레이엄 넘버 제외 사유(금융업종)", "bool"),
     # 🚀 Forward 섹션
     ("f_per",         "PER(Forward, 배)",             "num"),
     ("f_eps",         "EPS(Forward, 원)",             "num"),
     ("growth",        "예상 EPS 성장률(%)",            "num"),
+    ("growth_source", "성장률 값 출처(코드)",           "text"),
+    ("growth_score_capped", "고성장 추정 보수반영 여부", "bool"),
     ("f_target",      "목표주가(원)",                  "num"),
+    ("f_target_capped", "목표주가 상한 적용 여부",       "bool"),
+    ("f_target_cap_reason", "목표주가 상한 적용 사유",   "text"),
+    ("f_target_uncapped", "목표주가(상한 적용 전, 원)",  "num"),
+    # 🔒 데이터 검증/제외 사유 — Forward 마스킹 박스·배점 제외 툴팁에 표시되는 것과 같은 정보
+    ("is_valid",      "유효 종목 여부(데이터 검증 통과)", "bool"),
+    ("is_unverified", "데이터 검증 미확정 여부",         "bool"),
+    ("reject_reason", "데이터 거부/차단 사유",           "text"),
+    ("unverified_reason", "데이터 검증 미확정 사유",     "text"),
+    ("is_negative_growth", "성장률 마이너스(역성장) 여부", "bool"),
+    ("forward_data_missing", "Forward 데이터 없음 여부", "bool"),
+    ("forward_missing_fields", "Forward 데이터 중 없는 항목", "text"),
+    ("score_excluded_items", "퀀트 스코어 배점 제외 항목", "text"),
 ]
 
 US_HISTORY_FIELDS = [
@@ -133,6 +164,7 @@ US_HISTORY_FIELDS = [
     ("name_en_clean",      "종목명(영문)",                  "text"),
     ("symbol",             "티커",                         "text"),
     ("price",              "장마감 종가(USD)",              "num"),
+    ("price_calculated",   "종가 역산값 여부",              "bool"),
     ("quant_score",        "퀀트 스코어(획득)",             "num"),
     ("score_max",          "퀀트 스코어(만점)",             "num"),
     ("badge",              "밸류에이션 배지",               "text"),
@@ -161,29 +193,45 @@ US_HISTORY_FIELDS = [
     ("buyback_yield",      "자사주 매입 수익률(%)",          "num"),
     ("payout_ratio",       "배당성향(%)",                   "num"),
     ("sh_return",          "주주환원율(%)",                 "num"),
+    # ⬇️ 2026-08-30 재감사(공유인프라) M-13 반영 — 코스피와 같은 취지(위 KOSPI_HISTORY_FIELDS
+    # 주석 참고). 오너 결정(2026-08-30, TASK_HISTORY #166 백로그 항목).
+    ("dividend_data_unverified", "배당 데이터 미확정 여부", "bool"),
+    ("dividend_unverified_reason", "배당 데이터 미확정 사유", "text"),
     ("t_pegy",             "PEGY(Trailing)",               "num"),
     ("t_fair",             "과거 적정가(Trailing, USD)",     "num"),
+    ("t_fair_capped",      "과거 적정가 상한 적용 여부",      "bool"),
+    ("t_fair_uncapped",    "과거 적정가(상한 적용 전, USD)",  "num"),
+    ("t_fair_floored",     "과거 적정가 장부가 바닥값 적용 여부", "bool"),
+    ("is_trailing_loss",   "Trailing 적자 여부",            "bool"),
+    ("loss_evidence",      "적자 판정 근거",                "text"),
     ("graham_target",      "그레이엄 넘버(USD)",            "num"),
+    ("graham_is_financial_sector", "그레이엄 넘버 제외 사유(금융업종)", "bool"),
     # 🚀 Forward 섹션
     ("g_eff",              "실효성장률 g_eff(%p)",          "num"),
+    ("g_eff_capped",       "실효성장률 상한 적용 여부",       "bool"),
+    ("g_eff_uncapped",     "실효성장률(상한 적용 전, %p)",    "num"),
     ("f_per",              "PER(Forward, 배)",             "num"),
     ("f_eps",              "EPS(Forward, USD)",            "num"),
+    ("f_eps_calculated",   "EPS(Forward) 역산값 여부",       "bool"),
     ("f_pegy",             "PEGY(Forward)",                "num"),
     ("growth",             "3년 EPS 성장 전망(%)",          "num"),
+    ("growth_score_capped", "고성장 추정 보수반영 여부",      "bool"),
     ("floor_price",        "PBR 기준 바닥가(USD)",          "num"),
     ("f_target",           "모델 목표주가(USD)",            "num"),
+    ("f_target_capped",    "목표주가 상한 적용 여부",         "bool"),
+    ("f_target_cap_reason", "목표주가 상한 적용 사유",        "text"),
+    ("f_target_uncapped",  "목표주가(상한 적용 전, USD)",     "num"),
+    ("f_target_floored",   "목표주가 장부가 바닥값 적용 여부", "bool"),
+    # 🔒 데이터 검증/제외 사유 — Forward 마스킹 박스·배점 제외 툴팁에 표시되는 것과 같은 정보
+    ("is_valid",           "유효 종목 여부(데이터 검증 통과)", "bool"),
+    ("is_unverified",      "데이터 검증 미확정 여부",         "bool"),
+    ("reject_reason",      "데이터 거부/차단 사유",           "text"),
+    ("unverified_reason",  "데이터 검증 미확정 사유",         "text"),
+    ("forward_data_missing", "Forward 데이터 없음 여부",     "bool"),
+    ("forward_missing_fields", "Forward 데이터 중 없는 항목", "text"),
+    ("forward_per_extreme", "Forward PER 극단치 여부",       "bool"),
+    ("score_excluded_items", "퀀트 스코어 배점 제외 항목",     "text"),
 ]
-# 2026-08-29 재감사 M13 — 되돌림: 감사 문서는 f_target_capped/f_target_floored/
-# f_target_uncapped/t_fair_capped/t_fair_floored/price_calculated/f_eps_calculated/
-# is_unverified 를 이력 CSV 에 추가하라고 권했지만, 이 파일의 `FORBIDDEN_KEYS`
-# (tests/test_stock_history.py) 가 이미 그중 f_target_capped/f_target_uncapped/
-# t_fair_capped/t_fair_uncapped/is_unverified 를 "오너가 명시적으로 빼라고 한 내부
-# 필드"로 지정해 두었습니다(다른 계열의 캡·소스 플래그 g_eff_capped/g_eff_uncapped/
-# dps_source 등도 전부 같은 이유로 빠져 있음 — 카드에 보이는 재무 데이터만, 이력 CSV엔
-# 내부 진단/출처 플래그를 넣지 않는다는 기존 정책). price_calculated/f_eps_calculated
-# 는 블록리스트에 명시돼 있진 않지만 같은 "값의 출처/파생 여부" 계열이라 정책 취지상
-# 함께 보류합니다. §0-3-6(다른 모듈 결정에 무단으로 손대지 않음)에 따라 이번 재감사에서
-# 새로 추가하지 않고, 정책을 바꿀지는 오너 확인 후 별도로 진행합니다.
 
 
 
@@ -242,6 +290,11 @@ def to_storage_cell(value, kind):
       0이나 평균으로 채우는 건 §0-1 정면 위반입니다.
     - bool -> "true"/"false" (파일 안에서는 기계가 읽기 좋은 형태로, 사람이 받는
       다운로드 파일에서는 '예/아니오'로 바꿔 보여줍니다).
+    - list -> "; " 로 이어 붙인 문자열. 2026-08-30 재감사(공유인프라) M-13 반영 —
+      `score_excluded_items`/`loss_evidence`/`forward_missing_fields`처럼 카드에서
+      리스트를 이어 붙여 보여주는 내부 진단값을 이력 CSV에도 똑같이 담기 위해서입니다
+      (§0-1 "카드와 CSV의 정보는 항상 같아야 한다" — 오너 2026-08-30 결정).
+      빈 리스트는 "데이터 없음"이 아니라 빈 칸입니다(§0-1).
     - 그 외 -> str() 그대로. 반올림·천단위 콤마 같은 표시용 가공을 하지 않아야
       받는 사람이 계산에 다시 쓸 수 있습니다.
       (⚠️ 코스피 t_pbr/ev_ebitda 는 스냅샷에 문자열 '3.21' 로 들어있습니다 — 값을 바꾸지
@@ -251,6 +304,8 @@ def to_storage_cell(value, kind):
         return ""
     if kind == "bool" or isinstance(value, bool):
         return "true" if value else "false"
+    if isinstance(value, (list, tuple)):
+        return "; ".join(str(v) for v in value)
     return str(value)
 
 
@@ -287,10 +342,48 @@ def read_history_rows(path):
         return []
 
 
+def _detect_dropped_history_columns(path, keys):
+    """
+    2026-08-30 재감사(공유인프라) Medium-2 대응 헬퍼.
+
+    `path`에 이미 파일이 있다면, 그 CSV 헤더에는 있었는데 이번에 쓸 `keys`에는 없는
+    컬럼 이름을 돌려줍니다. 헤더 한 줄만 읽으므로 파일 전체를 파싱하지 않습니다.
+    """
+    if not path or not os.path.exists(path):
+        return set()
+    try:
+        with open(path, "r", encoding="utf-8-sig", newline="") as f:
+            header = next(csv.reader(f), None)
+    except Exception:
+        return set()
+    if not header:
+        return set()
+    return set(header) - set(keys)
+
+
 def write_history_rows(path, rows, fields):
-    """이력 CSV 전체를 다시 씁니다(헤더=영문 키, 인코딩=utf-8-sig)."""
+    """
+    이력 CSV 전체를 다시 씁니다(헤더=영문 키, 인코딩=utf-8-sig).
+
+    ⚠️ 2026-08-30 재감사(공유인프라) Medium-2 — 이 함수는 "전체를 읽어 새 헤더로 통째로
+    다시 쓰는" 방식입니다. 그래서 `KOSPI_HISTORY_FIELDS`/`US_HISTORY_FIELDS`에서 키 하나를
+    지우거나 이름을 바꾸면, **이미 몇 달치 쌓여 있던 그 컬럼의 과거 행 값까지 전부** 다음
+    수집 한 번으로 조용히·영구히 사라집니다. 백업도 확인 절차도 없어 되돌릴 수 없습니다.
+    그래서 기존 파일 헤더에는 있었는데 이번 `fields`에는 없는 컬럼을 발견하면, 사라지기
+    직전이라는 경고를 서버 로그에 크게 남깁니다(§0-1 — 실데이터가 사라지는 걸 조용히
+    넘기지 않기). 화면에는 노출하지 않습니다 — 이건 수집기(배치) 실행 중 콘솔에만
+    남는 진단이고, 화면 사용자에게 보여줄 사용자 시나리오가 아닙니다.
+    """
     os.makedirs(os.path.dirname(path), exist_ok=True)
     keys = field_keys(fields)
+    dropped = _detect_dropped_history_columns(path, keys)
+    if dropped:
+        print(
+            f"🔴 [stock_history] 경고: {path} 의 기존 컬럼 {sorted(dropped)} 이(가) "
+            f"새 필드 목록에 없습니다 — 지금 다시 쓰면 그 컬럼의 과거 이력이 전부 "
+            f"사라집니다. KOSPI_HISTORY_FIELDS/US_HISTORY_FIELDS에서 실수로 지운 게 "
+            f"아닌지 확인하세요."
+        )
     buf = io.StringIO()
     writer = csv.DictWriter(buf, fieldnames=keys, lineterminator="\r\n", extrasaction="ignore")
     writer.writeheader()

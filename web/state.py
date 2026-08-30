@@ -127,6 +127,13 @@ async def load_json_file_async(path: str) -> Tuple[Optional[Any], Optional[str]]
     #    있습니다), 그 성질을 이번 수정으로 깨지 않기 위해서입니다.
     from nicegui import run                       # noqa: PLC0415
 
+    # 🔴 2026-08-30 재감사(공유인프라) Low-4 — `web/blocking.py`는 "모든 블로킹 위임을
+    # 그 파일 하나로 모은다"는 원칙을 갖고 있고, 그 이유가 정확히 아래 규약(취소=bare
+    # None) 재구현을 여러 곳에서 각자 하다 어긋나는 사고를 막기 위해서입니다. 여기서
+    # `run.io_bound`를 직접 쓴 이유는 `load_json_file()`이 **항상 튜플**을 반환하기
+    # 때문에(빈 값이어도 `(None, '사유')`) `web/blocking._boxed()`가 막는 "정상적으로
+    # bare None을 반환하는 함수"라는 모호성이 애초에 생기지 않아서입니다 — 이 함수의
+    # 반환 계약이 "항상 튜플"에서 벗어나면 이 가정이 깨집니다.
     result = await run.io_bound(load_json_file, path)
     if result is None:
         # `run.io_bound` 는 **요청이 취소되었거나 서버가 내려가는 중**일 때만 None 을

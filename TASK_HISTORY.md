@@ -3715,15 +3715,153 @@
      `py_compile`로 수정 파일 전부 컴파일 확인.
 
 
-## 진행 예정 (백로그)
+### #167 — 4차 재감사 7번째 모듈: 공유인프라(web/theme·auth·auth_ui·layout·state·
+blocking·ads·components, utils/data_source·stock_history·stock_export) 전수
+재감사 + M-13(카드·CSV 정보 정책) 최종 반영 (2026-08-30)
 
-- 🆕 **이력 CSV의 캡/바닥값/계산값 플래그 정책 재검토** (#166, M-13) — 카드에는
-  "🧮 상한 적용값"/"🛡️ 장부가 바닥값" 배지로 보이는 정보가, 같은 종목을 내려받는
-  이력 CSV에는 빠져 있음(`tests/test_stock_history.py`의 `FORBIDDEN_KEYS` 정책).
-  오너 판단(2026-08-29): "카드에는 보이는데 CSV엔 빠지면 말이 안 됨 — 정보는
-  항상 같아야 한다", 다만 지금 당장이 아니라 **공유인프라 모듈 차례에** 코스피·
-  미국 두 시장을 한 번에 재정비하기로 함. 공유인프라 모듈 진행 시 이 항목부터
-  확인할 것.
+**배경.** 표준 절차(오디팅 서브에이전트 파견 → 직접 실제 코드 재확인 →
+수정·회귀 테스트 → 기기 전체 pytest 베이스라인 대조)를 이번에도 그대로
+따랐습니다. 대상은 이미 각자 전담 재감사를 마친 업무 모듈(수집기·결투·
+매크로/PEGY/보조지표/리포트·스코어카드·배당·미국주식)이 아니라, 그 모듈들이
+**공통으로 가져다 쓰는** 코드 14개 파일입니다. 스코핑 단계에서 `utils/db.py`
+(이름과 달리 실제로는 매크로 방공망 전용 — `market_history.csv` 저장·복구
+계층)와 `utils/guardrail.py`(코스피 PEGY 전용)·`utils/data_validator.py`/
+`utils/gdrive_helper.py`(둘 다 매크로 `scrape_daily.py`·코스피 수집기 전용)를
+grep으로 실제 호출처를 하나씩 추적해 "이름은 범용적이지만 실제로는 특정
+모듈 전용"인 파일들을 제외했습니다(§0-3-6·§0-3-10) — 최종 대상은
+`web/theme.py`·`web/auth.py`·`web/auth_ui.py`·`web/layout.py`·`web/state.py`·
+`web/blocking.py`·`web/ads.py`·`web/components/*.py`·`utils/data_source.py`·
+`utils/stock_history.py`·`utils/stock_export.py`.
+
+**감사 결과.** Structural/High급 결함은 없었습니다(세션 격리·인증 우회·XSS
+전부 기존 방어가 견고). Medium 2건, Low 2건, 그리고 지난 미국주식 모듈에서
+정책 결정만 나고 구현이 미뤄져 있던 M-13을 발견해 함께 처리했습니다.
+
+**1) Medium-1 반영 — `utils/data_source.py` 콜드 스타트 동시 요청 시 중복
+HTTP GET.** `_read_remote()`의 "다른 요청이 이미 받아오는 중" 가드
+(`entry['fetching'] and entry['text'] is not None`)가 **아직 한 번도 성공한
+적 없는**(재배포 직후 등) 상태에서는 뒷부분 조건에 걸려 무력화돼, 동시
+접속자 수만큼 같은 파일에 `raw.githubusercontent.com` GET이 중복으로
+나갔습니다(§0-3-2 "원격 서버에 무리 주지 않기" 위반). `threading.Event`를
+캐시 엔트리에 추가해, 콜드 스타트 중 뒤늦게 도착한 요청은 새 GET을 내지
+않고 이미 진행 중인 요청의 완료를 기다렸다가 그 결과를 같이 쓰도록
+고쳤습니다(락 밖에서 대기 + 타임아웃 방어). `tests/test_data_source.py`에
+`test_reaudit_medium1_concurrent_cold_start_no_duplicate_fetch()`를 추가 —
+가짜 HTTP 응답을 일부러 지연시켜 두 스레드가 동시에 콜드 스타트 구간에
+들어가게 만든 뒤 실제 HTTP 호출이 1번만 나가는지 확인합니다(수정 전
+코드로 되돌려 이 테스트가 실제로 실패함을 확인한 뒤 원상 복구).
+
+**2) Medium-2 반영 — `utils/stock_history.py` 필드 목록에서 컬럼을 빼면
+과거 이력이 조용히 영구 삭제됨.** `write_history_rows()`는 매번 "전체 읽기
+→ 새 필드 목록으로 통째로 재작성" 방식이라, 누군가 `KOSPI_HISTORY_FIELDS`/
+`US_HISTORY_FIELDS`에서 키 하나를 지우거나 이름을 바꾸면 다음 수집 한 번에
+그 컬럼의 **과거 몇 달치 데이터까지 전부** 사라지는데도 경고나 확인 절차가
+전혀 없었습니다(§0-1 정신 — 실데이터가 조용히 사라지면 안 됨). 기존 파일
+헤더와 새 필드 목록을 대조해 빠진 컬럼이 있으면 서버 로그에 경고를 남기는
+`_detect_dropped_history_columns()`를 추가했습니다(화면에는 노출하지
+않음 — 수집기 콘솔에만 남는 진단이라 §0-3-4 취지에 맞게 서버 쪽 채널로).
+`tests/test_stock_history.py`에
+`test_reaudit_medium2_dropped_column_warns_before_data_loss()` 추가(컬럼을
+빼는 경우/안 빼는 경우 양쪽 다 확인해 오탐도 점검).
+
+**3) Low-4 반영(주석만, 동작 변경 없음) — `web/blocking.py`의 "블로킹 위임은
+한 곳으로 모은다" 원칙을 우회하는 곳 2군데.** `web/state.py::
+load_json_file_async()`와 `web/components/widgets.py::download_button()`의
+`_click()`이 `run.io_bound()`를 `web/blocking.py`를 거치지 않고 직접 부릅니다.
+지금은 둘 다 감싸는 함수가 **항상 튜플**을 반환해 우연히 안전하지만(그래서
+`web/blocking._boxed()`가 막으려는 "정상적으로 bare None을 반환하는 함수"
+모호성이 애초에 생기지 않음), 이 사실이 코드에 명시돼 있지 않아 나중에
+반환 계약이 바뀌면 §0-1 버그(취소를 정상 빈 값으로 오인)가 조용히
+재발할 수 있습니다. 두 곳에 "왜 안전한지"와 "이 가정이 깨지면 재검토할
+것"을 명시하는 주석만 추가했습니다.
+
+**4) Low-5 반영 — 설정 오류 배너 문구가 항상 "사본입니다"라고 단정.**
+`get_staleness_status()`의 설정 오류(`DATA_SOURCE_BASE_URL` 오타 등) 분기는
+`_read_local()`이 이 함수가 보는 캐시에 결과를 남기지 않는 구조라, 로컬
+사본조차 없는 화면이 섞여 있어도 전역 배너가 "사본을 보여주고 있다"고
+단정적으로 말했습니다(정상 배포에서는 거의 발생하지 않는 조합이지만
+§0-1 정신에는 어긋남). 문구를 "화면에 값이 보인다면 사본, 안 보이는 화면은
+그 화면의 개별 실패 안내를 확인하라"는 조건부 표현으로 바꿨습니다.
+
+**5) M-13 최종 반영 — 이력 CSV의 카드·CSV 정보 정책 재정비 (코스피·미국
+동시).** 지난 미국주식 모듈(#165~#166)에서 오너가 이미 정책 방향을
+확정했던 사안입니다: "카드에는 표기가 되는데 CSV에 빠지면 말이 안 되는데,
+정보는 항상 같아야지 여기하고 저기하고 다르면 안 되는 것"(2026-08-29).
+이번에 실제 구현했습니다.
+
+  - `tests/test_stock_history.py`의 `FORBIDDEN_KEYS`(카드·CSV 정책의 실질적
+    구현체)를 다시 감사해, **화면이 실제로 읽어서 문구를 만드는 필드**인지
+    grep으로 하나씩 확인했습니다. `is_valid`·`is_unverified`·`reject_reason`·
+    `unverified_reason`·`forward_data_missing`·`forward_missing_fields`·
+    `score_excluded_items`·`growth_score_capped`·`f_target_capped`·
+    `f_target_cap_reason`·`f_target_uncapped`·`t_fair_capped`·
+    `t_fair_uncapped`·`g_eff_capped`·`g_eff_uncapped`·`dps_source`·
+    `growth_source`·`sh_return_basis` 18개는 실제로 카드의 배지·툴팁·
+    Forward 마스킹 박스·그레이엄 산출불가 박스 문구를 만드는 데 쓰이고
+    있어 **차단 목록에서 뺐습니다.** 반대로 `badge_bg`/`badge_fg`(색상
+    hex)·`is_visible`(단순 노출 필터)·`data_issues`/`collect_errors`
+    (관리자 전용 진단)·`t_roe_inherited_from`/`dps_inherited_from`/
+    `target_per_capped`/`t_eps_source`/`f_eps_source`/`price_source`/
+    `name_kr_source`/`sector_basis`/`url`/`raw_score`(전 화면 어디서도
+    읽지 않음, grep으로 확인)는 **차단을 그대로 유지**했습니다 — "카드에
+    보이는 것과 CSV가 같아야 한다"는 원칙이지 "스냅샷의 모든 내부 필드를
+    다 내보내자"는 게 아니기 때문입니다.
+  - `KOSPI_HISTORY_FIELDS`에 24개, `US_HISTORY_FIELDS`에 25개 필드를
+    새로 추가했습니다(위 18개 + FORBIDDEN_KEYS에는 원래 없었지만 필드
+    목록에서만 빠져 있던 `t_eps_calculated`·`is_trailing_loss`·
+    `loss_evidence`·`t_per_measured`·`graham_is_financial_sector`·
+    `dividend_data_unverified`·`dividend_unverified_reason`(코스피) /
+    `price_calculated`·`f_eps_calculated`·`f_target_floored`·
+    `t_fair_floored`·`forward_per_extreme`·`dividend_data_unverified`·
+    `dividend_unverified_reason`(미국) 등). 각 필드가 실제로 어느
+    collector/scoring 모듈에서 어떤 타입(bool/num/text)으로 채워지는지
+    `collector_kospi200.py`·`collector_us_stocks.py`·`utils/scoring_us.py`·
+    `utils/guardrail.py`를 grep으로 대조해 라벨과 종류를 정했습니다.
+  - `dps_source`/`growth_source`처럼 값 자체가 `"derived_from_div_yield"`
+    같은 **내부 코드 문자열**인 필드는, 카드가 보여주는 자연어 문구를 CSV에
+    그대로 복제하지 않았습니다(§0-3-10 — 렌더링 로직을 두 곳에 중복
+    구현하지 않기 위해). 대신 같은 근거 정보(왜 이 값인지)를 코드값
+    그대로 실어, "정보 자체는 카드와 CSV에 항상 같이 존재한다"는 원칙을
+    지켰습니다.
+  - `score_excluded_items`/`loss_evidence`/`forward_missing_fields`는
+    스냅샷에 **리스트**로 저장돼 있어(`to_storage_cell()`이 `str()`로
+    바로 찍으면 파이썬 리스트 표기 `['a', 'b']`가 나와 엑셀에서 읽기
+    나쁨), `to_storage_cell()`에 리스트를 `"; "`로 이어붙이는 분기를
+    추가했습니다. 기존 필드 중 리스트값은 없어 회귀 위험 없이 일반화만
+    했습니다.
+  - `tests/test_stock_history.py`에
+    `test_reaudit_m13_card_and_csv_information_parity()`를 추가 — 코스피·
+    미국 양쪽 합성 종목으로 새 필드 24/25개가 실제 CSV/JSON에 값 그대로
+    실리는지, 리스트값이 `"; "`로 정상 이어붙는지 확인합니다(수정 전
+    코드로 되돌려 `KeyError`로 실패함을 확인한 뒤 원상 복구). 기존
+    `test_export_end_to_end()`의 "내부 필드가 CSV에 없어야 한다" 예시
+    목록에서 이제는 정당하게 CSV에 포함되는 `f_target_cap_reason`을 빼고
+    여전히 차단 대상인 `value_trap_basis`로 교체했습니다.
+
+**6) Low-6 — 검토했으나 조치하지 않음.** `pegy_page.py`의 관리자 전용
+야후 파이낸스 교차검증 배지(`per_discrepancy`)도 CSV에는 없지만, 이건
+일반 사용자에게는 애초에 보이지 않는 관리자 전용 정보라 "카드·CSV 정보
+불일치"에 해당하지 않습니다. 참고로만 기록해 두고 이번 라운드에서는
+건드리지 않았습니다.
+
+**검증.** 기기 저장소에서 이번에 바뀐 6개 파일(`utils/data_source.py`·
+`utils/stock_history.py`·`web/state.py`·`web/components/widgets.py`·
+`tests/test_data_source.py`·`tests/test_stock_history.py`)을 매번 동기화한
+직후 `git diff HEAD`로 의도한 변경만 있는지 확인했고, 각 신규 회귀
+테스트는 수정 전 코드로 일시적으로 되돌려 실제로 실패하는지(오탐이 아닌지)
+개별 확인한 뒤 복구했습니다. 마지막에 `git stash`로 커밋된 HEAD 상태의
+전체 `pytest --ignore=archive`를 먼저 돌려 베이스라인(FAILED 3건·ERROR
+4건 — 전부 이 모듈과 무관한 기존 결함: `test_duel.py` 표기 통일 2건,
+NiceGUI 슬롯 스택 관련 렌더 스모크 4건)을 기록해 두고, `git stash pop`
+후 다시 전체를 돌려 FAILED/ERROR ID 집합이 베이스라인과 **완전히 동일**함을
+확인했습니다. 통과 수 1749 → 1752(+3, 이번에 추가한 신규 회귀 테스트
+3개: Medium-1·Medium-2·M-13). `py_compile`로 수정 파일 전부 컴파일 확인.
+
+이것으로 4차 재감사 8개 모듈 중 공유인프라까지 7개가 끝났습니다. 마지막
+남은 모듈은 테스트 스위트입니다.
+
+
+## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26
   workflow_dispatch(#37→#5, event≠schedule이라 정상 skip)와 2026-08-27 지연된
