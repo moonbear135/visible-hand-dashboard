@@ -52,6 +52,29 @@ from web.pages.us_stocks_page import (
 
 FAILURES = []
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def _assert_no_check_failures():
+    """
+    🔴 2026-08-30 재감사(테스트 스위트) H-1 — 이 파일만 다른 `check()`/`FAILURES` 파일들과
+    달리 이 안전장치가 없었습니다. `check()`는 실패를 `FAILURES`에 기록만 하고, 그 목록을
+    실제로 검사해서 죽는 코드는 파일 맨 아래 `test_us_stocks_page_full_suite()`가 모든
+    `test_*` 함수를 다시 불러 모은 뒤에만 있었습니다. 그래서 파일 전체를 한 번에 돌리면
+    (`full_suite`가 우연히 뒤에서 다시 검사해) 잡히지만, `pytest tests/test_us_stocks_page.py
+    -k test_s2`처럼 개별 함수만 선택 실행하면 내부 `check()` 실패가 조용히 사라지고
+    pytest가 초록불을 냈습니다(`tests/test_data_source.py`의 2026-08-21 발견과 같은 부류의
+    버그 — 8개 파일은 이미 이 fixture로 고쳐져 있었는데 이 파일만 빠져 있었습니다).
+
+    그래서 매 테스트 앞뒤로 `FAILURES`의 증가분을 직접 확인해 개별 실행에서도 똑같이
+    실패하게 만듭니다. 기존 `test_*` 함수는 한 줄도 안 고쳤습니다.
+    """
+    start = len(FAILURES)
+    yield
+    new_failures = FAILURES[start:]
+    assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
+
 
 def check(cond, msg):
     if not cond:

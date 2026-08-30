@@ -1172,22 +1172,11 @@ def main():
     print("=" * 70)
     print("📈 종목별 시계열 이력 · 다운로드 오프라인 검증")
     print("=" * 70)
-    test_field_spec()
-    test_row_from_real_snapshot()
-    test_status_guard()
-    test_collector_blocked_scenarios()
-    test_kr_ticker_master_collector()
-    test_kr_all_market_prices_collector()
-    test_us_screener_devalue_decoder()
-    test_us_all_market_prices_collector()
-    test_us_etf_screener_devalue_decoder()
-    test_us_all_market_etf_prices_collector()
-    test_append_and_dedup()
-    test_reaudit_medium2_dropped_column_warns_before_data_loss()
-    test_export_end_to_end()
-    test_reaudit_m13_card_and_csv_information_parity()
-    test_wiring()
-    test_value_round_trip()
+    from _test_discovery import discover_and_run_module_tests
+    discover_and_run_module_tests(
+        sys.modules[__name__],
+        on_skip=lambda names: print(f"\u23ed\ufe0f  pytest \uc804\uc6a9(\ud53d\uc2a4\ucc98 \ud544\uc694) {len(names)}\uac74\uc740 \uac74\ub108\ub700: {names}"),
+    )
 
     print("\n" + "=" * 70)
     if FAILURES:

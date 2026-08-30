@@ -990,26 +990,11 @@ def main():
     print("   + KRX OPEN API 실측 연결(#70, VKOSPI·선물 베이시스)")
     print("   + 공매도 2종 실측불가 재분류·가중치 재분배(#72) 검증")
     print("=" * 74)
-    test_direction_kospi_5d()
-    test_magnitude_net_sell()
-    test_bounds_and_winsorize()
-    test_bootstrap_safety()
-    test_population_builders()
-    test_real_history_spot_check()
-    test_wiring()
-    test_weight_redistribution()
-    test_retired_indicators_removed_from_code()
-    test_study_section_matches_code()
-    # --- 2026-08-10 (#70) KRX OPEN API 실측 연결 ---
-    test_upside_risk_direction()
-    test_krx_parsers()
-    test_krx_end_to_end_success()
-    test_krx_failure_modes()
-    test_krx_wiring()
-    # --- 2026-08-10 (#72) 공매도 2종 실측 불가 재분류 ---
-    test_short_indicators_reclassified()
-    # --- 2026-08-17 지표 표기명 단일 출처 통합 ---
-    test_friendly_names_single_source()
+    from _test_discovery import discover_and_run_module_tests
+    discover_and_run_module_tests(
+        sys.modules[__name__],
+        on_skip=lambda names: print(f"\u23ed\ufe0f  pytest \uc804\uc6a9(\ud53d\uc2a4\ucc98 \ud544\uc694) {len(names)}\uac74\uc740 \uac74\ub108\ub700: {names}"),
+    )
 
     print("\n" + "=" * 74)
     if FAILURES:

@@ -1999,13 +1999,21 @@ def test_view_and_scope():
                       "collector_us_indices", "us_index_history")
     #  ⚠️ 2026-08-29 수정 — Streamlit 은퇴로 `views/*.py` 는 archive/streamlit_views/ 로
     #     옮겨졌으므로 이 목록에서 뺐습니다(경로 자체가 없어졌습니다).
+    # 🔴 2026-08-30 재감사(테스트 스위트) H-2 — 예전엔 파일 텍스트 전체(주석·독스트링
+    # 포함)에서 마커 낱말을 찾았습니다. 그런데 다른 모듈이 "이 파일도 report_db.py를
+    # 가볍게 참조합니다" 같은 정당한 설명 주석을 남기면(예: utils/constants_us.py:277의
+    # S-6 문서화, collector_us_stocks.py:610의 collector_us_indices.py 형식 비교 설명)
+    # 실제 로직 유입이 전혀 없는데도 이 검사가 빨간불을 냈습니다. `python_code_only()`로
+    # 주석·독스트링을 먼저 걷어내 "실행되는 코드"만 검사하도록 고쳤습니다(§0-1 — 검사
+    # 자체가 오탐을 정상처럼 방치하지 않기).
     for untouched in ("utils/scorecard_db.py",
                       "collector_us_stocks.py", "collector_kospi200.py",
                       "utils/scoring.py",
                       "utils/constants_us.py", "scrape_daily.py"):
-        src = (REPO_ROOT / untouched).read_text(encoding="utf-8").lower()
-        check(not any(marker in src for marker in report_markers),
-              f"{untouched} 에 리포트 모듈 관련 수정 없음")
+        raw_src = (REPO_ROOT / untouched).read_text(encoding="utf-8")
+        code_only_src = python_code_only(raw_src).lower()
+        check(not any(marker in code_only_src for marker in report_markers),
+              f"{untouched} 에 리포트 모듈 관련 수정 없음(주석 제외, 실제 코드 기준)")
 
     check((REPO_ROOT / "REPORT_WORK_ORDER.md").exists(), "작업지시서 원본 보존")
 
@@ -2068,26 +2076,11 @@ def main():
     print("=" * 74)
     print("📈 리포트 모듈 오프라인 검증 (Supabase 미연결 · 네트워크 불필요)")
     print("=" * 74)
-    test_period_bounds()
-    test_build_snapshot_rows()
-    test_period_report_status()
-    test_period_report_composition()
-    test_benchmark_returns()
-    test_benchmark_files()
-    test_us_index_collector_parsing()
-    test_us_index_collector_run()
-    test_supabase_wiring()
-    test_batch_end_to_end()
-    test_price_stamp_wiring()
-    test_holding_snapshots()
-    test_holding_weights()
-    test_us_korean_names()
-    test_benchmark_average()
-    test_daily_weekend_fallback()
-    test_holding_schema_and_wiring()
-    test_sql_schema()
-    test_workflow()
-    test_view_and_scope()
+    from _test_discovery import discover_and_run_module_tests
+    discover_and_run_module_tests(
+        sys.modules[__name__],
+        on_skip=lambda names: print(f"\u23ed\ufe0f  pytest \uc804\uc6a9(\ud53d\uc2a4\ucc98 \ud544\uc694) {len(names)}\uac74\uc740 \uac74\ub108\ub700: {names}"),
+    )
 
     print("\n" + "=" * 74)
     if FAILURES:

@@ -3861,6 +3861,172 @@ NiceGUI 슬롯 스택 관련 렌더 스모크 4건)을 기록해 두고, `git st
 남은 모듈은 테스트 스위트입니다.
 
 
+### #168 — 4차 재감사 8번째(마지막) 모듈: 테스트 스위트 자체 전수 재감사 (2026-08-30)
+
+**배경.** 이번 모듈은 지금까지와 성격이 다릅니다 — 프로덕션 코드가 아니라
+**그 프로덕션 코드를 지키는 테스트 코드 자신**을 감사 대상으로 삼았습니다
+(오너의 8개 모듈 계획의 마지막 항목). 표준 절차(오디팅 서브에이전트 파견 →
+직접 실제 코드 재확인 → 수정·회귀 검증 → 기기 전체 pytest 베이스라인 대조)를
+그대로 따르되, 이번엔 사전 문서(`SPAGHETTI_AUDIT_2026-08-29.md`)의 "2-8.
+테스트 스위트" 항목(높음 4·중간 9·낮음 3, 집계만 있고 세부는 없어짐)을 출발
+단서로 삼아 실제 소스를 직접 재확인하며 항목을 다시 확정했습니다.
+
+**감사 결과 — 실제로 확인된 항목만 High 3·Medium 2·Low 1로 정리, 재구조화형
+2건(S)은 이번 라운드에서 백로그로 넘겼습니다.** 이 모듈 특유의 위험은 딱
+하나입니다 — "이 테스트, 사실 한 번도 실행된 적이 없었다"는 부류의 결함은
+프로덕션 버그와 달리 **화면·로그 어디에도 흔적이 안 남아** 다음 재감사가
+소스를 한 줄씩 읽기 전까진 영원히 안 드러납니다. 이번에 확인된 High 3건이
+전부 정확히 이 부류였습니다.
+
+**1) H-1 — `test_us_stocks_page.py`에 `check()`/`FAILURES` 무음 통과 방지
+장치가 없었음.** 2026-08-21 `test_data_source.py`에서 처음 발견된 것과 같은
+버그 종류(`check()`는 실패를 리스트에 적기만 하고, 그 리스트를 실제로 검사해
+죽는 코드는 `if __name__ == "__main__": main()` 안에만 있어 pytest 경로에서는
+실패해도 초록불)입니다. 이 파일에는 그 이후 다른 7개 파일에 이미 퍼진
+표준 방어(`@pytest.fixture(autouse=True)`로 테스트 전후 `FAILURES` 증가분을
+확인)가 아직 없었습니다 — 새 파일이 생길 때마다 이 방어를 손으로 복사해
+넣는 방식의 구조적 한계(§0-3-10 위반 소지, S-2에서 근본 해결 검토).
+동일한 fixture를 추가하고, 기존 검사 하나를 일부러 깨뜨려 pytest가 실제로
+빨간불이 되는지 확인한 뒤 원상 복구했습니다.
+
+**2) H-3 — `main()`의 수동 함수 목록이 실제 `test_*` 정의보다 오래됨(4개
+파일).** `python tests/test_x.py`로 직접 실행하는 경로 전용 문제입니다
+(pytest 경로는 위 fixture 덕분에 애초에 무영향). `test_macro_scoring.py`
+(29개 중 12개 미호출)·`test_report.py`(23개 중 3개)·`test_scorecard.py`
+(20개 중 2개)·`test_stock_history.py`(17개 중 1개)에서 새 `test_*`를
+추가하면서 `main()`의 호출 목록에 넣는 걸 빠뜨린 사례가 누적돼 있었습니다.
+patch가 아니라 **이 버그 종류 자체를 구조적으로 없애는** 방향으로
+갔습니다(§0-3-10) — `inspect`로 그 모듈 자신이 정의한 `test_*`를 소스
+줄 번호 순서대로 자동 수집해 부르는 공용 헬퍼 `tests/_test_discovery.py`를
+신설하고, 4개 파일의 `main()`을 전부 이 헬퍼 호출 한 줄로 교체했습니다.
+pytest 전용 픽스처(`tmp_path`/`monkeypatch`)를 받는 함수는 인자를 채울
+방법이 없어 자동으로 건너뛰되, 건너뛴 개수를 출력해 조용히 누락되지
+않게 했습니다. 4개 파일 전부 `python3 tests/test_x.py` 직접 실행으로
+컴파일·정상 동작 확인, `test_stock_history.py`가 그동안 조용히 빠져있던
+`test_market_field_round_trips_and_defaults_to_blank_when_absent`를 이제
+실제로 실행함을 확인했습니다.
+
+**3) S-1 — `test_web_session_isolation.py`의 렌더 스모크 4개가 슬롯 스택
+`RuntimeError`로 실패(pytest 전체 실행 시).** 2026-08-29 스코어카드 모듈
+M-6에서 발견해 `tests/_render_helpers.py::run_render()`로 해결했던 문제와
+같은 근본 원인인데, 이 파일은 그 헬퍼가 생기기 전에 작성돼 여전히
+`asyncio.run()`을 직접 쓰고 있었습니다(§0-3-10 — 같은 문제의 같은 해법을
+한 곳에서만 관리하지 못하고 있었음). `run_render` import를 추가하고 4개
+렌더 스모크 함수(내 성적표·사장님 보고서·매크로·결투) 안의 `asyncio.run(`
+10곳을 `run_render(`로 교체했습니다(로그인류 `auth.login()` 호출은 UI를
+그리지 않으므로 그대로 둠). 교체 도중 **한 곳을 놓쳤던 것**을 이번에
+검증 단계에서 직접 잡았습니다 — `test_report_render_smoke()`가 부르는
+헬퍼 함수 `_capture_report_render()` 안의 `asyncio.run(page._render_report_body(...))`
+는 `test_report_render_smoke()` 함수 자체의 줄 범위 밖에 있어 처음 교체
+때 범위에서 빠졌습니다. `pytest tests/test_web_session_isolation.py -q`를
+전체로 돌려서야(개별 실행으로는 안 잡힘 — 프로세스당 한 번만 생기는
+"유사 클라이언트"를 먼저 도는 테스트가 소진해버리는 게 원인이라, 실행
+순서·조합에 따라 드러나는 결함) 드러났고, 즉시 같은 방식으로 교체했습니다.
+
+  또한 `test_macro_render_smoke()`는 `nicegui.app.storage.user`를 직접
+  건드리고 있었는데, 이 저장소에는 실제 nicegui가 설치돼 있어(스텁이 아님)
+  진짜 `Storage` 클래스가 동작합니다 — 실제 요청 컨텍스트 없이 접근하면
+  `RuntimeError: app.storage.user needs a storage_secret` 로 죽거나(단독
+  실행), "스크립트 모드" 폴백 경로가 **접근할 때마다 새로 만드는 일회용
+  딕셔너리**를 돌려줘 쓰기가 다음 읽기에 반영되지 않습니다(전체 실행 —
+  `nicegui/context.py`의 `is_script_mode_preflight()` 조건 직접 확인).
+  이건 `run_render()`로 고칠 수 있는 종류가 아니라 애초에 잘못된 도구를
+  쓰고 있던 것이라 판단해, `web/pages/macro_page.py`가 `web.auth`에서
+  이름으로 가져다 쓰는 `is_admin` 함수를 **직접 monkeypatch**하는 방식으로
+  바꿨습니다 — 실제 Storage 객체를 건드리지 않고, §0-3-8이 요구하는 대로
+  "관리자 여부는 명시적으로 받는다"는 원칙에 오히려 더 맞습니다. 나머지
+  구간(2)~(4)는 `_render_dashboard()`/`_render_ai_commentary()`를
+  `macro_page()` 게이트를 우회해 직접 호출하므로 `app.storage.user` 조작이
+  원래도 무해했음을 확인하고 그대로 뒀습니다. `pytest -q`(개별)·
+  `pytest tests/test_web_session_isolation.py -q`(전체)·
+  `python3 tests/test_web_session_isolation.py`(직접 실행) 세 경로 모두
+  18개 테스트 전부 통과 확인.
+
+**4) H-2 — `test_report.py::test_view_and_scope()`의 "다른 모듈 안 건드림"
+검사가 주석까지 코드로 오해해 오탐.** "리포트 관련 키워드가 다른 모듈
+소스에 없어야 한다"는 검사가 원문 그대로 문자열 검색을 해서, 실제로는
+전혀 무관한 **설명 주석**(`collector_us_stocks.py:610`·
+`utils/constants_us.py:277` — 후자는 이번 4차 재감사 도중 제가 직접 적어
+넣은 주석) 때문에 계속 빨간불이었습니다. 같은 파일에 이미 있던
+`python_code_only()`(주석·docstring을 걷어내는 헬퍼, 다른 검사에서 이미
+같은 목적으로 쓰이고 있음)를 재사용해(§0-3-10 — 새 헬퍼를 또 만들지 않음)
+검사 대상을 실제 코드로 좁혔습니다. 진짜 위반(주석이 아니라 실제 코드에
+`report_db` 문자열이 들어간 경우)은 여전히 잡히는지 일부러 그런 줄을
+넣어 확인한 뒤 되돌렸습니다.
+
+**5) M-2 — `test_scorecard_public_ui.py::test_consent_body_renders_every_state`가
+assert 없는 순수 스모크였음.** 동의 화면의 세 상태(기록없음/최종확인/철회)를
+각각 그려보긴 했지만 "예외 없이 끝까지 실행됐다"만 확인했지 "그 상태에
+맞는 문구가 실제로 나왔다"는 전혀 확인하지 않았습니다 — 세 상태의 라벨을
+서로 뒤바꿔 매핑해도 이 테스트는 계속 초록불이었을 것입니다.
+`consent_page.ui.markdown`을 캡처해 `_render_current_state()`가 상태별로
+쓰는 정확한 문구("비공개 (공개 동의 기록이 없습니다)" / "공개 신청 완료
+(발행 대상)" / "철회됨")가 실제로 나왔는지, 그리고 **다른 상태의 문구가
+섞여 나오지 않는지**까지 확인하도록 다시 썼습니다. 검증을 위해
+`scorecard_consent_page.py`의 "confirmed" 라벨을 일부러 "철회됨"으로
+바꿔치기해 새 assert가 정확히 그 오류를 잡아내는지 확인한 뒤 되돌렸습니다
+(`git checkout --`로 원복, `git status`로 프로덕션 코드에 변경 없음 확인).
+
+**6) M-3 — `tests/_render_helpers.py` 독스트링의 import 예시가 실제와
+다름.** "`from tests._render_helpers import run_render`로 가져다 쓴다"고
+적혀 있었는데, `tests/`는 `__init__.py`가 없는 패키지가 아니라서 이
+문장 그대로 쓰면 실제로는 `ModuleNotFoundError`가 납니다. 실제로 쓰는
+3개 파일(`test_scorecard_ocr.py`·`test_scorecard_public_ui.py`·
+`test_web_session_isolation.py`) 전부 `sys.path.append(...)`로 `tests/`
+자신을 경로에 얹은 뒤 `from _render_helpers import run_render`로 가져다
+쓰는 걸 확인하고, 독스트링을 그 실제 관례에 맞게 고쳤습니다.
+
+**7) 검토 후 이번 라운드에서는 백로그로 넘김.**
+  - **S-2 — `tests/conftest.py` 부재.** 29개 파일이 `sys.path` 부트스트랩을
+    각자 복제하고, `check()`/`FAILURES` 무음 방지 fixture가 이제 8개 파일에
+    (이번 H-1 수정으로 1개 늘어) 동일하게 복제돼 있고, 6개 파일이
+    `test_duel_db.py`를 라이브러리처럼 import합니다. 이건 이미 백로그에
+    "🆕 #156 `tests/conftest.py` 부재"로 등재돼 있던 항목과 같은 사안임을
+    이번에 재확인했습니다 — 그 항목의 세부 사례 목록을 이번 감사 결과로
+    갱신했습니다(아래 백로그 섹션 참고). 공용 fixture 하나로 옮기는 리팩터는
+    29개 파일 전부에 손을 대는 범위라 스팟 감사 스타일 재감사보다는 별도
+    계획이 필요하다고 판단해 이번에도 손대지 않았습니다.
+  - **M-1 — `.count("문자열") == N` 형태의 브리틀한 단언 여러 곳.** 소스에
+    무해한 리팩터(예: 같은 문자열을 설명하는 주석 한 줄 추가)만 있어도
+    깨질 수 있는 검사 방식입니다. 지금 당장 오탐/미탐이 실제로 발생하고
+    있는 건 아니고(H-2처럼 이미 발생한 사례는 이번에 고쳤음), 스타일·
+    견고성 문제라 우선순위를 낮춰 백로그로 남겼습니다.
+
+**8) 재확인만 하고 손대지 않은 기존 결함 — `test_duel.py` 통화 표기 통일성
+2건.** 공유인프라 모듈(#167)을 포함해 지난 여러 라운드의 베이스라인
+검증에서 계속 "이 모듈과 무관한 기존 결함"으로 기록만 되고 있던 항목인데,
+이번이 마지막 모듈이라 처음으로 백로그에 독립 항목으로 등재했습니다
+(§0-3-6 — 결투 모듈은 이미 완료된 모듈이라 이번엔 건드리지 않음). 아래
+백로그 섹션 참고.
+
+**검증.** 기기 저장소에서 수정한 8개 파일(`tests/_render_helpers.py`·
+`tests/test_macro_scoring.py`·`tests/test_report.py`·`tests/test_scorecard.py`·
+`tests/test_scorecard_public_ui.py`·`tests/test_stock_history.py`·
+`tests/test_us_stocks_page.py`·`tests/test_web_session_isolation.py`)과
+신규 파일(`tests/_test_discovery.py`)마다 `python3 -c "import ast; ast.parse(...)"`로
+구문 확인, 각 수정 지점은 해당 파일만 pytest로 개별 확인 후 마지막에
+`git stash -u`로 이번 라운드의 모든 변경을 걷어낸 **커밋 `7f89d8b`
+그대로의 상태**에서 전체 `pytest --ignore=archive -q`를 한 번 돌리고,
+`git stash pop`으로 되돌린 뒤 다시 한 번 돌려 결과를 대조했습니다.
+수정 전: `FAILED` 3건(`test_duel.py` 통화 표기 통일성 2건 + 아직 고치기
+전의 `test_macro_render_smoke`) + `ERROR` 4건(`test_report.py::test_view_and_scope`
+[H-2] · 렌더 스모크 3건인 `test_render_smoke`·`test_report_render_smoke`·
+`test_duel_render_smoke` [S-1] — 이 4건은 `check()`/`FAILURES` 방식 특성상
+테스트 본문은 "통과"로 집계되고 autouse fixture 뒤처리에서만 별도로
+`ERROR`로 잡히는 방식이라 `1752 passed`에도 동시에 포함됨), 총 문제
+노드 7개 / 정상 노드 1752개(전체 1755개 중). 수정 후: `FAILED` 2건
+(`test_duel.py` 통화 표기 통일성 — 완전히 무관한 기존 결함, 값·메시지
+전부 수정 전후 동일함을 확인) · `ERROR` 0건, `1753 passed` — 문제 노드가
+7개에서 2개로 줄고, 그 2개는 전부 이번 모듈이 손대지 않은 기존 결함임을
+확인했습니다(전체 노드 수 1755개는 불변 — 테스트를 늘리거나 줄이지
+않고 오탐만 걷어냄). `test_consent_body_renders_every_state`는 위 5)에서
+설명한 대로 프로덕션 코드를 일부러 깨뜨려 새 assert가 실제로 잡는지
+음성 대조까지 마쳤습니다.
+
+이것으로 오너가 계획한 4차 재감사 8개 모듈(수집기·결투·매크로/PEGY/
+보조지표/리포트·스코어카드·배당 KR/US·미국주식·공유인프라·테스트 스위트)이
+전부 끝났습니다.
+
 ## 진행 예정 (백로그)
 
 - ✅ `duel_daily.yml`의 `workflow_run` 트리거(#150) 실동작 — 2026-08-26
@@ -3902,10 +4068,30 @@ NiceGUI 슬롯 스택 관련 렌더 스모크 4건)을 기록해 두고, `git st
   job)를 `archive/`로 옮기면 매크로/PEGY 7,751줄 중복과 `views/admin_view.py`의
   관리자 인증 두 번째 사본(평문 비밀번호 세션 상주 포함)이 함께 정리됨.
 - 🆕 #156 `tests/conftest.py` 부재 — 29개 테스트 파일이 전부 `sys.path` 부트스트랩을
-  복제하고, 6개 파일이 `test_duel_db.py`를 라이브러리처럼 import하며, `check()`/
-  `FAILURES` 무음 통과 방지 픽스처가 7개 파일에 완전히 동일하게 복제돼 있음.
-  `test_quant.py`는 함수명이 `run_golden_tests`라 pytest가 아예 수집하지 않아
-  8개 핵심 검증이 실행된 적 없음 — 이건 함수명 한 줄만 고치면 됨.
+  복제하고, 6개 파일이 `test_duel_db.py`를 라이브러리처럼 import함(2026-08-30
+  테스트 스위트 재감사 #168에서 S-2로 재확인·갱신 — `test_quant.py`의
+  `run_golden_tests` 미수집 문제는 2026-08-29 M-14에서 이미 해결돼 이 목록에서
+  뺌). `check()`/`FAILURES` 무음 통과 방지 픽스처는 이번 #168의 H-1 수정으로
+  1개 늘어 이제 8개 파일(`test_data_source.py`·`test_duel.py`·`test_duel_page_usd.py`
+  등 계열)에 완전히 동일하게 복제돼 있음. 공용 `conftest.py`로 옮기는 리팩터는
+  29개 파일 전부에 손을 대는 범위라 스팟 감사보다는 별도 계획이 필요.
+- 🆕 #168 `.count("문자열") == N` 형태의 브리틀한 테스트 단언 여러 곳(M-1,
+  2026-08-30 테스트 스위트 재감사) — 소스에 무해한 리팩터(예: 설명 주석
+  한 줄 추가)만 있어도 개수가 달라져 깨질 수 있는 검사 방식. 지금 당장
+  오탐/미탐이 발생 중인 건 아니고(이미 발생한 사례는 같은 라운드의 H-2에서
+  고침), 스타일·견고성 문제라 우선순위 낮게 남겨둠. `python_code_only()`처럼
+  존재 여부(`in`)로 바꾸거나, 개수가 정말 중요한 자리만 상수로 명시하는 방향
+  검토.
+- 🆕 #168 `test_duel.py` 통화 표기 통일성 2건(2026-08-30 테스트 스위트
+  재감사에서 처음으로 독립 항목화 — 그 전에는 여러 라운드의 베이스라인
+  검증 메모에만 "이 모듈과 무관한 기존 결함"으로 반복 기록되고 있었음).
+  `rules.calculate_fill()`의 `fail_reason` 문구가 KRW 통화에서는
+  `"1,051원"`처럼 항상 소수점 없이 정확한 표기를 만드는데, USD 통화에서는
+  `"$10.5"`·`"$4"`처럼 **끝자리 0이 잘림**(기대값은 `"$10.50"`·`"$4.00"`).
+  실제 화면(결투 카드)의 금액 표기와 이 실패 사유 문구의 표기가 서로 달라지는
+  사용자 체감 불일치일 가능성이 있음 — 결투 모듈은 이미 완료된 모듈이라
+  §0-3-6에 따라 이번 라운드에서는 코드를 건드리지 않았음. 재현:
+  `pytest tests/test_duel.py -k "test_fail_reason_amounts_use_the_same_notation_as_the_screen or test_fill_failure_messages_carry_the_shared_notation"`.
 (그 밖의 백로그 항목은 `PROJECT_STATUS.md`의 "지금 열려있는 일" 참고)
 
 ---

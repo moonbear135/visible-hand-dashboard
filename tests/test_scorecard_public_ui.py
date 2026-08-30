@@ -1318,12 +1318,33 @@ def _restore(module, saved):
         setattr(module, name, value)
 
 
+# 2026-08-30 재감사(테스트 스위트) M-2 — 원래 이 테스트는 `_render_body()`가 예외 없이
+# 끝까지 실행되는지만 봤습니다(assert 가 하나도 없었습니다). 그래서 세 상태(`none`/
+# `confirmed`/`revoked`)를 서로 뒤바꿔 매핑해도(예: `none`인데 "공개 신청 완료" 문구가
+# 나와도) 이 테스트는 계속 초록불이었을 것입니다 — "실행됐다"와 "맞는 화면이 그려졌다"는
+# 다른 주장인데 후자를 전혀 검증하지 않았습니다. `_render_current_state()`가 상태별로 쓰는
+# 정확한 문구(위 라벨 딕셔너리)를 실제로 그렸는지 캡처해 확인합니다.
+_CONSENT_STATE_LABELS = {
+    "none": "비공개 (공개 동의 기록이 없습니다)",
+    "confirmed": "공개 신청 완료 (발행 대상)",
+    "revoked": "철회됨",
+}
+
+
 @pytest.mark.parametrize("situation", sorted(SYNTHETIC_CONSENTS))
 def test_consent_body_renders_every_state(situation):
     """
     동의 화면 본문이 **끝까지** 실행되는지 — 기록 없음 / 최종확인 완료 / 철회(차단 중)
-    세 상태를 각각 그립니다(카드가 한 장이므로 상태마다 한 번씩).
+    세 상태를 각각 그리고, 그 상태에 맞는 문구가 실제로 나왔는지까지 확인합니다.
     """
+    captured_markdown = []
+    original_markdown = consent_page.ui.markdown
+
+    def _capture_markdown(content='', *a, **k):
+        captured_markdown.append(str(content))
+        return original_markdown(content, *a, **k)
+
+    consent_page.ui.markdown = _capture_markdown
     saved = _patch(
         consent_page,
         fetch_my_consent=lambda client, user_id: SYNTHETIC_CONSENTS[situation],
@@ -1333,6 +1354,17 @@ def test_consent_body_renders_every_state(situation):
         _run(consent_page._render_body(object(), "uid-1"))
     finally:
         _restore(consent_page, saved)
+        consent_page.ui.markdown = original_markdown
+
+    blob = "\n".join(captured_markdown)
+    expected_label = _CONSENT_STATE_LABELS[situation]
+    assert expected_label in blob, (
+        f"{situation!r} 상태인데 '{expected_label}' 문구가 안 보임 (실제: {captured_markdown})"
+    )
+    other_labels = [label for state, label in _CONSENT_STATE_LABELS.items() if state != situation]
+    assert not any(label in blob for label in other_labels), (
+        f"{situation!r} 상태인데 다른 상태 문구가 섞여 나옴 (실제: {captured_markdown})"
+    )
 
 
 def test_consent_body_never_reads_holdings_or_creates_a_nickname_while_rendering():

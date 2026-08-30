@@ -66,6 +66,15 @@ if sys.platform == "win32":
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.append(str(REPO_ROOT))
+sys.path.append(str(Path(__file__).parent))          # from _render_helpers import run_render
+
+# 🔴 2026-08-30 재감사(테스트 스위트) S-1 — 렌더 스모크 4건이 슬롯 컨텍스트 전파 없이
+# `asyncio.run()`을 직접 써서, 이 프로세스의 1회용 "유사 클라이언트"를 소진하면 실행 순서에
+# 따라 서로 연쇄 실패했습니다(`tests/_render_helpers.py::run_render()`의 M-6 발견과 동일한
+# 근본 원인 — 그 수정 당시 `test_scorecard_public_ui.py`/`test_scorecard_ocr.py`만 채택하고
+# 이 "가장 중요한 테스트"(§0-3-8) 파일은 빠져 있었습니다). 이 파일의 렌더 스모크도 같은
+# 공용 헬퍼를 쓰도록 옮깁니다(§0-3-10 — 이미 있는 해법 재사용, 새로 만들지 않음).
+from _render_helpers import run_render                                   # noqa: E402
 
 FAILURES = []
 
@@ -453,9 +462,12 @@ def test_storage_access_is_centralised():
 def _install_nicegui_stub():
     """nicegui 미설치 환경에서도 web/ 모듈을 import 할 수 있게 최소 스텁을 주입합니다.
 
-    (이 샌드박스에는 nicegui 를 설치할 수 없어 실제 서버를 띄울 수 없습니다 — 그래서
-     "서버를 띄우는 대신 저장소 접근자만 바꿔치기한다"는 설계를 택했습니다. 자세한 한계는
-     이 파일 맨 위 주석 참고.)
+    (이 함수는 nicegui가 **없을 때만** 스텁을 깔고, 있으면 바로 `return False`로 빠집니다
+     — 실제 서버를 띄우는 대신 저장소 접근자만 바꿔치기하는 설계는 그대로입니다. 2026-08-30
+     재감사(테스트 스위트) S-1: 이 기기에는 실제로 nicegui가 설치돼 있어(requirements.txt
+     명시) 이 스텁은 평소 켜지지 않습니다 — 아래 주석은 "샌드박스에 nicegui를 설치할 수
+     없다"고 돼 있었지만 더 이상 사실이 아니라 정정합니다. 스텁은 nicegui 자체가 없는
+     극단적 환경을 위한 방어적 대비책으로 남겨둡니다. 자세한 한계는 이 파일 맨 위 주석 참고.)
     """
     try:
         import nicegui  # noqa: F401
@@ -893,7 +905,7 @@ def test_render_smoke():
     try:
         # 2026-08-21 — `_render_body()` 가 `async def` 입니다(스냅샷 6개를 `run.io_bound` 로
         # 읽어 이벤트 루프를 막지 않게 한 수정). 검사 내용은 그대로이고 부르는 방법만 바뀝니다.
-        asyncio.run(page._render_body(object(), "uid-test", "a@example.com"))
+        run_render(page._render_body(object(), "uid-test", "a@example.com"))
         check(True, "_render_body() 가 예외 없이 끝까지 실행됨")
     except Exception as exc:                       # noqa: BLE001
         check(False, "_render_body() 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
@@ -1084,7 +1096,7 @@ def _capture_report_render(period, ref_date,
     try:
         # 2026-08-21 — `_render_report_body()` 가 `async def` 입니다(미국 유니버스 스냅샷을
         # `run.io_bound` 로 읽게 한 수정). 부르는 방법만 바뀌고 검사 내용은 그대로입니다.
-        asyncio.run(page._render_report_body(object(), "uid-test", period, ref_date))
+        run_render(page._render_report_body(object(), "uid-test", period, ref_date))
         error = None
     except Exception as exc:                       # noqa: BLE001
         error = exc
@@ -1341,8 +1353,23 @@ def test_macro_render_smoke():
 
     # (1) 비관리자는 본문이 **한 글자도** 그려지지 않아야 합니다.
     seen = []
-    original = (macro._render_dashboard, macro.render_admin_login)
+    original = (macro._render_dashboard, macro.render_admin_login, macro.is_admin)
 
+    # 🔴 2026-08-30 재감사(테스트 스위트) S-1 추가 발견 — 이 기기엔 실제 nicegui가 설치돼
+    # 있어(`_install_nicegui_stub()`가 스텁 없이 그대로 통과) `app.storage.user`가 진짜
+    # `nicegui.storage.Storage` 객체입니다. 진짜 요청(request) 컨텍스트 밖에서는 이게
+    # `is_script_mode_preflight()` 상태에 따라 RuntimeError를 던지거나(요청 없음 +
+    # storage_secret 없음), 혹은 매번 새로 만들어지는 `PseudoPersistentDict()`를 돌려줍니다
+    # — 후자면 여기서 `["admin"] = True`로 쓴 값이 `macro_page()` 내부의 `is_admin()`
+    # 호출(별도 PseudoPersistentDict 인스턴스)에는 전혀 보이지 않아, 관리자로 설정했는데도
+    # 게이트를 통과 못 하는 것처럼 조용히 실패합니다(재현: `pytest -k test_macro_render_smoke`
+    # 단독 실행 시 RuntimeError, 전체 파일과 함께 실행 시 이 check() 실패 — 둘 다 같은
+    # 근본 원인의 다른 증상). `macro_page.py`가 `web.auth.is_admin`을 이름으로 import해서
+    # 쓰므로(`from web.auth import is_admin`), 진짜 저장소를 흉내내는 대신 §0-3-8 원칙
+    # ("관리자 여부는 전역 추측이 아니라 명시적으로 받는다") 그대로 `macro.is_admin`
+    # 자체를 갈아 끼웁니다 — 이 화면이 실제로 의존하는 것은 저장소가 아니라
+    # `is_admin()`의 반환값 하나뿐입니다.
+    #
     # 2026-08-21 — `macro_page()`/`_render_dashboard()` 가 `async def` 가 되었습니다
     # (AI 코멘트 파일을 `run.io_bound` 로 읽게 한 수정). 그래서 가짜 본문도 **코루틴을
     # 돌려주는 함수**여야 `await _render_dashboard()` 가 성립합니다.
@@ -1352,21 +1379,20 @@ def test_macro_render_smoke():
     macro._render_dashboard = _fake_dashboard
     macro.render_admin_login = lambda: seen.append("login")
     try:
-        app.storage.user.clear()
-        asyncio.run(macro.macro_page())
+        macro.is_admin = lambda: False
+        run_render(macro.macro_page())
         check(seen == ["login"], "🔒 비관리자 접속 → 게이트 폼만, 본문 렌더 0회")
         seen.clear()
-        app.storage.user["admin"] = True
-        asyncio.run(macro.macro_page())
+        macro.is_admin = lambda: True
+        run_render(macro.macro_page())
         check(seen == ["body"], "🔓 관리자 접속 → 본문 렌더")
     finally:
-        (macro._render_dashboard, macro.render_admin_login) = original
-        app.storage.user.clear()
+        (macro._render_dashboard, macro.render_admin_login, macro.is_admin) = original
 
     # (2) 본문 전체를 실제로 실행 — f-string·이스케이프·분기가 전부 진짜로 돕니다.
     app.storage.user["admin"] = True
     try:
-        asyncio.run(macro._render_dashboard())
+        run_render(macro._render_dashboard())
         check(True, "본문 전체 렌더 (탭 7개·표·차트·다운로드 버튼 포함) 예외 0건")
     except Exception as exc:                       # noqa: BLE001
         check(False, "본문 전체 렌더", f"({type(exc).__name__}: {exc})")
@@ -1383,7 +1409,7 @@ def test_macro_render_smoke():
     macro.banner = lambda kind, body: drawn.append(body)
     macro.HISTORY_FILE = str(REPO_ROOT / "__no_such_market_history__.csv")
     try:
-        asyncio.run(macro._render_dashboard())
+        run_render(macro._render_dashboard())
         blob = "\n".join(str(d) for d in drawn)
         check(any(isinstance(d, tuple) and d[0] == "error" for d in drawn),
               "🚨 이력 파일이 없으면 빨간 실패 배너가 뜸 (§0-1)")
@@ -1411,7 +1437,7 @@ def test_macro_render_smoke():
     macro.warning_banner = lambda text: captured.append(text)
     try:
         result = macro.fetch_verified_market_data()
-        asyncio.run(macro._render_ai_commentary(result[4], result[3]))
+        run_render(macro._render_ai_commentary(result[4], result[3]))
         blob = "\n".join(captured)
         check("<img src=x onerror" not in blob, "🔐 AI 코멘트의 <img onerror=...> 가 그대로 나가지 않음")
         check("&lt;img src=x onerror" in blob, "   → 이스케이프된 문자열로 표시됨 (글자 그대로 보임)")
@@ -1732,7 +1758,7 @@ def test_duel_render_smoke():
     try:
         # 2026-08-21 — `_render_body()` 가 `async def` 입니다(코스피 유니버스 스냅샷을
         # `run.io_bound` 로 읽게 한 수정). 부르는 방법만 바뀌고 검사 내용은 그대로입니다.
-        asyncio.run(page._render_body(object(), "uid-duel", "duel@example.com"))
+        run_render(page._render_body(object(), "uid-duel", "duel@example.com"))
         check(True, "_render_body() 가 예외 없이 끝까지 실행됨")
     except Exception as exc:                       # noqa: BLE001
         check(False, "_render_body() 가 예외 없이 끝까지 실행됨", f"({type(exc).__name__}: {exc})")
@@ -1765,9 +1791,9 @@ def test_duel_render_smoke():
         # 되면서 이 줄이 그동안 코루틴 객체만 만들고 **한 번도 실행하지 않았습니다**
         # (pytest 가 "코루틴이 await 되지 않았다" 경고만 내고 조용히 넘어감 — 그래서 아래
         # check() 가 항상 실패였는데도 이 파일의 check()/FAILURES 버그 뒤에 숨어 있었습니다).
-        # 직접 `asyncio.run()`으로 실행해 실제 §0-3-8 이중 방어 코드를 진짜로 태웁니다.
-        asyncio.run(page._render_duel_section(object(), "uid-duel",
-                                  asyncio.run(page._load_kospi_universe()),
+        # 직접 `run_render()`으로 실행해 실제 §0-3-8 이중 방어 코드를 진짜로 태웁니다.
+        run_render(page._render_duel_section(object(), "uid-duel",
+                                  run_render(page._load_kospi_universe()),
                                   page._order_window_state(), lambda: None))
         blob2 = "\n".join(str(d) for d in drawn)
         check(bool(drawn) and "본인 것이 아닌" in blob2,

@@ -428,7 +428,7 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 10. **📋 재감사 4차 전체 진행 현황 (2026-08-29 갱신, 오너 지시로 모듈별 순차 진행 중).**
     저장소 전체를 모듈 단위로 순회하며 4번째 재감사(오푸스 높음, "한번 할 때 전부 다" —
     발견되는 High/Medium/Low/Structural 전 등급을 한 라운드에 처리)를 진행 중입니다.
-    상세 경위는 각 모듈 절(§9~§13)과 `TASK_HISTORY.md` #158~#167 참고.
+    상세 경위는 각 모듈 절(§9~§13)과 `TASK_HISTORY.md` #158~#168 참고.
     - ✅ 수집기 — 완료 (`COLLECTOR_REAUDIT_FINDINGS.md`)
     - ✅ 결투다! — 완료 (`DUEL_REAUDIT_FINDINGS.md`, §12)
     - ✅ 매크로/PEGY/보조지표/리포트 — 완료 (`MACRO_REAUDIT_FINDINGS.md`, TASK_HISTORY #161~#162)
@@ -438,7 +438,12 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
       1건은 정책 이관, S-1만 계속 유예) (`US_STOCKS_REAUDIT_FINDINGS.md`, TASK_HISTORY #165~#166)
     - ✅ 공유인프라 — 완료(Medium 2건·Low 2건 반영 + M-13 최종 반영: 이력 CSV
       카드·CSV 정보 정책을 코스피·미국 동시에 재정비). (TASK_HISTORY #167)
-    - ⬜ 테스트 스위트 — 아직 시작 전. 4차 재감사 마지막 모듈.
+    - ✅ 테스트 스위트 — 완료, 4차 재감사 마지막 모듈(High 3건·Medium 2건·Low 1건
+      반영, 재구조화형 2건은 백로그로 유예). `main()` 함수 목록 드리프트를
+      `tests/_test_discovery.py` 자동 수집으로 구조적으로 제거, `test_web_session_isolation.py`
+      렌더 스모크 슬롯 스택 실패 해소 등. (TASK_HISTORY #168)
+
+    **→ 4차 재감사 8개 모듈 전체 완료 (2026-08-30).**
 
 ## 1. 이 프로젝트는 무엇인가
 

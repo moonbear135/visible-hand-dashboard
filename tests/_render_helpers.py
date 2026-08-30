@@ -15,7 +15,14 @@ NiceGUI 화면 함수를 테스트에서 **실제로 실행**할 때 쓰는 공�
 같이 쓰면(§0-3-10) 그 문제가 사라집니다.
 
 실행: 이 파일 자체는 테스트가 아닙니다(파일 이름이 `test_`로 시작하지 않아 pytest가
-수집하지 않습니다) — `from tests._render_helpers import run_render` 로 가져다 씁니다.
+수집하지 않습니다). `tests/`가 패키지가 아니라서(`__init__.py` 없음) `from tests._render_helpers import ...`
+는 실제로는 `ModuleNotFoundError`가 납니다 — 실제 쓰는 파일들(예:
+`test_scorecard_public_ui.py`, `test_web_session_isolation.py`)처럼 각 테스트 파일
+맨 위에서 `sys.path.append(str(Path(__file__).parent))`로 `tests/` 자신을 경로에 얹은 뒤
+`from _render_helpers import run_render` 로 가져다 씁니다.
+
+2026-08-30 재감사(테스트 스위트) M-3 — 이 파일이 옮겨지기 전에 쓰던 예시 그대로 남아
+있던 잘못된 import 경로를 실제 호출 관례에 맞게 바로잡음.
 """
 
 import asyncio

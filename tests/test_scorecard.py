@@ -1465,24 +1465,11 @@ def main():
     print("=" * 74)
     print("📊 내 성적표 모듈 오프라인 검증 (Supabase 미연결 · 네트워크 불필요)")
     print("=" * 74)
-    test_normalization()
-    test_weighted_average()
-    test_currency_separation()
-    test_universe_lookup()
-    test_kr_ticker_master()
-    test_kr_all_market_prices()
-    test_us_all_market_prices()
-    test_us_all_etf_prices()
-    test_name_lookup()
-    test_resolve_stock_query()
-    test_portfolio()
-    test_sort_holding_rows()
-    test_supabase_fallback()
-    test_crud_with_fake_client()
-    test_password_reset()
-    test_sql_schema()
-    test_view_and_routing()
-    test_requirements_and_docs()
+    from _test_discovery import discover_and_run_module_tests
+    discover_and_run_module_tests(
+        sys.modules[__name__],
+        on_skip=lambda names: print(f"\u23ed\ufe0f  pytest \uc804\uc6a9(\ud53d\uc2a4\ucc98 \ud544\uc694) {len(names)}\uac74\uc740 \uac74\ub108\ub700: {names}"),
+    )
 
     print("\n" + "=" * 74)
     if FAILURES:
