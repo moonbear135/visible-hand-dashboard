@@ -14,30 +14,15 @@
 import sys
 from pathlib import Path
 
-sys.path.append(str(Path(__file__).parent.parent))
-
-import pytest
+# 저장소 루트를 `sys.path` 에 얹는 일과, 무음 통과 방지 하네스(FAILURES 목록 · check() ·
+# autouse 픽스처)는 파일마다 복사하지 않고 `tests/conftest.py` 한 곳에만 둡니다
+# (2026-08-30 — TASK_HISTORY #168 H-1 "복사 하나 빠뜨림" 재발 방지). 이 import 가 conftest 를
+# 먼저 불러오므로 `python tests/test_x.py` 직접 실행 경로에서도 아래 import 들이 정상 동작하고,
+# check() 실패를 pytest 빨간불로 승격시키는 `_assert_no_check_failures` 픽스처는 conftest 의
+# autouse 라 이 파일의 모든 테스트에 자동 적용됩니다(이 파일에 따로 쓸 것이 없습니다).
+from conftest import FAILURES, check  # noqa: E402
 
 from web.pages.pegy_page import build_stock_card_html, resolve_preset_badges
-
-FAILURES = []
-
-
-@pytest.fixture(autouse=True)
-def _assert_no_check_failures():
-    """다른 테스트 파일과 같은 관례 — check() 실패를 실제 pytest 실패로 승격."""
-    start = len(FAILURES)
-    yield
-    new_failures = FAILURES[start:]
-    assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
-
-
-def check(cond, label):
-    if cond:
-        print(f"  ✅ {label}")
-    else:
-        print(f"  ❌ {label}")
-        FAILURES.append(label)
 
 
 def _base_stock(**overrides) -> dict:

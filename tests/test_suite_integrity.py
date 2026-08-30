@@ -19,6 +19,19 @@
         `@pytest.fixture(autouse=True)`(테스트 전후 `FAILURES` 증가분 확인)를 파일마다
         **손으로 복사**해 넣는 방식이라, 2026-08-30 재감사(TASK_HISTORY `### #168` H-1)에서
         `test_us_stocks_page.py` 하나가 그 복사에서 빠져 있던 게 다시 발견됐습니다.
+      → 그래서 2026-08-30, 그 하네스(`FAILURES` 목록 · `check()` · autouse 픽스처)를 파일마다
+        복사하지 않고 `tests/conftest.py` **한 곳**으로 모았습니다(9개 파일). pytest 는
+        conftest 의 autouse 픽스처를 같은 디렉터리의 모든 테스트에 자동 적용하므로, 그때부터
+        "복사 하나 빠뜨림"이라는 사고 자체가 구조적으로 불가능해집니다.
+        ⚠️ **Check A 도 그 작업에서 함께 갱신했습니다.** 하네스를 conftest 로 옮기면 각 파일
+        자신의 AST 에서 `FAILURES`/`check` 가 사라지므로, 갱신하지 않았다면 Check A 가
+        "이 파일은 하네스를 안 쓴다"고 오판해 9개 파일을 **검사 대상에서 통째로 빼버렸을
+        것입니다**(스위트는 초록불인 채로 — 실제로 옮기고 나서 갱신 전에 돌려보니 Check A
+        9건이 PASSED 에서 SKIPPED 로 조용히 바뀌었습니다). 무음 통과를 잡는 검사가 스스로
+        무음이 되는, H-1 과 정확히 같은 모양의 결함입니다. 지금은
+        `from conftest import FAILURES, check` 로 가져다 쓰는 파일도 대상으로 잡고, 그런
+        파일은 **conftest 쪽에 진짜로 하네스 3종이 있고 그 autouse 픽스처가 실제로 적용되고
+        있는지**까지 확인한 뒤에야 합격시킵니다(`_conftest_harness_defects()`).
 
   (B) `main()`의 수동 함수 목록 노후화 — `python tests/test_x.py` 직접 실행 경로에서
       `main()`이 부를 `test_*` 목록을 손으로 나열하다 실제 정의와 어긋난 경우입니다.
@@ -64,6 +77,10 @@ TESTS_DIR = REPO_ROOT / "tests"
 # 저장소 관례인 `pytest --ignore=archive`와 같은 범위입니다.
 TEST_FILES = sorted(TESTS_DIR.glob("test_*.py"))
 TEST_FILE_IDS = [p.name for p in TEST_FILES]
+
+# 공용 하네스(`FAILURES` 목록 · `check()` · autouse 픽스처)가 사는 곳. Check A 는 이 파일에서
+# 하네스를 가져다 쓰는 테스트 파일도 검사 대상으로 잡습니다(2026-08-30 — 위 (A) 참고).
+CONFTEST_PATH = TESTS_DIR / "conftest.py"
 
 
 # =====================================================================================
@@ -144,44 +161,161 @@ def _test_function_nodes(tree):
 # =====================================================================================
 # 1. Check A — `check()`/`FAILURES` 하네스에는 무음 통과 방지 장치가 반드시 있어야 함
 # =====================================================================================
+def _defines_local_failures_list(tree):
+    """이 파일이 **자기 모듈 최상위에** `FAILURES` 목록을 직접 갖고 있는지."""
+    return any(n.strip("_").upper() == "FAILURES" for n in _module_level_assigned_names(tree))
+
+
+def _defines_local_check(tree):
+    """이 파일이 **자기 모듈 최상위에** `check()` 함수를 직접 정의하는지."""
+    return any(f.name.lstrip("_") == "check" for f in _toplevel_functions(tree))
+
+
+def _imports_harness_from_conftest(tree):
+    """
+    `from conftest import FAILURES, check` 처럼 **공용 하네스를 `tests/conftest.py` 에서
+    가져다 쓰는지**. 반환: (FAILURES 를 가져오는가, check 를 가져오는가).
+
+    2026-08-30 하네스를 conftest 로 모으면서 생긴 인식 경로입니다. 이게 없으면, 하네스를
+    옮긴 파일은 자기 AST 에 `FAILURES`/`check` 가 없으므로 Check A 가 "하네스를 안 쓴다"고
+    보고 **검사 대상에서 빼버립니다** — 위 (A) 참고.
+
+    함수 안에서 import 하는 형태까지 잡으려고 `ast.walk` 로 전체를 훑습니다(모듈 최상위만
+    보면 그 변형이 검사망을 빠져나갑니다 — 느슨해지는 방향으로는 열지 않습니다).
+    """
+    got_list = got_check = False
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.ImportFrom):
+            continue
+        if node.module not in ("conftest", "tests.conftest"):
+            continue
+        for alias in node.names:
+            bound = alias.asname or alias.name
+            if bound.strip("_").upper() == "FAILURES":
+                got_list = True
+            if bound.lstrip("_") == "check":
+                got_check = True
+    return got_list, got_check
+
+
 def _uses_check_failures_harness(tree):
     """
-    "모듈 최상위 `FAILURES` 목록 + 최상위 `check()` 함수" 조합을 하네스로 봅니다.
+    "`FAILURES` 목록 + `check()` 함수" 조합을 하네스로 봅니다. 둘은 **파일 안에 직접 정의**
+    돼 있어도 되고, **`tests/conftest.py` 에서 import** 해 온 것이어도 됩니다(2026-08-30
+    공용화 이후 9개 파일이 후자입니다).
+
     밑줄·대소문자 변형(`_FAILURES`/`failures`, `_check`)까지 받아들이는 이유: 이 하네스는
     파일 간 **복사·붙여넣기로 퍼지는** 물건이라, 이름을 살짝 바꿔 복사한 사본이 검사망을
     빠져나가면 그게 곧 다음 H-1이 됩니다.
     """
-    has_list = any(n.strip("_").upper() == "FAILURES" for n in _module_level_assigned_names(tree))
-    has_check = any(f.name.lstrip("_") == "check" for f in _toplevel_functions(tree))
+    conf_list, conf_check = _imports_harness_from_conftest(tree)
+    has_list = _defines_local_failures_list(tree) or conf_list
+    has_check = _defines_local_check(tree) or conf_check
     return has_list and has_check
 
 
-def _has_failures_autouse_fixture(tree):
+def _is_failures_autouse_fixture(fn):
     """
-    `@pytest.fixture(autouse=True)`(또는 `@fixture(autouse=True)`)가 붙었고 **본문에서
-    `FAILURES`를 실제로 들여다보는** 픽스처가 있는지.
+    이 함수가 `@pytest.fixture(autouse=True)`(또는 `@fixture(autouse=True)`)가 붙었고
+    **본문에서 `FAILURES`를 실제로 들여다보는** 픽스처인지.
 
-    "본문에서 FAILURES를 참조할 것"까지 요구하는 이유: 파일에 전혀 무관한 autouse 픽스처
+    "본문에서 FAILURES를 참조할 것"까지 요구하는 이유: 전혀 무관한 autouse 픽스처
     (예: 임시 디렉터리 정리)가 하나 있다는 이유만으로 통과시키면, 정작 무음 통과 방지는
     없는 파일이 초록불을 받습니다 — 그게 바로 이 파일이 막으려는 "겉보기 정상"입니다.
     """
-    for fn in _toplevel_functions(tree):
-        for deco in fn.decorator_list:
-            if not isinstance(deco, ast.Call):
-                continue
-            func = deco.func
-            name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
-            if name != "fixture":
-                continue
-            autouse = any(
-                kw.arg == "autouse" and isinstance(kw.value, ast.Constant) and kw.value.value is True
-                for kw in deco.keywords
-            )
-            if not autouse:
-                continue
-            if any(_references_name(stmt, "FAILURES") for stmt in fn.body):
-                return True
+    for deco in fn.decorator_list:
+        if not isinstance(deco, ast.Call):
+            continue
+        func = deco.func
+        name = func.attr if isinstance(func, ast.Attribute) else getattr(func, "id", None)
+        if name != "fixture":
+            continue
+        autouse = any(
+            kw.arg == "autouse" and isinstance(kw.value, ast.Constant) and kw.value.value is True
+            for kw in deco.keywords
+        )
+        if not autouse:
+            continue
+        if any(_references_name(stmt, "FAILURES") for stmt in fn.body):
+            return True
     return False
+
+
+def _failures_autouse_fixture_names(tree):
+    """`tree` 안에서 위 조건을 만족하는 픽스처들의 이름."""
+    return [fn.name for fn in _toplevel_functions(tree) if _is_failures_autouse_fixture(fn)]
+
+
+def _has_failures_autouse_fixture(tree):
+    """그 파일 **자신에** 무음 통과 방지 autouse 픽스처가 있는지."""
+    return bool(_failures_autouse_fixture_names(tree))
+
+
+def _conftest_harness_defects(request):
+    """
+    공용 하네스(`tests/conftest.py`)가 **진짜로** 무음 통과를 막고 있는지 확인하고, 문제가
+    있으면 사람이 읽을 수 있는 사유 목록을 돌려줍니다(정상이면 빈 목록).
+
+    ⚠️ 이 함수가 왜 이렇게 꼼꼼한가 — Check A 가 "이 파일은 conftest 하네스를 쓰니까 안전"
+    이라고 **믿고 넘어가는** 순간, conftest 쪽이 비었거나 망가졌을 때 9개 파일이 한꺼번에
+    거짓 초록불을 받습니다. 그건 옮기기 전보다 더 나쁜 상태(=한 곳이 뚫리면 전부 뚫림)라,
+    소스(AST)만 보고 판단하지 않고 **실제로 import 해서 물건이 있는지**, 그리고 **그
+    autouse 픽스처가 지금 이 테스트에도 실제로 걸려 있는지**까지 확인합니다.
+    """
+    problems = []
+    if not CONFTEST_PATH.is_file():
+        return [f"공용 하네스 파일이 없습니다: {CONFTEST_PATH}"]
+
+    # (1) 소스 구조 — 다른 검사와 같은 AST 기준으로 3종이 다 있는지
+    tree = _parse(str(CONFTEST_PATH))
+    if not _defines_local_failures_list(tree):
+        problems.append("conftest.py 에 모듈 최상위 `FAILURES` 목록이 없습니다")
+    if not _defines_local_check(tree):
+        problems.append("conftest.py 에 최상위 `check()` 함수가 없습니다")
+    guard_names = _failures_autouse_fixture_names(tree)
+    if not guard_names:
+        problems.append(
+            "conftest.py 에 `FAILURES` 를 들여다보는 `@pytest.fixture(autouse=True)` 픽스처가 "
+            "없습니다 — check() 실패를 pytest 실패로 승격시키는 장치가 통째로 없다는 뜻입니다"
+        )
+
+    # (2) 실물 — 정말 import 되고, 정말 그 타입이고, 인스턴스가 하나인지
+    try:
+        import conftest as _conftest
+    except Exception as exc:                                   # noqa: BLE001
+        problems.append(f"conftest.py 를 import 할 수 없습니다: {type(exc).__name__}: {exc}")
+        return problems
+
+    if not isinstance(getattr(_conftest, "FAILURES", None), list):
+        problems.append("`conftest.FAILURES` 가 실제 list 가 아닙니다")
+    if not callable(getattr(_conftest, "check", None)):
+        problems.append("`conftest.check` 가 호출 가능한 함수가 아닙니다")
+
+    # conftest.py 가 서로 다른 모듈 이름으로 두 번 import 되면 `FAILURES` 가 **두 개**가 되어,
+    # 기록하는 쪽(check)과 감시하는 쪽(픽스처)이 서로 다른 목록을 보게 됩니다. 그러면 실패가
+    # 조용히 사라집니다 — 이 파일이 막으려는 바로 그 결함이라 명시적으로 잡습니다.
+    instances = {
+        id(mod): name
+        for name, mod in list(sys.modules.items())
+        if getattr(mod, "__file__", None)
+        and Path(mod.__file__).resolve() == CONFTEST_PATH.resolve()
+    }
+    if len(instances) > 1:
+        problems.append(
+            f"conftest.py 가 서로 다른 모듈 이름 {sorted(instances.values())} 으로 중복 import "
+            f"돼 있습니다 — `FAILURES` 가 두 개가 되어 check() 실패가 감시망을 빠져나갑니다"
+        )
+
+    # (3) 동작 — 그 autouse 픽스처가 **지금 이 테스트에도** 실제로 적용돼 있는지.
+    #     (autouse 라면 같은 디렉터리의 모든 테스트에 걸리므로, 이 테스트도 예외가 아닙니다.
+    #      이름을 여기 하드코딩하지 않고 (1)에서 찾은 이름을 그대로 씁니다.)
+    if guard_names and not any(name in request.fixturenames for name in guard_names):
+        problems.append(
+            f"conftest.py 의 무음 통과 방지 픽스처 {guard_names} 가 지금 이 테스트의 활성 픽스처 "
+            f"목록에 없습니다 — 선언은 돼 있지만 실제로는 autouse 로 걸리지 않고 있다는 뜻입니다 "
+            f"(활성 목록: {sorted(request.fixturenames)})"
+        )
+    return problems
 
 
 def _every_test_asserts_failures(tree):
@@ -209,26 +343,70 @@ def _every_test_asserts_failures(tree):
 
 
 @pytest.mark.parametrize("path", TEST_FILES, ids=TEST_FILE_IDS)
-def test_check_failures_harness_cannot_pass_silently(path):
-    """Check A — `check()`/`FAILURES` 하네스를 쓰는 파일은 pytest에서도 반드시 빨간불이 될 것."""
+def test_check_failures_harness_cannot_pass_silently(path, request):
+    """Check A — `check()`/`FAILURES` 하네스를 쓰는 파일은 pytest에서도 반드시 빨간불이 될 것.
+
+    하네스는 두 가지 형태가 있고 **둘 다** 검사합니다(2026-08-30 공용화 이후).
+      · 공용형 — `from conftest import FAILURES, check`. 감시는 `tests/conftest.py` 의
+        autouse 픽스처가 하므로, 파일 자신에는 픽스처가 없는 게 정상입니다. 대신 그
+        conftest 가 진짜로 제 몫을 하는지를 확인합니다.
+      · 자체형 — 파일 안에 `FAILURES` 목록을 직접 두는 경우. conftest 의 픽스처는 **다른
+        리스트**를 보고 있어 이 파일을 지켜주지 못하므로, 예전과 똑같이 자기 파일 안에
+        방어 장치가 있어야 합니다(`tests/test_us_scoring.py` 가 이 형태입니다).
+    두 형태를 겸하면 두 검사를 모두 통과해야 합니다 — 느슨해지는 방향으로는 열지 않습니다.
+    """
     tree = _parse(str(path))
     if not _uses_check_failures_harness(tree):
         pytest.skip("이 파일은 check()/FAILURES 하네스를 쓰지 않음 — Check A 대상 아님")
 
-    ok = _has_failures_autouse_fixture(tree) or _every_test_asserts_failures(tree)
-    assert ok, (
-        f"\n🔴 {path.name} 은 check()/FAILURES 하네스를 쓰는데, check() 실패를 pytest 실패로\n"
-        f"   승격시키는 장치가 없습니다. check()는 FAILURES 에 적기만 하고 예외를 던지지\n"
-        f"   않으므로, 이 상태면 이 파일의 검사가 무엇을 잡아내든 pytest는 항상 초록불입니다\n"
-        f"   (TASK_HISTORY #168 H-1 / 2026-08-21 test_data_source.py 와 똑같은 결함).\n"
-        f"\n   고치는 법 — 다른 9개 파일과 같은 픽스처를 이 파일에도 추가하세요:\n"
-        f"       @pytest.fixture(autouse=True)\n"
-        f"       def _assert_no_check_failures():\n"
-        f"           start = len(FAILURES)\n"
-        f"           yield\n"
-        f"           new_failures = FAILURES[start:]\n"
-        f"           assert not new_failures, f\"check() 로 기록된 실패 ...: {{new_failures}}\"\n"
-        f"   (또는 test_us_scoring.py 처럼 모든 test_* 가 자기 본문에서 FAILURES 를 assert)"
+    checked_something = False
+
+    # ── 자체형: 이 파일 자신의 FAILURES 목록은 이 파일 자신이 지켜야 합니다 ──────────────
+    if _defines_local_failures_list(tree):
+        checked_something = True
+        ok = _has_failures_autouse_fixture(tree) or _every_test_asserts_failures(tree)
+        assert ok, (
+            f"\n🔴 {path.name} 은 자기 파일 안에 FAILURES 목록을 두고 check() 하네스를 쓰는데,\n"
+            f"   check() 실패를 pytest 실패로 승격시키는 장치가 없습니다. check()는 FAILURES 에\n"
+            f"   적기만 하고 예외를 던지지 않으므로, 이 상태면 이 파일의 검사가 무엇을 잡아내든\n"
+            f"   pytest는 항상 초록불입니다\n"
+            f"   (TASK_HISTORY #168 H-1 / 2026-08-21 test_data_source.py 와 똑같은 결함).\n"
+            f"\n   고치는 법(권장) — 자기 파일의 하네스를 지우고 공용 하네스를 쓰세요:\n"
+            f"       from conftest import FAILURES, check\n"
+            f"   (tests/conftest.py 의 autouse 픽스처가 자동으로 적용됩니다 — 9개 파일이 이 형태)\n"
+            f"\n   자기 파일에 FAILURES 를 꼭 따로 둬야 한다면 방어 장치도 이 파일에 두세요:\n"
+            f"       @pytest.fixture(autouse=True)\n"
+            f"       def _assert_no_check_failures():\n"
+            f"           start = len(FAILURES)\n"
+            f"           yield\n"
+            f"           new_failures = FAILURES[start:]\n"
+            f"           assert not new_failures, f\"check() 로 기록된 실패 ...: {{new_failures}}\"\n"
+            f"   (또는 test_us_scoring.py 처럼 모든 test_* 가 자기 본문에서 FAILURES 를 assert)"
+        )
+
+    # ── 공용형: conftest 가 실제로 지켜주고 있는지 확인 ────────────────────────────────
+    conf_list, conf_check = _imports_harness_from_conftest(tree)
+    if conf_list or conf_check:
+        checked_something = True
+        defects = _conftest_harness_defects(request)
+        assert not defects, (
+            f"\n🔴 {path.name} 은 공용 하네스(`from conftest import ...`)를 쓰는데, 정작 그\n"
+            f"   `tests/conftest.py` 가 무음 통과를 막아주지 못하는 상태입니다. 이 파일의\n"
+            f"   check() 실패는 지금 아무도 pytest 실패로 바꿔주지 않습니다\n"
+            f"   (하네스를 한 곳으로 모았기 때문에, 여기가 뚫리면 공용형 파일이 전부 뚫립니다).\n"
+            f"\n   발견된 문제 {len(defects)}건:\n"
+            + "".join(f"       - {d}\n" for d in defects)
+            + f"\n   고치는 법: tests/conftest.py 에 `FAILURES` 목록 · `check()` · 그리고 그\n"
+            f"   목록의 증가분을 검사하는 `@pytest.fixture(autouse=True)` 세 가지가 모두\n"
+            f"   있어야 합니다(그 파일 독스트링에 경위가 적혀 있습니다)."
+        )
+
+    # 위 두 분기 중 하나도 안 돌았다면 이 테스트는 아무것도 확인하지 않고 통과한 것입니다 —
+    # 그런 "빈손 초록불"이야말로 이 파일이 막으려는 것이라 명시적으로 실패시킵니다(§0-1).
+    assert checked_something, (
+        f"\n🔴 {path.name} 이 하네스 사용 파일로 판정됐는데 Check A 가 실제로는 아무 검사도\n"
+        f"   하지 않고 통과했습니다 — `_uses_check_failures_harness()` 와 아래 두 분기의\n"
+        f"   판정 기준이 어긋났다는 뜻입니다(검사망에 구멍이 생긴 상태)."
     )
 
 

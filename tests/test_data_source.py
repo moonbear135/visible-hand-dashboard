@@ -35,43 +35,17 @@ if sys.platform == "win32":
     sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding="utf-8")
 
 REPO_ROOT = Path(__file__).parent.parent
-sys.path.append(str(REPO_ROOT))
+# 저장소 루트를 `sys.path` 에 얹는 일과, 무음 통과 방지 하네스(FAILURES 목록 · check() ·
+# autouse 픽스처)는 파일마다 복사하지 않고 `tests/conftest.py` 한 곳에만 둡니다
+# (2026-08-30 — TASK_HISTORY #168 H-1 "복사 하나 빠뜨림" 재발 방지). 이 import 가 conftest 를
+# 먼저 불러오므로 `python tests/test_x.py` 직접 실행 경로에서도 아래 import 들이 정상 동작하고,
+# check() 실패를 pytest 빨간불로 승격시키는 `_assert_no_check_failures` 픽스처는 conftest 의
+# autouse 라 이 파일의 모든 테스트에 자동 적용됩니다(이 파일에 따로 쓸 것이 없습니다).
+from conftest import FAILURES, check  # noqa: E402
+
 sys.path.append(str(REPO_ROOT / "tests"))
 
 from utils import data_source                                          # noqa: E402
-
-FAILURES = []
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _assert_no_check_failures():
-    """
-    🔴 2026-08-21 발견 — `check()`는 실패를 `FAILURES`에 기록만 하고, 그 목록을 실제로
-    검사해서 죽는 코드는 파일 맨 아래 `if __name__ == "__main__": main()` 안에만 있었습니다.
-    이 파일의 모든 검증은 pytest로 돌려왔는데, pytest는 `main()`을 절대 부르지 않으므로
-    `check()` 실패가 있어도 각 `test_*` 함수는 스스로 실패하지 않았습니다 — 이 파일의
-    배선·렌더 스모크 검사가 그동안 pytest 상에서는 항상 초록불이었다는 뜻입니다
-    (2026-08-21, 결투다! USD 화면 작업 중 발견).
-
-    그래서 매 테스트 앞뒤로 `FAILURES`의 증가분을 직접 확인해 pytest에서도 똑같이
-    실패하게 만듭니다. 기존 `test_*` 함수는 한 줄도 안 고쳤습니다 — 이 fixture 하나가
-    파일 안의 모든 테스트에 자동 적용됩니다(pytest의 `autouse` 규약).
-    """
-    start = len(FAILURES)
-    yield
-    new_failures = FAILURES[start:]
-    assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
-
-
-
-def check(condition, label, detail=""):
-    if condition:
-        print(f"  ✅ {label}")
-    else:
-        print(f"  ❌ {label} {detail}")
-        FAILURES.append(label)
 
 
 # =============================================================================

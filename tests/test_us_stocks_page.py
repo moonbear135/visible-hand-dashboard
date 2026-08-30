@@ -25,7 +25,13 @@ import asyncio
 import os
 import sys
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# 저장소 루트를 `sys.path` 에 얹는 일과, 무음 통과 방지 하네스(FAILURES 목록 · check() ·
+# autouse 픽스처)는 파일마다 복사하지 않고 `tests/conftest.py` 한 곳에만 둡니다
+# (2026-08-30 — TASK_HISTORY #168 H-1 "복사 하나 빠뜨림" 재발 방지). 이 import 가 conftest 를
+# 먼저 불러오므로 `python tests/test_x.py` 직접 실행 경로에서도 아래 import 들이 정상 동작하고,
+# check() 실패를 pytest 빨간불로 승격시키는 `_assert_no_check_failures` 픽스처는 conftest 의
+# autouse 라 이 파일의 모든 테스트에 자동 적용됩니다(이 파일에 따로 쓸 것이 없습니다).
+from conftest import FAILURES, check  # noqa: E402
 
 from utils.constants_us import (
     US_FAILED_TICKERS_BANNER_RATIO,
@@ -49,39 +55,6 @@ from web.pages.us_stocks_page import (
     compute_stale_days,
     select_badges_for_preset,
 )
-
-FAILURES = []
-
-import pytest
-
-
-@pytest.fixture(autouse=True)
-def _assert_no_check_failures():
-    """
-    🔴 2026-08-30 재감사(테스트 스위트) H-1 — 이 파일만 다른 `check()`/`FAILURES` 파일들과
-    달리 이 안전장치가 없었습니다. `check()`는 실패를 `FAILURES`에 기록만 하고, 그 목록을
-    실제로 검사해서 죽는 코드는 파일 맨 아래 `test_us_stocks_page_full_suite()`가 모든
-    `test_*` 함수를 다시 불러 모은 뒤에만 있었습니다. 그래서 파일 전체를 한 번에 돌리면
-    (`full_suite`가 우연히 뒤에서 다시 검사해) 잡히지만, `pytest tests/test_us_stocks_page.py
-    -k test_s2`처럼 개별 함수만 선택 실행하면 내부 `check()` 실패가 조용히 사라지고
-    pytest가 초록불을 냈습니다(`tests/test_data_source.py`의 2026-08-21 발견과 같은 부류의
-    버그 — 8개 파일은 이미 이 fixture로 고쳐져 있었는데 이 파일만 빠져 있었습니다).
-
-    그래서 매 테스트 앞뒤로 `FAILURES`의 증가분을 직접 확인해 개별 실행에서도 똑같이
-    실패하게 만듭니다. 기존 `test_*` 함수는 한 줄도 안 고쳤습니다.
-    """
-    start = len(FAILURES)
-    yield
-    new_failures = FAILURES[start:]
-    assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
-
-
-def check(cond, msg):
-    if not cond:
-        FAILURES.append(msg)
-        print(f"  ❌ {msg}")
-    else:
-        print(f"  ✅ {msg}")
 
 
 # =============================================================================
