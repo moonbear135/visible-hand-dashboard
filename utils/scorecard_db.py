@@ -196,6 +196,12 @@ def format_amount(value, currency, decimals=None):
         number = float(value)
     except (TypeError, ValueError):
         return "—"
+    if not math.isfinite(number):
+        # 2026-08-30(#175/#178) — NaN·Infinity 방어. 현재 실데이터로는 재현되지 않지만,
+        # `_positive_number()`가 이미 같은 가드를 쓰고 있는 계산 계층과 달리 이 표시
+        # 계층엔 없었습니다. float(value)가 "nan"/"inf" 문자열도 성공적으로 파싱하는
+        # 파이썬 특성상, 값이 없을 때와 똑같이 "—"로 표시합니다(0원처럼 지어내지 않음).
+        return "—"
     if currency == CURRENCY_KRW:
         digits = 0 if decimals is None else decimals
         if digits == 0:

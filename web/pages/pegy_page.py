@@ -40,6 +40,7 @@ def _kst_today_str() -> str:
     """
     return (datetime.now(KST) if KST else datetime.now()).strftime('%Y%m%d')
 
+from utils.constants import GROWTH_CAP_PCT, SH_RETURN_CAP_PCT, GEFF_TOTAL_CAP_PCT
 from utils.db import COL_MAP, HISTORY_FILE
 from utils.guardrail import apply_valuation_guardrail
 from utils.stock_history import (
@@ -282,6 +283,17 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         "PEGY 항목 점수만 보수적으로 깎았습니다.<br>목표가·적정가 갭은 원래 성장률 그대로 계산되어 "
         "있으니(점수만 영향, 값 자체는 건드리지 않음) 함께 참고하세요.",
     ) if s.get("growth_score_capped") else ""
+
+    # 2026-08-30(#176/#178) — 실효성장률(g_eff) 2중 캡(SPEC §5-1). 위 배지와는 다른 캡입니다 —
+    # 저건 "점수만" 보수화하는 것이고, 이건 목표가·f_pegy 계산에 실제로 쓰이는 값 자체가
+    # 상한에 걸렸다는 뜻입니다(미국 페이지의 "🧮 상한 적용값" 배지와 동일한 취지).
+    g_eff_capped_badge_html = warn_badge(
+        "🧮 상한 적용값",
+        f"실효성장률이 상한(성장률 {GROWTH_CAP_PCT:.0f}%p / "
+        f"주주환원 {SH_RETURN_CAP_PCT:.0f}%p / "
+        f"합계 {GEFF_TOTAL_CAP_PCT:.0f}%p)에 걸려 절단된 값입니다.<br>"
+        f"캡 미적용 원값: {esc(fmt_num(s.get('g_eff_uncapped'), '%p', 2))}",
+    ) if s.get("g_eff_capped") else ""
 
     # 착시 저평가 판정 기준은 화면마다 다릅니다(코스피는 Trailing ROE 단독 — ROIC 원천
     # 데이터를 수집하지 않으므로). 배지 모양만 공용 컴포넌트에서 가져옵니다.
@@ -563,7 +575,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
                         <span class="vh-tooltip" tabindex="0">예상 성장률 ℹ️<span class="vh-tooltiptext"><b>예상 EPS 성장률 (%)</b><br>네이버 '추정 EPS(컨센서스)' 와 'TTM EPS' 의 실제 증감률입니다.<br>둘 중 하나라도 수집되지 않으면 값을 만들지 않고 '데이터 없음'으로 둡니다.</span></span>
                     </div>
-                    <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}{growth_capped_badge_html}</div>
+                    <div style="font-size: 18px; font-weight: 800; color: #4ade80;">{growth_disp}{growth_capped_badge_html}{g_eff_capped_badge_html}</div>
                 </div>
                 <div>
                     <div class="comparison-box" style="margin-bottom: 8px; border-color: #38bdf8; width: 100%;">

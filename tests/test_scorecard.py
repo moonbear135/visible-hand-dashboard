@@ -381,6 +381,10 @@ def test_normalization():
           "원화 표기는 절사(마인드맵 예시 93,076원과 일치)")
     check(format_amount(223.96, CURRENCY_USD) == "$223.96", "달러 표기는 소수 2자리")
     check(format_amount(None, CURRENCY_KRW) == "—", "값이 없으면 0원이 아니라 —")
+    check(format_amount(float("nan"), CURRENCY_KRW) == "—",
+          "NaN도 0원/nan원이 아니라 값 없음과 동일하게 — (2026-08-30 #175/#178)")
+    check(format_amount(float("inf"), CURRENCY_USD) == "—", "Infinity도 동일하게 —")
+    check(format_amount(float("-inf"), CURRENCY_KRW) == "—", "음의 Infinity도 동일하게 —")
 
 
 # =============================================================================

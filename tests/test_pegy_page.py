@@ -99,6 +99,35 @@ def test_h4_dps_real_value_shows_amount():
     check("DPS 850원/주" in html, "실측값은 금액으로 표기")
 
 
+def test_geff_cap_badge_shown_when_capped():
+    """2026-08-30(#176/#178) — g_eff가 캡에 걸린 종목은 목표가·f_pegy가 캡 적용값으로
+    계산됐다는 사실이 화면에도 드러나야 합니다(미국 페이지의 "🧮 상한 적용값" 배지와 동일
+    취지). 이전 스냅샷에는 이 필드가 아예 없을 수 있으니(수집기 재실행 전) 필드가 없을 때는
+    조용히 배지가 안 뜨는지도 함께 확인합니다.
+
+    ⚠️ "🧮 상한 적용값" 라벨 문자열 자체는 목표가 캡(별개의 캡) 안내 툴팁의 설명 문장
+    안에도 항상 등장하므로("상한에 걸린 종목에는 옆에 '🧮 상한 적용값' 배지가 붙습니다"),
+    라벨만으로는 이 배지가 실제로 켜졌는지 판정할 수 없습니다 — g_eff 배지 툴팁에만 있는
+    고유 문구로 판정합니다."""
+    GEFF_BADGE_MARKER = "실효성장률이 상한(성장률"
+
+    html_capped = build_stock_card_html(
+        _base_stock(g_eff_capped=True, g_eff_uncapped=52.3), rank_num=1, admin=False
+    )
+    check(GEFF_BADGE_MARKER in html_capped, "캡이 걸리면 g_eff 배지가 뜸")
+    check("52.3" in html_capped, "캡 미적용 원값(52.3%p)이 배지 안에 그대로 보임")
+
+    html_not_capped = build_stock_card_html(
+        _base_stock(g_eff_capped=False), rank_num=1, admin=False
+    )
+    check(GEFF_BADGE_MARKER not in html_not_capped, "캡이 안 걸리면 g_eff 배지 없음")
+
+    # 필드 자체가 없는(옛 스냅샷) 경우 — .get()이 None을 돌려주므로 조용히 배지 없이 렌더.
+    html_missing_field = build_stock_card_html(_base_stock(), rank_num=1, admin=False)
+    check(GEFF_BADGE_MARKER not in html_missing_field,
+          "필드가 아예 없는 옛 스냅샷도 예외 없이 배지만 생략됨")
+
+
 def test_l6_negative_ev_ebitda_does_not_show_mna_payback_years():
     print("\n[L-6] EV/EBITDA 가 음수(적자)면 'M&A 원금회수기간'을 그리지 않음")
     s = _base_stock(ev_ebitda=-3.4)
