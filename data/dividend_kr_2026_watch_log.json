@@ -131,6 +131,63 @@
       "delta_raw_lines_appended": 28,
       "unexpected_report_regressions": [],
       "delta_out_dir": "data/cache/watch_delta"
+    },
+    {
+      "checked_at_kst": "2026-09-01T08:46:18.640956+09:00",
+      "date_range_checked": "20260831~20260831",
+      "matched_stock_codes": [
+        "0001A0",
+        "000370",
+        "000400",
+        "000540",
+        "000880",
+        "002220",
+        "040300",
+        "054090",
+        "082640",
+        "085620",
+        "088350",
+        "102370",
+        "102940",
+        "246710",
+        "398120",
+        "459510",
+        "900070",
+        "900110",
+        "900270",
+        "900300",
+        "900340"
+      ],
+      "matched_stock_codes_source": "호출부가 전달한 list.json 매칭 결과",
+      "replaced_stock_codes": [
+        "0001A0",
+        "000370",
+        "000400",
+        "000540",
+        "000880",
+        "002220",
+        "040300",
+        "054090",
+        "082640",
+        "085620",
+        "088350",
+        "102370",
+        "102940",
+        "246710",
+        "398120",
+        "459510",
+        "900070",
+        "900110",
+        "900300",
+        "900340"
+      ],
+      "added_stock_codes": [
+        "900270"
+      ],
+      "skipped_replacements": [],
+      "delta_raw_lines_appended": 42,
+      "unexpected_report_regressions": [],
+      "delta_out_dir": "data/cache/watch_delta"
     }
   ]
 }
