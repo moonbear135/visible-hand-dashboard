@@ -37,6 +37,7 @@ JSON 은 stdin)으로 실행해서 stdout("yes"/"no")만 봅니다. 검증 대�
 않는 초록불이 되기 때문입니다 — 그게 정확히 이 저장소가 세 번 겪은 결함의 모양입니다.
 """
 import json
+import os
 import subprocess
 import sys
 import textwrap
@@ -392,6 +393,293 @@ def test_output_is_exactly_yes_or_no():
     """
     assert run_window_check(payload(run_entry(2))) == "yes"
     assert run_window_check(payload()) == "no"
+
+
+
+# =====================================================================================
+# 4. 자동 재실행(workflow_dispatch) 호출부 — 가짜 `gh` 위에서 오프라인 실행 (2026-08-31)
+# =====================================================================================
+#
+# 배경: 워치독이 "알림만" 하던 것을 바꿔, 빠진 대상을 발견하면 그 자리에서 딱 한 번
+# workflow_dispatch 로 다시 돌리게 했습니다(2026-08-31). 이 호출부는 GitHub 에 실제
+# 부수효과(진짜 크롤링 워크플로우 발동)를 내기 때문에 로컬에서 진짜로 돌려볼 수 없습니다.
+# 그래서 `gh` 와 `date` 를 PATH 앞쪽의 가짜 실행파일로 갈아끼우고, **워크플로우의 첫 스텝
+# 셸 스크립트 자체**(사본이 아니라 YAML 에서 파싱해 꺼낸 프로덕션 코드 — §0-3-10)를 그
+# 위에서 통째로 실행해, 어떤 인자로 몇 번 호출이 나갔는지를 봅니다. 네트워크는 전혀 타지
+# 않습니다.
+#
+# 가짜 `gh` 는 GET `.../runs` 에 대해 **진짜 GitHub API 처럼 `event=` 쿼리 파라미터를
+# 그대로 적용**합니다. 그래서 아래 `..._auto_dispatch_run_counts_as_ran` 테스트는 쿼리에서
+# `event=schedule` 필터가 되살아나는 순간 빨간불이 됩니다 — 그 필터가 있으면 어제 자동
+# 재실행으로 성공한 것이 안 보여서 **매일 헛되이 재실행을 반복**하기 때문입니다.
+#
+# ⚠️ 여전히 검증하지 않는 것: "재실행이 진짜 성공했는지". 그건 이 기능의 책임이 아니고
+# (그러면 감시의 감시가 됩니다), 어차피 다음 날 이 워치독이 다시 판정합니다.
+
+_GH_STUB = r'''import json, os, sys
+from urllib.parse import urlparse, parse_qs
+
+args = sys.argv[1:]
+with open(os.environ["GH_CALL_LOG"], "a", encoding="utf-8") as fh:
+    fh.write(json.dumps(args) + "\n")
+
+# POST .../dispatches — 재실행 트리거. 종료코드는 테스트가 정합니다.
+if "-X" in args and "POST" in args:
+    sys.exit(int(os.environ.get("GH_DISPATCH_RC", "0")))
+
+# GET repos/<owner>/<repo>/actions/workflows/<FILE>/runs?...
+parsed = urlparse(args[1])
+wf_file = parsed.path.split("/actions/workflows/")[1].split("/runs")[0]
+runs = json.load(open(os.environ["GH_RUN_STATUS"], encoding="utf-8"))[wf_file]
+
+# 진짜 GitHub API 와 같게 event 필터를 적용합니다(쿼리에 있을 때만).
+events = parse_qs(parsed.query).get("event")
+if events:
+    runs = [r for r in runs if r.get("event") in events]
+
+print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
+'''
+
+_DATE_STUB = r'''import os, subprocess, sys
+
+args = sys.argv[1:]
+if args == ["-u", "+%s"]:
+    print(os.environ["FAKE_NOW_TS"])
+elif args == ["+%u"]:
+    print(os.environ["FAKE_DOW"])
+else:
+    sys.exit(subprocess.run(["/bin/date"] + args).returncode)
+'''
+
+# 워크플로우 헤더의 "확인 대상" 목록 및 스크립트 안 TARGETS 와 같은 순서.
+ALL_TARGETS = [
+    "scrape.yml",
+    "scrape_us.yml",
+    "indicator_kr.yml",
+    "scrape_report_snapshots.yml",
+    "duel_daily.yml",
+    "duel_daily_us.yml",
+    "scorecard_publish_daily.yml",
+    "watch_dividend_disclosures.yml",
+    "watch_dividend_payment_events.yml",
+]
+WEEKDAY_ONLY_TARGETS = ALL_TARGETS[:5]
+DAILY_TARGETS = ALL_TARGETS[5:]
+
+REPO_SLUG = "moonbear135/visible-hand-dashboard"
+
+
+def load_check_step_script():
+    """워크플로우 첫 스텝(`감시대상 스케줄 확인`)의 셸 스크립트를 YAML 에서 그대로 꺼냅니다."""
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음 — 스텝 스크립트를 꺼낼 수 없음")
+    doc = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    script = doc["jobs"]["check"]["steps"][0]["run"]
+    if "dispatches" not in script:
+        raise _MarkerNotFound(
+            "첫 스텝 스크립트 안에서 재실행 호출부(`.../dispatches`)를 못 찾았습니다.\n"
+            "  누군가 자동 재실행을 지웠거나 다른 스텝으로 옮겼다면, 아래 검사들이 조용히\n"
+            "  아무것도 검증하지 않는 초록불이 되므로 여기서 명시적으로 실패시킵니다."
+        )
+    return script
+
+
+def _write_stub(path, body):
+    path.write_text("#!" + sys.executable + "\n" + body, encoding="utf-8")
+    path.chmod(0o755)
+
+
+def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=4):
+    """
+    가짜 `gh`/`date` 위에서 첫 스텝 스크립트를 통째로 실행합니다(네트워크 없음).
+
+    `run_status` 는 {워크플로우 파일명: [실행 항목, ...]} — 가짜 `gh` 가 그대로 돌려줍니다.
+    `dow` 는 KST 요일(1=월 ... 7=일), `dispatch_rc` 는 재실행 트리거의 종료코드입니다.
+    반환값은 (CompletedProcess, gh 호출 인자 목록, GITHUB_OUTPUT 내용).
+    """
+    script = load_check_step_script()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir / "gh", _GH_STUB)
+    _write_stub(bin_dir / "date", _DATE_STUB)
+
+    status_path = tmp_path / "run_status.json"
+    status_path.write_text(json.dumps(run_status), encoding="utf-8")
+    call_log = tmp_path / "gh_calls.jsonl"
+    call_log.write_text("", encoding="utf-8")
+    gh_output = tmp_path / "github_output"
+    gh_output.write_text("", encoding="utf-8")
+
+    env = dict(os.environ)
+    env.update(
+        PATH=f"{bin_dir}{os.pathsep}{env['PATH']}",
+        REPO=REPO_SLUG,
+        GH_TOKEN="fake-token-not-used",
+        GITHUB_OUTPUT=str(gh_output),
+        GH_CALL_LOG=str(call_log),
+        GH_RUN_STATUS=str(status_path),
+        GH_DISPATCH_RC=str(dispatch_rc),
+        FAKE_NOW_TS=str(NOW_TS),
+        FAKE_DOW=str(dow),
+    )
+
+    proc = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=120
+    )
+    calls = [
+        json.loads(line)
+        for line in call_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return proc, calls, gh_output.read_text(encoding="utf-8")
+
+
+def dispatch_calls(calls):
+    """가짜 `gh` 호출 중 재실행 트리거(POST .../dispatches)만 골라냅니다."""
+    return [c for c in calls if "-X" in c and "POST" in c]
+
+
+def expected_dispatch_args(wf_file):
+    """이 파일 하나를 재실행할 때 나가야 하는 `gh` 인자 — 글자 그대로."""
+    return [
+        "api",
+        "-X",
+        "POST",
+        f"repos/{REPO_SLUG}/actions/workflows/{wf_file}/dispatches",
+        "-f",
+        "ref=main",
+    ]
+
+
+def status_map(ok_files, missing_files, event="schedule"):
+    """window 안 성공(ok) / 실행 기록 없음(missing) 으로 가짜 API 응답을 만듭니다."""
+    status = {f: [dict(run_entry(2), event=event)] for f in ok_files}
+    status.update({f: [] for f in missing_files})
+    return status
+
+
+def test_missing_targets_are_each_redispatched_exactly_once(tmp_path):
+    """
+    빠진 대상마다 **정확히 한 번씩**, 정확한 인자로 재실행 호출이 나가야 합니다.
+    (여러 번 나가면 같은 크롤링을 중복 발동시키고, 인자가 한 글자만 어긋나도 아무 일도
+    안 일어나면서 이슈에는 '재실행 트리거함'이라고 적히게 됩니다.)
+    """
+    missing = ["scrape.yml", "indicator_kr.yml"]
+    ok = [f for f in ALL_TARGETS if f not in missing]
+    proc, calls, output = run_check_step(tmp_path, status_map(ok, missing), dow=4)
+
+    assert proc.returncode == 0, (
+        f"스텝이 죽었습니다.\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+    )
+    posts = dispatch_calls(calls)
+    assert posts == [expected_dispatch_args(f) for f in missing], (
+        f"재실행 호출이 기대와 다릅니다.\n실제: {posts}\n"
+        f"기대: {[expected_dispatch_args(f) for f in missing]}"
+    )
+    assert "has_failures=true" in output, output
+    for f in missing:
+        assert f"- {f} (자동 재실행 트리거함)" in output, output
+
+
+def test_healthy_targets_are_never_redispatched(tmp_path):
+    """
+    전부 정상이면 재실행 호출이 **단 한 건도** 나가면 안 됩니다 — 여기서 새면 워치독이
+    매일 아침 멀쩡한 크롤링 9개를 통째로 다시 돌리게 됩니다.
+    """
+    proc, calls, output = run_check_step(tmp_path, status_map(ALL_TARGETS, []), dow=4)
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], f"정상인데 재실행이 나갔습니다: {dispatch_calls(calls)}"
+    assert "has_failures=false" in output, output
+
+
+def test_dispatch_failure_is_reported_as_such(tmp_path):
+    """
+    재실행 트리거 자체가 실패하면(예: actions 권한 부족·API 오류) 이슈 문구가 '자동
+    재실행도 실패' 쪽으로 정확히 갈라져야 합니다 — 실패를 '걸어놨음'으로 위장하면
+    사람이 손댈 타이밍을 놓칩니다(§0-1).
+    """
+    missing = ["scrape.yml"]
+    ok = [f for f in ALL_TARGETS if f not in missing]
+    proc, calls, output = run_check_step(
+        tmp_path, status_map(ok, missing), dispatch_rc=1, dow=4
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")]
+    assert "- scrape.yml (자동 재실행도 실패 — 수동 확인 필요)" in output, output
+    assert "자동 재실행 트리거함" not in output, output
+
+
+def test_yesterdays_auto_dispatch_run_counts_as_ran(tmp_path):
+    """
+    ⭐ 이 변경의 핵심 — 어제 워치독이 건 자동 재실행이 성공했다면 그 실행의 event 는
+    `workflow_dispatch` 입니다. 조회 쿼리에 `event=schedule` 필터가 남아 있으면 그게 안
+    보여서 오늘도 '성공 없음'으로 판정되고 **매일 헛되이 재실행을 반복**합니다.
+    (가짜 `gh` 가 진짜 API 처럼 event 필터를 적용하므로, 필터가 되살아나는 순간 빨간불.)
+    """
+    proc, calls, output = run_check_step(
+        tmp_path, status_map(ALL_TARGETS, [], event="workflow_dispatch"), dow=4
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], (
+        "workflow_dispatch 로 성공한 실행을 못 보고 재실행을 또 걸었습니다 — 조회 쿼리에\n"
+        f"event 필터가 남아 있는지 확인하세요. 나간 호출: {dispatch_calls(calls)}"
+    )
+    assert "has_failures=false" in output, output
+
+
+def test_workflow_run_triggered_success_also_counts(tmp_path):
+    """
+    duel_daily.yml 은 2026-08-26 부터 scrape.yml 완료를 받는 `workflow_run` 이 주 트리거이고
+    cron 은 안전망입니다. event 를 안 가리므로 그 성공도 정상으로 세야 합니다.
+    """
+    status = status_map(ALL_TARGETS, [])
+    status["duel_daily.yml"] = [dict(run_entry(2), event="workflow_run")]
+    proc, calls, output = run_check_step(tmp_path, status, dow=4)
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+
+
+def test_weekend_skips_weekday_only_targets_entirely(tmp_path):
+    """
+    주말(토=6)에는 평일 전용 5개를 검사 자체에서 건너뜁니다 — 조회도, 재실행도 없어야
+    합니다(주말에 안 도는 게 정상인데 재실행을 걸면 매주 두 번씩 헛발동).
+    """
+    proc, calls, output = run_check_step(
+        tmp_path, status_map([], ALL_TARGETS), dow=6
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    for f in WEEKDAY_ONLY_TARGETS:
+        assert all(f not in " ".join(c) for c in calls), f"{f} 를 주말에 건드렸습니다: {calls}"
+    assert dispatch_calls(calls) == [
+        expected_dispatch_args(f) for f in DAILY_TARGETS
+    ], dispatch_calls(calls)
+
+
+def test_monday_widened_window_applies_to_redispatch_decision(tmp_path):
+    """
+    월요일(=1)엔 평일 대상 창이 76시간으로 넓어집니다 — 지난 금요일 성공(72시간 전)이
+    있으면 재실행을 걸면 안 됩니다(창이 30으로 좁아지면 월요일마다 5개가 헛발동).
+    """
+    status = {f: [dict(run_entry(72), event="schedule")] for f in WEEKDAY_ONLY_TARGETS}
+    status.update({f: [dict(run_entry(2), event="schedule")] for f in DAILY_TARGETS})
+    proc, calls, output = run_check_step(tmp_path, status, dow=1)
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+
+
+def test_permissions_grant_actions_write():
+    """재실행 API(POST .../dispatches)에는 `actions: write` 권한이 필요합니다."""
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음")
+    doc = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    assert doc["permissions"].get("actions") == "write", doc["permissions"]
 
 
 def main():
