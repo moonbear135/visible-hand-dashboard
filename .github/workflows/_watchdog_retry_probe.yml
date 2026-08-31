@@ -1,0 +1,19 @@
+name: (TEMP) Watchdog Retry Probe
+
+# ⚠️ 이 파일은 #184 자동 재실행(self-healing) 기능의 실전 확인 전용 임시
+# 워크플로우입니다. 확인 끝나면 삭제합니다(main에 계속 남기지 않음).
+#
+# 의도적으로 workflow_dispatch 외의 트리거가 전혀 없습니다 — push/schedule
+# 트리거가 하나라도 있으면 이 파일 자체가 커밋될 때(또는 매일 자동으로) 실행
+# 기록이 남아버려서, watch_schedule_health.yml이 "누락" 상태를 인위적으로
+# 재현하는 테스트 대상으로 쓸 수 없게 됩니다. 이 워크플로우는 실행돼도
+# echo 한 줄뿐이라 외부 사이트 요청도, 데이터 변경도 전혀 없습니다.
+
+on:
+  workflow_dispatch: {}
+
+jobs:
+  noop:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo "이 워크플로우는 #184 자동 재실행 기능 실전 확인용 임시 프로브입니다. 실제 데이터/사이트에 아무 영향 없습니다."
