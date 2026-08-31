@@ -1,0 +1,99 @@
+{
+  "baseline_date": null,
+  "baseline_row_count": null,
+  "checks": [
+    {
+      "detail": "수집 결과 500건.",
+      "field": null,
+      "name": "row_count_empty",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": null,
+      "name": "row_count_drop",
+      "status": "skipped"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": null,
+      "name": "row_count_surge",
+      "status": "skipped"
+    },
+    {
+      "detail": "'rsi' 결측·0 비율 0.0%.",
+      "field": "rsi",
+      "name": "unusable_ratio",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "rsi",
+      "name": "unusable_ratio_jump",
+      "status": "skipped"
+    },
+    {
+      "detail": "'rsi' 서로 다른 값 457개.",
+      "field": "rsi",
+      "name": "constant_value",
+      "status": "pass"
+    },
+    {
+      "detail": "'rsi' 은 수준 비교 대상 컬럼이 아닙니다(호출부 level_fields 미지정).",
+      "field": "rsi",
+      "name": "median_shift",
+      "status": "skipped"
+    },
+    {
+      "detail": "'bb_mid' 결측·0 비율 0.0%.",
+      "field": "bb_mid",
+      "name": "unusable_ratio",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "bb_mid",
+      "name": "unusable_ratio_jump",
+      "status": "skipped"
+    },
+    {
+      "detail": "'bb_mid' 서로 다른 값 497개.",
+      "field": "bb_mid",
+      "name": "constant_value",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "bb_mid",
+      "name": "median_shift",
+      "status": "skipped"
+    }
+  ],
+  "dataset": "indicator_kr",
+  "generated_at_kst": "2026-08-31T21:19:38.869273+09:00",
+  "probe": {
+    "fields": {
+      "bb_mid": {
+        "distinct_count": 497,
+        "median": 32057.5,
+        "missing_count": 0,
+        "numeric_count": 500,
+        "zero_count": 0
+      },
+      "rsi": {
+        "distinct_count": 457,
+        "median": 53.935,
+        "missing_count": 0,
+        "numeric_count": 500,
+        "zero_count": 0
+      }
+    },
+    "row_count": 500
+  },
+  "reason": "기준값이 없어 어제 대비 비교를 하지 않았습니다. 기준값 없이도 가능한 검사 5건은 통과했습니다. (첫 실행이면 내일부터 어제 대비 비교가 시작됩니다.)",
+  "reasons": [],
+  "row_count": 500,
+  "status": "no_baseline",
+  "target_date": "2026-08-31",
+  "version": 1
+}
