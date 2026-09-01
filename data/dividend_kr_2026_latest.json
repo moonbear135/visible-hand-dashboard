@@ -1,15 +1,15 @@
 {
   "summary": {
-    "generated_at_kst": "2026-09-01T08:46:18.644345+09:00",
+    "generated_at_kst": "2026-09-02T07:28:38.730637+09:00",
     "total_records": 2590,
     "by_status": {
       "OK": 2482,
       "NO_DATA": 108
     },
     "by_report_used": {
-      "반기보고서": 2448,
+      "반기보고서": 2449,
       "3분기보고서": 17,
-      "1분기보고서": 17
+      "1분기보고서": 16
     },
     "ok_with_common_dps": 148,
     "ok_without_common_dps": 2334,
@@ -905,89 +905,45 @@
     "bsns_year": "2026",
     "universe_size_input": 2735,
     "universe_size": 2735,
-    "requests_used": 5364,
-    "elapsed_sec": 18462.8,
+    "requests_used": 5368,
+    "elapsed_sec": 18485.399999999998,
     "completed": false,
-    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.))",
+    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.)))",
     "corpcode_source": "network",
     "corpcode_stats": {
-      "total_entries": 118819,
+      "total_entries": 118821,
       "listed_entries": 3988,
-      "unlisted_entries": 114831,
+      "unlisted_entries": 114833,
       "malformed_stock_codes": [],
       "duplicates": [],
       "invalid_entries": 0,
-      "total_list_nodes": 118819
+      "total_list_nodes": 118821
     },
-    "watch_update_performed_at_kst": "2026-09-01T08:46:18.640956+09:00",
-    "watch_date_range_checked": "20260831~20260831",
+    "watch_update_performed_at_kst": "2026-09-02T07:28:38.728061+09:00",
+    "watch_date_range_checked": "20260901~20260901",
     "watch_replaced_stock_codes": [
-      "0001A0",
-      "000370",
-      "000400",
-      "000540",
-      "000880",
-      "002220",
-      "040300",
-      "054090",
-      "082640",
-      "085620",
-      "088350",
-      "102370",
-      "102940",
-      "246710",
-      "398120",
-      "459510",
-      "900070",
-      "900110",
-      "900300",
-      "900340"
+      "001470",
+      "305090"
     ],
-    "watch_added_stock_codes": [
-      "900270"
-    ],
+    "watch_added_stock_codes": [],
     "watch_skipped_replacements": [],
     "watch_unexpected_report_regressions": [],
-    "watch_filings_outside_universe": [
-      "002550",
-      "404990"
-    ],
+    "watch_filings_outside_universe": [],
     "watch_delta_summary": {
-      "generated_at_kst": "2026-09-01T08:46:18.397092+09:00",
-      "total_records": 21,
+      "generated_at_kst": "2026-09-02T07:28:38.486169+09:00",
+      "total_records": 2,
       "by_status": {
-        "OK": 21
+        "OK": 2
       },
       "by_report_used": {
-        "반기보고서": 21
+        "반기보고서": 2
       },
       "ok_with_common_dps": 0,
-      "ok_without_common_dps": 21,
+      "ok_without_common_dps": 2,
       "unmapped_stock_codes": 0,
       "unmapped_detail": [],
       "unknown_se_labels": [],
-      "records_with_parse_notes": [
-        {
-          "stock_code": "000370",
-          "corp_name": "한화손해보험",
-          "notes": [
-            "알 수 없는 주식종류 '종류주식' (항목: 현금배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주식배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 현금배당금(원)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 주식배당(주)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다."
-          ]
-        },
-        {
-          "stock_code": "000400",
-          "corp_name": "롯데손해보험",
-          "notes": [
-            "알 수 없는 주식종류 '종류주식' (항목: 현금배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주식배당수익률(%)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 현금배당금(원)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다.",
-            "알 수 없는 주식종류 '종류주식' (항목: 주당 주식배당(주)) — 보통주/우선주 어느 쪽으로도 넣지 않았습니다."
-          ]
-        }
-      ],
+      "records_with_parse_notes": [],
       "records_with_unit_mismatch": 0,
       "stock_codes_with_unit_mismatch": [],
       "records_with_cross_source_mismatch": 0,
@@ -997,9 +953,9 @@
       "name_fallback_attempted": true,
       "name_fallback_universe_names": 2734,
       "name_fallback_index_stats": {
-        "total_entries": 118819,
-        "total_named_entries": 118819,
-        "named_entries": 110945,
+        "total_entries": 118821,
+        "total_named_entries": 118821,
+        "named_entries": 110948,
         "unnamed_entries": 0,
         "duplicate_names": [
           {
@@ -12773,7 +12729,7 @@
             "chosen": {
               "corp_code": "02045715",
               "corp_name": "대일산업",
-              "modify_date": "20260831"
+              "modify_date": "20260901"
             },
             "dropped": [
               {
@@ -64112,22 +64068,6 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
-            "corp_name": "에스엘케이",
-            "chosen": {
-              "corp_code": "01436840",
-              "corp_name": "에스엘케이",
-              "modify_date": "20260512"
-            },
-            "dropped": [
-              {
-                "corp_code": "01379679",
-                "corp_name": "에스엘케이",
-                "modify_date": "20190508"
-              }
-            ],
-            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
-          },
-          {
             "corp_name": "꿈",
             "chosen": {
               "corp_code": "01352201",
@@ -101078,27 +101018,27 @@
         "corp_cls 값은 삼성전자의 'Y' 외에는 실제 응답으로 확인하지 못했습니다."
       ],
       "bsns_year": "2026",
-      "universe_size_input": 21,
-      "universe_size": 21,
+      "universe_size_input": 2,
+      "universe_size": 2,
       "reprt_priority_used": [
         "11014",
         "11012",
         "11013"
       ],
       "skip_not_yet_due": false,
-      "requests_used": 42,
-      "elapsed_sec": 372.1,
+      "requests_used": 4,
+      "elapsed_sec": 22.6,
       "completed": true,
       "stopped_reason": null,
       "corpcode_source": "network",
       "corpcode_stats": {
-        "total_entries": 118819,
+        "total_entries": 118821,
         "listed_entries": 3988,
-        "unlisted_entries": 114831,
+        "unlisted_entries": 114833,
         "malformed_stock_codes": [],
         "duplicates": [],
         "invalid_entries": 0,
-        "total_list_nodes": 118819
+        "total_list_nodes": 118821
       },
       "limit_applied": null,
       "cross_source_baseline_path": null,
@@ -101109,7 +101049,7 @@
       "checkpoint_write_failures": 0,
       "verification_status": "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. 첫 GitHub Actions 실행 로그로 반드시 확인하세요."
     },
-    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 20종목을 최신 보고서로 교체하고 1종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
+    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 2종목을 최신 보고서로 교체하고 0종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
   },
   "records": [
     {
@@ -123695,7 +123635,6 @@
       "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814004299",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
-      "dps_cash_unspecified": null,
       "dps_cash_common_all": [],
       "dps_cash_preferred_all": [],
       "dps_stock_common": null,
@@ -123722,12 +123661,20 @@
       "cross_source_notes": [],
       "status": "OK",
       "status_reason": "반기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-29T12:20:08.807023+09:00",
+      "collected_at_kst": "2026-09-02T07:28:29.643034+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
+      "dps_cash_unspecified": null,
+      "dps_cash_unspecified_all": [],
+      "dps_stock_unspecified": null,
+      "dps_stock_unspecified_all": [],
+      "cash_yield_unspecified": null,
+      "cash_yield_unspecified_all": [],
+      "stock_yield_unspecified": null,
+      "stock_yield_unspecified_all": [],
       "probe_log": [
         {
           "reprt_code": "11014",
@@ -187324,14 +187271,13 @@
       "corp_cls": "K",
       "market": "코스닥시장",
       "bsns_year": "2026",
-      "reprt_code": "11013",
-      "reprt_name": "1분기보고서",
-      "stlm_dt": "2026-03-31",
-      "rcept_no": "20260529002369",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260529002369",
+      "reprt_code": "11012",
+      "reprt_name": "반기보고서",
+      "stlm_dt": "2026-06-30",
+      "rcept_no": "20260831001550",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260831001550",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
-      "dps_cash_unspecified": null,
       "dps_cash_common_all": [],
       "dps_cash_preferred_all": [],
       "dps_stock_common": null,
@@ -187345,9 +187291,9 @@
       "cash_total_mkrw": null,
       "stock_total_mkrw": null,
       "par_value": 500.0,
-      "eps": -229.0,
+      "eps": -663.0,
       "eps_basis": "연결",
-      "net_income_mkrw": -4264.0,
+      "net_income_mkrw": -12333.0,
       "net_income_basis": "연결",
       "prev_dps_cash_common": null,
       "prev_cash_yield_common": null,
@@ -187357,13 +187303,21 @@
       "prev2_payout_ratio": null,
       "cross_source_notes": [],
       "status": "OK",
-      "status_reason": "1분기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-29T14:18:35.764370+09:00",
+      "status_reason": "반기보고서 기준 누적치",
+      "collected_at_kst": "2026-09-02T07:28:35.653482+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
+      "dps_cash_unspecified": null,
+      "dps_cash_unspecified_all": [],
+      "dps_stock_unspecified": null,
+      "dps_stock_unspecified_all": [],
+      "cash_yield_unspecified": null,
+      "cash_yield_unspecified_all": [],
+      "stock_yield_unspecified": null,
+      "stock_yield_unspecified_all": [],
       "probe_log": [
         {
           "reprt_code": "11014",
@@ -187373,12 +187327,6 @@
         },
         {
           "reprt_code": "11012",
-          "status": "013",
-          "usable": false,
-          "why": "조회된 데이터가 없습니다(status 013) — 그 보고서가 없거나 배당 표가 없음."
-        },
-        {
-          "reprt_code": "11013",
           "status": "000",
           "usable": true,
           "why": "배당 항목 15행 확인"
