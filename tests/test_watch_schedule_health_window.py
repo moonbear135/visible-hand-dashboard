@@ -63,8 +63,42 @@ END_MARKER = '\' "$NOW_TS" "$WINDOW_HOURS")'
 # 워크플로우가 실행 목록을 읽어 들일 때 쓰는 시각 형식(GitHub API `created_at`).
 GH_TIME_FMT = "%Y-%m-%dT%H:%M:%SZ"
 
-# 테스트 기준 시각 — 2026-08-30 09:00 KST(= 00:00 UTC), 이 워치독의 실제 cron 발동 시각.
-NOW_TS = 1756512000
+def kst_ts(year, month, day, hour, minute=0):
+    """KST(=UTC+9, 한국은 1988년 이후 서머타임 없음) 벽시계 시각 → epoch 초.
+
+    ⚠️ 예전에는 여기에 epoch 숫자를 손으로 적어 뒀는데(`NOW_TS = 1756512000`), 그 값은
+       주석이 말하는 2026-08-30 이 아니라 **2025-08-30(토)** 이었습니다 — 사람이 못 알아채는
+       종류의 어긋남입니다. 이제 날짜를 그대로 적고 계산하게 해서 그 어긋남 자체를 없앱니다.
+    """
+    import datetime
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    return int(datetime.datetime(year, month, day, hour, minute, tzinfo=tz).timestamp())
+
+
+def kst_dow(ts):
+    """epoch 초 → KST 기준 요일(1=월 ... 7=일). 워크플로우의 `TZ=Asia/Seoul date +%u` 와 같은 값."""
+    import datetime
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    return datetime.datetime.fromtimestamp(ts, tz).isoweekday()
+
+
+# 테스트 기준 시각 — 2026-09-01(화) 18:00 KST = 09:00 UTC.
+# 2026-09-01 은 오너가 이 허점을 실전에서 발견한 날이고, 18:00 KST 는 그 결과 바뀐
+# **이 워치독의 실제 cron 발동 시각**(cron '0 9 * * *')입니다. 즉 기본값이 곧 "실전에서
+# 이 스크립트가 도는 바로 그 순간"입니다.
+NOW_TS = kst_ts(2026, 9, 1, 18, 0)
+
+# ── 장중/장마감 경계 시각들 (2026-09-01 추가) ────────────────────────────────
+# 한국 증시 정규장은 평일 09:00~15:30 KST. 워크플로우는 이 구간이면 자동 재실행(POST)을
+# 아예 걸지 않습니다. 아래 값들로 그 경계를 양쪽에서 못 박습니다.
+TS_TUE_MARKET_MIDDAY = kst_ts(2026, 9, 1, 11, 0)    # 화 11:00 — 한복판
+TS_TUE_MARKET_OPEN   = kst_ts(2026, 9, 1, 9, 0)     # 화 09:00 정각 — 개장(포함)
+TS_TUE_MARKET_CLOSE  = kst_ts(2026, 9, 1, 15, 30)   # 화 15:30 정각 — 마감(포함)
+TS_TUE_BEFORE_OPEN   = kst_ts(2026, 9, 1, 8, 59)    # 화 08:59 — 개장 1분 전(장중 아님)
+TS_TUE_AFTER_CLOSE   = kst_ts(2026, 9, 1, 15, 31)   # 화 15:31 — 마감 1분 후(장중 아님)
+TS_SAT_MIDDAY        = kst_ts(2026, 9, 5, 11, 0)    # 토 11:00 — 시각은 장중대지만 휴장
+TS_MON_AFTER_CLOSE   = kst_ts(2026, 9, 7, 18, 0)    # 월 18:00 — 월요일 76시간 창 검증용
+
 HOUR = 3600
 
 
@@ -141,12 +175,18 @@ def run_window_check(runs_payload, now_ts=NOW_TS, window_hours=30):
     return proc.stdout.strip()
 
 
-def run_entry(hours_ago, conclusion="success"):
-    """`hours_ago` 시간 전에 만들어진 실행 한 건(GitHub API 응답 모양 그대로)."""
+def run_entry(hours_ago, conclusion="success", now_ts=None):
+    """`hours_ago` 시간 전에 만들어진 실행 한 건(GitHub API 응답 모양 그대로).
+
+    `now_ts` 를 주면 그 시각 기준으로 계산합니다 — 장중/장마감 시나리오처럼 기준 시각을
+    옮겨 가며 돌리는 검사에서, 실행 기록만 옛 기준(NOW_TS)에 남아 창 밖으로 밀려나는
+    일이 없도록 하기 위한 것입니다.
+    """
     import datetime
 
+    base = NOW_TS if now_ts is None else now_ts
     created = datetime.datetime.fromtimestamp(
-        NOW_TS - hours_ago * HOUR, tz=datetime.timezone.utc
+        base - hours_ago * HOUR, tz=datetime.timezone.utc
     )
     return {
         "created_at": created.strftime(GH_TIME_FMT),
@@ -427,6 +467,14 @@ with open(os.environ["GH_CALL_LOG"], "a", encoding="utf-8") as fh:
 if "-X" in args and "POST" in args:
     sys.exit(int(os.environ.get("GH_DISPATCH_RC", "0")))
 
+# `gh issue create ...` — 두 번째 스텝(이슈 알림)이 부릅니다. 실제 이슈를 만들 수는 없으니
+# 호출 인자만 위 로그에 남기고(=본문 전문이 그대로 남습니다) 성공한 척 끝냅니다.
+# ⚠️ 이 분기가 없으면 아래 URL 파싱이 "create" 를 API 경로로 오해해 스텁이 죽습니다 —
+#    그러면 테스트가 검증하려던 본문이 아니라 스텁의 사고를 보게 됩니다.
+if args and args[0] == "issue":
+    print("https://github.com/%s/issues/1" % os.environ.get("REPO", "owner/repo"))
+    sys.exit(0)
+
 # GET repos/<owner>/<repo>/actions/workflows/<FILE>/runs?...
 parsed = urlparse(args[1])
 wf_file = parsed.path.split("/actions/workflows/")[1].split("/runs")[0]
@@ -440,13 +488,31 @@ if events:
 print(json.dumps({"total_count": len(runs), "workflow_runs": runs}))
 '''
 
-_DATE_STUB = r'''import os, subprocess, sys
+# 가짜 `date` — "지금"을 테스트가 완전히 통제합니다.
+#
+#   FAKE_NOW_TS : `date -u +%s` 가 돌려줄 epoch 초. 워크플로우는 이 값 하나에서
+#                 (a) window 판정의 기준 시각과 (b) **장중 여부**(KST 분 환산)를 둘 다
+#                 계산하므로, 이 환경변수 하나로 "가짜 현재 시각이 장중인가/장마감 후인가"가
+#                 정해집니다(2026-09-01 — 별도의 FAKE_HHMM 을 두지 않은 이유가 그것입니다.
+#                 두 개를 따로 두면 서로 어긋난 상태로도 테스트가 통과해 버립니다).
+#   FAKE_DOW    : `TZ=Asia/Seoul date +%u` 가 돌려줄 KST 요일(1=월 ... 7=일).
+#                 `run_check_step()` 은 기본적으로 FAKE_NOW_TS 에서 이 값을 **계산해서**
+#                 넘기므로 둘이 어긋나지 않습니다(주말 검사처럼 일부러 어긋내고 싶을 때만
+#                 `dow=` 로 직접 지정).
+#
+# 이슈 스텝이 제목에 쓰는 `TZ=Asia/Seoul date '+%Y-%m-%d %H:%M'` 도 FAKE_NOW_TS 에서
+# 만들어 줍니다 — 진짜 시계로 새면 같은 테스트가 실행 시각에 따라 다른 값을 보게 됩니다.
+_DATE_STUB = r'''import datetime, os, subprocess, sys
 
 args = sys.argv[1:]
 if args == ["-u", "+%s"]:
     print(os.environ["FAKE_NOW_TS"])
 elif args == ["+%u"]:
     print(os.environ["FAKE_DOW"])
+elif len(args) == 1 and args[0].startswith("+") and os.environ.get("TZ") == "Asia/Seoul":
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    moment = datetime.datetime.fromtimestamp(int(os.environ["FAKE_NOW_TS"]), tz)
+    print(moment.strftime(args[0][1:]))
 else:
     sys.exit(subprocess.run(["/bin/date"] + args).returncode)
 '''
@@ -480,6 +546,31 @@ def load_check_step_script():
             "  누군가 자동 재실행을 지웠거나 다른 스텝으로 옮겼다면, 아래 검사들이 조용히\n"
             "  아무것도 검증하지 않는 초록불이 되므로 여기서 명시적으로 실패시킵니다."
         )
+    if "MARKET_HOURS" not in script:
+        raise _MarkerNotFound(
+            "첫 스텝 스크립트 안에서 장중 판정(`MARKET_HOURS`)을 못 찾았습니다"
+            " (2026-09-01 추가).\n"
+            "  이게 사라지면 워치독이 장중에도 자동 재실행을 걸게 되고, 그러면 백필이 안 되는\n"
+            "  수집기(collector_kospi200.py · collector_indicator_kr.py)가 장중 가격을 그날\n"
+            "  종가인 것처럼 저장합니다 — 아래 장중 검사들이 조용히 무의미해지지 않도록\n"
+            "  여기서 명시적으로 실패시킵니다."
+        )
+    return script
+
+
+def load_issue_step_script():
+    """두 번째 스텝(`이슈로 알림 + 잡 실패 처리`)의 셸 스크립트를 YAML 에서 그대로 꺼냅니다."""
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음 — 스텝 스크립트를 꺼낼 수 없음")
+    doc = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
+    steps = doc["jobs"]["check"]["steps"]
+    if len(steps) < 2:
+        raise _MarkerNotFound(f"이슈 알림 스텝이 없습니다(스텝 {len(steps)}개).")
+    script = steps[1]["run"]
+    if "gh issue create" not in script:
+        raise _MarkerNotFound(
+            "두 번째 스텝에서 `gh issue create` 를 못 찾았습니다 — 이슈 본문 검사가 조용히\n"
+            "  아무것도 검증하지 않게 되므로 여기서 실패시킵니다."
+        )
     return script
 
 
@@ -488,15 +579,21 @@ def _write_stub(path, body):
     path.chmod(0o755)
 
 
-def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=4):
+def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
     """
     가짜 `gh`/`date` 위에서 첫 스텝 스크립트를 통째로 실행합니다(네트워크 없음).
 
     `run_status` 는 {워크플로우 파일명: [실행 항목, ...]} — 가짜 `gh` 가 그대로 돌려줍니다.
-    `dow` 는 KST 요일(1=월 ... 7=일), `dispatch_rc` 는 재실행 트리거의 종료코드입니다.
+    `now_ts` 는 가짜 "지금"(생략하면 NOW_TS = 화 18:00 KST, 실제 cron 발동 시각),
+    `dow` 는 KST 요일(1=월 ... 7=일 — 생략하면 `now_ts` 에서 계산해 둘이 어긋나지 않게 합니다),
+    `dispatch_rc` 는 재실행 트리거의 종료코드입니다.
     반환값은 (CompletedProcess, gh 호출 인자 목록, GITHUB_OUTPUT 내용).
     """
     script = load_check_step_script()
+    if now_ts is None:
+        now_ts = NOW_TS
+    if dow is None:
+        dow = kst_dow(now_ts)
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -519,7 +616,7 @@ def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=4):
         GH_CALL_LOG=str(call_log),
         GH_RUN_STATUS=str(status_path),
         GH_DISPATCH_RC=str(dispatch_rc),
-        FAKE_NOW_TS=str(NOW_TS),
+        FAKE_NOW_TS=str(now_ts),
         FAKE_DOW=str(dow),
     )
 
@@ -551,9 +648,13 @@ def expected_dispatch_args(wf_file):
     ]
 
 
-def status_map(ok_files, missing_files, event="schedule"):
-    """window 안 성공(ok) / 실행 기록 없음(missing) 으로 가짜 API 응답을 만듭니다."""
-    status = {f: [dict(run_entry(2), event=event)] for f in ok_files}
+def status_map(ok_files, missing_files, event="schedule", now_ts=None):
+    """window 안 성공(ok) / 실행 기록 없음(missing) 으로 가짜 API 응답을 만듭니다.
+
+    `now_ts` 는 "ok" 항목의 실행 시각을 어느 기준으로 2시간 전에 놓을지입니다 —
+    `run_check_step(now_ts=...)` 과 **같은 값**을 넘겨야 창 안에 들어옵니다.
+    """
+    status = {f: [dict(run_entry(2, now_ts=now_ts), event=event)] for f in ok_files}
     status.update({f: [] for f in missing_files})
     return status
 
@@ -566,7 +667,7 @@ def test_missing_targets_are_each_redispatched_exactly_once(tmp_path):
     """
     missing = ["scrape.yml", "indicator_kr.yml"]
     ok = [f for f in ALL_TARGETS if f not in missing]
-    proc, calls, output = run_check_step(tmp_path, status_map(ok, missing), dow=4)
+    proc, calls, output = run_check_step(tmp_path, status_map(ok, missing))
 
     assert proc.returncode == 0, (
         f"스텝이 죽었습니다.\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
@@ -586,7 +687,7 @@ def test_healthy_targets_are_never_redispatched(tmp_path):
     전부 정상이면 재실행 호출이 **단 한 건도** 나가면 안 됩니다 — 여기서 새면 워치독이
     매일 아침 멀쩡한 크롤링 9개를 통째로 다시 돌리게 됩니다.
     """
-    proc, calls, output = run_check_step(tmp_path, status_map(ALL_TARGETS, []), dow=4)
+    proc, calls, output = run_check_step(tmp_path, status_map(ALL_TARGETS, []))
 
     assert proc.returncode == 0, proc.stderr
     assert dispatch_calls(calls) == [], f"정상인데 재실행이 나갔습니다: {dispatch_calls(calls)}"
@@ -602,7 +703,7 @@ def test_dispatch_failure_is_reported_as_such(tmp_path):
     missing = ["scrape.yml"]
     ok = [f for f in ALL_TARGETS if f not in missing]
     proc, calls, output = run_check_step(
-        tmp_path, status_map(ok, missing), dispatch_rc=1, dow=4
+        tmp_path, status_map(ok, missing), dispatch_rc=1
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -619,7 +720,7 @@ def test_yesterdays_auto_dispatch_run_counts_as_ran(tmp_path):
     (가짜 `gh` 가 진짜 API 처럼 event 필터를 적용하므로, 필터가 되살아나는 순간 빨간불.)
     """
     proc, calls, output = run_check_step(
-        tmp_path, status_map(ALL_TARGETS, [], event="workflow_dispatch"), dow=4
+        tmp_path, status_map(ALL_TARGETS, [], event="workflow_dispatch")
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -637,7 +738,7 @@ def test_workflow_run_triggered_success_also_counts(tmp_path):
     """
     status = status_map(ALL_TARGETS, [])
     status["duel_daily.yml"] = [dict(run_entry(2), event="workflow_run")]
-    proc, calls, output = run_check_step(tmp_path, status, dow=4)
+    proc, calls, output = run_check_step(tmp_path, status)
 
     assert proc.returncode == 0, proc.stderr
     assert dispatch_calls(calls) == [], dispatch_calls(calls)
@@ -650,7 +751,7 @@ def test_weekend_skips_weekday_only_targets_entirely(tmp_path):
     합니다(주말에 안 도는 게 정상인데 재실행을 걸면 매주 두 번씩 헛발동).
     """
     proc, calls, output = run_check_step(
-        tmp_path, status_map([], ALL_TARGETS), dow=6
+        tmp_path, status_map([], ALL_TARGETS), now_ts=TS_SAT_MIDDAY
     )
 
     assert proc.returncode == 0, proc.stderr
@@ -666,9 +767,12 @@ def test_monday_widened_window_applies_to_redispatch_decision(tmp_path):
     월요일(=1)엔 평일 대상 창이 76시간으로 넓어집니다 — 지난 금요일 성공(72시간 전)이
     있으면 재실행을 걸면 안 됩니다(창이 30으로 좁아지면 월요일마다 5개가 헛발동).
     """
-    status = {f: [dict(run_entry(72), event="schedule")] for f in WEEKDAY_ONLY_TARGETS}
-    status.update({f: [dict(run_entry(2), event="schedule")] for f in DAILY_TARGETS})
-    proc, calls, output = run_check_step(tmp_path, status, dow=1)
+    base = TS_MON_AFTER_CLOSE
+    status = {f: [dict(run_entry(72, now_ts=base), event="schedule")]
+              for f in WEEKDAY_ONLY_TARGETS}
+    status.update({f: [dict(run_entry(2, now_ts=base), event="schedule")]
+                   for f in DAILY_TARGETS})
+    proc, calls, output = run_check_step(tmp_path, status, now_ts=base)
 
     assert proc.returncode == 0, proc.stderr
     assert dispatch_calls(calls) == [], dispatch_calls(calls)
@@ -680,6 +784,320 @@ def test_permissions_grant_actions_write():
     yaml = pytest.importorskip("yaml", reason="PyYAML 없음")
     doc = yaml.safe_load(WORKFLOW_PATH.read_text(encoding="utf-8"))
     assert doc["permissions"].get("actions") == "write", doc["permissions"]
+
+
+# =====================================================================================
+# 5. 장중 안전장치 — 한국 증시 정규장(평일 09:00~15:30 KST)에는 자동 재실행을 걸지 않는다
+#    (2026-09-01 오너 실전 발견)
+# =====================================================================================
+#
+# 배경: #184(2026-08-31)로 "빠진 대상을 발견하면 그 자리에서 딱 한 번 재실행"을 넣었는데,
+# **그 '자리'가 하필 한국 증시 개장 정각**이었습니다(당시 cron '0 0 * * *' = 09:00 KST).
+# 대상 수집기 중 `collector_kospi200.py`(argparse 자체가 없음)와
+# `collector_indicator_kr.py`(기록 날짜 = `_now_kst()`)는 **과거 날짜를 지정해 백필하는
+# 기능이 아예 없어서**, 장중에 재실행되면 장 시작 직후의 어중간한 가격을 그날의 정상적인
+# 종가인 것처럼 저장합니다. 게다가 정작 빠졌던 그 과거 날짜는 백필 수단이 없어 영영
+# 못 채웁니다 — 에러 없이 틀린 값이 남는, 가장 발견이 늦는 실패 모양입니다(§0-1).
+#
+# 고친 방법은 두 겹입니다:
+#   (A) 워치독 cron 을 18:00 KST(09:00 UTC)로 이동 → 아래
+#       `test_watchdog_cron_runs_outside_market_hours_and_after_every_target` 가 지킵니다.
+#   (B) 재실행 직전에 "지금 장중인가"를 한 번 보고, 장중이면 어떤 대상이든 POST 를 걸지
+#       않음 → 아래 나머지 검사들이 지킵니다. (A)만으로는 사람이 수동 workflow_dispatch 로
+#       장중에 이 워치독을 돌리는 경우를 못 막기 때문에 둘 다 있어야 합니다.
+#
+# ⚠️ 여기서도 검증하지 않는 것: 공휴일(휴장일). 워크플로우는 요일과 시각만 봅니다 —
+#    휴장일 표를 코드에 넣으면 매년 틀리고, 휴장일에 재실행을 한 번 건너뛰는 것은 안전한
+#    쪽으로 틀리는 방향이라 그대로 뒀습니다(워크플로우 헤더에 같은 내용이 적혀 있습니다).
+
+MARKET_SKIP_PHRASE = "장중이라 자동 재실행 생략"
+
+
+def test_dispatch_is_skipped_entirely_during_korean_market_hours(tmp_path):
+    """
+    ⭐ 이 변경의 핵심 — 장중(화 11:00 KST)에 대상이 '누락'으로 판정돼도 재실행 POST 가
+    **단 한 건도** 나가면 안 됩니다. 여기서 새면 백필 불가 수집기가 장중 가격을 그날
+    종가인 것처럼 저장합니다.
+    """
+    missing = ["scrape.yml", "indicator_kr.yml"]
+    ok = [f for f in ALL_TARGETS if f not in missing]
+    now = TS_TUE_MARKET_MIDDAY
+    proc, calls, output = run_check_step(
+        tmp_path, status_map(ok, missing, now_ts=now), now_ts=now
+    )
+
+    assert proc.returncode == 0, (
+        f"스텝이 죽었습니다.\n--- stdout ---\n{proc.stdout}\n--- stderr ---\n{proc.stderr}"
+    )
+    assert dispatch_calls(calls) == [], (
+        "장중인데 자동 재실행이 나갔습니다 — 이게 정확히 2026-09-01 에 고친 허점입니다.\n"
+        f"나간 호출: {dispatch_calls(calls)}"
+    )
+    # 누락 자체는 여전히 '실패'로 보고돼야 합니다(재실행을 안 걸었다고 조용해지면 안 됩니다).
+    assert "has_failures=true" in output, output
+    assert "market_hours=true" in output, output
+    for f in missing:
+        assert f"- {f} ({MARKET_SKIP_PHRASE}" in output, output
+    # 기존 두 케이스 문구가 잘못 섞여 나가면 사람이 "재실행 걸었구나"로 오해합니다.
+    assert "자동 재실행 트리거함" not in output, output
+    assert "자동 재실행도 실패" not in output, output
+
+
+def test_dispatch_happens_normally_after_market_close(tmp_path):
+    """
+    장 마감 후(기본 NOW_TS = 화 18:00 KST — 이 워치독의 실제 cron 발동 시각)에는 기존과
+    **완전히 똑같이** 재실행이 나가야 합니다. 장중 안전장치가 평소 동작까지 막아 버리면
+    #184 의 self-healing 이 통째로 죽습니다.
+    """
+    missing = ["scrape.yml"]
+    ok = [f for f in ALL_TARGETS if f not in missing]
+    proc, calls, output = run_check_step(tmp_path, status_map(ok, missing))
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], dispatch_calls(calls)
+    assert "market_hours=false" in output, output
+    assert "- scrape.yml (자동 재실행 트리거함)" in output, output
+    assert MARKET_SKIP_PHRASE not in output, output
+
+
+@pytest.mark.parametrize(
+    "now_ts, expect_market_hours, label",
+    [
+        (TS_TUE_BEFORE_OPEN, False, "화 08:59 — 개장 1분 전"),
+        (TS_TUE_MARKET_OPEN, True, "화 09:00 — 개장 정각(포함)"),
+        (TS_TUE_MARKET_MIDDAY, True, "화 11:00 — 장 한복판"),
+        (TS_TUE_MARKET_CLOSE, True, "화 15:30 — 마감 정각(포함)"),
+        (TS_TUE_AFTER_CLOSE, False, "화 15:31 — 마감 1분 후"),
+    ],
+)
+def test_market_hours_boundaries_are_exact(tmp_path, now_ts, expect_market_hours, label):
+    """
+    경계를 분 단위로 못 박습니다 — 09:00 정각과 15:30 정각은 **장중(포함)**, 그 바깥
+    1분은 장중이 아닙니다.
+    (15:30 을 포함으로 두는 이유: 그 순간이 종가가 확정되는 때라, 애매하면 재실행을
+     거는 쪽이 아니라 건너뛰는 쪽으로 틀리게 둡니다.)
+    """
+    missing = ["scrape.yml"]
+    ok = [f for f in ALL_TARGETS if f not in missing]
+    proc, calls, output = run_check_step(
+        tmp_path, status_map(ok, missing, now_ts=now_ts), now_ts=now_ts
+    )
+
+    assert proc.returncode == 0, f"[{label}] 스텝이 죽었습니다.\n{proc.stderr}"
+    expected_flag = "market_hours=true" if expect_market_hours else "market_hours=false"
+    assert expected_flag in output, f"[{label}] 기대 {expected_flag}\n{output}"
+    if expect_market_hours:
+        assert dispatch_calls(calls) == [], f"[{label}] 장중인데 재실행이 나갔습니다: {dispatch_calls(calls)}"
+    else:
+        assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], (
+            f"[{label}] 장중이 아닌데 재실행이 안 나갔습니다: {dispatch_calls(calls)}"
+        )
+
+
+def test_weekend_midday_is_not_market_hours(tmp_path):
+    """
+    토요일 11:00 KST — **시각만 보면** 정규장 시간대지만 휴장입니다. 요일 조건이 빠지면
+    이 검사가 빨간불이 됩니다.
+
+    평일 전용 5개는 원래 주말이라 검사 자체를 건너뛰므로(기존 로직), 여기서 재실행이
+    걸리는 대상은 매일 도는 4개뿐이어야 합니다 — 즉 장중 안전장치가 기존 주말 스킵과
+    충돌하지 않는지도 함께 봅니다.
+    """
+    proc, calls, output = run_check_step(
+        tmp_path, status_map([], ALL_TARGETS), now_ts=TS_SAT_MIDDAY
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert "market_hours=false" in output, output
+    for f in WEEKDAY_ONLY_TARGETS:
+        assert all(f not in " ".join(c) for c in calls), f"{f} 를 주말에 건드렸습니다: {calls}"
+    assert dispatch_calls(calls) == [
+        expected_dispatch_args(f) for f in DAILY_TARGETS
+    ], dispatch_calls(calls)
+    assert MARKET_SKIP_PHRASE not in output, output
+
+
+def test_healthy_targets_stay_quiet_during_market_hours(tmp_path):
+    """
+    장중이라도 **전부 정상이면** 아무 일도 일어나지 않아야 합니다 — 장중 판정이 정상 판정을
+    오염시켜 이슈를 만들어 내면 안 됩니다.
+    """
+    now = TS_TUE_MARKET_MIDDAY
+    proc, calls, output = run_check_step(
+        tmp_path, status_map(ALL_TARGETS, [], now_ts=now), now_ts=now
+    )
+
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+    # 실패가 없어도 market_hours 는 나가야 합니다(뒤 스텝이 빈 값을 만나지 않도록).
+    assert "market_hours=true" in output, output
+
+
+def test_market_hours_output_is_emitted_in_both_outcomes(tmp_path):
+    """
+    `market_hours` 출력은 실패 유무와 무관하게 **항상** 나가야 합니다. 이슈 스텝이 이 값을
+    읽어 본문을 가르므로, 값이 비면 '장중이라 생략'인데도 그 설명이 빠진 이슈가 만들어집니다.
+    """
+    for label, status in (
+        ("healthy", status_map(ALL_TARGETS, [])),
+        ("missing", status_map(ALL_TARGETS[1:], [ALL_TARGETS[0]])),
+    ):
+        # 케이스마다 별도 작업 디렉터리 — 같은 tmp_path 를 두 번 쓰면 스텁 설치가 충돌합니다.
+        case_dir = tmp_path / label
+        case_dir.mkdir()
+        _proc, _calls, output = run_check_step(case_dir, status)
+        assert ("market_hours=true" in output) or ("market_hours=false" in output), (
+            f"[{label}] market_hours 출력이 없습니다:\n{output}"
+        )
+
+
+# ── 이 워치독 **자신의** cron 이 안전한 시각인가 ──────────────────────────────────────
+def _cron_kst_minute_of_day(cron_expr):
+    """`분 시 일 월 요일`(UTC) cron 한 줄 → 그 발동 시각의 KST 하루 중 분(0~1439)."""
+    minute, hour = cron_expr.split()[0], cron_expr.split()[1]
+    return ((int(hour) * 60 + int(minute)) + 9 * 60) % (24 * 60)
+
+
+def _schedule_crons(workflow_path):
+    """워크플로우 파일에서 `on.schedule` 의 cron 문자열 목록을 그대로 읽습니다."""
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음")
+    doc = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    # ⚠️ YAML 1.1 에서 `on:` 은 불리언 True 로 읽힐 수 있습니다(PyYAML 버전에 따라 다름).
+    #    둘 다 봅니다 — 한쪽만 보면 어느 환경에서 조용히 빈손이 됩니다.
+    trigger = doc.get("on", doc.get(True))
+    if not isinstance(trigger, dict):
+        raise _MarkerNotFound(f"{workflow_path.name}: `on:` 블록을 dict 로 읽지 못했습니다: {trigger!r}")
+    schedule = trigger.get("schedule") or []
+    crons = [entry["cron"] for entry in schedule]
+    if not crons:
+        raise _MarkerNotFound(f"{workflow_path.name}: schedule cron 을 하나도 못 찾았습니다.")
+    return crons
+
+
+def test_watchdog_cron_runs_outside_market_hours_and_after_every_target():
+    """
+    이 워치독 자신의 cron 을 **파일에서 읽어** 두 가지를 검산합니다(값을 여기 베껴 적지
+    않습니다 — 베껴 적으면 나중에 워크플로우만 바뀌었을 때 이 검사가 조용히 어긋납니다).
+
+      ① 발동 시각이 한국 증시 정규장(평일 09:00~15:30 KST) **밖**일 것.
+         → 안이면, 재실행이 걸리는 그 순간이 장중이 됩니다(2026-09-01 이전의 바로 그 상태).
+      ② 발동 시각이 **감시 대상 9개의 그날 예정 시각보다 모두 늦을** 것.
+         → 그래야 "오늘 안 돈 것"을 다음 날이 아니라 그날 저녁에 잡습니다. 대상 쪽 cron 도
+           파일에서 직접 읽으므로, 나중에 누가 대상에 더 늦은 스케줄을 추가하면 이 검사가
+           빨간불이 되어 "워치독 시각도 같이 옮겨야 한다"는 사실을 알려 줍니다.
+    """
+    crons = _schedule_crons(WORKFLOW_PATH)
+    assert len(crons) == 1, f"워치독 cron 이 여러 개입니다(설계상 하루 한 번): {crons}"
+    watchdog_min = _cron_kst_minute_of_day(crons[0])
+
+    market_open, market_close = 9 * 60, 15 * 60 + 30
+    assert not (market_open <= watchdog_min <= market_close), (
+        f"워치독 cron {crons[0]!r} (UTC) = KST "
+        f"{watchdog_min // 60:02d}:{watchdog_min % 60:02d} 인데, 이건 한국 증시 정규장"
+        f"(09:00~15:30 KST) 안입니다.\n"
+        "  이 시각에 '누락' 판정이 나면 자동 재실행이 장중에 걸립니다 — 백필이 안 되는\n"
+        "  수집기(collector_kospi200.py · collector_indicator_kr.py)가 장중 가격을 그날\n"
+        "  종가인 것처럼 저장하게 됩니다. 이것이 2026-09-01 에 고친 허점입니다."
+    )
+
+    latest_target, latest_min = None, -1
+    for target in ALL_TARGETS:
+        for cron_expr in _schedule_crons(WORKFLOW_PATH.parent / target):
+            target_min = _cron_kst_minute_of_day(cron_expr)
+            if target_min > latest_min:
+                latest_target, latest_min = f"{target} ({cron_expr})", target_min
+
+    assert watchdog_min > latest_min, (
+        f"워치독이 KST {watchdog_min // 60:02d}:{watchdog_min % 60:02d} 에 도는데, 감시 대상 중\n"
+        f"  {latest_target} 은 KST {latest_min // 60:02d}:{latest_min % 60:02d} 에 시작합니다 —\n"
+        "  즉 그 대상이 그날 돌기도 전에 검사하게 됩니다. 워치독 시각을 그 뒤로 옮기세요."
+    )
+
+
+# ── 이슈 본문 — 세 번째 케이스('장중이라 생략')가 사람에게 설명되는가 ────────────────
+def run_issue_step(tmp_path, failed_text, market_hours, now_ts=None):
+    """
+    두 번째 스텝(이슈 알림)을 가짜 `gh`/`date` 위에서 통째로 실행합니다(네트워크 없음).
+
+    `gh issue create` 는 스텁이 인자만 기록하고 성공한 척 끝냅니다 — 그래서 **실제로 이슈
+    본문에 실리는 문자열 전문**을 그대로 검사할 수 있습니다(사본 검사가 아닙니다, §0-3-10).
+    디스코드 웹훅은 `DISCORD_WEBHOOK_URL` 을 비워 두어 그 블록이 통째로 건너뛰어집니다.
+    반환값은 (CompletedProcess, gh 호출 인자 목록).
+    """
+    script = load_issue_step_script()
+
+    bin_dir = tmp_path / "bin"
+    bin_dir.mkdir()
+    _write_stub(bin_dir / "gh", _GH_STUB)
+    _write_stub(bin_dir / "date", _DATE_STUB)
+    call_log = tmp_path / "gh_calls.jsonl"
+    call_log.write_text("", encoding="utf-8")
+
+    env = dict(os.environ)
+    env.update(
+        PATH=f"{bin_dir}{os.pathsep}{env['PATH']}",
+        REPO=REPO_SLUG,
+        GH_TOKEN="fake-token-not-used",
+        GH_CALL_LOG=str(call_log),
+        GH_DISPATCH_RC="0",
+        FAILED=failed_text,
+        MARKET_HOURS=market_hours,
+        DISCORD_WEBHOOK_URL="",
+        FAKE_NOW_TS=str(NOW_TS if now_ts is None else now_ts),
+        FAKE_DOW=str(kst_dow(NOW_TS if now_ts is None else now_ts)),
+    )
+    proc = subprocess.run(
+        ["bash", "-c", script], capture_output=True, text=True, env=env, timeout=120
+    )
+    calls = [
+        json.loads(line)
+        for line in call_log.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    ]
+    return proc, calls
+
+
+def issue_body(calls):
+    """가짜 `gh` 호출 중 `issue create` 의 `--body` 값을 꺼냅니다."""
+    for call in calls:
+        if call[:2] == ["issue", "create"] and "--body" in call:
+            return call[call.index("--body") + 1]
+    raise AssertionError(f"`gh issue create --body ...` 호출을 못 찾았습니다: {calls}")
+
+
+def test_issue_body_explains_the_market_hours_skip(tmp_path):
+    """
+    장중이라 재실행을 생략했으면, 이슈를 읽는 사람이 **왜 아무것도 안 걸렸는지**와
+    **다음에 무슨 일이 일어나는지**를 본문에서 알 수 있어야 합니다. 이유 없이 조용한
+    이슈는 "워치독이 고장났나?"로 읽힙니다(§0-1).
+    """
+    failed = f"- scrape.yml ({MARKET_SKIP_PHRASE} — 장 마감 후 이 워치독이 다시 확인합니다)\n"
+    proc, calls = run_issue_step(tmp_path, failed, market_hours="true",
+                                 now_ts=TS_TUE_MARKET_MIDDAY)
+
+    # 이 스텝은 마지막에 일부러 `exit 1` 합니다(Actions 탭에 빨간 X 로 남기려고).
+    assert proc.returncode == 1, f"rc={proc.returncode}\n{proc.stdout}\n{proc.stderr}"
+    body = issue_body(calls)
+    assert MARKET_SKIP_PHRASE in body, body            # 항목별 표시가 본문에 실렸는가
+    assert "장중" in body and "09:00~15:30" in body, body  # 무엇이 장중인지 정의돼 있는가
+    assert "18:00" in body, body                       # 다음에 언제 다시 보는지
+    assert "workflow_dispatch" in body, body           # 급할 때의 우회로
+
+
+def test_issue_body_has_no_market_note_after_market_close(tmp_path):
+    """
+    장 마감 후(정상 경로)에는 그 설명이 **붙지 않아야** 합니다 — 매번 붙으면 실제로
+    생략된 날과 구분이 안 됩니다.
+    """
+    failed = "- scrape.yml (자동 재실행 트리거함)\n"
+    proc, calls = run_issue_step(tmp_path, failed, market_hours="false")
+
+    assert proc.returncode == 1, proc.stderr
+    body = issue_body(calls)
+    assert "자동 재실행 트리거함" in body, body
+    assert MARKET_SKIP_PHRASE not in body, body
+    assert "09:00~15:30" not in body, body
 
 
 def main():
