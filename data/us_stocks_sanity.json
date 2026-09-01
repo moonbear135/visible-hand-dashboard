@@ -1,0 +1,99 @@
+{
+  "baseline_date": null,
+  "baseline_row_count": null,
+  "checks": [
+    {
+      "detail": "수집 결과 548건.",
+      "field": null,
+      "name": "row_count_empty",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": null,
+      "name": "row_count_drop",
+      "status": "skipped"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": null,
+      "name": "row_count_surge",
+      "status": "skipped"
+    },
+    {
+      "detail": "'price' 결측·0 비율 0.0%.",
+      "field": "price",
+      "name": "unusable_ratio",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "price",
+      "name": "unusable_ratio_jump",
+      "status": "skipped"
+    },
+    {
+      "detail": "'price' 서로 다른 값 542개.",
+      "field": "price",
+      "name": "constant_value",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "price",
+      "name": "median_shift",
+      "status": "skipped"
+    },
+    {
+      "detail": "'market_cap' 결측·0 비율 0.0%.",
+      "field": "market_cap",
+      "name": "unusable_ratio",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "market_cap",
+      "name": "unusable_ratio_jump",
+      "status": "skipped"
+    },
+    {
+      "detail": "'market_cap' 서로 다른 값 529개.",
+      "field": "market_cap",
+      "name": "constant_value",
+      "status": "pass"
+    },
+    {
+      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "field": "market_cap",
+      "name": "median_shift",
+      "status": "skipped"
+    }
+  ],
+  "dataset": "us_stocks",
+  "generated_at_kst": "2026-09-01T09:54:46.937677+09:00",
+  "probe": {
+    "fields": {
+      "market_cap": {
+        "distinct_count": 529,
+        "median": 41955000000.0,
+        "missing_count": 0,
+        "numeric_count": 548,
+        "zero_count": 0
+      },
+      "price": {
+        "distinct_count": 542,
+        "median": 148.87,
+        "missing_count": 0,
+        "numeric_count": 548,
+        "zero_count": 0
+      }
+    },
+    "row_count": 548
+  },
+  "reason": "기준값이 없어 어제 대비 비교를 하지 않았습니다. 기준값 없이도 가능한 검사 5건은 통과했습니다. (첫 실행이면 내일부터 어제 대비 비교가 시작됩니다.)",
+  "reasons": [],
+  "row_count": 548,
+  "status": "no_baseline",
+  "target_date": "2026-08-31",
+  "version": 1
+}
