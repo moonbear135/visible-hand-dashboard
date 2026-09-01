@@ -1,24 +1,24 @@
 {
-  "baseline_date": null,
-  "baseline_row_count": null,
+  "baseline_date": "2026-08-31",
+  "baseline_row_count": 548,
   "checks": [
     {
-      "detail": "수집 결과 548건.",
+      "detail": "수집 결과 550건.",
       "field": null,
       "name": "row_count_empty",
       "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "건수 정상: 2026-08-31 548건 → 오늘 550건.",
       "field": null,
       "name": "row_count_drop",
-      "status": "skipped"
+      "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "건수 급증 없음: 2026-08-31 548건 → 오늘 550건.",
       "field": null,
       "name": "row_count_surge",
-      "status": "skipped"
+      "status": "pass"
     },
     {
       "detail": "'price' 결측·0 비율 0.0%.",
@@ -27,22 +27,22 @@
       "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "'price' 결측·0 비율 변화 +0.0%p.",
       "field": "price",
       "name": "unusable_ratio_jump",
-      "status": "skipped"
+      "status": "pass"
     },
     {
-      "detail": "'price' 서로 다른 값 542개.",
+      "detail": "'price' 서로 다른 값 550개.",
       "field": "price",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "'price' 중앙값 148.87 → 147.755 (0.99배).",
       "field": "price",
       "name": "median_shift",
-      "status": "skipped"
+      "status": "pass"
     },
     {
       "detail": "'market_cap' 결측·0 비율 0.0%.",
@@ -51,49 +51,49 @@
       "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "'market_cap' 결측·0 비율 변화 +0.0%p.",
       "field": "market_cap",
       "name": "unusable_ratio_jump",
-      "status": "skipped"
+      "status": "pass"
     },
     {
-      "detail": "'market_cap' 서로 다른 값 529개.",
+      "detail": "'market_cap' 서로 다른 값 532개.",
       "field": "market_cap",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "기준값이 없어 어제 대비 비교를 하지 않았습니다.",
+      "detail": "'market_cap' 중앙값 4.1955e+10 → 4.0945e+10 (0.98배).",
       "field": "market_cap",
       "name": "median_shift",
-      "status": "skipped"
+      "status": "pass"
     }
   ],
   "dataset": "us_stocks",
-  "generated_at_kst": "2026-09-01T09:54:46.937677+09:00",
+  "generated_at_kst": "2026-09-02T08:36:49.858872+09:00",
   "probe": {
     "fields": {
       "market_cap": {
-        "distinct_count": 529,
-        "median": 41955000000.0,
+        "distinct_count": 532,
+        "median": 40945000000.0,
         "missing_count": 0,
-        "numeric_count": 548,
+        "numeric_count": 550,
         "zero_count": 0
       },
       "price": {
-        "distinct_count": 542,
-        "median": 148.87,
+        "distinct_count": 550,
+        "median": 147.755,
         "missing_count": 0,
-        "numeric_count": 548,
+        "numeric_count": 550,
         "zero_count": 0
       }
     },
-    "row_count": 548
+    "row_count": 550
   },
-  "reason": "기준값이 없어 어제 대비 비교를 하지 않았습니다. 기준값 없이도 가능한 검사 5건은 통과했습니다. (첫 실행이면 내일부터 어제 대비 비교가 시작됩니다.)",
+  "reason": "2026-08-31 대비 검사 11건 통과.",
   "reasons": [],
-  "row_count": 548,
-  "status": "no_baseline",
-  "target_date": "2026-08-31",
+  "row_count": 550,
+  "status": "ok",
+  "target_date": "2026-09-01",
   "version": 1
 }
