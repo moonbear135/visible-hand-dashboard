@@ -1,5 +1,5 @@
 {
-  "baseline_date": "2026-08-31",
+  "baseline_date": "2026-09-01",
   "baseline_row_count": 500,
   "checks": [
     {
@@ -9,13 +9,13 @@
       "status": "pass"
     },
     {
-      "detail": "건수 정상: 2026-08-31 500건 → 오늘 500건.",
+      "detail": "건수 정상: 2026-09-01 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_drop",
       "status": "pass"
     },
     {
-      "detail": "건수 급증 없음: 2026-08-31 500건 → 오늘 500건.",
+      "detail": "건수 급증 없음: 2026-09-01 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_surge",
       "status": "pass"
@@ -33,7 +33,7 @@
       "status": "pass"
     },
     {
-      "detail": "'rsi' 서로 다른 값 457개.",
+      "detail": "'rsi' 서로 다른 값 456개.",
       "field": "rsi",
       "name": "constant_value",
       "status": "pass"
@@ -57,32 +57,32 @@
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 서로 다른 값 497개.",
+      "detail": "'bb_mid' 서로 다른 값 500개.",
       "field": "bb_mid",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 중앙값 32,057.5 → 32,057.5 (1.00배).",
+      "detail": "'bb_mid' 중앙값 32,057.5 → 32,302.5 (1.01배).",
       "field": "bb_mid",
       "name": "median_shift",
       "status": "pass"
     }
   ],
   "dataset": "indicator_kr",
-  "generated_at_kst": "2026-09-01T00:57:13.831570+09:00",
+  "generated_at_kst": "2026-09-01T21:57:06.050158+09:00",
   "probe": {
     "fields": {
       "bb_mid": {
-        "distinct_count": 497,
-        "median": 32057.5,
+        "distinct_count": 500,
+        "median": 32302.5,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
       },
       "rsi": {
-        "distinct_count": 457,
-        "median": 53.935,
+        "distinct_count": 456,
+        "median": 54.045,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
@@ -90,7 +90,7 @@
     },
     "row_count": 500
   },
-  "reason": "2026-08-31 대비 검사 10건 통과 (판정 불가 1건).",
+  "reason": "2026-09-01 대비 검사 10건 통과 (판정 불가 1건).",
   "reasons": [],
   "row_count": 500,
   "status": "ok",
