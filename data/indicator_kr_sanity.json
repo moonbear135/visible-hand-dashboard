@@ -63,26 +63,26 @@
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 중앙값 32,057.5 → 32,302.5 (1.01배).",
+      "detail": "'bb_mid' 중앙값 32,302.5 → 32,538.8 (1.01배).",
       "field": "bb_mid",
       "name": "median_shift",
       "status": "pass"
     }
   ],
   "dataset": "indicator_kr",
-  "generated_at_kst": "2026-09-01T21:57:06.050158+09:00",
+  "generated_at_kst": "2026-09-02T17:19:47.137484+09:00",
   "probe": {
     "fields": {
       "bb_mid": {
         "distinct_count": 500,
-        "median": 32302.5,
+        "median": 32538.75,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
       },
       "rsi": {
         "distinct_count": 456,
-        "median": 54.045,
+        "median": 49.72,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
@@ -94,6 +94,6 @@
   "reasons": [],
   "row_count": 500,
   "status": "ok",
-  "target_date": "2026-09-01",
+  "target_date": "2026-09-02",
   "version": 1
 }
