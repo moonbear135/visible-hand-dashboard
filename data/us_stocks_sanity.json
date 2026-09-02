@@ -1,21 +1,21 @@
 {
-  "baseline_date": "2026-08-31",
-  "baseline_row_count": 548,
+  "baseline_date": "2026-09-01",
+  "baseline_row_count": 550,
   "checks": [
     {
-      "detail": "수집 결과 550건.",
+      "detail": "수집 결과 551건.",
       "field": null,
       "name": "row_count_empty",
       "status": "pass"
     },
     {
-      "detail": "건수 정상: 2026-08-31 548건 → 오늘 550건.",
+      "detail": "건수 정상: 2026-09-01 550건 → 오늘 551건.",
       "field": null,
       "name": "row_count_drop",
       "status": "pass"
     },
     {
-      "detail": "건수 급증 없음: 2026-08-31 548건 → 오늘 550건.",
+      "detail": "건수 급증 없음: 2026-09-01 550건 → 오늘 551건.",
       "field": null,
       "name": "row_count_surge",
       "status": "pass"
@@ -33,13 +33,13 @@
       "status": "pass"
     },
     {
-      "detail": "'price' 서로 다른 값 550개.",
+      "detail": "'price' 서로 다른 값 540개.",
       "field": "price",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'price' 중앙값 148.87 → 147.755 (0.99배).",
+      "detail": "'price' 중앙값 147.755 → 148.96 (1.01배).",
       "field": "price",
       "name": "median_shift",
       "status": "pass"
@@ -57,43 +57,43 @@
       "status": "pass"
     },
     {
-      "detail": "'market_cap' 서로 다른 값 532개.",
+      "detail": "'market_cap' 서로 다른 값 534개.",
       "field": "market_cap",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'market_cap' 중앙값 4.1955e+10 → 4.0945e+10 (0.98배).",
+      "detail": "'market_cap' 중앙값 4.0945e+10 → 4.112e+10 (1.00배).",
       "field": "market_cap",
       "name": "median_shift",
       "status": "pass"
     }
   ],
   "dataset": "us_stocks",
-  "generated_at_kst": "2026-09-02T08:36:49.858872+09:00",
+  "generated_at_kst": "2026-09-03T08:39:00.479592+09:00",
   "probe": {
     "fields": {
       "market_cap": {
-        "distinct_count": 532,
-        "median": 40945000000.0,
+        "distinct_count": 534,
+        "median": 41120000000.0,
         "missing_count": 0,
-        "numeric_count": 550,
+        "numeric_count": 551,
         "zero_count": 0
       },
       "price": {
-        "distinct_count": 550,
-        "median": 147.755,
+        "distinct_count": 540,
+        "median": 148.96,
         "missing_count": 0,
-        "numeric_count": 550,
+        "numeric_count": 551,
         "zero_count": 0
       }
     },
-    "row_count": 550
+    "row_count": 551
   },
-  "reason": "2026-08-31 대비 검사 11건 통과.",
+  "reason": "2026-09-01 대비 검사 11건 통과.",
   "reasons": [],
-  "row_count": 550,
+  "row_count": 551,
   "status": "ok",
-  "target_date": "2026-09-01",
+  "target_date": "2026-09-02",
   "version": 1
 }
