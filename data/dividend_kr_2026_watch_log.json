@@ -206,6 +206,24 @@
       "delta_raw_lines_appended": 4,
       "unexpected_report_regressions": [],
       "delta_out_dir": "data/cache/watch_delta"
+    },
+    {
+      "checked_at_kst": "2026-09-03T07:31:38.588730+09:00",
+      "date_range_checked": "20260902~20260902",
+      "matched_stock_codes": [
+        "003670",
+        "143210"
+      ],
+      "matched_stock_codes_source": "호출부가 전달한 list.json 매칭 결과",
+      "replaced_stock_codes": [
+        "003670",
+        "143210"
+      ],
+      "added_stock_codes": [],
+      "skipped_replacements": [],
+      "delta_raw_lines_appended": 4,
+      "unexpected_report_regressions": [],
+      "delta_out_dir": "data/cache/watch_delta"
     }
   ]
 }

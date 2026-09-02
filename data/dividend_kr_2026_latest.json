@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at_kst": "2026-09-02T07:28:38.730637+09:00",
+    "generated_at_kst": "2026-09-03T07:31:38.590859+09:00",
     "total_records": 2590,
     "by_status": {
       "OK": 2482,
@@ -905,32 +905,32 @@
     "bsns_year": "2026",
     "universe_size_input": 2735,
     "universe_size": 2735,
-    "requests_used": 5368,
-    "elapsed_sec": 18485.399999999998,
+    "requests_used": 5372,
+    "elapsed_sec": 18732.399999999998,
     "completed": false,
-    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.)))",
+    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.))))",
     "corpcode_source": "network",
     "corpcode_stats": {
-      "total_entries": 118821,
+      "total_entries": 118831,
       "listed_entries": 3988,
-      "unlisted_entries": 114833,
+      "unlisted_entries": 114843,
       "malformed_stock_codes": [],
       "duplicates": [],
       "invalid_entries": 0,
-      "total_list_nodes": 118821
+      "total_list_nodes": 118831
     },
-    "watch_update_performed_at_kst": "2026-09-02T07:28:38.728061+09:00",
-    "watch_date_range_checked": "20260901~20260901",
+    "watch_update_performed_at_kst": "2026-09-03T07:31:38.588730+09:00",
+    "watch_date_range_checked": "20260902~20260902",
     "watch_replaced_stock_codes": [
-      "001470",
-      "305090"
+      "003670",
+      "143210"
     ],
     "watch_added_stock_codes": [],
     "watch_skipped_replacements": [],
     "watch_unexpected_report_regressions": [],
     "watch_filings_outside_universe": [],
     "watch_delta_summary": {
-      "generated_at_kst": "2026-09-02T07:28:38.486169+09:00",
+      "generated_at_kst": "2026-09-03T07:31:38.389823+09:00",
       "total_records": 2,
       "by_status": {
         "OK": 2
@@ -953,9 +953,9 @@
       "name_fallback_attempted": true,
       "name_fallback_universe_names": 2734,
       "name_fallback_index_stats": {
-        "total_entries": 118821,
-        "total_named_entries": 118821,
-        "named_entries": 110948,
+        "total_entries": 118831,
+        "total_named_entries": 118831,
+        "named_entries": 110956,
         "unnamed_entries": 0,
         "duplicate_names": [
           {
@@ -88576,6 +88576,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "피에이치씨",
+            "chosen": {
+              "corp_code": "01777640",
+              "corp_name": "피에이치씨",
+              "modify_date": "20260902"
+            },
+            "dropped": [
+              {
+                "corp_code": "00155179",
+                "corp_name": "피에이치씨",
+                "modify_date": "20230215"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "위테크",
             "chosen": {
               "corp_code": "01925034",
@@ -89095,6 +89111,22 @@
               {
                 "corp_code": "00406277",
                 "corp_name": "에프에스코리아",
+                "modify_date": "20230221"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
+            "corp_name": "상명건설",
+            "chosen": {
+              "corp_code": "02046149",
+              "corp_name": "상명건설",
+              "modify_date": "20260902"
+            },
+            "dropped": [
+              {
+                "corp_code": "01015081",
+                "corp_name": "상명건설",
                 "modify_date": "20230221"
               }
             ],
@@ -101027,18 +101059,18 @@
       ],
       "skip_not_yet_due": false,
       "requests_used": 4,
-      "elapsed_sec": 22.6,
+      "elapsed_sec": 247.0,
       "completed": true,
       "stopped_reason": null,
       "corpcode_source": "network",
       "corpcode_stats": {
-        "total_entries": 118821,
+        "total_entries": 118831,
         "listed_entries": 3988,
-        "unlisted_entries": 114833,
+        "unlisted_entries": 114843,
         "malformed_stock_codes": [],
         "duplicates": [],
         "invalid_entries": 0,
-        "total_list_nodes": 118821
+        "total_list_nodes": 118831
       },
       "limit_applied": null,
       "cross_source_baseline_path": null,
@@ -143732,11 +143764,10 @@
       "reprt_code": "11012",
       "reprt_name": "반기보고서",
       "stlm_dt": "2026-06-30",
-      "rcept_no": "20260814000996",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814000996",
+      "rcept_no": "20260902000346",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260902000346",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
-      "dps_cash_unspecified": null,
       "dps_cash_common_all": [],
       "dps_cash_preferred_all": [],
       "dps_stock_common": null,
@@ -143763,12 +143794,20 @@
       "cross_source_notes": [],
       "status": "OK",
       "status_reason": "반기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-29T12:56:11.316651+09:00",
+      "collected_at_kst": "2026-09-03T07:31:29.429691+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
+      "dps_cash_unspecified": null,
+      "dps_cash_unspecified_all": [],
+      "dps_stock_unspecified": null,
+      "dps_stock_unspecified_all": [],
+      "cash_yield_unspecified": null,
+      "cash_yield_unspecified_all": [],
+      "stock_yield_unspecified": null,
+      "stock_yield_unspecified_all": [],
       "probe_log": [
         {
           "reprt_code": "11014",
@@ -149418,11 +149457,10 @@
       "reprt_code": "11012",
       "reprt_name": "반기보고서",
       "stlm_dt": "2026-06-30",
-      "rcept_no": "20260814004210",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260814004210",
+      "rcept_no": "20260902000277",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260902000277",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
-      "dps_cash_unspecified": null,
       "dps_cash_common_all": [],
       "dps_cash_preferred_all": [],
       "dps_stock_common": null,
@@ -149449,12 +149487,20 @@
       "cross_source_notes": [],
       "status": "OK",
       "status_reason": "반기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-29T13:06:16.211328+09:00",
+      "collected_at_kst": "2026-09-03T07:31:35.814835+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
+      "dps_cash_unspecified": null,
+      "dps_cash_unspecified_all": [],
+      "dps_stock_unspecified": null,
+      "dps_stock_unspecified_all": [],
+      "cash_yield_unspecified": null,
+      "cash_yield_unspecified_all": [],
+      "stock_yield_unspecified": null,
+      "stock_yield_unspecified_all": [],
       "probe_log": [
         {
           "reprt_code": "11014",
