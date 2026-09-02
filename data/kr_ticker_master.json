@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "generated_at": "2026-09-02 16:11",
+    "generated_at": "2026-09-02 21:04",
     "source": "FinanceDataReader StockListing('KRX') + StockListing('ETF/KR')",
     "count": 4040,
     "description": "코스피+코스닥+국내ETF 전체 상장종목 코드↔이름 목록 — 가격/밸류에이션 없음, 이름 검색 보조용"
