@@ -769,6 +769,39 @@ def test_resolve_stock_query():
     check(ticker == "FAKE" and name == "Fake Corp" and reason is None,
           "미국: 회사 이름으로 입력해도 인식")
 
+    # -- 2026-09-02 오너 실사용 버그: 이름 매칭의 공백 민감성 (LLY "일라이 릴리") --
+    # 저장된 미국 종목 한글명은 공백 없이 저장되는데(예: 실제 LLY → "일라이릴리",
+    # utils/company_names_kr.py), 토스증권 등 실제 증권사 앱은 잔고 상세 화면에서
+    # 공백을 넣어 보여준다(예: "일라이 릴리") — 그대로 입력하면 정확일치·부분일치가
+    # 둘 다 공백 한 칸 차이로 실패했었다. find_ticker_by_name()이 비교 직전에만 양쪽
+    # 공백을 제거하도록 고친 뒤 재현·검증한다(§0-1: 실제 재현 없이 고쳤다고 믿지 않기).
+    spaced_snapshot = {
+        "metadata": {}, "stocks": [
+            {"symbol": "SPACED", "name": "Spaced Name Corp", "name_kr": "일라이릴리",
+             "price": 900.0},
+            {"symbol": "OTHERSP", "name": "Other Spaced Corp", "name_kr": "한글이름",
+             "price": 100.0},
+        ],
+    }
+    spaced_index = build_universe_index(spaced_snapshot, MARKET_US)
+    spaced_indexes = {MARKET_KR: {}, MARKET_US: spaced_index}
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "일라이릴리", spaced_indexes)
+    check(ticker == "SPACED" and reason is None,
+          "미국: 공백 없는 원래 저장 형태로 입력하면 그대로 인식(회귀 확인)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "일라이 릴리", spaced_indexes)
+    check(ticker == "SPACED" and reason is None,
+          "미국: 실제 증권사 앱처럼 공백을 넣어 입력해도 정확일치로 인식(2026-09-02 실사용 버그 수정)")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "일라이 릴", spaced_indexes)
+    check(ticker == "SPACED" and reason is None,
+          "미국: 공백 섞인 부분 입력도 유일하면 부분일치로 인식")
+
+    ticker, name, reason = resolve_stock_query(MARKET_US, "한 글 이 름", spaced_indexes)
+    check(ticker == "OTHERSP" and reason is None,
+          "미국: 공백이 여러 군데 섞여도(연속 공백 포함) 정규화 후 인식")
+
     # 유니버스 밖 종목 — 코드처럼 생겼으면 이름을 몰라도 그대로 받아들입니다(§0-1: 지어내지
     # 않되, 정직한 '현재가 없음' 표시로 넘어갈 수 있게 코드 자체는 거부하지 않음).
     ticker, name, reason = resolve_stock_query(MARKET_KR, "005380", indexes)

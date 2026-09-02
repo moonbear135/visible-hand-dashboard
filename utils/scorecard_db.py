@@ -656,6 +656,20 @@ def load_us_all_etf_prices(data_dir=None):
     return build_universe_index(payload, MARKET_US), (payload or {}).get("metadata")
 
 
+def _strip_spaces(text) -> str:
+    """이름 비교용 — 문자열 안의 모든 공백(중간 포함)을 제거합니다.
+
+    2026-09-02 오너 실사용 버그 발견 — 미국 종목 한글명은 `utils/company_names_kr.py`에
+    공백 없이 저장돼 있는데(예: LLY → "일라이릴리"), 토스증권 등 실제 증권사 앱은 잔고
+    상세 화면에서 공백을 넣어 보여줍니다(예: "일라이 릴리"). 사람이 화면에 보이는 대로
+    그대로 입력하면 `find_ticker_by_name()`의 정확일치·부분일치가 둘 다 공백 한 칸
+    차이로 실패했습니다. 판정 로직(정확일치→유일한 부분일치) 자체는 그대로 두고,
+    비교 직전에만 양쪽 문자열에서 공백을 제거합니다 — 화면에 보여줄 종목명은 항상 원본
+    (`stock.get("name")`)을 그대로 반환하므로 저장값·표시값은 전혀 건드리지 않습니다.
+    """
+    return re.sub(r"\s+", "", str(text or ""))
+
+
 def _name_match_candidates(stock: dict) -> list:
     """이름 매칭에 쓸 후보 문자열 — 영문명(`name`)과, 있으면 한글명(`name_kr`) 둘 다.
 
@@ -696,9 +710,11 @@ def find_ticker_by_name(market, name, indexes):
     if not query:
         return None, None, "종목명이 비어 있습니다."
 
+    normalized_query = _strip_spaces(query)
+
     index = indexes.get(market_code) or {}
     exact = [(key, stock) for key, stock in index.items()
-             if query in _name_match_candidates(stock)]
+             if normalized_query in (_strip_spaces(c) for c in _name_match_candidates(stock))]
     if len(exact) == 1:
         key, stock = exact[0]
         return key, stock.get("name"), None
@@ -706,7 +722,7 @@ def find_ticker_by_name(market, name, indexes):
         return None, None, "같은 이름의 종목이 여러 개 있습니다 — 종목코드를 직접 입력해 주세요."
 
     partial = [(key, stock) for key, stock in index.items()
-               if any(query in candidate for candidate in _name_match_candidates(stock))]
+               if any(normalized_query in _strip_spaces(candidate) for candidate in _name_match_candidates(stock))]
     if len(partial) == 1:
         key, stock = partial[0]
         return key, stock.get("name"), None
