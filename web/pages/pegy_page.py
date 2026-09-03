@@ -938,9 +938,21 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         )
 
     if snapshot_status not in ("SUCCESS", "UNKNOWN"):
+        # 2026-09-03 — "검증 통과 N/M종목"만 보여주면, 그중 대부분이 실은 적자 기업이라
+        # 정상적으로 산출 불가한 것(수집 실패 아님, collector_kospi200.py
+        # _is_genuine_collection_failure 참고)인지 진짜 미수집/파싱 실패인지 구분이 안 됩니다.
+        # loss_excluded_count(집계 시점에 이미 계산돼 metadata에 남음)를 그대로 노출해
+        # "무엇이 진짜 문제인지"를 화면에서도 정직하게 구분합니다.
+        _total = metadata.get('total_count', 0) or 0
+        _valid = metadata.get('valid_count', 0) or 0
+        _loss_excluded = metadata.get('loss_excluded_count', 0) or 0
+        _real_failed = max(_total - _valid, 0)
         warning_banner(
             f"⚠️ 스냅샷 수집 상태: {snapshot_status} — "
-            f"검증 통과 {metadata.get('valid_count', '?')}/{metadata.get('total_count', '?')}종목. "
+            f"수집 확인 {_valid}/{_total}종목"
+            + (f" (그중 {_loss_excluded}종목은 적자 등으로 애초에 산출 불가일 뿐 수집 자체는 정상)"
+               if _loss_excluded else "")
+            + f". 실제 미수집·파싱 실패는 {_real_failed}종목. "
             "일부 종목은 데이터 부족으로 '측정 불가' 카드로 표시됩니다."
         )
 
