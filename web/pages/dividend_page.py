@@ -480,6 +480,72 @@ def build_payment_event_index(payload):
     return index
 
 
+def next_dividend_event(events, today):
+    """한 종목의 지급일정 이벤트 목록 → **앞으로 다가올 배당 1건**(없으면 None).
+
+    2026-09-03 추가(오너 요청: "다음 배당 일정 정도는 연결을 같이 할 수 있지 않을까",
+    "기재 정정 공시도 어느정도 따라갈 수 있지 않을까"). 국내 종목 스코어카드 화면
+    (`web/pages/pegy_page.py`)의 카드에 "다음 배당 일정" 보조 한 줄을 붙이려고 만들었습니다.
+    배당 캘린더 화면은 `payment_badge_html()` 처럼 한 종목의 이벤트를 **전부** 나열할 자리가
+    있지만, 스코어카드 카드에는 그럴 자리가 없어 **화면이 대표 1건을 골라야만** 합니다.
+    그 고르는 규칙을 카드 렌더링 코드 안에 흩어 놓지 않고 여기 순수 함수 한 곳에 모읍니다
+    (§0-3-10 · §4-3 — 화면 파일이 데이터 판단 로직을 각자 새로 짓지 않기).
+
+    🔴 이건 **원본 데이터의 판단이 아니라 화면이 만든 선택 규칙**입니다. 산출물 파일
+       (`dividend_kr_2026_payment_events.json`)은 스스로 "'현재 배당 상태'가 아니라 '접수된
+       배당결정 공시 이벤트의 로그'이고, `[기재정정]` 공시는 원본과 별개 레코드로 함께
+       남으며, **어느 것이 최종본인지는 이 파일이 판단하지 않는다**"고
+       `summary.known_limitations` 에 못박아 두었습니다(수집기
+       `collector_dividend_payment_kr.py` 도 같은 문장을 씁니다). 즉 최종본 판정은 화면
+       몫이라는 설계이고, 이 함수가 그 몫을 맡습니다. 그래서 호출부는 고른 1건이 "그 종목
+       배당의 전부"처럼 보이지 않도록 전체 이력이 배당 캘린더 화면에 있다는 안내를 함께
+       띄웁니다.
+
+    규칙 (셋 다 §0-1 — 모르는 것을 아는 척하지 않기):
+      ① `record_date`(배당기준일)가 `today` **이상**인 이벤트만 후보입니다. 오늘이 기준일인
+         건은 아직 오늘 안에 남아 있는 일정이라 **포함**합니다(경계값 — 테스트로 고정).
+         `record_date` 가 없거나 형식을 못 읽으면(`parse_iso_date()` 가 None) "언제인지
+         모른다"는 뜻이라 후보에서 뺍니다 — 아무 날짜나 가정해 채우지 않습니다.
+      ② 같은 `record_date` 에 여러 건이 있으면(전형적으로 원본 + `[기재정정]` 정정본)
+         **가장 나중에 접수된 것**이 그 날짜의 대표입니다. 정정본이 있는데 정정 전 원본을
+         보여주면 그 자체가 틀린 안내입니다. `build_payment_event_index()` 가 이미 접수일ㆍ
+         접수번호 오름차순으로 정렬해 주지만, 정렬이 보장되지 않은 목록이 들어와도 같은
+         답이 나오도록 **여기서 한 번 더** 같은 키로 정렬한 뒤 고릅니다(호출부의 정렬
+         상태에 조용히 기대지 않기 — 이 함수만 따로 불러도 규칙이 성립해야 합니다).
+      ③ 그렇게 남은 날짜별 대표 중 `record_date` 가 **가장 이른** 1건을 돌려줍니다.
+
+    ⚠️ 자회사 대리공시(`is_subsidiary_notice`)는 여기서 **거르지 않습니다.** 수집기가
+       "공시 주체(corp_name/stock_code)와 실제 배당하는 회사가 다를 수 있다"고 밝힌
+       건인데, 골라내 버리면 정보가 통째로 사라지고(§0-1) 반대로 아무 말 없이 보여주면
+       오해를 부릅니다. 그래서 이 함수는 그대로 돌려주고, **그 사실을 화면에 밝히는 일은
+       호출부**가 맡습니다(`_payment_event_notes_html()` 이 이미 캘린더 화면에서 하듯이).
+
+    :param events: 한 종목의 이벤트 리스트(`build_payment_event_index()` 의 값). None 이나
+        빈 목록이면 그대로 None 을 돌려줍니다(그 종목엔 보조 줄이 안 붙습니다).
+    :param today: 기준일(`date`). 이 함수는 시계를 직접 읽지 않습니다 — 호출부가
+        `today_kst()` 로 만들어 넘깁니다(서버 시간대에 기대지 않기 + 테스트에서 날짜 고정).
+    :return: 이벤트 dict 1건(**원본 그대로** — 값을 가공하지 않습니다) 또는 후보가 없으면
+        None.
+    """
+    ordered = sorted(
+        events or (),
+        key=lambda item: (str((item or {}).get('rcept_dt') or ''),
+                          str((item or {}).get('rcept_no') or '')),
+    )
+    # 함수 지역 dict 입니다(모듈 전역이 아닙니다 — §0-3-8). 오름차순으로 넣으면서 같은
+    # 키를 계속 덮어쓰므로, 같은 배당기준일에서는 **마지막(=가장 나중 접수)** 건만 남습니다.
+    representative = {}
+    for event in ordered:
+        record_date = parse_iso_date((event or {}).get('record_date'))
+        if record_date is None or record_date < today:
+            continue
+        representative[record_date] = event
+    if not representative:
+        return None
+    return representative[min(representative)]
+
+
+
 # =============================================================================
 # 🔴 KRX 휴장일 표 — 배당락일 계산용
 # =============================================================================
@@ -1207,6 +1273,18 @@ def cross_source_badge_html(entry) -> str:
     return warn_badge('🔎 출처 간 불일치', body)
 
 
+#: 🔴 2026-09-03 — 이 두 문장을 **상수로 뽑았습니다.** 지금까지는 아래
+#: `_payment_event_notes_html()` 안에만 있었는데, 같은 공시를 스코어카드 화면
+#: (`web/pages/pegy_page.py` 의 "다음 배당 일정" 한 줄)에서도 보여주게 되면서 같은 경고를
+#: 두 화면이 각자 손으로 적을 상황이 됐습니다. 문장이 한쪽만 고쳐지면 같은 공시를 두 화면이
+#: 다르게 설명하게 되므로 출처를 하나로 둡니다(§0-3-10). 문구 자체는 바꾸지 않았습니다 —
+#: 앞에 붙던 '⚠️ ' 는 표시하는 쪽이 붙입니다(배지 라벨에 이미 ⚠️ 가 들어가는 자리도 있어서).
+SUBSIDIARY_NOTICE_CAVEAT = ('이 공시는 "자회사의 주요경영사항"으로 접수됐습니다 — 공시 주체와 '
+                            '실제 배당하는 회사가 다를 수 있습니다.')
+PARTIAL_PARSE_CAVEAT = ('공시 원문에서 일부 항목을 확실히 읽지 못했습니다'
+                        '(parse_status={status}).')
+
+
 def _payment_event_notes_html(event) -> str:
     """이벤트 1건의 부가 안내(정정 여부는 `payment_event_summary_text`가 이미 앞에 붙이므로
     여기서는 다루지 않음) — 자회사 대리공시ㆍ파싱 일부 실패ㆍ원문 링크. 없으면 빈 문자열.
@@ -1216,12 +1294,10 @@ def _payment_event_notes_html(event) -> str:
     """
     parts = []
     if event.get('is_subsidiary_notice'):
-        parts.append('⚠️ 이 공시는 "자회사의 주요경영사항"으로 접수됐습니다 — 공시 주체와 '
-                     '실제 배당하는 회사가 다를 수 있습니다.')
+        parts.append('⚠️ ' + SUBSIDIARY_NOTICE_CAVEAT)
     status = event.get('parse_status')
     if status and status != 'OK':
-        parts.append(f'⚠️ 공시 원문에서 일부 항목을 확실히 읽지 못했습니다'
-                     f'(parse_status={esc(status)}).')
+        parts.append('⚠️ ' + PARTIAL_PARSE_CAVEAT.format(status=esc(status)))
     url = event.get('dart_document_url')
     if url:
         parts.append(dart_link_html(url))

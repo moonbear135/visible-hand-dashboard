@@ -22,7 +22,11 @@ from pathlib import Path
 # autouse 라 이 파일의 모든 테스트에 자동 적용됩니다(이 파일에 따로 쓸 것이 없습니다).
 from conftest import FAILURES, check  # noqa: E402
 
-from web.pages.pegy_page import build_stock_card_html, resolve_preset_badges
+from web.pages.pegy_page import (
+    build_next_dividend_html,
+    build_stock_card_html,
+    resolve_preset_badges,
+)
 
 
 def _base_stock(**overrides) -> dict:
@@ -255,3 +259,143 @@ def test_pegy_index_page_render_smoke():
         check(not early,
               "실제 스냅샷이 있으므로 §0-1 조기 반환이 아니라 본문 전체가 그려짐"
               + (f" — 배너: {early}" if early else ""))
+
+
+# =============================================================================
+# 📅 "다음 배당 일정" 보조 한 줄 (2026-09-03 추가 — 오너 요청)
+#
+# 선택 규칙 자체(어느 공시를 고르는가)는 `tests/test_dividend_next_event.py` 가 순수 함수
+# 단위로 고정합니다. 여기서는 **카드가 그 결과를 어떻게 그리는가**만 봅니다 —
+#   ① 없으면 아예 안 그린다, ② 있어도 기존 "작년 배당률(확정)" 표기를 건드리지 않는다,
+#   ③ 정정ㆍ자회사 대리공시ㆍ원문 미해독 사실을 감추지 않는다, ④ 전부 esc() 를 통과한다.
+# =============================================================================
+NEXT_DIV_MARKER = "📅 다음 배당 일정"
+
+
+def _payment_event(**overrides) -> dict:
+    """실제 `dividend_kr_2026_payment_events.json` 레코드에서 카드가 읽는 필드만 추린 것."""
+    event = {
+        "record_date": "2026-09-30",
+        "pay_date_expected": "2026-10-30",
+        "dps_common": 314,
+        "dividend_class": "중간배당",
+        "is_correction": False,
+        "is_subsidiary_notice": False,
+        "parse_status": "OK",
+    }
+    event.update(overrides)
+    return event
+
+
+def test_next_dividend_line_is_absent_when_there_is_no_upcoming_event():
+    """🔴 다가오는 공시가 없으면 **한 글자도 그리지 않습니다**(자리표시자 금지).
+    "예정된 공시 없음"을 500장 카드에 찍으면 소음일 뿐 아니라, 우리가 아는 사실도 아닙니다
+    (수집 유니버스 밖이거나 아직 공시가 안 났을 수 있음 — §0-1)."""
+    print("\n[다음배당-1] 이벤트 없음(None)·필드 자체 없음 — 보조 줄 자체가 없음")
+    html_none = build_stock_card_html(_base_stock(next_dividend_event=None), 1, admin=False)
+    check(NEXT_DIV_MARKER not in html_none, "None 이면 보조 줄이 아예 없음")
+    check("예정된 공시 없음" not in html_none, "'없음' 이라고 단정하는 문구를 쓰지 않음")
+
+    # 필드가 아예 없는 옛 스냅샷 경로(.get() → None)도 같아야 합니다.
+    html_missing = build_stock_card_html(_base_stock(), 1, admin=False)
+    check(NEXT_DIV_MARKER not in html_missing, "필드가 없는 종목도 조용히 생략됨")
+
+
+def test_next_dividend_line_shows_disclosure_values_as_is():
+    """공시 원문값을 그대로 옮깁니다 — 현재가로 다시 계산하지 않습니다."""
+    print("\n[다음배당-2] 이벤트가 있으면 배당기준일·지급예정일·1주당·배당구분을 원문 그대로")
+    html = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event()), 1, admin=False)
+    check(NEXT_DIV_MARKER in html, "보조 줄이 그려짐")
+    check("배당기준일 <b style=\"color: #7dd3fc;\">2026-09-30</b>" in html, "배당기준일 원문값")
+    check("지급예정일 <b style=\"color: #7dd3fc;\">2026-10-30</b>" in html, "지급예정일 원문값")
+    check("1주당 <b style=\"color: #7dd3fc;\">314원</b>" in html, "주당배당금 원문값")
+    check("(중간배당)" in html, "배당구분 원문 라벨")
+
+
+def test_next_dividend_line_does_not_touch_last_year_confirmed_dividend():
+    """🔴 이번 작업은 순수 추가(additive)입니다 — 기존 "작년 배당률(확정)" 표기가 보조 줄
+    유무와 관계없이 **글자 하나까지 동일**해야 합니다."""
+    print("\n[다음배당-3] 기존 '작년 배당률(확정)' 표기는 보조 줄이 붙어도 그대로")
+    without = build_stock_card_html(_base_stock(), 1, admin=False)
+    with_line = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event()), 1, admin=False)
+
+    for fragment in ("DPS 850원/주", "배당수익률 1.70%", "(425억원)"):
+        check(fragment in without, f"보조 줄 없을 때 기존 표기 유지: {fragment}")
+        check(fragment in with_line, f"보조 줄 있을 때도 기존 표기 유지: {fragment}")
+
+    # 보조 줄을 뺀 나머지가 완전히 같아야 합니다(추가만 했지 무엇도 바꾸지 않았음).
+    # 줄바꿈만 없앤 뒤 비교합니다 — `compact()` 가 빈 줄을 지우므로 보조 줄이 없을 때와
+    # 있을 때의 줄 수가 달라서, 줄바꿈 차이 때문에 틀린 빨간불이 나지 않게 하기 위함입니다.
+    flat_without = without.replace("\n", "")
+    flat_with = with_line.replace("\n", "")
+    fragment = build_next_dividend_html(_payment_event()).replace("\n", "")
+    check(fragment and fragment in flat_with, "보조 줄 조각이 카드 안에 그대로 들어가 있음")
+    check(flat_with.replace(fragment, "") == flat_without,
+          "보조 줄 조각만 빼면 카드 HTML 이 기존과 완전히 동일함")
+
+
+def test_next_dividend_line_marks_that_a_correction_was_followed():
+    """오너 요청의 핵심 — 정정본을 따라갔다는 사실을 화면에도 남깁니다."""
+    print("\n[다음배당-4] is_correction 이면 '[기재정정 반영]' 표시")
+    html = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event(is_correction=True)), 1, admin=False)
+    check("[기재정정 반영]" in html, "정정본을 따라갔다는 사실을 밝힘")
+
+    html_plain = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event(is_correction=False)), 1, admin=False)
+    check("[기재정정 반영]" not in html_plain, "정정본이 아니면 그 표시를 붙이지 않음")
+
+
+def test_next_dividend_line_discloses_subsidiary_and_partial_parse():
+    """🔴 수집기가 밝힌 두 가지 한계를 카드도 감추지 않습니다(§0-1).
+
+    특히 원문 일부 미해독(`parse_status='PARTIAL'`)은 "어차피 빈 칸으로 보이겠지"로 넘길 수
+    없습니다 — 2026-09-03 실측으로 PARTIAL 22건 중 13건은 이 줄에 나오는 네 항목이 전부
+    채워져 있어, 배지가 없으면 완전히 읽힌 공시처럼 보입니다.
+    """
+    print("\n[다음배당-5] 자회사 대리공시 · 원문 일부 미해독 배지")
+    html_sub = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event(is_subsidiary_notice=True)),
+        1, admin=False)
+    check("자회사 대리공시" in html_sub, "자회사 대리공시 사실을 밝힘")
+    check("공시 주체와 실제 배당하는 회사가 다를 수 있습니다" in html_sub,
+          "캘린더 화면과 같은 문장(공용 상수)을 씀")
+
+    html_partial = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event(parse_status="PARTIAL")),
+        1, admin=False)
+    check("원문 일부 미해독" in html_partial, "원문 일부 미해독 사실을 밝힘")
+    check("parse_status=PARTIAL" in html_partial, "어떤 상태였는지 그대로 노출")
+
+    html_clean = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event()), 1, admin=False)
+    check("자회사 대리공시" not in html_clean, "해당 없으면 배지를 붙이지 않음")
+    check("원문 일부 미해독" not in html_clean, "parse_status=OK 면 배지를 붙이지 않음")
+
+
+def test_next_dividend_line_handles_missing_optional_fields_without_inventing():
+    """지급예정일ㆍ배당구분이 원문에 없는 건이 실제로 있습니다(실측: 지급예정일 결측 29건).
+    없는 값을 '미정' 같은 단정으로 채우지 않고, 배당구분은 괄호째 생략합니다."""
+    print("\n[다음배당-6] 결측 필드 — 지어내지 않음")
+    html = build_stock_card_html(
+        _base_stock(next_dividend_event=_payment_event(
+            pay_date_expected=None, dividend_class=None, dps_common=None)),
+        1, admin=False)
+    check("지급예정일 <b style=\"color: #7dd3fc;\">데이터 없음</b>" in html,
+          "지급예정일 결측은 '데이터 없음'")
+    check("1주당 <b style=\"color: #7dd3fc;\">데이터 없음</b>" in html,
+          "주당배당금 결측도 '데이터 없음'(0원으로 그리지 않음)")
+    check("()" not in build_next_dividend_html(_payment_event(dividend_class=None)),
+          "배당구분이 없으면 빈 괄호를 남기지 않고 통째로 생략")
+
+
+def test_next_dividend_line_escapes_disclosure_strings():
+    """§0-3-9 — 공시에서 온 문자열은 전부 `esc()` 를 통과해야 합니다(원문 라벨은 외부 입력)."""
+    print("\n[다음배당-7] XSS — 원문 문자열 이스케이프")
+    html = build_next_dividend_html(_payment_event(
+        dividend_class='<script>alert(1)</script>', record_date='<img src=x onerror=1>'))
+    check("<script>" not in html, "스크립트 태그가 그대로 들어가지 않음")
+    check("&lt;script&gt;" in html, "이스케이프된 형태로만 들어감")
+    check("<img src=x" not in html, "배당기준일 문자열도 이스케이프됨")

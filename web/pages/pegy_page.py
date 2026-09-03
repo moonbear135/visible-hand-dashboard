@@ -54,6 +54,7 @@ from web.auth import is_admin
 from web.blocking import run_blocking
 from web.components import (
     LEARNING_NOTICE_HTML,
+    NA_TEXT,
     compact,
     disclaimer_footer,
     download_button,
@@ -77,6 +78,20 @@ from web.components import (
     warning_banner,
 )
 from web.layout import layout
+# 🟢 2026-09-03 — 배당 지급일정 공시(DART)를 이 화면에도 잇습니다(오너 요청). 파일 상수·
+#    색인·"다음 1건" 선택 규칙을 여기서 다시 만들지 않고 배당 캘린더 화면의 것을 **그대로**
+#    가져다 씁니다(§0-3-10 중복 금지, §4-3 표현 계층이 데이터 판단 로직을 새로 짓지 않기).
+#    화면 파일끼리의 import 는 이미 `report_page.py` 가 `dividend_page.today_kst` 를 이렇게
+#    쓰고 있는 기존 패턴입니다(순환 참조 없음 — dividend_page 는 이 파일을 import 하지 않음).
+from web.pages.dividend_page import (
+    PARTIAL_PARSE_CAVEAT,
+    PAYMENT_EVENTS_FILENAME,
+    SUBSIDIARY_NOTICE_CAVEAT,
+    build_payment_event_index,
+    next_dividend_event,
+    to_float,
+    today_kst,
+)
 from web.state import (
     PAGE_RESPONSE_TIMEOUT_SECONDS,
     data_path,
@@ -197,9 +212,140 @@ async def load_pegy_summary_history():
     return payload
 
 
+async def load_payment_event_index():
+    """📅 DART 배당결정 공시 색인 `{종목코드: [이벤트, ...]}`. 못 읽으면 **조용히 빈 dict**.
+
+    2026-09-03 추가(오너 요청) — 카드의 "다음 배당 일정" 보조 한 줄용입니다. 파일은
+    `collector_dividend_payment_kr.py` 가 매일 05:30 KST 에 갱신합니다(이 화면은 읽기만
+    합니다 — 렌더링 도중에 수집기를 부르지 않습니다).
+
+    🔴 실패해도 **배너를 띄우지 않고 빈 dict** 로 넘깁니다. 이 화면의 핵심 측정치(밸류에이션)
+       와 무관한 **덧붙는 보조 정보**라, 파일이 아직 없거나 깨졌다고 밸류에이션 화면 전체에
+       경고를 띄우는 것은 소음입니다 — 색인이 비면 모든 종목이 `None` 을 받아 보조 줄만 안
+       붙고 나머지는 평소와 똑같이 그려집니다(`load_pegy_summary_history()` 가 없는 파일을
+       조용히 빈 목록으로 넘기는 것과 같은 태도).
+       ⚠️ 대신 이 조용함이 "일정이 없다"로 오독되지 않도록, 보조 줄이 붙는 자리 툴팁이
+       "이 줄은 있을 때만 붙는다"고 밝힙니다(§0-1 — 없음과 모름을 뭉개지 않기). 전체 이력과
+       읽기 실패 경고는 배당 캘린더 화면(`/dividend`)이 이미 제대로 보여줍니다.
+
+    :return: 함수 지역 dict (모듈 전역이 아닙니다 — §0-3-8).
+    """
+    payload, _load_error = await load_json_file_async(data_path(PAYMENT_EVENTS_FILENAME))
+    if not isinstance(payload, dict):
+        return {}
+    return build_payment_event_index(payload)
+
+
+def attach_next_dividend_events(stocks, payment_index, today) -> None:
+    """각 종목 dict 에 `next_dividend_event`(이벤트 1건 또는 None)를 **제자리로** 붙입니다.
+
+    2026-09-03 — 카드 조립 함수(`build_stock_card_html`)는 순수 문자열 조립이라 파일을 읽지
+    않습니다. 그래서 "이 종목의 다음 배당 공시"를 미리 계산해 종목 dict 에 얹어 두는 이
+    한 곳에서만 색인을 들여다봅니다(카드 500장이 각자 색인을 뒤지지 않도록).
+
+    코드 형식은 색인 쪽(`build_payment_event_index`)이 `str(...).strip()` 으로 맞춰 두므로
+    여기서도 같은 방식으로 맞춥니다 — 한쪽만 공백을 안 털면 조용히 아무 것도 안 붙습니다.
+
+    :param today: 기준일(`date`). 호출부가 `today_kst()` 로 만들어 넘깁니다(서버 시간대에
+        기대지 않기 — Render 는 UTC 라 한국 자정~오전 9시에 하루가 밀립니다).
+    """
+    for stock in stocks or ():
+        code = str(stock.get('code') or '').strip()
+        stock['next_dividend_event'] = next_dividend_event(
+            (payment_index or {}).get(code) or (), today)
+
+
 # =============================================================================
 # 2. 카드 HTML 조립 (순수 문자열 — NiceGUI 위젯을 만들지 않습니다)
 # =============================================================================
+#: 📅 "다음 배당 일정" 한 줄에 붙는 툴팁 본문(2026-09-03, 오너 요청으로 추가).
+#: 🔴 이 줄이 무엇이고 **무엇이 아닌지**를 여기서 다 밝힙니다 — 바로 위 "작년 배당률(확정)"
+#:    과 나란히 놓이는 자리라, 설명이 없으면 같은 값의 최신판으로 오해되기 딱 좋습니다.
+NEXT_DIVIDEND_TOOLTIP = (
+    '<b>다음 배당 일정 — DART 배당결정 공시</b><br>'
+    '매일 수집하는 DART 현금ㆍ현물배당결정 공시 로그에서, <b>배당기준일이 오늘 이후인</b> 건 중 '
+    '가장 가까운 <b>1건만</b> 이 화면이 직접 골라 보여줍니다.<br>'
+    '같은 배당기준일에 원본과 [기재정정] 공시가 함께 있으면 <b>가장 최근에 접수된 공시</b>를 '
+    '따릅니다. 이 선택은 원본 데이터의 판단이 아니라 <b>이 화면이 만든 규칙</b>입니다 — '
+    '공시 파일 자체는 "어느 것이 최종본인지 판단하지 않는다"고 밝히고 있습니다.<br>'
+    '수치는 <b>공시 원문값 그대로</b>입니다. 현재가로 배당수익률을 다시 계산하지 않으며, 위 '
+    "'작년 배당률(확정)'과는 출처도 시점도 다른 <b>별개의 값</b>입니다.<br>"
+    '"지급예정일"은 확정된 지급일이 아니라 상법상 지급 기한(통상 1개월 이내)이라고 DART 원문에 '
+    '적혀 있습니다.<br>'
+    '이 줄은 <b>다가오는 공시가 있을 때만</b> 붙습니다 — 줄이 없다고 배당이 없다는 뜻이 '
+    '아니라, 아직 접수된 공시를 못 찾았다는 뜻입니다.<br>'
+    '같은 종목의 나머지 공시와 지난 이력 전체는 "투자 감사합니다!"(배당 캘린더) 화면에서 '
+    '볼 수 있습니다.'
+)
+
+
+def build_next_dividend_html(event) -> str:
+    """📅 "다음 배당 일정" 보조 한 줄. **다가오는 일정이 없으면(`event` 가 None) 빈 문자열.**
+
+    2026-09-03 추가(오너 요청: "다음 배당 일정 정도는 연결을 같이 할 수 있지 않을까").
+    `event` 는 `next_dividend_event()`(배당 캘린더 화면의 순수 함수)가 고른 1건이며, 이 함수는
+    **고르지 않습니다 — 받은 것을 그리기만 합니다**(§4-3 — 표현 계층이 데이터 판단을 새로
+    짓지 않기). 그래서 여기엔 계산이 한 줄도 없습니다.
+
+    🔴 값이 없는 종목에는 "예정된 공시 없음" 같은 자리표시자를 찍지 않고 **아무것도 그리지
+       않습니다.** 이건 핵심 측정 지표가 아니라 "있으면 보여주는" 보조 정보인데, 500장 카드
+       전부에 빈 칸을 그리면 그 자체가 소음이고, 무엇보다 "없음"은 우리가 아는 사실이 아닙니다
+       (수집 유니버스 밖이거나 아직 공시가 안 났을 뿐 — 캘린더 화면의 `payment_badge_html()`
+       도 같은 이유로 이벤트가 없으면 빈 문자열입니다).
+    🔴 배당수익률을 현재가로 **다시 계산하지 않습니다.** 공시 시점의 원문값만 그대로 옮깁니다.
+    🔴 자회사 대리공시ㆍ원문 일부 파싱 실패는 배지로 **그대로 밝힙니다**(§0-1). 특히
+       파싱 실패는 "화면에 빈 칸이 생기니 어차피 보이겠지"로 넘길 수 없습니다 — 2026-09-03
+       실측: `parse_status='PARTIAL'` 98건 중 22건이고, 그중 **13건은 이 줄에 보이는 네 항목
+       (배당기준일ㆍ지급예정일ㆍ주당배당금ㆍ배당구분)이 전부 채워져 있어** 배지가 없으면
+       완전히 읽힌 공시처럼 보입니다. 경고 문구는 캘린더 화면과 **같은 상수**를 씁니다
+       (§0-3-10 — 같은 공시를 두 화면이 다르게 설명하지 않도록).
+
+    :param event: `next_dividend_event()` 의 반환값(이벤트 dict) 또는 None.
+    :return: HTML 조각(문자열). 넣을 값이 없으면 빈 문자열.
+    """
+    if not event:
+        return ""
+
+    # 원문값 그대로 — 없으면 '데이터 없음'입니다("미정"이라고 쓰면 회사가 아직 안 정했다는
+    # 뜻이 되는데, 실제로는 원문에 항목 자체가 없었던 경우가 대부분이라 우리가 아는 사실이
+    # 아닙니다). 배당 캘린더 화면(`payment_event_summary_text`)도 같은 자리에 NA_TEXT 를 씁니다.
+    record_date = esc(event.get("record_date") or NA_TEXT)
+    pay_date = esc(event.get("pay_date_expected") or NA_TEXT)
+    dps_text = esc(fmt_num(to_float(event.get("dps_common")), "원", 0))
+
+    # 배당구분(중간배당·분기배당·기말배당)은 원문 라벨이라 없으면 괄호째 생략합니다 —
+    # "(데이터 없음)"을 붙이면 값이 아니라 잡음만 늘어납니다.
+    dividend_class = str(event.get("dividend_class") or "").strip()
+    class_text = f" ({esc(dividend_class)})" if dividend_class else ""
+
+    # [기재정정] 이면 "정정본을 따라갔다"는 사실을 그대로 밝힙니다(오너 요청 — 정정 공시를
+    # 따라가는 것 자체가 이번 작업의 목적이라, 따라갔다는 사실도 화면에 남깁니다).
+    correction_html = (
+        ' <span style="color: #fbbf24; font-weight: 800;">[기재정정 반영]</span>'
+        if event.get("is_correction") else ""
+    )
+
+    notes_html = ""
+    if event.get("is_subsidiary_notice"):
+        notes_html += warn_badge("⚠️ 자회사 대리공시", esc(SUBSIDIARY_NOTICE_CAVEAT))
+    parse_status = event.get("parse_status")
+    if parse_status and parse_status != "OK":
+        notes_html += warn_badge(
+            "⚠️ 원문 일부 미해독",
+            esc(PARTIAL_PARSE_CAVEAT.format(status=parse_status)),
+        )
+
+    return compact(f"""
+    <div style="font-size: 12.5px; color: #cbd5e1; margin-top: 8px; padding-top: 7px; border-top: 1px dashed #334155; line-height: 1.6;">
+        <span class="vh-tooltip" tabindex="0" style="color: #7dd3fc; font-weight: 700; border-bottom: 1px dotted #475569;">📅 다음 배당 일정 ℹ️<span class="vh-tooltiptext">{NEXT_DIVIDEND_TOOLTIP}</span></span>
+        <span style="color: #94a3b8;">:</span>
+        배당기준일 <b style="color: #7dd3fc;">{record_date}</b>
+        <span style="color: #475569;">·</span> 지급예정일 <b style="color: #7dd3fc;">{pay_date}</b>
+        <span style="color: #475569;">·</span> 1주당 <b style="color: #7dd3fc;">{dps_text}</b>{class_text}{correction_html}{notes_html}
+    </div>
+    """)
+
+
 def build_blocked_card_html(s, rank_num) -> str:
     """⚪ 카드 자체를 그릴 수 없는 종목(price 없음 / 상장주식수 파싱 오류)."""
     reason = s.get("reject_reason") or s.get("unverified_reason") or "원인 미상"
@@ -360,6 +506,12 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
         "🧮 계산값",
         "재무제표에 확정 DPS가 없어 배당수익률로 역산한 값입니다 (실측 아님)",
     ) if dps_source == "derived_from_div_yield" else ""
+
+    # 📅 2026-09-03 — "다음 배당 일정" 보조 한 줄(오너 요청). 위 DPS·배당수익률(작년 확정)은
+    #    **한 글자도 건드리지 않고**, 아래에 완전히 별개의 줄로 덧붙기만 합니다.
+    #    값은 `_render_body()` 가 미리 붙여 둔 것(`attach_next_dividend_events`)이라 이 함수는
+    #    파일을 읽지 않습니다. 다가오는 공시가 없으면 빈 문자열이라 아무것도 안 그려집니다.
+    next_dividend_html = build_next_dividend_html(s.get("next_dividend_event"))
 
     growth_val = s.get("growth")
     growth_disp = "데이터 없음" if growth_val is None else f"{growth_val:+.1f}%"
@@ -704,6 +856,7 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
                         <span class="vh-tooltip" tabindex="0">작년 배당률 (확정) ℹ️<span class="vh-tooltiptext"><b>주주환원 세부 내역 — 가장 최근 마감된 회계연도 기준</b><br>배당은 실제 지급돼야 확정되는 값이라, 아래 수치는 올해 실제 지급 내역이 아니라 <b>작년(가장 최근 확정 회계연도)</b> 재무제표 기준입니다.<br>• 1주당 배당금 (DPS): {esc(dps_str)}<br>• 배당 총 규모: {esc(s.get('return_total') or '데이터 없음')}<br>• 배당수익률: {esc(fmt_num(s.get('sh_return'), '%', 2))}<br>※ {esc(s.get('sh_return_basis') or '배당수익률만 반영 (자사주 매입 공시 미수집)')}</span></span>
                     </div>
                     <div style="font-size: 18px; font-weight: 800; color: #86efac;">DPS {esc(dps_str)}{calc_dps_tag} <span style="color: #475569; font-size: 15px; margin: 0 4px;">|</span> 배당수익률 {esc(fmt_num(s.get('sh_return'), '%', 2))} <span style="font-size: 13px; color: #94a3b8;">({esc(s.get('return_total') or '데이터 없음')})</span></div>
+                    {next_dividend_html}
                 </div>
                 <div>
                     <div style="font-size: 13px; color: #94a3b8; margin-bottom: 6px;">
@@ -759,6 +912,13 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         return
 
     summary_history = await load_pegy_summary_history()
+
+    # 📅 2026-09-03 — DART 배당결정 공시를 종목 dict 에 미리 붙여 둡니다(오너 요청).
+    #    파일은 여기서 **딱 한 번만** 읽고(카드 500장이 각자 읽지 않게), 실패해도 빈 색인이
+    #    돼 보조 줄만 안 붙습니다 — 밸류에이션 화면 전체는 평소대로 그려집니다.
+    #    실측(2026-09-03, 실제 스냅샷 513종목 × 실제 공시 98건): 색인 lookup 500여 회의
+    #    총 소요는 1ms 미만이라 체감 지연이 없습니다(파일 읽기는 비동기 1회).
+    attach_next_dividend_events(all_stocks, await load_payment_event_index(), today_kst())
 
     # 스냅샷이 언제 것인지, 수집 품질이 어땠는지 화면에 그대로 노출.
     # last_updated_at 은 KST 벽시계 값으로 저장되므로(collector_kospi200.py) 비교 기준도 KST 로 맞춥니다.
