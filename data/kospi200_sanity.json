@@ -70,7 +70,7 @@
     }
   ],
   "dataset": "kospi200",
-  "generated_at_kst": "2026-09-03T22:06:46.052210+09:00",
+  "generated_at_kst": "2026-09-04T07:04:32.333888+09:00",
   "probe": {
     "fields": {
       "market_cap": {
@@ -94,6 +94,6 @@
   "reasons": [],
   "row_count": 515,
   "status": "ok",
-  "target_date": "2026-09-03",
+  "target_date": "2026-09-04",
   "version": 1
 }
