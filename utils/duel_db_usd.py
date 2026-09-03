@@ -17,7 +17,7 @@
     - 공통 검증·변환 헬퍼(`_execute` · `_require_client` · `_iso_date` · `_now_kst` ·
       `_require_text` · `_require_positive_int` · `_require_offset` · `_require_amount` ·
       `_first_row` · `_is_duplicate_key_error` · `_assert_unique_keys` · `_filter_is_null` ·
-      `_filter_not_null` · `_assert_no_identity_fields` · `_validate_fill_payload` ·
+      `_validate_fill_payload` ·
       `_validate_daily_snapshot` · `_validate_holding_snapshot`) — 이들은 표 이름을
       인자로 받거나 아예 몰라도 되는 순수 로직입니다. 두 번 구현하면 한쪽만 고쳐지는
       날 원화·달러의 검증 규칙이 갈라집니다(§0-3-10).
@@ -26,16 +26,10 @@
     - `create_service_client` · `service_config_present` · `_read_service_env` —
       **같은 Supabase 프로젝트, 같은 service_role 키**를 씁니다(원화·달러는 같은
       DB 안의 다른 표일 뿐입니다). 두 번째 클라이언트 생성 경로를 만들지 않습니다.
-    - `ensure_nickname` · `fetch_my_nickname` · `fetch_nicknames_for_accounts` —
-      **닉네임은 처음부터 원화·달러가 공유하는 표입니다**(`duel_nicknames`,
-      `(user_id, window_type)` 키 — 5-11-10 확정). USD 전용 함수를 만들면 그 자체가
-      "닉네임이 계좌별로 다시 갈라진다"는 잘못된 모델을 코드에 새기는 것이라 만들지
-      않습니다. `fetch_nicknames_for_accounts()` 는 계좌 행(딕셔너리)을 받으므로
-      호출부는 이 파일의 `fetch_all_active_accounts_usd()` 결과를 그대로 넘기면 됩니다.
-    - `fetch_real_principal_holdings` — "내 성적표"의 실제 보유종목은 통화별로 이미
-      `currency` 컬럼을 갖고 있어 트랙과 무관한 사용자 단위 조회입니다(5-3). 체급
-      산정 시 원화/달러 어느 금액을 쓸지 가르는 것은 `utils/duel_publish.py`(다음
-      라운드)의 일이지, 조회 함수를 복제할 이유가 아닙니다.
+    - 🗑️ 2026-09-03 — 예전에 여기서 함께 import 하던 닉네임 3종(`ensure_nickname` ·
+      `fetch_my_nickname` · `fetch_nicknames_for_accounts`)과 `fetch_real_principal_holdings`
+      는 결투 공개 순위표(Branch 2) 은퇴(2026-08-23)로 원화 파일에서 지워졌습니다. 이 파일도
+      더 이상 import 하지 않습니다(원화 파일 머리말의 🗑️ 항목 참고).
     - `duel_rules.apply_buy_fill_to_position` · `compute_twr` 등 순수 계산 — 이 파일은
       여전히 "계산하지 않고 담아 보내기만" 합니다. (⚠️ 체결 거래일 확정은 여기서
       빠졌습니다 — 2026-08-21 아래 세 번째 예외 사례로 옮겼습니다.)
@@ -43,10 +37,9 @@
   · **새로 정의합니다**(표 이름 또는 통화별 규칙 상수가 함수 본문에 박혀 있는 것들):
     - §0 의 `_usd` 표 이름 상수 10개 + RPC 이름.
     - A 절: `opt_in_usd` · `save_order_usd` · `edit_order_usd` · `cancel_order_usd` ·
-      조회 5종 · `save_consent_usd` · `fetch_my_consent_usd` · `revoke_consent_usd` ·
-      순위표 읽기 3종.
+      조회 5종. (🗑️ 2026-09-03 — 공개 동의 3종·순위표 읽기 3종은 Branch 2 은퇴로 지움.)
     - B 절: 배치 전용 CRUD 전부(활성계좌·원장·포지션·스냅샷 일괄조회, 옵트인 백필,
-      정기입금, 체결 기록, 발행표 쓰기/지우기 등).
+      정기입금, 체결 기록 등). (🗑️ 2026-09-03 — 발행표 쓰기/지우기·체급 배정은 지움.)
     - 주문 접수 시간대 창은 `duel_rules.resolve_order_window_usd()`(16:00:01~21:00:00,
       2026-08-20 오너 최종 확정)를 씁니다 — `resolve_order_window()`(원화, 18:00:01~
       22:00:00)와 다른 함수입니다. 이 파일에 `resolve_order_window(...)` 를 실수로
@@ -72,8 +65,8 @@
 -------------------------------------------------------------------------------
 🔴 이 파일도 두 절로 나뉘고, 절대 섞이면 안 됩니다(`utils/duel_db.py` 머리말과 동일)
 -------------------------------------------------------------------------------
-    A. 사용자용 (anon key + 로그인 세션) — 표는 `duel_orders_usd` · `duel_public_consent_usd`
-       **둘만** 쓰기 가능(스키마 §14).
+    A. 사용자용 (anon key + 로그인 세션) — 쓰기 가능한 표는 `duel_orders_usd` **하나**
+       (스키마 §14 · 공개 동의 표는 2026-08-23 에 은퇴).
     B. 배치용 (service_role, 야간 GitHub Actions 전용) — §0-3-2(집합 연산)를 그대로 지킵니다.
 
 🧮 계산은 여기 없습니다. `utils/duel_rules.py` 를 호출만 합니다(원화 파일과 동일한 규약).
@@ -92,11 +85,6 @@ from utils import duel_db
 from utils.duel_db import (
     DuelDbError,
     CHUNK_SIZE,
-    CONSENT_ITEM_FLAGS,
-    CONSENT_REAL_PRINCIPAL_FLAG,
-    PUBLIC_LEADERBOARD_COLUMNS,
-    PUBLIC_HOLDINGS_COLUMNS,
-    FORBIDDEN_PUBLISH_FIELDS,
     FORBIDDEN_USER_WRITE_PARAMS,
     _execute,
     _execute_all,
@@ -114,8 +102,6 @@ from utils.duel_db import (
     _fill_ledger_payload,
     _sell_settlement_payload,
     _filter_is_null,
-    _filter_not_null,
-    _assert_no_identity_fields,
     _validate_fill_payload,
     _validate_daily_snapshot,
     _validate_holding_snapshot,
@@ -124,10 +110,6 @@ from utils.duel_db import (
     cash_balances_by_account,
     create_service_client,
     service_config_present,
-    ensure_nickname,
-    fetch_my_nickname,
-    fetch_nicknames_for_accounts,
-    fetch_real_principal_holdings,
 )
 from utils.duel_rules import (
     ACCOUNT_WINDOW_TYPES,
@@ -154,12 +136,6 @@ __all__ = [
     "fetch_my_cash_ledger_usd",
     "fetch_my_snapshots_usd",
     "fetch_my_holding_snapshots_usd",
-    "save_consent_usd",
-    "fetch_my_consent_usd",
-    "revoke_consent_usd",
-    "fetch_public_leaderboard_latest_date_usd",
-    "fetch_public_leaderboard_usd",
-    "fetch_public_holdings_for_nickname_usd",
     "fetch_all_active_accounts_usd",
     "fetch_cash_ledger_for_accounts_usd",
     "fetch_positions_for_accounts_usd",
@@ -176,17 +152,6 @@ __all__ = [
     "expire_or_cancel_all_pending_for_date_usd",
     "annotate_pending_orders_with_hold_reason_usd",
     "write_daily_snapshots_usd",
-    "fetch_publishable_consents_usd",
-    "fetch_revoked_consent_accounts_usd",
-    "fetch_bracket_assignments_usd",
-    "insert_bracket_assignments_usd",
-    "delete_published_rows_for_date_usd",
-    "delete_published_rows_for_nicknames_usd",
-    "leaderboard_has_any_rows_usd",
-    "fetch_published_group_index_usd",
-    "delete_published_group_usd",
-    "write_public_leaderboard_usd",
-    "write_public_holdings_usd",
 ]
 
 
@@ -199,13 +164,10 @@ ORDERS_TABLE_USD = "duel_orders_usd"
 LEDGER_TABLE_USD = "duel_cash_ledger_usd"
 DAILY_SNAPSHOTS_TABLE_USD = "duel_daily_snapshots_usd"
 HOLDING_SNAPSHOTS_TABLE_USD = "duel_holding_snapshots_usd"
-CONSENT_TABLE_USD = "duel_public_consent_usd"
-PUBLIC_LEADERBOARD_TABLE_USD = "duel_public_leaderboard_usd"
-PUBLIC_HOLDINGS_TABLE_USD = "duel_public_holdings_usd"
-BRACKET_ASSIGNMENTS_TABLE_USD = "duel_bracket_assignments_usd"
-
-#: `duel_nicknames` 는 **일부러 여기 없습니다** — 원화·달러가 같은 표를 공유합니다
-#: (위 머리말 참고). `utils.duel_db.NICKNAMES_TABLE` 을 그대로 씁니다.
+#: 🗑️ 2026-09-03 — `duel_public_consent_usd` · `duel_public_leaderboard_usd` ·
+#:    `duel_public_holdings_usd` · `duel_bracket_assignments_usd` 상수는 지웠습니다. 네 표는
+#:    2026-08-23 마이그레이션(`sql/scorecard_public_schema.sql` §0)에서 drop 됐고, 그 표를
+#:    만지던 함수는 저장소 어디에서도 호출되지 않아 함께 지웠습니다(원화 파일 머리말 참고).
 
 #: 옵트인 RPC. `sql/duel_schema.sql` §14-10 의 함수 이름과 문자 그대로 같아야 합니다.
 OPT_IN_RPC_USD = "duel_opt_in_usd"
@@ -245,8 +207,9 @@ def opt_in_usd(client):
     그대로 담아 돌려줍니다. `user_id`/금액 인자가 없는 이유, 멱등성의 근거는 원화 쪽
     `opt_in()` docstring 과 완전히 동일합니다(RPC 가 같은 방식으로 설계됐습니다).
 
-    ⚠️ 닉네임은 여기서 만들지 않습니다 — 5단계 동의 시점에 `ensure_nickname()` 이
-       만듭니다(원화와 같은 순서, 5-11-10).
+    ⚠️ 닉네임은 여기서 만들지 않습니다(원화와 같은 순서). 🗑️ 2026-09-03 — 결투 닉네임
+       계층(`ensure_nickname`)은 Branch 2 은퇴로 지워졌고, 공개 닉네임은 이제
+       `utils/scorecard_publish_db.py` 의 몫입니다.
 
     반환: 그 사용자의 USD 계좌 3개 dict 목록(M1 → M3 → M6 순).
     """
@@ -590,185 +553,6 @@ def fetch_my_holding_snapshots_usd(client, account_id, start_date=None, end_date
     if end_date:
         query = query.lte("snapshot_date", _iso_date(end_date, "조회 종료일"))
     rows = _execute(query.order("snapshot_date"), "종목별 스냅샷 조회")
-    return [dict(row) for row in rows]
-
-
-# -----------------------------------------------------------------------------
-# A-3/A-4. 공개 동의 저장 + 철회 (`utils.duel_db.py` A-3/A-4 절 미러)
-#
-#  ⚠️ 5-11-10 확정: 이 표(`duel_public_consent_usd`)는 원화 `duel_public_consent` 와
-#     **완전히 독립**입니다. 한쪽 동의·철회가 다른 쪽에 전혀 영향을 주지 않습니다.
-#     공유되는 건 오직 닉네임 문자열뿐이고, 그 공유는 이 절이 아니라 `ensure_nickname()`
-#     (원화 파일에서 import)이 담당합니다.
-# -----------------------------------------------------------------------------
-def save_consent_usd(client, account_id, **consent_flags):
-    """
-    USD 트랙 공개 동의 상태를 저장합니다(`duel_public_consent_usd`). 받는 키·검증 규칙은
-    `utils.duel_db.save_consent()` 와 완전히 같습니다(항목별 동의 5개 + 최종확인 +
-    실제 매입총합 동의 — 5-2 / 5-2-4). 표만 다릅니다.
-    """
-    _require_client(client)
-    account = _require_text(account_id, "계좌 ID")
-
-    allowed = set(CONSENT_ITEM_FLAGS) | {"final_confirmed", CONSENT_REAL_PRINCIPAL_FLAG}
-    unknown = sorted(set(consent_flags) - allowed)
-    if unknown:
-        raise DuelDbError(
-            f"알 수 없는 동의 항목입니다: {unknown}"
-            f" (허용: {sorted(allowed)}) — 오타를 조용히 무시하면 사용자는 동의했다고 믿는데"
-            " 시스템은 안 켜진 상태가 됩니다."
-        )
-    for key, value in consent_flags.items():
-        if not isinstance(value, bool):
-            raise DuelDbError(f"동의 값은 True/False 여야 합니다: {key}={value!r}")
-
-    payload = {"account_id": account}
-    payload.update({key: bool(value) for key, value in consent_flags.items()})
-
-    if payload.get("final_confirmed"):
-        missing = [flag for flag in CONSENT_ITEM_FLAGS if not payload.get(flag)]
-        if missing:
-            raise DuelDbError(
-                "최종 확인은 공개 항목 5개를 **모두** 체크했을 때만 할 수 있습니다"
-                f" (아직 체크되지 않음: {missing})."
-                " 이 모듈은 '일부만 공개' 조합을 제공하지 않습니다 — 전부 공개하거나,"
-                " 전부 공개하지 않거나 둘 중 하나입니다."
-            )
-        payload["final_confirmed_at"] = _now_kst().isoformat()
-    elif "final_confirmed" in payload:
-        payload["final_confirmed_at"] = None
-
-    _assert_reconsent_allowed_usd(client, account)
-
-    rows = _execute(
-        client.table(CONSENT_TABLE_USD).upsert(payload, on_conflict="account_id"),
-        "공개 동의 저장",
-    )
-    return _first_row(rows, "공개 동의 저장")
-
-
-def fetch_my_consent_usd(client, account_id):
-    """본인 USD 계좌의 공개 동의 행 1개(없으면 None)."""
-    _require_client(client)
-    account = _require_text(account_id, "계좌 ID")
-    rows = _execute(
-        client.table(CONSENT_TABLE_USD).select("*").eq("account_id", account).limit(1),
-        "공개 동의 조회",
-    )
-    return dict(rows[0]) if rows else None
-
-
-def _assert_reconsent_allowed_usd(client, account_id, *, now_kst=None):
-    """USD 트랙의 3개월 재동의 차단(5-8-2). `utils.duel_db._assert_reconsent_allowed()` 미러."""
-    existing = fetch_my_consent_usd(client, account_id)
-    if not existing:
-        return None
-    block = duel_rules.resolve_reconsent_block(existing.get("revoked_at"), now_kst)
-    if block["blocked"]:
-        raise DuelDbError(
-            "공개 동의를 철회한 뒤에는 3개월 동안 다시 동의할 수 없습니다."
-            f" {block['unblocks_on'].isoformat()} 부터 다시 신청하실 수 있습니다."
-            " (철회하면 그때까지 발행됐던 공개 기록은 전부 영구 삭제되므로,"
-            " 되돌리기가 아니라 처음부터 다시 시작하는 절차입니다.)"
-        )
-    return existing
-
-
-def revoke_consent_usd(client, account_id, *, now_kst=None):
-    """
-    USD 트랙 공개 동의를 철회합니다. `utils.duel_db.revoke_consent()` 의 미러 —
-    행을 지우지 않고, 항목별 동의 7개를 전부 끄고, 두 번 눌러도 멱등인 것까지 동일합니다.
-    ⚠️ 이 철회는 **원화 트랙 동의에 아무 영향이 없습니다**(5-11-10 — 완전 독립).
-    """
-    _require_client(client)
-    account = _require_text(account_id, "계좌 ID")
-
-    existing = fetch_my_consent_usd(client, account)
-    if not existing:
-        raise DuelDbError(
-            "이 계좌에는 철회할 공개 동의 기록이 없습니다"
-            " (아직 공개 순위표에 참여한 적이 없습니다)."
-        )
-    if existing.get("revoked_at"):
-        return existing
-
-    payload = {flag: False for flag in CONSENT_ITEM_FLAGS}
-    payload[CONSENT_REAL_PRINCIPAL_FLAG] = False
-    payload["final_confirmed"] = False
-    payload["final_confirmed_at"] = None
-    payload["revoked_at"] = _now_kst(now_kst).isoformat()
-
-    # 🔴 2026-08-29 재감사 L-12 — 원화 `revoke_consent()` 와 같은 TOCTOU 방어입니다
-    #    (아직 철회되지 않은 행만 update, 0행이면 다른 요청이 먼저 끝냈다는 뜻).
-    rows = _execute(
-        _filter_is_null(
-            client.table(CONSENT_TABLE_USD).update(payload).eq("account_id", account),
-            "revoked_at"),
-        "공개 동의 철회",
-    )
-    if not rows:
-        return fetch_my_consent_usd(client, account) or existing
-    return _first_row(rows, "공개 동의 철회")
-
-
-# -----------------------------------------------------------------------------
-# A-6. 발행표 읽기 전용 조회 (`utils.duel_db.py` A-6 절 미러)
-#
-#  🔴 컬럼 목록은 `utils.duel_db.PUBLIC_LEADERBOARD_COLUMNS` /
-#     `PUBLIC_HOLDINGS_COLUMNS` 를 **그대로 재사용**합니다 — USD 발행표(§13-8)도
-#     원화와 컬럼 이름이 완전히 같아서 새로 적을 이유가 없습니다(§0-3-10).
-# -----------------------------------------------------------------------------
-def fetch_public_leaderboard_latest_date_usd(client, *, window_type, bracket_key):
-    """이 그룹(창유형 × 체급)이 USD 발행표에서 **가장 최근에 발행된 날짜** 또는 None."""
-    _require_client(client)
-    window = _require_text(window_type, "창 유형")
-    bracket = _require_text(bracket_key, "체급 식별자")
-    rows = _execute(
-        client.table(PUBLIC_LEADERBOARD_TABLE_USD).select("published_date")
-        .eq("window_type", window).eq("bracket_key", bracket)
-        .order("published_date", desc=True).limit(1),
-        "공개 순위표 발행일 조회",
-    )
-    value = (rows[0] or {}).get("published_date") if rows else None
-    return str(value)[:10] if value else None
-
-
-def fetch_public_leaderboard_usd(client, *, window_type, bracket_key, published_date=None,
-                                 limit=duel_rules.LEADERBOARD_PAGE_SIZE, offset=0,
-                                 order_desc=False):
-    """
-    발행된 USD 공개 순위표 한 페이지를 읽습니다. `utils.duel_db.fetch_public_leaderboard()`
-    와 인자·정렬·페이지네이션 규약이 완전히 같습니다(표만 다릅니다).
-    """
-    _require_client(client)
-    window = _require_text(window_type, "창 유형")
-    bracket = _require_text(bracket_key, "체급 식별자")
-    count = _require_positive_int(limit, "조회 개수")
-    start = _require_offset(offset, "건너뛸 개수")
-
-    query = (client.table(PUBLIC_LEADERBOARD_TABLE_USD).select(PUBLIC_LEADERBOARD_COLUMNS)
-             .eq("window_type", window).eq("bracket_key", bracket))
-    if published_date is not None:
-        query = query.eq("published_date", _iso_date(published_date, "발행일"))
-    query = (query.order("rank", desc=bool(order_desc))
-                  .order("nickname", desc=bool(order_desc)))
-    rows = _execute(query.range(start, start + count - 1), "공개 순위표 조회")
-    return [dict(row) for row in rows]
-
-
-def fetch_public_holdings_for_nickname_usd(client, nickname, *, published_date=None,
-                                           window_type=None):
-    """한 참가자(닉네임)의 **발행된** USD 보유종목을 읽습니다."""
-    _require_client(client)
-    name = _require_text(nickname, "닉네임")
-
-    query = (client.table(PUBLIC_HOLDINGS_TABLE_USD).select(PUBLIC_HOLDINGS_COLUMNS)
-             .eq("nickname", name))
-    if published_date is not None:
-        query = query.eq("published_date", _iso_date(published_date, "발행일"))
-    if window_type is not None:
-        query = query.eq("window_type", _require_text(window_type, "창 유형"))
-    rows = _execute(query.order("ticker"), "공개 보유종목 조회")
     return [dict(row) for row in rows]
 
 
@@ -1324,231 +1108,6 @@ def write_daily_snapshots_usd(service_client, snapshot_date, computed_rows):
     return None
 
 
-# -----------------------------------------------------------------------------
-# B-7. 공개 발행 (5단계 Branch 2 의 USD 미러) — 가장 민감한 함수들
-#
-#  🔴 이 절도 원화 파일과 같은 규율을 따릅니다: 판단하지 않고, 이미 결정된 행을 그대로
-#     담아 보내거나 지정된 것을 지울 뿐입니다. 닉네임 조회(`fetch_nicknames_for_accounts`)
-#     는 원화 파일에서 그대로 재사용합니다(공유 표이므로 — 위 머리말 참고).
-#  🔴 발행표에는 user_id/account_id 를 넣지 않습니다(스키마 §13-8 / §0-3-8).
-# -----------------------------------------------------------------------------
-def fetch_publishable_consents_usd(service_client):
-    """(배치 전용) **USD 발행 대상 계좌의 동의 행**을 한 번의 질의로 전부 읽습니다."""
-    _require_client(service_client, batch=True)
-
-    def _query(offset, limit):
-        query = service_client.table(CONSENT_TABLE_USD).select(
-            "account_id,consent_rank,consent_return,consent_holdings,consent_quantity,"
-            "consent_buy_amount,final_confirmed," + CONSENT_REAL_PRINCIPAL_FLAG + ",revoked_at"
-        ).eq("final_confirmed", True)
-        return _filter_is_null(query, "revoked_at").range(offset, limit)
-
-    rows = _execute_all(_query, "발행 대상 동의 조회")        # H-6
-    return [dict(row) for row in rows]
-
-
-def fetch_revoked_consent_accounts_usd(service_client):
-    """(배치 전용) **철회된 USD 계좌의 account_id 목록**을 한 번의 질의로 읽습니다."""
-    _require_client(service_client, batch=True)
-
-    def _query(offset, limit):
-        query = service_client.table(CONSENT_TABLE_USD).select("account_id,revoked_at")
-        return _filter_not_null(query, "revoked_at").range(offset, limit)
-
-    rows = _execute_all(_query, "철회 계좌 조회")             # H-6
-    return [dict(row) for row in rows]
-
-
-def fetch_bracket_assignments_usd(service_client, season_key):
-    """
-    (배치 전용) **이번 시즌의 USD 체급 배정 기록 전부**를 한 번의 질의로 읽습니다.
-    `season_key` 는 원화 트랙과 **같은 함수**(`duel_rules.season_key_for_date()`)가
-    만드는 값이라 시즌 경계 자체는 공유합니다(5-11-8) — 배정 기록 표만 별개입니다.
-    반환: `{account_id: {"season_key": ..., "bracket_key": ...}}`.
-    """
-    _require_client(service_client, batch=True)
-    season = _require_text(season_key, "시즌 식별자")
-    rows = _execute_all(                  # H-6
-        lambda offset, limit: (
-            service_client.table(BRACKET_ASSIGNMENTS_TABLE_USD)
-            .select("account_id,season_key,bracket_key").eq("season_key", season)
-            .range(offset, limit)),
-        "체급 배정 조회",
-    )
-    return {row["account_id"]: dict(row) for row in rows if (row or {}).get("account_id")}
-
-
-def insert_bracket_assignments_usd(service_client, rows):
-    """(배치 전용) 새로 배정된 USD 체급을 기록합니다(insert 만). 반환: 넣은 행 수."""
-    _require_client(service_client, batch=True)
-    payload = []
-    for row in rows or []:
-        payload.append({
-            "account_id": _require_text((row or {}).get("account_id"), "계좌 ID"),
-            "season_key": _require_text((row or {}).get("season_key"), "시즌 식별자"),
-            "bracket_key": _require_text((row or {}).get("bracket_key"), "체급 식별자"),
-        })
-    if not payload:
-        return 0
-    _assert_unique_keys(payload, ("account_id", "season_key"), "체급 배정 요청")
-
-    inserted = 0
-    for start in range(0, len(payload), CHUNK_SIZE):
-        chunk = payload[start:start + CHUNK_SIZE]
-        try:
-            _execute(service_client.table(BRACKET_ASSIGNMENTS_TABLE_USD).insert(chunk), "체급 배정 기록")
-        except DuelDbError as exc:
-            if not _is_duplicate_key_error(exc):
-                raise
-            continue
-        inserted += len(chunk)
-    return inserted
-
-
-# ── 발행표 쓰기·지우기 ─────────────────────────────────────────────────────────
-def delete_published_rows_for_date_usd(service_client, published_date):
-    """(배치 전용) **그날 USD 발행분을 통째로 지웁니다**(두 표 각각 질의 1개)."""
-    _require_client(service_client, batch=True)
-    day = _iso_date(published_date, "발행일")
-    _execute(service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).delete()
-             .eq("published_date", day), "순위표 당일 발행분 삭제")
-    _execute(service_client.table(PUBLIC_HOLDINGS_TABLE_USD).delete()
-             .eq("published_date", day), "보유종목 당일 발행분 삭제")
-    return None
-
-
-def delete_published_rows_for_nicknames_usd(service_client, nicknames):
-    """(배치 전용) 지정한 닉네임의 USD 발행 행을 **모든 날짜에서 영구 삭제**합니다."""
-    _require_client(service_client, batch=True)
-    names = sorted({str(value).strip() for value in (nicknames or []) if str(value).strip()})
-    if not names:
-        return 0
-
-    removed = 0
-    for start in range(0, len(names), CHUNK_SIZE):
-        chunk = names[start:start + CHUNK_SIZE]
-        removed += len(_execute(
-            service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).delete().in_("nickname", chunk),
-            "철회 계좌의 발행 순위 삭제",
-        ))
-        removed += len(_execute(
-            service_client.table(PUBLIC_HOLDINGS_TABLE_USD).delete().in_("nickname", chunk),
-            "철회 계좌의 발행 보유종목 삭제",
-        ))
-    return removed
-
-
-def leaderboard_has_any_rows_usd(service_client):
-    """(배치 전용) USD 순위표 발행표에 **행이 하나라도 있는가**(질의 1개, `limit(1)`)."""
-    _require_client(service_client, batch=True)
-    rows = _execute(
-        service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).select("id").limit(1),
-        "발행표 존재 확인",
-    )
-    return bool(rows)
-
-
-def fetch_published_group_index_usd(service_client, window_type, bracket_key):
-    """
-    (배치 전용) 한 USD 그룹(창유형 × 체급)이 과거에 발행된 적이 있는지와, 있다면 어느
-    날짜에 누구(닉네임)로 실렸는지를 읽습니다. 최소 인원 미달 그룹 청소 전용(5-6).
-    반환: `{published_date: [nickname, ...]}`
-    """
-    _require_client(service_client, batch=True)
-    window = _require_text(window_type, "창 유형")
-    bracket = _require_text(bracket_key, "체급 식별자")
-    rows = _execute(
-        service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).select("published_date,nickname")
-        .eq("window_type", window).eq("bracket_key", bracket),
-        "발행 이력 조회",
-    )
-    index = {}
-    for row in rows:
-        day = (row or {}).get("published_date")
-        nickname = str((row or {}).get("nickname") or "").strip()
-        if day and nickname:
-            index.setdefault(str(day)[:10], []).append(nickname)
-    return index
-
-
-def delete_published_group_usd(service_client, window_type, bracket_key, *, holdings_index=None):
-    """
-    (배치 전용) 최소 인원 미달 USD 그룹의 발행 행을 **모든 날짜에서** 지웁니다.
-    `utils.duel_db.delete_published_group()` 미러(질의 수는 계좌·사용자 수에 비례하지 않음).
-    """
-    _require_client(service_client, batch=True)
-    window = _require_text(window_type, "창 유형")
-    bracket = _require_text(bracket_key, "체급 식별자")
-
-    index = (fetch_published_group_index_usd(service_client, window, bracket)
-             if holdings_index is None else dict(holdings_index))
-    if not index:
-        return 0
-
-    removed = len(_execute(
-        service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).delete()
-        .eq("window_type", window).eq("bracket_key", bracket),
-        "최소 인원 미달 그룹 순위 삭제",
-    ))
-    for day, nicknames in sorted(index.items()):
-        names = sorted({str(name).strip() for name in nicknames if str(name).strip()})
-        for start in range(0, len(names), CHUNK_SIZE):
-            removed += len(_execute(
-                service_client.table(PUBLIC_HOLDINGS_TABLE_USD).delete()
-                .eq("published_date", day).in_("nickname", names[start:start + CHUNK_SIZE]),
-                "최소 인원 미달 그룹 보유종목 삭제",
-            ))
-    return removed
-
-
-def write_public_leaderboard_usd(service_client, published_date, rows):
-    """
-    (배치 전용) USD 순위표 발행 행을 한 번에 넣습니다(청크 단위 insert). 반환: 넣은 행 수.
-    식별자 혼입 방어(`_assert_no_identity_fields`, 원화 파일에서 재사용)는 동일합니다.
-    """
-    _require_client(service_client, batch=True)
-    day = _iso_date(published_date, "발행일")
-    payload = []
-    for row in rows or []:
-        item = dict(row)
-        _assert_no_identity_fields(item, PUBLIC_LEADERBOARD_TABLE_USD)
-        item["published_date"] = day
-        payload.append(item)
-    if not payload:
-        return 0
-    _assert_unique_keys(payload, ("published_date", "window_type", "bracket_key", "nickname"),
-                        "순위표 발행 요청")
-
-    written = 0
-    for start in range(0, len(payload), CHUNK_SIZE):
-        chunk = payload[start:start + CHUNK_SIZE]
-        _execute(service_client.table(PUBLIC_LEADERBOARD_TABLE_USD).insert(chunk), "순위표 발행")
-        written += len(chunk)
-    return written
-
-
-def write_public_holdings_usd(service_client, published_date, rows):
-    """(배치 전용) USD 공개 보유종목 발행 행을 한 번에 넣습니다. 반환: 넣은 행 수."""
-    _require_client(service_client, batch=True)
-    day = _iso_date(published_date, "발행일")
-    payload = []
-    for row in rows or []:
-        item = dict(row)
-        _assert_no_identity_fields(item, PUBLIC_HOLDINGS_TABLE_USD)
-        item["published_date"] = day
-        payload.append(item)
-    if not payload:
-        return 0
-    _assert_unique_keys(payload, ("published_date", "nickname", "ticker"), "보유종목 발행 요청")
-
-    written = 0
-    for start in range(0, len(payload), CHUNK_SIZE):
-        chunk = payload[start:start + CHUNK_SIZE]
-        _execute(service_client.table(PUBLIC_HOLDINGS_TABLE_USD).insert(chunk), "보유종목 발행")
-        written += len(chunk)
-    return written
-
-
 # =============================================================================
 #  회귀 방어용 자기 점검 — 원화 파일의 같은 회귀 방어를 USD 함수에도 적용
 # =============================================================================
@@ -1556,7 +1115,7 @@ def write_public_holdings_usd(service_client, published_date, rows):
 #: 시그니처를 검사합니다 — `utils.duel_db.USER_WRITE_FUNCTIONS` 와 같은 규약입니다.
 USER_WRITE_FUNCTIONS_USD = (
     "opt_in_usd", "save_order_usd", "save_sell_order_usd", "edit_order_usd",
-    "cancel_order_usd", "save_consent_usd",
+    "cancel_order_usd",
 )
 
 

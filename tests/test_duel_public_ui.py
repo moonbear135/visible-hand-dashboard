@@ -26,16 +26,11 @@
 -------------------------------------------------------------------------------
 지금 이 파일이 검증하는 것
 -------------------------------------------------------------------------------
-    [1] `duel_db.fetch_public_leaderboard*` / `fetch_public_holdings_for_nickname`
-        — 맞는 표에, 맞는 필터·정렬·페이지 범위로 가는가. 빈 결과는 정상인가.
-        — `select("*")` 를 쓰지 않는가(§0-3-8 — 나중에 컬럼이 늘어도 새어나가지 않게).
-    [2] 발행 배치 실행 스크립트·워크플로우 — 판단하지 않고 위임만 하는가, 체결 배치 뒤에
-        도는가.
     [3] 🗑️ 은퇴 확인 — 두 화면 파일·`DUEL_CONSENT_*`/`DUEL_LEADERBOARD_*` 스위치·메뉴
         항목이 정말로 사라졌는가, 그러면서 `/duel` 쪽 스위치는 그대로인가.
 
-가짜 Supabase 클라이언트는 **새로 만들지 않고** `tests/test_duel_db.py` 의 `FakeClient` 를
-그대로 가져다 씁니다(§0-3-10 — 같은 흉내를 두 벌 만들지 않습니다).
+    (🗑️ [1] 발행표 조회 검증은 2026-09-03 에, [2] 발행 배치 스크립트 검증은 2026-08-25 에
+     각각 검증 대상이 삭제되면서 함께 지웠습니다 — 아래 [3] 앞의 주석 참고.)
 
 실행: pytest tests/test_duel_public_ui.py -v
 """
@@ -46,15 +41,8 @@ import sys
 import types
 from pathlib import Path
 
-import pytest
-
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.append(str(REPO_ROOT))
-sys.path.append(str(Path(__file__).parent))          # from test_duel_db import FakeClient
-
-from test_duel_db import FakeClient                                      # noqa: E402
-from utils import duel_db, duel_rules                                    # noqa: E402
-from utils.duel_db import DuelDbError                                    # noqa: E402
 
 
 # =============================================================================
@@ -175,164 +163,13 @@ def _install_stubs():
 _install_stubs()
 
 
-# =============================================================================
-# 1. 발행표 조회 — 맞는 표에, 맞는 필터로 (§0-3-2 · §0-3-8)
-# =============================================================================
-def _board_rows(count=3, start_rank=1):
-    return [{"published_date": "2026-08-20", "window_type": "M1",
-             "bracket_key": "krw_10m_30m", "rank": start_rank + i,
-             "nickname": f"닉네임{i}", "twr_pct": 1.5 - i}
-            for i in range(count)]
-
-
-def test_latest_published_date_reads_one_row_ordered_desc():
-    client = FakeClient(responses={
-        (duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): [{"published_date": "2026-08-20"}],
-    })
-    day = duel_db.fetch_public_leaderboard_latest_date(
-        client, window_type="M1", bracket_key="krw_10m_30m")
-    assert day == "2026-08-20"
-
-    call = client.only_call(duel_db.PUBLIC_LEADERBOARD_TABLE, "select")
-    assert call.filter_map == {"window_type": "M1", "bracket_key": "krw_10m_30m"}
-    assert call.orders == [("published_date", True)], "최신 발행일이 먼저 와야 합니다"
-    assert call.options.get("limit") == 1, "발행일 조회는 한 행이면 충분합니다(§0-3-2)"
-
-
-def test_latest_published_date_returns_none_when_nothing_published():
-    """
-    빈 결과는 **오류가 아니라 정상**입니다(최소 인원 미달 그룹은 발행되지 않습니다).
-    화면은 이걸 "아직 공개할 만큼 사람이 안 모였습니다"로 안내합니다.
-    """
-    client = FakeClient()
-    assert duel_db.fetch_public_leaderboard_latest_date(
-        client, window_type="M6", bracket_key=duel_rules.BRACKET_NONE_KEY) is None
-
-
-def test_fetch_public_leaderboard_paginates_with_range_and_rank_order():
-    client = FakeClient(responses={
-        (duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): _board_rows(30),
-    })
-    rows = duel_db.fetch_public_leaderboard(
-        client, window_type="M1", bracket_key="krw_10m_30m",
-        published_date="2026-08-20", limit=30, offset=60)
-    assert len(rows) == 30
-
-    call = client.only_call(duel_db.PUBLIC_LEADERBOARD_TABLE, "select")
-    assert call.filter_map == {"window_type": "M1", "bracket_key": "krw_10m_30m",
-                               "published_date": "2026-08-20"}
-    # rank 오름차순 + 동순위 안에서는 nickname 으로 **순서를 고정**(페이지 경계에서 같은
-    # 사람이 두 번 나오거나 건너뛰어지지 않게). 순위를 다시 매기는 것이 아닙니다.
-    assert call.orders == [("rank", False), ("nickname", False)]
-    assert call.options.get("range") == (60, 89), "range 는 양끝 포함(0-based)"
-
-
-def test_fetch_public_leaderboard_can_read_from_the_bottom():
-    """"하위 500"은 인원을 세지 않고 **정렬을 뒤집어** 읽습니다(§0-3-2)."""
-    client = FakeClient(responses={
-        (duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): _board_rows(5),
-    })
-    duel_db.fetch_public_leaderboard(
-        client, window_type="M3", bracket_key="krw_100m_plus",
-        published_date="2026-08-20", limit=5, offset=0, order_desc=True)
-    call = client.only_call(duel_db.PUBLIC_LEADERBOARD_TABLE, "select")
-    assert call.orders == [("rank", True), ("nickname", True)]
-
-
-def test_fetch_public_leaderboard_never_selects_star():
-    """
-    🔴 §0-3-8 — 읽을 컬럼을 하나하나 적습니다. 나중에 발행표에 컬럼이 하나 늘어도 이
-    함수가 그것을 화면으로 날라 주지 않게 하려는 구조적 방어입니다.
-    """
-    for columns in (duel_db.PUBLIC_LEADERBOARD_COLUMNS, duel_db.PUBLIC_HOLDINGS_COLUMNS):
-        assert "*" not in columns
-        for forbidden in duel_db.FORBIDDEN_PUBLISH_FIELDS:
-            assert forbidden not in columns.split(","), \
-                f"발행표 조회 컬럼에 식별자({forbidden})가 있습니다"
-
-    client = FakeClient(responses={(duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): []})
-    duel_db.fetch_public_leaderboard(client, window_type="M1", bracket_key="krw_10m_30m")
-    call = client.only_call(duel_db.PUBLIC_LEADERBOARD_TABLE, "select")
-    assert call.options["columns"] == duel_db.PUBLIC_LEADERBOARD_COLUMNS
-
-
-def test_fetch_public_leaderboard_rejects_nonsense_paging():
-    """값을 조용히 보정하지 않습니다 — 2페이지를 눌렀는데 1페이지가 나오면 안 됩니다(§0-1)."""
-    client = FakeClient()
-    for kwargs in ({"limit": 0}, {"limit": -5}, {"limit": 1.5}, {"offset": -1},
-                   {"offset": "두번째"}):
-        with pytest.raises(DuelDbError):
-            duel_db.fetch_public_leaderboard(
-                client, window_type="M1", bracket_key="krw_10m_30m", **kwargs)
-
-
-def test_fetch_public_leaderboard_empty_page_is_not_an_error():
-    client = FakeClient(responses={(duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): []})
-    assert duel_db.fetch_public_leaderboard(
-        client, window_type="M1", bracket_key="krw_10m_30m", offset=1500) == []
-
-
-def test_fetch_public_holdings_filters_nickname_date_and_window():
-    rows = [{"published_date": "2026-08-20", "window_type": "M1", "nickname": "닉",
-             "ticker": "005930", "stock_name": "삼성전자", "quantity": 10.0,
-             "buy_amount": 700000.0}]
-    client = FakeClient(responses={(duel_db.PUBLIC_HOLDINGS_TABLE, "select"): rows})
-    result = duel_db.fetch_public_holdings_for_nickname(
-        client, "닉", published_date="2026-08-20", window_type="M1")
-    assert result == rows
-
-    call = client.only_call(duel_db.PUBLIC_HOLDINGS_TABLE, "select")
-    assert call.filter_map == {"nickname": "닉", "published_date": "2026-08-20",
-                               "window_type": "M1"}
-    assert call.orders == [("ticker", False)]
-
-
-def test_fetch_public_holdings_keeps_nulls_as_none():
-    """
-    동의하지 않은 항목은 발행 배치가 **null 로** 넣습니다. 조회 계층이 그것을 0 으로
-    바꾸면 "0주 보유"와 "수량 비공개"가 같아집니다(§0-1). 그대로 통과시켜야 합니다.
-    """
-    client = FakeClient(responses={(duel_db.PUBLIC_HOLDINGS_TABLE, "select"): [
-        {"published_date": "2026-08-20", "window_type": "M1", "nickname": "닉",
-         "ticker": "005930", "stock_name": "삼성전자", "quantity": None, "buy_amount": None},
-    ]})
-    row = duel_db.fetch_public_holdings_for_nickname(client, "닉")[0]
-    assert row["quantity"] is None and row["buy_amount"] is None
-
-
-def test_public_reads_touch_only_the_two_publish_tables():
-    """
-    🔴 순위표 읽기 경로가 원본 표를 스치지 않는지. 세 함수를 실제로 불러 보고, **오간
-    질의의 표 이름**이 발행표 2개뿐인지 확인합니다.
-    """
-    client = FakeClient(responses={
-        (duel_db.PUBLIC_LEADERBOARD_TABLE, "select"): _board_rows(2),
-        (duel_db.PUBLIC_HOLDINGS_TABLE, "select"): [],
-    })
-    duel_db.fetch_public_leaderboard_latest_date(client, window_type="M1",
-                                                 bracket_key="krw_10m_30m")
-    duel_db.fetch_public_leaderboard(client, window_type="M1", bracket_key="krw_10m_30m",
-                                     published_date="2026-08-20")
-    duel_db.fetch_public_holdings_for_nickname(client, "닉네임0",
-                                               published_date="2026-08-20")
-    tables = {call.table for call in client.calls}
-    assert tables == {duel_db.PUBLIC_LEADERBOARD_TABLE, duel_db.PUBLIC_HOLDINGS_TABLE}
-    assert {call.op for call in client.calls} == {"select"}, "읽기 경로는 select 뿐입니다"
-
-
-# 🔴 2026-08-25 — 이 자리에 있던 「2. 발행 배치 실행 스크립트 · 워크플로우」
-#    (test_publish_runner_delegates_and_never_decides ·
-#    test_publish_workflow_runs_after_the_fill_batch) 두 테스트를 지웠습니다.
-#    검증 대상이던 run_duel_publish_batch.py · run_duel_publish_batch_us.py ·
-#    .github/workflows/duel_publish_daily(_us).yml · utils/duel_publish(_usd).py ·
-#    tests/test_duel_publish(_usd).py 8개 파일 자체를 은퇴시켰기 때문입니다
-#    (DUEL_MODULE_WORK_ORDER.md §5-20에서 2026-08-23에 이미 삭제 결정됐던 것을,
-#    이번에야 실제로 실행 — 그동안 살아서 매일 밤 존재하지 않는 표에 쓰기를
-#    시도하고 있었습니다). 이 파일들은 _to_delete_duel_publish/ 에 옮겨져 있고,
-#    git 커밋 시 삭제로 반영됩니다. `duel_db.py`의 fetch_public_leaderboard 계열
-#    함수·표 상수는 손대지 않았습니다 — tests/test_duel_db.py가 여전히 그것들을
-#    직접 검증하고 있고, 화면과 무관하게 그 자체로는 안전한 읽기 전용 코드라
-#    이번 정리 범위 밖입니다.
+# 🗑️ 2026-09-03 — 이 자리에 있던 「1. 발행표 조회」 10개 테스트(`duel_db.fetch_public_leaderboard*`
+#    / `fetch_public_holdings_for_nickname` 검증)를 지웠습니다. 검증 대상 함수와 표 상수
+#    (`PUBLIC_LEADERBOARD_TABLE` · `PUBLIC_HOLDINGS_TABLE` · `PUBLIC_*_COLUMNS`)가
+#    `utils/duel_db.py` 에서 삭제됐기 때문입니다 — 그 표 두 개는 2026-08-23 마이그레이션
+#    (`sql/scorecard_public_schema.sql` §0)에서 drop 됐고, 함수는 저장소 어디에서도
+#    호출되지 않았습니다(2026-08-25 주석이 "이번 정리 범위 밖"으로 남겨 뒀던 것을 이번에
+#    실행). 후임 순위표 읽기 함수의 검증은 `tests/test_scorecard_publish.py` 에 있습니다.
 # =============================================================================
 # 3. 🗑️ 은퇴 확인 (2026-08-23) — 정말로 사라졌는가, 그리고 /duel 은 그대로인가
 # =============================================================================

@@ -129,9 +129,11 @@ class FakeQuery:
     def range(self, start, end):
         """
         PostgREST 의 페이지네이션(`.range(start, end)` — **양끝을 포함**하는 구간).
-        2026-08-20 추가 — `utils/duel_db.py::fetch_public_leaderboard()` 가 순위표 한
-        페이지를 읽는 방법입니다(`.limit()` + `.offset()` 두 갈래로 나누지 않고 한 가지
-        형태로만 씁니다 — `.filter()` 를 추가할 때와 같은 판단).
+        2026-08-20 추가 — `utils/duel_db.py::_execute_all()` 의 페이지 순회와
+        `utils/scorecard_publish_db.py` 의 순위표 읽기가 쓰는 방법입니다(`.limit()` +
+        `.offset()` 두 갈래로 나누지 않고 한 가지 형태로만 씁니다 — `.filter()` 를 추가할
+        때와 같은 판단). 🗑️ 2026-09-03 — 처음 이 메서드를 요구했던 결투
+        `fetch_public_leaderboard()` 는 Branch 2 은퇴로 지워졌습니다.
         """
         self.options["range"] = (start, end)
         return self
@@ -861,9 +863,9 @@ def test_user_write_functions_do_not_accept_fill_or_balance_params():
     # 🔴 2026-08-21 `save_sell_order` 추가 — 리밸런싱 매도도 **사용자 경로의 쓰기**이므로
     #    같은 금지 목록의 적용을 받아야 합니다(보유 수량·창 번호는 받지만 체결 결과·잔고·
     #    귀속 거래일은 여전히 인자로 받지 않습니다).
+    # 🗑️ 2026-09-03 `save_consent` 제거 — 결투 공개 동의 표가 은퇴하면서 함수도 지웠습니다.
     assert set(duel_db.USER_WRITE_FUNCTIONS) == {
-        "opt_in", "save_order", "save_sell_order", "edit_order", "cancel_order",
-        "save_consent"}
+        "opt_in", "save_order", "save_sell_order", "edit_order", "cancel_order"}
 
 
 def _module_ast():
@@ -895,18 +897,18 @@ def _write_targets(function_node):
 
 def test_user_facing_functions_only_write_orders_and_consent():
     """
-    A 절 쓰기 함수가 **duel_orders / duel_public_consent 이외의 표에 쓰지 않는지**.
+    A 절 쓰기 함수가 **duel_orders 이외의 표에 쓰지 않는지**.
 
-    스키마 §9 가 사용자에게 insert/update 를 준 표는 이 둘뿐입니다. 여기에 원장이나 포지션
-    쓰기가 생기면 그건 곧 "anon key 로 가상 현금을 찍을 수 있다"는 뜻이고, 그 값은 스냅샷 →
-    공개 순위표로 흘러갑니다(§0-3-9).
+    스키마 §9 가 사용자에게 insert/update 를 준 표는 `duel_orders` 하나입니다(🗑️ 2026-09-03 —
+    `duel_public_consent` 는 은퇴해 `save_consent` 와 함께 지워졌습니다). 여기에 원장이나
+    포지션 쓰기가 생기면 그건 곧 "anon key 로 가상 현금을 찍을 수 있다"는 뜻입니다(§0-3-9).
     """
     tree, _source = _module_ast()
     functions = {node.name: node for node in ast.walk(tree)
                  if isinstance(node, ast.FunctionDef)}
     for name in duel_db.USER_WRITE_FUNCTIONS:
         targets = _write_targets(functions[name])
-        assert targets <= {"ORDERS_TABLE", "CONSENT_TABLE"}, \
+        assert targets <= {"ORDERS_TABLE"}, \
             f"{name} 이 사용자 권한 밖의 표에 씁니다: {targets}"
 
 
@@ -958,124 +960,6 @@ def test_opt_in_does_not_reach_for_the_batch_key():
     assert isinstance(rpc_calls[0].args[0], ast.Name) \
         and rpc_calls[0].args[0].id == "OPT_IN_RPC", \
         "RPC 이름은 문자열을 흩뿌리지 않고 OPT_IN_RPC 상수 하나로 씁니다"
-
-
-def test_publish_tables_are_only_written_by_the_batch_section():
-    """
-    🔴 2026-08-20 (순위표 화면 라운드) **의도적으로 다시 조정한** 테스트 — 그 이력을 남깁니다.
-
-    · 5단계 백엔드 이전: "A 절이 발행표를 한 글자도 언급하지 않는다".
-    · 5단계 백엔드 라운드: 위와 같되 "읽든 쓰든" 전부 B 절이어야 한다로 교체.
-    · **지금(화면 라운드)**: 순위표 화면은 로그인한 **일반 사용자**가 보는 화면이고, 스키마
-      §9-7 은 그 두 표에 `authenticated` 의 **select 를 이미 허용**하고 있습니다. 그 조회를
-      B 절(배치)에 두면 화면이 배치 함수를 부르게 되고, 그 순간 앱 서버에 service_role 키가
-      필요해집니다 — §0-3-8 이 막으려는 바로 그 사고입니다. 그래서 **읽기만** A 절로
-      내려왔습니다(`fetch_public_leaderboard*` / `fetch_public_holdings_for_nickname`).
-
-    지금 고정하는 불변식(약해진 것이 아니라 **더 정확해진 것**):
-      ① A 절은 발행표에 **쓰지 않습니다** — insert/update/upsert/delete 가 한 번도 없어야
-         합니다. (스키마 §9-8 은 그 정책을 아무에게도 주지 않았으므로, 앱에 그런 코드가
-         있다면 그건 "권한 오류를 만드는 코드"이거나 누군가 RLS 를 열려는 신호입니다.)
-      ② A 절은 **체급 배정표(`duel_bracket_assignments`)를 아예 건드리지 않습니다** —
-         이 표는 읽기도 배치 몫입니다(§8-3 은 service_role 에도 update/delete 를 안 줬고,
-         화면이 체급을 알아야 할 이유가 없습니다. 체급은 발행표 행에 이미 들어 있습니다).
-      ③ 발행표 이름 **문자열**은 여전히 §0 의 상수 두 줄에만 있습니다.
-    """
-    tree, source = _module_ast()
-    a_start = source.index("#  A 절 —")
-    b_start = source.index("#  B 절 —")
-    a_section = source[a_start:b_start]
-
-    # ② 체급 배정표는 A 절에서 읽지도 않습니다.
-    for table in ("duel_bracket_assignments", "BRACKET_ASSIGNMENTS_TABLE"):
-        assert table not in a_section, f"A 절이 발행 인프라({table})를 건드립니다"
-
-    # ① A 절 함수 중 발행표에 **쓰는** 함수가 하나도 없어야 합니다.
-    functions = {node.name: node for node in ast.walk(tree)
-                 if isinstance(node, ast.FunctionDef)}
-    for name, node in functions.items():
-        marker = f"def {name}("
-        if not (a_start <= source.index(marker) < b_start):
-            continue
-        targets = _write_targets(node)
-        assert not ({"PUBLIC_LEADERBOARD_TABLE", "PUBLIC_HOLDINGS_TABLE",
-                     "BRACKET_ASSIGNMENTS_TABLE"} & targets), \
-            f"A 절 함수 {name} 이 발행표에 씁니다: {targets}"
-
-    # A 절이 발행표를 만지는 방법은 select 하나뿐이라는 것을 문자열로도 한 번 더 고정합니다.
-    for forbidden in (".insert(", ".update(", ".upsert(", ".delete()"):
-        publish_writes = [line for line in a_section.splitlines()
-                          if forbidden in line and ("PUBLIC_LEADERBOARD_TABLE" in line
-                                                    or "PUBLIC_HOLDINGS_TABLE" in line)]
-        assert not publish_writes, f"A 절이 발행표에 {forbidden} 를 씁니다: {publish_writes}"
-
-    # ③ 표 이름 문자열은 §0 의 상수 두 줄에만 있어야 합니다(문자열을 흩뿌리지 않기).
-    literals = [line for line in source.splitlines()
-                if '"duel_public_leaderboard"' in line or '"duel_public_holdings"' in line]
-    assert len(literals) == 2, f"발행표 이름 문자열이 상수 밖에도 있습니다: {literals}"
-
-
-# =============================================================================
-# 5. A 절 — 공개 동의 (5-2)
-# =============================================================================
-def test_save_consent_rejects_final_confirm_without_all_five():
-    client = FakeClient()
-    with pytest.raises(DuelDbError) as excinfo:
-        duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
-                             consent_holdings=True, consent_quantity=True,
-                             consent_buy_amount=False, final_confirmed=True)
-    assert "consent_buy_amount" in str(excinfo.value)
-    assert client.calls == []
-
-
-def test_save_consent_final_confirm_records_time():
-    client = FakeClient()
-    duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
-                         consent_holdings=True, consent_quantity=True,
-                         consent_buy_amount=True, final_confirmed=True)
-    call = client.only_call(duel_db.CONSENT_TABLE, "upsert")
-    assert call.options["on_conflict"] == "account_id"
-    assert call.payload["final_confirmed"] is True
-    assert call.payload["final_confirmed_at"], "최종확인 시각이 없는 최종확인은 만들지 않습니다"
-
-
-def test_save_consent_unsetting_final_clears_the_timestamp():
-    client = FakeClient()
-    duel_db.save_consent(client, "acc-1", final_confirmed=False)
-    # 2026-08-20 — save_consent 가 저장 직전에 철회 이력을 한 번 읽으므로(5-8-2 재동의
-    # 차단), `calls[0]` 가 아니라 **upsert 질의**를 집어 봅니다.
-    assert client.only_call(duel_db.CONSENT_TABLE,
-                            "upsert").payload["final_confirmed_at"] is None
-
-
-def test_real_principal_consent_is_independent_of_the_five():
-    """
-    실제 '내 성적표' 매입총합 사용 동의는 5개와 **완전히 별개**입니다(5-2-4).
-    5개가 전부 꺼져 있어도 이것만 켤 수 있어야 하고, 그 반대도 마찬가지입니다.
-    """
-    client = FakeClient()
-    duel_db.save_consent(client, "acc-1", consent_real_principal_bracket=True)
-    payload = client.only_call(duel_db.CONSENT_TABLE, "upsert").payload
-    assert payload["consent_real_principal_bracket"] is True
-    for flag in duel_db.CONSENT_ITEM_FLAGS:
-        assert flag not in payload, "독립 동의가 다른 항목을 함께 켜면 안 됩니다"
-
-    client = FakeClient()
-    duel_db.save_consent(client, "acc-1", consent_rank=True, consent_return=True,
-                         consent_holdings=True, consent_quantity=True,
-                         consent_buy_amount=True, final_confirmed=True)
-    assert "consent_real_principal_bracket" not in \
-        client.only_call(duel_db.CONSENT_TABLE, "upsert").payload
-    assert duel_db.CONSENT_REAL_PRINCIPAL_FLAG not in duel_db.CONSENT_ITEM_FLAGS
-
-
-def test_save_consent_rejects_unknown_flag():
-    client = FakeClient()
-    with pytest.raises(DuelDbError):
-        duel_db.save_consent(client, "acc-1", consent_rankk=True)   # 오타
-    with pytest.raises(DuelDbError):
-        duel_db.save_consent(client, "acc-1", consent_rank="yes")   # bool 아님
-    assert client.calls == []
 
 
 # =============================================================================
@@ -1897,7 +1781,6 @@ def test_calling_service_client_without_package_raises_catchable_error(monkeypat
                                trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW),
     lambda: duel_db.edit_order(None, "order-1", 3, now_kst=INSIDE_WINDOW),
     lambda: duel_db.cancel_order(None, "order-1", now_kst=INSIDE_WINDOW),
-    lambda: duel_db.save_consent(None, "acc-1", consent_rank=True),
     lambda: duel_db.fetch_all_active_accounts(None),
     lambda: duel_db.apply_monthly_deposits(None, date(2026, 9, 10)),
     lambda: duel_db.create_duel_accounts_for_user(None, "user-1"),
@@ -2058,37 +1941,12 @@ def test_batch_reads_all_use_range():
          duel_db.DAILY_SNAPSHOTS_TABLE),
         (lambda c: duel_db.fetch_pending_orders_for_fill(c, date(2026, 8, 20)),
          duel_db.ORDERS_TABLE),
-        (lambda c: duel_db.fetch_publishable_consents(c), duel_db.CONSENT_TABLE),
-        (lambda c: duel_db.fetch_revoked_consent_accounts(c), duel_db.CONSENT_TABLE),
-        (lambda c: duel_db.fetch_bracket_assignments(c, "2026-H2"),
-         duel_db.BRACKET_ASSIGNMENTS_TABLE),
     ]
     for call, table in checks:
         client = FakeClient()
         call(client)
         query = client.only_call(table, "select")
         assert "range" in query.options, f"{table} 조회에 .range() 가 없습니다(H-6)"
-
-
-def test_revoke_consent_does_not_extend_the_block_when_another_tab_won():
-    """
-    🔴 L-12 — 두 탭에서 동시에 철회해도 `revoked_at` 을 덮어쓰지 않습니다(TOCTOU).
-
-    update 문 자체에 "아직 철회되지 않은 행만" 조건을 넣고, 0행이면 다른 요청이 먼저
-    끝냈다는 뜻이므로 그 결과를 다시 읽어 돌려줍니다(3개월 차단이 연장되지 않습니다).
-    """
-    already = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
-    client = FakeClient(responses={
-        # 1차 조회에서는 "아직 철회 전"으로 보이지만(다른 탭이 그 사이 철회),
-        # update 는 0행이고, 그 뒤 재조회에서 이미 철회된 행이 나옵니다.
-        (duel_db.CONSENT_TABLE, "select"): sequence(
-            [{"account_id": "acc-1", "revoked_at": None}], [already]),
-        (duel_db.CONSENT_TABLE, "update"): [],
-    })
-    result = duel_db.revoke_consent(client, "acc-1")
-    assert result["revoked_at"] == already["revoked_at"], "먼저 찍힌 철회 시각을 덮어썼습니다"
-    update = client.only_call(duel_db.CONSENT_TABLE, "update")
-    assert ("is", "revoked_at", "null") in update.filters
 
 
 def test_save_sell_order_accepts_a_fractional_holding():

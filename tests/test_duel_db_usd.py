@@ -10,8 +10,9 @@
 
 이 파일이 특히 확인하는 것(원화 검증과 겹치지 않는, USD 트랙만의 위험 지점):
     ① `utils/duel_db_usd.py` 머리말이 선언한 "재사용 vs 신규 정의" 경계가 실제 코드와
-       일치하는가 — 공유돼야 할 함수(닉네임 3종·서비스 클라이언트·순수 헬퍼)가 **정말
+       일치하는가 — 공유돼야 할 함수(서비스 클라이언트·순수 집계·순수 헬퍼)가 **정말
        같은 객체**인지(재정의해서 두 벌이 되면 나중에 한쪽만 고쳐집니다).
+       (🗑️ 2026-09-03 — 닉네임 3종은 결투 공개 순위표 은퇴로 원화 파일에서 지워졌습니다.)
     ② 접수 시간대가 **16:00:01~21:00:00**(KRW 의 18:00:01~22:00:00 이 아님)로 판정되는가.
     ③ 트리거 거절 번역문이 "16:00~21:00"을 말하지, KRW 문구("18:00~22:00")가 새어 들어오지
        않는가(`_translate_order_guard_error_usd` — 이 파일에서 유일하게 "재사용하지 않기로"
@@ -56,15 +57,17 @@ TRADING_DAYS = [date(2026, 8, 19), date(2026, 8, 20), date(2026, 8, 21)]
 #  씁니다"라고 말합니다. 말로만 하는 약속은 누군가 조용히 `_usd` 쌍둥이를 새로 만들면서
 #  깨질 수 있으므로, **같은 객체인지(`is`)**를 직접 대조해 회귀로 고정합니다.
 # =============================================================================
+# 🗑️ 2026-09-03 — 닉네임 3종(`ensure_nickname`·`fetch_my_nickname`·`fetch_nicknames_for_accounts`)
+#    과 `fetch_real_principal_holdings`, 그리고 USD 발행 함수만 쓰던 `_filter_not_null` ·
+#    `_assert_no_identity_fields` 는 결투 공개 순위표(Branch 2) 은퇴로 원화 파일에서
+#    지워지거나 이 파일이 더 이상 import 하지 않아 목록에서 뺐습니다.
 @pytest.mark.parametrize("name", [
-    "ensure_nickname", "fetch_my_nickname", "fetch_nicknames_for_accounts",
     "create_service_client", "service_config_present",
     "group_rows_by_account", "sum_cash_balance", "cash_balances_by_account",
-    "fetch_real_principal_holdings",
     "_execute", "_require_client", "_iso_date", "_now_kst", "_require_text",
     "_require_positive_int", "_require_offset", "_require_amount", "_first_row",
     "_is_duplicate_key_error", "_assert_unique_keys", "_filter_is_null",
-    "_filter_not_null", "_assert_no_identity_fields", "_validate_fill_payload",
+    "_validate_fill_payload",
     "_validate_daily_snapshot", "_validate_holding_snapshot",
 ])
 def test_shared_helpers_are_the_same_object_as_the_krw_file(name):
@@ -88,10 +91,8 @@ def test_usd_module_does_not_redefine_the_shared_functions():
     tree = ast.parse(source)
     defined = {node.name for node in ast.walk(tree) if isinstance(node, ast.FunctionDef)}
     forbidden_redefinitions = {
-        "ensure_nickname", "fetch_my_nickname", "fetch_nicknames_for_accounts",
         "create_service_client", "service_config_present",
         "group_rows_by_account", "sum_cash_balance", "cash_balances_by_account",
-        "fetch_real_principal_holdings",
     }
     assert not (defined & forbidden_redefinitions), \
         f"공유해야 할 함수를 이 파일이 새로 정의합니다: {defined & forbidden_redefinitions}"
@@ -106,10 +107,6 @@ def test_table_names_and_rpc_are_usd_suffixed_and_distinct_from_krw():
         (duel_db_usd.LEDGER_TABLE_USD, duel_db.LEDGER_TABLE),
         (duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD, duel_db.DAILY_SNAPSHOTS_TABLE),
         (duel_db_usd.HOLDING_SNAPSHOTS_TABLE_USD, duel_db.HOLDING_SNAPSHOTS_TABLE),
-        (duel_db_usd.CONSENT_TABLE_USD, duel_db.CONSENT_TABLE),
-        (duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, duel_db.PUBLIC_LEADERBOARD_TABLE),
-        (duel_db_usd.PUBLIC_HOLDINGS_TABLE_USD, duel_db.PUBLIC_HOLDINGS_TABLE),
-        (duel_db_usd.BRACKET_ASSIGNMENTS_TABLE_USD, duel_db.BRACKET_ASSIGNMENTS_TABLE),
         (duel_db_usd.OPT_IN_RPC_USD, duel_db.OPT_IN_RPC),
     ]
     for usd_value, krw_value in pairs:
@@ -502,9 +499,10 @@ def test_fetch_my_snapshots_usd_output_feeds_compute_twr_directly():
 def test_usd_user_write_functions_do_not_accept_fill_or_balance_params():
     assert duel_db_usd.user_write_signature_violations_usd() == []
     # 🔴 2026-08-21 `save_sell_order_usd` 추가(원화 목록의 미러 — 같은 이유).
+    # 🗑️ 2026-09-03 `save_consent_usd` 제거 — USD 공개 동의 표가 은퇴하면서 함수도 지웠습니다.
     assert set(duel_db_usd.USER_WRITE_FUNCTIONS_USD) == {
         "opt_in_usd", "save_order_usd", "save_sell_order_usd", "edit_order_usd",
-        "cancel_order_usd", "save_consent_usd"}
+        "cancel_order_usd"}
 
 
 def _usd_module_ast():
@@ -532,13 +530,14 @@ def _write_targets(function_node):
 
 
 def test_usd_user_facing_functions_only_write_orders_and_consent():
-    """스키마 §14 가 사용자에게 준 표는 `duel_orders_usd`/`duel_public_consent_usd` 뿐입니다."""
+    """스키마 §14 가 사용자에게 준 표는 `duel_orders_usd` 뿐입니다(🗑️ 2026-09-03 — 공개 동의
+    표는 은퇴해 `save_consent_usd` 와 함께 지워졌습니다)."""
     tree, source = _usd_module_ast()
     functions = {node.name: node for node in ast.walk(tree)
                  if isinstance(node, ast.FunctionDef)}
     for name in duel_db_usd.USER_WRITE_FUNCTIONS_USD:
         targets = _write_targets(functions[name])
-        assert targets <= {"ORDERS_TABLE_USD", "CONSENT_TABLE_USD"}, \
+        assert targets <= {"ORDERS_TABLE_USD"}, \
             f"{name} 이 사용자 권한 밖의 USD 표에 씁니다: {targets}"
 
 
@@ -568,142 +567,6 @@ def test_opt_in_usd_does_not_reach_for_the_batch_key():
                  and child.func.attr == "rpc"]
     assert len(rpc_calls) == 1
     assert isinstance(rpc_calls[0].args[0], ast.Name) and rpc_calls[0].args[0].id == "OPT_IN_RPC_USD"
-
-
-def test_usd_publish_tables_are_only_written_by_the_batch_section():
-    """A 절이 USD 발행표에 쓰지 않고, 체급 배정표도 건드리지 않는지(KRW 와 같은 불변식)."""
-    tree, source = _usd_module_ast()
-    a_start = source.index("#  A 절 —")
-    b_start = source.index("#  B 절 —")
-    a_section = source[a_start:b_start]
-
-    for table in ("duel_bracket_assignments_usd", "BRACKET_ASSIGNMENTS_TABLE_USD"):
-        assert table not in a_section, f"A 절이 발행 인프라({table})를 건드립니다"
-
-    functions = {node.name: node for node in ast.walk(tree)
-                 if isinstance(node, ast.FunctionDef)}
-    for name, node in functions.items():
-        marker = f"def {name}("
-        if not (a_start <= source.index(marker) < b_start):
-            continue
-        targets = _write_targets(node)
-        assert not ({"PUBLIC_LEADERBOARD_TABLE_USD", "PUBLIC_HOLDINGS_TABLE_USD",
-                     "BRACKET_ASSIGNMENTS_TABLE_USD"} & targets), \
-            f"A 절 함수 {name} 이 발행표에 씁니다: {targets}"
-
-
-# =============================================================================
-# 5. A 절 — 공개 동의 (USD, `duel_public_consent_usd`)
-# =============================================================================
-def test_save_consent_usd_rejects_final_confirm_without_all_five():
-    client = FakeClient()
-    with pytest.raises(DuelDbError) as excinfo:
-        duel_db_usd.save_consent_usd(client, "acc-1", consent_rank=True, consent_return=True,
-                                     consent_holdings=True, consent_quantity=True,
-                                     consent_buy_amount=False, final_confirmed=True)
-    assert "consent_buy_amount" in str(excinfo.value)
-    assert client.calls == []
-
-
-def test_save_consent_usd_final_confirm_records_time_on_the_usd_table():
-    client = FakeClient()
-    duel_db_usd.save_consent_usd(client, "acc-1", consent_rank=True, consent_return=True,
-                                 consent_holdings=True, consent_quantity=True,
-                                 consent_buy_amount=True, final_confirmed=True)
-    call = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "upsert")
-    assert call.options["on_conflict"] == "account_id"
-    assert call.payload["final_confirmed"] is True
-    assert call.payload["final_confirmed_at"]
-    assert client.calls_for(duel_db.CONSENT_TABLE) == [], "KRW 동의표에는 손대지 않습니다"
-
-
-def test_real_principal_consent_usd_is_independent_of_the_five():
-    client = FakeClient()
-    duel_db_usd.save_consent_usd(client, "acc-1", consent_real_principal_bracket=True)
-    payload = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "upsert").payload
-    assert payload["consent_real_principal_bracket"] is True
-    for flag in duel_db.CONSENT_ITEM_FLAGS:
-        assert flag not in payload
-
-
-def test_save_consent_usd_rejects_unknown_flag():
-    client = FakeClient()
-    with pytest.raises(DuelDbError):
-        duel_db_usd.save_consent_usd(client, "acc-1", consent_rankk=True)
-    assert client.calls == []
-
-
-def test_revoke_consent_usd_is_independent_of_krw_consent():
-    """
-    🔴 5-11-10 확정 — USD 철회는 KRW 동의에 **아무 영향이 없습니다**. 여기서는 그 독립성을
-    "KRW 표에 질의가 전혀 가지 않는다"는 사실로 고정합니다.
-    """
-    existing = {"account_id": "acc-1", "revoked_at": None}
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): [existing]})
-    duel_db_usd.revoke_consent_usd(client, "acc-1")
-    call = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "update")
-    assert call.payload["revoked_at"]
-    assert all(call.payload[flag] is False for flag in duel_db.CONSENT_ITEM_FLAGS)
-    assert client.calls_for(duel_db.CONSENT_TABLE) == []
-
-
-def test_revoke_consent_usd_without_existing_consent_is_rejected():
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): []})
-    with pytest.raises(DuelDbError):
-        duel_db_usd.revoke_consent_usd(client, "acc-1")
-
-
-def test_revoke_consent_usd_called_twice_is_idempotent():
-    already_revoked = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): [already_revoked]})
-    result = duel_db_usd.revoke_consent_usd(client, "acc-1")
-    assert result == already_revoked
-    assert client.calls_for(duel_db_usd.CONSENT_TABLE_USD, "update") == []
-
-
-def test_reconsent_block_usd_blocks_within_three_months():
-    """
-    재동의 차단은 `duel_rules.resolve_reconsent_block()`(순수 함수, 공유)이 판정합니다.
-    `_assert_reconsent_allowed_usd()` 는 `save_consent_usd()` 가 저장 직전에 부르는 내부
-    헬퍼라 여기서 직접 불러 시각을 고정합니다(공개 인터페이스인 `save_consent_usd()` 는
-    `now_kst` 를 받지 않습니다 — KRW 의 `save_consent()` 와 동일한 규약).
-    """
-    revoked = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): [revoked]})
-    with pytest.raises(DuelDbError) as excinfo:
-        duel_db_usd._assert_reconsent_allowed_usd(
-            client, "acc-1", now_kst=datetime(2026, 8, 20, tzinfo=KST))
-    assert "3개월" in str(excinfo.value)
-
-
-# =============================================================================
-# 6. A 절 — 발행표 읽기 전용 조회 (USD)
-# =============================================================================
-def test_fetch_public_leaderboard_usd_uses_the_shared_column_list():
-    """컬럼 목록은 `duel_db.PUBLIC_LEADERBOARD_COLUMNS` 를 그대로 재사용합니다(새로 안 적음)."""
-    client = FakeClient(responses={(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): []})
-    duel_db_usd.fetch_public_leaderboard_usd(client, window_type="M1", bracket_key="usd_under_750")
-    call = client.only_call(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select")
-    assert call.options["columns"] == duel_db.PUBLIC_LEADERBOARD_COLUMNS
-
-
-def test_fetch_public_leaderboard_latest_date_usd_filters_by_window_and_bracket():
-    client = FakeClient(responses={
-        (duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): [{"published_date": "2026-08-19"}],
-    })
-    result = duel_db_usd.fetch_public_leaderboard_latest_date_usd(
-        client, window_type="M1", bracket_key="usd_under_750")
-    assert result == "2026-08-19"
-    call = client.only_call(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select")
-    assert call.filter_map == {"window_type": "M1", "bracket_key": "usd_under_750"}
-
-
-def test_fetch_public_holdings_for_nickname_usd_uses_the_shared_column_list():
-    client = FakeClient(responses={(duel_db_usd.PUBLIC_HOLDINGS_TABLE_USD, "select"): []})
-    duel_db_usd.fetch_public_holdings_for_nickname_usd(client, "떠난사람0009")
-    call = client.only_call(duel_db_usd.PUBLIC_HOLDINGS_TABLE_USD, "select")
-    assert call.options["columns"] == duel_db.PUBLIC_HOLDINGS_COLUMNS
-    assert call.filter_map == {"nickname": "떠난사람0009"}
 
 
 # =============================================================================
@@ -1065,134 +928,6 @@ def test_fetch_cash_ledger_for_accounts_usd_with_empty_list_sends_no_query():
 
 
 # =============================================================================
-# 13. B 절 — 공개 발행 (USD 미러)
-# =============================================================================
-def test_fetch_publishable_consents_usd_reads_only_final_confirmed_and_not_revoked():
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): [
-        {"account_id": "acc-1", "final_confirmed": True, "revoked_at": None},
-    ]})
-    rows = duel_db_usd.fetch_publishable_consents_usd(client)
-    assert len(rows) == 1
-    call = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "select")
-    assert ("eq", "final_confirmed", True) in call.filters
-
-
-def test_fetch_revoked_consent_accounts_usd_reads_only_revoked_rows():
-    client = FakeClient(responses={(duel_db_usd.CONSENT_TABLE_USD, "select"): [
-        {"account_id": "acc-9", "revoked_at": "2026-08-01T00:00:00+09:00"},
-    ]})
-    rows = duel_db_usd.fetch_revoked_consent_accounts_usd(client)
-    assert rows == [{"account_id": "acc-9", "revoked_at": "2026-08-01T00:00:00+09:00"}]
-
-
-def test_bracket_assignments_usd_round_trip_through_insert_and_fetch():
-    client = FakeClient(responses={
-        (duel_db_usd.BRACKET_ASSIGNMENTS_TABLE_USD, "select"): [
-            {"account_id": "acc-1", "season_key": "2026-03-01", "bracket_key": "usd_under_750"},
-        ],
-    })
-    inserted = duel_db_usd.insert_bracket_assignments_usd(client, [
-        {"account_id": "acc-1", "season_key": "2026-03-01", "bracket_key": "usd_under_750"},
-    ])
-    assert inserted == 1
-    fetched = duel_db_usd.fetch_bracket_assignments_usd(client, "2026-03-01")
-    assert fetched["acc-1"]["bracket_key"] == "usd_under_750"
-
-
-def test_insert_bracket_assignments_usd_rejects_duplicate_conflict_keys():
-    client = FakeClient()
-    with pytest.raises(DuelDbError):
-        duel_db_usd.insert_bracket_assignments_usd(client, [
-            {"account_id": "acc-1", "season_key": "2026-03-01", "bracket_key": "usd_under_750"},
-            {"account_id": "acc-1", "season_key": "2026-03-01", "bracket_key": "usd_750_2250"},
-        ])
-    assert client.calls == []
-
-
-def test_delete_published_rows_for_date_usd_touches_only_usd_tables():
-    client = FakeClient()
-    duel_db_usd.delete_published_rows_for_date_usd(client, date(2026, 8, 20))
-    assert client.only_call(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "delete").filter_map == \
-        {"published_date": "2026-08-20"}
-    assert client.only_call(duel_db_usd.PUBLIC_HOLDINGS_TABLE_USD, "delete").filter_map == \
-        {"published_date": "2026-08-20"}
-    assert client.calls_for(duel_db.PUBLIC_LEADERBOARD_TABLE) == []
-    assert client.calls_for(duel_db.PUBLIC_HOLDINGS_TABLE) == []
-
-
-def test_delete_published_rows_for_nicknames_usd_deletes_from_both_usd_tables():
-    client = FakeClient(responses={
-        (duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "delete"): [{"id": "r1"}],
-        (duel_db_usd.PUBLIC_HOLDINGS_TABLE_USD, "delete"): [{"id": "h1"}, {"id": "h2"}],
-    })
-    removed = duel_db_usd.delete_published_rows_for_nicknames_usd(client, ["떠난사람0009"])
-    assert removed == 3
-
-
-def test_leaderboard_has_any_rows_usd_true_and_false():
-    empty_client = FakeClient(responses={(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): []})
-    assert duel_db_usd.leaderboard_has_any_rows_usd(empty_client) is False
-
-    full_client = FakeClient(responses={
-        (duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): [{"id": "r1"}],
-    })
-    assert duel_db_usd.leaderboard_has_any_rows_usd(full_client) is True
-
-
-def test_fetch_published_group_index_usd_groups_nicknames_by_date():
-    client = FakeClient(responses={(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): [
-        {"published_date": "2026-08-19", "nickname": "떠난사람0001"},
-        {"published_date": "2026-08-19", "nickname": "떠난사람0002"},
-        {"published_date": "2026-08-20", "nickname": "떠난사람0001"},
-    ]})
-    index = duel_db_usd.fetch_published_group_index_usd(client, "M1", "usd_under_750")
-    assert index == {
-        "2026-08-19": ["떠난사람0001", "떠난사람0002"],
-        "2026-08-20": ["떠난사람0001"],
-    }
-
-
-def test_delete_published_group_usd_with_empty_group_does_nothing():
-    client = FakeClient(responses={(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "select"): []})
-    removed = duel_db_usd.delete_published_group_usd(client, "M1", "usd_under_750")
-    assert removed == 0
-    assert client.calls_for(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "delete") == []
-
-
-def test_write_public_leaderboard_usd_rejects_identity_fields():
-    """식별자 혼입 방어(`_assert_no_identity_fields`)는 KRW 파일 함수를 그대로 재사용합니다."""
-    client = FakeClient()
-    with pytest.raises(DuelDbError):
-        duel_db_usd.write_public_leaderboard_usd(client, date(2026, 8, 20), [
-            {"window_type": "M1", "bracket_key": "usd_under_750", "rank": 1,
-             "nickname": "떠난사람0001", "twr_pct": 1.5, "account_id": "acc-1"},
-        ])
-    assert client.calls == []
-
-
-def test_write_public_leaderboard_usd_writes_the_usd_table_only():
-    client = FakeClient()
-    written = duel_db_usd.write_public_leaderboard_usd(client, date(2026, 8, 20), [
-        {"window_type": "M1", "bracket_key": "usd_under_750", "rank": 1,
-         "nickname": "떠난사람0001", "twr_pct": 1.5},
-    ])
-    assert written == 1
-    assert client.only_call(duel_db_usd.PUBLIC_LEADERBOARD_TABLE_USD, "insert").rows[0]["published_date"] \
-        == "2026-08-20"
-    assert client.calls_for(duel_db.PUBLIC_LEADERBOARD_TABLE) == []
-
-
-def test_write_public_holdings_usd_rejects_identity_fields():
-    client = FakeClient()
-    with pytest.raises(DuelDbError):
-        duel_db_usd.write_public_holdings_usd(client, date(2026, 8, 20), [
-            {"window_type": "M1", "nickname": "떠난사람0001", "ticker": "AAPL",
-             "stock_name": "애플", "quantity": 20, "buy_amount": 2_800, "user_id": "user-1"},
-        ])
-    assert client.calls == []
-
-
-# =============================================================================
 # 14. None 클라이언트는 AttributeError 가 아니라 DuelDbError 여야 합니다
 # =============================================================================
 @pytest.mark.parametrize("call", [
@@ -1203,8 +938,6 @@ def test_write_public_holdings_usd_rejects_identity_fields():
                                        trading_days=TRADING_DAYS, now_kst=INSIDE_WINDOW_USD),
     lambda: duel_db_usd.edit_order_usd(None, "order-1", 3, now_kst=INSIDE_WINDOW_USD),
     lambda: duel_db_usd.cancel_order_usd(None, "order-1", now_kst=INSIDE_WINDOW_USD),
-    lambda: duel_db_usd.save_consent_usd(None, "acc-1", consent_rank=True),
-    lambda: duel_db_usd.revoke_consent_usd(None, "acc-1"),
     lambda: duel_db_usd.fetch_all_active_accounts_usd(None),
     lambda: duel_db_usd.apply_monthly_deposits_usd(None, date(2026, 9, 10)),
     lambda: duel_db_usd.create_duel_accounts_for_user_usd(None, "user-1"),
@@ -1295,12 +1028,6 @@ def test_batch_reads_all_use_range_usd():
          duel_db_usd.DAILY_SNAPSHOTS_TABLE_USD),
         (lambda c: duel_db_usd.fetch_pending_orders_for_fill_usd(c, date(2026, 8, 20)),
          duel_db_usd.ORDERS_TABLE_USD),
-        (lambda c: duel_db_usd.fetch_publishable_consents_usd(c),
-         duel_db_usd.CONSENT_TABLE_USD),
-        (lambda c: duel_db_usd.fetch_revoked_consent_accounts_usd(c),
-         duel_db_usd.CONSENT_TABLE_USD),
-        (lambda c: duel_db_usd.fetch_bracket_assignments_usd(c, "2026-H2"),
-         duel_db_usd.BRACKET_ASSIGNMENTS_TABLE_USD),
     ]
     for call, table in checks:
         client = FakeClient()
@@ -1332,20 +1059,6 @@ def test_expire_stale_pending_orders_before_usd_uses_a_less_than_filter():
     assert ("lt", "target_date", "2026-08-20") in call.filters
     assert ("eq", "status", "pending") in call.filters
     assert client.calls_for(duel_db.ORDERS_TABLE) == []      # 원화 표는 안 건드립니다
-
-
-def test_revoke_consent_usd_does_not_extend_the_block_when_another_tab_won():
-    """L-12(USD) — 원화와 같은 TOCTOU 방어."""
-    already = {"account_id": "acc-1", "revoked_at": "2026-08-01T00:00:00+09:00"}
-    client = FakeClient(responses={
-        (duel_db_usd.CONSENT_TABLE_USD, "select"): sequence(
-            [{"account_id": "acc-1", "revoked_at": None}], [already]),
-        (duel_db_usd.CONSENT_TABLE_USD, "update"): [],
-    })
-    result = duel_db_usd.revoke_consent_usd(client, "acc-1")
-    assert result["revoked_at"] == already["revoked_at"]
-    update = client.only_call(duel_db_usd.CONSENT_TABLE_USD, "update")
-    assert ("is", "revoked_at", "null") in update.filters
 
 
 def test_save_sell_order_usd_accepts_a_fractional_holding():
