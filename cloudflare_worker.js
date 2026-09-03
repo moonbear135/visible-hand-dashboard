@@ -17,6 +17,13 @@
 // 막아주고(GitHub 자체 cron이 제때 돌면 이 Worker는 조용히 아무것도 안 함),
 // 혹시 이 Worker 쪽에 문제가 생겨도 GitHub 자체 cron이 여전히 살아있는
 // 이중 안전장치가 됨.
+//
+// ⚠️ 단, 반대 순서 — 이 Worker가 먼저 깨우고 GitHub 자체 cron이 몇 시간 **뒤에**
+// 늦게 발동하는 경우 — 는 이 체크로 못 막음(실측: 2026-09-02·09-03 이틀 연속
+// 두 워크플로우 모두 하루 두 번 커밋됨). 그 쪽은 2026-09-04부터 수집기 자체의
+// `--skip-if-not-ready`(오늘 자 스냅샷이 이미 SUCCESS 면 아무것도 안 하고 exit 0,
+// collector_kospi200.py / collector_indicator_kr.py)가 막음. 이 Worker 의 로직은 그대로 —
+// dispatch 는 여전히 입력 없이(ref=main 만) 보내므로 force 기본값 false 로 점검이 켜짐.
 
 const REPO_OWNER = "moonbear135";
 const REPO_NAME = "visible-hand-dashboard";

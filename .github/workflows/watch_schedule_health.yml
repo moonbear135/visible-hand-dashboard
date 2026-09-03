@@ -57,12 +57,13 @@
 #
 #     왜 그게 문제인가 — 대상 수집기 중 일부는 **"과거 특정 날짜"를 지정해 백필하는 기능이
 #     아예 없습니다.** 저장소 코드를 직접 열어 확인한 사실입니다(추측 아님, §0-1):
-#       · `collector_kospi200.py` — argparse 자체가 없습니다(인자를 하나도 받지 않음).
-#         언제 돌리든 "지금 이 순간"의 시세만 긁습니다. `scrape.yml` 의 `target_date`
-#         입력은 백필이 아니라 **이 스텝을 건너뛰는 스위치**입니다
-#         (`if: ${{ github.event.inputs.target_date == '' }}`).
-#       · `collector_indicator_kr.py` — 인자는 `--limit/--days/--delay` 뿐이고, 기록되는
-#         날짜는 `today_str = _now_kst()`(236행)로 **실행 시각이 곧 날짜**입니다.
+#       · `collector_kospi200.py` — 날짜 인자가 없습니다(2026-09-04 추가된 `--skip-if-not-ready`
+#         는 "오늘 이미 SUCCESS 면 건너뛰기" 스위치일 뿐 백필이 아님). 언제 돌리든 "지금 이
+#         순간"의 시세만 긁습니다. `scrape.yml` 의 `target_date` 입력은 백필이 아니라
+#         **이 스텝을 건너뛰는 스위치**입니다 (`if: ${{ github.event.inputs.target_date == '' }}`).
+#       · `collector_indicator_kr.py` — 인자는 `--limit/--days/--delay`(+ 위와 같은
+#         `--skip-if-not-ready`) 뿐이고, 기록되는 날짜는 `today_str = _now_kst()` 로
+#         **실행 시각이 곧 날짜**입니다.
 #         `--days` 는 지표 계산에 쓸 과거 시세를 몇 일치 받아올지일 뿐, "어느 날짜로
 #         기록할지"를 바꾸지 못합니다.
 #     그래서 장중에 자동 재실행이 걸리면 (a) 장 시작 직후의 어중간한 가격이 그날의 정상적인

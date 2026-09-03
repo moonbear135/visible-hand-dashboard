@@ -730,3 +730,68 @@ def test_no_dividend_scoring_requires_both_evidences(monkeypatch):
         shares_lookup={})
     assert out[0]["dps_source"] == "no_dividend_confirmed"
     assert out[0]["dps"] == 0
+
+
+# ── 2026-09-04: 무인 자동화 사전 점검(--skip-if-not-ready) — "오늘 이미 SUCCESS 면 건너뛰기" ──
+# 배경: GitHub 자체 cron 지연 + Cloudflare Worker dispatch 가 같은 날 둘 다 발동해 2026-09-02·
+# 09-03 이틀 연속 하루 두 번 크롤링됨(git log -- data/kospi200_pegy_latest.json 으로 확인).
+# 판정 규칙은 collector_us_stocks.snapshot_covered_session_dates() 와 같은 방향 — "모르면 수집".
+
+import datetime as _dt
+import json
+
+_GUARD_NOW = _dt.datetime(2026, 9, 4, 16, 12)   # 가상의 '오늘' — Worker 트리거(16:10 KST) 직후
+
+
+def _write_kospi_snapshot(tmp_path, status, last_updated_at, drop_status=False):
+    meta = {"last_updated_at": last_updated_at, "status": status, "total_count": 500}
+    if drop_status:
+        meta.pop("status")
+    p = tmp_path / "kospi200_pegy_latest.json"
+    p.write_text(json.dumps({"metadata": meta, "stocks": []}), encoding="utf-8")
+    return str(p)
+
+
+def test_readiness_skips_when_today_already_success(tmp_path):
+    """(a) 오늘(KST) 자 스냅샷이 SUCCESS → 건너뜀."""
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04 16:08")
+    r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is False
+    assert r["snapshot_date"] == "2026-09-04" and r["snapshot_status"] == "SUCCESS"
+
+
+def test_readiness_collects_when_not_yet_collected_today(tmp_path):
+    """(b) 어제 SUCCESS 뿐이거나 파일이 없으면 → 수집."""
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-03 16:08")
+    assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    missing = str(tmp_path / "없는파일.json")
+    assert K.evaluate_kospi200_collection_readiness(missing, now_kst=_GUARD_NOW)["should_collect"] is True
+
+
+def test_readiness_retries_when_today_degraded_or_failed(tmp_path):
+    """(c) 오늘 DEGRADED/FAILED 로 끝났으면 성공으로 치지 않고 재시도. status 없는 옛 형식·깨진 파일도 수집."""
+    for status in ("DEGRADED", "FAILED"):
+        snap = _write_kospi_snapshot(tmp_path, status, "2026-09-04 16:08")
+        r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
+        assert r["should_collect"] is True, status
+        assert r["snapshot_status"] == status and r["snapshot_date"] is None
+    snap = _write_kospi_snapshot(tmp_path, None, "2026-09-04 16:08", drop_status=True)
+    assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    broken = tmp_path / "kospi200_pegy_latest.json"
+    broken.write_text("{깨진 json", encoding="utf-8")
+    assert K.evaluate_kospi200_collection_readiness(str(broken), now_kst=_GUARD_NOW)["should_collect"] is True
+
+
+def test_main_block_wires_skip_flag_before_any_collection():
+    """__main__ 에서 사전 점검이 4단계 수집 전부보다 **앞에** 있고, 건너뛸 때 exit 0 이어야 합니다."""
+    src = (Path(__file__).parent.parent / "collector_kospi200.py").read_text(encoding="utf-8")
+    main_block = src[src.index('if __name__ == "__main__":'):]
+    assert '"--skip-if-not-ready"' in main_block
+    guard_at = main_block.index("evaluate_kospi200_collection_readiness()")
+    assert guard_at < main_block.index("run_kr_ticker_master_collector()")
+    assert "sys.exit(0)" in main_block[guard_at:main_block.index("run_kr_ticker_master_collector()")]
+    # 워크플로우 배선: 평소엔 플래그를 켜고, force=true 일 때만 끕니다(scrape_us.yml 과 같은 관례)
+    wf = (Path(__file__).parent.parent / ".github" / "workflows" / "scrape.yml").read_text(encoding="utf-8")
+    assert "python collector_kospi200.py --skip-if-not-ready" in wf
+    assert "github.event.inputs.force" in wf
+    assert "- cron: '5 7 * * 1-5'" in wf   # schedule: 안전망은 그대로

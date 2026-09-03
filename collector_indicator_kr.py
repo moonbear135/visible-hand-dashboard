@@ -230,7 +230,95 @@ def cross_check_last_close(code, last_close, today_price_map):
 
 
 # =============================================================================
-# 3. 메인
+# 3. 무인 자동화 사전 점검 — "오늘 이미 SUCCESS 로 수집을 마쳤으면 건너뛰기" (2026-09-04 신설)
+#
+# 배경: GitHub Actions 자체 schedule cron 이 몇 시간씩 지연되는 일이 잦아(TASK_HISTORY #154)
+# Cloudflare Worker(cloudflare_worker.js)가 17:05 KST 에 workflow_dispatch 로 indicator_kr.yml
+# 을 한 번 더 깨웁니다. Worker 는 "오늘 실행 기록이 있으면 안 쏜다"고 확인하지만, GitHub 자체
+# cron 이 그 **뒤에** 늦게 발동하는 경우는 막을 수 없어 같은 날 두 번 수집됩니다.
+# 실측(`git log --date=iso -- data/indicator_kr_latest.json`, 스냅샷 generated_at KST):
+#   2026-09-02  17:19 KST / 21:39 KST  → 하루 두 번 (둘 다 성공 500/실패 0)
+#   2026-09-03  17:17 KST / 21:38 KST  → 하루 두 번 (둘 다 성공 500/실패 0)
+# collector_us_stocks.py 의 `--skip-if-not-ready`(evaluate_collection_readiness) /
+# collector_kospi200.py 의 evaluate_kospi200_collection_readiness() 와 같은 취지입니다.
+# indicator_kr.yml 의 schedule: 자체는 안전망으로 그대로 둡니다.
+#
+# 판정 규칙("모르면 수집한다" — 건너뛰면 하루가 통째로 비고, 수집하면 최악이라도 중복 1회):
+#   · 스냅샷 파일이 없거나 깨짐                       → 수집
+#   · status 가 SUCCESS 가 아님(DEGRADED, 또는 이 필드가 없는 옛 형식) → 수집
+#   · date == 오늘(KST)                               → 건너뜀
+#   · 그 외(어제 이전의 SUCCESS)                       → 수집
+# 날짜 비교는 KST 입니다 — 스냅샷의 date 가 today_str = _now_kst() 로 찍히기 때문입니다.
+# =============================================================================
+def read_snapshot_completion(path=None):
+    """
+    기존 스냅샷(indicator_kr_latest.json)에서 "어느 날짜를, 어떤 status 로 저장했는가"를 읽습니다.
+
+    반환: (completed_date, status, generated_at)
+      completed_date: status 가 SUCCESS 일 때만 스냅샷의 date(YYYY-MM-DD, KST). 파일이 없거나
+                      깨졌거나 SUCCESS 가 아니면 None (모르면 수집하는 쪽이 안전).
+    """
+    if path is None:
+        path = LATEST_SNAPSHOT_PATH
+    if not os.path.exists(path):
+        return None, None, None
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f) or {}
+    except Exception as e:
+        print(f"  ⚠️ {path} 를 읽지 못했습니다({e}) — 이미 수집됐는지 알 수 없어 수집을 진행합니다.")
+        return None, None, None
+    status = data.get("status")
+    date_str = data.get("date")
+    generated_at = data.get("generated_at")
+    if status != "SUCCESS" or not isinstance(date_str, str) or len(date_str) < 10:
+        return None, status, generated_at
+    return date_str[:10], status, generated_at
+
+
+def evaluate_collection_readiness(snapshot_path=None, now_kst=None):
+    """
+    "지금 이 실행이 실제로 수집을 해야 하는가"를 판정합니다(무인 자동화 전용).
+
+    반환: dict — should_collect / reason / target_date / snapshot_date / snapshot_status /
+          snapshot_generated_at (collector_kospi200 의 같은 이름 키와 대응)
+    """
+    now = now_kst or _now_kst()
+    target = now.strftime("%Y-%m-%d")
+    completed_date, status, generated_at = read_snapshot_completion(snapshot_path)
+
+    if completed_date == target:
+        should, reason = False, (
+            f"{target} 자 수집이 이미 status=SUCCESS 로 완료되어 스냅샷에 들어있습니다"
+            f" (생성 {generated_at} KST)"
+        )
+    elif status is not None and status != "SUCCESS":
+        should, reason = True, (
+            f"기존 스냅샷이 status={status} 입니다(생성 {generated_at} KST) — "
+            f"성공으로 치지 않고 다시 수집합니다"
+        )
+    elif completed_date is None:
+        should, reason = True, (
+            "기존 스냅샷이 없거나 읽을 수 없거나 status 필드가 없는 옛 형식입니다 — 수집을 진행합니다"
+        )
+    else:
+        should, reason = True, (
+            f"기존 스냅샷은 {completed_date} 자(status=SUCCESS)이고 오늘은 {target} 입니다 — "
+            f"수집을 진행합니다"
+        )
+
+    return {
+        "should_collect": should,
+        "reason": reason,
+        "target_date": target,
+        "snapshot_date": completed_date,
+        "snapshot_status": status,
+        "snapshot_generated_at": generated_at,
+    }
+
+
+# =============================================================================
+# 4. 메인
 # =============================================================================
 def run(limit=500, days=INDICATOR_FETCH_DAYS, delay=INDICATOR_REQUEST_DELAY_SECONDS):
     today_str = _now_kst().strftime("%Y-%m-%d")
@@ -303,10 +391,19 @@ def run(limit=500, days=INDICATOR_FETCH_DAYS, delay=INDICATOR_REQUEST_DELAY_SECO
     print(f"  이력 기록: {today_str} 기준 {result['row_count']}종목 기록{replaced_note} "
           f"/ 파일 총 {result['total_rows']}행")
 
+    # 2026-09-04 신설: 무인 자동화 사전 점검(evaluate_collection_readiness)이 "오늘 이미 잘
+    # 수집됐는가"를 판정할 때 읽는 status. 실패 0건일 때만 SUCCESS, 하나라도 실패하면 DEGRADED.
+    # 코스피(0.85)·미국(0.90) 같은 비율 임계값을 따로 두지 않은 이유 — 이 모듈의 실측
+    # (2026-08-26~09-03, 저장소에 커밋된 스냅샷 10회)이 전부 성공 500/실패 0 이라 "몇 %까지가
+    # 정상"이라는 근거 데이터가 없고(§0-1 지어내지 않기), 실패가 1건이라도 있으면 그날의 두 번째
+    # 트리거가 재시도하는 편이 안전합니다(같은 날짜 행은 append_daily_history 가 교체하므로
+    # 재실행은 멱등). 성공 0건이면 위에서 이미 return 해 스냅샷 자체를 쓰지 않습니다.
+    status = "SUCCESS" if not failures else "DEGRADED"
     with open(LATEST_SNAPSHOT_PATH, "w", encoding="utf-8") as f:
         json.dump({
             "generated_at": _now_kst().strftime("%Y-%m-%d %H:%M"),
             "date": today_str,
+            "status": status,
             "universe_tracked_count": info["tracked_count"],
             "universe_visible_count": info["visible_count"],
             "success_count": len(rows),
@@ -338,10 +435,40 @@ def run(limit=500, days=INDICATOR_FETCH_DAYS, delay=INDICATOR_REQUEST_DELAY_SECO
         print(f"  실패 종목(최대 10개 표시): {failures[:10]}")
 
 
-if __name__ == "__main__":
+def main(argv=None):
     parser = argparse.ArgumentParser(description="보조지표 모듈 일간 수집기")
     parser.add_argument("--limit", type=int, default=500)
     parser.add_argument("--days", type=int, default=INDICATOR_FETCH_DAYS)
     parser.add_argument("--delay", type=float, default=INDICATOR_REQUEST_DELAY_SECONDS)
-    args = parser.parse_args()
+    # 2026-09-04: 무인 자동화(GitHub Actions)에서만 켜는 사전 점검. 로컬에서 손으로 돌릴 때는
+    # 이 옵션을 주지 않으므로 언제나 그대로 수집합니다(같은 날 재수집도 막지 않음).
+    # 플래그 이름·동작은 collector_us_stocks.py / collector_kospi200.py 와 맞췄습니다.
+    parser.add_argument("--skip-if-not-ready", action="store_true",
+                        help="무인 자동화(GitHub Actions) 전용. 오늘(KST) 자 스냅샷이 이미 "
+                             "status=SUCCESS(실패 0건)로 저장돼 있으면 아무것도 하지 않고 정상 "
+                             "종료(exit 0)합니다. 실패가 있던 날(DEGRADED)은 성공으로 치지 않고 "
+                             "다시 수집합니다. GitHub 자체 cron 과 Cloudflare Worker 의 "
+                             "workflow_dispatch 가 같은 날 둘 다 발동해도 실제 수집은 하루 한 번만 "
+                             "일어나게 하는 방어 장치입니다.")
+    args = parser.parse_args(argv)
+    if args.skip_if_not_ready:
+        readiness = evaluate_collection_readiness()
+        print("=" * 70)
+        print("[무인 자동화 사전 점검] --skip-if-not-ready")
+        print(f"  현재 KST              : {_now_kst().strftime('%Y-%m-%d %H:%M:%S')}")
+        print(f"  이번에 담길 날짜      : {readiness['target_date']}")
+        print(f"  스냅샷 status         : {readiness['snapshot_status'] or '(없음)'}")
+        print(f"  스냅샷 생성 시각      : {readiness['snapshot_generated_at'] or '(없음)'} KST")
+        print(f"  판정                  : {readiness['reason']}")
+        print("=" * 70)
+        if not readiness["should_collect"]:
+            print("⏭️  이번 실행은 아무것도 하지 않고 정상 종료합니다 (오류 아님).")
+            print("   GitHub 자체 cron 과 Cloudflare Worker 가 같은 날 둘 다 트리거해도,")
+            print("   실제 수집은 이 점검 덕분에 하루 한 번만 일어납니다.")
+            return False
     run(limit=args.limit, days=args.days, delay=args.delay)
+    return True
+
+
+if __name__ == "__main__":
+    main()

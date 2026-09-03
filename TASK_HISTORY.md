@@ -2735,6 +2735,51 @@ actor=`moonbear135`)가 이 파일의 `CRON_TARGETS` 설정과 정확히 들어�
 그 완료(`event=schedule`)로 `duel_daily.yml`이 정상 실행됩니다 — 데이터
 유실은 아니고 처리 시점만 늦어지는 구조입니다.
 
+### #189 — 코스피·보조지표 수집기에 "오늘 이미 SUCCESS 면 건너뛰기" 사전 점검(`--skip-if-not-ready`) 이식 — 하루 두 번 크롤링 차단 (2026-09-04)
+
+**배경.** #184/#185/#188의 클라우드플레어 워커(`cloudflare_worker.js`)는 "오늘 실행
+기록이 없으면 `workflow_dispatch`로 깨움"이라 GitHub 자체 cron이 **먼저** 돌면 조용히
+빠지지만, 워커가 먼저 깨우고 GitHub cron이 몇 시간 **뒤에** 늦게 발동하는 반대 순서는
+못 막습니다. 실측(`git log --date=iso -- data/...`, 추측 아님 §0-1):
+- `kospi200_pegy_latest.json` — 09-02 08:59/13:12 UTC, 09-03 08:46/13:11 UTC → 이틀 연속 하루 두 번
+- `indicator_kr_latest.json` — 09-02 17:19/21:39 KST, 09-03 17:17/21:38 KST → 이틀 연속 하루 두 번
+같은 날 두 번째 실행은 같은 종가를 한 번 더 긁는 것이라(§0-3-2 정중한 크롤링 위반) 수집기
+쪽에서 스스로 멈추게 했습니다. `collector_us_stocks.py`에 이미 있던
+`collect --skip-if-not-ready`(`evaluate_collection_readiness()` — 이번에 담길 거래일이
+이미 스냅샷에 있으면 exit 0, 단 `status`가 FAILED/DEGRADED 면 빈 집합으로 취급해 재시도,
+M15)를 먼저 읽고 같은 취지·같은 플래그 이름으로 옮겼습니다.
+
+**한 일.**
+1. `collector_kospi200.py` — `evaluate_kospi200_collection_readiness()` 신설 + `__main__`에
+   argparse(`--skip-if-not-ready`) 추가. 판정: 스냅샷 없음/깨짐 → 수집, `metadata.status`
+   ≠ SUCCESS(DEGRADED/FAILED, status 키 없는 옛 형식 포함) → 수집(재시도), `last_updated_at`
+   의 KST 날짜 == 오늘 → **건너뜀(exit 0)**. 건너뛰면 마스터 목록·전 종목 종가 수집까지
+   4단계 전부 돌지 않습니다(미국 쪽과 같은 구조). 파일명 하드코딩은 `KOSPI_SNAPSHOT_FILENAME`
+   상수로 단일화(§0-3-10).
+2. `collector_indicator_kr.py` — 스냅샷에 `status` 필드 신설(실패 0건 → SUCCESS, 1건이라도
+   실패 → DEGRADED. 비율 임계값을 두지 않은 근거: 커밋된 최근 10회 스냅샷 전부 성공 500/실패 0
+   이라 "몇 %까지 정상"의 실측 근거가 없음) + `evaluate_collection_readiness()` +
+   `main(argv)` 분리(`--skip-if-not-ready`). 옛 형식(status 없음)은 SUCCESS 로 승격하지 않음.
+3. `.github/workflows/scrape.yml`·`indicator_kr.yml` — `scrape_us.yml`과 같은 관례로
+   `force` 입력(boolean, 기본 false) 추가, 평소엔 `--skip-if-not-ready`, `force=true`면 플래그
+   없이 무조건 수집. **`schedule:` cron 블록은 한 줄도 건드리지 않음**(워커 장애 시 안전망).
+   워커·워치독은 입력 없이 dispatch 하므로 기본값 false → 점검 켜진 채 돕니다.
+4. 문서 동기화 — `watch_schedule_health.yml` 헤더의 "argparse 자체가 없다" 문구,
+   `cloudflare_worker.js` 헤더에 "반대 순서는 못 막음 → 수집기 플래그가 막음" 주석(둘 다 주석만).
+5. 회귀테스트 — `tests/test_collector_kospi200_ranking.py`·`tests/test_collector_indicator_kr.py`
+   에 (a) 오늘 SUCCESS → 스킵, (b) 어제 SUCCESS/파일 없음 → 수집, (c) 오늘 DEGRADED/FAILED/
+   옛 형식/깨진 파일 → 재시도, 플래그 없으면(force) 무조건 수집, `__main__` 배선 순서, 워크플로우
+   배선·cron 불변 검사 9개 추가. 전체 스위트 2,000+ passed / 회귀 0건.
+
+**확인 못 한 것 / 한계(§0-1).** 실제 GitHub Actions 위에서 하루 두 트리거가 실제로 한 번만
+수집하는지는 다음 평일 실행 로그로 확인해야 합니다(로컬에서는 스텁 수집기로 `__main__`
+블록을 그대로 exec 해 호출 여부만 검증). 코스피 쪽은 첫 실행이 SUCCESS 가 아니면(예:
+FAILED) 두 번째 트리거가 마스터 목록·전 종목 종가까지 한 번 더 돌게 되는데, 이건 미국
+쪽과 동일한 의도된 재시도입니다. 첫 실행이 SUCCESS 인데 뒤따르는 전 종목 종가 수집만
+실패한 경우는 두 번째 트리거도 통째로 건너뛰므로 그날 `kr_all_market_prices.json`이
+갱신되지 않을 수 있습니다(지금까지 그 조합이 실제로 난 적은 없고, 워치독이 잡는 범위 밖 —
+필요하면 후속으로 다룰 것).
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

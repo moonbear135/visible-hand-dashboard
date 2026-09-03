@@ -276,3 +276,104 @@ def test_run_continues_when_one_stock_fetch_fails(tmp_path, monkeypatch):
     assert snapshot["success_count"] == 1
     assert snapshot["failed_count"] == 1
     assert {s["code"] for s in snapshot["stocks"]} == {"GOOD"}
+
+
+# ---------------------------------------------------------------------------
+# 2026-09-04: 무인 자동화 사전 점검(--skip-if-not-ready) — "오늘 이미 SUCCESS 면 건너뛰기"
+#   배경: GitHub 자체 cron 지연 + Cloudflare Worker dispatch 가 같은 날 둘 다 발동해
+#   2026-09-02·09-03 이틀 연속 하루 두 번 수집됨(스냅샷 generated_at 17:1x / 21:3x KST).
+#   판정 규칙은 collector_kospi200 / collector_us_stocks 와 같은 방향 — "모르면 수집".
+# ---------------------------------------------------------------------------
+
+_GUARD_NOW = __import__("datetime").datetime(2026, 9, 4, 17, 12)
+
+
+def _write_indicator_snapshot(tmp_path, status, date, drop_status=False):
+    d = {"generated_at": f"{date} 17:10", "date": date, "status": status,
+         "success_count": 500, "failed_count": 0, "stocks": []}
+    if drop_status:
+        d.pop("status")
+    p = tmp_path / "indicator_kr_latest.json"
+    p.write_text(json.dumps(d), encoding="utf-8")
+    return str(p)
+
+
+def test_readiness_skips_when_today_already_success(tmp_path):
+    """(a) 오늘(KST) 자 스냅샷이 SUCCESS → 건너뜀."""
+    snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04")
+    r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is False
+    assert r["snapshot_date"] == "2026-09-04"
+
+
+def test_readiness_collects_when_not_yet_collected_today(tmp_path):
+    """(b) 어제 SUCCESS 뿐이거나 파일이 없으면 → 수집."""
+    snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-03")
+    assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    assert collector_indicator_kr.evaluate_collection_readiness(
+        str(tmp_path / "없는파일.json"), now_kst=_GUARD_NOW)["should_collect"] is True
+
+
+def test_readiness_retries_when_today_degraded_or_legacy(tmp_path):
+    """(c) 오늘 DEGRADED(실패 있음)면 재시도. status 필드가 없는 옛 형식·깨진 파일도 SUCCESS 로 승격하지 않음."""
+    snap = _write_indicator_snapshot(tmp_path, "DEGRADED", "2026-09-04")
+    r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is True and r["snapshot_status"] == "DEGRADED"
+    snap = _write_indicator_snapshot(tmp_path, None, "2026-09-04", drop_status=True)
+    assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    broken = tmp_path / "indicator_kr_latest.json"
+    broken.write_text("{깨진", encoding="utf-8")
+    assert collector_indicator_kr.evaluate_collection_readiness(str(broken), now_kst=_GUARD_NOW)["should_collect"] is True
+
+
+def test_main_skip_flag_gates_run(tmp_path, monkeypatch):
+    """main(argv): 플래그 + 오늘 SUCCESS → run() 미호출 / 플래그 없음(force) → 호출 / 오늘 DEGRADED → 호출."""
+    calls = []
+    monkeypatch.setattr(collector_indicator_kr, "run", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(collector_indicator_kr, "_now_kst", lambda: _GUARD_NOW)
+    wf_args = ["--limit", "500", "--days", "400", "--delay", "0.5"]
+
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH",
+                        _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04"))
+    assert collector_indicator_kr.main(wf_args + ["--skip-if-not-ready"]) is False
+    assert calls == []
+    assert collector_indicator_kr.main(wf_args) is True            # 탈출구: 플래그를 빼면 무조건 수집
+    assert calls == [{"limit": 500, "days": 400, "delay": 0.5}]
+
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH",
+                        _write_indicator_snapshot(tmp_path, "DEGRADED", "2026-09-04"))
+    assert collector_indicator_kr.main(wf_args + ["--skip-if-not-ready"]) is True
+    assert len(calls) == 2
+
+
+def test_run_records_status_success_only_when_no_failures(tmp_path, monkeypatch):
+    """run() 이 쓰는 status: 실패 0건 → SUCCESS, 1건이라도 실패 → DEGRADED (사전 점검이 읽는 값)."""
+    price_path = tmp_path / "kr_all_market_prices.json"
+    ticker_path = tmp_path / "kr_ticker_master.json"
+    latest_path = tmp_path / "indicator_kr_latest.json"
+    price_path.write_text(json.dumps({
+        "metadata": {"generated_at": "2026-08-25 17:00"},
+        "stocks": [{"code": "GOOD", "name": "정상"}, {"code": "BAD", "name": "실패"}],
+    }), encoding="utf-8")
+    ticker_path.write_text(json.dumps({
+        "stocks": [{"code": "GOOD", "type": "STOCK"}, {"code": "BAD", "type": "STOCK"}],
+    }), encoding="utf-8")
+    monkeypatch.setattr(collector_indicator_kr, "PRICE_LIST_PATH", str(price_path))
+    monkeypatch.setattr(collector_indicator_kr, "TICKER_MASTER_PATH", str(ticker_path))
+    monkeypatch.setattr(collector_indicator_kr, "UNIVERSE_PATH", str(tmp_path / "indicator_universe_kr.json"))
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH", str(latest_path))
+    monkeypatch.setattr(stock_history, "stock_history_path", lambda filename: str(tmp_path / "indicator_kr_history.csv"))
+    monkeypatch.setattr(collector_indicator_kr, "_now_kst",
+                         lambda: __import__("datetime").datetime(2026, 8, 25, 17, 10))
+
+    monkeypatch.setattr(collector_indicator_kr, "fetch_and_calculate", _fake_fetch_and_calculate)
+    collector_indicator_kr.run(limit=2, days=400, delay=0)
+    assert json.loads(latest_path.read_text(encoding="utf-8"))["status"] == "SUCCESS"
+
+    def flaky_fetch(code, days=None):
+        if code == "BAD":
+            raise RuntimeError("가짜 네트워크 실패")
+        return _fake_fetch_and_calculate(code, days)
+    monkeypatch.setattr(collector_indicator_kr, "fetch_and_calculate", flaky_fetch)
+    collector_indicator_kr.run(limit=2, days=400, delay=0)
+    assert json.loads(latest_path.read_text(encoding="utf-8"))["status"] == "DEGRADED"

@@ -12,6 +12,14 @@ on:
         description: '(선택) 과거 날짜를 보정하려면 YYYY-MM-DD 형식으로 입력. 비워두면 오늘 기준으로 정상 수집합니다.'
         required: false
         default: ''
+      # 2026-09-04: scrape_us.yml 의 같은 이름 입력과 동일한 관례. 기본값 false 라
+      # cloudflare_worker.js / watch_schedule_health.yml 처럼 입력 없이 dispatch 하는 호출은
+      # 전부 사전 점검이 켜진 채로 돕니다.
+      force:
+        description: '사전 점검을 무시하고 무조건 수집합니다 (오늘 이미 SUCCESS 로 수집된 날을 다시 수집하고 싶을 때만 true)'
+        type: boolean
+        required: false
+        default: false
 
 permissions:
   contents: write # 깃허브에 파일 쓰기 권한 활성화
@@ -37,8 +45,20 @@ jobs:
     - name: 코스피 시가총액 상위 200 개별 종목 데이터 수집 (data/*.json 갱신)
       # 과거 날짜 보정(백필) 실행일 때는 건너뜁니다 (이 수집기는 항상 "현재 시점" 데이터만 가져오기 때문)
       if: ${{ github.event.inputs.target_date == '' }}
+      # 2026-09-04: 평소(cron · Cloudflare Worker 의 workflow_dispatch)에는 --skip-if-not-ready 로
+      # 사전 점검을 켭니다. 오늘(KST) 자 스냅샷이 이미 status=SUCCESS 면 아무것도 하지 않고 정상
+      # 종료(exit 0)하므로, GitHub 자체 cron 이 몇 시간 늦게 발동해 Worker 와 같은 날 둘 다 돌아도
+      # 실제 크롤링은 하루 한 번만 일어납니다(2026-09-02·09-03 실측: 매일 두 번 커밋됨).
+      # DEGRADED/FAILED 로 끝난 날은 성공으로 치지 않고 다시 수집합니다.
+      # 수동 실행에서 force=true 를 고르면 점검 없이 무조건 다시 수집합니다(scrape_us.yml 과 동일).
+      # ⚠️ 위 schedule: cron 은 안전망으로 그대로 둡니다 — Worker 쪽 장애 시 이게 유일한 트리거.
       run: |
-        python collector_kospi200.py
+        if [ "${{ github.event.inputs.force }}" = "true" ]; then
+          echo "⚠️ force=true — 사전 점검을 건너뛰고 무조건 수집합니다"
+          python collector_kospi200.py
+        else
+          python collector_kospi200.py --skip-if-not-ready
+        fi
 
     - name: 거시경제/수급 데이터 수집 (market_history.csv 갱신)
       env:
