@@ -2021,16 +2021,30 @@ def test_admin_page_entrypoint_render_smoke():
 
 
 def test_privacy_page_entrypoint_render_smoke():
-    """🚪 `/privacy` — 로그인·플래그가 전혀 없는 상시 공개 화면."""
-    print("\n[10-b] /privacy 진입점 렌더 스모크")
+    """🚪 `/privacy` — 로그인·플래그가 전혀 없는 상시 공개 화면.
+
+    2026-09-04 — 이 화면은 더 이상 `@ui.page` 가 아니라 **순수 FastAPI 정적 라우트**입니다
+    (`web/pages/privacy_page.py` 머리말 — 애드센스 반려 대응). 그래서 렌더 스모크 대신
+    라우트 함수를 그대로 불러 완성된 HTML 응답이 나오는지 봅니다(정적 HTML 의 내용 검사는
+    `tests/test_crawler_html.py` 에 있습니다).
+    """
+    print("\n[10-b] /privacy 정적 라우트 스모크")
     _install_nicegui_stub()
     import web.pages.privacy_page as page
 
-    _entry_run(page, lambda: page.privacy_page(), "privacy_page()")
+    try:
+        response = page.privacy_page()
+    except Exception as exc:                       # noqa: BLE001
+        check(False, "privacy_page() 가 예외 없이 응답을 돌려줌", f"({type(exc).__name__}: {exc})")
+        return
+    check(response.status_code == 200 and response.media_type == "text/html",
+          "privacy_page() 가 200 text/html 응답을 돌려줌")
     # 본문이 통째로 f-string 상수라, 그 상수가 실제로 완성되는지(#128/#129 부류)까지가
     # 이 화면에서 확인할 수 있는 전부입니다.
     check(page.CONTACT_EMAIL in page._BODY_MARKDOWN,
           "본문 f-string 이 문의처 이메일까지 정상적으로 조립됨")
+    check(page.CONTACT_EMAIL in response.body.decode("utf-8"),
+          "정적 HTML 응답 본문에 문의처 이메일이 실제로 들어 있음")
 
 
 def test_scorecard_page_entrypoint_render_smoke():

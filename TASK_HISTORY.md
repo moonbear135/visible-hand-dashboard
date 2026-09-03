@@ -2879,6 +2879,79 @@ NiceGUI 렌더). (b) 외부에서 `/` 를 북마크한 사용자는 소개 페�
 않았습니다(요청 범위 밖). (d) Render 재배포 후 실제 도메인에서 `curl https://visiblehand.co.kr/`
 로 한 번 더 확인하는 것을 권합니다(이 작업은 로컬 기동으로만 검증했습니다).
 
+### #192 — 공개 화면 4개(`/kr`·`/us`·`/dividend`·`/indicator`)에 크롤러용 즉석 정적 HTML 분기, `/privacy` 순수 정적 전환 (애드센스 반려 대응 2차, 2026-09-04)
+
+**배경.** #191 이 `/` 만 고쳤고, 로그인 없이 누구나 보는 데이터 화면 4개는 여전히 NiceGUI 렌더라
+크롤러에게 빈 페이지였습니다. 이 화면들은 실시간 시세가 아니라 **수집기가 하루 1~2번 갱신하는 배치
+스냅샷(JSON)** 을 그리는 것뿐이라, 요청 시점의 그 파일을 서버에서 HTML 로 펼쳐 보여줘도 실사용자가
+보는 것과 같은 데이터입니다. 오너 확정: 봇에게만 **그 순간의 스냅샷을 즉석 렌더**한 정적 HTML(미리
+만들어 저장하지 않음 — 워크플로우 무변경), 일반 사용자는 예전 그대로, `/privacy` 는 고정 법률 문구라
+봇 감지 없이 통째로 정적 전환.
+
+**조사(§0-1, 추측 아님).** 설치본 NiceGUI **3.16.0** `nicegui/page.py::page._wrap.decorated` 를 직접
+읽음: 페이지 함수가 `fastapi.Response` 를 반환하면 `if isinstance(result, Response): return result`
+로 NiceGUI 화면 조립을 건너뜀. `request` 매개변수는 `_wrap` 이 시그니처에 없으면 스스로 끼워 넣고,
+있으면 FastAPI 가 타입 주석으로 주입. NiceGUI 자신도 `nicegui/client.py::AI_AGENT_TOKENS` 로 UA 를
+보고 AI 에이전트에게 마크다운을 돌려주고 있음(프레임워크가 이미 하는 일). 별도 미니 앱으로 로컬
+기동 + curl 로 **early return 실동작 확인** 후 채택(미들웨어 불필요). 각 화면이 읽는 파일·필드는
+실제 JSON 을 열어 확인: `kospi200_pegy_latest.json`(metadata.last_updated_at/status/total_count,
+stocks[].rank/name/code/market/price/t_per/t_pegy/f_pegy/f_target/quant_score/score_max/badge/is_visible),
+`us_stocks_latest.json`(metadata.last_updated_at_kst/session_dates_from_source/indices/failed_tickers,
+stocks[].symbol/name_kr/industry/price/t_per/f_per/t_pegy/f_pegy/f_target/…),
+`dividend_kr_2026_latest.json`(summary.generated_at_kst/completed/…, records[].stock_code/corp_name/
+market/stlm_dt/reprt_name/dps_cash_common/cash_yield_common/bsns_year) + `dividend_history_kr_2023_2025.json`,
+`indicator_kr_latest.json`(generated_at/date/…count, stocks[].rsi/rsi_signal/macd/macd_signal_line/
+macd_cross/bb_percent_b/bb_position/verdict_label/unavailable_reasons).
+
+**한 일.**
+1. `web/static_html.py` 신설 — `BOT_UA_TOKENS`(googlebot·mediapartners-google·adsbot-google·
+   google-inspectiontool·storebot-google·googleother·bingbot — 일반 브라우저 UA 에 있는 토큰은
+   넣지 않음, 보수적), `is_known_crawler(request)`(None → False), `crawler_response(html)`
+   (`Vary: User-Agent`·`Cache-Control: no-store`, NiceGUI 가 만들어 둔 요청용 `Client` 를 응답 직후
+   `BackgroundTask` 로 삭제 — NiceGUI 마크다운 응답과 같은 방식), 문서 뼈대 `render_document()`
+   (`<title>`·`<meta description>`·canonical·CSS·푸터), `notice_box()`·`table_html()`·
+   `remaining_note()`. `landing_page.py` 의 CSS·뼈대를 여기로 옮겨 재사용(§0-3-10).
+2. 4개 화면 — `@ui.page` 함수에 `request: Request = None` 추가(테스트가 인자 없이 부르므로 기본값
+   None = 봇 아님), 맨 앞에서 `if is_known_crawler(request): return crawler_response(await
+   build_crawler_html())`. `build_crawler_html()` 은 화면의 `_render_body()` 가 쓰는 **같은 로더·
+   같은 파일**을 읽어 제목·투자주의/학습용 고지(`_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL`
+   HTML 조각 그대로 재사용)·동기화 시각·상태 경고·상위 30건 표(`CRAWLER_TABLE_ROWS`)·"나머지는
+   브라우저에서" 안내·푸터 고지를 만듦. 실패 시 화면과 같은 문구 + "데이터 준비 중"만(§0-1).
+   `/dividend`·`/indicator` 는 공개 스위치(`*_ENABLED`·`*_MENU_ADMIN_ONLY`)를 화면과 같은 상수로
+   판정해 꺼져 있으면 크롤러에게도 같은 "준비중" 문구(클로킹 아님). 일반 접속자 경로는 `return None`
+   한 줄 외 변경 없음.
+3. `/privacy` — `@app.get('/privacy')` 순수 라우트로 전환. 본문 `_BODY_MARKDOWN` 은 한 글자도 안
+   바꾸고 `ui.markdown` 이 쓰던 것과 같은 `markdown2`(extras `fenced-code-blocks`·`tables`)로 HTML 화.
+4. 테스트 — `tests/test_crawler_html.py` 신설(15건: 봇 판정 보수성, 4개 화면 실데이터 HTML 에
+   title/description/실제 종목명·코드/`<script` 0, 스냅샷 실패 시 표 없음+정직 문구, 스위치 꺼짐/
+   관리자 전용 시 "준비중", 페이지 함수에 봇 요청 → `HTMLResponse` 반환·헤더, `request` 시그니처,
+   4개 파일만 분기, `/privacy` 정적·법률 문구·`@ui.page` 아님). `test_web_session_isolation.py`
+   의 `/privacy` 스모크를 정적 라우트 방식으로 갱신. `PROJECT_STATUS.md`·`main.py` 주석 갱신.
+
+**검증.** `py_compile` OK. 로컬 기동(`NICEGUI_STORAGE_SECRET` 임시 난수, `DIVIDEND_ENABLED`·
+`INDICATOR_ENABLED`=true) 후 curl:
+- Googlebot UA → `/kr` 200 · text/html · 14,858B · `<script` 0 · `vary: User-Agent` · 본문에
+  "📅 마지막 동기화: 2026-09-03 22:06", 삼성전자/005930/250,000원/… 30행 표. `/us` 17,321B(엔비디아
+  NVDA $224.41 …, S&P500·나스닥·다우 ETF 프록시 등락률). `/dividend` 14,832B(요약 5건, 고려아연
+  10,000원 … 확정 148건 중 30건, 수집 중단 경고 그대로). `/indicator` 12,355B(삼성전자 RSI 46.59 …,
+  강한 경고 상·하단). `/privacy` 8,746B 정적, 법률 문구 원문.
+- Mediapartners-Google / AdsBot-Google / Google-InspectionTool / bingbot → 전부 정적(socket.io 0).
+- Chrome / iPhone Safari / curl UA → `/kr` 417KB NiceGUI 셸(`x-nicegui-content: page`, script 10개,
+  socket.io 포함) — **예전과 동일**, `/us`·`/dividend`·`/indicator` 도 같음.
+- 전체 스위트 **2,097 passed / 72 skipped**(회귀 0, 신규 +15; skip 은 #191 때와 같은
+  `test_suite_integrity` Check A 의 하네스 미사용 파일 건너뜀).
+
+**확인 못 한 것 / 한계(§0-1).** (a) 애드센스 재심사 통과 여부는 구글 판단. (b) 클로킹 정책:
+봇과 사람이 **같은 파일의 같은 데이터**를 보되 포장(정적 표 30행 vs 인터랙티브 카드 500장)이
+다릅니다 — 구글 문서상 "동적 렌더링"류의 허용 범주로 판단하지만, 심사관이 어떻게 볼지는 장담
+못 함. 상위 30행만 싣는 것도 같은 맥락(전부 싣지 않음을 본문에 명시). (c) Render 배포 환경은
+같은 `main.py`·같은 nicegui 핀이라 동일하게 동작할 것으로 보나, Render/Cloudflare 앞단이 UA 를
+바꾸거나 캐시하면(`Vary: User-Agent` 를 무시하는 캐시) 분기가 달라질 수 있음 — 배포 후 실제
+도메인에서 `curl -A Googlebot…` 으로 확인 권장. (d) `DATA_SOURCE_BASE_URL` 원격 모드에서는
+크롤러 요청도 같은 `load_json_file_async`(스레드) 를 타므로 첫 요청이 원격 왕복만큼 느릴 수 있음
+(`response_timeout` 60초 안). (e) `markdown2` 를 `privacy_page.py` 가 직접 import 하게 됨 —
+nicegui 의 필수 의존성이라 설치본에 항상 있지만 `requirements.txt` 에 명시적으로는 없음.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

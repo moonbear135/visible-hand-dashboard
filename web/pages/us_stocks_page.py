@@ -27,6 +27,7 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
 
 from datetime import datetime
 
+from fastapi import Request
 from nicegui import ui
 
 try:
@@ -81,7 +82,17 @@ from web.components import (
     warn_badge,
     warning_banner,
 )
+from web.components.html import FOOTER_NOTICE_HTML
 from web.layout import layout
+from web.static_html import (
+    SITE_TITLE,
+    crawler_response,
+    is_known_crawler,
+    notice_box,
+    remaining_note,
+    render_document,
+    table_html,
+)
 from web.state import (
     PAGE_RESPONSE_TIMEOUT_SECONDS,
     data_path,
@@ -91,6 +102,16 @@ from web.state import (
 
 # 페이지당 카드 수는 여기서 새로 정하지 않고 수집기와 같은 상수를 씁니다(단일 출처).
 ITEMS_PER_PAGE = US_PAGE_SIZE
+
+#: 크롤러용 정적 HTML 에 표로 싣는 종목 수(시가총액 순 상위) — `pegy_page.CRAWLER_TABLE_ROWS` 와 짝.
+CRAWLER_TABLE_ROWS = 30
+
+CRAWLER_META_DESCRIPTION = (
+    f'미국(나스닥·뉴욕) 시가총액 상위 {US_TARGET_UNIVERSE_SIZE}종목의 Trailing·Forward PEGY '
+    '밸류에이션, 목표주가, 100점 만점 퀀트 종합점수를 매일 장마감 후 공개 재무·시세 데이터로 '
+    '자동 계산한 결과입니다. 모든 금액은 미국 달러(USD) 표기이며, 종목 추천이 아니고 모든 '
+    '수치는 참고용입니다.'
+)
 
 FILTER_PRESETS = [
     "🌐 전체 종목 보기",
@@ -918,10 +939,101 @@ def apply_stock_filters(all_stocks, query, badges, preset, value_trap_only):
 # 4. 페이지
 # =============================================================================
 @ui.page('/us', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def us_stocks_index_page() -> None:
-    """공개 화면. 로그인 불필요 — 사용자별 데이터가 전혀 없습니다(§0-3-8)."""
+async def us_stocks_index_page(request: Request = None):
+    """공개 화면. 로그인 불필요 — 사용자별 데이터가 전혀 없습니다(§0-3-8).
+
+    🧾 알려진 크롤러에게는 같은 스냅샷을 그 자리에서 읽은 순수 HTML 을 돌려줍니다
+       (`pegy_page.pegy_index_page` 와 같은 분기 — 근거는 `web/static_html.py` 머리말).
+    """
+    if is_known_crawler(request):
+        return crawler_response(await build_crawler_html())
     with layout('🇺🇸 미국 주식은 이가격', width_class='max-w-6xl'):
         await _render_body()
+    return None
+
+
+async def build_crawler_html() -> str:
+    """크롤러용 정적 HTML — `_render_body()` 와 **같은 스냅샷**(`US_SNAPSHOT_FILENAME`)을 같은
+    로더로 읽어 제목·고지·지수 등락·거래일·상위 종목 표를 폅니다. 실패하면 화면과 같은
+    빨간 안내만 둡니다(§0-1)."""
+    metadata, all_stocks = await load_us_snapshot()
+    all_stocks = [s for s in all_stocks if s.get("is_visible", True)]
+
+    parts = [compact(_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL)]
+    index_html = build_index_header_html(metadata.get("indices") or {})
+    if index_html:
+        parts.append(index_html)
+
+    if not all_stocks:
+        parts.append(notice_box(
+            f"🚨 미국주식 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
+            "가짜 기본값으로 화면을 채우지 않기 위해 밸류에이션 수치를 표시하지 않습니다. "
+            "데이터 준비 중입니다 — 잠시 후 다시 확인해 주세요."
+        ))
+    else:
+        snapshot_status = metadata.get("status", "UNKNOWN")
+        trading_date = _snapshot_trading_date_iso(metadata)
+        parts.append(notice_box(
+            f"📅 마지막 확정 거래일: {trading_date or NA_TEXT} · "
+            f"수집 시각(KST): {metadata.get('last_updated_at_kst') or NA_TEXT} · "
+            f"배치 수집 스냅샷 ({metadata.get('total_count', len(all_stocks))}개 종목 / 상태 {snapshot_status})",
+            kind='info',
+        ))
+        if snapshot_status not in ("SUCCESS", "UNKNOWN"):
+            parts.append(notice_box(
+                f"⚠️ 스냅샷 수집 상태: {snapshot_status} — "
+                f"검증 통과 {metadata.get('valid_count', '?')}/{metadata.get('total_count', '?')}종목. "
+                "일부 종목은 데이터 부족으로 '측정 불가' 카드로 표시됩니다.", kind='warn',
+            ))
+        failed = metadata.get("failed_tickers") or []
+        if failed:
+            parts.append(notice_box(
+                f"⚠️ 수집 실패 {len(failed)}종목 (조용히 건너뛰지 않고 전부 기록합니다) — "
+                "목록은 브라우저 화면의 접이식 패널에서 볼 수 있습니다.", kind='warn',
+            ))
+        ranked = sorted(all_stocks, key=lambda s: (s.get('rank') is None, s.get('rank') or 0))
+        top = ranked[:CRAWLER_TABLE_ROWS]
+        rows = []
+        for s in top:
+            score = s.get('quant_score')
+            score_max = s.get('score_max')
+            score_text = (f"{score} / {score_max}" if score is not None and score_max
+                          else NA_TEXT)
+            name = s.get('name_kr') or s.get('name_en_clean') or s.get('name') or NA_TEXT
+            rows.append([
+                fmt_num(s.get('rank')),
+                name,
+                s.get('symbol') or NA_TEXT,
+                s.get('industry') or NA_TEXT,
+                fmt_usd(s.get('price')),
+                fmt_num(s.get('t_per'), digits=2),
+                fmt_num(s.get('f_per'), digits=2),
+                fmt_num(s.get('t_pegy'), digits=2),
+                fmt_num(s.get('f_pegy'), digits=2),
+                fmt_usd(s.get('f_target')),
+                score_text,
+                s.get('badge') or NA_TEXT,
+            ])
+        parts.append(f'<h2>시가총액 상위 {len(top)}종목 — Trailing / Forward PEGY 밸류에이션 (USD)</h2>')
+        parts.append(table_html(
+            ['순위', '종목명', '티커', '업종', '현재가(USD)', 'Trailing PER', 'Forward PER',
+             'Trailing PEGY', 'Forward PEGY', 'Forward 목표주가(USD)', '퀀트 종합점수 (획득/만점)', '판정'],
+            rows,
+        ))
+        parts.append(remaining_note(len(top), len(all_stocks), '화면 노출 종목'))
+        parts.append(
+            '<p class="note">PEGY = PER ÷ (이익 성장률 + 주주환원율). 값이 낮을수록 성장·환원 대비 주가가 '
+            '싸다고 읽습니다. 모든 금액은 미국 달러(USD)이며 원화 환산을 하지 않습니다. '
+            f'"{NA_TEXT}" 은 수집하지 못했거나(적자 등) 계산할 수 없는 값을 지어내지 않고 그대로 비워 둔 것입니다.</p>'
+        )
+
+    parts.append(compact(FOOTER_NOTICE_HTML))
+    return render_document(
+        title=f'🇺🇸 미국 주식은 이가격이에요 — 나스닥·뉴욕 시가총액 상위 {US_TARGET_UNIVERSE_SIZE} PEGY 밸류에이션 | {SITE_TITLE}',
+        description=CRAWLER_META_DESCRIPTION,
+        canonical_path='/us',
+        main_html='\n'.join(parts),
+    )
 
 
 async def _render_body() -> None:                  # noqa: C901 — 원본 화면 순서를 그대로 유지

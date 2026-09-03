@@ -29,6 +29,10 @@ import web.theme
 #   pegy_page      → '/kr'          (공개 · 한국 주식 PEGY 화면. **2026-09-04 '/' 에서 이동**,
 #                                    미국판 '/us' 와 짝)
 #   us_stocks_page → '/us'          (공개 화면)
+#     ⚠️ 위 두 화면과 '/dividend'·'/indicator' 는 **알려진 크롤러 UA**(Googlebot·애드센스 봇 등)
+#        에게만 NiceGUI 화면 대신 같은 스냅샷 파일을 그 자리에서 읽은 순수 HTML 을 돌려줍니다
+#        (`@ui.page` 함수 맨 앞에서 `fastapi.Response` 를 조기 반환 — NiceGUI 3.16 이 지원하는
+#        형태, `web/static_html.py` 머리말). 일반 접속자 경로는 바뀌지 않았습니다.
 #   scorecard_page → '/scorecard'   (로그인 필요 · **2026-08-17 공개 전환 완료**)
 #   report_page    → '/report'      (로그인 필요 · **2026-08-17 공개 전환 완료**,
 #                                    scorecard 와 같은 로그인 세션을 공유합니다)
@@ -52,7 +56,8 @@ import web.theme
 #                                    2026-08-25 추가)
 #   privacy_page   → '/privacy'     (항상 공개 · 개인정보 처리방침. 구글 애드센스 승인
 #                                    조건 · 3단계 공개 절차 없음(법적 고지문이라 항상 켜짐),
-#                                    2026-08-25 추가)
+#                                    2026-08-25 추가. **2026-09-04 '/' 와 같은 순수 FastAPI
+#                                    정적 페이지로 전환** — 고정 법률 문구라 봇 감지 불필요)
 #
 # (2026-08-23 전환) `duel_consent_page → '/duel/consent'` 와
 #   `duel_leaderboard_page → '/duel/leaderboard'` 두 화면을 **성적표 공개 계층으로 전환**

@@ -108,6 +108,7 @@ import calendar as calendar_module
 import os
 from datetime import date, datetime, timedelta, timezone
 
+from fastapi import Request
 from nicegui import ui
 
 from web.auth import is_admin
@@ -127,6 +128,15 @@ from web.components import (
     warning_banner,
 )
 from web.layout import DIVIDEND_ENABLED, DIVIDEND_MENU_ADMIN_ONLY, layout
+from web.static_html import (
+    SITE_TITLE,
+    crawler_response,
+    is_known_crawler,
+    notice_box,
+    remaining_note,
+    render_document,
+    table_html,
+)
 from web.state import (
     PAGE_RESPONSE_TIMEOUT_SECONDS,
     data_path,
@@ -138,6 +148,15 @@ from web.state import (
 # 상수 — 전부 문자열/튜플(불변)입니다. 가변 전역(dict/list/set)은 하나도 두지 않습니다(§0-3-8).
 # =============================================================================
 DATA_FILENAME = 'dividend_kr_2026_latest.json'
+
+#: 크롤러용 정적 HTML 에 표로 싣는 확정 배당 건수(보통주 주당배당금 내림차순 상위).
+CRAWLER_TABLE_ROWS = 30
+
+CRAWLER_META_DESCRIPTION = (
+    'DART 정기보고서(2026년)와 KIND 연간 집계(2023~2025)를 바탕으로 한 한국 상장사 배당 캘린더. '
+    '결산기준일별 확정 배당(보통주 주당 현금배당금·배당수익률)과 아직 미확정인 종목의 작년 배당 '
+    '참고값을 보여줍니다. 실제 지급일·배당락일이 아닌 결산기준일 기준이며, 종목 추천이 아닙니다.'
+)
 RAW_FILENAME = 'dividend_kr_2026_raw.jsonl'
 HISTORY_FILENAME = 'dividend_history_kr_2023_2025.json'
 
@@ -1527,8 +1546,16 @@ def summary_cards(summary, confirmed_count, pending_count):
 #  6.8MB + 4MB JSON 두 개를 읽으므로(원격 모드에서는 네트워크 왕복까지) 3초를 넘길 수 있고,
 #  그러면 화면 대신 **영어 500 오류 페이지**가 나갑니다(§0-3-4 위반).
 @ui.page('/dividend', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def dividend_page() -> None:
-    """공개 화면 — 로그인 불필요(사용자별 데이터가 전혀 없습니다, §0-3-8)."""
+async def dividend_page(request: Request = None):
+    """공개 화면 — 로그인 불필요(사용자별 데이터가 전혀 없습니다, §0-3-8).
+
+    🧾 알려진 크롤러에게는 같은 파일을 그 자리에서 읽은 순수 HTML 을 돌려줍니다
+       (`pegy_page.pegy_index_page` 와 같은 분기 — 근거는 `web/static_html.py` 머리말).
+       공개 게이트도 같은 상수로 같은 순서로 판정합니다 — 크롤러는 로그인할 수 없으므로
+       `DIVIDEND_MENU_ADMIN_ONLY` 가 True 면 관리자가 아닌 접속자와 똑같이 "준비중"만 봅니다.
+    """
+    if is_known_crawler(request):
+        return crawler_response(await build_crawler_html())
     with layout('💰 투자 감사합니다!', width_class='max-w-6xl'):
         ui.markdown('## 💰 투자 감사합니다! — 배당 캘린더')
 
@@ -1542,6 +1569,122 @@ async def dividend_page() -> None:
             return
 
         await _render_body()
+    return None
+
+
+async def build_crawler_html() -> str:
+    """크롤러용 정적 HTML — `_render_body()` 가 읽는 **같은 파일 두 개**(`DATA_FILENAME`·
+    `HISTORY_FILENAME`)를 같은 로더로 읽고, 같은 순수 함수(`build_entries`)로 확정/미확정을
+    가른 뒤 상단 요약과 확정 배당 상위 목록을 표로 폅니다.
+
+    지급일정 공시 파일(`PAYMENT_EVENTS_FILENAME`)은 달력 칸의 🔴락일·🟡기준일·🟢지급일 배지
+    전용이라 이 표에는 쓰이지 않아 읽지 않습니다 — 표에 실리는 값은 전부 위 두 파일에서 옵니다.
+    실패 정책은 화면과 같습니다(§0-1).
+    """
+    title = '💰 투자 감사합니다! — 배당 캘린더'
+    parts = [f'<h1>{esc(title)}</h1>']
+
+    def _document(main_parts) -> str:
+        return render_document(
+            title=f'{title} | {SITE_TITLE}',
+            description=CRAWLER_META_DESCRIPTION,
+            canonical_path='/dividend',
+            main_html='\n'.join(main_parts),
+        )
+
+    if not DIVIDEND_ENABLED or DIVIDEND_MENU_ADMIN_ONLY:
+        parts.append(notice_box(COMING_SOON_TEXT, kind='warn'))
+        return _document(parts)
+
+    payload, load_error = await load_json_file_async(data_path(DATA_FILENAME))
+    history_payload, history_error = await load_json_file_async(data_path(HISTORY_FILENAME))
+
+    if payload is None or not isinstance(payload, dict):
+        parts.append(notice_box(
+            '🚨 2026년 배당 수집 결과를 불러오지 못했습니다. '
+            f'({load_error or "파일 형식이 예상과 다릅니다."})\n\n'
+            '가짜 기본값으로 달력을 채우지 않기 위해 아무 수치도 표시하지 않습니다. '
+            '데이터 준비 중입니다 — 잠시 후 다시 확인해 주세요.'
+        ))
+        return _document(parts)
+
+    summary = payload.get('summary') or {}
+    records = payload.get('records') or []
+    if not records:
+        parts.append(notice_box(
+            '🚨 2026년 배당 수집 결과에 레코드가 0건입니다.\n\n'
+            '수집이 정상적으로 끝났는지 확인이 필요합니다. 값을 지어내지 않고 여기서 멈춥니다.'
+        ))
+        return _document(parts)
+
+    generated = summary.get('generated_at_kst')
+    if generated:
+        parts.append(notice_box(
+            f'🕒 데이터 기준 시각 (KST): {generated}\n\n'
+            '이 화면의 모든 값은 그 시각에 수집된 스냅샷이며, 실시간 시세가 아닙니다. '
+            '출처는 DART 정기보고서(2026년)와 KIND 연간 집계(2023~2025) 두 가지뿐입니다.',
+            kind='info',
+        ))
+    else:
+        parts.append(notice_box(
+            '⚠️ 데이터 기준 시각(generated_at_kst)이 수집 결과에 없습니다. '
+            '아래 값이 언제 수집된 것인지 이 화면에서는 확인할 수 없습니다.', kind='warn',
+        ))
+    if summary.get('completed') is False:
+        reason = summary.get('stopped_reason') or '사유 미기록'
+        parts.append(notice_box(
+            f'🚨 이번 수집은 끝까지 돌지 못하고 중단됐습니다({reason}).\n\n'
+            '아래 종목 수·건수는 끝까지 돈 만큼만입니다 — 나머지 종목은 이번 수집에 '
+            '아예 포함되지 않았고, 값을 지어내 채우지 않았습니다.'
+        ))
+
+    if history_error is not None or not isinstance(history_payload, dict):
+        parts.append(notice_box(
+            '⚠️ 2023~2025년 배당 기준선 파일을 불러오지 못했습니다. '
+            f'({history_error or "파일 형식이 예상과 다릅니다."}) '
+            '아직 미확정인 종목의 "작년 배당율" 값은 이번에는 전부 "데이터 없음"입니다.',
+            kind='warn',
+        ))
+        history_index = {}
+    else:
+        history_index = build_history_index(history_payload)
+
+    confirmed, pending = build_entries(records, history_index)
+
+    parts.append('<h2>요약</h2><ul>')
+    for label, value, note in summary_cards(summary, len(confirmed), len(pending)):
+        parts.append(f'<li><b>{esc(label)}</b>: {esc(value)} <span class="note">— {esc(note)}</span></li>')
+    parts.append('</ul>')
+
+    parts.append(notice_box(CALENDAR_DATE_NOTICE, kind='warn'))
+    parts.append(notice_box(UNIVERSE_NOTICE, kind='learn'))
+    parts.append(notice_box(YIELD_SOURCE_NOTICE, kind='learn'))
+    parts.append(notice_box(CUMULATIVE_DPS_NOTICE, kind='learn'))
+    parts.append(notice_box(TAX_NOTICE, kind='learn'))
+
+    top = confirmed[:CRAWLER_TABLE_ROWS]
+    rows = [[
+        entry.get('corp_name') or NA_TEXT,
+        entry.get('stock_code') or NA_TEXT,
+        entry.get('market_text') or NA_TEXT,
+        entry.get('settle_date') or NA_TEXT,
+        entry.get('report_name') or NA_TEXT,
+        fmt_num(entry.get('dps_krw'), '원', digits=0),
+        fmt_num(entry.get('dividend_yield_pct'), '%', digits=2),
+        (str(entry['dividend_basis_year']) if entry.get('dividend_basis_year') is not None else NA_TEXT),
+    ] for entry in top]
+    parts.append(f'<h2>2026년 배당 확정 {len(confirmed):,}건 — 보통주 주당 현금배당금 상위 {len(top)}건</h2>')
+    parts.append(table_html(
+        ['회사명', '종목코드', '시장', '결산기준일', '보고서', '보통주 주당 현금배당금',
+         '배당수익률(보고서 원문)', '배당 기준연도'],
+        rows,
+    ))
+    parts.append(remaining_note(len(top), len(confirmed), '2026년 배당 확정'))
+    parts.append(
+        f'<p class="note">아직 2026년 배당이 확정되지 않은 종목은 {len(pending):,}건이며, 그 목록(작년 배당 '
+        '참고값 포함)과 월별 달력은 브라우저(자바스크립트 실행)에서 같은 주소를 열면 볼 수 있습니다.</p>'
+    )
+    return _document(parts)
 
 
 async def _render_body() -> None:

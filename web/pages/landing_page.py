@@ -18,8 +18,10 @@
 - `@app.get('/')` — `main.py` 의 `/ads.txt`·`/healthz` 가 이미 쓰는 **같은 패턴**입니다
   (§0-3-10 — 새 구조 발명 금지). NiceGUI 3.x 는 `ui.run(root=...)` 을 안 주면 `/` 에 아무
   페이지도 등록하지 않으므로(설치본 `nicegui/nicegui.py` 확인) 충돌이 없습니다.
-- 템플릿 엔진은 이 저장소에 없으므로 들이지 않고, 아래 상수 문자열 + 아주 작은 f-string 으로
-  조립합니다. 외부 CDN·스크립트 의존 0 — `<style>` 한 블록이 전부입니다.
+- 템플릿 엔진은 이 저장소에 없으므로 들이지 않고, 상수 문자열 + 아주 작은 f-string 으로
+  조립합니다. 외부 CDN·스크립트 의존 0 — `<style>` 한 블록이 전부입니다. 문서 뼈대
+  (`<head>`·CSS·푸터)는 2026-09-04 부터 `web/static_html.py::render_document` 한 곳에 있고,
+  `/privacy` 와 공개 화면 4개의 크롤러용 응답도 같은 뼈대를 씁니다(§0-3-10).
 - 소개 문구는 `ENGINEERING_SPEC.md` §0(프로젝트 개요)·§5(PEGY 수식·배점), `PROJECT_STATUS.md`
   §0-3(화면별 공개 상태), 각 화면 파일의 머리말에서 **확인한 사실만** 적었습니다. 화면에
   이미 걸려 있는 학습용 안내·투자 주의 문구(`web/components/html.py`, `pegy_page.py`)와
@@ -36,9 +38,11 @@ from fastapi.responses import HTMLResponse
 from nicegui import app
 
 from web import layout as _layout
+# 문서 뼈대(`<head>`·CSS·푸터)는 `/privacy` 와 크롤러용 정적 응답도 함께 쓰는 공용 조각입니다
+# (2026-09-04 `web/static_html.py` 로 옮김 — 같은 CSS 를 두 곳에 두지 않기 위해, §0-3-10).
+# `SITE_TITLE` 은 이 모듈 이름으로도 계속 읽힙니다(`tests/test_landing_page.py`).
+from web.static_html import SITE_TITLE, render_document  # noqa: F401
 
-# 브랜드 표기는 `main.py` 의 `ui.run(title='잘 보면 보이는 손', favicon='💡')` 와 같은 값입니다.
-SITE_TITLE = '잘 보면 보이는 손'
 SITE_TAGLINE = '사실 이 가격이에요 — 코스피·코스닥·미국 주식 PEGY 밸류에이션'
 
 #: 한국 주식 PEGY 대시보드(구 `/`)가 옮겨간 경로. `pegy_page.py` 의 데코레이터와 **같은
@@ -51,44 +55,6 @@ META_DESCRIPTION = (
     '재무·시세 데이터로 자동 계산해 보여주는 주식 공부용 보조 도구입니다. '
     '종목 추천이 아니며 모든 수치는 참고용입니다.'
 )
-
-# 파비콘은 NiceGUI 가 `ui.run(favicon='💡')` 값으로 `/favicon.ico` 에 이미 내주는 것(실측:
-# `image/svg+xml`, 💡 글자 SVG)을 그대로 씁니다 — 같은 아이콘을 여기서 다시 만들지 않습니다(§0-3-10).
-_FAVICON_HREF = '/favicon.ico'
-
-_CSS = """
-:root { color-scheme: light; }
-* { box-sizing: border-box; }
-body { margin: 0; background: #f8fafc; color: #0f172a;
-       font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "Apple SD Gothic Neo",
-                    "Noto Sans KR", "Malgun Gothic", sans-serif; line-height: 1.65; }
-a { color: #0369a1; }
-header { background: linear-gradient(90deg, #1e293b 0%, #0f172a 100%); color: #fff;
-         padding: 40px 20px 36px; text-align: center; }
-header h1 { margin: 0 0 8px; font-size: 34px; font-weight: 800; letter-spacing: -0.5px; }
-header p.tagline { margin: 0 0 22px; font-size: 17px; color: #cbd5e1; font-weight: 600; }
-.cta { display: inline-block; margin: 6px 6px 0; padding: 12px 22px; border-radius: 10px;
-       font-weight: 800; font-size: 16px; text-decoration: none; }
-.cta.primary { background: #f59e0b; color: #1e293b; }
-.cta.secondary { background: transparent; color: #e2e8f0; border: 1.5px solid #64748b; }
-main { max-width: 860px; margin: 0 auto; padding: 28px 20px 40px; }
-section { margin-bottom: 30px; }
-h2 { font-size: 21px; margin: 0 0 10px; color: #b45309; letter-spacing: -0.3px; }
-p { margin: 0 0 12px; }
-ul { margin: 0 0 12px; padding-left: 22px; }
-li { margin-bottom: 6px; }
-table { border-collapse: collapse; width: 100%; font-size: 15px; margin-bottom: 12px; }
-th, td { border: 1px solid #e2e8f0; padding: 8px 10px; text-align: left; vertical-align: top; }
-th { background: #f1f5f9; }
-.notice { border: 2px solid #ef4444; background: #fff1f2; border-radius: 12px; padding: 14px 18px;
-          color: #7f1d1d; font-weight: 600; }
-.learn { border: 2px solid #475569; background: #f1f5f9; border-radius: 12px; padding: 14px 18px;
-         color: #1e293b; font-weight: 600; }
-.note { font-size: 14px; color: #475569; }
-footer { text-align: center; font-size: 13px; color: #64748b; padding: 18px 20px 30px; }
-footer a { color: #64748b; }
-@media (max-width: 600px) { header h1 { font-size: 27px; } .cta { display: block; margin: 8px 0 0; } }
-"""
 
 
 def _screen_links() -> str:
@@ -128,25 +94,13 @@ def _screen_links() -> str:
 
 def build_landing_html() -> str:
     """완성된 HTML 문서 한 장을 돌려줍니다. 순수 함수 — 테스트가 직접 부릅니다."""
-    return f"""<!DOCTYPE html>
-<html lang="ko">
-<head>
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>{SITE_TITLE} — {SITE_TAGLINE}</title>
-<meta name="description" content="{META_DESCRIPTION}">
-<link rel="canonical" href="https://visiblehand.co.kr/">
-<link rel="icon" href="{_FAVICON_HREF}">
-<style>{_CSS}</style>
-</head>
-<body>
-<header>
+    header_html = f"""
   <h1>💡 {SITE_TITLE}</h1>
   <p class="tagline">{SITE_TAGLINE}</p>
   <a class="cta primary" href="{DASHBOARD_PATH}">🇰🇷 한국 주식 대시보드 보기</a>
   <a class="cta secondary" href="/us">🇺🇸 미국 주식 대시보드 보기</a>
-</header>
-<main>
+"""
+    main_html = f"""
 <section>
   <h2>이 서비스는 무엇인가요?</h2>
   <p>"잘 보면 보이는 손"은 정식 금융기관의 서비스가 아니라, 주식 초보자가 <b>밸류에이션(이 회사가 지금 싼지 비싼지)</b>을
@@ -220,13 +174,14 @@ def build_landing_html() -> str:
   <a class="cta primary" href="{DASHBOARD_PATH}">🇰🇷 한국 주식 대시보드 시작하기</a>
   <a class="cta secondary" href="/us" style="color:#1e293b;border-color:#94a3b8">🇺🇸 미국 주식 보기</a>
 </section>
-</main>
-<footer>
-  <a href="/privacy">개인정보 처리방침</a> · {SITE_TITLE} (visiblehand.co.kr) — 개인 학습용 프로젝트
-</footer>
-</body>
-</html>
 """
+    return render_document(
+        title=f'{SITE_TITLE} — {SITE_TAGLINE}',
+        description=META_DESCRIPTION,
+        canonical_path='/',
+        header_html=header_html,
+        main_html=main_html,
+    )
 
 
 @app.get('/', include_in_schema=False)

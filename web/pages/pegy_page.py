@@ -56,6 +56,8 @@ from utils.stock_history import (
     KOSPI_KEY_FIELD,
 )
 
+from fastapi import Request
+
 from web import ads
 from web.auth import is_admin
 from web.blocking import run_blocking
@@ -84,7 +86,17 @@ from web.components import (
     warn_badge,
     warning_banner,
 )
+from web.components.html import FOOTER_NOTICE_HTML
 from web.layout import layout
+from web.static_html import (
+    SITE_TITLE,
+    crawler_response,
+    is_known_crawler,
+    notice_box,
+    remaining_note,
+    render_document,
+    table_html,
+)
 # 🟢 2026-09-03 — 배당 지급일정 공시(DART)를 이 화면에도 잇습니다(오너 요청). 파일 상수·
 #    색인·"다음 1건" 선택 규칙을 여기서 다시 만들지 않고 배당 캘린더 화면의 것을 **그대로**
 #    가져다 씁니다(§0-3-10 중복 금지, §4-3 표현 계층이 데이터 판단 로직을 새로 짓지 않기).
@@ -110,6 +122,16 @@ from web.state import (
 SNAPSHOT_FILENAME = "kospi200_pegy_latest.json"
 SUMMARY_HISTORY_FILENAME = "pegy_summary_history.json"
 ITEMS_PER_PAGE = 20
+
+#: 크롤러용 정적 HTML 에 표로 싣는 종목 수(시가총액 순 상위). 전체 500종목을 다 넣지 않고,
+#: 나머지는 "실제 화면에서" 안내합니다(`web/static_html.py` 머리말).
+CRAWLER_TABLE_ROWS = 30
+
+CRAWLER_META_DESCRIPTION = (
+    '코스피+코스닥 통합 시가총액 상위 500종목의 Trailing·Forward PEGY 밸류에이션, 목표주가, '
+    '100점 만점 퀀트 종합점수를 매일 장마감 후 공개 재무·시세 데이터로 자동 계산한 결과입니다. '
+    '종목 추천이 아니며 모든 수치는 참고용입니다.'
+)
 
 FILTER_PRESETS = [
     "🌐 전체 종목 보기 (500개 코스피+코스닥)",
@@ -887,11 +909,94 @@ def build_stock_card_html(s, rank_num, admin: bool) -> str:      # noqa: C901 �
 # 3. 페이지
 # =============================================================================
 @ui.page('/kr', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def pegy_index_page() -> None:
+async def pegy_index_page(request: Request = None):
     """한국 주식 공개 화면(구 `/`, 2026-09-04 부터 `/kr`). 로그인 불필요 — 사용자별 데이터가
-    전혀 없습니다(§0-3-8). 도메인 루트 `/` 는 `landing_page.py` 의 정적 소개 페이지입니다."""
+    전혀 없습니다(§0-3-8). 도메인 루트 `/` 는 `landing_page.py` 의 정적 소개 페이지입니다.
+
+    🧾 알려진 크롤러(Googlebot·애드센스 봇 등)에게는 NiceGUI 화면 대신 **같은 스냅샷 파일을
+       그 자리에서 읽어 만든 순수 HTML** 을 돌려줍니다 — 메커니즘·이유·`request=None` 기본값의
+       근거는 `web/static_html.py` 머리말. 일반 접속자 경로는 예전과 한 글자도 다르지 않습니다.
+    """
+    if is_known_crawler(request):
+        return crawler_response(await build_crawler_html())
     with layout('💡 사실 이 가격이에요', width_class='max-w-6xl'):
         await _render_body()
+    return None
+
+
+async def build_crawler_html() -> str:
+    """크롤러용 정적 HTML — `_render_body()` 가 읽는 **같은 스냅샷**(`SNAPSHOT_FILENAME`)을
+    같은 비동기 로더로 읽어, 실사용자 화면과 같은 제목·고지·동기화 시각·상위 종목을 표로 폅니다.
+
+    실패 정책도 화면과 같습니다: 스냅샷을 못 읽으면 숫자를 하나도 적지 않고 같은 문구의
+    빨간 안내만 둡니다(§0-1). 순수 함수에 가깝지만 파일을 읽으므로 `async` 입니다.
+    """
+    metadata, all_stocks = await load_kospi200_snapshot()
+    all_stocks = [s for s in all_stocks if s.get("is_visible", True)]
+    last_updated_at = metadata.get("last_updated_at")
+    snapshot_status = metadata.get("status", "UNKNOWN")
+
+    # 제목·투자 주의·학습용 안내는 실제 화면(`_render_title`)과 **같은 HTML 조각**을 그대로 씁니다.
+    parts = [compact(_TITLE_HEAD + LEARNING_NOTICE_HTML + _TITLE_TAIL)]
+
+    if last_updated_at is None or not all_stocks:
+        parts.append(notice_box(
+            f"🚨 시가총액 상위 500 스냅샷을 불러오지 못했습니다. ({metadata.get('load_error', '원인 미상')})\n\n"
+            "가짜 기본값으로 화면을 채우지 않기 위해 밸류에이션 수치를 표시하지 않습니다. "
+            "데이터 준비 중입니다 — 잠시 후 다시 확인해 주세요."
+        ))
+    else:
+        parts.append(notice_box(
+            f"📅 마지막 동기화: {last_updated_at} (크롤링 완료 후 장마감 데이터 적용) · "
+            f"배치 수집 스냅샷 ({metadata.get('total_count', len(all_stocks))}개 종목 / 상태 {snapshot_status})",
+            kind='info',
+        ))
+        if snapshot_status not in ("SUCCESS", "UNKNOWN"):
+            parts.append(notice_box(
+                f"⚠️ 스냅샷 수집 상태: {snapshot_status} — 일부 종목은 데이터 부족으로 "
+                "'측정 불가' 카드로 표시됩니다.", kind='warn',
+            ))
+        ranked = sorted(all_stocks, key=lambda s: (s.get('rank') is None, s.get('rank') or 0))
+        top = ranked[:CRAWLER_TABLE_ROWS]
+        rows = []
+        for s in top:
+            score = s.get('quant_score')
+            score_max = s.get('score_max')
+            score_text = (f"{score} / {score_max}" if score is not None and score_max
+                          else NA_TEXT)
+            rows.append([
+                fmt_num(s.get('rank')),
+                s.get('name') or NA_TEXT,
+                s.get('code') or NA_TEXT,
+                s.get('market') or NA_TEXT,
+                fmt_num(s.get('price'), '원', digits=0),
+                fmt_num(s.get('t_per'), digits=2),
+                fmt_num(s.get('t_pegy'), digits=2),
+                fmt_num(s.get('f_pegy'), digits=2),
+                fmt_num(s.get('f_target'), '원', digits=0),
+                score_text,
+                s.get('badge') or NA_TEXT,
+            ])
+        parts.append(f'<h2>시가총액 상위 {len(top)}종목 — Trailing / Forward PEGY 밸류에이션</h2>')
+        parts.append(table_html(
+            ['순위', '종목명', '종목코드', '시장', '현재가', 'Trailing PER', 'Trailing PEGY',
+             'Forward PEGY', 'Forward 목표주가', '퀀트 종합점수 (획득/만점)', '판정'],
+            rows,
+        ))
+        parts.append(remaining_note(len(top), len(all_stocks), '화면 노출 종목'))
+        parts.append(
+            '<p class="note">PEGY = PER ÷ (이익 성장률 + 주주환원율). 값이 낮을수록 성장·환원 대비 주가가 '
+            '싸다고 읽습니다. Trailing 은 확정된 최근 4개 분기 실적 기준, Forward 는 증권가 추정치 기준입니다. '
+            f'"{NA_TEXT}" 은 수집하지 못했거나(적자 등) 계산할 수 없는 값을 지어내지 않고 그대로 비워 둔 것입니다.</p>'
+        )
+
+    parts.append(compact(FOOTER_NOTICE_HTML))
+    return render_document(
+        title=f'🇰🇷 한국 주식은 이가격이에요 — 코스피·코스닥 시가총액 상위 500 PEGY 밸류에이션 | {SITE_TITLE}',
+        description=CRAWLER_META_DESCRIPTION,
+        canonical_path='/kr',
+        main_html='\n'.join(parts),
+    )
 
 
 async def _render_body() -> None:                  # noqa: C901 — 원본 화면 순서를 그대로 유지

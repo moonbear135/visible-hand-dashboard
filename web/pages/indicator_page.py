@@ -19,6 +19,7 @@ web/pages/indicator_page.py
 
 import math
 
+from fastapi import Request
 from nicegui import ui
 
 from utils.constants import DERIVED_INDICATOR_BADGE
@@ -48,12 +49,30 @@ from web.components import (
 )
 from web.components.html import compact
 from web.layout import INDICATOR_ENABLED, INDICATOR_MENU_ADMIN_ONLY, layout
+from web.static_html import (
+    SITE_TITLE,
+    crawler_response,
+    is_known_crawler,
+    notice_box,
+    remaining_note,
+    render_document,
+    table_html,
+)
 from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS, data_path, load_json_file_async
 
 # =============================================================================
 # 상수
 # =============================================================================
 LATEST_FILENAME = 'indicator_kr_latest.json'
+
+#: 크롤러용 정적 HTML 에 표로 싣는 종목 수(수집기 배열 순서 = 시가총액 순 상위).
+CRAWLER_TABLE_ROWS = 30
+
+CRAWLER_META_DESCRIPTION = (
+    '코스피·코스닥 시가총액 상위 종목의 RSI(14)·MACD·볼린저밴드 세 보조지표 원값과 결정론적 '
+    '종합판정을 매일 장마감 종가로 다시 계산해 종목별로 조회합니다. 과거 종가를 계산한 결과일 뿐 '
+    '미래 주가를 맞히지 않으며, 매수·매도 판단의 근거로 쓰지 마세요.'
+)
 
 #: 오너 요청(2026-08-25) — 검색만 시키지 말고 전체 목록을 페이지네이션으로 죽 보여줄 것.
 #: `web/components/widgets.py::pager()`(dividend/pegy 와 같은 페이지네이션 위젯) 재사용.
@@ -228,8 +247,16 @@ async def _load_recent_history_by_code(days=2):
 # 페이지 (공개 플래그 게이트 → 본문) — dividend_page.py 와 같은 패턴(§0-3-10)
 # =============================================================================
 @ui.page('/indicator', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def indicator_page() -> None:
-    """관리자 전용으로 시작(§0-3-6 2단계). 로그인 불필요 — 사용자별 데이터가 없습니다(§0-3-8)."""
+async def indicator_page(request: Request = None):
+    """관리자 전용으로 시작(§0-3-6 2단계). 로그인 불필요 — 사용자별 데이터가 없습니다(§0-3-8).
+
+    🧾 알려진 크롤러에게는 같은 파일을 그 자리에서 읽은 순수 HTML 을 돌려줍니다
+       (`pegy_page.pegy_index_page` 와 같은 분기 — 근거는 `web/static_html.py` 머리말).
+       공개 게이트도 같은 상수로 판정합니다 — 크롤러는 로그인할 수 없으므로
+       `INDICATOR_MENU_ADMIN_ONLY` 가 True 면 관리자가 아닌 접속자와 똑같이 "준비중"만 봅니다.
+    """
+    if is_known_crawler(request):
+        return crawler_response(await build_crawler_html())
     with layout('🙏 여기서부터는 신앙입니다', width_class='max-w-6xl'):
         ui.markdown('## 🙏 여기서부터는 신앙입니다 — RSI·MACD·볼린저밴드')
 
@@ -242,6 +269,101 @@ async def indicator_page() -> None:
             return
 
         await _render_body()
+    return None
+
+
+async def build_crawler_html() -> str:
+    """크롤러용 정적 HTML — `_render_body()` 가 읽는 **같은 파일**(`LATEST_FILENAME`)을 같은
+    로더로 읽어 기준 시각·강한 경고·상위 종목의 세 지표 원값과 종합판정을 표로 폅니다.
+    (전일 대비·최근 흐름은 이력 CSV 에서 오는 카드 전용 보조 정보라 여기서는 읽지 않습니다.)
+    실패 정책은 화면과 같습니다(§0-1)."""
+    title = '🙏 여기서부터는 신앙입니다 — RSI·MACD·볼린저밴드'
+    parts = [f'<h1>{esc(title)}</h1>']
+
+    def _document(main_parts) -> str:
+        return render_document(
+            title=f'{title} | {SITE_TITLE}',
+            description=CRAWLER_META_DESCRIPTION,
+            canonical_path='/indicator',
+            main_html='\n'.join(main_parts),
+        )
+
+    if not INDICATOR_ENABLED or INDICATOR_MENU_ADMIN_ONLY:
+        parts.append(notice_box(COMING_SOON_TEXT, kind='warn'))
+        return _document(parts)
+
+    payload, error = await load_json_file_async(data_path(LATEST_FILENAME))
+    if payload is None or not isinstance(payload, dict):
+        parts.append(notice_box(
+            '🚨 보조지표 수집 결과를 불러오지 못했습니다. '
+            f'({error or "파일 형식이 예상과 다릅니다."})\n\n'
+            '가짜 값으로 채우지 않기 위해 아무 수치도 표시하지 않습니다. '
+            '데이터 준비 중입니다 — 잠시 후 다시 확인해 주세요.'
+        ))
+        return _document(parts)
+    stocks = payload.get('stocks') or []
+    if not stocks:
+        parts.append(notice_box(
+            '🚨 보조지표 수집 결과에 종목이 0건입니다.\n\n'
+            '수집이 정상적으로 끝났는지 확인이 필요합니다. 값을 지어내지 않고 여기서 멈춥니다.'
+        ))
+        return _document(parts)
+
+    generated = payload.get('generated_at')
+    if generated:
+        tracked = payload.get('universe_tracked_count')
+        visible = payload.get('universe_visible_count')
+        success = payload.get('success_count')
+        counts_line = ''
+        if tracked is not None:
+            counts_line = (
+                f"\n\n추적 대상 {tracked}종목(그중 화면 노출 {visible if visible is not None else '—'}종목) "
+                f"중 오늘 {success if success is not None else '—'}종목 계산 성공."
+            )
+        parts.append(notice_box(
+            f'🕒 데이터 기준 (KST): {generated} (기준일 {payload.get("date") or "—"})\n\n'
+            '이 화면의 모든 값은 그 시각에 계산된 결과이며, 실시간 시세가 아닙니다. '
+            'RSI·MACD·볼린저밴드는 매일 새로 받은 종가로 매번 다시 계산합니다.' + counts_line,
+            kind='info',
+        ))
+    else:
+        parts.append(notice_box(
+            '⚠️ 데이터 기준 시각(generated_at)이 수집 결과에 없습니다. '
+            '아래 값이 언제 수집된 것인지 이 화면에서는 확인할 수 없습니다.', kind='warn',
+        ))
+    parts.append(notice_box(STRONG_WARNING_TEXT))
+    if payload.get('failed_count'):
+        parts.append(notice_box(
+            f"⚠️ 오늘 수집에서 {payload['failed_count']}개 종목은 계산에 실패해 이 목록에 없습니다.",
+            kind='warn',
+        ))
+
+    top = stocks[:CRAWLER_TABLE_ROWS]
+    rows = []
+    for s in top:
+        reasons = s.get('unavailable_reasons')
+        rows.append([
+            s.get('name') or NA_TEXT,
+            s.get('code') or NA_TEXT,
+            fmt_num(s.get('rsi'), digits=2),
+            _translate(s.get('rsi_signal'), _RSI_SIGNAL_LABELS, '—'),
+            fmt_num(s.get('macd'), digits=2),
+            fmt_num(s.get('macd_signal_line'), digits=2),
+            _translate(s.get('macd_cross'), _MACD_CROSS_LABELS, '없음'),
+            fmt_num(s.get('bb_percent_b'), digits=2),
+            _translate(s.get('bb_position'), _BB_POSITION_LABELS, '—'),
+            s.get('verdict_label') or NA_TEXT,
+            (str(reasons) if reasons else ''),
+        ])
+    parts.append(f'<h2>시가총액 상위 {len(top)}종목 — 보조지표 원값과 종합판정</h2>')
+    parts.append(table_html(
+        ['종목명', '종목코드', 'RSI(14)', 'RSI 판독', 'MACD', 'MACD 시그널', 'MACD 교차',
+         '볼린저 %B', '볼린저 위치', '종합판정', '산출 불가 사유'],
+        rows,
+    ))
+    parts.append(remaining_note(len(top), len(stocks), '수집 종목'))
+    parts.append(notice_box(STRONG_WARNING_TEXT))
+    return _document(parts)
 
 
 async def _render_body() -> None:

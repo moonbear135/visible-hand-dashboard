@@ -1,6 +1,15 @@
 """
 🔒 개인정보 처리방침 — 언제나 공개인 화면 (URL `/privacy`, 2026-08-25 추가).
 
+🧾 2026-09-04 — **순수 FastAPI 정적 라우트로 전환.** 구글 애드센스가 NiceGUI 화면의 최초 HTML
+   에 본문이 없다("가치가 별로 없는 콘텐츠")며 사이트를 반려했고(`landing_page.py` 머리말),
+   애드센스 승인 조건인 이 방침 페이지가 크롤러 눈에 빈 페이지였습니다. 이 문서는 데이터와
+   무관한 **고정 법률 문구**라 봇 감지 분기조차 필요 없이 `/` 와 같은 `@app.get` 패턴으로
+   통째로 정적 HTML 을 돌려줍니다(§0-3-10 — `/ads.txt`·`/` 가 이미 쓰는 패턴). 본문 원문
+   (`_BODY_MARKDOWN`)은 한 글자도 바꾸지 않았고, 예전 `ui.markdown` 이 쓰던 것과 **같은
+   라이브러리·같은 extras**(`markdown2`, `fenced-code-blocks`·`tables` — 설치본
+   `nicegui/elements/markdown.py` 확인)로 HTML 을 만듭니다.
+
 구글 애드센스 승인 조건("사이트에 개인정보/쿠키 처리방침 페이지가 있어야 함")을 채우려고
 오너가 명시적으로 요청한 화면입니다("이것도 같이 해줘"). 다른 공개 화면과 달리 **3단계
 공개 절차(§0-3-2)를 적용하지 않습니다** — 이 문서는 켜고 끄는 기능이 아니라 항상 켜져
@@ -25,12 +34,24 @@
 권장합니다(이 파일 어디에도 "법적으로 완벽하다"고 주장하지 않습니다).
 """
 
-from nicegui import ui
+import markdown2
+from fastapi.responses import HTMLResponse
+from nicegui import app
 
-from web.layout import layout
-from web.state import PAGE_RESPONSE_TIMEOUT_SECONDS
+from web.static_html import SITE_TITLE, render_document
 
 CONTACT_EMAIL = 'redmoon11230@gmail.com'
+
+PAGE_TITLE = '🔒 개인정보 처리방침'
+
+META_DESCRIPTION = (
+    f'{SITE_TITLE}(visiblehand.co.kr)의 개인정보 처리방침 — 수집하는 항목(이메일·표시 이름·'
+    '보유종목·세션 쿠키), 수집 목적, 처리 위탁(Supabase·Google Gemini API·Render·Google AdSense), '
+    '보유 기간, 쿠키·광고, 이용자 권리와 문의처를 안내합니다.'
+)
+
+#: `ui.markdown` 의 기본 extras 와 같은 값(설치본 `nicegui/elements/markdown.py::Markdown.default_extras`).
+_MARKDOWN_EXTRAS = ('fenced-code-blocks', 'tables')
 
 _BODY_MARKDOWN = f"""
 > ⚠️ **이 문서는 초안입니다.** 서비스 운영자가 실제 데이터 처리 방식을 바탕으로 직접
@@ -122,14 +143,22 @@ _BODY_MARKDOWN = f"""
 """
 
 
-@ui.page('/privacy', response_timeout=PAGE_RESPONSE_TIMEOUT_SECONDS)
-async def privacy_page() -> None:
+def build_privacy_html() -> str:
+    """완성된 HTML 문서 한 장. 순수 함수 — 테스트가 직접 부릅니다."""
+    body_html = markdown2.markdown(_BODY_MARKDOWN, extras=list(_MARKDOWN_EXTRAS))
+    return render_document(
+        title=f'{PAGE_TITLE} — {SITE_TITLE}',
+        description=META_DESCRIPTION,
+        canonical_path='/privacy',
+        main_html=f'<h1>{PAGE_TITLE}</h1>\n{body_html}',
+    )
+
+
+@app.get('/privacy', include_in_schema=False)
+def privacy_page() -> HTMLResponse:
     """개인정보 처리방침. 로그인 불필요 — 누구나(구글 크롤러 포함) 볼 수 있어야 합니다.
 
-    본문이 전부 고정 문자열이라 실제로 await 할 데이터·네트워크 호출은 없지만,
-    `async def` + `response_timeout` 을 다른 모든 공개 화면과 똑같이 맞춥니다
-    (`tests/test_event_loop_blocking.py::test_every_page_function_is_async_with_an_explicit_response_timeout`
-    — 예외 목록에 새로 올리는 대신 기존 관례를 그대로 따릅니다, §0-3-10).
+    JS 없이 서버가 완성된 HTML 을 그대로 돌려줍니다(NiceGUI `@ui.page` 아님 — `/` 와 같은
+    패턴). 봇 감지도 하지 않습니다: 누가 오든 같은 바이트입니다.
     """
-    with layout('🔒 개인정보 처리방침'):
-        ui.markdown(_BODY_MARKDOWN).classes('w-full')
+    return HTMLResponse(build_privacy_html())
