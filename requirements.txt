@@ -1,6 +1,11 @@
 typing_extensions>=4.12
 plotly
-pandas
+# 2026-09-03 — pandas>=3.0에서 pd.read_html()이 리터럴 HTML 문자열 입력을 더 이상
+# 받지 않아(FileNotFoundError로 즉시 크래시) collector_kospi200.py의 재무제표 파싱이
+# 통째로 멈추는 걸 실측 확인(PROJECT_STATUS.md 부수 관찰 항목). 그 호출부는 io.StringIO로
+# 감싸 pandas 2.x/3.x 양쪽에서 정상 동작하도록 이미 고쳤지만(같은 커밋), 전체 코드베이스를
+# pandas 3.x 전수 호환 검증까지 하진 않았으므로 상한을 안전하게 고정해둡니다.
+pandas>=2.2,<3
 finance-datareader
 # ⚠️ `requests` 는 수집기(collector_*.py)뿐 아니라 **웹앱 실행 중에도** 쓰입니다 —
 #    utils/data_source.py 가 data/*.json 을 raw.githubusercontent.com 에서 읽어옵니다
@@ -8,7 +13,7 @@ finance-datareader
 #    이 줄은 지우지 마세요.
 requests
 beautifulsoup4
-lxml
+lxml>=5,<7
 schedule
 bcrypt
 

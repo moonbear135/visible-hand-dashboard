@@ -9,6 +9,7 @@ from datetime import datetime, timedelta
 from bs4 import BeautifulSoup
 import pandas as pd
 import re
+import io
 
 # 2026-08-06 2차 감사 후속(오너 실데이터 검증 중 발견): GitHub Actions 러너는 기본 UTC라
 # datetime.now()가 KST가 아닌 UTC를 반환합니다. JSON metadata의 last_updated_at이
@@ -661,7 +662,7 @@ def fetch_naver_item_dps_and_eps(code, ticker_types=None):
         # -------------------------------------------------------------
         try:
             # 2. 2차 출처: 주요 재무제표 동적 키워드 타겟팅 (하드코딩 및 iloc 인덱스 금지)
-            dfs = pd.read_html(res.text, encoding='euc-kr')
+            dfs = pd.read_html(io.StringIO(res.text), encoding='euc-kr')
             fin_df_list = [d for d in dfs if ('매출액' in str(d) or '영업이익' in str(d) or '주당배당금' in str(d))]
             if fin_df_list:
                 fin_df = fin_df_list[0]
@@ -781,7 +782,7 @@ def fetch_naver_item_dps_and_eps(code, ticker_types=None):
                 res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
                 _ev_ebitda_circuit["consecutive_failures"] = 0  # 응답을 받았으면(표 파싱 결과와 무관) 연결 자체는 살아있는 것
                 if res_ev.status_code == 200:
-                    ev_dfs = pd.read_html(res_ev.text)
+                    ev_dfs = pd.read_html(io.StringIO(res_ev.text))
                     # =========================================================
                     # 2026-08-06 2차 감사 1-6: `iloc[row_idx, 1]` 고정 위치 인덱스 제거
                     # (SPEC §2-1 위반). 위레포트 표는 연도 컬럼 개수가 종목/시점마다 달라서
