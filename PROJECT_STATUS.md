@@ -461,9 +461,9 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 1. 이 프로젝트는 무엇인가
 
-"잘 보면 보이는 손 (The Visible Hand)" — 코스피 시장 위험도 + 코스피 시가총액 상위 200개 종목 PEGY(가치) 점수를 매일 자동으로 계산해서 보여주는 대시보드.
+"잘 보면 보이는 손 (The Visible Hand)" — 코스피 시장 위험도 + 코스피+코스닥 통합 시가총액 상위 500개 종목 PEGY(가치) 점수를 매일 자동으로 계산해서 보여주는 대시보드(2026-08-26 코스피 단독 상위 200 → 통합 상위 500으로 확대, TASK_HISTORY #150).
 
-> ⚠️ **명칭 주의**: 여기서 "200개 종목"은 **KRX 공식 "코스피 200 지수" 편입종목이 아니라, 순수 시가총액 순위 상위 200개**입니다(2026-08-06 오너 확인 — 공식 지수 전환은 하지 않기로 함). 공식 지수는 유동주식 시총·업종 안배·유동성 심사를 거쳐 연 2회만 리밸런싱되지만, 이 프로젝트는 매일 시가총액만으로 순위를 매깁니다. 화면·다운로드 파일의 사용자 노출 문구는 모두 "시가총액 상위 200"으로 표기하도록 통일함(파일명 `collector_kospi200.py`/`kospi200_pegy_latest.json` 등 내부 이름은 하위 호환을 위해 유지).
+> ⚠️ **명칭 주의**: 여기서 "500개 종목"은 **KRX 공식 "코스피 200 지수" 편입종목이 아니라, 코스피+코스닥 통합 순수 시가총액 순위 상위 500개**입니다(2026-08-06 오너 확인 — 공식 지수 전환은 하지 않기로 함. 당시엔 코스피 단독 상위 200이었고 2026-08-26 통합 상위 500으로 확대). 공식 지수는 유동주식 시총·업종 안배·유동성 심사를 거쳐 연 2회만 리밸런싱되지만, 이 프로젝트는 매일 시가총액만으로 순위를 매깁니다(진입 500위 / 이탈 575위 히스테리시스 — `collector_kospi200.py`의 `apply_hysteresis_buffer`). 화면·다운로드 파일의 사용자 노출 문구는 모두 "코스피+코스닥 통합 시가총액 상위 500"으로 표기하도록 통일함(파일명 `collector_kospi200.py`/`kospi200_pegy_latest.json` 등 내부 이름은 하위 호환을 위해 유지).
 
 - 실제 서비스 주소: `visiblehand.co.kr` (커스텀 도메인, `index.html`이 아래 Streamlit 앱을 iframe으로 감싸는 구조)
 - 실제 앱이 돌아가는 곳: **Streamlit Community Cloud** (`https://visible-hand-dashboard-2vmzz6tk63wsac7n345ord.streamlit.app/`)
@@ -476,7 +476,7 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | 파일/폴더 | 역할 |
 |---|---|
 | `scrape_daily.py` | 코스피 지수/환율/수급 데이터 수집 → `market_history.csv`에 누적. 백필 모드 지원 |
-| `collector_kospi200.py` | 코스피 시가총액 상위 200개 종목 PEGY 데이터 수집 → `data/*.json`. 상장주식수(FDR 우선), Trailing EPS 계산값 예외, 그레이엄 넘버 등이 여기 있음 |
+| `collector_kospi200.py` | 코스피+코스닥 통합 시가총액 상위 500개 종목(2026-08-26 확대 전엔 코스피 단독 상위 200) PEGY 데이터 수집 → `data/*.json`. 상장주식수(FDR 우선), Trailing EPS 계산값 예외, 그레이엄 넘버 등이 여기 있음 |
 | `.github/workflows/scrape.yml` | **코스피 자동화 워크플로우.** 매일 평일 KST 16:05 실행 |
 | `.github/workflows/scrape_us.yml` | **🇺🇸 미국주식 자동화 워크플로우 (2026-08-07 신설).** 서머타임 대응으로 cron 2개(20:35/21:35 UTC)를 걸고, 수집기의 `--skip-if-not-ready` 사전 점검이 하루 한 번만 실제 수집되게 걸러냄 |
 | `.github/workflows/keep_awake.yml` | (2026-08-09 신설) Streamlit 무료 호스팅이 **12시간 무방문 시 앱을 재우는 정책** 대응 — 8시간마다 실제 Streamlit 앱 URL(커스텀 도메인 아님)을 방문해 타이머 리셋. 데이터 수집과 무관, 실패해도 영향 없음 |
@@ -509,7 +509,6 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | `utils/macro_scoring.py` | (2026-08-06 신설) 매크로 종합점수 계산(z-score 정규화+시그모이드 변환+동시충격 증폭기) 단일 모듈. `scrape_daily.py`(저장)와 `views/macro_view.py`(표시)가 공용으로 호출. 2026-08-10(#68) **실측 지표 정규화 함수**(`measured_downside_risk` 등) 추가, (#70) 값이 클수록 위험인 지표용 `measured_upside_risk` + 이력 컬럼 분포 생성기 `history_column_population` 추가 |
 | `utils/krx_openapi.py` | (2026-08-10 신설, TASK_HISTORY #70) **KRX OPEN API 최소 클라이언트.** VKOSPI 지수값 / KOSPI200 지수 종가 / KOSPI200 선물 근월물 종가만 가져와 매크로 2지표에 씁니다. 인증키는 환경변수 `KRX_OPENAPI_KEY`에서만 읽고 **HTTP 헤더 `AUTH_KEY`로만** 전달(URL에 실으면 서버 로그에 남음). 외부 래퍼 라이브러리 **미채택**(근거는 파일 상단 주석·#70). 실패는 전부 `None` → 그 지표만 배점 제외. **⚠️ 실서버 응답으로 검증된 적 없음** — 지수명·선물 근월물 식별이 미확인이라, 못 찾으면 응답에 있던 이름을 전부 로그로 출력합니다 |
 | `app.py` / `visiblehand.py` | 앱 진입점. 공개 메뉴는 코스피 PEGY 화면(기본) + 🇺🇸 미국주식(사이드바 상단 체크박스, 2026-08-08 공개 전환) 두 개. 매크로는 관리자 인증 후에만 |
-| `utils/scheduler.py` | 앱 내장 스케줄러(기본 비활성화, `ENABLE_INAPP_SCHEDULER=1`일 때만). 정식 경로는 GitHub Actions. (구버전 레거시 `scheduler.py`/`run_scheduler.bat`는 2026-08-06 삭제됨) |
 | `utils/stock_history.py` | (2026-08-09 신설) **종목별 시계열 이력의 단일 출처.** 다운로드에 내보낼 필드 목록 + 한국어 라벨(`KOSPI_HISTORY_FIELDS` 26개 / `US_HISTORY_FIELDS` 40개 — 카드에 실제로 보이는 재무 지표만, 내부 진단·색상 필드 전부 제외) + 이력 append/조회. `record_daily_history()` 가 수집 상태를 보고 **SUCCESS/DEGRADED 일 때만** 기록하고 같은 날짜는 중복 없이 교체. streamlit 미의존 |
 | `data/kospi200_stock_history.csv`, `data/us_stocks_history.csv` | (2026-08-09부터 생성) **종목별 날짜 이력**(하루 한 종목 = 한 줄). 컬럼명은 영문 키(라벨 문구가 바뀌어도 과거 행이 안 깨지게), 인코딩 `utf-8-sig`. ⚠️ **과거 소급 없음 — 도입 후 첫 수집분부터 쌓입니다.** 워크플로우의 `git add data/` 범위에 자동 포함 |
 | `utils/stock_export.py` | (2026-08-08 신설 → 2026-08-09 재작성) "종목별 데이터 다운로드" 내보내기 모듈. 이력 행 목록 → **날짜=행 / 지표=열** CSV(한국어 헤더 · **UTF-8 BOM**, 엑셀 한글 깨짐 방지) / JSON(`ensure_ascii=False`, 숫자 컬럼만 숫자로 복원해 종목코드 `005930` 이 안 깨짐) + 파일명 안전화(`BRK/B`→`BRK_B`). streamlit 미의존 순수 함수라 코스피·미국 양쪽이 같은 형식을 공유 |

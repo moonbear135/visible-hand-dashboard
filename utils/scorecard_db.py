@@ -47,7 +47,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 # 🕐 "오늘"의 기준 시간대. 이 프로젝트가 화면에서 오늘 날짜를 정할 때 쓰는 방식과 **같은
-#    관례**입니다(`web/pages/macro_page.py`, `utils/db.py`, `utils/scheduler.py` 등 —
+#    관례**입니다(`web/pages/macro_page.py`, `utils/db.py` 등 —
 #    전부 이 try/except 블록을 그대로 씁니다). zoneinfo 가 없는 환경에서도 import 가
 #    깨지지 않도록 감싸고, 그때는 서버 로컬 시간으로 물러섭니다.
 try:  # pragma: no cover - 환경에 따라 갈리는 import

@@ -18,7 +18,11 @@
 #     · scrape.yml, scrape_us.yml, indicator_kr.yml, scrape_report_snapshots.yml,
 #       duel_daily.yml — 평일에만 돕니다(주말엔 검사 자체를 건너뜁니다).
 #     · duel_daily_us.yml, scorecard_publish_daily.yml, watch_dividend_disclosures.yml,
-#       watch_dividend_payment_events.yml — 매일 돕니다.
+#       watch_dividend_payment_events.yml, watch_data_sanity.yml — 매일 돕니다.
+#       (watch_data_sanity.yml 은 2026-09-03 추가 — 8/30 신설 당시 이 목록에 빠져 있어서,
+#        그 워치독이 조용히 멈춰도 아무도 모르는 사각지대였습니다. 매일 09:30 KST 에 돌고
+#        트리거가 schedule / workflow_dispatch(입력 없음)뿐이라 다른 daily 대상과 같은
+#        규칙(30시간 창, `-f ref=main` 재실행)이 그대로 맞습니다.)
 #
 #   일부러 뺀 것:
 #     · keep_awake.yml / render_keep_awake.yml — 데이터 수집이 아니라 단순 핑(ping)이라
@@ -73,10 +77,10 @@
 #     고친 방법 — 두 겹으로 막습니다(#183 때와 같은 벨트-앤-서스펜더):
 #       (A) 이 워치독의 cron 을 09:00 KST → **18:00 KST(09:00 UTC)** 로 옮겼습니다.
 #           · 장 마감(15:30 KST) 이후라 그 시점의 "현재 시세"는 여전히 종가 그대로입니다.
-#           · 대상 9개의 그날 정규 스케줄 중 가장 늦은 것이 17:10 KST(duel_daily.yml)이라,
+#           · 대상 10개의 그날 정규 스케줄 중 가장 늦은 것이 17:10 KST(duel_daily.yml)이라,
 #             **그날 안 돈 것을 그날 저녁에** 잡아냅니다(예전엔 다음 날 09:00까지 기다려야
 #             했습니다 — 오히려 대응이 빨라집니다).
-#           · 9개 전부에 대해 "정상적으로 그날 스케줄대로 돌았다면 18:00 KST 체크 시점에
+#           · 10개 전부에 대해 "정상적으로 그날 스케줄대로 돌았다면 18:00 KST 체크 시점에
 #             window(평소 30시간 / 월요일 76시간) 안에 들어오는가"를 요일별로 계산해
 #             확인했습니다(가장 빡빡한 duel_daily.yml 도 그날치가 0.83시간 전이고, 설령
 #             그게 아직 안 끝났어도 어제치가 24.83시간 전이라 30시간 안에 들어옵니다 —
@@ -124,7 +128,7 @@ on:
   # 매일 09:00 UTC = KST 18:00 (2026-09-01 변경 — 위 🔴 문단 (A) 참고).
   #   · 한국 증시 마감(15:30 KST) 이후라, 여기서 자동 재실행이 걸려도 그 수집기가 긁는
   #     "지금 이 순간"의 시세가 그날 종가 그대로입니다.
-  #   · 대상 9개의 그날 정규 스케줄이 전부 지난 뒤입니다(가장 늦은 것: 17:10 KST 인
+  #   · 대상 10개의 그날 정규 스케줄이 전부 지난 뒤입니다(가장 늦은 것: 17:10 KST 인
   #     duel_daily.yml). 그래서 "그날 안 돈 것"을 다음 날이 아니라 그날 저녁에 잡습니다.
   #   ⚠️ 예전 값(00:00 UTC = 09:00 KST)은 하필 코스피 개장 정각이었습니다 — 그게 이번에
   #      고친 바로 그 허점입니다. 이 값을 다시 앞당길 때는 반드시 "그 시각이 장중인가"를
@@ -162,7 +166,8 @@ jobs:
           duel_daily_us.yml|daily
           scorecard_publish_daily.yml|daily
           watch_dividend_disclosures.yml|daily
-          watch_dividend_payment_events.yml|daily"
+          watch_dividend_payment_events.yml|daily
+          watch_data_sanity.yml|daily"
 
           NOW_TS=$(date -u +%s)
           DOW_KST=$(TZ=Asia/Seoul date +%u)   # 1=월 ... 7=일
@@ -226,7 +231,7 @@ jobs:
             # 자동 재실행(workflow_dispatch)하게 되면서, 그 재실행이 성공해도 event 가
             # `workflow_dispatch` 라 schedule 만 보는 필터에는 안 잡히고, 그러면 다음 날에도
             # "여전히 성공 없음"으로 판정돼 **매일 헛되이 재실행을 반복**하게 됩니다. 대상
-            # 9개는 schedule / workflow_dispatch(그리고 duel_daily.yml 은 scrape.yml 완료를
+            # 10개는 schedule / workflow_dispatch(그리고 duel_daily.yml 은 scrape.yml 완료를
             # 받는 workflow_run) 외의 트리거가 없어서, 필터를 빼도 무관한 이벤트가 섞여 들어와
             # 오탐이 생길 여지는 없습니다. 우리가 알고 싶은 건 "그날 그 수집이 실제로 돌았는가"
             # 이지 "어느 트리거로 돌았는가"가 아닙니다.
@@ -262,7 +267,7 @@ jobs:
             else
               echo "❌ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 기록 없음!"
               # 발견 즉시 그 자리에서 딱 한 번 재실행을 걸어 둡니다(§0-3-2 — 사람이 폰을 못
-              # 보는 동안 데이터가 며칠씩 밀리는 걸 막는 게 목적). 대상 9개 모두
+              # 보는 동안 데이터가 며칠씩 밀리는 걸 막는 게 목적). 대상 10개 모두
               # workflow_dispatch 트리거가 있고 입력값은 전부 선택(기본값 있음)이라
               # `-f ref=main` 만으로 트리거됩니다.
               # 재실행이 진짜 성공했는지까지 여기서 다시 확인하지는 **않습니다** — 그건 감시의

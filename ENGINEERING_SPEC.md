@@ -18,7 +18,7 @@
 | 항목 | 내용 |
 |------|------|
 | **프로젝트명** | 잘 보면 보이는 손 (The Visible Hand) |
-| **목적** | KOSPI 200 시가총액 상위 종목의 퀀트 밸류에이션(PEGY) 대시보드 |
+| **목적** | 코스피+코스닥 통합 시가총액 상위 500종목의 퀀트 밸류에이션(PEGY) 대시보드 (2026-08-26 코스피 단독 상위 200 → 통합 상위 500 확대, TASK_HISTORY #150) |
 | **프론트엔드** | 🚀 NiceGUI (`main.py` + `web/`) — 2026-08-17 컷오버, 2026-08-29 Streamlit 은퇴 완료로 단일 스택. 구 Streamlit(`visiblehand.py`·`app.py`·`views/`)은 `archive/`로 이동(§10) |
 | **데이터 수집** | 네이버 증권 웹 스크래핑 (`collector_kospi200.py`, `scrape_daily.py`) |
 | **검증 파이프라인** | 3단계 DataValidator (`utils/data_validator.py`) |
@@ -1091,7 +1091,7 @@ visible_hand/
 │       ├── macro_view.py               → web/pages/macro_page.py
 │       └── admin_view.py               → web/pages/admin_page.py
 │
-├── collector_kospi200.py         코스피 시총 상위 200 수집기 (핵심)
+├── collector_kospi200.py         코스피+코스닥 통합 시총 상위 500 수집기 (핵심, 파일명의 "200"은 하위 호환용)
 ├── collector_us_stocks.py        🇺🇸 미국주식 550종목 수집기 + 상단 지수 3종
 ├── collector_us_indices.py       📈 리포트용 미국 벤치마크(S&P500·나스닥) 일별 종가 수집기
 ├── scrape_daily.py               일별 매크로 위험 지표 수집기 → market_history.csv
@@ -1135,7 +1135,7 @@ visible_hand/
 │   └── report_schema.sql           📈 "리포트" 스냅샷 테이블 + RLS
 │
 ├── data/                         수집 산출물 (GitHub Actions가 커밋해 누적)
-│   ├── kospi200_pegy_latest.json     최신 코스피 200종목 스냅샷
+│   ├── kospi200_pegy_latest.json     최신 코스피+코스닥 통합 상위 500종목 스냅샷
 │   ├── pegy_summary_history.json     시장 전체 요약 이력 (종목별 이력 아님)
 │   ├── kospi200_stock_history.csv    종목별 날짜 이력 (코스피)
 │   ├── kr_all_market_prices.json     코스피+코스닥 전 종목 종가

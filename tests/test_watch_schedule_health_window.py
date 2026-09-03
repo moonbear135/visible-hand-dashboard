@@ -528,6 +528,7 @@ ALL_TARGETS = [
     "scorecard_publish_daily.yml",
     "watch_dividend_disclosures.yml",
     "watch_dividend_payment_events.yml",
+    "watch_data_sanity.yml",   # 2026-09-03 추가 — 8/30 신설 때 감시 목록에서 빠져 있던 daily 대상
 ]
 WEEKDAY_ONLY_TARGETS = ALL_TARGETS[:5]
 DAILY_TARGETS = ALL_TARGETS[5:]
