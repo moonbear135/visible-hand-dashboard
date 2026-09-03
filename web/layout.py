@@ -247,7 +247,10 @@ INDICATOR_MENU_ADMIN_ONLY = False
 #      '⚔️ 내 밑으로 눈 깔어'  → '⚔️ 수익률 비교'
 _MENU_GROUPS = [
     ('💡 재무제표 읽기', [
-        ('/', '🇰🇷 한국 주식은 이가격이에요', False),
+        # 🔁 2026-09-04 — '/' → '/kr'. 도메인 루트 '/' 는 이제 JS 없이 읽히는 정적 소개
+        #    페이지(web/pages/landing_page.py, 애드센스 심사 대응)이고, 한국 주식 화면은
+        #    미국판 '/us' 와 짝을 이루는 '/kr' 로 옮겼습니다.
+        ('/kr', '🇰🇷 한국 주식은 이가격이에요', False),
         ('/us', '🇺🇸 미국 주식은 이가격이에요', False),
     ]),
     # 💼 "내 성적표" 공개 계층 두 화면(`/scorecard/consent`·`/scorecard/leaderboard`)은
@@ -372,7 +375,10 @@ def layout(title: str, width_class: str = 'max-w-4xl'):
             ui.button(icon='menu', on_click=lambda: drawer.toggle()) \
                 .props('round unelevated color=white text-color=primary size=md') \
                 .classes('shadow-2')
-            ui.label('💡 잘 보면 보이는 손').classes('text-lg font-bold')
+            # 🔁 2026-09-04 — 라벨 → 링크. 도메인 루트 '/' 가 정적 소개 페이지가 되면서,
+            #    대시보드 어느 화면에서든 그 소개 페이지로 돌아갈 입구가 헤더에 하나 필요해졌습니다.
+            #    글자·클래스는 그대로이고 밑줄·색만 헤더 배경에 맞춰 상속하게 둡니다.
+            ui.link('💡 잘 보면 보이는 손', '/').classes('text-lg font-bold no-underline text-white')
         ui.label(title).classes('text-sm opacity-70')
 
     admin = is_admin()

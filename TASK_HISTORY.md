@@ -2832,6 +2832,53 @@ OCI홀딩스, 펄어비스, DL, 위메이드, 아이에스동서 등)이 이 셋
 만으로 "적자 기업 (EPS가 0 이하…)"라고 쓰는데, 에코프로처럼 TTM EPS 가 +1,036원인 종목엔
 문구가 정확하지 않습니다 — 화면 문구 결정은 오너 몫이라 손대지 않음.
 
+### #191 — 도메인 루트 `/` 를 JS 없는 정적 소개 페이지로, 한국 주식 PEGY 화면은 `/kr` 로 이동 (구글 애드센스 "가치가 별로 없는 콘텐츠" 반려 대응, 2026-09-04)
+
+**배경(실측, 추측 아님 §0-1).** 애드센스 사이트 심사가 "빈약하며 제공하는 가치가 전혀 또는 거의
+없는 콘텐츠"로 반려됐습니다. `curl` 로 확인한 원인: NiceGUI `@ui.page` 가 서버에서 내려주는 최초
+HTML 의 `<body>` 에는 텍스트가 한 글자도 없고(`socket.io.min.js`·`quasar` 등 `<script>` 태그뿐),
+PEGY 표·카드는 브라우저가 웹소켓으로 붙은 뒤에야 그려집니다. `<meta name="description">` 도 없었습니다.
+크롤러 눈에는 `/` 가 빈 페이지였던 것입니다. 오너 승인 방향: **정적 소개 페이지 추가**.
+
+**한 일.**
+1. `web/pages/landing_page.py` 신설 — `@app.get('/')` 순수 FastAPI 라우트(`main.py` 의 `/ads.txt`·
+   `/healthz` 와 같은 패턴, §0-3-10). 템플릿 엔진 없이 상수 문자열 + f-string, 외부 CDN·스크립트 0,
+   `<style>` 한 블록. 내용: `<title>`·`<meta name="description">`·canonical, 서비스 소개(개인 학습용
+   보조 도구, 코스피+코스닥 통합 상위 500 + 미국 상위 종목, 후행지표 원칙), PEGY 설명(SPEC §5-1 수식
+   ·Trailing/Forward·성장률 캡), 퀀트 스코어 배점표(SPEC §5-3 그대로), 화면 목록(3단계 공개 스위치가
+   켜진 것만 — `web/layout.py` 의 `*_ENABLED` 값을 그대로 읽음), 데이터 출처·3단계 검증(네이버 증권/
+   stockanalysis.com, `utils/data_validator.py` 단계명 그대로), 화면과 같은 학습용 안내·투자 주의
+   문구, "대시보드 보기" 버튼 → `/kr`, `/us`·`/privacy` 링크. 파비콘은 NiceGUI 가 이미 내주는
+   `/favicon.ico`(💡 SVG, 실측) 재사용.
+2. `web/pages/pegy_page.py` — `@ui.page('/')` → `@ui.page('/kr')`. **화면 내용은 변경 없음.** 경로
+   이름은 미국판 `/us` 와 짝을 이루는 두 글자 소문자(`🇰🇷`/`🇺🇸` 메뉴 쌍)로 정함.
+3. `web/layout.py` — 사이드바 `('/', '🇰🇷 한국 주식은 이가격이에요')` → `'/kr'`. 헤더의
+   "💡 잘 보면 보이는 손" 라벨을 `/` 링크로 바꿔 대시보드 어디서든 소개 페이지로 돌아갈 입구를 둠.
+4. `main.py` — `landing_page` import 추가(등록), 경로 주석 갱신. `dividend_us_page.py` 머리말의
+   `/` 언급 정정. 내부 참조 전수 조사(`grep -rn "'/'\|\"/\"" web/ main.py tests/`): 코드상 `/` 를
+   가리키는 곳은 `layout.py` 메뉴 한 줄뿐이었고, 로그인 후 이동은 전부 `ui.navigate.reload()`
+   (경로 무관)라 리다이렉트 갱신 대상 없음.
+5. `tests/test_landing_page.py` 신설(6건) — `/` 응답에 description·title·본문 문장이 **서버 응답
+   자체에** 있음, `<script` 0개, 소개 페이지 링크 ↔ `pegy_page.py` 실제 `@ui.page` 경로 일치(AST),
+   사이드바가 `/kr` 을 가리키고 `/` 는 안 가리킴, `web/pages/*.py` 어디에도 `@ui.page('/')` 가
+   없음, `main.py` 등록. `test_pegy_page.py`·`test_event_loop_blocking.py` 의 낡은 `/` 주석 갱신.
+6. `PROJECT_STATUS.md` §0-3 표·§0-4 파일 구조 갱신.
+
+**검증.** `py_compile` OK. 로컬 기동(`NICEGUI_STORAGE_SECRET` 임시 난수) 후 `curl -s localhost:PORT/`
+→ 200 · `text/html` · 9,638 바이트, 응답 원문에 `<title>잘 보면 보이는 손 — …</title>`·
+`<meta name="description" …>`·"PEGY = PER ÷ (이익 성장률 + 주주환원율)" 등 본문이 그대로 있고
+`<script` 태그 0개. `/kr` → 200(기존 NiceGUI 셸, `socket.io` 포함 — 예전 `/` 와 동일),
+`/us`·`/privacy`·`/favicon.ico` 200, `/ads.txt` 404(게시자 ID 미설정 시 기대 동작), `/nonexistent` 404.
+전체 스위트 **2,081 passed / 70 skipped**(회귀 0, 신규 +6).
+
+**확인 못 한 것 / 한계(§0-1).** (a) 애드센스 재심사 통과 여부는 구글 쪽 판단이라 장담할 수 없습니다 —
+이번 수정은 "크롤러가 실제 텍스트를 읽을 수 있다"는 확인된 원인 하나를 없앤 것입니다. 심사관이
+`/kr`·`/us` 같은 대시보드 화면까지 크롤링해 "빈 페이지"로 볼 가능성은 남습니다(그 화면들은 여전히
+NiceGUI 렌더). (b) 외부에서 `/` 를 북마크한 사용자는 소개 페이지를 먼저 보고 버튼 한 번을 더
+눌러야 합니다(오너가 승인한 방향). (c) `robots.txt`·sitemap 은 원래 없었고 이번에도 추가하지
+않았습니다(요청 범위 밖). (d) Render 재배포 후 실제 도메인에서 `curl https://visiblehand.co.kr/`
+로 한 번 더 확인하는 것을 권합니다(이 작업은 로컬 기동으로만 검증했습니다).
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

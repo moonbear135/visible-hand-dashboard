@@ -63,7 +63,8 @@ DNS 전환(컷오버)과 "내 성적표"·"사장님 보고서" 공개 전환, �
 
 | 화면 | 경로 | 공개 상태 |
 |---|---|---|
-| 코스피 PEGY | `/` | 공개 |
+| 소개 페이지(정적 HTML, JS 없음) | `/` | 공개 (2026-09-04 추가 — 애드센스 "가치가 별로 없는 콘텐츠" 반려 대응, `web/pages/landing_page.py`, TASK_HISTORY #191) |
+| 코스피+코스닥 PEGY | `/kr` | 공개 (**2026-09-04 `/` → `/kr` 이동**, #191) |
 | 미국주식 | `/us` | 공개 |
 | 내 성적표 | `/scorecard` | **공개** (2026-08-17 전환, 로그인 필요) |
 | 사장님 보고서 | `/report` | **공개** (2026-08-17 전환, 로그인 필요, 성적표와 로그인 공유) |
@@ -85,7 +86,8 @@ web/
   state.py                읽기전용 시장데이터 로더 (내부에서 data_source 경유)
   components/             카드·툴팁·배지·다운로드버튼 등 화면 5개 공용 UI
   pages/
-    pegy_page.py           / (공개)
+    landing_page.py        / (공개 · 순수 FastAPI 정적 소개 페이지, 2026-09-04)
+    pegy_page.py           /kr (공개 · 2026-09-04 전까지 /)
     us_stocks_page.py      /us (공개)
     scorecard_page.py      /scorecard (공개, 로그인 필요)
     report_page.py         /report (공개, 로그인 필요)

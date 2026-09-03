@@ -21,7 +21,13 @@ from utils import data_source
 import web.ads
 import web.theme
 # @ui.page 등록을 위해 import 자체가 필요합니다 (모듈을 읽는 순간 경로가 등록됨).
-#   pegy_page      → '/'            (공개 기본 화면)
+#   landing_page   → '/'            (공개 · **순수 FastAPI 정적 소개 페이지**, JS 없이 완성된
+#                                    HTML 응답. 2026-09-04 구글 애드센스 "가치가 별로 없는
+#                                    콘텐츠" 반려 대응 — NiceGUI 화면은 최초 HTML 에 본문이
+#                                    없어 크롤러에게 빈 페이지로 보였음. 아래 /ads.txt 와 같은
+#                                    `@app.get` 패턴, §0-3-10)
+#   pegy_page      → '/kr'          (공개 · 한국 주식 PEGY 화면. **2026-09-04 '/' 에서 이동**,
+#                                    미국판 '/us' 와 짝)
 #   us_stocks_page → '/us'          (공개 화면)
 #   scorecard_page → '/scorecard'   (로그인 필요 · **2026-08-17 공개 전환 완료**)
 #   report_page    → '/report'      (로그인 필요 · **2026-08-17 공개 전환 완료**,
@@ -39,7 +45,7 @@ import web.theme
 #   dividend_us_page → '/dividend/us' (관리자 전용 시작 · 🇺🇸 미국 배당 달력,
 #                                    DIVIDEND_US_ENABLED 로 단계적 공개, 2026-08-27 추가.
 #                                    위 한국 배당과 **파일도 스위치도 완전히 분리**돼 있어
-#                                    한쪽을 꺼도 다른 쪽은 그대로 돕니다 — pegy_page(`/`) 와
+#                                    한쪽을 꺼도 다른 쪽은 그대로 돕니다 — pegy_page(`/kr`) 와
 #                                    us_stocks_page(`/us`) 가 이미 쓰는 것과 같은 구조)
 #   indicator_page → '/indicator'   (관리자 전용 시작 · "여기서부터는 신앙입니다" 보조지표
 #                                    RSI/MACD/볼린저밴드, INDICATOR_ENABLED 로 단계적 공개,
@@ -63,6 +69,7 @@ from web.pages import (  # noqa: F401
     dividend_us_page,
     duel_page,
     indicator_page,
+    landing_page,
     macro_page,
     pegy_page,
     privacy_page,

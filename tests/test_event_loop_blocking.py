@@ -670,7 +670,7 @@ def test_the_home_page_search_box_no_longer_reads_files_on_the_loop():
         "이력 CSV 읽기가 run_blocking 을 거치지 않습니다"
     )
 
-    # 두 호출부(홈 '/' 와 미국 '/us')가 실제로 await 하는지.
+    # 두 호출부(한국 '/kr'(구 '/') 와 미국 '/us')가 실제로 await 하는지.
     for page in ("pegy_page.py", "us_stocks_page.py"):
         page_tree = ast.parse((REPO_ROOT / "web" / "pages" / page).read_text(encoding="utf-8"))
         awaited = [
