@@ -1,14 +1,14 @@
 {
   "summary": {
-    "generated_at_kst": "2026-09-01T09:03:05.725570+09:00",
+    "generated_at_kst": "2026-09-04T07:46:19.640478+09:00",
     "source": "DART 수시공시(거래소공시 pblntf_ty=I) 원문 document.xml",
-    "total_records": 98,
+    "total_records": 99,
     "by_parse_status": {
       "OK": 76,
-      "PARTIAL": 22
+      "PARTIAL": 23
     },
     "records_without_record_date": 0,
-    "records_without_pay_date_expected": 29,
+    "records_without_pay_date_expected": 30,
     "records_with_correction_flag": 11,
     "records_with_subsidiary_notice_flag": 18,
     "missing_label_counts": {
@@ -22,15 +22,15 @@
       "report_nm 판정 규칙은 2026-08 실측 표본 6종에서만 도출했습니다. 규칙 밖의 표기는 UNRECOGNIZED_REPORT_TYPE 으로 아래 scan_stats 에 남고, 이벤트로 만들지 않았습니다(추측해서 넓히지 않았습니다).",
       "파일 이름의 연도는 '접수일이 그 해'라는 뜻일 뿐, 회사의 사업연도와 다를 수 있습니다(list.json 에는 사업연도로 거르는 조건이 없습니다)."
     ],
-    "date_range_checked": "20260831~20260831",
-    "new_records_this_run": 3,
+    "date_range_checked": "20260903~20260903",
+    "new_records_this_run": 1,
     "documents_failed_this_run": 0,
     "document_failures": [],
     "scan_stats": {
-      "pages": 3,
-      "seen_rows": 266,
-      "dividend_decisions": 3,
-      "shareholder_register_close": 2,
+      "pages": 2,
+      "seen_rows": 113,
+      "dividend_decisions": 1,
+      "shareholder_register_close": 0,
       "unrecognized": 0,
       "skipped_no_stock_code": 0,
       "kept_with_unnormalized_stock_code": 0,
@@ -3069,6 +3069,41 @@
       "unparsed_values": [],
       "parse_notes": [],
       "parse_status": "OK"
+    },
+    {
+      "rcept_no": "20260903800391",
+      "rcept_dt": "20260903",
+      "corp_code": "01436628",
+      "corp_name": "이지스레지던스리츠",
+      "stock_code": "350520",
+      "stock_code_raw": "350520",
+      "report_nm": "부동산투자회사금전배당결정              ",
+      "report_nm_extra": null,
+      "matched_prefix": "부동산투자회사금전배당결정",
+      "is_correction": false,
+      "is_subsidiary_notice": false,
+      "dart_document_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260903800391",
+      "collected_at_kst": "2026-09-04T07:46:19.640341+09:00",
+      "dividend_class": null,
+      "dividend_type": null,
+      "dps_common": 150,
+      "dps_preferred": null,
+      "yield_common": 4.4,
+      "yield_preferred": null,
+      "total_amount": 5529930300,
+      "record_date": "2026-06-30",
+      "pay_date_expected": null,
+      "board_resolution_date": "2026-09-03",
+      "notes": "1) 상기 \"배당금총액\" 및 \"1주당 배당금\"은 이사회 결의로 승인되었으므로, 추후 정기주주총회 승인과정에서 변경될 수 있습니다.\n\n2) 1주당 배당금은 \"배당금총액(5,529,930,300원)/총 발행주식수(36,866,202주)\"로 산출하였습니다.\n\n* 상기 배당금총액 중 자본준비금의 이익잉여금 전입금액을 재원으로 하는 배당금액은 법인세법 제18조 제8호 및 소득세법시행령 제26조의3 제6항에 따라 법인세법상 소득금액 및 소득세법상 배당소득에 포함되지 않는 금액이오니 참고하시기 바랍니다.\n- 과세대상 배당금:4,032,354,152원\n- 비과세 배당금:1,497,576,148원\n\n3) 상기 \"시가배당률\"은 배당기준일 2매매거래일 전일부터 과거 1주일간(2026.06.22~2026.06.26)의 유가증 권 시장에서 형성된 최종시세가격의 산술평균가격에 대한 주당배당금의 비율을 백분율로 산정하였습니다.",
+      "missing_labels": [],
+      "unparsed_values": [
+        {
+          "label": "5. 배당금지급 예정일",
+          "raw": "제13기 정기주주총회일로부터 1개월 이내"
+        }
+      ],
+      "parse_notes": [],
+      "parse_status": "PARTIAL"
     }
   ]
 }
