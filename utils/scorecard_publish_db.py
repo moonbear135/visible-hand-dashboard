@@ -542,7 +542,8 @@ def fetch_public_leaderboard_latest_date(client, *, currency, bracket_key):
 
     None 은 오류가 아니라 정상 상태입니다 — ① 아직 아무도 이 그룹에 없거나, ② 최소 인원을
     못 채워 발행되지 않았거나, ③ 발행됐다가 인원이 줄어 청소로 지워진 경우입니다. 화면은 이
-    셋을 "아직 공개할 만큼 사람이 모이지 않았습니다"로 **똑같이** 안내합니다 — 셋을 구분해
+    셋을 "아직 공개할 순위표가 없습니다"(`scorecard_leaderboard_page.NOTICE_EMPTY_GROUP`)로
+    **똑같이** 안내합니다(문턱이 2026-09-03 부터 1명이라 사실상 전부 "동의자 0명") — 셋을 구분해
     보여주면 그 자체가 "이 구간에 몇 명쯤 있는지"에 대한 정보가 되고, 그건 소수 N 역추적의
     재료입니다.
 
@@ -990,9 +991,9 @@ def fetch_published_group_index(service_client, currency, bracket_key):
     (배치 전용) 한 그룹(통화 × 체급)이 **과거에 발행된 적이 있는지**와, 있다면 어느 날짜에
     누구(닉네임)로 실렸는지를 읽습니다. 최소 인원 미달 그룹을 청소할 때만 씁니다.
 
-    ⚠️ 인원이 임계값을 **넘는** 그룹에는 절대 부르지 마세요 — 그런 그룹은 정의상 500명
-       이상이라 결과가 큽니다. 호출부(`utils/scorecard_publish.py`)는 **미달 그룹에만**
-       부릅니다. 미달 그룹은 500명 미만이라 결과 크기가 구조적으로 작습니다.
+    ⚠️ 오늘 발행되는 그룹에는 절대 부르지 마세요 — 그런 그룹은 인원이 많을 수 있어 결과가
+       큽니다. 호출부(`utils/scorecard_publish.py`)는 **오늘 발행하지 않는 그룹에만**
+       부릅니다(2026-09-03 부터 문턱이 1명이라, 사실상 "오늘 동의자가 0명인 그룹").
 
     반환: `{published_date: [nickname, ...]}`
     """
@@ -1000,7 +1001,7 @@ def fetch_published_group_index(service_client, currency, bracket_key):
     code = _require_currency(currency)
     bracket = _require_text(bracket_key, "체급 식별자")
 
-    # 2026-08-29 재감사 H-2 — 한 그룹이 아무리 미달(500명 미만)이어도, **과거 모든 날짜**의
+    # 2026-08-29 재감사 H-2 — 한 그룹이 오늘 아무리 작아도(미발행 그룹), **과거 모든 날짜**의
     # 행을 한 번에 읽으므로 날짜가 쌓이면 총 행 수는 상한을 넘을 수 있습니다. 일부만 읽으면
     # 청소(`delete_published_group`)가 일부 날짜를 놓칩니다.
     def _query(offset, limit):

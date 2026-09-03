@@ -13,8 +13,14 @@
 
 로그인한 사용자가 자신의 **"내 성적표"**(`holdings` 표에 직접 등록한 실제 보유 자산)를
 공개 동의하면, 매일 밤 배치가 통화(원화/달러) × 체급(매입원가 구간)별로 순위표를 만들어
-발행합니다. 순위는 매입원가 대비 수익률로 매기고, 참가자가 500명 미만인 그룹은 아예
-발행하지 않습니다.
+발행합니다. 순위는 매입원가 대비 수익률로 매기고, 최소 인원(`MIN_PARTICIPANTS_FOR_PUBLICATION`)
+미만인 그룹은 아예 발행하지 않습니다.
+
+> ✅ **2026-09-03 오너 확정 — 최소 인원 500명 → 1명.** 실사용자가 적어 500명을 기다리면
+> 기능이 시작조차 안 되고, 순위표에 오르는 건 어차피 6개 항목 전부 동의 + 최종 확인을 마친
+> 사람뿐이라 인원이 적다고 숨길 필요가 없다는 판단입니다. 상수·`group_meets_minimum()`·
+> 미달 그룹 청소 로직은 그대로 두고 값만 1 로 낮췄습니다. 아래 본문의 "500명"은 그 이전
+> 기록입니다.
 
 ## `/duel`(결투 가상계좌)과의 관계 — 가장 먼저 읽어야 하는 절
 
@@ -48,7 +54,7 @@
 8구간), `BRACKET_TIERS_USD`/`BRACKET_KEYS_USD`/`assign_bracket_usd()`/`bracket_label_usd()`(달러
 대응), `resolve_bracket_for_season()`/`resolve_bracket_for_season_usd()`,
 `season_key_for_date()`(매년 3월 1일 시작, 12개월 시즌), `MIN_PARTICIPANTS_FOR_PUBLICATION`
-(=500)/`group_meets_minimum()`, `rank_participants()`(⚠️ 입력 dict 키가 내부적으로 `"twr_pct"`로
+(=1, 2026-09-03 까지는 500)/`group_meets_minimum()`, `rank_participants()`(⚠️ 입력 dict 키가 내부적으로 `"twr_pct"`로
 고정돼 있음 — 새 코드도 이 리터럴 키로 넘겨야 하며, DB 컬럼/최종 payload 키는 `return_pct`로
 바꿔서 저장), `RECONSENT_BLOCK_MONTHS`(=3)/`resolve_reconsent_block()`,
 `LEADERBOARD_TOP_COUNT`/`LEADERBOARD_BOTTOM_COUNT`/`leaderboard_page_bounds()`/

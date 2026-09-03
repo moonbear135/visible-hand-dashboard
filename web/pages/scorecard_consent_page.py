@@ -527,11 +527,15 @@ async def _render_body(client, user_id: str) -> None:
     """
     ui.label(NOTICE_TRACKS_INDEPENDENT).classes('vh-muted vh-keep-all whitespace-pre-line')
     ui.label(NOTICE_SHARED_NICKNAME).classes('vh-muted vh-keep-all whitespace-pre-line')
+    # 2026-09-03 오너 확정 — 최소 인원 문턱 500명 → 1명. 예전 문구("참가자가 충분히 모인
+    # 그룹만 공개됩니다(같은 통화·같은 체급에 500명 이상) … 사람이 적으면 닉네임만으로
+    # 누구인지 추측될 수 있기 때문입니다")는 더는 사실이 아니라 지웠습니다. 인원이 적어도
+    # 바로 공개된다는 점은 동의하기 **전에** 알아야 하는 사실이라 여기서 분명히 말합니다.
     ui.label(
-        f'※ 순위표는 참가자가 충분히 모인 그룹만 공개됩니다(같은 통화·같은 체급에 '
-        f'{duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION}명 이상). 인원이 적은 그룹은 '
-        '동의하셔도 순위표가 만들어지지 않습니다 — 사람이 적으면 닉네임만으로 누구인지 '
-        '추측될 수 있기 때문입니다. 원화 순위표와 달러 순위표는 인원도 따로 셉니다.'
+        '※ 최종 확인까지 마치시면 같은 통화·같은 체급 그룹에 다른 참가자가 몇 명이든 — '
+        '한 분뿐이어도 — 다음 발행(하루 한 번, 밤)부터 순위표에 바로 반영됩니다. '
+        '인원이 적을 때는 그룹 안에서 닉네임이 눈에 띄기 쉽다는 점을 감안해 주세요. '
+        '원화 순위표와 달러 순위표는 서로 별개로 만들어집니다.'
     ).classes('vh-muted vh-keep-all')
 
     # ⚠️ `@ui.refreshable` 은 비동기 함수도 그대로 지원합니다(NiceGUI 3.x).
@@ -681,8 +685,7 @@ def _render_consent_form(client, user_id: str, state: dict, on_changed) -> None:
 
     if already:
         info_banner(
-            '✅ 최종 확인까지 마친 상태입니다. 다음 발행 배치부터 순위표에 나타납니다'
-            '(같은 그룹에 사람이 충분히 모였다면).'
+            '✅ 최종 확인까지 마친 상태입니다. 다음 발행 배치부터 순위표에 나타납니다.'
         )
         return
 

@@ -55,9 +55,9 @@
     SCORECARD_LEADERBOARD_ENABLED         … 이 화면 전용 스위치(기본 꺼짐, 환경변수)
     SCORECARD_LEADERBOARD_MENU_ADMIN_ONLY … 관리자 전용 단계 ↔ 전체 공개
 
-최소 인원 게이팅(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`)이 이미 구조적으로 막고
-있지만, 그건 "발행이 안 된다"는 뜻이고 **화면이 안 보인다**는 뜻은 아니라서 화면 쪽 스위치를
-따로 둡니다.
+최소 인원 게이팅(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`, 2026-09-03 부터 1명이라
+사실상 "동의자 0명이면 미발행")은 "발행이 안 된다"는 뜻이고 **화면이 안 보인다**는 뜻은
+아니라서 화면 쪽 스위치를 따로 둡니다.
 
 -------------------------------------------------------------------------------
 📝 문구에 대하여
@@ -159,10 +159,16 @@ NOTICE_HOW_RANKING_WORKS = (
     f"'{duel_rules.BRACKET_NONE_LABEL}' 그룹입니다."
 )
 
+# 2026-09-03 오너 확정 — 최소 인원 문턱 500명 → 1명(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`
+# 주석 참고). 예전 문구("참가자가 500명 이상인 그룹만 공개됩니다. 사람이 적으면 닉네임만으로
+# 누구인지 추측될 수 있어서 …")는 이제 사실이 아니라 지웠습니다. 순위표에 오르는 사람은
+# 본인이 6개 항목 전부에 동의하고 최종 확인까지 마친 분뿐이라는 점을 대신 적습니다.
+# ⚠️ 숫자를 여기 다시 적지 않습니다(§0-3-10) — 문턱을 다시 올리면 이 문구도 같이 손봐야 합니다.
 NOTICE_MIN_PARTICIPANTS = (
-    f"참가자가 {duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION}명 이상인 그룹만 공개됩니다. "
-    "사람이 적으면 닉네임만으로 누구인지 추측될 수 있어서, 인원이 모자란 그룹은 순위표를 "
-    "아예 만들지 않습니다(이미 만들어져 있었더라도 지웁니다)."
+    "순위표에는 공개에 동의하신 분만 오릅니다(6개 항목 전부 동의 + 최종 확인). "
+    "그룹 인원이 몇 명이든 동의하신 분이 한 분이라도 있으면 그 그룹은 다음 발행부터 공개됩니다. "
+    "동의를 철회하면 다음 발행부터 빠지고, 동의한 분이 아무도 남지 않은 그룹은 순위표를 "
+    "지웁니다."
 )
 
 NOTICE_DAILY = (
@@ -177,8 +183,8 @@ NOTICE_OVERLAP = (
 )
 
 NOTICE_EMPTY_GROUP = (
-    "아직 공개할 만큼 사람이 모이지 않았습니다. 이 그룹의 순위표는 참가자가 충분히 쌓인 "
-    "뒤부터 보입니다 — 오류가 아닙니다."
+    "아직 공개할 순위표가 없습니다. 이 그룹에 공개 동의하신 분이 생기면 다음 발행부터 "
+    "보입니다 — 오류가 아닙니다."
 )
 
 #: 위쪽/아래쪽 두 구간의 표시 이름. 인원 상한은 규칙 계층에서 가져옵니다(§0-3-10).
@@ -496,7 +502,7 @@ async def scorecard_leaderboard_page() -> None:
 def _render_coming_soon() -> None:
     warning_banner(
         '🚧 공개 순위표는 아직 준비중입니다.\n\n'
-        '참가자가 충분히 모이면 열립니다. 그때까지 누구의 성적표도 공개되지 않습니다.'
+        '열리기 전까지는 누구의 성적표도 공개되지 않습니다.'
     )
 
 
@@ -617,11 +623,12 @@ async def _render_group(client, view: dict, on_changed) -> None:
         ui.label(NOTICE_BRACKET_CURRENCY_USD).classes('vh-muted vh-keep-all whitespace-pre-line')
 
     if not published_date:
-        # 🔴 정상 상태입니다(오류 아님). 참가자가 없거나, 최소 인원 미달이라 발행되지
-        #    않았거나, 발행됐다가 인원이 줄어 지워진 경우 — 셋을 구분해 보여주지 않습니다
-        #    (구분 자체가 "이 구간에 몇 명쯤 있는지"의 힌트가 되고, 그건 소수 N 역추적의
-        #     재료입니다 — `scorecard_publish_db.fetch_public_leaderboard_latest_date()`
-        #     독스트링과 같은 판단).
+        # 🔴 정상 상태입니다(오류 아님). 동의한 참가자가 없거나, 최소 인원
+        #    (`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`, 2026-09-03 부터 1명) 미달이라
+        #    발행되지 않았거나, 발행됐다가 전원 철회로 지워진 경우 — 셋을 구분해 보여주지
+        #    않습니다(구분 자체가 "이 구간에 몇 명쯤 있는지"의 힌트가 되고, 그건 소수 N
+        #    역추적의 재료입니다 — `scorecard_publish_db.fetch_public_leaderboard_latest_date()`
+        #    독스트링과 같은 판단). 문턱이 1명이라 지금은 사실상 "동의자 0명"과 같습니다.
         info_banner(f'ℹ️ {NOTICE_EMPTY_GROUP}')
         return
 

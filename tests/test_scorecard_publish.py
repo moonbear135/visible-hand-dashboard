@@ -21,7 +21,7 @@
     ④ `build_publish_rows()` — `(currency, bracket_key)` 로 묶이는가, 수익률 없는 사용자를
        0% 로 채우지 않고 빼는가.
     ⑤ 발행 payload 에 `user_id` 가 절대 실리지 않는가(`FORBIDDEN_PUBLISH_FIELDS` 재사용).
-    ⑥ 최소 인원 500명 경계(499 vs 500), 미달 그룹의 과거 행 제거.
+    ⑥ 최소 인원 경계(`MIN_PARTICIPANTS_FOR_PUBLICATION` — 2026-09-03 부터 1명, 0 vs 1), 미달 그룹의 과거 행 제거.
     ⑦ 🔴 **원화·달러가 어디서도 섞이지 않는가** — 체급 키 집합, 그룹, 발행 payload, 삭제 필터.
     ⑧ 전량 재작성 · dry-run 무기록 · §0-3-2(사용자 수와 무관한 왕복 수).
     ⑨ 🔴 **종목별 상세지표 5종**(2026-08-23 신설) — 이미 계산된 값을 그대로 옮기는가,
@@ -933,15 +933,29 @@ def _group(count, prefix="닉"):
             for i in range(count)]
 
 
-def test_minimum_participant_threshold_is_five_hundred():
-    """임계값은 결투와 **같은 상수 하나**를 씁니다(§0-3-10 — 숫자를 두 번 적지 않기)."""
-    assert duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION == 500
+MIN = duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION
+
+
+def test_minimum_participant_threshold_is_one():
+    """
+    임계값은 `duel_rules` 의 **상수 하나**를 씁니다(§0-3-10 — 숫자를 두 번 적지 않기).
+
+    2026-09-03 오너 확정으로 500 → 1. 동의자가 한 명이라도 있으면 그 그룹은 발행됩니다.
+    (이전엔 여기서 `== 500` 과 "이 모듈에 500 이 다시 적혀 있지 않은가"를 확인했습니다.
+    1 은 리터럴로 검사할 수 없는 숫자라, 대신 비교가 `group_meets_minimum()` 한 곳으로만
+    가는지를 봅니다.)
+    """
+    assert MIN == 1
     code = _executable_source("scorecard_publish.py")
-    assert "500" not in code, "임계값 숫자가 이 모듈에 다시 적혀 있습니다"
+    assert "500" not in code, "옛 임계값 숫자가 이 모듈에 남아 있습니다"
+    assert "group_meets_minimum(" in code, "발행 판정이 규칙 계층 함수를 거치지 않습니다"
+    assert "MIN_PARTICIPANTS_FOR_PUBLICATION >" not in code
+    assert "MIN_PARTICIPANTS_FOR_PUBLICATION <" not in code
+    assert ">= duel_rules.MIN_PARTICIPANTS" not in code, "비교를 이 모듈에서 직접 하고 있습니다"
 
 
-@pytest.mark.parametrize("count,publishable", [(0, False), (1, False), (499, False),
-                                               (500, True), (501, True)])
+@pytest.mark.parametrize("count,publishable", [(0, False), (MIN - 1, False),
+                                               (MIN, True), (MIN + 1, True), (500, True)])
 def test_split_groups_by_threshold_boundary(count, publishable):
     groups = {(KRW, "krw_under_1m"): _group(count)}
     ok, blocked = scorecard_publish.split_groups_by_threshold(groups)
@@ -971,7 +985,8 @@ def test_all_possible_groups_pairs_each_currency_with_only_its_own_brackets():
 
 def test_group_that_fell_below_the_threshold_has_its_old_rows_deleted():
     """
-    참가자가 501명이었다가 499명으로 줄어든 경우 — **이미 발행돼 있던 행도 제거합니다.**
+    참가자가 있다가 최소 인원 아래로 줄어든 경우(문턱 1명이면 = 전원 철회) — **이미
+    발행돼 있던 행도 제거합니다.**
     보유종목 쪽은 통화까지 함께 걸어 지웁니다(같은 닉네임의 다른 통화 행을 지우지 않으려고).
     """
     client = FakeClient(responses={
@@ -1269,15 +1284,37 @@ def test_running_twice_on_the_same_day_does_not_duplicate_rows():
 
 
 def test_publish_batch_publishes_nothing_below_the_threshold():
-    client = _publish_client(user_count=499)
+    """
+    최소 인원 미만이면 아무것도 쓰지 않습니다. 2026-09-03 부터 문턱이 1명이라 "미만"은
+    곧 동의자 0명이고, 참가자가 없는 그룹은 `build_publish_rows()` 가 애초에 만들지 않으므로
+    `blocked_groups` 도 비어 있습니다(예전 499명 시험에서는 `["KRW/krw_5m_10m"]` 였습니다).
+    """
+    client = _publish_client(user_count=MIN - 1)
     summary = _run(client)
     assert summary["leaderboard_rows"] == 0
     assert summary["holdings_rows"] == 0
-    assert summary["blocked_groups"] == ["KRW/krw_5m_10m"]
+    assert summary["published_groups"] == []
+    assert summary["blocked_groups"] == []
     assert client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "insert") == []
+    assert client.calls_for(scorecard_publish_db.PUBLIC_HOLDINGS_TABLE, "insert") == []
 
 
 def test_publish_batch_publishes_at_exactly_the_threshold():
+    """동의자가 딱 최소 인원(=1명)이면 그 한 명만으로 그룹이 발행됩니다(2026-09-03 오너 확정)."""
+    client = _publish_client(user_count=MIN)
+    summary = _run(client)
+    assert summary["published_groups"] == ["KRW/krw_5m_10m"]
+    assert summary["blocked_groups"] == []
+    assert summary["leaderboard_rows"] == MIN
+    assert summary["holdings_rows"] == MIN
+    rows = [row for call in client.calls_for(
+                scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "insert")
+            for row in call.rows]
+    assert [row["rank"] for row in rows] == [1]
+
+
+def test_publish_batch_still_publishes_a_large_group():
+    """문턱을 낮춘 뒤에도 옛 경계값(500명) 그룹이 그대로 발행되는지 — 회귀 방지."""
     client = _publish_client(user_count=500)
     summary = _run(client)
     assert summary["published_groups"] == ["KRW/krw_5m_10m"]
@@ -1566,12 +1603,29 @@ def test_publish_batch_requires_an_explicit_date():
 # =============================================================================
 # 9. 요약 출력 — 빠진 것과 막힌 것이 드러나되, 식별자는 한 글자도 안 나오게
 # =============================================================================
-def test_summary_lines_show_blocked_groups_and_skipped_users():
-    client = _publish_client(user_count=499)
+def test_summary_lines_show_published_groups_with_their_counts():
+    """문턱이 1명이라 실제 배치에서 3명짜리 그룹은 발행됩니다 — 요약에도 그렇게 찍혀야 합니다."""
+    client = _publish_client(user_count=3)
     lines = scorecard_publish.format_summary_lines(_run(client))
     text = "\n".join(lines)
-    assert "499명" in text
-    assert "미발행" in text and "500" in text
+    assert "3명" in text
+    assert "✅ 발행" in text
+    assert "미발행" not in text
+
+
+def test_summary_lines_show_blocked_groups_and_skipped_users():
+    """
+    미발행 분기(`⛔ 미발행(최소 N명)`)는 문턱이 1명인 지금 실제 배치로는 만들 수 없지만
+    (참가자 0명 그룹은 애초에 안 생기므로), 문턱을 다시 올리면 곧바로 쓰이는 출력이라
+    요약 dict 를 직접 만들어 형식을 고정합니다 — 숫자는 상수에서 가져와야 합니다.
+    """
+    summary = {"published_date": TODAY.isoformat(), "season_key": "2026",
+               "consent_count": 2, "group_counts": {"KRW/krw_5m_10m": 2},
+               "published_groups": [], "blocked_groups": ["KRW/krw_5m_10m"],
+               "skipped": [{"user_id": "u1", "reason": scorecard_publish.SKIP_NO_HOLDINGS}]}
+    text = "\n".join(scorecard_publish.format_summary_lines(summary))
+    assert "2명" in text
+    assert "미발행" in text and f"최소 {MIN}명" in text
 
 
 def test_summary_lines_never_print_a_user_id():

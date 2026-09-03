@@ -1421,7 +1421,7 @@ def test_leaderboard_body_renders_and_does_not_preload_holdings():
 
 def test_leaderboard_body_handles_an_unpublished_group_as_a_normal_state():
     """
-    참가자가 없거나 최소 인원 미달이면 **오류가 아니라 안내**입니다. 질의도 1개만 나갑니다
+    동의한 참가자가 없으면(최소 인원 미달 — 2026-09-03 부터 1명) **오류가 아니라 안내**입니다. 질의도 1개만 나갑니다
     (발행일이 없으면 순위를 읽으러 가지 않습니다). 셋 중 무엇인지 **구분해 보여주지
     않습니다** — 구분 자체가 "이 구간에 몇 명쯤 있는지"의 힌트가 되기 때문입니다.
     """
@@ -1434,10 +1434,10 @@ def test_leaderboard_body_handles_an_unpublished_group_as_a_normal_state():
         _restore(board_page, saved)
 
     assert len(client.calls) == 1
-    assert any("아직 공개할 만큼" in text for text in notices), notices
-    blob = " ".join(notices)
-    for leak in ("명", "미달", "참가자 수"):
-        assert leak not in board_page.NOTICE_EMPTY_GROUP or "충분히" in blob
+    assert any("아직 공개할 순위표가 없습니다" in text for text in notices), notices
+    # 2026-09-03 문턱 500→1 이후에도 안내는 인원 힌트를 주지 않아야 합니다.
+    for leak in ("명", "미달", "참가자 수", "500", "충분히"):
+        assert leak not in board_page.NOTICE_EMPTY_GROUP, leak
 
 
 def test_leaderboard_holdings_panel_renders_escaped_and_marks_private_fields():

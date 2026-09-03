@@ -59,7 +59,7 @@
      로 또 한 번. 필터 오타 하나가 전원 공개로 이어지는 구조를 만들지 않습니다.
   ③ 모르는 값을 0 으로 바꾸지 않습니다. 수익률을 계산할 수 없는 사용자는 0% 로 세우지 않고
      **발행에서 뺍니다**(§0-1). "0% 수익"과 "성적을 계산할 수 없음"은 다른 말입니다.
-  ④ 최소 인원(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`) 미달 그룹은 아예 만들지 않고,
+  ④ 최소 인원(`duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`, 2026-09-03 부터 1명) 미달 그룹은 아예 만들지 않고,
      예전에 발행됐던 행도 지웁니다.
   ⑤ 철회한 사람의 과거 기록을 매일 밤 **전부** 다시 봅니다(배치가 하루 걸러도 따라잡게).
 
@@ -680,9 +680,13 @@ def split_groups_by_threshold(groups):
     """
     그룹들을 **발행할 것 / 발행하지 않을 것**으로 가릅니다.
 
-    임계값은 `duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION`(오너 확정 500명) 하나이고,
-    비교도 `duel_rules.group_meets_minimum()` 한 곳에서만 합니다(§0-3-10). 3명짜리 구간에서
-    "1위 닉네임"은 사실상 실명이라, 이 게이팅이 익명성의 마지막 방어선입니다.
+    임계값은 `duel_rules.MIN_PARTICIPANTS_FOR_PUBLICATION` 하나이고, 비교도
+    `duel_rules.group_meets_minimum()` 한 곳에서만 합니다(§0-3-10).
+
+    2026-09-03 오너 확정으로 그 값이 500 → 1 이 됐습니다(상수 주석 참고). 그래서 지금은
+    **동의자가 한 명이라도 순위가 매겨진 그룹은 전부 발행**되고, `blocked` 에는 실질적으로
+    아무것도 담기지 않습니다(`build_publish_rows()` 는 참가자가 0명인 그룹을 만들지 않으므로).
+    함수·반환 형태·요약 출력은 그대로 둡니다 — 문턱을 다시 올리면 상수 하나만 바꾸면 됩니다.
 
     반환 `(publishable, blocked)` — 둘 다 `{(currency, bracket_key): [참가자...]}`.
 
@@ -783,8 +787,8 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
     season_key = duel_rules.season_key_for_date(day_iso)
 
     # 2026-08-29 재감사 H-3 — `price_lookup` 을 안 넘긴 실제 배치 실행에서는, 가격 스냅샷
-    # (`data/*.json`) 을 하나도 못 읽는 것과 "이 구간에 사람이 500명 미만이다"(정상적인
-    # 익명성 게이팅)가 **코드상 완전히 같은 상태**(전원 `no_return`)가 됩니다. 그 상태가
+    # (`data/*.json`) 을 하나도 못 읽는 것과 "이 구간에 사람이 최소 인원 미만이다"(정상적인
+    # 게이팅 — 2026-09-03 부터 문턱 1명)가 **코드상 완전히 같은 상태**(전원 `no_return`)가 됩니다. 그 상태가
     # 아래 5단계에서 "발행 대상이 없다"로 읽혀 **과거 발행 이력 전체를 영구 삭제**합니다.
     # `report_db.run_daily_snapshot_batch()` 가 같은 상황에서 이미 하는 것처럼, 스냅샷을
     # 아예 못 읽었으면 값을 추측해서 진행하지 않고 여기서 멈춥니다(§0-1).
