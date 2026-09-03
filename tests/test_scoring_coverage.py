@@ -16,6 +16,7 @@ tests/test_scoring_coverage.py
      · 극단적 고평가 상한(PEGY z-score → 20%~5%)
      · 5개 배지 분기 전부 + PEGY 밴드 경계 4개
      · guardrail 의 정합성 모순 6종(①~⑥)과 그 승격 규칙
+       (2026-09-03: ①②④는 같은 기간(TTM) 지표끼리 비교하는 ①'②'④'로 교체 — 연간 ROE 대 TTM 비교는 '주의'로 강등)
 
    테스트가 "있다"와 "실제로 뭔가를 검증한다"는 다른 주장이므로(§0-1의 정신), 여기서는
    기대값을 코드 출력에서 베끼지 않고 **명세(SPEC §5)와 상수에서 손으로 계산해** 적었습니다.
@@ -403,23 +404,72 @@ def test_pegy_extreme_boundary_is_inclusive():
 # =====================================================================================
 # 10. guardrail — 정합성 모순 크로스체크 (2026-08-06 2차 감사 6-2)
 # =====================================================================================
-def test_deficit_with_positive_trailing_per_is_flagged_as_a_sign_loss_contradiction():
+def test_annual_roe_deficit_with_ttm_profit_is_a_period_mismatch_note_not_a_contradiction():
+    """
+    2026-09-03 — 옛 ①②④는 t_roe(시가총액표 ROE = 연간 결산 기준)와 t_per/t_eps(aside
+    'PER|EPS(YYYY.MM)' = 최근 4분기 TTM)를 같은 기간처럼 비교해, 흑자 전환 종목 20개
+    (삼성SDI·에코프로·펄어비스 등, 2026-09-03 실제 스냅샷)를 "부호 유실 모순"으로
+    오탐하고 검증 미통과(is_unverified)로 승격시켰습니다. 기간이 다른 지표끼리는
+    '주의(기간 불일치)'로 기록만 하고 승격하지 않아야 합니다.
+    """
+    result = apply_valuation_guardrail(
+        base_stock(t_roe=-3.15, t_per=1176.86, t_per_measured=1176.86, t_eps=458, graham_target=56_338))
+    notes = result["consistency_warnings"]
+    assert len(notes) == 1 and notes[0].startswith("주의(기간 불일치)")
+    assert "연간" in notes[0] and "TTM" in notes[0] and "직접 비교 불가" in notes[0]
+    assert "PER 1176.86배" in notes[0] and "EPS 458원" in notes[0] and "56,338원" in notes[0]
+    assert not any(w.startswith("모순") for w in notes)
+    assert result["is_unverified"] is False          # 승격 없음 — 퀀트 풀·Forward 카드 유지
+    assert result["is_valid"] is True
+    assert result.get("unverified_reason") is None
+    assert result["consistency_warnings"] == result["data_issues"]   # 기록은 남김(감사 추적)
+
+
+def test_period_mismatch_note_falls_back_to_t_per_when_measured_value_is_absent():
+    # t_per_measured 가 없는 옛 스냅샷/합성 입력도 같은 판정(부호 판정에 t_per 를 대신 사용)
     result = apply_valuation_guardrail(base_stock(t_roe=-5.0, t_per=10.0, t_eps=None))
-    assert any("PER 부호 유실" in w for w in result["consistency_warnings"])
-    assert result["is_unverified"] is True          # 모순은 검증 미통과로 승격
-    assert result["is_valid"] is True               # 다만 종목 전체를 차단하지는 않음
-    assert "데이터 정합성 모순" in result["unverified_reason"]
-    assert result["consistency_warnings"] == result["data_issues"]
+    assert any(w.startswith("주의(기간 불일치)") and "PER 10.0배" in w for w in result["consistency_warnings"])
+    assert result["is_unverified"] is False
 
 
-def test_deficit_with_positive_trailing_eps_is_flagged_unless_it_is_a_calculated_value():
-    flagged = apply_valuation_guardrail(base_stock(t_roe=-5.0, t_per=None, t_eps=5_000))
-    assert any("EPS 부호 유실" in w for w in flagged["consistency_warnings"])
-    # 🧮 계산값(price ÷ PER 역산)은 부호 유실이 아니라 설계된 예외라 경고하지 않습니다
+def test_period_mismatch_note_ignores_calculated_eps_and_needs_a_positive_ttm_value():
+    # 🧮 계산값(price ÷ PER 역산)은 실측이 아니라 근거로 쓰지 않습니다
     calculated = apply_valuation_guardrail(
         base_stock(t_roe=-5.0, t_per=None, t_eps=5_000, t_eps_calculated=True))
     assert calculated.get("consistency_warnings") is None
     assert calculated["is_unverified"] is False
+    # 진짜 적자(연간 ROE<0 · TTM PER<0 · TTM EPS 없음)는 기간 불일치가 아니므로 아무 경고도 없음
+    genuine_loss = apply_valuation_guardrail(
+        base_stock(t_roe=-5.19, t_per=None, t_per_measured=-50.81, t_eps=None))
+    assert genuine_loss.get("consistency_warnings") is None
+
+
+def test_same_period_per_sign_disagreement_between_sources_is_a_contradiction():
+    """①' — 같은 기간(TTM)인 상세 페이지 PER 과 시가총액표 PER 의 부호가 다르면 진짜 부호 유실 신호."""
+    result = apply_valuation_guardrail(
+        base_stock(t_roe=12.0, t_per=10.0, t_per_measured=10.0, t_per_primary=10.0, t_per_secondary=-10.2))
+    assert any(w.startswith("모순") and "출처 간 불일치" in w and "PER 부호 유실" in w
+               for w in result["consistency_warnings"])
+    assert result["is_unverified"] is True          # 모순은 검증 미통과로 승격
+    assert result["is_valid"] is True               # 다만 종목 전체를 차단하지는 않음
+    assert "데이터 정합성 모순" in result["unverified_reason"]
+    # 두 출처가 같은 부호(정상)면 경고 없음 — 값 차이는 3단계 교차검증(3%)의 몫
+    ok = apply_valuation_guardrail(
+        base_stock(t_per=10.0, t_per_measured=10.0, t_per_primary=10.0, t_per_secondary=10.2))
+    assert ok.get("consistency_warnings") is None
+    # 한쪽이 없으면(옛 스냅샷·aside 파싱 실패) 판정하지 않음 — 없는 값으로 지어내지 않음(§0-1)
+    partial = apply_valuation_guardrail(base_stock(t_per_measured=-10.0, t_per=None, t_eps=None, t_per_secondary=-10.0))
+    assert partial.get("consistency_warnings") is None
+
+
+def test_same_period_per_and_eps_sign_disagreement_is_a_contradiction():
+    """②' — 같은 줄(aside, TTM)에서 읽은 PER 과 EPS 의 부호가 다르면 정규식이 한쪽 부호만 잃은 것."""
+    result = apply_valuation_guardrail(base_stock(t_per=10.0, t_per_measured=10.0, t_eps=-5_000))
+    assert any(w.startswith("모순") and "부호가 다름" in w for w in result["consistency_warnings"])
+    assert result["is_unverified"] is True
+    # 계산값 EPS 는 판정 대상이 아님
+    calc = apply_valuation_guardrail(base_stock(t_per=10.0, t_per_measured=10.0, t_eps=-5_000, t_eps_calculated=True))
+    assert not any(w.startswith("모순") for w in (calc.get("consistency_warnings") or []))
 
 
 def test_dps_without_dividend_yield_is_flagged_as_a_conversion_miss():
@@ -428,11 +478,66 @@ def test_dps_without_dividend_yield_is_flagged_as_a_conversion_miss():
     assert result["is_unverified"] is True
 
 
-def test_graham_number_on_a_loss_making_company_is_flagged():
+def test_graham_number_with_non_positive_ttm_eps_is_flagged():
+    """④' — 그레이엄 넘버는 'TTM EPS>0 일 때만 산출'이 규칙이므로, EPS≤0 인데 값이 있으면 수집 로직 오류."""
     result = apply_valuation_guardrail(
-        base_stock(t_roe=-5.0, t_per=None, t_eps=None, graham_target=30_000))
+        base_stock(t_roe=-5.0, t_per=None, t_eps=-1_000, graham_target=30_000))
     assert any("그레이엄" in w and w.startswith("모순") for w in result["consistency_warnings"])
     assert result["is_unverified"] is True
+    # 연간 ROE 만 적자이고 TTM EPS 는 흑자면 산출 규칙 위반이 아님 → '주의(기간 불일치)'에만 언급
+    turnaround = apply_valuation_guardrail(
+        base_stock(t_roe=-5.0, t_per=12.0, t_per_measured=12.0, t_eps=4_000, graham_target=30_000))
+    assert not any(w.startswith("모순") for w in turnaround["consistency_warnings"])
+    assert any("그레이엄 넘버 30,000원은 TTM EPS 기준 산출값" in w for w in turnaround["consistency_warnings"])
+    assert turnaround["is_unverified"] is False
+
+
+def test_real_snapshot_turnaround_stocks_are_not_promoted_to_unverified():
+    """
+    실데이터 회귀 가드 — 2026-09-03 스냅샷에서 연간 ROE<0 · TTM PER/EPS>0 인 종목 20개
+    (삼성SDI 006400 등)가 검증 미통과로 승격되지 않아야 합니다. 스냅샷이 갱신돼 그런 종목이
+    하나도 없으면 skip (없는 데이터를 지어내서 검증하지 않음, §0-1).
+    """
+    import copy
+    import json
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+                        "data", "kospi200_pegy_latest.json")
+    if not os.path.exists(path):
+        pytest.skip("실제 스냅샷 없음")
+    with open(path, encoding="utf-8") as f:
+        stocks = json.load(f).get("stocks") or []
+    targets = [
+        s for s in stocks
+        if s.get("t_roe") is not None and s["t_roe"] < 0
+        and s.get("t_eps") is not None and s["t_eps"] > 0 and not s.get("t_eps_calculated")
+        and s.get("t_per_measured") is not None and s["t_per_measured"] > 0
+    ]
+    if not targets:
+        pytest.skip("현재 스냅샷에 연간 ROE 적자 · TTM 흑자 조합 종목이 없음")
+    guard_set = ("consistency_warnings", "is_unverified", "unverified_reason", "reject_reason",
+                 "forward_data_missing", "forward_missing_fields", "is_negative_growth",
+                 "dividend_data_unverified", "dividend_unverified_reason")
+    for s in targets:
+        pre = copy.deepcopy(s)
+        old_warnings = set(pre.get("consistency_warnings") or [])
+        pre["data_issues"] = [i for i in (pre.get("data_issues") or []) if i not in old_warnings]
+        for k in guard_set:
+            pre.pop(k, None)
+        pre["is_valid"] = pre.get("validation_error") is None    # 3단계 하네스 판정만 승계
+        result = apply_valuation_guardrail(pre)
+        contradictions = [w for w in (result.get("consistency_warnings") or []) if w.startswith("모순")]
+        assert not contradictions, f"{s['name']}({s['code']}): {contradictions}"
+        assert any(w.startswith("주의(기간 불일치)") for w in result["consistency_warnings"]), s["name"]
+        assert result["is_unverified"] is False, s["name"]
+
+
+def test_collector_emits_both_ttm_per_sources_for_the_same_period_sign_check():
+    """①' 배선 — 수집기가 상세 페이지 PER(t_per_primary)·시가총액표 PER(t_per_secondary)을 따로 남겨야 합니다."""
+    path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "collector_kospi200.py")
+    with open(path, encoding="utf-8") as f:
+        src = f.read()
+    assert '"t_per_primary": n_t_per' in src
+    assert '"t_per_secondary": raw_per' in src
 
 
 def test_graham_number_far_above_price_is_a_warning_but_not_a_contradiction():

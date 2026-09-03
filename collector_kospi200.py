@@ -1808,6 +1808,11 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             "t_per": t_per,
             # 부호까지 보존한 원본 Trailing PER(적자면 음수). 화면에서 '적자 근거'로 노출합니다.
             "t_per_measured": t_per_measured,
+            # 2026-09-03 신설 — 같은 기간(최근 4분기 TTM)인 두 출처의 PER 원본을 따로 남깁니다.
+            # utils/guardrail.py ①'가 이 둘의 부호가 어긋나는지(부호 유실 회귀)를 판정합니다.
+            # 예전 ROE(연간) 대 PER(TTM) 비교는 기간이 달라 흑자 전환 종목을 오탐했습니다.
+            "t_per_primary": n_t_per,      # 종목 상세 aside 'PER|EPS(YYYY.MM)' (부호 보존)
+            "t_per_secondary": raw_per,    # 시가총액 순위표 PER 열 (부호 보존, 3단계 교차검증 2차 출처)
             "is_trailing_loss": is_trailing_loss,
             "loss_evidence": loss_evidence,
             "t_eps": t_eps,

@@ -52,32 +52,79 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
     # (abs()가 부호를 지운 1-1 버그의 직접적 방치 원인). 값을 고치지는 않고 —
     # 여기서 조용히 보정하면 또 같은 일이 반복되므로 — 모순을 발견하면 목록에
     # 그대로 적어 화면·JSON에 노출하고, 심각한 것만 검증 실패로 승격시킵니다.
+    #
+    # ⚠️ 2026-09-03 수정 — 구 ①②④는 "집계 기간이 다른 지표"를 같은 시점의 값처럼 비교했습니다.
+    #   · t_roe      : 네이버 시가총액 순위표 ROE 열. 2분기 실적이 TTM에 반영된 2026-08-27~09-03
+    #                  구간(kospi200_stock_history.csv 실측)에 511종목 중 2종목만 값이 바뀜
+    #                  → 분기 롤오버와 무관한 연간(최근 결산) 기준 값입니다.
+    #   · t_per/t_eps: 종목 상세 aside 'PER|EPS(YYYY.MM)' = 최근 4분기 합산(TTM). 같은 구간에
+    #                  78종목이 바뀌었고(에코프로 EPS 452→1,036, 펄어비스 2,320→4,227 등),
+    #                  시가총액표 PER 열도 이 값과 3% 이내로 같이 움직입니다(3단계 교차검증 통과).
+    #   · 실측 분포(2026-09-03 스냅샷): ROE(연간)<0 인데 PER·EPS(TTM)>0 인 종목 20개(삼성SDI·
+    #     에코프로·펄어비스 등, 전부 price÷EPS≈PER 정합, 네이버 실측값)와 그 거울상인
+    #     ROE(연간)>0 인데 시가총액표 PER(TTM)<0 인 종목 14개(대한항공·LG디스플레이 등)가
+    #     함께 존재합니다. 부호 유실 버그라면 후자의 조합은 만들어질 수 없으므로, 이 조합은
+    #     '흑자 전환/적자 전환 구간'에서 정상적으로 생기는 기간 불일치이지 데이터 모순이 아닙니다.
+    #   → ROE(연간) 대 PER·EPS(TTM) 비교는 '모순'(검증 미통과 승격)이 아니라 '주의'(기록만)로
+    #     내리고, 문구에 기간이 달라 직접 비교할 수 없음을 명시합니다.
+    #   → 부호 유실 회귀 가드는 같은 기간(TTM) 지표끼리만 비교하는 ①'(상세 페이지 PER vs
+    #     시가총액표 PER 부호)·②'(PER vs EPS 부호)·④'(EPS≤0 인데 그레이엄 산출)로 대체합니다.
     # =========================================================
     consistency_warnings = []
     t_roe = cleaned.get('t_roe')
     t_per = cleaned.get('t_per')
     t_eps = cleaned.get('t_eps')
     graham_target = cleaned.get('graham_target')
+    # 부호가 보존된 TTM PER 원본(t_per 는 양수일 때만 채워지므로 부호 판정에는 쓸 수 없음).
+    # t_per_measured 가 없는 옛 스냅샷/합성 입력은 t_per 로 대신합니다.
+    t_per_signed = cleaned.get('t_per_measured')
+    if t_per_signed is None:
+        t_per_signed = t_per
+    t_per_primary = cleaned.get('t_per_primary')       # 상세 페이지 aside TTM PER (2026-09-03 신설)
+    t_per_secondary = cleaned.get('t_per_secondary')   # 시가총액표 TTM PER (교차검증 2차 출처)
+    # 계산값(price ÷ PER 역산)은 부호 유실이 아니라 설계된 예외라 부호 판정에서 뺍니다.
+    t_eps_measured = t_eps if (t_eps is not None and not cleaned.get('t_eps_calculated')) else None
 
-    # ① 적자(ROE<0)인데 Trailing PER이 양수 → 부호 유실(정규식/abs) 재발 신호
-    if t_roe is not None and t_roe < 0 and t_per is not None and t_per > 0:
+    def _sign(v):
+        if v is None or v == 0:
+            return None
+        return 1 if v > 0 else -1
+
+    # ①' 같은 기간(TTM) 두 출처의 PER 부호가 다름 → 어느 한쪽 부호 유실(1-1 버그의 직접 재발 신호)
+    if _sign(t_per_primary) and _sign(t_per_secondary) and _sign(t_per_primary) != _sign(t_per_secondary):
         consistency_warnings.append(
-            f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing PER은 {t_per}배(양수) — PER 부호 유실 의심"
+            f"모순: Trailing PER 부호가 출처 간 불일치 — 상세 페이지 {t_per_primary}배 vs 시가총액표 {t_per_secondary}배"
+            f"(둘 다 최근 4분기 TTM 기준) — PER 부호 유실 의심"
         )
-    # ② 적자인데 Trailing EPS가 양수 → 같은 계열의 부호 유실
-    if t_roe is not None and t_roe < 0 and t_eps is not None and t_eps > 0 and not cleaned.get('t_eps_calculated'):
+    # ②' 같은 기간(TTM) PER 과 EPS 의 부호가 다름 → 같은 계열의 부호 유실
+    if _sign(t_per_signed) and _sign(t_eps_measured) and _sign(t_per_signed) != _sign(t_eps_measured):
         consistency_warnings.append(
-            f"모순: Trailing ROE {t_roe}%(적자)인데 Trailing EPS는 {t_eps:,}원(양수) — EPS 부호 유실 의심"
+            f"모순: Trailing PER {t_per_signed}배와 Trailing EPS {t_eps_measured:,}원의 부호가 다름"
+            f"(둘 다 최근 4분기 TTM 기준) — 부호 유실 의심"
         )
+    # ④' EPS(TTM)가 0 이하인데 그레이엄 넘버가 산출됨 → "EPS>0 일 때만 산출" 규칙 위반(수집 로직 오류)
+    if graham_target and t_eps is not None and t_eps <= 0:
+        consistency_warnings.append(
+            f"모순: Trailing EPS {t_eps:,}원(0 이하)인데 그레이엄 넘버({graham_target:,}원)가 산출됨 — 산출 규칙(EPS>0) 위반, 표시 금지 대상"
+        )
+    # ① ② ④(구) → 기간 불일치 '주의': 연간 ROE 는 적자인데 TTM 지표는 흑자. 기록만 하고 승격하지 않음.
+    ttm_profit_bits = []
+    if _sign(t_per_signed) == 1:
+        ttm_profit_bits.append(f"PER {t_per_signed}배")
+    if _sign(t_eps_measured) == 1:
+        ttm_profit_bits.append(f"EPS {t_eps_measured:,}원")
+    if t_roe is not None and t_roe < 0 and ttm_profit_bits:
+        note = (
+            f"주의(기간 불일치): ROE {t_roe}%(연간 결산 기준)는 적자인데 최근 4분기 합산(TTM) 기준 "
+            f"Trailing {'·'.join(ttm_profit_bits)}은 흑자 — 집계 기간이 달라 직접 비교 불가(흑자 전환 구간일 수 있음)"
+        )
+        if graham_target:
+            note += f" / 그레이엄 넘버 {graham_target:,}원은 TTM EPS 기준 산출값"
+        consistency_warnings.append(note)
     # ③ DPS는 있는데 주주환원율이 0 → 배당수익률 환산 누락
     if dps is not None and dps > 0 and sh_return is not None and sh_return <= 0:
         consistency_warnings.append(
             f"모순: DPS {dps:,}원인데 배당수익률이 {sh_return}% — 배당수익률 환산 누락 의심"
-        )
-    # ④ 적자인데 그레이엄 넘버가 산출됨 → "적자는 산출 불가" 규칙 위반
-    if t_roe is not None and t_roe < 0 and graham_target:
-        consistency_warnings.append(
-            f"모순: 적자(ROE {t_roe}%) 종목인데 그레이엄 넘버({graham_target:,}원)가 산출됨 — 표시 금지 대상"
         )
     # ⑤ 그레이엄 넘버가 현재가의 5배 초과 → EPS/PBR 파싱 오염 의심
     if graham_target and price > 0 and graham_target > price * GRAHAM_OUTLIER_MULTIPLE:
@@ -98,9 +145,10 @@ def apply_valuation_guardrail(stock_data: dict) -> dict:
                 existing_issues.append(w)
         cleaned['data_issues'] = existing_issues
 
-    # 위 ①②④(부호 유실 계열 모순)는 "값이 조금 이상하다"가 아니라 "수집 로직이 다시
-    # 망가졌다"는 신호이므로, 종목을 완전히 차단하진 않되 검증 미통과로 승격시켜
-    # 퀀트 점수 산출 대상에서 빼고 화면에 사유를 띄웁니다(회귀 가드).
+    # 위 ①'②'④'(같은 기간 지표끼리의 부호 유실 계열 모순)는 "값이 조금 이상하다"가 아니라
+    # "수집 로직이 다시 망가졌다"는 신호이므로, 종목을 완전히 차단하진 않되 검증 미통과로
+    # 승격시켜 퀀트 점수 산출 대상에서 빼고 화면에 사유를 띄웁니다(회귀 가드).
+    # '주의(기간 불일치)'·'이상치'·'주의'는 기록만 하고 승격하지 않습니다.
     critical_contradictions = [w for w in consistency_warnings if w.startswith("모순")]
 
     def _finish(is_valid, is_unverified, reject_reason=None, unverified_reason=None):
