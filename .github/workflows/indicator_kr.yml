@@ -40,6 +40,19 @@ jobs:
       - name: 저장소 코드 체크아웃
         uses: actions/checkout@v3
 
+      - name: 원격 main 최신 커밋으로 동기화 (앞선 실행이 방금 푸시한 스냅샷 반영)
+        # scrape_us.yml e5d9900(2026-09-03)과 같은 이유 — checkout 은 트리거 시점의
+        # github.sha 에 고정되어, 앞선 실행이 그새 푸시한 당일 스냅샷을 못 볼 수 있습니다.
+        # --skip-if-not-ready 사전 점검이 최신 스냅샷을 보게 하려면 여기서 origin/main
+        # 으로 맞춰야 합니다. 이 워크플로우엔 scrape_us.yml 같은 concurrency 대기가 없어
+        # 완전한 보장은 아니지만(진짜 겹치면 여전히 못 볼 수 있음), 순차 실행 시나리오는
+        # 이 한 스텝으로 막힙니다 — 손해는 없고 이득만 있어 우선 추가합니다.
+        run: |
+          echo "트리거 시점 커밋(github.sha): ${{ github.sha }}"
+          git fetch --depth=1 origin main
+          git reset --hard origin/main
+          echo "동기화 후 HEAD             : $(git rev-parse HEAD)"
+
       - name: 파이썬 환경 설정
         uses: actions/setup-python@v4
         with:
