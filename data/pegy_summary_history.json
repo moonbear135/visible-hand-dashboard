@@ -584,7 +584,7 @@
     "collected_at": "2026-09-02 22:07"
   },
   {
-    "date": "2026-09-03 17:39",
+    "date": "2026-09-03 22:06",
     "f_per": 13.0,
     "growth": 18.1,
     "pegy": 0.7,
@@ -592,6 +592,6 @@
     "f_per_sample_count": 256,
     "growth_sample_count": 239,
     "pegy_sample_count": 202,
-    "collected_at": "2026-09-03 17:39"
+    "collected_at": "2026-09-03 22:06"
   }
 ]

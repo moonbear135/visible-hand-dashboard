@@ -1,6 +1,6 @@
 {
   "metadata": {
-    "last_updated_at": "2026-09-03 17:39",
+    "last_updated_at": "2026-09-03 22:06",
     "status": "DEGRADED",
     "total_count": 500,
     "valid_count": 378,
@@ -2124,13 +2124,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.45",
-      "ev_ebitda": null,
+      "ev_ebitda": "6.90",
       "g_eff": 35.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[32, 32])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=005490 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495bfe5f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 32.9배)"
       ],
       "forward_data_missing": false,
@@ -2277,13 +2276,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.20",
-      "ev_ebitda": null,
+      "ev_ebitda": "16.85",
       "g_eff": 22.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[27, 57])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=010130 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496fec700>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[27, 57])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -2353,13 +2351,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.65",
-      "ev_ebitda": null,
+      "ev_ebitda": "12.23",
       "g_eff": 5.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[48, 34])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=316140 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f97b50>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[48, 34])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -2429,13 +2426,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "11.27",
-      "ev_ebitda": null,
+      "ev_ebitda": "23.31",
       "g_eff": 11.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[34, 41])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=267260 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84951e9e70>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[34, 41])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -2505,13 +2501,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "9.81",
-      "ev_ebitda": null,
+      "ev_ebitda": "31.67",
       "g_eff": 29.8,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[27, 6])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=298040 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84959f7f40>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 34.0배)"
       ],
       "forward_data_missing": false,
@@ -2662,13 +2657,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.11",
-      "ev_ebitda": null,
+      "ev_ebitda": "16.13",
       "g_eff": 7.3,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[14, 39])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=138040 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965ddf90>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[14, 39])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -3137,13 +3131,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "37.01",
-      "ev_ebitda": null,
+      "ev_ebitda": "182.07",
       "g_eff": 29.9,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[14, 96])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=196170 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496168d60>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 34.4배)"
       ],
       "forward_data_missing": false,
@@ -4658,13 +4651,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.07",
-      "ev_ebitda": null,
+      "ev_ebitda": "7.87",
       "g_eff": 30.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[26, 71])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=011070 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496169d50>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 31.4배)"
       ],
       "forward_data_missing": false,
@@ -4735,13 +4727,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.83",
-      "ev_ebitda": null,
+      "ev_ebitda": "46.20",
       "g_eff": -21.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[10, 51])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=272210 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84956ea9b0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[10, 51])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -4812,13 +4803,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "6.41",
-      "ev_ebitda": null,
+      "ev_ebitda": "37.01",
       "g_eff": 31.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[23, 54])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=047810 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f979d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 31.6배)"
       ],
       "forward_data_missing": false,
@@ -4891,14 +4881,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "4.93",
-      "ev_ebitda": null,
+      "ev_ebitda": "38.16",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[19, 8])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=086520 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965b12d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)",
@@ -5816,13 +5805,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.51",
-      "ev_ebitda": null,
+      "ev_ebitda": "10.56",
       "g_eff": 32.4,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[16, 76])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=006260 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84954ab3a0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 32.5배)"
       ],
       "forward_data_missing": false,
@@ -6053,13 +6041,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.45",
-      "ev_ebitda": null,
+      "ev_ebitda": "2081.28",
       "g_eff": -48.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[5, 89])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=0126Z0 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849616ba30>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[5, 89])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -7229,13 +7216,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.31",
-      "ev_ebitda": null,
+      "ev_ebitda": "26.91",
       "g_eff": -4.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[16, 34])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=267270 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f943d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[16, 34])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -7387,13 +7373,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.69",
-      "ev_ebitda": null,
+      "ev_ebitda": "3.47",
       "g_eff": 39.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[84, 59])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=032640 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84960c8fd0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 43,225원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 38.2배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -7549,13 +7534,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "3.07",
-      "ev_ebitda": null,
+      "ev_ebitda": "20.41",
       "g_eff": 31.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[28, 16])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=377300 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f72c50>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 30.3배)"
       ],
       "forward_data_missing": false,
@@ -7852,13 +7836,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.99",
-      "ev_ebitda": null,
+      "ev_ebitda": "19.08",
       "g_eff": 7.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[34, 40])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=175330 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84960c9540>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[34, 40])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -8078,14 +8061,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.31",
-      "ev_ebitda": null,
+      "ev_ebitda": "14.02",
       "g_eff": 33.1,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[9, 0])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=088350 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496589270>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 32,550원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 33.1배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
@@ -8242,13 +8224,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "4.76",
-      "ev_ebitda": null,
+      "ev_ebitda": "44.95",
       "g_eff": 22.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[16, 63])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=240810 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f739d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[16, 63])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -8400,13 +8381,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.26",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.22",
       "g_eff": 15.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[39, 5])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=271560 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849592ea10>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[39, 5])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -8476,13 +8456,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "5.36",
-      "ev_ebitda": null,
+      "ev_ebitda": "35.05",
       "g_eff": 31.3,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[16, 30])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=353200 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84959c3c40>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 34.2배)"
       ],
       "forward_data_missing": false,
@@ -8637,13 +8616,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "6.28",
-      "ev_ebitda": null,
+      "ev_ebitda": "23.41",
       "g_eff": 4.1,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[31, 56])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=058470 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965b10c0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[31, 56])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -9194,14 +9172,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "12.66",
-      "ev_ebitda": null,
+      "ev_ebitda": "-46.94",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [HLB] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[18, 59])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=028300 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f97670>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -20.33배(<0), Trailing ROE -44.32%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -9359,14 +9336,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.40",
-      "ev_ebitda": null,
+      "ev_ebitda": "11.08",
       "g_eff": 27.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "Trailing ROE를 같은 회사 보통주(00538*)에서 상속 — 이 우선주의 실측치가 아님",
         "상장주식수 파싱 실패 (후보값=[56, 19])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=005385 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84952e5660>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 946,675원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 26.2배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -9613,13 +9589,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.21",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.85",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [현대제철] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[15, 90])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=004020 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495ae17e0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -232.72배(<0), Trailing ROE -0.04%(<0)",
         "Trailing EPS 수집 실패",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -9775,13 +9750,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.93",
-      "ev_ebitda": null,
+      "ev_ebitda": "-57.80",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [SKC] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[11, 23])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=011790 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965b1e70>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -4.08배(<0), Trailing ROE -73.28%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -10166,13 +10140,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "5.86",
-      "ev_ebitda": null,
+      "ev_ebitda": "22.78",
       "g_eff": -8.2,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[14, 76])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=082740 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965de650>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[14, 76])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -10329,13 +10302,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.79",
-      "ev_ebitda": null,
+      "ev_ebitda": "3.29",
       "g_eff": 34.2,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[17, 85])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=001040 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84954a88b0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 32.5배)"
       ],
       "forward_data_missing": false,
@@ -10493,13 +10465,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "10.11",
-      "ev_ebitda": null,
+      "ev_ebitda": "579.37",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [로보티즈] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[4, 66])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=108490 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849619d8a0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -934.21배(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -10653,13 +10624,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.87",
-      "ev_ebitda": null,
+      "ev_ebitda": "6.34",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [한온시스템] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[6, 74])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=018880 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84951e90f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -582.5배(<0), Trailing ROE -6.0%(<0)",
         "Trailing EPS 수집 실패",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -10812,13 +10782,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "3.55",
-      "ev_ebitda": null,
+      "ev_ebitda": "13.31",
       "g_eff": 5.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[39, 63])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=161890 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849519ad10>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[39, 63])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -11214,13 +11183,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.71",
-      "ev_ebitda": null,
+      "ev_ebitda": "3.67",
       "g_eff": 4.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[29, 33])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=111770 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f972b0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[29, 33])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -11290,13 +11258,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.50",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.56",
       "g_eff": 11.1,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[28, 71])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=011780 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849659c2b0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[28, 71])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -11369,13 +11336,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "8.13",
-      "ev_ebitda": null,
+      "ev_ebitda": "-28.95",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [리가켐바이오] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[12, 22])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=141080 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495ae3550>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -18.14배(<0), Trailing ROE -13.22%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -12004,13 +11970,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "48.24",
-      "ev_ebitda": null,
+      "ev_ebitda": "-57.13",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [파두] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[27, 39])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=440110 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849658aec0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -30.98배(<0), Trailing ROE -131.08%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -12241,13 +12206,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.47",
-      "ev_ebitda": null,
+      "ev_ebitda": "27.63",
       "g_eff": 16.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[45, 28])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=139130 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495221900>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 48,030원) — 추정 신뢰구간 밖이라 상한값으로 절단",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -12396,13 +12360,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "5.43",
-      "ev_ebitda": null,
+      "ev_ebitda": "40.32",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[38, 2])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=084370 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965de2f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -12479,13 +12442,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.19",
-      "ev_ebitda": null,
+      "ev_ebitda": "9.18",
       "g_eff": 33.6,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[15, 14])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=023530 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965ddcf0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 303,325원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 30.9배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -12563,13 +12525,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.69",
-      "ev_ebitda": null,
+      "ev_ebitda": "-77.01",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [SK바이오사이언스] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[5, 99])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=302440 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849659d780>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -34.95배(<0), Trailing ROE -3.2%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -12645,13 +12606,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.49",
-      "ev_ebitda": null,
+      "ev_ebitda": "9.70",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[22, 2])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=017800 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849519a260>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -12728,13 +12688,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.58",
-      "ev_ebitda": null,
+      "ev_ebitda": "8.39",
       "g_eff": 15.2,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[19, 65])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=006360 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495ae0550>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[19, 65])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -13206,14 +13165,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.72",
-      "ev_ebitda": null,
+      "ev_ebitda": "4.28",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[26, 47])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=003690 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965ca440>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -13295,14 +13253,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "39.05",
-      "ev_ebitda": null,
+      "ev_ebitda": "-58.31",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [보로노이] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[6, 21])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=310210 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84951e9c30>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -39.17배(<0), Trailing ROE -50.18%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -13379,13 +13336,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.00",
-      "ev_ebitda": null,
+      "ev_ebitda": "6.76",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[5, 99])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=007340 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496168940>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -13462,13 +13418,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "4.88",
-      "ev_ebitda": null,
+      "ev_ebitda": "25.38",
       "g_eff": 27.8,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[66, 66])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=064760 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495638670>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 29.4배)"
       ],
       "forward_data_missing": false,
@@ -13615,13 +13570,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.83",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.20",
       "g_eff": 6.1,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[25, 0])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=004370 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495221600>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[25, 0])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -14895,13 +14849,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.86",
-      "ev_ebitda": null,
+      "ev_ebitda": "3.09",
       "g_eff": 1.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[15, 82])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=005850 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84956593f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[15, 82])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -14971,14 +14924,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "9.80",
-      "ev_ebitda": null,
+      "ev_ebitda": "98.81",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[4, 59])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=214370 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84956e8610>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -15773,13 +15725,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.00",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.20",
       "g_eff": 16.9,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[40, 45])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=081660 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495aca620>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[40, 45])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -15931,13 +15882,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.35",
-      "ev_ebitda": null,
+      "ev_ebitda": "3.52",
       "g_eff": 27.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[12, 56])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=181710 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849592c4f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 26.6배)"
       ],
       "forward_data_missing": false,
@@ -16091,13 +16041,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.14",
-      "ev_ebitda": null,
+      "ev_ebitda": "30.35",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [서진시스템] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[13, 77])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=178320 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965ca3e0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -23.3배(<0), Trailing ROE -12.63%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -16173,13 +16122,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.89",
-      "ev_ebitda": null,
+      "ev_ebitda": "10.32",
       "g_eff": 12.2,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[42, 83])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=014680 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84954a8910>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[42, 83])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -16324,13 +16272,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "3.28",
-      "ev_ebitda": null,
+      "ev_ebitda": "24.77",
       "g_eff": -9.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[12, 45])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=237690 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495bfc3d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[12, 45])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -17301,14 +17248,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "13.70",
-      "ev_ebitda": null,
+      "ev_ebitda": "151.91",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[4, 78])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=457190 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495bfd060>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -18331,14 +18277,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "7.85",
-      "ev_ebitda": null,
+      "ev_ebitda": "63.44",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [테크윙] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[17, 41])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=089030 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84960e7ac0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -146.04배(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -18804,13 +18749,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.38",
-      "ev_ebitda": null,
+      "ev_ebitda": "11.67",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[18, 65])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=096530 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849532cd30>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -18890,13 +18834,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.39",
-      "ev_ebitda": null,
+      "ev_ebitda": "18.70",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [호텔신라] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[20, 87])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=008770 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8496589ab0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -12.09배(<0), Trailing ROE -14.46%(<0)",
         "Trailing EPS 수집 실패",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -19056,14 +18999,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "12.08",
-      "ev_ebitda": null,
+      "ev_ebitda": "10.59",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [아시아나항공] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[7, 36])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=020560 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849659c250>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -1.35배(<0), Trailing ROE -34.48%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -19217,13 +19159,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.49",
-      "ev_ebitda": null,
+      "ev_ebitda": "4.48",
       "g_eff": 39.9,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[26, 36])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=001120 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84954ab1f0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 175,025원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 39.1배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -20265,13 +20206,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "7.04",
-      "ev_ebitda": null,
+      "ev_ebitda": "-70.50",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [코오롱티슈진] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[3, 67])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=950160 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84956eadd0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -7.8배(<0), Trailing ROE -183.43%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -20499,13 +20439,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "6.36",
-      "ev_ebitda": null,
+      "ev_ebitda": "24.34",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[12, 24])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=039200 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84960a09d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -20582,13 +20521,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.97",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.98",
       "g_eff": 12.3,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[14, 17])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=035900 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495199210>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[14, 17])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -20658,13 +20596,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "5.31",
-      "ev_ebitda": null,
+      "ev_ebitda": "51.36",
       "g_eff": 17.3,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[15, 3])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=089970 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849659c460>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[15, 3])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -21221,13 +21158,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.24",
-      "ev_ebitda": null,
+      "ev_ebitda": "8.45",
       "g_eff": -4.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[15, 12])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=069620 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495198850>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[15, 12])"
       ],
       "forward_data_missing": false,
       "is_negative_growth": true,
@@ -21880,13 +21816,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.59",
-      "ev_ebitda": null,
+      "ev_ebitda": "10.30",
       "g_eff": 6.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[17, 68])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=001740 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84954ab220>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[17, 68])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -22040,13 +21975,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "3.54",
-      "ev_ebitda": null,
+      "ev_ebitda": "13.16",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[29, 34])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=082920 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495ac8a60>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -22524,13 +22458,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.67",
-      "ev_ebitda": null,
+      "ev_ebitda": "7.85",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[4, 48])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=300720 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84960cbac0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -23162,13 +23095,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.72",
-      "ev_ebitda": null,
+      "ev_ebitda": "6.26",
       "g_eff": 14.7,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
-        "상장주식수 파싱 실패 (후보값=[12, 97])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=017960 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f70c70>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))"
+        "상장주식수 파싱 실패 (후보값=[12, 97])"
       ],
       "forward_data_missing": false,
       "is_unverified": false,
@@ -23327,13 +23259,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.70",
-      "ev_ebitda": null,
+      "ev_ebitda": "83.64",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[2, 57])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=043260 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495902230>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -23665,13 +23596,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.94",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.88",
       "g_eff": 39.5,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[7, 58])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=000080 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84959005b0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 38.4배)"
       ],
       "forward_data_missing": false,
@@ -23741,13 +23671,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "3.81",
-      "ev_ebitda": null,
+      "ev_ebitda": "35.35",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[4, 95])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=001820 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495659270>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -23827,14 +23756,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "4.83",
-      "ev_ebitda": null,
+      "ev_ebitda": "-47.83",
       "g_eff": null,
       "is_valid": false,
       "validation_error": "❌ [제이앤티씨] 1단계 검증 실패로 반영 차단!",
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[3, 43])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=204270 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f73a30>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "적자 기업 — Trailing 밸류에이션(PER/PEGY/적정가/그레이엄) 산출 불가: Trailing PER -15.89배(<0), Trailing ROE -31.32%(<0)",
         "Trailing EPS 수집 실패",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
@@ -23997,14 +23925,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.19",
-      "ev_ebitda": null,
+      "ev_ebitda": "-107.71",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[3, 44])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=003240 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84951995a0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -24255,13 +24182,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "2.66",
-      "ev_ebitda": null,
+      "ev_ebitda": "9.74",
       "g_eff": 29.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[20, 67])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=032350 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f95f90>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 30.3배)"
       ],
       "forward_data_missing": false,
@@ -26676,13 +26602,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.71",
-      "ev_ebitda": null,
+      "ev_ebitda": "4.30",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[13, 5])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=056190 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f84965dfbb0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
@@ -26930,13 +26855,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.46",
-      "ev_ebitda": null,
+      "ev_ebitda": "9.48",
       "g_eff": 33.9,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[20, 96])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=195870 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495f95450>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 목표 PER 25.0배 상한 적용 (캡 미적용 34.4배)"
       ],
       "forward_data_missing": false,
@@ -33437,14 +33361,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.30",
-      "ev_ebitda": null,
+      "ev_ebitda": "6.29",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[13, 0])",
         "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=383800 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f849659f880>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "Forward ROE 컨센서스 미제공 (애널리스트 커버리지 없음)",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
@@ -34414,14 +34337,13 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "0.27",
-      "ev_ebitda": null,
+      "ev_ebitda": "1.10",
       "g_eff": 32.0,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "Trailing ROE를 같은 회사 보통주(00088*)에서 상속 — 이 우선주의 실측치가 아님",
         "상장주식수 파싱 실패 (후보값=[29, 79])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=00088K (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495acb3d0>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "목표주가 캡 적용: 현재가 2.5배 상한에 도달 (캡 미적용 산출값 473,275원) — 추정 신뢰구간 밖이라 상한값으로 절단 / 목표 PER 25.0배 상한 적용 (캡 미적용 32.2배)",
         "주의: 목표주가가 현재가 2.5배 상한에 도달 — 표시되는 상승여력은 계산값이 아니라 상한값"
       ],
@@ -34667,13 +34589,12 @@
       "per_discrepancy": null,
       "cross_validated": true,
       "t_pbr": "1.22",
-      "ev_ebitda": null,
+      "ev_ebitda": "5.38",
       "g_eff": null,
       "is_valid": true,
       "validation_error": null,
       "data_issues": [
         "상장주식수 파싱 실패 (후보값=[22, 38])",
-        "EV/EBITDA 수집 실패: HTTPSConnectionPool(host='navercomp.wisereport.co.kr', port=443): Max retries exceeded with url: /v2/company/c1010001.aspx?cmp_cd=102710 (Caused by ConnectTimeoutError(<HTTPSConnection(host='navercomp.wisereport.co.kr', port=443) at 0x7f8495273700>, 'Connection to navercomp.wisereport.co.kr timed out. (connect timeout=10)'))",
         "Forward 컨센서스(추정 PER/EPS) 미제공",
         "성장률 산출 불가 (TTM EPS 또는 추정 EPS 없음)"
       ],
