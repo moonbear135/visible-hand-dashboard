@@ -523,10 +523,16 @@ async def _render_body(client) -> None:
        끼리 화면 상태가 섞입니다(§0-3-8 — 순위표는 사용자 데이터가 아니지만, "다른 사람이
        페이지를 넘기면 내 화면이 바뀌는" 것 자체가 같은 종류의 사고입니다).
     """
-    ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted vh-keep-all whitespace-pre-line')
-    ui.label(NOTICE_MIN_PARTICIPANTS).classes('vh-muted')
-    ui.label(NOTICE_DAILY).classes('vh-muted whitespace-pre-line')
-    ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all whitespace-pre-line')
+    # 2026-09-04 — 오너 요청으로 접이식 전환. 위 _render_fixed_notice() 는 §0-3-4 급
+    # 고정 문구(로그인 폼보다도 위, 항상 펼쳐짐)라 손대지 않았고, 이 네 문단은 그 아래
+    # "순위 계산 규칙 상세 설명"이라 duel_page.py 의 기존 접이식 패턴(§0-3-10, '📖 이
+    # 대결은 어떻게 굴러가나요?')을 그대로 재사용합니다. 기본값은 접힘(닫힘) — value 를
+    # 안 주면 ui.expansion 기본값이 False.
+    with ui.expansion('📖 순위는 어떻게 매겨지나요? (규칙 전체 보기)').classes('w-full'):
+        ui.label(NOTICE_HOW_RANKING_WORKS).classes('vh-muted vh-keep-all whitespace-pre-line')
+        ui.label(NOTICE_MIN_PARTICIPANTS).classes('vh-muted')
+        ui.label(NOTICE_DAILY).classes('vh-muted whitespace-pre-line')
+        ui.label(NOTICE_TRACKS_NEVER_MERGED).classes('vh-muted vh-keep-all whitespace-pre-line')
 
     currencies = currency_options()
     default_currency = next(iter(currencies))
