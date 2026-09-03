@@ -1,5 +1,5 @@
 {
-  "baseline_date": "2026-09-02",
+  "baseline_date": "2026-09-03",
   "baseline_row_count": 500,
   "checks": [
     {
@@ -9,13 +9,13 @@
       "status": "pass"
     },
     {
-      "detail": "건수 정상: 2026-09-02 500건 → 오늘 500건.",
+      "detail": "건수 정상: 2026-09-03 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_drop",
       "status": "pass"
     },
     {
-      "detail": "건수 급증 없음: 2026-09-02 500건 → 오늘 500건.",
+      "detail": "건수 급증 없음: 2026-09-03 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_surge",
       "status": "pass"
@@ -63,14 +63,14 @@
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 중앙값 32,538.8 → 32,791.2 (1.01배).",
+      "detail": "'bb_mid' 중앙값 32,791.2 → 32,791.2 (1.00배).",
       "field": "bb_mid",
       "name": "median_shift",
       "status": "pass"
     }
   ],
   "dataset": "indicator_kr",
-  "generated_at_kst": "2026-09-03T17:17:58.156066+09:00",
+  "generated_at_kst": "2026-09-03T21:38:30.522995+09:00",
   "probe": {
     "fields": {
       "bb_mid": {
@@ -90,7 +90,7 @@
     },
     "row_count": 500
   },
-  "reason": "2026-09-02 대비 검사 10건 통과 (판정 불가 1건).",
+  "reason": "2026-09-03 대비 검사 10건 통과 (판정 불가 1건).",
   "reasons": [],
   "row_count": 500,
   "status": "ok",
