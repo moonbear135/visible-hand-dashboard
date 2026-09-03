@@ -85,6 +85,16 @@ VOL_THRESHOLD_PCT = 2.0              # 일간수익률 표준편차(%) 기준 '�
 # 커버하는 증권사가 적음). 근거 없이 숫자만 낮추는 건 §0-1 위반이라 지금은 값을 그대로
 # 두었습니다 — 이번 merge 이후 실제 valid_ratio가 여기 얼마나 못 미치는지 첫 실행 로그로
 # 확인한 뒤, 필요하면 그 실측값 근거로 재조정하세요(과거 0.95→0.85 조정과 같은 방식).
+# ---------------------------------------------------------
+# ✅ 2026-09-03 해소 — 위 플래그로 지켜본 결과, 500 확대 이후 8일 연속 DEGRADED(valid_ratio 0.756)였는데
+# 원인은 커버리지 부족이 아니라 "집계 방식"이었습니다. 적자 기업(is_trailing_loss)은 PER/PEGY가
+# 수학적으로 산출 불가라 설계상 항상 is_valid=False 인데(ENGINEERING_SPEC §적용 사례 2 — 적자 기업을
+# 배제하지 않고 '산출 불가'로 노출하는 것이 오너 지침), valid_ratio 가 그 플래그를 그대로 재사용해
+# 정상 동작을 "수집 실패"로 셌습니다. 500 확대 후 적자 기업이 111개(그중 is_valid=False 92개)에 달하면서
+# 이 왜곡이 임계값을 넘긴 것입니다. 그래서 문턱값은 그대로 두고, valid_ratio 집계에서만 적자 기업을 실패로 세지 않도록
+# 고쳤습니다(run_kospi200_collector 의 _is_genuine_collection_failure 참고). 2026-09-03 스냅샷에
+# 같은 로직을 적용한 실측 valid_ratio = 0.978(489/500, 진짜 수집·파싱 실패 11종목) 로 SUCCESS 구간입니다.
+# 제외 건수는 metadata.loss_excluded_count 에 그대로 남깁니다.
 # =========================================================
 VALID_RATIO_SUCCESS = 0.85   # 이 이상이면 SUCCESS (컨센서스 미커버 구조적 결측 감안, 코스피200 기준 실측값 — 위 플래그 참고)
 VALID_RATIO_DEGRADED = 0.70  # 이 미만이면 수집 파이프라인 자체 이상 의심
@@ -2008,6 +2018,25 @@ def update_pegy_summary_history(meta_date, enriched_stocks):
 
     print(f"Updated PEGY summary history log: {new_record} -> {history_path}")
 
+
+def _is_genuine_collection_failure(stock):
+    """valid_ratio(크롤러 자체 건강검진 → status SUCCESS/DEGRADED/FAILED → 화면 경고 배너)에서만 쓰는 판정.
+
+    2026-09-03 신설. 적자 기업(is_trailing_loss)은 Trailing PER/PEGY가 수학적으로 산출 불가한 것뿐이지
+    수집·파싱이 실패한 게 아닙니다(ENGINEERING_SPEC §적용 사례 2 — 적자 기업을 표에서 배제하지 않고
+    "산출 불가"로 노출하는 것이 오너 지침 = 정상 동작). 그런데 valid_ratio 가 is_valid/is_unverified 를
+    그대로 재사용해 이 정상 동작을 "수집 실패"로 세는 바람에, 500 확대 후 적자 기업이 100개 안팎으로
+    늘자 DEGRADED 경고가 8일째 상시 점등(=아무도 안 보는 경고)돼 있었습니다.
+
+    ⚠️ is_valid / is_unverified 필드 값 자체는 여기서 건드리지 않습니다 — 화면 마스킹
+    (web/pages/pegy_page.py hard_block/was_blocked)과 퀀트 스코어링 population(_score_pool)은
+    계속 그 필드를 그대로 씁니다. 이 함수는 오직 "오늘 크롤링이 잘 됐나"를 세는 용도입니다.
+    """
+    if stock.get("is_trailing_loss"):
+        return False
+    return not (stock.get("is_valid") and not stock.get("is_unverified"))
+
+
 def run_kospi200_collector():
     """코스피+코스닥 통합 시가총액 상위 500 real 데이터 배치 수집 및 data/kospi200_pegy_latest.json 저장
 
@@ -2061,8 +2090,15 @@ def run_kospi200_collector():
     total_count = len(visible_stocks)
     tracked_count = len(enriched_stocks)
     hidden_buffer_count = tracked_count - total_count
-    valid_stocks = [s for s in visible_stocks if s.get("is_valid") and not s.get("is_unverified")]
-    failed_codes = [s["code"] for s in visible_stocks if not (s.get("is_valid") and not s.get("is_unverified"))]
+    # 2026-09-03: 적자 기업(is_trailing_loss)은 설계상 is_valid=False 지만 수집 실패가 아니므로 여기서는
+    # 실패로 세지 않습니다(_is_genuine_collection_failure 주석 참고). is_valid/is_unverified 자체는 불변.
+    valid_stocks = [s for s in visible_stocks if not _is_genuine_collection_failure(s)]
+    failed_codes = [s["code"] for s in visible_stocks if _is_genuine_collection_failure(s)]
+    # 투명성: 적자라서 이 집계에서 실패로 안 센 종목 수를 metadata 에 그대로 남깁니다(data_issues 와 같은 관례).
+    loss_excluded_count = sum(
+        1 for s in visible_stocks
+        if s.get("is_trailing_loss") and not (s.get("is_valid") and not s.get("is_unverified"))
+    )
     valid_ratio = (len(valid_stocks) / total_count) if total_count else 0.0
 
     # 2026-08-06 2차 감사 1-10: 0.95 하드코딩 → 근거 있는 상수(utils 상단 주석 참고)로 교체.
@@ -2085,6 +2121,10 @@ def run_kospi200_collector():
             "valid_count": len(valid_stocks),
             "valid_ratio": round(valid_ratio, 3),
             "failed_codes": failed_codes,
+            # 2026-09-03 신설: 적자 기업이라 PER/PEGY 산출 불가(is_valid=False)지만 수집 실패가 아니어서
+            # 위 valid_count/valid_ratio 에서 실패로 세지 않은 종목 수. "왜 실패 122개가 11개로 줄었지?"를
+            # 나중에 추적할 수 있게 근거를 남깁니다. (valid_count = total_count - len(failed_codes))
+            "loss_excluded_count": loss_excluded_count,
             # 히스테리시스 버퍼 관련 필드(2026-08-06 신설). tracked_count는 화면 비노출 버퍼 구간까지
             # 포함한 실제 수집 종목 수, hidden_buffer_count는 그중 화면에 안 보이는 개수입니다.
             "tracked_count": tracked_count,
@@ -2104,7 +2144,8 @@ def run_kospi200_collector():
             },
             "description": (
                 f"코스피+코스닥 통합 시가총액 상위 1위~{total_count}위 퀀트 스냅샷 "
-                f"(검증 통과 {len(valid_stocks)}/{total_count} 종목, 상태={status})"
+                f"(검증 통과 {len(valid_stocks)}/{total_count} 종목, 상태={status}"
+                f", 적자로 산출 불가 {loss_excluded_count}종목은 수집 실패로 미집계)"
                 + (f" + 히스테리시스 버퍼 비노출 {hidden_buffer_count}종목" if hidden_buffer_count else "")
             )
         },
@@ -2117,7 +2158,9 @@ def run_kospi200_collector():
         json.dump(snapshot_payload, f, ensure_ascii=False, indent=2)
 
     if status != "SUCCESS":
-        print(f"⚠️ 수집 품질 저하(status={status}): 검증 통과 {len(valid_stocks)}/{total_count} 종목. 실패 종목: {failed_codes[:20]}{' ...' if len(failed_codes) > 20 else ''}")
+        print(f"⚠️ 수집 품질 저하(status={status}): 검증 통과 {len(valid_stocks)}/{total_count} 종목"
+              f"(적자로 산출 불가 {loss_excluded_count}종목은 수집 실패로 미집계). "
+              f"실패 종목: {failed_codes[:20]}{' ...' if len(failed_codes) > 20 else ''}")
 
     # 상단 요약 지표(PER/성장률/PEGY 중앙값) 수치 누적 기록 저장.
     # ⚠️ 여기는 visible_stocks(화면에 실제 보이는 200개)만 넘깁니다 — views/pegy_view.py가
