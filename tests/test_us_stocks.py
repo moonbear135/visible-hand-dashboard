@@ -703,6 +703,21 @@ def test_automation_readiness():
     check(r8["should_collect"] is False and r8["target_session_date"] == "2026-07-17",
           "주말 실행은 대상이 직전 금요일이고 이미 수집돼 있어 건너뜀")
 
+    # --- 2026-09-05(#195) 코스피 사고의 미국판 재현: "새벽(장 시작 전)에 한 번 돌아 오늘 날짜가
+    #     찍힌 뒤, 정식 장마감 후 실행이 건너뛰어지는가" → 미국 쪽은 **아니어야** 함.
+    #     이 판정은 달력 날짜가 아니라 resolve_collection_session_et()(마감+30분 지난 최근 평일)이
+    #     계산한 **거래일** 을 스냅샷의 실제 세션 날짜(session_dates_from_source)와 비교하므로,
+    #     금요일 09:05 ET 실행은 대상이 '목요일' 이라 건너뛰고(그 시각 페이지도 목요일 종가),
+    #     16:35 ET 정식 실행은 대상이 '금요일' 이라 수집합니다. 코스피 쪽 날짜-only 결함이 없음을
+    #     여기서 고정해 둡니다(구조가 달라 손대지 않음 — TASK_HISTORY #195).
+    _write_fake_snapshot(snap, "2026-09-03")            # 목요일 세션까지 수집돼 있는 상태
+    r9 = _readiness_at_utc(snap, 2026, 9, 4, 13, 5)     # 금 09:05 EDT — 장 시작 전 잘못 발동한 cron
+    check(r9["should_collect"] is False and r9["target_session_date"] == "2026-09-03",
+          f"[#195 재현] 금요일 장 시작 전 실행은 대상이 목요일이라 건너뜀 (대상 {r9['target_session_date']})")
+    r10 = _readiness_at_utc(snap, 2026, 9, 4, 20, 35)   # 금 16:35 EDT — 정식 장마감+30분 실행
+    check(r10["should_collect"] is True and r10["target_session_date"] == "2026-09-04",
+          f"[#195 재현] 같은 날 장마감 후 정식 실행은 금요일 세션을 수집 (대상 {r10['target_session_date']})")
+
     # --- CLI 에 옵션이 실제로 배선돼 있는지 -----------------------------------
     check(any(a.dest == "skip_if_not_ready" for a in _collect_subparser_actions()),
           "collect 서브커맨드에 --skip-if-not-ready 옵션이 등록됨")

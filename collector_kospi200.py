@@ -50,6 +50,8 @@ from utils.constants import (
     TARGET_PRICE_CAP_MULTIPLE,
     ROE_PREMIUM_BASELINE_PCT,
     VALUE_TRAP_ROE_PCT,
+    KR_MARKET_CLOSE_HOUR,      # 2026-09-05(#195): 사전 점검 "오늘 SUCCESS" 인정 기준 시각(15:30 KST)
+    KR_MARKET_CLOSE_MINUTE,
 )
 # 2026-08-09 신설(TASK_HISTORY #64): 종목별 시계열 이력 누적. 필드 목록·라벨·저장 규칙의
 # 단일 출처는 utils/stock_history.py 이며, 기존 수집 로직은 한 줄도 바뀌지 않았습니다
@@ -2250,13 +2252,61 @@ def run_kospi200_collector():
 #   · metadata.status 가 SUCCESS 가 아님(DEGRADED/FAILED)  → 수집 (재시도 기회를 막지 않음 —
 #     2026-08-26 500 확대 이후 valid_ratio 집계 오류로 상시 DEGRADED 였던 기간(파일 상단 주석,
 #     2026-09-03 해소)이라면 이 가드는 한 번도 건너뛰지 않고 매번 두 번 수집했을 것)
-#   · metadata.last_updated_at 의 날짜(KST) == 오늘(KST)   → 건너뜀
+#   · metadata.last_updated_at 의 날짜(KST) == 오늘(KST)
+#       - 그 시각이 장마감(KR_MARKET_CLOSE 15:30 KST) **이후**     → 건너뜀
+#       - 그 시각이 장마감 **이전**(장 시작 전 새벽·장중)          → 수집 (2026-09-05 #195 추가)
 #   · 그 외(어제 이전의 SUCCESS)                            → 수집
 # 날짜 비교는 KST 입니다 — last_updated_at 자체가 _now_kst() 로 찍히고(파일 상단 주석),
 # scrape.yml 의 cron(16:05 KST)·Worker(16:10 KST) 모두 같은 KST 날짜 안에서 돕니다.
+#
+# ── 2026-09-05 개정(#195): "오늘 날짜" 만 보고 "시각" 은 안 보던 결함 ──────────────────
+# 처음 만들 때(#189, 2026-09-04)는 "같은 날 두 번째 트리거는 언제나 첫 번째보다 늦다" 를
+# 암묵적으로 전제하고 last_updated_at 의 앞 10글자(날짜)만 비교했습니다. 그런데 GitHub 자체
+# cron 은 몇 시간 지연될 뿐 아니라 **전날 tick 이 다음 날 새벽에** 발동하기도 합니다.
+# 실측(추측 아님, §0-1):
+#   `git log --date=iso -- data/kospi200_pegy_latest.json`
+#     2026-09-03 22:09:19 +0000  = 2026-09-04(금) 07:09 KST  ← 장 시작(09:00) 전 새벽 실행
+#   그때 저장된 metadata.last_updated_at = "2026-09-04 07:04", status = SUCCESS.
+#   내용물은 네이버가 그 시각에 보여주는 값 = 9/3(목) 종가(삼성전자우 184,100원)입니다.
+#   → 금요일 정식 오후 트리거(16:05 cron / 16:10 Worker)는 "2026-09-04 == 오늘, SUCCESS" 로
+#     판정돼 통째로 건너뛰었고, 진짜 금요일 종가(삼성전자우 191,600원)는 한 번도 수집되지
+#     않은 채 주말 내내 목요일 값이 노출됐습니다. 같은 __main__ 에서 뒤이어 도는
+#     전 종목 종가 수집(kr_all_market_prices.json — 결투·성적표 현재가 조회용)도 같은
+#     sys.exit(0) 에 묶여 함께 멈췄습니다(#189 "한계" 문단에 적어둔 바로 그 결합).
+# 고친 규칙: "오늘 날짜 + SUCCESS" 인 경우에 한해 last_updated_at 의 **시각** 도 확인해,
+#   장마감(15:30 KST) 이후에 찍힌 것만 "오늘 장마감 데이터가 이미 있다" 로 인정합니다.
+#   그 전에 찍힌 SUCCESS 는 "오늘 날짜지만 아직 장마감 데이터가 아님" 으로 보고 다시
+#   수집합니다(그날 장마감 후 트리거가 새벽 실행분을 덮어쓰게 됨). 다른 분기(없음/깨짐,
+#   DEGRADED/FAILED, 어제 이전)는 한 줄도 바꾸지 않았습니다.
+#   last_updated_at 은 수집 **완료** 시점(run_kospi200_collector 저장 직전)에 찍히므로
+#   "15:30 이후 완료" 판정이 됩니다. 15:30 직전에 시작해 직후에 끝난 실행은 이론상 통과
+#   하지만, 정식 트리거는 모두 16:05 이후라 실제 운영 범위 밖입니다(§0-1 — 한계 명시).
+#   ⚠️ 이 개정은 재발 방지책이지 백필이 아닙니다 — 2026-09-04(금) 종가 자체는 이 수집기로
+#      되살릴 수 없습니다(watch_schedule_health.yml 헤더 "지금 이 순간의 시세만" 참고).
 # =============================================================================
 def _kospi_snapshot_path():
     return os.path.join(os.path.dirname(__file__), "data", KOSPI_SNAPSHOT_FILENAME)
+
+
+def kr_snapshot_time_is_after_close(last_updated_at):
+    """
+    스냅샷 타임스탬프("YYYY-MM-DD HH:MM", KST)의 **시각** 이 국내 정규장 마감(15:30 KST) 이후인가.
+    (2026-09-05 #195 신설 — 위 헤더 "2026-09-05 개정" 참고)
+
+    - 15:30 정각은 "이후" 로 칩니다(마감 동시호가 종료 = 종가 확정 시점).
+    - 시각 부분이 없거나(옛 형식 "YYYY-MM-DD" 만) 파싱이 안 되면 **False** — "장마감 데이터인지
+      모르면 수집한다" 가 안전한 방향입니다(건너뛰면 하루가 통째로 비고, 수집하면 최악이라도
+      중복 1회). 날짜가 오늘인지는 여기서 보지 않습니다(호출부가 이미 확인).
+    """
+    if not isinstance(last_updated_at, str):
+        return False
+    m = re.match(r"^\d{4}-\d{2}-\d{2}[ T](\d{1,2}):(\d{2})", last_updated_at.strip())
+    if not m:
+        return False
+    hh, mm = int(m.group(1)), int(m.group(2))
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return False
+    return (hh, mm) >= (KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE)
 
 
 def read_kospi200_snapshot_completion(snapshot_path):
@@ -2269,6 +2319,10 @@ def read_kospi200_snapshot_completion(snapshot_path):
                        "모르면 건너뛰기"가 아니라 "모르면 수집한다"가 안전한 방향이기 때문입니다.
       status         : metadata.status 원문(없으면 None)
       last_updated_at: metadata.last_updated_at 원문(없으면 None)
+
+    ⚠️ 여기서는 **날짜** 만 뽑습니다. "그 날짜의 SUCCESS 가 장마감 이후 것인가" 는
+       evaluate_kospi200_collection_readiness() 가 kr_snapshot_time_is_after_close() 로
+       따로 봅니다(2026-09-05 #195 — 새벽 07:04 SUCCESS 가 그날 오후 정식 수집을 막았던 사고).
     """
     if not os.path.exists(snapshot_path):
         return None, None, None
@@ -2298,17 +2352,37 @@ def evaluate_kospi200_collection_readiness(snapshot_path=None, now_kst=None):
       snapshot_date      : 기존 스냅샷이 SUCCESS 로 담고 있는 날짜(없으면 None)
       snapshot_status    : 기존 스냅샷의 status 원문(없으면 None)
       snapshot_updated_at: 기존 스냅샷의 last_updated_at 원문(없으면 None)
+      snapshot_after_close: 오늘 자 SUCCESS 가 장마감(15:30 KST) 이후에 찍힌 것인가
+                           (오늘 자 SUCCESS 가 아니면 None) — 2026-09-05 #195 추가
+
+    판정 규칙(위 헤더 주석과 동일):
+      스냅샷 없음/깨짐 → 수집 / DEGRADED·FAILED → 수집 / 어제 이전 SUCCESS → 수집 /
+      오늘 SUCCESS 인데 장마감 **이전** 시각 → 수집(#195) / 오늘 SUCCESS 이고 장마감 이후 → 건너뜀
     """
     now = now_kst or _now_kst()
     target = now.strftime("%Y-%m-%d")
     path = snapshot_path or _kospi_snapshot_path()
     completed_date, status, updated_at = read_kospi200_snapshot_completion(path)
+    after_close = None
 
     if completed_date == target:
-        should, reason = False, (
-            f"{target} 자 수집이 이미 status=SUCCESS 로 완료되어 스냅샷에 들어있습니다"
-            f" (마지막 갱신 {updated_at} KST)"
-        )
+        # 2026-09-05(#195): 날짜만 같다고 끝난 게 아닙니다 — 새벽/장중에 찍힌 SUCCESS 는
+        # 전날 종가를 담고 있으므로(실측: 2026-09-04 07:04 SUCCESS = 9/3 목 종가), 장마감
+        # 이후에 찍힌 것만 "오늘 장마감 데이터가 이미 있다" 로 인정합니다.
+        after_close = kr_snapshot_time_is_after_close(updated_at)
+        if after_close:
+            should, reason = False, (
+                f"{target} 자 수집이 이미 status=SUCCESS 로 완료되어 스냅샷에 들어있습니다"
+                f" (마지막 갱신 {updated_at} KST — 장마감 "
+                f"{KR_MARKET_CLOSE_HOUR:02d}:{KR_MARKET_CLOSE_MINUTE:02d} 이후)"
+            )
+        else:
+            should, reason = True, (
+                f"{target} 자 SUCCESS 스냅샷이 있지만 마지막 갱신 {updated_at} KST 가 장마감 "
+                f"{KR_MARKET_CLOSE_HOUR:02d}:{KR_MARKET_CLOSE_MINUTE:02d} 이후가 아닙니다"
+                f"(장 시작 전·장중 실행분 또는 시각 없음) — 아직 오늘 장마감 데이터가 아니므로 "
+                f"다시 수집합니다"
+            )
     elif status is not None and status != "SUCCESS":
         should, reason = True, (
             f"기존 스냅샷이 status={status} 입니다(마지막 갱신 {updated_at} KST) — "
@@ -2329,6 +2403,7 @@ def evaluate_kospi200_collection_readiness(snapshot_path=None, now_kst=None):
         "snapshot_date": completed_date,
         "snapshot_status": status,
         "snapshot_updated_at": updated_at,
+        "snapshot_after_close": after_close,
     }
 
 
@@ -2341,8 +2416,10 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="코스피+코스닥 통합 시가총액 상위 500 수집기")
     parser.add_argument("--skip-if-not-ready", action="store_true",
                         help="무인 자동화(GitHub Actions) 전용. 오늘(KST) 자 스냅샷이 이미 "
-                             "status=SUCCESS 로 저장돼 있으면 아무것도 하지 않고 정상 종료(exit 0)"
-                             "합니다. DEGRADED/FAILED 로 끝난 날은 성공으로 치지 않고 다시 수집"
+                             "status=SUCCESS 로, 그리고 장마감(15:30 KST) 이후 시각에 저장돼 "
+                             "있으면 아무것도 하지 않고 정상 종료(exit 0)합니다. 장마감 전(새벽·"
+                             "장중)에 찍힌 오늘 자 SUCCESS 는 전날 종가이므로 다시 수집합니다"
+                             "(#195). DEGRADED/FAILED 로 끝난 날은 성공으로 치지 않고 다시 수집"
                              "합니다. GitHub 자체 cron 과 Cloudflare Worker 의 workflow_dispatch "
                              "가 같은 날 둘 다 발동해도 실제 크롤링은 하루 한 번만 일어나게 하는 "
                              "방어 장치입니다.")

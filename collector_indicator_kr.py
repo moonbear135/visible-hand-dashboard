@@ -21,6 +21,7 @@ TECHNICAL_INDICATOR_WORK_ORDER.md(검토 완료)에서 확정된 것만 그대�
 import argparse
 import json
 import os
+import re
 import time
 from datetime import datetime, timedelta
 
@@ -36,7 +37,12 @@ from utils import stock_history
 from utils import data_sanity
 from utils.indicators import calculate_rsi, calculate_macd, calculate_bollinger, combine_verdict
 from utils.indicator_universe import update_universe_for_today, select_top_n_stock_codes, get_tracked_codes
-from utils.constants import INDICATOR_FETCH_DAYS, INDICATOR_REQUEST_DELAY_SECONDS
+from utils.constants import (
+    INDICATOR_FETCH_DAYS,
+    INDICATOR_REQUEST_DELAY_SECONDS,
+    KR_MARKET_CLOSE_HOUR,      # 2026-09-05(#195): 사전 점검 "오늘 SUCCESS" 인정 기준 시각(15:30 KST)
+    KR_MARKET_CLOSE_MINUTE,
+)
 
 
 def _now_kst():
@@ -246,10 +252,39 @@ def cross_check_last_close(code, last_close, today_price_map):
 # 판정 규칙("모르면 수집한다" — 건너뛰면 하루가 통째로 비고, 수집하면 최악이라도 중복 1회):
 #   · 스냅샷 파일이 없거나 깨짐                       → 수집
 #   · status 가 SUCCESS 가 아님(DEGRADED, 또는 이 필드가 없는 옛 형식) → 수집
-#   · date == 오늘(KST)                               → 건너뜀
+#   · date == 오늘(KST)
+#       - generated_at 시각이 장마감(KR_MARKET_CLOSE 15:30 KST) **이후**  → 건너뜀
+#       - generated_at 시각이 장마감 **이전**(장 시작 전 새벽·장중)       → 수집 (2026-09-05 #195)
 #   · 그 외(어제 이전의 SUCCESS)                       → 수집
 # 날짜 비교는 KST 입니다 — 스냅샷의 date 가 today_str = _now_kst() 로 찍히기 때문입니다.
+#
+# ── 2026-09-05 개정(#195): "오늘 날짜" 만 보고 "시각" 은 안 보던 결함 ──────────────────
+# collector_kospi200.py 쪽에서 실제로 난 사고(같은 파일 같은 절 참고): GitHub cron 이 전날 tick
+# 을 **다음 날 새벽**(2026-09-04 금 07:09 KST, 장 시작 전)에 발동해 "오늘 날짜 SUCCESS" 를
+# 찍었고, 그날 정식 오후 트리거가 "오늘 이미 했네" 로 통째로 건너뛰어 금요일 종가가 끝내
+# 수집되지 않았습니다. 이 수집기의 판정도 #189 에서 같은 모양(date 만 비교)으로 옮겨 왔으므로
+# 같은 결함이 잠복해 있었습니다 — 실제로 발동한 적은 없으나(09-04 스냅샷은 21:40 KST 생성)
+# 새벽에 돌면 FDR 에 오늘 봉이 아직 없어 "오늘 날짜인데 내용은 어제 지표" 가 되는 구조는 동일
+# 합니다. 고친 규칙: "오늘 날짜 + SUCCESS" 인 경우에 한해 generated_at 의 **시각** 도 확인해,
+# 장마감(15:30 KST) 이후에 생성된 것만 인정합니다. 다른 분기는 그대로입니다.
 # =============================================================================
+def snapshot_time_is_after_close(generated_at):
+    """
+    스냅샷 generated_at("YYYY-MM-DD HH:MM", KST)의 **시각** 이 국내 정규장 마감(15:30 KST) 이후인가.
+    (2026-09-05 #195 신설 — collector_kospi200.kr_snapshot_time_is_after_close 와 같은 규칙)
+    15:30 정각은 이후로 칩니다. 시각이 없거나 파싱이 안 되면 False("모르면 수집").
+    """
+    if not isinstance(generated_at, str):
+        return False
+    m = re.match(r"^\d{4}-\d{2}-\d{2}[ T](\d{1,2}):(\d{2})", generated_at.strip())
+    if not m:
+        return False
+    hh, mm = int(m.group(1)), int(m.group(2))
+    if not (0 <= hh <= 23 and 0 <= mm <= 59):
+        return False
+    return (hh, mm) >= (KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE)
+
+
 def read_snapshot_completion(path=None):
     """
     기존 스냅샷(indicator_kr_latest.json)에서 "어느 날짜를, 어떤 status 로 저장했는가"를 읽습니다.
@@ -281,17 +316,34 @@ def evaluate_collection_readiness(snapshot_path=None, now_kst=None):
     "지금 이 실행이 실제로 수집을 해야 하는가"를 판정합니다(무인 자동화 전용).
 
     반환: dict — should_collect / reason / target_date / snapshot_date / snapshot_status /
-          snapshot_generated_at (collector_kospi200 의 같은 이름 키와 대응)
+          snapshot_generated_at / snapshot_after_close (collector_kospi200 의 같은 이름 키와 대응)
+
+    판정 규칙(위 헤더 주석과 동일): 스냅샷 없음/깨짐 → 수집 / DEGRADED·옛 형식 → 수집 /
+      어제 이전 SUCCESS → 수집 / 오늘 SUCCESS 인데 generated_at 이 장마감 **이전** → 수집(#195) /
+      오늘 SUCCESS 이고 장마감 이후 → 건너뜀
     """
     now = now_kst or _now_kst()
     target = now.strftime("%Y-%m-%d")
     completed_date, status, generated_at = read_snapshot_completion(snapshot_path)
+    after_close = None
 
     if completed_date == target:
-        should, reason = False, (
-            f"{target} 자 수집이 이미 status=SUCCESS 로 완료되어 스냅샷에 들어있습니다"
-            f" (생성 {generated_at} KST)"
-        )
+        # 2026-09-05(#195): 날짜만 같다고 끝난 게 아닙니다 — 새벽/장중에 생성된 SUCCESS 는
+        # 어제 봉까지의 지표이므로, 장마감 이후 생성분만 "오늘 것이 이미 있다" 로 인정합니다.
+        after_close = snapshot_time_is_after_close(generated_at)
+        if after_close:
+            should, reason = False, (
+                f"{target} 자 수집이 이미 status=SUCCESS 로 완료되어 스냅샷에 들어있습니다"
+                f" (생성 {generated_at} KST — 장마감 "
+                f"{KR_MARKET_CLOSE_HOUR:02d}:{KR_MARKET_CLOSE_MINUTE:02d} 이후)"
+            )
+        else:
+            should, reason = True, (
+                f"{target} 자 SUCCESS 스냅샷이 있지만 생성 {generated_at} KST 가 장마감 "
+                f"{KR_MARKET_CLOSE_HOUR:02d}:{KR_MARKET_CLOSE_MINUTE:02d} 이후가 아닙니다"
+                f"(장 시작 전·장중 실행분 또는 시각 없음) — 아직 오늘 장마감 데이터가 아니므로 "
+                f"다시 수집합니다"
+            )
     elif status is not None and status != "SUCCESS":
         should, reason = True, (
             f"기존 스냅샷이 status={status} 입니다(생성 {generated_at} KST) — "
@@ -314,6 +366,7 @@ def evaluate_collection_readiness(snapshot_path=None, now_kst=None):
         "snapshot_date": completed_date,
         "snapshot_status": status,
         "snapshot_generated_at": generated_at,
+        "snapshot_after_close": after_close,
     }
 
 
@@ -445,8 +498,10 @@ def main(argv=None):
     # 플래그 이름·동작은 collector_us_stocks.py / collector_kospi200.py 와 맞췄습니다.
     parser.add_argument("--skip-if-not-ready", action="store_true",
                         help="무인 자동화(GitHub Actions) 전용. 오늘(KST) 자 스냅샷이 이미 "
-                             "status=SUCCESS(실패 0건)로 저장돼 있으면 아무것도 하지 않고 정상 "
-                             "종료(exit 0)합니다. 실패가 있던 날(DEGRADED)은 성공으로 치지 않고 "
+                             "status=SUCCESS(실패 0건)로, 그리고 장마감(15:30 KST) 이후에 저장돼 "
+                             "있으면 아무것도 하지 않고 정상 종료(exit 0)합니다. 장마감 전(새벽·"
+                             "장중)에 생성된 오늘 자 SUCCESS 는 어제 봉 기준이므로 다시 수집합니다"
+                             "(#195). 실패가 있던 날(DEGRADED)은 성공으로 치지 않고 "
                              "다시 수집합니다. GitHub 자체 cron 과 Cloudflare Worker 의 "
                              "workflow_dispatch 가 같은 날 둘 다 발동해도 실제 수집은 하루 한 번만 "
                              "일어나게 하는 방어 장치입니다.")

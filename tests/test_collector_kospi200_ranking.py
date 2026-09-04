@@ -753,28 +753,72 @@ def _write_kospi_snapshot(tmp_path, status, last_updated_at, drop_status=False):
 
 
 def test_readiness_skips_when_today_already_success(tmp_path):
-    """(a) 오늘(KST) 자 스냅샷이 SUCCESS → 건너뜀."""
+    """(a) 오늘(KST) 자 스냅샷이 SUCCESS 이고 **장마감(15:30) 이후** 시각 → 건너뜀."""
     snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04 16:08")
     r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
     assert r["should_collect"] is False
     assert r["snapshot_date"] == "2026-09-04" and r["snapshot_status"] == "SUCCESS"
+    assert r["snapshot_after_close"] is True
+
+
+# ── 2026-09-05(#195): "오늘 날짜" 만 보고 "시각" 은 안 보던 결함 ──────────────────────────
+# 실측 사고: GitHub cron 이 2026-09-04(금) 07:09 KST(장 시작 전 새벽)에 발동해 last_updated_at
+# "2026-09-04 07:04" SUCCESS 를 찍음(내용은 9/3 목 종가). 그날 정식 오후 트리거(16:05/16:10)가
+# "오늘 이미 SUCCESS" 로 통째로 건너뛰어 금요일 종가(삼성전자우 191,600)가 끝내 수집되지 않고
+# 주말 내내 목요일 값(184,100)이 노출됨. 아래 테스트는 그 재현 케이스와 경계값입니다.
+
+def test_readiness_recollects_when_today_success_was_before_market_close(tmp_path):
+    """(b) 오늘 자 SUCCESS 라도 시각이 장마감 전(새벽·장중)이면 → 전날 종가이므로 다시 수집(#195 재현)."""
+    # 사고 원본 그대로: 07:04 KST 에 찍힌 오늘 자 SUCCESS
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04 07:04")
+    r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is True
+    assert r["snapshot_date"] == "2026-09-04" and r["snapshot_status"] == "SUCCESS"
+    assert r["snapshot_after_close"] is False
+    assert "장마감" in r["reason"] and "다시 수집" in r["reason"]
+    # 장중(마감 직전 1분)도 같은 취급
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04 15:29")
+    assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    # 시각이 아예 없는 값(날짜만) — "장마감 이후인지 모르면 수집"
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04")
+    assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+
+
+def test_readiness_market_close_boundary_is_inclusive_and_named_constant(tmp_path):
+    """장마감 정각(15:30)은 '이후' 로 침. 기준값은 utils.constants 의 이름 있는 상수 한 곳에서 옴(§0-3-10)."""
+    from utils.constants import KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE
+    assert (KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE) == (15, 30)
+    assert K.kr_snapshot_time_is_after_close("2026-09-04 15:30") is True
+    assert K.kr_snapshot_time_is_after_close("2026-09-04 15:29") is False
+    assert K.kr_snapshot_time_is_after_close("2026-09-04 07:04") is False
+    assert K.kr_snapshot_time_is_after_close("2026-09-04 23:59") is True
+    # 파싱 불가·형식 이상은 전부 False("모르면 수집")
+    for bad in (None, "", "2026-09-04", "2026-09-04 25:00", "어제", 1630):
+        assert K.kr_snapshot_time_is_after_close(bad) is False, bad
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-04 15:30")
+    assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is False
 
 
 def test_readiness_collects_when_not_yet_collected_today(tmp_path):
-    """(b) 어제 SUCCESS 뿐이거나 파일이 없으면 → 수집."""
+    """(c)(e) 어제 이전 SUCCESS 뿐이거나 파일이 없으면 → 수집(#195 이후에도 그대로)."""
     snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-03 16:08")
+    r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is True and r["snapshot_after_close"] is None
+    # 어제 자 SUCCESS 가 장마감 이후 시각이어도 "오늘" 이 아니면 당연히 수집(시각 조건은 오늘 자에만 적용)
+    snap = _write_kospi_snapshot(tmp_path, "SUCCESS", "2026-09-01 22:11")
     assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
     missing = str(tmp_path / "없는파일.json")
     assert K.evaluate_kospi200_collection_readiness(missing, now_kst=_GUARD_NOW)["should_collect"] is True
 
 
 def test_readiness_retries_when_today_degraded_or_failed(tmp_path):
-    """(c) 오늘 DEGRADED/FAILED 로 끝났으면 성공으로 치지 않고 재시도. status 없는 옛 형식·깨진 파일도 수집."""
+    """(d)(e) 오늘 DEGRADED/FAILED 로 끝났으면 성공으로 치지 않고 재시도(장마감 이후 시각이어도). status 없는 옛 형식·깨진 파일도 수집."""
     for status in ("DEGRADED", "FAILED"):
         snap = _write_kospi_snapshot(tmp_path, status, "2026-09-04 16:08")
         r = K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)
         assert r["should_collect"] is True, status
         assert r["snapshot_status"] == status and r["snapshot_date"] is None
+        assert r["snapshot_after_close"] is None   # 시각 판정은 오늘 자 SUCCESS 에만 적용
     snap = _write_kospi_snapshot(tmp_path, None, "2026-09-04 16:08", drop_status=True)
     assert K.evaluate_kospi200_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
     broken = tmp_path / "kospi200_pegy_latest.json"

@@ -3080,6 +3080,75 @@ $500 잘못 입금·매수 없음·첫 스냅샷이 버그 이후라 첫 행 `mi
 (e) 4-C-3 은 §2 를 먼저 실행했다는 전제 — 순서를 바꾸면 A 같은 계좌가 불일치로 보일 수 있음(머리말에
 명시).
 
+### #195 — [실전 버그] 코스피 수집기 사전 점검(#189)이 "오늘 날짜" 만 보고 "시각" 은 안 봐서, 새벽 07:04 SUCCESS 가 금요일 정식 장마감 수집을 통째로 건너뛰게 한 결함 수정 (2026-09-05)
+
+**사고 경위(실측, §0-1).** 오너가 2026-09-05(토) 아침 확인: `/kr` 의 삼성전자우가 184,100원
+(= 9/3 목 종가)인데 실제 9/4(금) 종가는 191,600원. 결투 계좌 평가금액·"내 성적표" 현재가도 같이
+목요일 값에서 멈춰 있음. `git log --date=iso -- data/kospi200_pegy_latest.json`:
+- `2026-09-03 22:09:19 +0000` = **2026-09-04(금) 07:09 KST** — 장 시작(09:00) 전 새벽에 GitHub 자체
+  cron(9/3 tick 이 밤새 밀린 것으로 보임, #154 와 같은 지연 유형)이 발동해 크롤링 1회.
+- 그때 저장된 `metadata.last_updated_at = "2026-09-04 07:04"`, `status = SUCCESS`. 네이버가 그 시각에
+  보여주는 값은 전날(목) 종가이므로 **"오늘 날짜 라벨 + 어제 내용물"** 인 스냅샷이 됨.
+- 금요일 정식 트리거(cron 16:05 / Worker 16:10 KST)는 #189 의 `evaluate_kospi200_collection_readiness()`
+  가 `last_updated_at[:10] == 오늘` 만 보고 "이미 SUCCESS" 로 판정 → `sys.exit(0)`. 이 exit 에
+  뒤이어 도는 마스터 목록·**전 종목 종가(`kr_all_market_prices.json`, 결투·성적표 현재가 조회용)** 수집까지
+  4단계가 통째로 묶여 있어(#189 "한계" 문단에 적어둔 결합) 함께 멈춤. 금요일 종가는 한 번도 수집되지 않음.
+`indicator_kr_latest.json` 은 09-04 21:40 KST 생성이라 이번엔 무사했지만, #189 에서 같은 모양(date 만
+비교)으로 옮겨 온 `collector_indicator_kr.evaluate_collection_readiness()` 에도 같은 결함이 잠복해 있었음
+(새벽 실행이면 FDR 에 오늘 봉이 없어 "오늘 날짜인데 어제 지표" 가 되는 구조 동일).
+
+**원인.** #189 는 "같은 날 두 번째 트리거는 언제나 첫 번째보다 늦다(둘 다 오후)" 를 암묵 전제로 날짜만
+비교. GitHub cron 이 몇 시간 지연되는 것을 넘어 **전날 tick 이 다음 날 새벽에** 발동하는 경우를 고려하지
+않음. #185 가 워치독의 장중 자동 재실행은 막았지만, GitHub 자체 cron 이 새벽에 발동하는 경로는 그 방어
+밖이었음.
+
+**한 일.**
+1. `utils/constants.py` — `KR_MARKET_CLOSE_HOUR = 15`, `KR_MARKET_CLOSE_MINUTE = 30` 신설(§0-3-10 —
+   미국 쪽 `US_MARKET_CLOSE_HOUR/MINUTE` 와 같은 꼴, 두 국내 수집기가 공용). 휴장·조기마감 캘린더 판정은
+   하지 않음을 주석에 명시(§0-1).
+2. `collector_kospi200.py` — `kr_snapshot_time_is_after_close(last_updated_at)` 신설(시각 ≥ 15:30 이면
+   True, 15:30 정각 포함; 시각이 없거나 파싱 불가면 False = "모르면 수집"). `evaluate_kospi200_collection_readiness()`
+   의 **"오늘 날짜 + SUCCESS" 분기에만** 이 시각 조건을 덧붙임 — 장마감 이후면 종전대로 건너뜀, 이전(새벽·
+   장중)이면 "아직 오늘 장마감 데이터 아님" 으로 다시 수집. 스냅샷 없음/깨짐, DEGRADED/FAILED, 어제 이전
+   SUCCESS 분기는 한 줄도 안 바꿈. 반환 dict 에 `snapshot_after_close`(오늘 자 SUCCESS 가 아니면 None) 추가,
+   사유 문구·`--skip-if-not-ready` help·헤더 주석(§ "2026-09-05 개정") 에 경위와 규칙 변경 이유 기록.
+   `last_updated_at` 은 수집 **완료** 시점에 찍히므로 "15:30 이후 완료" 판정이 되는 점, 15:30 직전 시작·
+   직후 완료라는 이론상 빈틈(정식 트리거가 모두 16:05 이후라 운영 범위 밖)도 헤더에 명시.
+3. `collector_indicator_kr.py` — 같은 결함을 같은 방식으로 수정(`snapshot_time_is_after_close(generated_at)`,
+   `evaluate_collection_readiness()` 오늘 자 SUCCESS 분기만). 요청 범위(코스피·미국)를 넘는 파일이지만
+   #189 에서 같은 코드 모양으로 함께 이식된 쌍둥이라 이번에 같이 닫음.
+4. `collector_us_stocks.py` — **점검 결과 같은 결함 없음, 손대지 않음.** `evaluate_collection_readiness()` 는
+   달력 날짜가 아니라 `resolve_collection_session_et()`(마감 16:00 + 30분이 지난 가장 최근 평일)이 계산한
+   **거래일** 을 스냅샷의 실제 세션 날짜(`session_dates_from_source`, 페이지 "At close" 타임스탬프에서 읽음)와
+   비교함. 실제 호출로 확인: 목요일 세션 스냅샷 상태에서 금 09:05 ET(장 시작 전) 실행 → 대상 = 목요일 → 건너뜀
+   (그 시각 페이지도 목요일 종가라 옳음), 금 16:35 ET → 대상 = 금요일 → 수집, 토 03:00 ET → 대상 = 금요일 → 수집.
+   즉 "대상 날짜" 자체에 마감 시각 규칙이 들어 있어 코스피 쪽 날짜-only 결함이 구조적으로 없음.
+5. 회귀 테스트 — `tests/test_collector_kospi200_ranking.py`(+2): (b) 사고 원본 그대로 `07:04` SUCCESS → 수집,
+   `15:29` → 수집, 시각 없는 날짜만 → 수집; 경계 `15:30` 정각 → 건너뜀, 상수 (15, 30) 단일 출처, 파싱 불가
+   입력 6종 전부 False. 기존 (a)(c)(d)(e) 테스트에 `snapshot_after_close` 단언 보강(어제 자 22:11 SUCCESS 도
+   수집 — 시각 조건은 오늘 자에만). `tests/test_collector_indicator_kr.py`(+2): 같은 케이스 + `main(argv)` 배선
+   (플래그 + 새벽 SUCCESS → `run()` 실제 호출). `tests/test_us_stocks.py::test_automation_readiness` 에 위 4번
+   재현 케이스 2건(`r9`/`r10`) 추가해 "미국 쪽엔 이 결함이 없음" 을 고정. 수정 전 코드로 되돌려 돌리면
+   코스피 readiness 테스트 5개가 실패함을 확인한 뒤 적용.
+
+**검증.** `pytest -q tests/test_collector_kospi200_ranking.py tests/test_collector_indicator_kr.py tests/test_us_stocks.py`
+94 passed. 전체 `pytest -q --ignore=archive` **2,109 passed / 72 skipped**(#193 의 2,105 + 신규 4, 회귀 0).
+저장소에 실제로 남아 있는 사고 스냅샷(`last_updated_at 2026-09-04 07:04`)으로 새 판정을 호출하면 "장마감 15:30
+이후가 아닙니다 — 다시 수집합니다" 로 나옴(수정 전에는 "이미 완료 — 건너뜀").
+중간에 두 테스트가 깨진 것은 코드가 아니라 **주석 문구** 때문이었음 — `test_scorecard.py` 가
+`utils/constants.py` 에 "scorecard" 문자열이 없어야 한다고 보고(`scorecard_page.py` 언급 → "내 성적표 화면" 으로
+고침), `test_stock_history.py` 가 `collector_kospi200.py` 에서 `run_kr_ticker_master_collector()` 문자열의
+첫 등장이 `run_kr_all_market_prices_collector()` 보다 앞이어야 한다고 봐서(헤더 주석의 함수명 언급을 풀어 씀).
+
+**하지 않은 것 / 남는 일(§0-1).** (a) **2026-09-04(금) 종가 백필은 하지 않음** — 이 수집기는 "지금 이 순간"
+시세만 가져오는 구조라 과거 시점 재수집이 불가능(`watch_schedule_health.yml` 헤더 명시). 금요일 데이터는 결측으로
+남고, 09-07(월) 정식 장마감 수집이 정상적으로 도는지는 오너가 실제 운영에서 확인. (b) 새벽 실행 자체(GitHub cron
+지연 발동)를 막은 것은 아님 — 그 실행은 여전히 크롤링 1회를 하고 "오늘 날짜 + 새벽" SUCCESS 를 남기지만, 이제
+그날 오후 정식 실행이 그것을 덮어씀. 새벽 실행을 아예 안 하게 하려면 수집기 시작 시 "지금 장마감 전이면 종료"
+가드가 필요한데(미국 쪽 `is_ready_now` 2차 방어선과 같은 취지), 로컬 수동 실행·테스트 경로까지 영향이 가서
+이번엔 넣지 않음 — 후속 판단 사항. (c) #189 "한계" 의 "첫 실행 SUCCESS 인데 전 종목 종가만 실패" 조합은 그대로.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

@@ -288,8 +288,8 @@ def test_run_continues_when_one_stock_fetch_fails(tmp_path, monkeypatch):
 _GUARD_NOW = __import__("datetime").datetime(2026, 9, 4, 17, 12)
 
 
-def _write_indicator_snapshot(tmp_path, status, date, drop_status=False):
-    d = {"generated_at": f"{date} 17:10", "date": date, "status": status,
+def _write_indicator_snapshot(tmp_path, status, date, drop_status=False, time_str="17:10"):
+    d = {"generated_at": f"{date} {time_str}", "date": date, "status": status,
          "success_count": 500, "failed_count": 0, "stocks": []}
     if drop_status:
         d.pop("status")
@@ -299,26 +299,61 @@ def _write_indicator_snapshot(tmp_path, status, date, drop_status=False):
 
 
 def test_readiness_skips_when_today_already_success(tmp_path):
-    """(a) 오늘(KST) 자 스냅샷이 SUCCESS → 건너뜀."""
+    """(a) 오늘(KST) 자 스냅샷이 SUCCESS 이고 generated_at 이 **장마감(15:30) 이후** → 건너뜀."""
     snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04")
     r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
     assert r["should_collect"] is False
     assert r["snapshot_date"] == "2026-09-04"
+    assert r["snapshot_after_close"] is True
+
+
+def test_readiness_recollects_when_today_success_was_before_market_close(tmp_path):
+    """(b) 2026-09-05 #195: 오늘 자 SUCCESS 라도 generated_at 이 장마감 전(새벽·장중)이면 다시 수집.
+    코스피 수집기에서 실제로 난 사고(09-04 금 07:04 KST SUCCESS → 오후 정식 수집 스킵)와 같은 모양의
+    결함이 이 수집기에도 잠복해 있었음 — 새벽 실행이면 FDR 에 오늘 봉이 없어 어제 지표를 오늘 날짜로 저장."""
+    snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04", time_str="07:04")
+    r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is True and r["snapshot_after_close"] is False
+    assert "장마감" in r["reason"] and "다시 수집" in r["reason"]
+    snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04", time_str="15:29")
+    assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    # 경계값: 15:30 정각은 '이후'
+    snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04", time_str="15:30")
+    assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is False
+    # generated_at 이 없거나 이상하면 "모르면 수집"
+    p = tmp_path / "indicator_kr_latest.json"
+    p.write_text(json.dumps({"date": "2026-09-04", "status": "SUCCESS", "stocks": []}), encoding="utf-8")
+    assert collector_indicator_kr.evaluate_collection_readiness(str(p), now_kst=_GUARD_NOW)["should_collect"] is True
+    for bad in (None, "", "2026-09-04", "2026-09-04 25:00"):
+        assert collector_indicator_kr.snapshot_time_is_after_close(bad) is False, bad
+
+
+def test_main_skip_flag_does_not_skip_on_pre_close_success(tmp_path, monkeypatch):
+    """main(argv) 배선: 플래그 + 오늘 자 SUCCESS 인데 새벽 생성분 → run() 이 실제로 호출돼야 함(#195)."""
+    calls = []
+    monkeypatch.setattr(collector_indicator_kr, "run", lambda **kw: calls.append(kw))
+    monkeypatch.setattr(collector_indicator_kr, "_now_kst", lambda: _GUARD_NOW)
+    monkeypatch.setattr(collector_indicator_kr, "LATEST_SNAPSHOT_PATH",
+                        _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-04", time_str="07:04"))
+    assert collector_indicator_kr.main(["--limit", "500", "--skip-if-not-ready"]) is True
+    assert len(calls) == 1
 
 
 def test_readiness_collects_when_not_yet_collected_today(tmp_path):
-    """(b) 어제 SUCCESS 뿐이거나 파일이 없으면 → 수집."""
+    """(c)(e) 어제 이전 SUCCESS 뿐이거나 파일이 없으면 → 수집(#195 이후에도 그대로, 시각 조건은 오늘 자에만)."""
     snap = _write_indicator_snapshot(tmp_path, "SUCCESS", "2026-09-03")
-    assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
+    r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
+    assert r["should_collect"] is True and r["snapshot_after_close"] is None
     assert collector_indicator_kr.evaluate_collection_readiness(
         str(tmp_path / "없는파일.json"), now_kst=_GUARD_NOW)["should_collect"] is True
 
 
 def test_readiness_retries_when_today_degraded_or_legacy(tmp_path):
-    """(c) 오늘 DEGRADED(실패 있음)면 재시도. status 필드가 없는 옛 형식·깨진 파일도 SUCCESS 로 승격하지 않음."""
+    """(d)(e) 오늘 DEGRADED(실패 있음)면 재시도(장마감 이후 생성분이어도). status 필드가 없는 옛 형식·깨진 파일도 SUCCESS 로 승격하지 않음."""
     snap = _write_indicator_snapshot(tmp_path, "DEGRADED", "2026-09-04")
     r = collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)
     assert r["should_collect"] is True and r["snapshot_status"] == "DEGRADED"
+    assert r["snapshot_after_close"] is None
     snap = _write_indicator_snapshot(tmp_path, None, "2026-09-04", drop_status=True)
     assert collector_indicator_kr.evaluate_collection_readiness(snap, now_kst=_GUARD_NOW)["should_collect"] is True
     broken = tmp_path / "indicator_kr_latest.json"
