@@ -475,8 +475,25 @@ if args and args[0] == "issue":
     print("https://github.com/%s/issues/1" % os.environ.get("REPO", "owner/repo"))
     sys.exit(0)
 
+# 첫 번째 `repos/...` 인자가 API 경로입니다 (`-H "Accept: ..."` 처럼 옵션이 앞에 올 수 있음).
+api_path = next((a for a in args if a.startswith("repos/")), None)
+if api_path is None:
+    sys.exit(2)
+parsed = urlparse(api_path)
+
+# GET repos/<owner>/<repo>/contents/<path>?ref=main — 데이터 파일 원문(2026-09-05, 데이터
+# 갱신 확인). 테스트가 GH_DATA_FILES(JSON: {저장소 상대경로: 파일 원문}) 로 내용을 정하고,
+# 없는 경로는 진짜 API 처럼 실패(404)합니다.
+if "/contents/" in parsed.path:
+    rel = parsed.path.split("/contents/")[1]
+    files = json.load(open(os.environ["GH_DATA_FILES"], encoding="utf-8"))
+    if rel not in files:
+        print(json.dumps({"message": "Not Found", "status": "404"}))
+        sys.exit(1)
+    sys.stdout.write(files[rel])
+    sys.exit(0)
+
 # GET repos/<owner>/<repo>/actions/workflows/<FILE>/runs?...
-parsed = urlparse(args[1])
 wf_file = parsed.path.split("/actions/workflows/")[1].split("/runs")[0]
 runs = json.load(open(os.environ["GH_RUN_STATUS"], encoding="utf-8"))[wf_file]
 
@@ -535,6 +552,57 @@ DAILY_TARGETS = ALL_TARGETS[5:]
 
 REPO_SLUG = "moonbear135/visible-hand-dashboard"
 
+# ── 데이터 갱신 확인 대상 (2026-09-05 #196) — 워크플로우 TARGETS 의 3·4번째 필드와 동일 ──
+# {워크플로우 파일: (데이터 파일 저장소 상대경로, 타임스탬프 JSON 키)}
+DATA_TARGETS = {
+    "scrape.yml": ("data/kospi200_pegy_latest.json", "metadata.last_updated_at"),
+    "indicator_kr.yml": ("data/indicator_kr_latest.json", "generated_at"),
+}
+KR_CLOSE_MIN = 15 * 60 + 30   # 15:30 KST — 아래 test_market_close_constant_... 가 상수 파일과 대조
+
+
+def expected_trade_date(now_ts):
+    """워크플로우가 "기대 거래일"로 삼는 날짜 — 지금이 평일 장마감 이후면 오늘, 아니면 가장
+    최근 평일. (검사 대상 로직의 사본이지만, 아래 검사들은 이 헬퍼가 아니라 **날짜를 글자로
+    박은** 시나리오로도 같은 판정을 못 박아서 사본이 틀려도 조용히 통과하지 않습니다.)"""
+    import datetime
+    tz = datetime.timezone(datetime.timedelta(hours=9))
+    now = datetime.datetime.fromtimestamp(now_ts, tz)
+    day = now.date()
+    if not (day.isoweekday() <= 5 and now.hour * 60 + now.minute >= KR_CLOSE_MIN):
+        day -= datetime.timedelta(days=1)
+    while day.isoweekday() > 5:
+        day -= datetime.timedelta(days=1)
+    return day.isoformat()
+
+
+def data_file_text(wf_file, stamp, status="SUCCESS"):
+    """실제 파일 모양 그대로(키 위치가 다릅니다 — 코스피는 metadata 안, 보조지표는 최상위)."""
+    if wf_file == "scrape.yml":
+        return json.dumps({"metadata": {"last_updated_at": stamp, "status": status,
+                                        "total_count": 500},
+                           "stocks": []}, ensure_ascii=False)
+    if wf_file == "indicator_kr.yml":
+        return json.dumps({"generated_at": stamp, "date": stamp[:10], "status": status,
+                           "success_count": 500, "stocks": []}, ensure_ascii=False)
+    raise AssertionError(f"{wf_file} 는 데이터 갱신 확인 대상이 아닙니다")
+
+
+def fresh_data_files(now_ts, hhmm=(16, 5)):
+    """두 대상 모두 "기대 거래일 + 장마감 이후" 로 찍힌 정상 데이터 파일 세트."""
+    stamp = f"{expected_trade_date(now_ts)} {hhmm[0]:02d}:{hhmm[1]:02d}"
+    return {path: data_file_text(wf, stamp) for wf, (path, _key) in DATA_TARGETS.items()}
+
+
+def contents_calls(calls):
+    """가짜 `gh` 호출 중 데이터 파일 조회(contents API)만 골라 그 경로를 돌려줍니다."""
+    out = []
+    for c in calls:
+        api = next((a for a in c if isinstance(a, str) and a.startswith("repos/")), "")
+        if "/contents/" in api:
+            out.append(api.split("/contents/")[1].split("?")[0])
+    return out
+
 
 def load_check_step_script():
     """워크플로우 첫 스텝(`감시대상 스케줄 확인`)의 셸 스크립트를 YAML 에서 그대로 꺼냅니다."""
@@ -555,6 +623,14 @@ def load_check_step_script():
             "  수집기(collector_kospi200.py · collector_indicator_kr.py)가 장중 가격을 그날\n"
             "  종가인 것처럼 저장합니다 — 아래 장중 검사들이 조용히 무의미해지지 않도록\n"
             "  여기서 명시적으로 실패시킵니다."
+        )
+    if "DATA_FRESH" not in script or "/contents/" not in script:
+        raise _MarkerNotFound(
+            "첫 스텝 스크립트 안에서 데이터 갱신 확인(`DATA_FRESH` / contents API)을 못 찾았습니다"
+            " (2026-09-05 #196 추가).\n"
+            "  이게 사라지면 `--skip-if-not-ready` 로 아무것도 수집하지 않고 exit 0 한 실행을\n"
+            "  워치독이 다시 '성공'으로 오판합니다 — 아래 데이터 갱신 검사들이 조용히\n"
+            "  무의미해지지 않도록 여기서 명시적으로 실패시킵니다."
         )
     return script
 
@@ -580,7 +656,8 @@ def _write_stub(path, body):
     path.chmod(0o755)
 
 
-def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
+def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None,
+                   data_files=None):
     """
     가짜 `gh`/`date` 위에서 첫 스텝 스크립트를 통째로 실행합니다(네트워크 없음).
 
@@ -588,6 +665,10 @@ def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
     `now_ts` 는 가짜 "지금"(생략하면 NOW_TS = 화 18:00 KST, 실제 cron 발동 시각),
     `dow` 는 KST 요일(1=월 ... 7=일 — 생략하면 `now_ts` 에서 계산해 둘이 어긋나지 않게 합니다),
     `dispatch_rc` 는 재실행 트리거의 종료코드입니다.
+    `data_files` 는 {저장소 상대경로: 파일 원문} — 가짜 `gh` 의 contents API 가 돌려줄 데이터
+    파일(2026-09-05 데이터 갱신 확인). 생략하면 두 대상 모두 "기대 거래일 16:05" 로 찍힌
+    정상 파일을 줍니다(그래야 실행 결과만 다루는 기존 검사들이 데이터 쪽에서 오탐 없이
+    예전 판정을 그대로 봅니다). 빈 dict 를 주면 모든 조회가 404 입니다.
     반환값은 (CompletedProcess, gh 호출 인자 목록, GITHUB_OUTPUT 내용).
     """
     script = load_check_step_script()
@@ -595,6 +676,8 @@ def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
         now_ts = NOW_TS
     if dow is None:
         dow = kst_dow(now_ts)
+    if data_files is None:
+        data_files = fresh_data_files(now_ts)
 
     bin_dir = tmp_path / "bin"
     bin_dir.mkdir()
@@ -603,6 +686,8 @@ def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
 
     status_path = tmp_path / "run_status.json"
     status_path.write_text(json.dumps(run_status), encoding="utf-8")
+    data_path = tmp_path / "data_files.json"
+    data_path.write_text(json.dumps(data_files, ensure_ascii=False), encoding="utf-8")
     call_log = tmp_path / "gh_calls.jsonl"
     call_log.write_text("", encoding="utf-8")
     gh_output = tmp_path / "github_output"
@@ -616,6 +701,7 @@ def run_check_step(tmp_path, run_status, dispatch_rc=0, dow=None, now_ts=None):
         GITHUB_OUTPUT=str(gh_output),
         GH_CALL_LOG=str(call_log),
         GH_RUN_STATUS=str(status_path),
+        GH_DATA_FILES=str(data_path),
         GH_DISPATCH_RC=str(dispatch_rc),
         FAKE_NOW_TS=str(now_ts),
         FAKE_DOW=str(dow),
@@ -1099,6 +1185,240 @@ def test_issue_body_has_no_market_note_after_market_close(tmp_path):
     assert "자동 재실행 트리거함" in body, body
     assert MARKET_SKIP_PHRASE not in body, body
     assert "09:00~15:30" not in body, body
+
+# =====================================================================================
+# 6. "성공으로 끝남" ≠ "데이터를 만듦" — 데이터 파일 타임스탬프까지 본다 (2026-09-05 #196)
+# =====================================================================================
+#
+# 배경: scrape.yml / indicator_kr.yml 은 2026-09-04 부터 `--skip-if-not-ready` 로 돕니다.
+# 09-04(금) 새벽 07:04 KST 에 GitHub cron 이 늦게 발동해 저장한 "오늘자 SUCCESS"(내용은
+# 목요일 종가) 때문에 그날 오후 정식 실행이 전부 건너뛰어졌고(#195), 그 건너뛴 실행은
+# conclusion=success 로 남았습니다. 이 워치독은 conclusion 만 봤으니 "✅"를 찍었고, 새
+# 데이터가 하루 종일 하나도 안 만들어졌는데 아무 경고도 없었습니다. 아래 검사들은 그
+# 사고 원본 그대로의 타임스탬프로 워치독이 이제 ❌ 를 찍는지 못 박습니다.
+#
+# 판정 규칙(워크플로우 헤더 🔴 2026-09-05 문단): 타임스탬프 날짜가 "기대 거래일"(평일 장마감
+# 이후면 오늘, 아니면 가장 최근 평일)이고 시각이 15:30 KST 이후(정각 포함 — 수집기의
+# kr_snapshot_time_is_after_close() 와 같은 규칙)여야 "데이터를 만들었다"입니다.
+
+STALE_PHRASE = "실행은 성공했지만 데이터 미갱신"
+
+# 사고 당일 — 2026-09-04(금) 18:00 KST, 워치독 정규 발동 시각.
+TS_FRI_INCIDENT_CHECK = kst_ts(2026, 9, 4, 18, 0)
+INCIDENT_STAMP = "2026-09-04 07:04"   # kospi200_pegy_latest.json metadata.last_updated_at 실측값
+
+
+def _all_ok_status(now_ts):
+    return status_map(ALL_TARGETS, [], now_ts=now_ts)
+
+
+def _data_files_with(now_ts, overrides):
+    """정상 세트에서 일부 대상만 다른 스탬프/원문으로 바꿉니다. overrides: {wf_file: 스탬프 또는 None(404)}"""
+    files = fresh_data_files(now_ts)
+    for wf, stamp in overrides.items():
+        path = DATA_TARGETS[wf][0]
+        if stamp is None:
+            files.pop(path, None)
+        else:
+            files[path] = data_file_text(wf, stamp)
+    return files
+
+
+def test_incident_success_run_with_pre_close_snapshot_is_flagged_and_redispatched(tmp_path):
+    """
+    ⭐ 이 변경의 핵심 — 사고 원본 재현. 금 18:00 KST, scrape.yml 은 2시간 전 success 로
+    끝났지만 데이터 파일은 "2026-09-04 07:04"(오늘 날짜, 장마감 이전). 예전 워치독은 ✅.
+    이제는 ❌ + 자동 재실행(18:00 은 장마감 후라 안전) + 이슈 항목에 사유가 실려야 합니다.
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": INCIDENT_STAMP}),
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], dispatch_calls(calls)
+    assert "has_failures=true" in output, output
+    assert f"- scrape.yml ({STALE_PHRASE}: 데이터 기준 2026-09-04 07:04 KST" in output, output
+    assert "장마감 15:30 이전" in output, output
+    assert "자동 재실행 트리거함" in output, output
+    # 로그에도 conclusion=success 였음을 명시(사람이 "실행이 없었나?"로 읽지 않도록)
+    assert "실행은 성공(conclusion=success)으로 끝났지만" in proc.stdout, proc.stdout
+
+
+def test_success_run_with_yesterdays_snapshot_is_flagged(tmp_path):
+    """날짜 자체가 어제(목 16:05)면 시각이 장마감 후라도 ❌ — 기대 거래일은 오늘(금)입니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"indicator_kr.yml": "2026-09-03 16:05"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("indicator_kr.yml")], dispatch_calls(calls)
+    assert f"- indicator_kr.yml ({STALE_PHRASE}: 데이터 기준 2026-09-03 16:05 KST" in output, output
+    assert "기대 거래일 2026-09-04" in output, output
+
+
+@pytest.mark.parametrize("hhmm, expect_flag, label", [
+    ((15, 30), False, "15:30 정각 — 장마감 '이후'로 침(수집기 규칙과 동일)"),
+    ((15, 29), True,  "15:29 — 1분 전이면 장중 값"),
+    ((21, 40), False, "21:40 — 사고 당일 보조지표 실제 생성 시각(정상)"),
+    ((0, 0),   True,  "00:00 — 자정 직후 값"),
+])
+def test_close_boundary_is_exact(tmp_path, hhmm, expect_flag, label):
+    now = TS_FRI_INCIDENT_CHECK
+    stamp = f"2026-09-04 {hhmm[0]:02d}:{hhmm[1]:02d}"
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": stamp, "indicator_kr.yml": stamp}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    flagged = dispatch_calls(calls)
+    if expect_flag:
+        assert flagged == [expected_dispatch_args("scrape.yml"),
+                           expected_dispatch_args("indicator_kr.yml")], (label, flagged)
+        assert "has_failures=true" in output, (label, output)
+    else:
+        assert flagged == [], (label, flagged)
+        assert "has_failures=false" in output, (label, output)
+
+
+def test_fresh_snapshots_pass_with_no_dispatch(tmp_path):
+    """정상(오늘 16:05 / 17:10) — ❌ 도 재실행도 없고, 로그에 갱신 확인 문구가 남습니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": "2026-09-04 16:05",
+                                          "indicator_kr.yml": "2026-09-04 17:10"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+    assert "data/kospi200_pegy_latest.json 갱신 확인(데이터 기준 2026-09-04 16:05 KST" in proc.stdout, proc.stdout
+    assert "data/indicator_kr_latest.json 갱신 확인(데이터 기준 2026-09-04 17:10 KST" in proc.stdout, proc.stdout
+
+
+def test_unreachable_data_file_counts_as_not_updated(tmp_path):
+    """파일을 못 받으면(404·권한·네트워크) "갱신 확인 못 함 = 미갱신"으로 안전한 쪽(❌)입니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": None}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], dispatch_calls(calls)
+    assert f"- scrape.yml ({STALE_PHRASE}: 데이터 파일의 타임스탬프(metadata.last_updated_at)를 읽지 못함" in output, output
+
+
+def test_malformed_data_file_counts_as_not_updated(tmp_path):
+    """JSON 이 아니거나(HTML 에러 페이지 등) 키가 없으면 역시 ❌ — 예외로 워치독이 죽지 않습니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    files = fresh_data_files(now)
+    files[DATA_TARGETS["scrape.yml"][0]] = "<html>Sign in</html>"
+    files[DATA_TARGETS["indicator_kr.yml"][0]] = json.dumps({"status": "SUCCESS"})   # generated_at 없음
+    proc, calls, output = run_check_step(tmp_path, _all_ok_status(now), now_ts=now, data_files=files)
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml"),
+                                     expected_dispatch_args("indicator_kr.yml")], dispatch_calls(calls)
+    assert "읽지 못함" in output, output
+
+
+def test_only_the_two_data_targets_fetch_files_and_only_when_a_run_succeeded(tmp_path):
+    """
+    데이터 파일 조회는 (a) 3·4번째 필드가 있는 두 대상에 대해서만, (b) 그것도 성공 실행이
+    있을 때만 나갑니다 — 실행 기록이 없으면 어차피 재실행 대상이라 파일을 받을 이유가 없고,
+    나머지 8개는 이번 결함 범위 밖이라 종전대로 conclusion 만 봅니다(범위 확장 금지).
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    # (a) 전부 성공 → 두 파일만 각각 정확히 한 번
+    (tmp_path / "a").mkdir()
+    proc, calls, _ = run_check_step(tmp_path / "a", _all_ok_status(now), now_ts=now)
+    assert proc.returncode == 0, proc.stderr
+    assert sorted(contents_calls(calls)) == sorted(p for p, _ in DATA_TARGETS.values()), contents_calls(calls)
+    # (b) scrape.yml 실행 없음 → 그 파일은 조회하지 않고 바로 재실행
+    (tmp_path / "b").mkdir()
+    status = status_map([f for f in ALL_TARGETS if f != "scrape.yml"], ["scrape.yml"], now_ts=now)
+    proc, calls, output = run_check_step(tmp_path / "b", status, now_ts=now)
+    assert proc.returncode == 0, proc.stderr
+    assert contents_calls(calls) == [DATA_TARGETS["indicator_kr.yml"][0]], contents_calls(calls)
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")]
+    assert "- scrape.yml (자동 재실행 트리거함)" in output, output   # "실행 없음" 문구는 예전 그대로
+    assert STALE_PHRASE not in output, output
+
+
+def test_before_close_check_expects_the_previous_weekday(tmp_path):
+    """
+    사람이 장 마감 전에 수동으로 돌리면(화 11:00 / 월 08:00) 오늘 데이터를 기대할 수 없으니
+    "가장 최근 평일"(월 / 지난 금) 데이터가 장마감 후 값이면 정상입니다 — 아니면 매일 아침
+    수동 실행마다 오탐이 납니다.
+    """
+    # 화 11:00 → 월(2026-08-31) 16:05 면 정상 (장중이라 재실행은 어차피 안 걸림)
+    now = TS_TUE_MARKET_MIDDAY
+    assert expected_trade_date(now) == "2026-08-31"
+    (tmp_path / "tue").mkdir()
+    proc, calls, output = run_check_step(
+        tmp_path / "tue", _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": "2026-08-31 16:05",
+                                          "indicator_kr.yml": "2026-08-31 17:10"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "has_failures=false" in output, output
+
+    # 월 08:00 → 지난 금(2026-09-04) 16:05 면 정상, 목(09-03)이면 ❌
+    now = kst_ts(2026, 9, 7, 8, 0)
+    assert expected_trade_date(now) == "2026-09-04"
+    (tmp_path / "mon").mkdir()
+    proc, calls, output = run_check_step(
+        tmp_path / "mon", _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": "2026-09-04 16:05",
+                                          "indicator_kr.yml": "2026-09-03 17:10"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("indicator_kr.yml")], dispatch_calls(calls)
+    assert "기대 거래일 2026-09-04" in output, output
+
+
+def test_stale_data_during_market_hours_is_reported_but_not_redispatched(tmp_path):
+    """장중(화 11:00)에 미갱신이 잡혀도 재실행은 종전 규칙대로 생략 — 문구에 두 사유가 함께 실립니다."""
+    now = TS_TUE_MARKET_MIDDAY
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": "2026-08-31 07:04"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert f"- scrape.yml ({STALE_PHRASE}: 데이터 기준 2026-08-31 07:04 KST" in output, output
+    assert MARKET_SKIP_PHRASE in output, output
+
+
+def test_market_close_constant_matches_utils_constants():
+    """
+    워크플로우의 `KST_MARKET_CLOSE_MIN` 은 수집기가 쓰는 utils/constants.py 의
+    KR_MARKET_CLOSE_HOUR/MINUTE(#195 신설)와 **같은 값**이어야 합니다 — 워크플로우는
+    체크아웃 없이 돌아 그 모듈을 import 할 수 없으므로 값을 따로 들고 있고, 여기서
+    두 파일을 직접 읽어 대조합니다(한쪽만 바뀌면 빨간불).
+    """
+    import re
+    from utils.constants import KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE
+    script = load_check_step_script()
+    m = re.search(r"^\s*KST_MARKET_CLOSE_MIN=(\d+)", script, re.M)
+    assert m, "워크플로우에서 KST_MARKET_CLOSE_MIN=<숫자> 를 못 찾았습니다"
+    assert int(m.group(1)) == KR_MARKET_CLOSE_HOUR * 60 + KR_MARKET_CLOSE_MINUTE == KR_CLOSE_MIN, (
+        int(m.group(1)), KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE)
+    # 데이터 갱신 판정이 그 값을 실제로 인자로 받는지(다른 상수를 몰래 쓰지 않는지)
+    assert '"$KST_MARKET_CLOSE_MIN")' in script, "데이터 갱신 판정 스크립트가 KST_MARKET_CLOSE_MIN 을 인자로 받지 않습니다"
+
+
+def test_issue_body_explains_the_stale_data_case(tmp_path):
+    """이슈 본문이 "성공인데 왜 이슈가 떴지?"에 답해야 합니다 — 미갱신 항목 문구와 그 이유 설명."""
+    failed = (f"- scrape.yml ({STALE_PHRASE}: 데이터 기준 2026-09-04 07:04 KST — 날짜는 오늘이지만 "
+              "장마감 15:30 이전 시각(장 시작 전·장중 값); 자동 재실행 트리거함)\n")
+    proc, calls = run_issue_step(tmp_path, failed, market_hours="false", now_ts=TS_FRI_INCIDENT_CHECK)
+    assert proc.returncode == 1, proc.stderr
+    body = issue_body(calls)
+    assert STALE_PHRASE in body and "2026-09-04 07:04" in body, body
+    assert "--skip-if-not-ready" in body, body          # 왜 성공인데도 이슈인지
+    assert "타임스탬프" in body, body                    # 무엇을 추가로 봤는지
+    assert MARKET_SKIP_PHRASE not in body, body
 
 
 def main():

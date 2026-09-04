@@ -3149,6 +3149,79 @@ $500 잘못 입금·매수 없음·첫 스냅샷이 버그 이후라 첫 행 `mi
 이번엔 넣지 않음 — 후속 판단 사항. (c) #189 "한계" 의 "첫 실행 SUCCESS 인데 전 종목 종가만 실패" 조합은 그대로.
 
 
+### #196 — [실전 버그 2건] ① `/indicator` 카드 이력표가 컨테이너의 얼어붙은 로컬 사본을 읽음(`read_history_rows` 원격 경로 누락) ② 스케줄 워치독이 "스킵으로 조용히 끝난 실행" 을 성공으로 오판 (2026-09-05)
+
+#195 직후 저장소 전체 감사에서 발견된 후속 결함 2건. 둘 다 09-04(금) 사고(#195)와 같은 날 실제로 겉으로
+드러난 증상이 있었고, 이번 수정으로 각각의 재발 경로를 닫음.
+
+**결함 A — `/indicator` 카드 "최근 이력/전일 대비" 표가 하루 늦음.**
+- 증상(실측): 페이지 상단 배너는 "데이터 기준 2026-09-04 21:40"(원격 최신)인데, 같은 페이지 종목 카드 안의
+  이력표는 "가장 최근 기록은 2026-09-03까지". 실제로는 09-04 지표 수집이 21:40 에 500종목 전부 성공해
+  `data/indicator_kr_history.csv` 에 09-04 행 500개가 이미 정상적으로 쌓여 있었음.
+- 원인: Render 는 `DATA_SOURCE_BASE_URL` 로 원격(GitHub raw)에서 읽고 `data/**` 커밋은 Build Filters 로 재배포를
+  막아 두므로(`utils/data_source.py` 머리말), 컨테이너의 로컬 `data/` 사본은 **마지막 코드 배포 시점에 얼어붙음**.
+  2026-08-17 에 `load_stock_history()`(한 종목 조회) 는 `data_source.read_text()` 로 옮겼는데, 전체 표를 읽는
+  `read_history_rows()` 는 그 마이그레이션에서 **누락** 되어 여전히 순수 로컬 `open()`. `web/pages/indicator_page.py::
+  _load_recent_history_by_code()` 가 카드 렌더링에 이 함수를 직접 씀. `grep -rn read_history_rows` 결과 화면 쪽
+  호출부는 `/indicator` 한 곳뿐 — `/kr`·`/us` 의 종목별 다운로드는 `load_stock_history()`(이미 수정됨)를 쓰므로 영향 없음.
+- 수정 (`utils/stock_history.py`): `read_history_rows(path, *, local_only=False)` 가 `data_source.read_text(path,
+  encoding="utf-8-sig")` 를 거치도록 변경 — 원격 성공이면 원격 최신, 실패+캐시면 마지막 성공분+배너, 콜드스타트 실패면
+  로컬 사본+배너, 셋 다 없으면 빈 목록. `DATA_SOURCE_BASE_URL` 미설정(기본값)이면 예전과 100% 동일한 로컬 읽기
+  (`_read_local`). 시그니처(동기)·반환값(행 dict 목록, 실패 시 빈 목록)·`run_blocking(read_history_rows, path)`
+  호출 방식은 그대로. **기록 경로는 원격 전환하지 않음** — `append_daily_history()` 는 "읽은 것 + 오늘치" 를 같은
+  로컬 파일에 통째로 다시 쓰므로 읽기·쓰기가 반드시 같은 파일이어야 함(읽기만 원격이면 원격이 뒤처졌을 때 로컬에
+  쌓인 날짜가 통째로 사라질 수 있음). 그래서 `local_only=True`(= 예전 원본 그대로인 `_read_history_rows_local`)
+  로 호출. 헤더 주석에 경위 기록.
+- 회귀 테스트 (`tests/test_data_source.py::test_read_history_rows_goes_through_data_source`, [9-b]): [9]의
+  `load_stock_history()` 검사와 대칭 — ① 원격 꺼짐(로컬 그대로·BOM 처리·네트워크 0회·배너 없음·없는 파일 → []),
+  ② 원격 성공 → 09-04 행이 보임(얼어붙은 사본의 09-03 아님) + `local_only=True` 는 원격이 켜져 있어도 로컬만 읽고
+  네트워크를 안 탐, ③ TTL 뒤 원격 실패+캐시 → 마지막 성공분 유지 + 배너 대상에 `data/indicator_kr_history.csv`,
+  ④ 콜드스타트 실패 → 로컬 사본 + `local_fallback` 배너, ⑤ 셋 다 없음 → [], ⑥ 소스 수준(기록 경로 `local_only=True`,
+  indicator_page 가 여전히 `run_blocking(read_history_rows,` 로 부름).
+
+**결함 B — 스케줄 워치독(`watch_schedule_health.yml`)이 "데이터를 하나도 안 만든 날" 에 초록불.**
+- 증상: 09-04(금) `scrape.yml` 정식 실행은 `--skip-if-not-ready` 로 아무것도 수집하지 않고 exit 0(#195) → 실행
+  결과는 conclusion=success. 워치독은 conclusion 만 보므로 "✅ 성공 실행 확인됨" — 새 데이터가 하루 종일 하나도 안
+  만들어졌는데 이슈도 디스코드 알림도 없었음.
+- 수정 (`.github/workflows/watch_schedule_health.yml` — 구조·알림 방식은 그대로, 판정 조건만 강화):
+  - `TARGETS` 에 3·4번째 필드(데이터 파일|타임스탬프 JSON 키) 추가. 이번 결함 범위인 두 대상만:
+    `scrape.yml → data/kospi200_pegy_latest.json / metadata.last_updated_at`,
+    `indicator_kr.yml → data/indicator_kr_latest.json / generated_at`. 나머지 8개는 종전대로 conclusion 만 봄(범위 확장 안 함).
+  - 성공 실행이 있는 경우에만 `gh api -H "Accept: application/vnd.github.raw" repos/…/contents/<path>?ref=main` 으로
+    main 의 파일을 받아(체크아웃 없이 파일 하나만 읽는 가장 가벼운 방법; 기존 `contents: read` 권한으로 충분) 인라인
+    파이썬으로 판정: 타임스탬프 날짜가 **기대 거래일**(지금이 평일 장마감 이후면 오늘, 아니면 가장 최근 평일 — 사람이
+    장 마감 전에 수동 실행해도 오탐 없음)이고 **시각 ≥ 15:30 KST**(정각 포함 — 수집기의
+    `kr_snapshot_time_is_after_close()`/`snapshot_time_is_after_close()` 와 같은 규칙). 파일을 못 받거나 JSON 이
+    아니거나 키가 없으면 "갱신 확인 못 함 = 미갱신"(안전한 쪽). 장마감 기준값은 기존 `KST_MARKET_CLOSE_MIN=930` 을
+    그대로 인자로 넘김 — 워크플로우는 체크아웃 없이 돌아 `utils/constants.py` 를 import 할 수 없으므로, 테스트가 두
+    파일을 직접 읽어 `KR_MARKET_CLOSE_HOUR*60+KR_MARKET_CLOSE_MINUTE` 와 같은지 대조(한쪽만 바뀌면 빨간불).
+  - "데이터 미갱신" 은 "실행 없음" 과 똑같이 처리: 같은 자동 재실행(장중이면 종전대로 생략)·같은 이슈/디스코드 알림·
+    같은 잡 실패(exit 1). 이슈 항목 문구만 `- scrape.yml (실행은 성공했지만 데이터 미갱신: 데이터 기준 2026-09-04 07:04
+    KST — 날짜는 오늘이지만 장마감 15:30 이전 시각(장 시작 전·장중 값); 자동 재실행 트리거함)` 처럼 사유가 앞에 붙고,
+    "실행 없음" 항목 문구는 예전과 글자 그대로 동일. 이슈 본문 첫 문단에 "성공인데 왜 이슈인지"(`--skip-if-not-ready`
+    → 타임스탬프까지 확인) 설명 추가. 18:00 KST 재실행은 장마감 후라 #195 로 고쳐진 수집기 사전 점검이 "오늘자
+    SUCCESS 지만 장마감 이전 시각" 을 보고 이번엔 실제로 수집함.
+- 회귀 테스트 (`tests/test_watch_schedule_health_window.py` §6, +14): 가짜 `gh` 에 contents API(GH_DATA_FILES) 추가,
+  `run_check_step(data_files=…)`(생략 시 정상 파일 → 기존 46개 검사가 그대로 통과). ⭐ 사고 원본 재현(금 18:00,
+  success 실행 + `2026-09-04 07:04` → ❌·재실행·사유 문구), 어제 날짜 16:05 → ❌("기대 거래일 2026-09-04"),
+  경계 4종(15:30 정각 통과 / 15:29 ❌ / 21:40 통과 / 00:00 ❌), 정상 → 재실행 0건 + 로그 "갱신 확인" 문구, 404 → ❌,
+  HTML·키 없음 → ❌(예외로 안 죽음), 조회 범위(두 대상만·성공 실행 있을 때만·"실행 없음" 문구 불변), 장 마감 전
+  수동 실행(화 11:00 → 월 데이터 정상, 월 08:00 → 금 정상·목 ❌), 장중 미갱신 → 보고만 하고 재실행 생략, 상수 대조,
+  이슈 본문 설명. `load_check_step_script()` 에 `DATA_FRESH`/`/contents/` 마커 검사 추가(사라지면 `_MarkerNotFound`).
+  수정 전 워크플로우로 되돌려 돌리면 31개 실패 확인.
+
+**검증.** 관련: `pytest -q tests/test_data_source.py tests/test_stock_history.py` 34 passed,
+`tests/test_watch_schedule_health_window.py` 60 passed(46 + 14). 전체 `pytest -q --ignore=archive` **2,124 passed / 72 skipped**
+(#195 의 2,109 + 신규 15, 회귀 0; 실행 환경의 명령 시간 상한 때문에 45개 파일을 3묶음으로 나눠 돌렸고 합계가
+`--collect-only` 의 2,196건과 일치). 중간에 `test_suite_integrity.py` 가 `test_data_source.py::main()` 의 수동 호출
+목록에 새 테스트가 빠졌다고 잡아 목록에 추가(#168 H-3 재발 방지 장치가 의도대로 작동).
+
+**하지 않은 것(§0-1).** (a) 워치독의 데이터 확인 대상을 두 개 밖으로 넓히지 않음(다른 8개는 파일·키가 제각각이라
+별도 작업). (b) 공휴일(휴장일) 판정은 여전히 없음 — 휴장일에는 수집기가 그날 날짜로 스냅샷을 남기므로 오탐은 없고,
+어느 쪽이든 안전한 방향. (c) 09-04(금) 종가 백필은 #195 와 같은 이유로 하지 않음. (d) 실제 GitHub/디스코드 부수효과
+(이슈 생성·웹훅)는 여전히 오프라인 검증 밖 — 오너가 Actions 탭에서 workflow_dispatch 로 한 번 돌려 확인 필요.
+
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

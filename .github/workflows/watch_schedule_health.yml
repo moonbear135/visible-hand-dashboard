@@ -41,6 +41,33 @@
 #     건너뛰고, 월요일엔 지난 금요일 실행분까지 보이도록 창을
 #     넓힙니다(주말 동안은 검사가 없었으므로).
 #
+#   🔴 2026-09-05 (#196) — "성공으로 끝났다"와 "데이터를 만들었다"는 다른 말입니다:
+#     scrape.yml / indicator_kr.yml 은 2026-09-04 부터 `--skip-if-not-ready` 로 돕니다 —
+#     "오늘 이미 SUCCESS 스냅샷이 있으면 아무것도 수집하지 않고 exit 0". 그런데 GitHub
+#     자체 cron 이 09-04(금) 새벽 07:04 KST 에 늦게 발동해 저장한 "오늘자 SUCCESS"(내용은
+#     목요일 종가) 때문에 그날 오후 정식 실행이 전부 건너뛰어졌고(#195), 그 건너뛴 실행이
+#     conclusion=success 로 남았습니다. 이 워치독은 conclusion 만 봤으니 "✅ 성공 실행
+#     확인됨"을 찍었고, 새 데이터가 하루 종일 하나도 안 만들어졌는데 아무 경고가 없었습니다.
+#     그래서 이제 두 대상은 **담당 데이터 파일의 타임스탬프까지** 봅니다:
+#       · scrape.yml       → data/kospi200_pegy_latest.json  의 metadata.last_updated_at
+#       · indicator_kr.yml → data/indicator_kr_latest.json   의 generated_at
+#     판정: 타임스탬프 날짜가 "기대 거래일"(지금이 평일 장마감 이후면 오늘, 아니면 가장
+#     최근 평일)이고 **시각이 장마감(15:30 KST) 이후**여야 "데이터를 만들었다"로 칩니다.
+#     시각 조건은 collector_kospi200.py::kr_snapshot_time_is_after_close() /
+#     collector_indicator_kr.py::snapshot_time_is_after_close() 와 같은 규칙(15:30 정각
+#     포함, `utils/constants.py` 의 KR_MARKET_CLOSE_HOUR/MINUTE)입니다 — 이 워크플로우는
+#     저장소를 체크아웃하지 않아 그 모듈을 import 할 수 없으므로 아래 `KST_MARKET_CLOSE_MIN`
+#     을 같은 값으로 두고, tests/test_watch_schedule_health_window.py 가 두 값이 같은지
+#     파일에서 직접 읽어 검사합니다(어긋나면 빨간불). 데이터 파일은 GitHub Contents API
+#     (`gh api -H "Accept: application/vnd.github.raw" .../contents/<path>?ref=main`)로
+#     main 의 현재 내용을 받습니다 — 체크아웃 없이 파일 하나만 읽는 가장 가벼운 방법입니다.
+#     ⚠️ 나머지 8개 대상은 이번 결함 범위 밖이라 종전대로 conclusion 만 봅니다(범위를
+#        넓히지 않음 — 대상별 데이터 파일·타임스탬프 키를 따로 확인해야 하므로 별도 작업).
+#     "데이터 미갱신" 판정도 "실행 없음"과 똑같이 취급합니다 — 같은 자동 재실행(장중이면
+#     생략)·같은 이슈/디스코드 알림·같은 잡 실패 처리. 재실행이 걸리는 18:00 KST 는 장마감
+#     이후라, #195 로 고쳐진 수집기의 사전 점검이 "오늘자 SUCCESS 지만 장마감 이전 시각"을
+#     보고 이번엔 실제로 수집합니다.
+#
 #   ⚠️ 한계 — 정직하게 밝혀둡니다:
 #     이 워치독도 결국 GitHub Actions 의 schedule 로 도는 워크플로우입니다. 즉 이
 #     워치독 자체가 같은 이유로 늦게 돌거나 아예 안 돌 가능성을 완전히 배제할 수는
@@ -157,10 +184,12 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 파일명|weekdays 또는 daily  (아래 헤더 코멘트의 "확인 대상" 목록과 동일)
-          TARGETS="scrape.yml|weekdays
+          # 파일명|weekdays 또는 daily|데이터 파일(선택)|그 파일의 타임스탬프 JSON 키(선택, 점 구분)
+          #   (위 헤더 코멘트의 "확인 대상" 목록과 동일. 3·4번째 필드가 있는 대상은 실행 결과에
+          #    더해 그 데이터 파일이 실제로 갱신됐는지까지 봅니다 — 2026-09-05 #196 문단 참고.)
+          TARGETS="scrape.yml|weekdays|data/kospi200_pegy_latest.json|metadata.last_updated_at
           scrape_us.yml|weekdays
-          indicator_kr.yml|weekdays
+          indicator_kr.yml|weekdays|data/indicator_kr_latest.json|generated_at
           scrape_report_snapshots.yml|weekdays
           duel_daily.yml|weekdays
           duel_daily_us.yml|daily
@@ -185,6 +214,9 @@ jobs:
           KST_MINUTE_OF_DAY=$(( ( (NOW_TS + 32400) % 86400 ) / 60 ))
           KST_MARKET_OPEN_MIN=540    # 09:00
           KST_MARKET_CLOSE_MIN=930   # 15:30 (종가가 확정되는 순간이라 경계도 '장중'으로 봅니다)
+          # ⚠️ 위 값은 utils/constants.py 의 KR_MARKET_CLOSE_HOUR*60 + KR_MARKET_CLOSE_MINUTE 와
+          #    같아야 합니다 — 아래 "데이터 갱신 확인"(2026-09-05)이 수집기와 같은 장마감 기준을
+          #    쓰기 위해서입니다. tests/test_watch_schedule_health_window.py 가 두 값을 대조합니다.
           if [ "$DOW_KST" -le 5 ] \
              && [ "$KST_MINUTE_OF_DAY" -ge "$KST_MARKET_OPEN_MIN" ] \
              && [ "$KST_MINUTE_OF_DAY" -le "$KST_MARKET_CLOSE_MIN" ]; then
@@ -204,7 +236,7 @@ jobs:
 
           FAILED_LIST=""
 
-          while IFS='|' read -r FILE KIND; do
+          while IFS='|' read -r FILE KIND DATA_FILE STAMP_KEY; do
             [ -z "$FILE" ] && continue
 
             if [ "$KIND" = "weekdays" ] && { [ "$DOW_KST" = "6" ] || [ "$DOW_KST" = "7" ]; }; then
@@ -262,10 +294,88 @@ jobs:
           print("yes" if found else "no")
           ' "$NOW_TS" "$WINDOW_HOURS")
 
-            if [ "$LATEST_OK" = "yes" ]; then
-              echo "✅ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 확인됨."
+            # ── 2026-09-05 (#196): 성공 실행이 있어도 "실제로 새 데이터를 만들었는가" ────────
+            # 3·4번째 필드가 있는 대상(scrape.yml / indicator_kr.yml)은 main 의 데이터 파일을
+            # 받아 타임스탬프를 봅니다. `--skip-if-not-ready` 로 아무것도 안 하고 exit 0 한
+            # 실행도 conclusion=success 라, 실행 결과만으로는 "데이터가 안 만들어진 하루"를
+            # 못 잡기 때문입니다(위 헤더 🔴 2026-09-05 문단). 실행 기록 자체가 없으면 어차피
+            # 재실행 대상이므로 파일을 받지 않습니다.
+            DATA_FRESH=yes
+            DATA_NOTE=""
+            if [ "$LATEST_OK" = "yes" ] && [ -n "${DATA_FILE:-}" ]; then
+              # 실패(404·권한·네트워크)하면 빈 문자열 → 아래 판정이 "타임스탬프 없음 = 갱신
+              # 확인 못 함 = 미갱신"으로 안전한 쪽(no)으로 처리합니다(RESP 와 같은 if/else 꼴 —
+              # `cmd || echo` 한 줄 형태가 stdout 을 이어 붙이는 문제는 위 주석 참고).
+              if ! DATA_JSON=$(gh api -H "Accept: application/vnd.github.raw" \
+                    "repos/${REPO}/contents/${DATA_FILE}?ref=main" 2>/dev/null); then
+                DATA_JSON=''
+              fi
+              DATA_VERDICT=$(printf '%s' "$DATA_JSON" | python3 -c '
+          import json, sys, re, datetime
+          # 인자: NOW_TS(epoch 초) / 타임스탬프 키(점 구분) / 장마감 분(KST_MARKET_CLOSE_MIN)
+          # stdout: 1행 "yes"|"no", 2행 사람이 읽는 사유(로그·이슈 본문에 그대로 실림).
+          now = int(sys.argv[1])
+          key = sys.argv[2]
+          close_min = int(sys.argv[3])
+          KST = datetime.timezone(datetime.timedelta(hours=9))
+          try:
+              data = json.loads(sys.stdin.read())
+          except Exception:
+              data = None
+          stamp = data
+          for part in key.split("."):
+              stamp = stamp.get(part) if isinstance(stamp, dict) else None
+          # 기대 거래일: 지금이 평일이고 장마감(close_min) 이후면 오늘, 아니면 가장 최근 평일.
+          # (18:00 KST 정규 발동이면 항상 오늘. 사람이 장 마감 전에 수동으로 돌리면 어제 평일.)
+          # 공휴일은 판정하지 않습니다 — 헤더의 ⚠️ 참고(휴장일 표 하드코딩 금지, §0-1).
+          kst_now = datetime.datetime.fromtimestamp(now, KST)
+          expected = kst_now.date()
+          if not (expected.isoweekday() <= 5 and kst_now.hour * 60 + kst_now.minute >= close_min):
+              expected -= datetime.timedelta(days=1)
+          while expected.isoweekday() > 5:
+              expected -= datetime.timedelta(days=1)
+          m = (re.match(r"^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})", stamp.strip())
+               if isinstance(stamp, str) else None)
+          close_label = f"{close_min // 60:02d}:{close_min % 60:02d}"
+          if m is None:
+              print("no")
+              print(f"데이터 파일의 타임스탬프({key})를 읽지 못함(파일을 못 받았거나 형식이 다름): {str(stamp)[:60]!s}")
+              sys.exit(0)
+          stamp_date, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
+          if not (0 <= hh <= 23 and 0 <= mm <= 59):
+              print("no")
+              print(f"데이터 파일의 타임스탬프({key}) 시각이 비정상: {stamp_date} {hh}:{mm}")
+          elif stamp_date != expected.isoformat():
+              print("no")
+              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 거래일 {expected.isoformat()}(장마감 {close_label} 이후)의 데이터가 아님")
+          elif hh * 60 + mm < close_min:
+              # 수집기의 kr_snapshot_time_is_after_close()/snapshot_time_is_after_close() 와 같은
+              # 규칙 — 장마감 정각(15:30)은 "이후"로 칩니다. 이 분기가 #195 사고(07:04 SUCCESS)의 모양입니다.
+              print("no")
+              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 날짜는 오늘이지만 장마감 {close_label} 이전 시각(장 시작 전·장중 값)")
+          else:
+              print("yes")
+              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 거래일 {expected.isoformat()} 장마감 이후")
+          ' "$NOW_TS" "$STAMP_KEY" "$KST_MARKET_CLOSE_MIN")
+              DATA_FRESH=$(printf '%s\n' "$DATA_VERDICT" | sed -n 1p)
+              DATA_NOTE=$(printf '%s\n' "$DATA_VERDICT" | sed -n 2p)
+            fi
+
+            # 이슈 본문 항목 앞에 붙는 설명. "실행 없음"은 예전 그대로 빈 문자열(문구 불변).
+            STALE_TAG=""
+            if [ "$LATEST_OK" = "yes" ] && [ "$DATA_FRESH" = "yes" ]; then
+              if [ -n "${DATA_FILE:-}" ]; then
+                echo "✅ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 확인됨 + ${DATA_FILE} 갱신 확인(${DATA_NOTE})."
+              else
+                echo "✅ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 확인됨."
+              fi
             else
-              echo "❌ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 기록 없음!"
+              if [ "$LATEST_OK" = "yes" ]; then
+                echo "❌ $FILE — 실행은 성공(conclusion=success)으로 끝났지만 ${DATA_FILE} 이 갱신되지 않음: ${DATA_NOTE}"
+                STALE_TAG="실행은 성공했지만 데이터 미갱신: ${DATA_NOTE}; "
+              else
+                echo "❌ $FILE — 최근 ${WINDOW_HOURS}시간 내 성공 실행 기록 없음!"
+              fi
               # 발견 즉시 그 자리에서 딱 한 번 재실행을 걸어 둡니다(§0-3-2 — 사람이 폰을 못
               # 보는 동안 데이터가 며칠씩 밀리는 걸 막는 게 목적). 대상 10개 모두
               # workflow_dispatch 트리거가 있고 입력값은 전부 선택(기본값 있음)이라
@@ -285,13 +395,13 @@ jobs:
               # 건너뜁니다(§0-3-2 — 안전한 쪽이 기본값).
               if [ "$MARKET_HOURS" = "true" ]; then
                 echo "⏸  $FILE — 지금은 한국 증시 장중(평일 09:00~15:30 KST)이라 자동 재실행을 생략합니다."
-                FAILED_LIST="${FAILED_LIST}- ${FILE} (장중이라 자동 재실행 생략 — 장 마감 후 이 워치독이 다시 확인합니다)\n"
+                FAILED_LIST="${FAILED_LIST}- ${FILE} (${STALE_TAG}장중이라 자동 재실행 생략 — 장 마감 후 이 워치독이 다시 확인합니다)\n"
               elif gh api -X POST "repos/${REPO}/actions/workflows/${FILE}/dispatches" -f ref=main >/dev/null 2>&1; then
                 echo "🔁 $FILE — 자동 재실행 트리거 성공."
-                FAILED_LIST="${FAILED_LIST}- ${FILE} (자동 재실행 트리거함)\n"
+                FAILED_LIST="${FAILED_LIST}- ${FILE} (${STALE_TAG}자동 재실행 트리거함)\n"
               else
                 echo "⚠️ $FILE — 자동 재실행 트리거 실패! 수동 확인 필요."
-                FAILED_LIST="${FAILED_LIST}- ${FILE} (자동 재실행도 실패 — 수동 확인 필요)\n"
+                FAILED_LIST="${FAILED_LIST}- ${FILE} (${STALE_TAG}자동 재실행도 실패 — 수동 확인 필요)\n"
               fi
             fi
           done <<< "$TARGETS"
@@ -338,9 +448,12 @@ jobs:
           "
           fi
 
-          BODY="다음 워크플로우가 예상 시간 안에 **성공** 실행된 기록이 없습니다. 각 항목
-          뒤에 자동 재실행(workflow_dispatch)을 걸어 봤는지, 그 트리거 자체가 됐는지를
-          적어 뒀습니다:
+          BODY="다음 워크플로우가 예상 시간 안에 **성공** 실행된 기록이 없거나, 성공으로
+          끝났는데도 담당 데이터 파일이 갱신되지 않았습니다('실행은 성공했지만 데이터 미갱신'
+          으로 적힌 항목 — \`--skip-if-not-ready\` 로 아무것도 수집하지 않고 exit 0 한 실행도
+          conclusion=success 로 남기 때문에, 2026-09-05 부터 데이터 파일의 타임스탬프까지
+          확인합니다). 각 항목 뒤에 자동 재실행(workflow_dispatch)을 걸어 봤는지, 그 트리거
+          자체가 됐는지를 적어 뒀습니다:
 
           ${FAILED}
 
