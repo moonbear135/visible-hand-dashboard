@@ -2952,6 +2952,71 @@ macd_cross/bb_percent_b/bb_position/verdict_label/unavailable_reasons).
 (`response_timeout` 60초 안). (e) `markdown2` 를 `privacy_page.py` 가 직접 import 하게 됨 —
 nicegui 의 필수 의존성이라 설치본에 항상 있지만 `requirements.txt` 에 명시적으로는 없음.
 
+### #193 — 결투 정기입금이 계좌 개설일(`anchor_date`) 이전 날짜에도 들어가던 버그 수정(KRW·USD) + 잘못 들어간 원장 정정 SQL (2026-09-04)
+
+**배경(재현 수치).** 2026-08-22 에 개설된 결투 계좌(시드 1,000만원)가 2026-09-04 화면에서 총자산
+**1,160만원 = 1,000만원 + 80만원×2** 로 표시됐습니다. 이 계좌는 8/22 에 생겼으니 7/10·8/10 정기입금을
+받을 수 없는데(그때 계좌가 없었음) 둘 다 들어가 있었습니다.
+
+**원인(코드 레벨, 오너가 먼저 특정).** 2026-08-29 재감사 H-7 로 `utils/duel_batch.py::
+_pending_monthly_deposit_dates(day, lookback_days=60)` 가 최근 60일 안의 "매월 10일"을 전부 찾아
+날짜마다 `duel_db.apply_monthly_deposits()` 를 부르게 됐습니다(배치 공백 보정). 그런데
+`apply_monthly_deposits()` 는 `fetch_all_active_accounts()` 로 **지금 활성인 계좌 전체**를 가져와
+"그 계좌·그 날짜로 이미 입금이 있는지"만 걸렀고, **그 계좌가 그 날짜에 존재했는지
+(`anchor_date <= event_date`)** 는 보지 않았습니다. `fetch_all_active_accounts()` 는 이미
+`anchor_date` 를 select 하고 있었는데 필터에 안 쓰였습니다. `utils/duel_db_usd.py::
+apply_monthly_deposits_usd()` 도 같은 구조의 미러라 같은 버그. (스키마 §1 주석: "anchor_date 는
+입금·정산 리듬의 기준일(계좌 생성일)".)
+
+**한 일.**
+1. `utils/duel_db.py::apply_monthly_deposits()` · `utils/duel_db_usd.py::apply_monthly_deposits_usd()`
+   — payload 대상 계좌를 `_iso_date(row["anchor_date"]) <= event_date` 인 것으로만 좁힘
+   (`anchor_date == event_date` 는 개설 당일이 10일인 정상 케이스라 포함, `>` 만 제외). 이미 읽어
+   온 `anchor_date` 를 그대로 쓰므로 **추가 질의 없음**(§0-3-2 — 질의 수 3개 유지). 날짜 정규화는
+   같은 파일의 기존 헬퍼 `_iso_date()` 재사용(§0-3-10 — 문자열/date/datetime 모두 ISO 문자열로
+   맞춘 뒤 사전순 비교 = 날짜 비교). `anchor_date` 가 없는 행(스키마상 not null 이라 정상이면
+   없음)은 지어내지 않고 `_iso_date` 가 `DuelDbError` 로 멈춤(§0-1). 두 함수 docstring 에 왜 이
+   필터가 필요해졌는지(H-7 60일 lookback 과 만나 개설 전 날짜 입금) 기록.
+2. 회귀 테스트 — `tests/test_duel_db.py` +5, `tests/test_duel_db_usd.py` +3. 핵심은
+   `test_apply_monthly_deposits_skips_accounts_opened_after_the_deposit_date`(KRW/USD): 계좌 A
+   (anchor 9/20)·계좌 B(anchor 9/5)에 9/10 입금을 넣으면 **B 에만** 들어가야 함. 수정 전 코드에
+   돌려 보면 `assert 2 == 1` 로 실패(버그 재현 확인), 수정 후 통과. 그 외: 개설 당일(=10일) 포함,
+   `anchor_date` 가 date 객체로 와도 동일 판정, 전부 개설 전이면 중복 조회조차 안 하고 0행,
+   `anchor_date` 없는 행은 예외. 기존 fixture `_active_accounts()`/`_active_accounts_usd()` 에
+   `anchor_date` 컬럼 추가(실제 표에서 not null 이라 실제 행 모양에 맞춘 것 — 기존 단언은 무변경).
+3. `sql/duel_ledger_fix_2026-09-04_backdated_monthly_deposit.sql` 신설(기존 `duel_schema_migration_
+   <날짜>_<주제>.sql` 이름 규칙을 따르되 스키마 변경이 아닌 **데이터 정정**이라 `ledger_fix` 로 구분).
+   ① 진단(읽기 전용): `duel_cash_ledger`/`_usd` 에서 `event_type='monthly_deposit'` 이고
+   `event_date < 계좌.anchor_date` 인 행 목록 + 계좌별 건수·합계. ② 정정(쓰기): 각 행마다
+   **반대 부호의 `reversal` 행**을 `insert … select` 로 추가 — `event_date` 는 원본과 같은 날짜,
+   `order_id` null, memo 는 "정정: <anchor_date> 계좌 개설 이전(anchor_date보다 이른 날짜
+   <event_date>)에 잘못 들어간 정기입금 되돌림 — 원본 원장 id=N". `not exists` 로 같은 원본 id 의
+   되돌림이 있으면 다시 넣지 않음(재실행 안전). ③ 확인: 잘못된 입금+되돌림의 계좌·날짜별 합이 0 이
+   아닌 행(0행이어야 정상). 원장은 append-only(§4-2 트리거)라 update/delete 를 쓰지 않았고,
+   `duel_cash_ledger(_usd)_sign_match`·`_order_link` 제약이 `reversal` 에는 부호·order_id 제한이
+   없음을 스키마에서 확인. 파일 머리말에 "진단 → 건수 확인 → 정정 → 확인" 순서와 백업 권장 주석.
+   **이 SQL 은 실행하지 않았음** — service_role 키는 GitHub Actions Secrets 에만(§0-3-8), 오너가
+   Supabase SQL 편집기에서 실행.
+
+**검증.** `py_compile` OK. `tests/test_duel_db.py`+`test_duel_db_usd.py` **267 passed**. 전체
+`pytest -q --ignore=archive` **2,105 passed / 72 skipped**(#192 의 2,097 + 신규 8, 회귀 0).
+SQL 은 실서버 대신 **로컬 PostgreSQL 16 에 `sql/duel_schema.sql` + 2026-08-29 마이그레이션을 그대로
+올리고**(auth 스키마·role 만 스텁) 재현 데이터(8/22 개설 계좌에 7/10·8/10 입금 80만원×2, 8/5 개설
+계좌에 8/10 정상 입금, USD 8/22 계좌에 8/10 $500)로 실행: 진단이 정확히 잘못된 3행(KRW 2·USD 1)만
+집계, 정정 insert 가 제약·트리거를 통과해 잔고 11,600,000 → 10,000,000(USD 10,500 → 10,000), 정상
+계좌(10,800,000)는 무변경, 2회째 실행은 `INSERT 0 0`, 확인 쿼리 0행, reversal 행에 update 시도 →
+append-only 트리거가 거부.
+
+**확인 못 한 것 / 남는 일(§0-1).** (a) 실제 Supabase 의 잘못된 행 건수·계좌 수는 진단 쿼리를 오너가
+돌려야 알 수 있음(이 세션에는 키 없음). (b) **스냅샷·TWR 부작용**: 이미 저장된
+`duel_daily_snapshots(_usd)` 의 총자산·현금은 잘못된 입금이 반영된 값이고, 배치 TWR 은
+`EXTERNAL_CASH_FLOW_TYPES = ('seed','monthly_deposit')` 만 외부 현금흐름으로 봐서 `reversal` 을
+세지 않음. 정정 뒤 첫 스냅샷에서 현금이 80만원×N 줄어드는데 그날 cash_flow 는 0 이라 그 구간 일간
+수익률이 그만큼 마이너스로 잡힐 수 있음. 이 작업은 원장만 다뤘고 스냅샷·TWR 처리는 별도 판단 필요
+(SQL 머리말에도 기록). (c) 잔고 계산은 `duel_db.sum_cash_balance()`/`cash_balances_by_account()` 가 event_type 을
+가리지 않고 `amount` 를 전부 더하는 구조임을 코드로 읽어 확인 — 따라서 `reversal` 행은 화면·
+배치 잔고에 자동 반영될 것으로 보이나, 실제 화면에서 실행 확인은 안 함.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

@@ -1053,9 +1053,14 @@ def test_create_duel_accounts_fills_only_missing_window_types():
 # =============================================================================
 # 7. B 절 — 정기 입금 (2-2) · §0-3-2 집합 연산 회귀 고정
 # =============================================================================
-def _active_accounts(count):
+def _active_accounts(count, anchor="2026-08-20"):
+    """
+    활성 계좌 fixture. `anchor_date` 는 실제 표(`duel_accounts.anchor_date date not null`)와
+    `fetch_all_active_accounts()` 의 select 목록에 **항상** 있는 컬럼이라 여기서도 넣습니다
+    (2026-09-04 — 개설 전 날짜 입금 방지 필터가 이 값을 봅니다).
+    """
     return [{"id": f"acc-{index}", "user_id": f"user-{index}", "window_type": "M1",
-             "status": "active"} for index in range(count)]
+             "anchor_date": anchor, "status": "active"} for index in range(count)]
 
 
 @pytest.mark.parametrize("account_count", [3, 50, 900])
@@ -1123,6 +1128,76 @@ def test_apply_monthly_deposits_fills_only_the_accounts_that_missed_it():
 def test_apply_monthly_deposits_with_no_accounts_sends_no_write():
     client = FakeClient(responses={(duel_db.ACCOUNTS_TABLE, "select"): []})
     assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 0
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+
+
+def test_apply_monthly_deposits_skips_accounts_opened_after_the_deposit_date():
+    """
+    🔴 2026-09-04 회귀 — 계좌 개설일(`anchor_date`) **이전** 날짜의 정기 입금은 넣지 않습니다.
+
+    2026-08-29 H-7 로 배치가 최근 60일의 10일을 전부 `apply_monthly_deposits()` 에 넘기게
+    되면서, "지금 활성인 계좌 전체"에 넣던 이 함수가 계좌가 생기기도 전의 10일에도 입금을
+    넣었습니다(2026-08-22 개설 계좌가 7/10·8/10 입금을 받아 1,000만원 + 80만원×2 = 1,160만원
+    으로 표시된 실제 사례). 계좌 A(이번 달 20일 개설)는 이번 달 10일 입금을 받으면 안 되고,
+    계좌 B(이번 달 5일 개설)는 받아야 합니다.
+    """
+    accounts = [
+        {"id": "acc-A", "user_id": "user-A", "window_type": "M1",
+         "anchor_date": "2026-09-20", "status": "active"},   # 10일 **뒤**에 개설 → 제외
+        {"id": "acc-B", "user_id": "user-B", "window_type": "M1",
+         "anchor_date": "2026-09-05", "status": "active"},   # 10일 **전**에 개설 → 포함
+    ]
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): accounts,
+        (duel_db.LEDGER_TABLE, "select"): [],
+    })
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 1
+    rows = client.only_call(duel_db.LEDGER_TABLE, "insert").rows
+    assert [row["account_id"] for row in rows] == ["acc-B"]
+    assert rows[0]["event_date"] == "2026-09-10"
+    # 필터는 이미 읽어 온 `anchor_date` 로만 판단합니다 — 계좌 조회가 늘면 안 됩니다(§0-3-2).
+    assert len(client.calls_for(duel_db.ACCOUNTS_TABLE, "select")) == 1
+
+
+def test_apply_monthly_deposits_includes_an_account_opened_on_the_deposit_day():
+    """`anchor_date == event_date`(개설 당일이 마침 10일)는 정상 케이스라 **포함**합니다."""
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): _active_accounts(1, anchor="2026-09-10"),
+        (duel_db.LEDGER_TABLE, "select"): [],
+    })
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 1
+
+
+def test_apply_monthly_deposits_accepts_anchor_date_as_date_object():
+    """`anchor_date` 가 문자열이 아니라 date 로 와도 같은 판정입니다(`_iso_date` 재사용)."""
+    accounts = [
+        {"id": "acc-A", "anchor_date": date(2026, 9, 20), "status": "active"},
+        {"id": "acc-B", "anchor_date": date(2026, 9, 5), "status": "active"},
+    ]
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): accounts,
+        (duel_db.LEDGER_TABLE, "select"): [],
+    })
+    assert duel_db.apply_monthly_deposits(client, "2026-09-10") == 1
+    assert [r["account_id"] for r in client.only_call(duel_db.LEDGER_TABLE, "insert").rows] == ["acc-B"]
+
+
+def test_apply_monthly_deposits_all_accounts_too_new_sends_no_write():
+    """전부 개설 전 날짜면 중복 조회조차 하지 않고 0행으로 끝납니다."""
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): _active_accounts(3, anchor="2026-09-11"),
+    })
+    assert duel_db.apply_monthly_deposits(client, date(2026, 9, 10)) == 0
+    assert client.calls_for(duel_db.LEDGER_TABLE) == []
+
+
+def test_apply_monthly_deposits_refuses_an_account_without_anchor_date():
+    """`anchor_date` 가 없는 행은 지어내지 않고 예외로 멈춥니다(§0-1 — 표는 not null)."""
+    client = FakeClient(responses={
+        (duel_db.ACCOUNTS_TABLE, "select"): [{"id": "acc-0", "status": "active"}],
+    })
+    with pytest.raises(DuelDbError, match="계좌 개설일"):
+        duel_db.apply_monthly_deposits(client, date(2026, 9, 10))
     assert client.calls_for(duel_db.LEDGER_TABLE) == []
 
 

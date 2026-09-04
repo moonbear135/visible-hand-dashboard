@@ -639,9 +639,10 @@ def test_create_duel_accounts_for_user_usd_reraises_unrelated_errors():
 # =============================================================================
 # 8. B 절 — 정기 입금 ($500) · §0-3-2 집합 연산 회귀 고정
 # =============================================================================
-def _active_accounts_usd(count):
+def _active_accounts_usd(count, anchor="2026-08-20"):
+    """`anchor_date` 는 실제 표에서 not null 이라 fixture 에도 넣습니다(원화 테스트와 같은 이유)."""
     return [{"id": f"acc-{index}", "user_id": f"user-{index}", "window_type": "M1",
-             "status": "active"} for index in range(count)]
+             "anchor_date": anchor, "status": "active"} for index in range(count)]
 
 
 @pytest.mark.parametrize("account_count", [3, 50, 900])
@@ -688,6 +689,48 @@ def test_apply_monthly_deposits_usd_second_run_inserts_nothing():
 def test_apply_monthly_deposits_usd_with_no_accounts_sends_no_write():
     client = FakeClient(responses={(duel_db_usd.ACCOUNTS_TABLE_USD, "select"): []})
     assert duel_db_usd.apply_monthly_deposits_usd(client, date(2026, 9, 10)) == 0
+    assert client.calls_for(duel_db_usd.LEDGER_TABLE_USD) == []
+
+
+def test_apply_monthly_deposits_usd_skips_accounts_opened_after_the_deposit_date():
+    """
+    🔴 2026-09-04 회귀(원화 `test_apply_monthly_deposits_skips_accounts_opened_after_the_deposit_date`
+    의 미러) — 계좌 개설일 이전 날짜의 정기 입금은 넣지 않습니다. H-7 의 60일 lookback 이
+    개설 전 10일까지 넘기던 버그 재현: 계좌 A(이번 달 20일 개설)는 제외, 계좌 B(5일 개설)는 포함.
+    """
+    accounts = [
+        {"id": "acc-A", "user_id": "user-A", "window_type": "M1",
+         "anchor_date": "2026-09-20", "status": "active"},
+        {"id": "acc-B", "user_id": "user-B", "window_type": "M1",
+         "anchor_date": "2026-09-05", "status": "active"},
+    ]
+    client = FakeClient(responses={
+        (duel_db_usd.ACCOUNTS_TABLE_USD, "select"): accounts,
+        (duel_db_usd.LEDGER_TABLE_USD, "select"): [],
+    })
+    assert duel_db_usd.apply_monthly_deposits_usd(client, date(2026, 9, 10)) == 1
+    rows = client.only_call(duel_db_usd.LEDGER_TABLE_USD, "insert").rows
+    assert [row["account_id"] for row in rows] == ["acc-B"]
+    assert rows[0]["amount"] == duel_rules.MONTHLY_DEPOSIT_USD
+    assert len(client.calls_for(duel_db_usd.ACCOUNTS_TABLE_USD, "select")) == 1
+
+
+def test_apply_monthly_deposits_usd_includes_an_account_opened_on_the_deposit_day():
+    """`anchor_date == event_date` 는 포함(개설 당일이 10일인 정상 케이스)."""
+    client = FakeClient(responses={
+        (duel_db_usd.ACCOUNTS_TABLE_USD, "select"): _active_accounts_usd(1, anchor="2026-09-10"),
+        (duel_db_usd.LEDGER_TABLE_USD, "select"): [],
+    })
+    assert duel_db_usd.apply_monthly_deposits_usd(client, date(2026, 9, 10)) == 1
+
+
+def test_apply_monthly_deposits_usd_refuses_an_account_without_anchor_date():
+    """`anchor_date` 가 없는 행은 지어내지 않고 예외(§0-1)."""
+    client = FakeClient(responses={
+        (duel_db_usd.ACCOUNTS_TABLE_USD, "select"): [{"id": "acc-0", "status": "active"}],
+    })
+    with pytest.raises(DuelDbError, match="계좌 개설일"):
+        duel_db_usd.apply_monthly_deposits_usd(client, date(2026, 9, 10))
     assert client.calls_for(duel_db_usd.LEDGER_TABLE_USD) == []
 
 

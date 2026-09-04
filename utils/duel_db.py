@@ -1366,12 +1366,26 @@ def apply_monthly_deposits(service_client, deposit_date):
 
     ⚠️ 10일이 주말·공휴일이어도 **그대로 10일자**로 넣습니다(2-2-4). 이건 시장 이벤트가
        아니라 현금 이벤트입니다. 날짜를 영업일로 밀지 마세요.
+
+    ── 🔴 2026-09-04 — 계좌 개설일(`anchor_date`) 이전 날짜에는 넣지 않습니다 ────────────
+    2026-08-29 H-7 로 `duel_batch._pending_monthly_deposit_dates()` 가 최근 60일의 10일을
+    **전부** 이 함수에 넘기게 되면서, "지금 활성인 계좌 전체"만 보던 이 함수가 **계좌가
+    생기기도 전의 10일**에도 입금을 넣는 버그가 생겼습니다(2026-08-22 개설 계좌가 7/10·8/10
+    입금을 받아 시드 1,000만원 + 80만원×2 = 1,160만원으로 표시된 실제 사례). 그래서
+    `anchor_date > event_date` 인 계좌는 payload 에서 뺍니다(`anchor_date == event_date`
+    는 개설 당일이 마침 10일인 정상 케이스라 **포함**). `fetch_all_active_accounts()` 가
+    이미 `anchor_date` 를 읽어 오므로 추가 질의는 없습니다(§0-3-2 — 질의 수는 여전히 3개).
     """
     _require_client(service_client, batch=True)
     event_date = _iso_date(deposit_date, "입금일")
 
     accounts = fetch_all_active_accounts(service_client)
-    account_ids = [row["id"] for row in accounts if row.get("id")]
+    # `anchor_date` 는 스키마상 not null 이라, 없으면 지어내지 않고 `_iso_date` 가 예외를
+    # 올립니다(§0-1). ISO 문자열끼리는 사전순 비교가 곧 날짜 비교입니다.
+    account_ids = [
+        row["id"] for row in accounts
+        if row.get("id") and _iso_date(row.get("anchor_date"), "계좌 개설일") <= event_date
+    ]
     if not account_ids:
         return 0
 

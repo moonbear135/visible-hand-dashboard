@@ -750,12 +750,21 @@ def apply_monthly_deposits_usd(service_client, deposit_date):
     `utils.duel_db.apply_monthly_deposits()` 의 미러 — §0-3-2 준수(질의 3개 고정),
     멱등성 확보 방식(미리 걸러 넣기)까지 완전히 동일합니다.
     반환: 실제로 새로 넣은 행 수.
+
+    🔴 2026-09-04 — 원화와 같은 이유로 `anchor_date > event_date` 인 계좌(그 날짜에 아직
+       개설되지 않은 계좌)는 제외합니다. H-7 의 60일 lookback 따라잡기가 최근 10일들을 전부
+       넘기면서, 개설 전 날짜에도 입금이 들어가던 버그의 미러 수정입니다(원화 docstring 참고).
+       `fetch_all_active_accounts_usd()` 가 이미 `anchor_date` 를 읽어 오므로 추가 질의는 없습니다.
     """
     _require_client(service_client, batch=True)
     event_date = _iso_date(deposit_date, "입금일")
 
     accounts = fetch_all_active_accounts_usd(service_client)
-    account_ids = [row["id"] for row in accounts if row.get("id")]
+    # `anchor_date` 는 스키마상 not null — 없으면 `_iso_date` 가 예외를 올립니다(§0-1).
+    account_ids = [
+        row["id"] for row in accounts
+        if row.get("id") and _iso_date(row.get("anchor_date"), "계좌 개설일") <= event_date
+    ]
     if not account_ids:
         return 0
 
