@@ -33,7 +33,7 @@
       "status": "pass"
     },
     {
-      "detail": "'rsi' 서로 다른 값 456개.",
+      "detail": "'rsi' 서로 다른 값 462개.",
       "field": "rsi",
       "name": "constant_value",
       "status": "pass"
@@ -57,32 +57,32 @@
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 서로 다른 값 498개.",
+      "detail": "'bb_mid' 서로 다른 값 499개.",
       "field": "bb_mid",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 중앙값 32,791.2 → 32,791.2 (1.00배).",
+      "detail": "'bb_mid' 중앙값 32,791.2 → 32,672.5 (1.00배).",
       "field": "bb_mid",
       "name": "median_shift",
       "status": "pass"
     }
   ],
   "dataset": "indicator_kr",
-  "generated_at_kst": "2026-09-03T21:38:30.522995+09:00",
+  "generated_at_kst": "2026-09-04T21:40:08.732578+09:00",
   "probe": {
     "fields": {
       "bb_mid": {
-        "distinct_count": 498,
-        "median": 32791.25,
+        "distinct_count": 499,
+        "median": 32672.5,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
       },
       "rsi": {
-        "distinct_count": 456,
-        "median": 49.825,
+        "distinct_count": 462,
+        "median": 50.875,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
@@ -94,6 +94,6 @@
   "reasons": [],
   "row_count": 500,
   "status": "ok",
-  "target_date": "2026-09-03",
+  "target_date": "2026-09-04",
   "version": 1
 }
