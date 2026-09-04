@@ -796,6 +796,99 @@ def test_bypass_files_go_through_data_source():
 
 
 # =============================================================================
+# [9-b] `read_history_rows()` 도 data_source 를 거치는지 (2026-09-05, TASK_HISTORY #196)
+#
+#  문제였던 것: [9]에서 `load_stock_history()`(한 종목 조회)만 옮기고 **전체 표를 읽는
+#  `read_history_rows()` 는 빠뜨렸습니다.** `/indicator` 카드의 "최근 이력/전일 대비" 표가
+#  이 함수를 쓰므로(`web/pages/indicator_page.py::_load_recent_history_by_code`), 상단 배너는
+#  원격 최신("데이터 기준 2026-09-04 21:40")인데 카드 표는 컨테이너에 얼어붙은 사본의
+#  "2026-09-03까지"를 보여줬습니다. 아래는 [9]의 원격 성공/실패/캐시 조합과 대칭입니다.
+# =============================================================================
+def test_read_history_rows_goes_through_data_source():
+    print("\n[9-b] read_history_rows() 가 data_source 를 거치는지 (원격 성공/실패/캐시/꺼짐)")
+
+    import utils.stock_history as stock_history
+
+    name = stock_history.INDICATOR_HISTORY_FILENAME
+    header = "date,code,name,rsi_14\r\n"
+    local_csv = "\ufeff" + header + "2026-09-03,005930,삼성전자,55.1\r\n"
+    remote_csv = (header + "2026-09-03,005930,삼성전자,55.1\r\n"
+                  "2026-09-04,005930,삼성전자,58.7\r\n").encode("utf-8-sig")
+
+    def _dates(rows):
+        return sorted({r.get("date") for r in rows})
+
+    # ① 원격 꺼짐(기본값) — 로컬 파일을 예전 그대로 읽음(BOM 제거·행 dict 목록), 배너 없음.
+    with Sandbox() as box:
+        path = box.write_local(name, local_csv)
+        rows = stock_history.read_history_rows(path)
+        check(_dates(rows) == ["2026-09-03"] and rows[0]["code"] == "005930"
+              and "\ufeff" not in "".join(rows[0].keys()),
+              "① 원격 꺼짐 — 로컬 CSV 를 예전과 똑같이 읽음(BOM 처리 포함)", f"실제: {rows}")
+        check(box.requests.calls == [], "   네트워크 0회")
+        check(data_source.get_staleness_status() is None, "   배너 없음")
+        check(stock_history.read_history_rows(box.path("없는파일.csv")) == [],
+              "   파일이 없으면 빈 목록(예전과 동일)")
+        check(stock_history.read_history_rows(path, local_only=True) == rows,
+              "   local_only=True(기록 경로용)도 같은 결과")
+
+    base = "https://example.invalid/main"
+
+    # ② 원격 성공 — 컨테이너의 얼어붙은 사본(09-03까지)이 아니라 **원격의 09-04 행**이 보여야 함.
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.write_local(name, local_csv)
+        box.script(FakeResponse(200, remote_csv, etag='"h1"', content_type="text/plain"))
+        rows = stock_history.read_history_rows(path)
+        check(_dates(rows) == ["2026-09-03", "2026-09-04"],
+              "② 원격 성공 — 원격 최신 행(09-04)이 보임(얼어붙은 로컬 사본 아님)", f"실제: {_dates(rows)}")
+        check(box.requests.calls and box.requests.calls[0]["url"].endswith(f"/data/{name}"),
+              "   요청 URL 이 data/<이력 파일> 을 가리킴",
+              f"실제: {[c['url'] for c in box.requests.calls]}")
+        check(data_source.get_staleness_status() is None, "   배너 없음")
+
+        # ②-b 기록 경로(local_only=True)는 원격이 켜져 있어도 **로컬 파일**만 봄 —
+        #     수집기가 "읽은 것 + 오늘치"를 같은 로컬 파일에 다시 쓰므로 둘이 어긋나면 안 됩니다.
+        before = len(box.requests.calls)
+        local_rows = stock_history.read_history_rows(path, local_only=True)
+        check(_dates(local_rows) == ["2026-09-03"] and len(box.requests.calls) == before,
+              "   local_only=True 는 원격이 켜져 있어도 로컬 파일만 읽고 네트워크를 타지 않음")
+
+        # ③ TTL 뒤 원격 실패 + 캐시 있음 → 마지막 성공분(09-04 포함) 유지 + 배너.
+        box.clock.advance(601)
+        box.script(FakeTimeout("synthetic"))
+        rows = stock_history.read_history_rows(path)
+        check(_dates(rows) == ["2026-09-03", "2026-09-04"],
+              "③ 원격 실패 + 캐시 있음 — 마지막 성공분으로 계속 서비스")
+        status = data_source.get_staleness_status()
+        check(status is not None and f"data/{name}" in (status.get("files") or []),
+              "   전역 배너 대상에 이력 파일이 잡힘", f"실제: {status}")
+
+    # ④ 콜드 스타트에서 원격 실패 + 캐시 없음 → 로컬 사본으로 폴백하되 배너.
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.write_local(name, local_csv)
+        box.script(FakeTimeout("synthetic"))
+        rows = stock_history.read_history_rows(path)
+        check(_dates(rows) == ["2026-09-03"], "④ 원격 실패 + 캐시 없음 — 로컬 사본으로 폴백")
+        status = data_source.get_staleness_status()
+        check(status is not None and status.get("local_fallback") is True,
+              "   배너: 배포 시점 사본을 쓰는 중이라고 표시", f"실제: {status}")
+
+    # ⑤ 셋 다 실패(원격 실패 + 캐시 없음 + 로컬 사본 없음) → 빈 목록(값을 지어내지 않음).
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.script(FakeTimeout("synthetic"))
+        check(stock_history.read_history_rows(box.path(name)) == [],
+              "⑤ 원격·캐시·로컬 셋 다 없으면 빈 목록(예외 없이)")
+
+    # ⑥ 소스 수준 회귀 방지 — 화면(indicator_page)이 이 함수를 그대로 쓰고, 기록 경로는 local_only.
+    history_src = (REPO_ROOT / "utils" / "stock_history.py").read_text(encoding="utf-8")
+    page_src = (REPO_ROOT / "web" / "pages" / "indicator_page.py").read_text(encoding="utf-8")
+    check("read_history_rows(path, local_only=True)" in history_src,
+          "⑥ append_daily_history(기록 경로)는 local_only=True 로 로컬만 읽음")
+    check("run_blocking(read_history_rows," in page_src,
+          "   indicator_page 는 여전히 read_history_rows 를 스레드에서 부름(동기 시그니처 유지)")
+
+
+# =============================================================================
 # [9] 🔴 화면이 데이터를 읽는 동안 **이벤트 루프가 멈추지 않는가** (2026-08-21 추가)
 #
 #     무슨 사고를 막는 검사인가
@@ -1061,6 +1154,7 @@ def main():
     test_layout_global_banner()
     test_response_size_and_type_guards()
     test_bypass_files_go_through_data_source()
+    test_read_history_rows_goes_through_data_source()
     test_pages_never_block_the_event_loop()
     test_reaudit_medium1_concurrent_cold_start_no_duplicate_fetch()
 

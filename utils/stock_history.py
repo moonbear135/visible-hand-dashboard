@@ -37,7 +37,7 @@ import csv
 import io
 import os
 
-# 🌐 조회(`load_stock_history`)가 파일을 여는 단일 창구. 원격 로드가 꺼져 있으면(기본값)
+# 🌐 조회(`load_stock_history`·`read_history_rows`)가 파일을 여는 단일 창구. 원격 로드가 꺼져 있으면(기본값)
 #    예전과 똑같은 로컬 파일 읽기이고, 켜져 있으면 최신성 추적·전역 배너를 함께 받습니다.
 #    ⚠️ **기록(write) 경로는 이 모듈에서 예전 그대로 로컬 파일에 직접 씁니다** — 기록하는
 #       쪽은 GitHub Actions 안의 수집기이고, 그 환경에는 저장소가 통째로 체크아웃돼 있어
@@ -327,16 +327,56 @@ def build_history_rows(stocks, date_str, fields):
 # =============================================================================
 # 3. 읽기 / 쓰기
 # =============================================================================
-def read_history_rows(path):
+def _read_history_rows_local(path):
     """
-    이력 CSV 전체를 dict 목록으로 읽습니다.
-    파일이 없거나 깨졌으면 **빈 목록**을 돌려줍니다(값을 지어내지 않음).
+    이력 CSV 전체를 **로컬 파일에서만** dict 목록으로 읽습니다 (2026-08-17 이전의
+    `read_history_rows()` 원본 그대로). 기록(write) 경로 전용입니다 — 아래
+    `read_history_rows()` 머리말 참고.
     """
     if not path or not os.path.exists(path):
         return []
     try:
         with open(path, "r", encoding="utf-8-sig", newline="") as f:
             return [dict(r) for r in csv.DictReader(f)]
+    except Exception as e:
+        print(f"⚠️ 종목별 이력 파일을 읽지 못했습니다({path}): {e}")
+        return []
+
+
+def read_history_rows(path, *, local_only=False):
+    """
+    이력 CSV 전체를 dict 목록으로 읽습니다.
+    파일이 없거나 깨졌으면 **빈 목록**을 돌려줍니다(값을 지어내지 않음).
+
+    🌐 2026-09-05 (TASK_HISTORY #196) — 파일을 여는 일은 `utils/data_source.py` 가 합니다.
+       2026-08-17 에 `load_stock_history()` 만 원격 우선 읽기로 옮기고 **이 함수는 빠뜨렸습니다.**
+       그래서 `/indicator` 카드의 "최근 이력/전일 대비" 표(`web/pages/indicator_page.py::
+       _load_recent_history_by_code`)가 Render 컨테이너에 **마지막 코드 배포 시점에 얼어붙은
+       로컬 사본**을 읽었고, 같은 페이지 상단 배너는 "데이터 기준 2026-09-04 21:40"(원격 최신)
+       인데 카드 표는 "가장 최근 기록은 2026-09-03까지"로 하루 어긋나 보였습니다(§0-1 위반).
+       원격 로드가 꺼져 있으면(`DATA_SOURCE_BASE_URL` 미설정 = 기본값) 예전과 100% 동일한
+       로컬 파일 읽기입니다.
+
+    :param local_only: True 면 `data_source` 를 거치지 않고 로컬 파일만 읽습니다.
+        **기록(write) 경로(`append_daily_history`) 전용**입니다 — 수집기는 "읽은 것 + 오늘치"를
+        같은 로컬 파일에 통째로 다시 쓰므로, 읽기와 쓰기가 반드시 같은 파일을 봐야 합니다.
+        (읽기만 원격에서 오면 원격이 뒤처졌을 때 로컬에 쌓인 날짜가 통째로 사라질 수 있습니다.)
+        화면(읽기 전용)은 기본값(False)을 씁니다.
+
+    ⚠️ 시그니처·반환값(행 dict 목록, 실패 시 빈 목록)·동기 호출 방식은 그대로입니다 —
+       `indicator_page.py` 는 예전처럼 `run_blocking(read_history_rows, path)` 로 스레드에서 부릅니다.
+    """
+    if not path:
+        return []
+    if local_only:
+        return _read_history_rows_local(path)
+    try:
+        text, error, _version = data_source.read_text(path, encoding="utf-8-sig")
+        if error is not None or text is None:
+            return []
+        # 전체 표(종목코드별 최근 N일 인덱싱)가 필요한 호출자라 여기서는 전부 펼칩니다
+        # (원본 설계 그대로). 한 종목만 필요하면 `load_stock_history()` 를 쓰세요.
+        return [dict(r) for r in csv.DictReader(io.StringIO(text, newline=""))]
     except Exception as e:
         print(f"⚠️ 종목별 이력 파일을 읽지 못했습니다({path}): {e}")
         return []
@@ -407,7 +447,8 @@ def append_daily_history(path, stocks, date_str, fields):
     if not date_str:
         raise ValueError("append_daily_history: 기록할 날짜(date_str)가 필요합니다.")
 
-    existing = read_history_rows(path)
+    # ⚠️ 기록 경로는 로컬 파일만 봅니다 (읽기·쓰기가 같은 파일이어야 함 — read_history_rows 머리말).
+    existing = read_history_rows(path, local_only=True)
     kept = [r for r in existing if r.get(DATE_FIELD) != date_str]
     replaced = len(existing) - len(kept)
 
