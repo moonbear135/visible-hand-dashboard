@@ -3017,6 +3017,69 @@ append-only 트리거가 거부.
 가리지 않고 `amount` 를 전부 더하는 구조임을 코드로 읽어 확인 — 따라서 `reversal` 행은 화면·
 배치 잔고에 자동 반영될 것으로 보이나, 실제 화면에서 실행 확인은 안 함.
 
+### #194 — #193 후속: 잘못된 정기입금이 이미 반영된 `duel_daily_snapshots(_usd)` 행 정정 SQL 추가 (같은 파일 §4, 2026-09-04)
+
+**왜 원장 되돌림(#193 §2)만으로는 안 끝나나(코드 레벨, 오너가 먼저 특정).** 화면 숫자가 두 경로로
+만들어짐. ① **총자산·예수금** — `web/pages/duel_page.py::_render_account_card()` 가 매 페이지 로드마다
+원장을 라이브 합산(`sum_cash_balance(fetch_my_cash_ledger(...))`, 저장 스냅샷 안 씀) → reversal 행만
+들어가면 **다음 새로고침에 바로** 정상. ② **누적 수익률(TWR)** — `fetch_my_snapshots()` 로
+`duel_daily_snapshots` 에 **이미 저장된** 과거 행을 읽어 `compute_twr()` → 그 행들은 버그 시점에 배치가
+실제 계산해 넣은 값이라 `total_value`·`cash_balance`(첫 행이면 `cash_flow_amount`까지)가 이미 틀려
+있고, 원장에 reversal 을 넣어도 **저절로 안 바뀜**. 배치가 나중에 고쳐 줄 수도 없음:
+`utils/duel_batch.py::collect_external_cash_flows()` 는 직전 스냅샷 경계(boundary) 이전 날짜의 원장
+행을 "이미 반영됨"으로 건너뛰는데 reversal 은 원본과 같은 과거 날짜(anchor_date 이전)라 **언제 돌아도
+boundary 보다 이르고**, 애초에 `EXTERNAL_CASH_FLOW_TYPES=('seed','monthly_deposit')` 라 reversal 은
+세지도 않으며, `cash_flow_amount` 는 `check (>= 0)` 라 되돌림을 음수 현금흐름으로 적을 수도 없음.
+`duel_daily_snapshots` 는 `revoke delete … from service_role` 이지만 **update 는 열려 있음**
+(`grant select, insert, update … to service_role`, 스키마 §9) → SQL 로 직접 update 해야만 바로잡힘.
+
+**한 일.** `sql/duel_ledger_fix_2026-09-04_backdated_monthly_deposit.sql` 에 **§4 "스냅샷 정정(있을
+경우)"** 을 이어 붙임(새 파일 없음 — 기존 진단→정정→확인 흐름 뒤에 4-A/4-B/4-C). 머리말 실행 순서에
+4) 추가, "이 파일이 고치지 않는 것" 문단은 "→ §4 에서 처리" 로 갱신.
+1. **4-A 진단(읽기 전용, KRW·USD)** — §1 조건(`monthly_deposit` 이고 `event_date < anchor_date`)으로
+   잘못된 입금을 받은 계좌를 verdict 로 분류: `AUTO` / `MANUAL: position_value>0`(매수 이력 —
+   `dates_with_positions`) / `MANUAL: 원장에 다른 행`(시드·잘못된 입금·그 되돌림 외 원장 행 —
+   `other_ledger_events`) / `MANUAL: 시드 불일치` / `SKIP: 스냅샷 없음`. 오너 지시는 (i) 전 스냅샷
+   `position_value = 0` ↔ (ii) `> 0` 두 갈래였는데, §0-1 로 **(b) "원장에 시드+잘못된 입금+되돌림
+   외 행이 없음"** 조건을 하나 더 걸었음 — 예: 8/05 개설 계좌가 7/10 잘못된 입금과 8/10 **정상** 입금을
+   함께 가진 경우, 정답은 seed_amount 가 아니라 "seed + 정상 입금"이라 오너 규칙대로 덮어쓰면 오히려
+   틀려짐. 이런 계좌는 AUTO 에서 빼고 수동 목록에 사유와 함께 남김.
+2. **4-B 정정(쓰기, KRW·USD 각 1문)** — `target` CTE 가 4-A 의 AUTO 조건 네 가지를 `exists/not exists`
+   로 그대로 다시 씀(→ MANUAL 계좌는 where 에서 **구조적으로** 제외). "가장 이른 행"은 `distinct on
+   (account_id) … order by account_id, snapshot_date`(unique (account_id, snapshot_date) 라 동률 없음).
+   update: 모든 행 `cash_balance = total_value = seed_amount`; 가장 이른 행만 `cash_flow_amount =
+   seed_amount, kind='seed'`, 나머지 `0 / null`. `position_value`·`total_cost` 는 이미 0 이라 안 건드림,
+   `updated_at` 은 트리거(`duel_snapshots_set_updated_at`)에 맡김. 같은 값을 다시 쓰므로 멱등.
+3. **4-C 확인(읽기 전용)** — 4-C-1/2: AUTO 계좌 스냅샷 중 정답(위 규칙, `row_number()` 로 첫 행 판정)과
+   다른 행(0행이 정상). 4-C-3: AUTO 계좌의 최신 스냅샷 `cash_balance` 와 원장 라이브 합계가 같은지
+   (화면 예수금 ↔ TWR 입력 교차 확인, 0행이 정상). 파일 끝 "⚠️ 여기부터는 사람이 판단" — MANUAL 계좌를
+   사유·매수 날짜·기타 원장 행과 함께 다시 SELECT(값을 지어내지 않음, §0-1).
+
+**검증(로컬 PostgreSQL 16, #193 과 같은 방식).** `sql/duel_schema.sql` + 마이그레이션 2개를 auth 스텁
+위에 올리고 재현 데이터 6계좌: KRW A(8/22 개설·매수 없음·7/10+8/10 잘못된 입금, 스냅샷 9행 중 8/29
+이후 4행이 11,600,000), B(A 와 같되 8/25 삼성전자 100주 700만원 실제 매수 주문+원장, position 7,000,000),
+C(8/05 개설·7/10 잘못된 입금+8/10 정상 입금·매수 없음), D(정상 계좌, 버그 무관); USD E(8/22 개설·8/10
+$500 잘못 입금·매수 없음·첫 스냅샷이 버그 이후라 첫 행 `mixed 10,500`), F(E + position 5,000).
+§1~§3 실행 후(reversal 5+2행) §4 를 `set role service_role` 로 실행:
+- 4-A: A·E → AUTO, B·F → `MANUAL: position_value>0`(날짜 목록 포함), C → `MANUAL: 원장에 다른 행`
+  (`monthly_deposit 2026-08-10 800000`), D 는 어디에도 안 나옴.
+- 4-B: `UPDATE 9`(A) / `UPDATE 4`(E). 전 행 덤프 before/after diff — 값이 바뀐 행은 **A 의 4행
+  (11,600,000→10,000,000)과 E 의 4행(첫 행 10,500 mixed→10,000 seed, 나머지 10,500→10,000)뿐**.
+  B·C·D·F 는 `updated_at` 까지 바이트 단위로 동일(diff 없음).
+- 4-C: 실행 전엔 A 4행·E 4행이 위반으로 잡히고(4-C-3 도 A·E 불일치), 실행 후 4-C-1/2/3 모두 0행.
+- 재실행: 4-B 를 한 번 더 → `UPDATE 9 / 4`, 값 diff 없음(13행의 `updated_at` 만 갱신 = 트리거 동작 확인),
+  4-C 여전히 0행. 파일 전체(§1~§4)를 새 DB 에서 두 번 연속 실행해도 오류 없음(2회째는 `INSERT 0 0`).
+- 제약: update 가 `duel_snapshots(_usd)_total_match`·`_cash_flow_match` 를 통과했고, 실행 후 두 제약
+  조건을 SELECT 로 다시 세어 위반 0행.
+코드(.py) 변경 없음 → pytest 는 돌리지 않음.
+
+**확인 못 한 것 / 남는 일(§0-1).** (a) 실제 Supabase 에서 AUTO/MANUAL 계좌가 각각 몇 개인지는 4-A 를
+오너가 돌려야 알 수 있음(키 없음). (b) MANUAL 계좌(매수 이력 있음 / 정상 입금 공존)의 스냅샷은 이
+파일이 손대지 않음 — 목록만 남기고 사람이 계좌별로 판단. (c) `duel_holding_snapshots` 는 안 건드림
+(AUTO 계좌는 보유가 없어 행이 없음). (d) 화면에서 TWR 이 실제로 정상화되는지는 실행 후 확인 필요.
+(e) 4-C-3 은 §2 를 먼저 실행했다는 전제 — 순서를 바꾸면 A 같은 계좌가 불일치로 보일 수 있음(머리말에
+명시).
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
