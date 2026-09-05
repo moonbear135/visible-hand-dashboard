@@ -3321,6 +3321,66 @@ tests/test_duel_batch_usd.py tests/test_suite_integrity.py` **379 passed / 73 sk
 바꾸지 않음(다른 화면이 검증된 채로 쓰는 중). (c) 실제 raw.githubusercontent.com 왕복은 여전히 오프라인 검증 밖 —
 배포 후 `/kr` 최상단 카드의 "(YYYY-MM-DD 장마감 기준)" 날짜가 `market_history.csv` 마지막 행과 같은지 오너 확인 필요.
 
+### #199 — 스케줄 워치독의 "데이터 파일 타임스탬프 확인"(#196-B)을 나머지 감시 대상으로 확장 — 근거 있는 4개만 추가, 4개는 이유를 적고 제외 (2026-09-05)
+
+#196-B 는 사고 범위였던 `scrape.yml` / `indicator_kr.yml` 2개만 "실행 성공 + 데이터 파일 타임스탬프" 로 봤고 나머지 8개는
+conclusion 만 봤음. 오너가 "원래 감시하던 나머지도 전부 같은 방식으로" 요청 → 워크플로우·수집기 코드를 하나씩 열어
+**(a) 결과물 파일 (b) 그 안의 타임스탬프 필드 (c) "언제까지 갱신됐어야 하는지" 를 정할 근거(수집기 자신의 판정 규칙
+또는 cron)** 세 가지가 실제로 있는 대상만 넣고, 없는 대상은 억지로 기준을 만들지 않고 이유를 적어 제외(§0-1).
+
+| 워크플로우 | 판정 | 데이터 파일 / 타임스탬프 키 | 기준(재사용한 근거) |
+|---|---|---|---|
+| `scrape.yml` | kr (#196 그대로) | `data/kospi200_pegy_latest.json` / `metadata.last_updated_at` | 기대 거래일 + 15:30 KST 이후 (`utils/constants.py` KR_MARKET_CLOSE_*) |
+| `indicator_kr.yml` | kr (#196 그대로) | `data/indicator_kr_latest.json` / `generated_at` | 위와 동일 |
+| `scrape_us.yml` | **us (신규)** | `data/us_stocks_latest.json` / `metadata.last_updated_at_et` | `collector_us_stocks.py::resolve_collection_session_et()` — 마감 16:00 ET + 30분(`utils/constants_us.py` US_MARKET_CLOSE_* + US_COLLECT_AFTER_CLOSE_MINUTES)이 지난 가장 최근 평일 |
+| `scrape_report_snapshots.yml` | **us (신규)** | `data/us_index_history.json` / `metadata.collected_at_et` | `collector_us_indices.py` 가 같은 `resolve_collection_session_et()` 를 씀. 벤치마크 스텝이 `continue-on-error: true` 라 그 스텝이 죽어도 conclusion=success — 파일까지 봐야 하는 대상. 재실행이 함께 돌리는 Supabase 적재는 upsert(user_id,market,snapshot_date)라 안전 |
+| `watch_dividend_disclosures.yml` | **daily@05:00 (신규)** | `data/cache/dividend_kr_2026_watch_state.json` / `updated_at_kst` | 감시기가 성공한 실행마다 "어제(KST)까지 확인함" 을 이 상태 파일에 적고(`_write_watch_state`) 워크플로우가 매번 커밋(git log 로 매일 커밋 확인). 장마감 개념이 없으니 그 워크플로우 cron(20:00 UTC = 05:00 KST) 기준: 지났으면 오늘, 아니면 어제가 기대 실행일 |
+| `watch_dividend_payment_events.yml` | **daily@05:30 (신규)** | `data/cache/dividend_kr_2026_payment_state.json` / `updated_at_kst` | 위와 동일 (`write_payment_state`, cron 20:30 UTC = 05:30 KST) |
+| `duel_daily.yml` / `duel_daily_us.yml` | 제외(conclusion 만) | — | 결과(체결·취소·보류)는 Supabase 에만 기록. git 에 남는 `data/duel_freshness_probe_previous*.json` 은 **내일 비교용 기준값(상태) 파일**이고, 점검표를 못 만든 날은 예전 파일을 일부러 그대로 두는 것이 정상 동작(`run_duel_daily_batch.py` ⑤) → 파일 갱신 여부가 "배치가 할 일을 했는가" 를 말해주지 않음(오탐·미탐 양쪽) |
+| `scorecard_publish_daily.yml` | 제외 | — | `permissions: contents: read`, git 산출물 없음(Supabase 만) |
+| `watch_data_sanity.yml` | 제외 | — | 그 자체가 감시 스크립트, 산출물 없음(읽기만) |
+| `render_keep_awake.yml` / `collect_dividend_kr.yml` | 원래 감시 대상 아님 | — | 헤더 "일부러 뺀 것" 그대로(단순 핑 / 연 1회) |
+
+**구현 (`.github/workflows/watch_schedule_health.yml` — 구조·알림·재실행 방식은 #196 그대로, 판정 규칙만 확장).**
+- `TARGETS` 5번째 필드 = 판정 규칙(`kr` / `us` / `daily@HH:MM`, 비우면 kr). 인라인 파이썬이 규칙별로 분기:
+  - `kr`: #196 코드·문구 글자 그대로(이슈 본문·§6 검사가 문구에 의존 — `test_kr_rule_wording_is_unchanged_by_the_extension` 로 못 박음).
+  - `us`: 타임스탬프를 ET 벽시계로 읽어(`zoneinfo.ZoneInfo("America/New_York")`, 서머타임 자동) "그 순간에 수집하면 담기는
+    거래일" 을 수집기와 같은 규칙(마감+30분이 지난 가장 최근 평일)으로 계산하고, 지금(ET)의 그것과 같으면 갱신. "날짜 == 오늘"
+    식 비교를 쓰지 않은 이유: 미국 수집은 ET 저녁(= KST 다음 날 새벽)에 돌고, 빠진 날을 사람이 KST 낮에 다시 돌리면 타임스탬프
+    날짜는 다음 ET 날짜(마감 전 시각)가 되지만 담긴 종가는 직전 거래일 것이라 정상 — 수집기 자신이 그렇게 판정함. 워치독 정규
+    18:00 KST = 05:00 EDT / 04:00 EST 라 어느 계절이든 기대 거래일은 직전 평일. tzdata 를 못 불러오면 "판정 불가 = 미갱신"(안전한 쪽).
+  - `daily@HH:MM`: 기대 실행일(지금 KST 가 그 시각을 지났으면 오늘, 아니면 어제)과 타임스탬프 날짜가 같으면 갱신. 시각 조건 없음
+    — 두 배당 감시기는 언제 돌든 `end_date = today - 1일` 이라 같은 날 어느 시각이든 결과가 같음. 30시간 창만 보던 예전 판정은
+    "어제 07:13 실행" 을 오늘도 ✅ 로 봤는데, 이제 오늘치가 없으면 ❌.
+- 상수: `US_MARKET_CLOSE_MIN=960` / `US_COLLECT_AFTER_CLOSE_MINUTES=30` → `US_COLLECT_READY_MIN`(16:30 ET). 워크플로우는 체크아웃
+  없이 돌아 import 할 수 없으므로 `KST_MARKET_CLOSE_MIN` 과 같은 방식으로 값을 들고 있고 테스트가 `utils/constants_us.py` 와 대조.
+- 헤더에 🔴 #199 문단(대상별 근거 + 제외 이유) 추가, 재실행·이슈·디스코드 단계는 손대지 않음.
+
+**회귀 테스트 (`tests/test_watch_schedule_health_window.py` §7, +28 → 88).** §6 과 대칭 + 규칙별 특유 케이스. 판정 파이썬 소스를
+워크플로우에서 그대로 뽑아 실행하는 `run_verdict()` 헬퍼 추가(사본 아님, §0-3-10).
+- 선언: TARGETS 6개 데이터 대상·4개 conclusion 전용 대상이 헤더와 일치(`test_us_targets_are_declared_with_the_us_rule`).
+- us: 정상(목 16:35/19:20 ET → ✅ + 로그 문구) / 전 거래일 값(수 19:20) → ❌·재실행·사유 / 벤치마크 파일만 낡음 → ❌ /
+  경계 4종(16:30 정각 ✅, 16:29 ❌, 16:00 ❌, 23:59 ✅) / **KST 낮 재실행(금 01:00 ET)은 ✅**(오탐 방지) / 월요일 검사 → 지난 금 /
+  서머타임(1월 EST 04:00·7월 EDT 05:00 양쪽) / 404·키 없음 → ❌ / 상수 3종 대조 + 시간대 이름 / **실제 `resolve_collection_session_et()`
+  에 5개 순간을 넣어 워치독 판정과 대조**(`test_us_rule_mirrors_collector_session_resolution`).
+- daily: 오늘 07:13/07:30 → ✅ / 어제 → ❌·재실행·사유 / 경계 4종(오늘 00:00 ✅, 04:59 ✅, 어제 23:59 ❌, 내일 ❌) / cron 전(금 03:00)
+  수동 실행은 어제 기대·05:00~05:29 구간은 두 대상이 다르게 / 주말도 판정(토 → 토) / 404·키 없음 → ❌ /
+  `daily@HH:MM` 이 그 워크플로우 cron 의 KST 환산과 일치 / 상태 파일 경로의 연도·디렉터리가 그 워크플로우 `--year`·`--cache-dir` 와
+  일치하고 커밋 목록에 있음(연도 바뀔 때 한쪽만 고치면 빨간불).
+- 공통: 모르는 규칙 → "알 수 없는 판정 규칙" + 미갱신(추측 안 함), 빈 규칙 = kr / kr 문구 불변 / 장중엔 새 대상도 보고만 하고 재실행 생략 /
+  파일 조회는 6개 데이터 대상에 대해서만·성공 실행 있을 때만.
+- 수정 전 워크플로우(HEAD)로 되돌려 돌리면 **25개 실패** 확인(새 검사가 실제로 옛 워크플로우를 잡음).
+
+**검증.** 관련: `pytest -q tests/test_watch_schedule_health_window.py` **88 passed**(60 + 28). 전체 `pytest -q --ignore=archive`
+**2,215 passed / 73 skipped**(#198 의 2,187 + 신규 28, 회귀 0; `--collect-only` 2,288건과 일치. 실행 환경의 명령 시간 상한 때문에
+46개 파일을 3묶음(1,164 / 963+73 skipped / 88)으로 나눠 돌렸고 합계가 일치).
+
+**하지 않은 것(§0-1).** (a) 위 표의 제외 4개에 판정 기준을 만들지 않음. (b) 공휴일(한국·미국) 판정은 여전히 없음 — 수집기와 같은 한계.
+(c) 배당 상태 파일 경로의 연도(2026)는 워크플로우 `--year 2026` 과 함께 바뀌어야 하며 테스트가 대조만 함(자동 갱신 안 함).
+(d) 실제 GitHub/디스코드 부수효과는 여전히 오프라인 검증 밖 — 오너가 Actions 탭에서 workflow_dispatch 로 한 번 돌려 6개 대상의
+"갱신 확인" 로그 문구를 확인 필요(특히 미국 2개는 ET 로 찍힌 값이 맞는지).
+
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

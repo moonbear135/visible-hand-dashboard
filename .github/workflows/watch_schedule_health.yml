@@ -61,12 +61,49 @@
 #     파일에서 직접 읽어 검사합니다(어긋나면 빨간불). 데이터 파일은 GitHub Contents API
 #     (`gh api -H "Accept: application/vnd.github.raw" .../contents/<path>?ref=main`)로
 #     main 의 현재 내용을 받습니다 — 체크아웃 없이 파일 하나만 읽는 가장 가벼운 방법입니다.
-#     ⚠️ 나머지 8개 대상은 이번 결함 범위 밖이라 종전대로 conclusion 만 봅니다(범위를
-#        넓히지 않음 — 대상별 데이터 파일·타임스탬프 키를 따로 확인해야 하므로 별도 작업).
 #     "데이터 미갱신" 판정도 "실행 없음"과 똑같이 취급합니다 — 같은 자동 재실행(장중이면
 #     생략)·같은 이슈/디스코드 알림·같은 잡 실패 처리. 재실행이 걸리는 18:00 KST 는 장마감
 #     이후라, #195 로 고쳐진 수집기의 사전 점검이 "오늘자 SUCCESS 지만 장마감 이전 시각"을
 #     보고 이번엔 실제로 수집합니다.
+#
+#   🔴 2026-09-05 (#199) — 데이터 갱신 확인을 나머지 대상으로 확장 (오너 요청):
+#     "결과물 파일 + 그 안의 타임스탬프 + 언제까지 갱신됐어야 하는지 정할 근거" 세 가지가
+#     **저장소 코드에서 그대로 확인되는** 대상만 넣었습니다. 판정 규칙은 5번째 필드로 고르고,
+#     기준 시각은 새로 정하지 않고 그 수집기가 이미 쓰는 규칙을 그대로 옮겼습니다(§0-1):
+#       · kr  — scrape.yml / indicator_kr.yml (위 #196 그대로: 기대 거래일 + 15:30 KST 이후)
+#       · us  — scrape_us.yml → data/us_stocks_latest.json  의 metadata.last_updated_at_et
+#               scrape_report_snapshots.yml → data/us_index_history.json 의 metadata.collected_at_et
+#               두 수집기(collector_us_stocks.py / collector_us_indices.py)가 공유하는
+#               `resolve_collection_session_et()` 규칙 그대로 — "어느 순간의 수집이 담는 거래일"은
+#               그 순간(ET) 기준으로 **마감 16:00 ET + 30분(US_COLLECT_AFTER_CLOSE_MINUTES)이 지난
+#               가장 최근 평일**. 타임스탬프 시각에 그 규칙을 적용해 얻은 거래일이, 지금(ET)에 같은
+#               규칙을 적용해 얻은 거래일과 같아야 "데이터를 만들었다"입니다. 한국 시각이 아니라
+#               ET(America/New_York, 서머타임 자동)로 판정하며, 파이썬 표준 zoneinfo 를 씁니다
+#               (ubuntu 러너에 tzdata 있음 — 못 불러오면 "판정 불가 = 미갱신"으로 안전한 쪽).
+#               상수는 utils/constants_us.py 의 US_MARKET_CLOSE_HOUR/MINUTE·US_COLLECT_AFTER_CLOSE_MINUTES
+#               와 같은 값을 아래 `US_MARKET_CLOSE_MIN`/`US_COLLECT_AFTER_CLOSE_MINUTES` 에 두고
+#               테스트가 대조합니다(KST_MARKET_CLOSE_MIN 과 같은 방식).
+#               scrape_report_snapshots.yml 의 벤치마크 스텝은 `continue-on-error: true` 라 그 스텝이
+#               죽어도 conclusion=success 입니다 — 바로 그래서 파일까지 봐야 하는 대상이고, 재실행이
+#               같이 다시 돌리는 Supabase 스냅샷 적재는 upsert(user_id,market,snapshot_date)라 안전합니다.
+#       · daily@HH:MM — watch_dividend_disclosures.yml → data/cache/dividend_kr_2026_watch_state.json,
+#               watch_dividend_payment_events.yml → data/cache/dividend_kr_2026_payment_state.json
+#               (둘 다 `updated_at_kst`). 두 감시기는 성공한 실행마다 "어제(KST)까지 확인함"을 이
+#               상태 파일에 적고 워크플로우가 매번 커밋합니다(변경 없는 날이 없음 — updated_at_kst
+#               가 매번 바뀜). 장마감 개념이 없으니 기준은 **그 워크플로우 자신의 cron(KST)**:
+#               지금(KST)이 그 시각을 지났으면 오늘, 아니면 어제가 "기대 실행일"이고, 타임스탬프
+#               날짜가 그 날이면 됩니다(시각 조건 없음 — 이 감시기는 언제 돌든 "어제까지"를 보므로
+#               같은 날의 어느 시각이든 결과가 같습니다). 파일명의 연도(2026)는 그 워크플로우의
+#               `--year 2026` 과 같은 값이어야 하며 테스트가 대조합니다.
+#     일부러 넣지 않은 대상(종전대로 conclusion 만 봅니다 — 근거 없이 기준을 지어내지 않음):
+#       · duel_daily.yml / duel_daily_us.yml — 결과(체결·취소·보류)는 Supabase 에만 기록되고,
+#         git 에 남는 `data/duel_freshness_probe_previous*.json` 은 **내일 비교용 기준값(상태)**
+#         파일입니다. 점검표를 못 만든 날은 예전 파일을 일부러 그대로 두는 것이 정상 동작이라
+#         (run_duel_daily_batch.py ⑤), 그 파일이 안 바뀐 것을 "배치가 할 일을 안 했다"로 읽으면
+#         오탐이고, 반대로 바뀌었다고 주문 처리가 됐다는 뜻도 아닙니다.
+#       · scorecard_publish_daily.yml — `permissions: contents: read`, git 산출물이 없습니다(Supabase 만).
+#       · watch_data_sanity.yml — 그 자체가 감시 스크립트이고 산출물이 없습니다(읽기만 함).
+#       · render_keep_awake.yml / collect_dividend_kr.yml — 애초에 감시 대상이 아님(위 "일부러 뺀 것").
 #
 #   ⚠️ 한계 — 정직하게 밝혀둡니다:
 #     이 워치독도 결국 GitHub Actions 의 schedule 로 도는 워크플로우입니다. 즉 이
@@ -184,18 +221,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          # 파일명|weekdays 또는 daily|데이터 파일(선택)|그 파일의 타임스탬프 JSON 키(선택, 점 구분)
+          # 파일명|weekdays 또는 daily|데이터 파일(선택)|그 파일의 타임스탬프 JSON 키(선택, 점 구분)|판정 규칙(선택)
           #   (위 헤더 코멘트의 "확인 대상" 목록과 동일. 3·4번째 필드가 있는 대상은 실행 결과에
           #    더해 그 데이터 파일이 실제로 갱신됐는지까지 봅니다 — 2026-09-05 #196 문단 참고.)
-          TARGETS="scrape.yml|weekdays|data/kospi200_pegy_latest.json|metadata.last_updated_at
-          scrape_us.yml|weekdays
-          indicator_kr.yml|weekdays|data/indicator_kr_latest.json|generated_at
-          scrape_report_snapshots.yml|weekdays
+          #   5번째 필드 = 판정 규칙(2026-09-05 #199 — 헤더 🔴 #199 문단 참고). 비우면 kr.
+          #     kr           : 기대 거래일(KST) + 장마감 15:30 KST 이후
+          #     us           : 타임스탬프(ET)가 담는 거래일 == 지금(ET)이 담는 거래일 (마감+30분 ET 규칙)
+          #     daily@HH:MM  : 타임스탬프 날짜(KST) == 기대 실행일 (그 워크플로우 cron 의 KST 시각 기준)
+          #   daily 의 HH:MM 은 그 워크플로우 schedule cron 을 KST 로 옮긴 값입니다(20:00 UTC → 05:00,
+          #   20:30 UTC → 05:30). 테스트가 각 대상 워크플로우의 cron 과 대조합니다.
+          TARGETS="scrape.yml|weekdays|data/kospi200_pegy_latest.json|metadata.last_updated_at|kr
+          scrape_us.yml|weekdays|data/us_stocks_latest.json|metadata.last_updated_at_et|us
+          indicator_kr.yml|weekdays|data/indicator_kr_latest.json|generated_at|kr
+          scrape_report_snapshots.yml|weekdays|data/us_index_history.json|metadata.collected_at_et|us
           duel_daily.yml|weekdays
           duel_daily_us.yml|daily
           scorecard_publish_daily.yml|daily
-          watch_dividend_disclosures.yml|daily
-          watch_dividend_payment_events.yml|daily
+          watch_dividend_disclosures.yml|daily|data/cache/dividend_kr_2026_watch_state.json|updated_at_kst|daily@05:00
+          watch_dividend_payment_events.yml|daily|data/cache/dividend_kr_2026_payment_state.json|updated_at_kst|daily@05:30
           watch_data_sanity.yml|daily"
 
           NOW_TS=$(date -u +%s)
@@ -217,6 +260,17 @@ jobs:
           # ⚠️ 위 값은 utils/constants.py 의 KR_MARKET_CLOSE_HOUR*60 + KR_MARKET_CLOSE_MINUTE 와
           #    같아야 합니다 — 아래 "데이터 갱신 확인"(2026-09-05)이 수집기와 같은 장마감 기준을
           #    쓰기 위해서입니다. tests/test_watch_schedule_health_window.py 가 두 값을 대조합니다.
+          #
+          # ── 미국 쪽 기준(2026-09-05 #199, 판정 규칙 us) — utils/constants_us.py 와 같은 값 ─────
+          #   US_MARKET_CLOSE_MIN            = US_MARKET_CLOSE_HOUR*60 + US_MARKET_CLOSE_MINUTE (16:00 ET)
+          #   US_COLLECT_AFTER_CLOSE_MINUTES = US_COLLECT_AFTER_CLOSE_MINUTES (마감 뒤 데이터 정리 30분)
+          #   → US_COLLECT_READY_MIN = 16:30 ET. collector_us_stocks.py::resolve_collection_session_et() 가
+          #     "지금 수집하면 담기는 거래일"을 정할 때 쓰는 바로 그 경계이고, collector_us_indices.py 도
+          #     같은 함수를 씁니다. 테스트가 세 값을 상수 파일에서 직접 읽어 대조합니다(어긋나면 빨간불).
+          #   ⚠️ 분 단위 값은 ET **벽시계** 기준입니다 — 서머타임(EDT/EST) 환산은 아래 파이썬이 zoneinfo 로 합니다.
+          US_MARKET_CLOSE_MIN=960             # 16:00 ET
+          US_COLLECT_AFTER_CLOSE_MINUTES=30
+          US_COLLECT_READY_MIN=$(( US_MARKET_CLOSE_MIN + US_COLLECT_AFTER_CLOSE_MINUTES ))   # 16:30 ET
           if [ "$DOW_KST" -le 5 ] \
              && [ "$KST_MINUTE_OF_DAY" -ge "$KST_MARKET_OPEN_MIN" ] \
              && [ "$KST_MINUTE_OF_DAY" -le "$KST_MARKET_CLOSE_MIN" ]; then
@@ -236,7 +290,7 @@ jobs:
 
           FAILED_LIST=""
 
-          while IFS='|' read -r FILE KIND DATA_FILE STAMP_KEY; do
+          while IFS='|' read -r FILE KIND DATA_FILE STAMP_KEY RULE; do
             [ -z "$FILE" ] && continue
 
             if [ "$KIND" = "weekdays" ] && { [ "$DOW_KST" = "6" ] || [ "$DOW_KST" = "7" ]; }; then
@@ -295,11 +349,11 @@ jobs:
           ' "$NOW_TS" "$WINDOW_HOURS")
 
             # ── 2026-09-05 (#196): 성공 실행이 있어도 "실제로 새 데이터를 만들었는가" ────────
-            # 3·4번째 필드가 있는 대상(scrape.yml / indicator_kr.yml)은 main 의 데이터 파일을
-            # 받아 타임스탬프를 봅니다. `--skip-if-not-ready` 로 아무것도 안 하고 exit 0 한
-            # 실행도 conclusion=success 라, 실행 결과만으로는 "데이터가 안 만들어진 하루"를
-            # 못 잡기 때문입니다(위 헤더 🔴 2026-09-05 문단). 실행 기록 자체가 없으면 어차피
-            # 재실행 대상이므로 파일을 받지 않습니다.
+            # 3·4번째 필드가 있는 대상은 main 의 데이터 파일을 받아 타임스탬프를 봅니다.
+            # `--skip-if-not-ready` 로 아무것도 안 하고 exit 0 한 실행도 conclusion=success 라,
+            # 실행 결과만으로는 "데이터가 안 만들어진 하루"를 못 잡기 때문입니다(위 헤더 🔴
+            # 2026-09-05 문단). 실행 기록 자체가 없으면 어차피 재실행 대상이므로 파일을 받지
+            # 않습니다. 판정 규칙(kr / us / daily@HH:MM)은 5번째 필드 — #199 문단 참고.
             DATA_FRESH=yes
             DATA_NOTE=""
             if [ "$LATEST_OK" = "yes" ] && [ -n "${DATA_FILE:-}" ]; then
@@ -312,12 +366,21 @@ jobs:
               fi
               DATA_VERDICT=$(printf '%s' "$DATA_JSON" | python3 -c '
           import json, sys, re, datetime
-          # 인자: NOW_TS(epoch 초) / 타임스탬프 키(점 구분) / 장마감 분(KST_MARKET_CLOSE_MIN)
+          # 인자: NOW_TS(epoch 초) / 타임스탬프 키(점 구분) / 판정 규칙(kr | us | daily@HH:MM, 빈 값=kr)
+          #       / 한국 장마감 분(KST_MARKET_CLOSE_MIN) / 미국 수집 가능 분(US_COLLECT_READY_MIN, ET 벽시계)
           # stdout: 1행 "yes"|"no", 2행 사람이 읽는 사유(로그·이슈 본문에 그대로 실림).
           now = int(sys.argv[1])
           key = sys.argv[2]
-          close_min = int(sys.argv[3])
+          rule = sys.argv[3] or "kr"
+          close_min = int(sys.argv[4])
+          us_ready_min = int(sys.argv[5])
           KST = datetime.timezone(datetime.timedelta(hours=9))
+
+          def verdict(ok, note):
+              print("yes" if ok else "no")
+              print(note)
+              sys.exit(0)
+
           try:
               data = json.loads(sys.stdin.read())
           except Exception:
@@ -325,38 +388,93 @@ jobs:
           stamp = data
           for part in key.split("."):
               stamp = stamp.get(part) if isinstance(stamp, dict) else None
-          # 기대 거래일: 지금이 평일이고 장마감(close_min) 이후면 오늘, 아니면 가장 최근 평일.
-          # (18:00 KST 정규 발동이면 항상 오늘. 사람이 장 마감 전에 수동으로 돌리면 어제 평일.)
-          # 공휴일은 판정하지 않습니다 — 헤더의 ⚠️ 참고(휴장일 표 하드코딩 금지, §0-1).
-          kst_now = datetime.datetime.fromtimestamp(now, KST)
-          expected = kst_now.date()
-          if not (expected.isoweekday() <= 5 and kst_now.hour * 60 + kst_now.minute >= close_min):
-              expected -= datetime.timedelta(days=1)
-          while expected.isoweekday() > 5:
-              expected -= datetime.timedelta(days=1)
+          # 타임스탬프 앞부분 "YYYY-MM-DD HH:MM" / "YYYY-MM-DDTHH:MM..." 만 읽습니다. 뒤에 초·시간대
+          # 오프셋이 붙어 있어도(예: 2026-09-04T21:04:52-04:00) 그 벽시계 값이 곧 그 시장의 시각입니다
+          # (kr/daily 는 KST 로, us 는 ET 로 적힌 값 — 각 수집기가 그 시간대의 now 로 적습니다).
           m = (re.match(r"^(\d{4}-\d{2}-\d{2})[ T](\d{1,2}):(\d{2})", stamp.strip())
                if isinstance(stamp, str) else None)
-          close_label = f"{close_min // 60:02d}:{close_min % 60:02d}"
           if m is None:
-              print("no")
-              print(f"데이터 파일의 타임스탬프({key})를 읽지 못함(파일을 못 받았거나 형식이 다름): {str(stamp)[:60]!s}")
-              sys.exit(0)
+              verdict(False, f"데이터 파일의 타임스탬프({key})를 읽지 못함(파일을 못 받았거나 형식이 다름): {str(stamp)[:60]!s}")
           stamp_date, hh, mm = m.group(1), int(m.group(2)), int(m.group(3))
-          if not (0 <= hh <= 23 and 0 <= mm <= 59):
-              print("no")
-              print(f"데이터 파일의 타임스탬프({key}) 시각이 비정상: {stamp_date} {hh}:{mm}")
-          elif stamp_date != expected.isoformat():
-              print("no")
-              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 거래일 {expected.isoformat()}(장마감 {close_label} 이후)의 데이터가 아님")
-          elif hh * 60 + mm < close_min:
-              # 수집기의 kr_snapshot_time_is_after_close()/snapshot_time_is_after_close() 와 같은
-              # 규칙 — 장마감 정각(15:30)은 "이후"로 칩니다. 이 분기가 #195 사고(07:04 SUCCESS)의 모양입니다.
-              print("no")
-              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 날짜는 오늘이지만 장마감 {close_label} 이전 시각(장 시작 전·장중 값)")
-          else:
-              print("yes")
-              print(f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 거래일 {expected.isoformat()} 장마감 이후")
-          ' "$NOW_TS" "$STAMP_KEY" "$KST_MARKET_CLOSE_MIN")
+          try:
+              stamp_day = datetime.date.fromisoformat(stamp_date)
+          except ValueError:
+              stamp_day = None
+          if stamp_day is None or not (0 <= hh <= 23 and 0 <= mm <= 59):
+              verdict(False, f"데이터 파일의 타임스탬프({key}) 시각이 비정상: {stamp_date} {hh}:{mm}")
+
+          if rule == "kr":
+              # ── #196 그대로 ─────────────────────────────────────────────────────────
+              # 기대 거래일: 지금이 평일이고 장마감(close_min) 이후면 오늘, 아니면 가장 최근 평일.
+              # (18:00 KST 정규 발동이면 항상 오늘. 사람이 장 마감 전에 수동으로 돌리면 어제 평일.)
+              # 공휴일은 판정하지 않습니다 — 헤더의 ⚠️ 참고(휴장일 표 하드코딩 금지, §0-1).
+              kst_now = datetime.datetime.fromtimestamp(now, KST)
+              expected = kst_now.date()
+              if not (expected.isoweekday() <= 5 and kst_now.hour * 60 + kst_now.minute >= close_min):
+                  expected -= datetime.timedelta(days=1)
+              while expected.isoweekday() > 5:
+                  expected -= datetime.timedelta(days=1)
+              close_label = f"{close_min // 60:02d}:{close_min % 60:02d}"
+              if stamp_date != expected.isoformat():
+                  verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 거래일 {expected.isoformat()}(장마감 {close_label} 이후)의 데이터가 아님")
+              if hh * 60 + mm < close_min:
+                  # 수집기의 kr_snapshot_time_is_after_close()/snapshot_time_is_after_close() 와 같은
+                  # 규칙 — 장마감 정각(15:30)은 "이후"로 칩니다. 이 분기가 #195 사고(07:04 SUCCESS)의 모양입니다.
+                  verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 날짜는 오늘이지만 장마감 {close_label} 이전 시각(장 시작 전·장중 값)")
+              verdict(True, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 거래일 {expected.isoformat()} 장마감 이후")
+
+          if rule == "us":
+              # ── #199: collector_us_stocks.py::resolve_collection_session_et() 규칙 그대로 ────
+              # "어느 순간에 수집하면 어느 거래일을 담는가" = 그 순간(ET) 기준으로 마감+30분
+              # (us_ready_min)이 지난 가장 최근 평일. 타임스탬프 순간의 거래일이 지금의 거래일과
+              # 같으면 갱신된 것입니다. 날짜 == 오늘 식의 비교를 안 쓰는 이유: 미국 수집은 ET 저녁
+              # (= KST 다음 날 새벽)에 돌고, 빠진 날을 사람이 KST 낮에 다시 돌리면 타임스탬프 날짜는
+              # 다음 ET 날짜(마감 전 시각)가 되지만 담긴 종가는 여전히 직전 거래일 것이라 정상입니다
+              # — 수집기 자신이 그렇게 판정하므로 여기서도 같은 함수를 씁니다.
+              # 미국 휴장일도 판정하지 않습니다(수집기와 같은 한계 — 헤더 ⚠️ 참고).
+              try:
+                  import zoneinfo
+                  ET = zoneinfo.ZoneInfo("America/New_York")
+              except Exception as exc:
+                  verdict(False, f"미국 동부 시간대(America/New_York) 정보를 불러오지 못해 판정 불가: {type(exc).__name__}: {exc}")
+
+              def session_of(moment_et):
+                  probe = moment_et.date()
+                  while True:
+                      ready = datetime.datetime(probe.year, probe.month, probe.day,
+                                                us_ready_min // 60, us_ready_min % 60, tzinfo=ET)
+                      if probe.isoweekday() <= 5 and moment_et >= ready:
+                          return probe
+                      probe -= datetime.timedelta(days=1)
+
+              now_et = datetime.datetime.fromtimestamp(now, ET)
+              expected = session_of(now_et)
+              stamp_et = datetime.datetime(stamp_day.year, stamp_day.month, stamp_day.day, hh, mm, tzinfo=ET)
+              got = session_of(stamp_et)
+              ready_label = f"{us_ready_min // 60:02d}:{us_ready_min % 60:02d}"
+              if got != expected:
+                  verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} ET — 그 시각의 수집이 담는 거래일은 {got.isoformat()}(마감+30분 {ready_label} ET 규칙), 기대 거래일 {expected.isoformat()}의 데이터가 아님")
+              verdict(True, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} ET — 거래일 {expected.isoformat()} 마감+30분({ready_label} ET) 이후")
+
+          dm = re.match(r"^daily@(\d{2}):(\d{2})$", rule)
+          if dm and int(dm.group(1)) <= 23 and int(dm.group(2)) <= 59:
+              # ── #199: 장마감 개념이 없는 매일 실행 대상 — 그 워크플로우 cron(KST) 기준 ───────
+              # 기대 실행일: 지금(KST)이 cron 시각을 지났으면 오늘, 아니면 어제. 타임스탬프 날짜가
+              # 그 날이면 갱신된 것이고 시각은 보지 않습니다(배당 감시기는 언제 돌든 "어제까지"를
+              # 확인하므로 같은 날의 어느 시각이든 결과가 같습니다 — collector_dividend_kr.py /
+              # collector_dividend_payment_kr.py 의 `end_date = today - 1일`).
+              deadline_min = int(dm.group(1)) * 60 + int(dm.group(2))
+              deadline_label = f"{dm.group(1)}:{dm.group(2)}"
+              kst_now = datetime.datetime.fromtimestamp(now, KST)
+              expected = kst_now.date()
+              if kst_now.hour * 60 + kst_now.minute < deadline_min:
+                  expected -= datetime.timedelta(days=1)
+              if stamp_day != expected:
+                  verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 실행일 {expected.isoformat()}(예약 {deadline_label} KST)의 결과가 아님")
+              verdict(True, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 실행일 {expected.isoformat()}(예약 {deadline_label} KST)의 결과")
+
+          verdict(False, f"알 수 없는 판정 규칙({rule!r}) — TARGETS 5번째 필드를 확인하세요")
+          ' "$NOW_TS" "$STAMP_KEY" "${RULE:-kr}" "$KST_MARKET_CLOSE_MIN" "$US_COLLECT_READY_MIN")
               DATA_FRESH=$(printf '%s\n' "$DATA_VERDICT" | sed -n 1p)
               DATA_NOTE=$(printf '%s\n' "$DATA_VERDICT" | sed -n 2p)
             fi

@@ -552,13 +552,43 @@ DAILY_TARGETS = ALL_TARGETS[5:]
 
 REPO_SLUG = "moonbear135/visible-hand-dashboard"
 
-# ── 데이터 갱신 확인 대상 (2026-09-05 #196) — 워크플로우 TARGETS 의 3·4번째 필드와 동일 ──
-# {워크플로우 파일: (데이터 파일 저장소 상대경로, 타임스탬프 JSON 키)}
+# ── 데이터 갱신 확인 대상 (2026-09-05 #196, #199 확장) — 워크플로우 TARGETS 의 3·4·5번째 필드와 동일 ──
+# {워크플로우 파일: (데이터 파일 저장소 상대경로, 타임스탬프 JSON 키, 판정 규칙)}
+#   kr           : 기대 거래일(KST) + 장마감 15:30 KST 이후                          (#196)
+#   us           : 타임스탬프(ET)가 담는 거래일 == 지금(ET)이 담는 거래일 (마감+30분 규칙)  (#199)
+#   daily@HH:MM  : 타임스탬프 날짜(KST) == 기대 실행일 (그 워크플로우 cron 의 KST 시각)   (#199)
 DATA_TARGETS = {
-    "scrape.yml": ("data/kospi200_pegy_latest.json", "metadata.last_updated_at"),
-    "indicator_kr.yml": ("data/indicator_kr_latest.json", "generated_at"),
+    "scrape.yml": ("data/kospi200_pegy_latest.json", "metadata.last_updated_at", "kr"),
+    "scrape_us.yml": ("data/us_stocks_latest.json", "metadata.last_updated_at_et", "us"),
+    "indicator_kr.yml": ("data/indicator_kr_latest.json", "generated_at", "kr"),
+    "scrape_report_snapshots.yml": ("data/us_index_history.json", "metadata.collected_at_et", "us"),
+    "watch_dividend_disclosures.yml": ("data/cache/dividend_kr_2026_watch_state.json",
+                                       "updated_at_kst", "daily@05:00"),
+    "watch_dividend_payment_events.yml": ("data/cache/dividend_kr_2026_payment_state.json",
+                                          "updated_at_kst", "daily@05:30"),
 }
+KR_DATA_TARGETS = [wf for wf, (_p, _k, rule) in DATA_TARGETS.items() if rule == "kr"]
+US_DATA_TARGETS = [wf for wf, (_p, _k, rule) in DATA_TARGETS.items() if rule == "us"]
+DAILY_DATA_TARGETS = [wf for wf, (_p, _k, rule) in DATA_TARGETS.items() if rule.startswith("daily@")]
+# 일부러 데이터 확인을 붙이지 않은 대상 — 헤더 🔴 #199 문단의 "일부러 넣지 않은 대상"과 동일해야 합니다.
+CONCLUSION_ONLY_TARGETS = ["duel_daily.yml", "duel_daily_us.yml", "scorecard_publish_daily.yml",
+                           "watch_data_sanity.yml"]
 KR_CLOSE_MIN = 15 * 60 + 30   # 15:30 KST — 아래 test_market_close_constant_... 가 상수 파일과 대조
+US_READY_MIN = 16 * 60 + 30   # 16:30 ET (마감 16:00 + 30분) — test_us_constants_match_... 가 상수 파일과 대조
+
+
+def _kst():
+    import datetime
+    return datetime.timezone(datetime.timedelta(hours=9))
+
+
+def _et():
+    """미국 동부(America/New_York) — 서머타임 자동. 워크플로우 인라인 파이썬과 같은 zoneinfo."""
+    zoneinfo = pytest.importorskip("zoneinfo", reason="zoneinfo 없음(Python 3.9+)")
+    try:
+        return zoneinfo.ZoneInfo("America/New_York")
+    except Exception as exc:   # tzdata 없는 환경(Windows 에서 tzdata 미설치 등)
+        pytest.skip(f"America/New_York 시간대 정보를 불러올 수 없음: {exc}")
 
 
 def expected_trade_date(now_ts):
@@ -566,8 +596,7 @@ def expected_trade_date(now_ts):
     최근 평일. (검사 대상 로직의 사본이지만, 아래 검사들은 이 헬퍼가 아니라 **날짜를 글자로
     박은** 시나리오로도 같은 판정을 못 박아서 사본이 틀려도 조용히 통과하지 않습니다.)"""
     import datetime
-    tz = datetime.timezone(datetime.timedelta(hours=9))
-    now = datetime.datetime.fromtimestamp(now_ts, tz)
+    now = datetime.datetime.fromtimestamp(now_ts, _kst())
     day = now.date()
     if not (day.isoweekday() <= 5 and now.hour * 60 + now.minute >= KR_CLOSE_MIN):
         day -= datetime.timedelta(days=1)
@@ -576,8 +605,38 @@ def expected_trade_date(now_ts):
     return day.isoformat()
 
 
+def us_session_date(moment_et):
+    """collector_us_stocks.py::resolve_collection_session_et() 규칙의 사본 — 그 순간(ET)에
+    수집하면 담기는 거래일: 마감+30분(16:30 ET)이 지난 가장 최근 평일. (위 expected_trade_date
+    와 같은 이유로, 아래 검사들은 날짜를 글자로 박은 시나리오로도 판정을 못 박습니다.)"""
+    import datetime
+    probe = moment_et.date()
+    while True:
+        ready = datetime.datetime(probe.year, probe.month, probe.day,
+                                  US_READY_MIN // 60, US_READY_MIN % 60, tzinfo=moment_et.tzinfo)
+        if probe.isoweekday() <= 5 and moment_et >= ready:
+            return probe.isoformat()
+        probe -= datetime.timedelta(days=1)
+
+
+def expected_us_session(now_ts):
+    import datetime
+    return us_session_date(datetime.datetime.fromtimestamp(now_ts, _et()))
+
+
+def expected_daily_date(now_ts, deadline_hhmm):
+    """daily@HH:MM 규칙의 "기대 실행일" — 지금(KST)이 그 시각을 지났으면 오늘, 아니면 어제."""
+    import datetime
+    now = datetime.datetime.fromtimestamp(now_ts, _kst())
+    day = now.date()
+    if now.hour * 60 + now.minute < deadline_hhmm[0] * 60 + deadline_hhmm[1]:
+        day -= datetime.timedelta(days=1)
+    return day.isoformat()
+
+
 def data_file_text(wf_file, stamp, status="SUCCESS"):
-    """실제 파일 모양 그대로(키 위치가 다릅니다 — 코스피는 metadata 안, 보조지표는 최상위)."""
+    """실제 파일 모양 그대로(키 위치가 제각각입니다 — 코스피는 metadata 안, 보조지표는 최상위,
+    미국 두 파일은 metadata 안(키 이름 다름), 배당 감시 상태 파일은 최상위 두 키뿐)."""
     if wf_file == "scrape.yml":
         return json.dumps({"metadata": {"last_updated_at": stamp, "status": status,
                                         "total_count": 500},
@@ -585,13 +644,45 @@ def data_file_text(wf_file, stamp, status="SUCCESS"):
     if wf_file == "indicator_kr.yml":
         return json.dumps({"generated_at": stamp, "date": stamp[:10], "status": status,
                            "success_count": 500, "stocks": []}, ensure_ascii=False)
+    if wf_file == "scrape_us.yml":
+        return json.dumps({"metadata": {"last_updated_at_et": stamp, "status": status,
+                                        "total_count": 549, "currency": "USD"},
+                           "stocks": []}, ensure_ascii=False)
+    if wf_file == "scrape_report_snapshots.yml":
+        # collector_us_indices.py 는 `_now_et().isoformat()` 로 초·오프셋까지 적습니다.
+        iso = stamp.replace(" ", "T") + ":52.665805-04:00" if len(stamp) == 16 else stamp
+        return json.dumps({"metadata": {"collected_at_et": iso, "is_etf_proxy": True,
+                                        "fetched_any": True},
+                           "indices": {}}, ensure_ascii=False)
+    if wf_file in ("watch_dividend_disclosures.yml", "watch_dividend_payment_events.yml"):
+        # `_write_watch_state()` / `write_payment_state()` 가 남기는 모양 그대로.
+        iso = stamp.replace(" ", "T") + ":50.321560+09:00" if len(stamp) == 16 else stamp
+        return json.dumps({"last_checked_de": stamp[:10].replace("-", ""),
+                           "updated_at_kst": iso}, ensure_ascii=False)
     raise AssertionError(f"{wf_file} 는 데이터 갱신 확인 대상이 아닙니다")
 
 
+def fresh_stamp_for(wf_file, now_ts, hhmm=None):
+    """그 대상의 규칙으로 "정상"이 되는 타임스탬프 하나 — 검사 시각(now_ts)에서 계산."""
+    _path, _key, rule = DATA_TARGETS[wf_file]
+    if rule == "kr":
+        hh, mm = hhmm or (16, 5)
+        return f"{expected_trade_date(now_ts)} {hh:02d}:{mm:02d}"
+    if rule == "us":
+        hh, mm = hhmm or (16, 35)          # scrape_us.yml 첫 cron(20:35 UTC = 16:35 EDT) 시각
+        return f"{expected_us_session(now_ts)} {hh:02d}:{mm:02d}"
+    deadline = tuple(int(x) for x in rule.split("@", 1)[1].split(":"))
+    hh, mm = hhmm or (7, 13)               # 실측(2026-09-05 07:13 KST — cron 05:00 에서 GitHub 지연분)
+    return f"{expected_daily_date(now_ts, deadline)} {hh:02d}:{mm:02d}"
+
+
 def fresh_data_files(now_ts, hhmm=(16, 5)):
-    """두 대상 모두 "기대 거래일 + 장마감 이후" 로 찍힌 정상 데이터 파일 세트."""
-    stamp = f"{expected_trade_date(now_ts)} {hhmm[0]:02d}:{hhmm[1]:02d}"
-    return {path: data_file_text(wf, stamp) for wf, (path, _key) in DATA_TARGETS.items()}
+    """모든 데이터 대상이 각자의 규칙으로 "정상"으로 찍힌 데이터 파일 세트.
+    `hhmm` 은 kr 대상(코스피·보조지표)의 시각만 바꿉니다(기존 호출부 호환)."""
+    files = {}
+    for wf, (path, _key, rule) in DATA_TARGETS.items():
+        files[path] = data_file_text(wf, fresh_stamp_for(wf, now_ts, hhmm if rule == "kr" else None))
+    return files
 
 
 def contents_calls(calls):
@@ -1322,24 +1413,27 @@ def test_malformed_data_file_counts_as_not_updated(tmp_path):
     assert "읽지 못함" in output, output
 
 
-def test_only_the_two_data_targets_fetch_files_and_only_when_a_run_succeeded(tmp_path):
+def test_only_the_data_targets_fetch_files_and_only_when_a_run_succeeded(tmp_path):
     """
-    데이터 파일 조회는 (a) 3·4번째 필드가 있는 두 대상에 대해서만, (b) 그것도 성공 실행이
-    있을 때만 나갑니다 — 실행 기록이 없으면 어차피 재실행 대상이라 파일을 받을 이유가 없고,
-    나머지 8개는 이번 결함 범위 밖이라 종전대로 conclusion 만 봅니다(범위 확장 금지).
+    데이터 파일 조회는 (a) 3·4번째 필드가 있는 대상(#196 의 2개 + #199 의 4개)에 대해서만,
+    (b) 그것도 성공 실행이 있을 때만 나갑니다 — 실행 기록이 없으면 어차피 재실행 대상이라
+    파일을 받을 이유가 없고, 나머지 4개(CONCLUSION_ONLY_TARGETS)는 확인할 결과물 파일이
+    없거나 그 파일이 결과물이 아니라서 종전대로 conclusion 만 봅니다(헤더 🔴 #199 문단).
     """
     now = TS_FRI_INCIDENT_CHECK
-    # (a) 전부 성공 → 두 파일만 각각 정확히 한 번
+    # (a) 전부 성공 → 데이터 대상 파일만 각각 정확히 한 번
     (tmp_path / "a").mkdir()
     proc, calls, _ = run_check_step(tmp_path / "a", _all_ok_status(now), now_ts=now)
     assert proc.returncode == 0, proc.stderr
-    assert sorted(contents_calls(calls)) == sorted(p for p, _ in DATA_TARGETS.values()), contents_calls(calls)
+    assert sorted(contents_calls(calls)) == sorted(p for p, _k, _r in DATA_TARGETS.values()), contents_calls(calls)
+    assert len(contents_calls(calls)) == len(DATA_TARGETS) == 6, contents_calls(calls)
     # (b) scrape.yml 실행 없음 → 그 파일은 조회하지 않고 바로 재실행
     (tmp_path / "b").mkdir()
     status = status_map([f for f in ALL_TARGETS if f != "scrape.yml"], ["scrape.yml"], now_ts=now)
     proc, calls, output = run_check_step(tmp_path / "b", status, now_ts=now)
     assert proc.returncode == 0, proc.stderr
-    assert contents_calls(calls) == [DATA_TARGETS["indicator_kr.yml"][0]], contents_calls(calls)
+    assert sorted(contents_calls(calls)) == sorted(
+        p for wf, (p, _k, _r) in DATA_TARGETS.items() if wf != "scrape.yml"), contents_calls(calls)
     assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")]
     assert "- scrape.yml (자동 재실행 트리거함)" in output, output   # "실행 없음" 문구는 예전 그대로
     assert STALE_PHRASE not in output, output
@@ -1405,7 +1499,8 @@ def test_market_close_constant_matches_utils_constants():
     assert int(m.group(1)) == KR_MARKET_CLOSE_HOUR * 60 + KR_MARKET_CLOSE_MINUTE == KR_CLOSE_MIN, (
         int(m.group(1)), KR_MARKET_CLOSE_HOUR, KR_MARKET_CLOSE_MINUTE)
     # 데이터 갱신 판정이 그 값을 실제로 인자로 받는지(다른 상수를 몰래 쓰지 않는지)
-    assert '"$KST_MARKET_CLOSE_MIN")' in script, "데이터 갱신 판정 스크립트가 KST_MARKET_CLOSE_MIN 을 인자로 받지 않습니다"
+    assert '"$KST_MARKET_CLOSE_MIN" "$US_COLLECT_READY_MIN")' in script, \
+        "데이터 갱신 판정 스크립트가 KST_MARKET_CLOSE_MIN / US_COLLECT_READY_MIN 을 인자로 받지 않습니다"
 
 
 def test_issue_body_explains_the_stale_data_case(tmp_path):
@@ -1419,6 +1514,470 @@ def test_issue_body_explains_the_stale_data_case(tmp_path):
     assert "--skip-if-not-ready" in body, body          # 왜 성공인데도 이슈인지
     assert "타임스탬프" in body, body                    # 무엇을 추가로 봤는지
     assert MARKET_SKIP_PHRASE not in body, body
+
+
+# =====================================================================================
+# 7. 데이터 갱신 확인을 나머지 대상으로 확장 (2026-09-05 #199)
+# =====================================================================================
+#
+# §6 의 kr 규칙(코스피·보조지표)에 더해, "결과물 파일 + 타임스탬프 + 기준 시각의 근거" 가
+# 저장소 코드에서 확인되는 4개 대상을 추가했습니다(워크플로우 헤더 🔴 #199 문단):
+#   · us  — scrape_us.yml / scrape_report_snapshots.yml: 두 수집기가 공유하는
+#           collector_us_stocks.py::resolve_collection_session_et() 규칙 그대로. 타임스탬프
+#           순간(ET)의 "담기는 거래일"이 지금(ET)의 그것과 같아야 합니다(마감 16:00 ET + 30분).
+#   · daily@HH:MM — 배당 감시 2종: 장마감 개념이 없으니 그 워크플로우 cron(KST) 기준으로
+#           "기대 실행일"(지났으면 오늘, 아니면 어제)의 날짜면 됩니다(시각 조건 없음).
+# 아래 검사들은 §6 과 대칭입니다 — 정상 / 미갱신(어제·전 거래일) / 경계(정각·1분 전) / 키 없음 /
+# 404 / 장 마감 전 수동 실행 / 상수 대조 / 조회 범위. 여기에 us 특유의 "KST 낮 재실행은 정상"
+# (타임스탬프 날짜가 다음 ET 날짜여도 담긴 거래일이 같음)과 서머타임·월요일 케이스를 더했습니다.
+
+VERDICT_START_MARKER = 'DATA_VERDICT=$(printf \'%s\' "$DATA_JSON" | python3 -c \''
+VERDICT_END_MARKER = '\' "$NOW_TS" "$STAMP_KEY" "${RULE:-kr}" "$KST_MARKET_CLOSE_MIN" "$US_COLLECT_READY_MIN")'
+
+
+def extract_verdict_source():
+    """워크플로우 안의 데이터 갱신 판정 파이썬 소스를 그대로 뽑습니다(사본 아님 — §0-3-10)."""
+    text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    start = text.find(VERDICT_START_MARKER)
+    if start < 0:
+        raise _MarkerNotFound(f"데이터 갱신 판정 스크립트 시작 마커를 못 찾았습니다: {VERDICT_START_MARKER!r}")
+    start += len(VERDICT_START_MARKER)
+    end = text.find(VERDICT_END_MARKER, start)
+    if end < 0:
+        raise _MarkerNotFound(f"데이터 갱신 판정 스크립트 끝 마커를 못 찾았습니다: {VERDICT_END_MARKER!r}")
+    return textwrap.dedent(text[start:end])
+
+
+def run_verdict(payload_text, now_ts, key, rule, close_min=KR_CLOSE_MIN, us_ready_min=US_READY_MIN):
+    """워크플로우가 부르는 것과 같은 방식으로 판정 스크립트만 실행 → (yes|no, 사유)."""
+    proc = subprocess.run(
+        [sys.executable, "-c", extract_verdict_source(), str(now_ts), key, rule,
+         str(close_min), str(us_ready_min)],
+        input=payload_text, capture_output=True, text=True, timeout=60,
+    )
+    assert proc.returncode == 0, proc.stderr
+    lines = proc.stdout.splitlines()
+    assert len(lines) == 2 and lines[0] in ("yes", "no"), proc.stdout
+    return lines[0], lines[1]
+
+
+# 사고 당일(금 2026-09-04) 18:00 KST = 05:00 EDT — 미국 쪽 기대 거래일은 목요일(09-03).
+US_EXPECTED_ON_FRI = "2026-09-03"
+US_STALE_PHRASE_TAIL = "의 데이터가 아님"
+
+
+def test_us_targets_are_declared_with_the_us_rule():
+    """TARGETS 의 us 대상 2개가 헤더 🔴 #199 문단과 같은 파일·키·규칙으로 적혀 있어야 합니다."""
+    script = load_check_step_script()
+    assert "scrape_us.yml|weekdays|data/us_stocks_latest.json|metadata.last_updated_at_et|us" in script
+    assert ("scrape_report_snapshots.yml|weekdays|data/us_index_history.json|metadata.collected_at_et|us"
+            in script)
+    assert ("watch_dividend_disclosures.yml|daily|data/cache/dividend_kr_2026_watch_state.json"
+            "|updated_at_kst|daily@05:00") in script
+    assert ("watch_dividend_payment_events.yml|daily|data/cache/dividend_kr_2026_payment_state.json"
+            "|updated_at_kst|daily@05:30") in script
+    import re
+    block = re.search(r'TARGETS="(.*?)"', script, re.S)
+    assert block, "TARGETS=\"...\" 블록을 못 찾았습니다"
+    target_lines = [l.strip() for l in block.group(1).splitlines() if l.strip()]
+    assert [l.split("|")[0] for l in target_lines] == ALL_TARGETS, target_lines
+    for wf in CONCLUSION_ONLY_TARGETS:
+        line = next(l for l in target_lines if l.startswith(wf + "|"))
+        assert line.count("|") == 1, f"{wf} 는 conclusion 만 보는 대상이어야 합니다(헤더 #199): {line}"
+    for wf, (path, key, rule) in DATA_TARGETS.items():
+        kind = "weekdays" if wf in WEEKDAY_ONLY_TARGETS else "daily"
+        assert f"{wf}|{kind}|{path}|{key}|{rule}" in target_lines, (wf, target_lines)
+    assert sorted(list(DATA_TARGETS) + CONCLUSION_ONLY_TARGETS) == sorted(ALL_TARGETS)
+
+
+def test_us_fresh_snapshot_after_ready_time_passes(tmp_path):
+    """정상 — 목 16:35 ET(첫 cron 20:35 UTC) 수집분을 금 18:00 KST 에 보면 ✅ + 로그 문구."""
+    now = TS_FRI_INCIDENT_CHECK
+    assert expected_us_session(now) == US_EXPECTED_ON_FRI
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-03 16:35",
+                                          "scrape_report_snapshots.yml": "2026-09-03 19:20"}),
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+    assert ("data/us_stocks_latest.json 갱신 확인(데이터 기준 2026-09-03 16:35 ET — 거래일 2026-09-03 "
+            "마감+30분(16:30 ET) 이후)") in proc.stdout, proc.stdout
+    assert "data/us_index_history.json 갱신 확인(데이터 기준 2026-09-03 19:20 ET" in proc.stdout, proc.stdout
+
+
+def test_us_snapshot_of_previous_session_is_flagged_and_redispatched(tmp_path):
+    """
+    ⭐ us 핵심 — 수요일 19:20 ET 수집분(수 거래일)이 금 18:00 KST 에도 그대로면, 목요일 정식
+    수집(금 05:35 KST)이 `--skip-if-not-ready` 로 조용히 exit 0 했거나 아예 안 돈 것입니다.
+    ❌ + 자동 재실행(18:00 KST = 05:00 ET, 마감 후라 안전) + 이슈 항목에 사유.
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-02 19:20"}),
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_us.yml")], dispatch_calls(calls)
+    assert "has_failures=true" in output, output
+    assert f"- scrape_us.yml ({STALE_PHRASE}: 데이터 기준 2026-09-02 19:20 ET" in output, output
+    assert "담는 거래일은 2026-09-02" in output and f"기대 거래일 {US_EXPECTED_ON_FRI}{US_STALE_PHRASE_TAIL}" in output, output
+    assert "자동 재실행 트리거함" in output, output
+    assert "실행은 성공(conclusion=success)으로 끝났지만" in proc.stdout, proc.stdout
+
+
+def test_us_benchmark_file_stale_despite_green_run_is_flagged(tmp_path):
+    """
+    scrape_report_snapshots.yml 의 벤치마크 스텝은 continue-on-error 라 죽어도 conclusion=success —
+    그래서 파일까지 봐야 하는 대상입니다. 수요일 값 그대로면 ❌ + 재실행(Supabase 적재는 upsert 라 안전).
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_report_snapshots.yml": "2026-09-02T21:04:52.665805-04:00"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_report_snapshots.yml")], dispatch_calls(calls)
+    assert f"- scrape_report_snapshots.yml ({STALE_PHRASE}: 데이터 기준 2026-09-02 21:04 ET" in output, output
+
+
+@pytest.mark.parametrize("hhmm, expect_flag, label", [
+    ((16, 30), False, "16:30 ET 정각 — 마감+30분 '이후'로 침(resolve_collection_session_et 의 >= 와 동일)"),
+    ((16, 29), True,  "16:29 ET — 1분 전이면 아직 전 거래일(수) 세션"),
+    ((16, 0),  True,  "16:00 ET — 마감 정각이지만 +30분 게이트 전"),
+    ((23, 59), False, "23:59 ET — 같은 날 늦은 수집(2차 cron 이후 재시도)도 정상"),
+])
+def test_us_ready_boundary_is_exact(tmp_path, hhmm, expect_flag, label):
+    now = TS_FRI_INCIDENT_CHECK
+    stamp = f"{US_EXPECTED_ON_FRI} {hhmm[0]:02d}:{hhmm[1]:02d}"
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": stamp, "scrape_report_snapshots.yml": stamp}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    flagged = dispatch_calls(calls)
+    if expect_flag:
+        assert flagged == [expected_dispatch_args("scrape_us.yml"),
+                           expected_dispatch_args("scrape_report_snapshots.yml")], (label, flagged)
+        assert "has_failures=true" in output, (label, output)
+        assert "담는 거래일은 2026-09-02" in output, (label, output)
+    else:
+        assert flagged == [], (label, flagged)
+        assert "has_failures=false" in output, (label, output)
+
+
+def test_us_rerun_during_korean_daytime_is_not_a_false_alarm(tmp_path):
+    """
+    빠진 목요일치를 사람이 금요일 KST 낮(= 금 01:00 ET)에 다시 돌리면 타임스탬프 날짜는 금요일(마감 전
+    시각)이지만 담긴 종가는 목요일 것입니다 — 수집기 자신이 그 순간의 거래일을 목요일로 계산하므로
+    워치독도 정상(✅)으로 봐야 합니다. "날짜 == 오늘" 식 비교였다면 여기서 매번 오탐이 납니다.
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-04 01:00"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+    assert "데이터 기준 2026-09-04 01:00 ET — 거래일 2026-09-03 마감+30분(16:30 ET) 이후" in proc.stdout, proc.stdout
+
+
+def test_us_monday_check_expects_last_friday_session(tmp_path):
+    """월 18:00 KST(= 월 05:00 ET) 검사의 기대 거래일은 지난 금요일 — 금 16:35 ET 수집분이면 ✅, 목요일 것이면 ❌."""
+    now = TS_MON_AFTER_CLOSE
+    assert expected_us_session(now) == "2026-09-04"
+    (tmp_path / "ok").mkdir()
+    proc, calls, output = run_check_step(
+        tmp_path / "ok", _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-04 16:35",
+                                          "scrape_report_snapshots.yml": "2026-09-04 19:20"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert "has_failures=false" in output, output
+    (tmp_path / "stale").mkdir()
+    proc, calls, output = run_check_step(
+        tmp_path / "stale", _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-03 16:35"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_us.yml")], dispatch_calls(calls)
+    assert "기대 거래일 2026-09-04" in output, output
+
+
+def test_us_rule_follows_daylight_saving_time():
+    """
+    ET 는 서머타임이 있어 KST 와의 차이가 13시간(EDT)/14시간(EST)으로 바뀝니다. 워치독의 18:00 KST 는
+    EDT 로 05:00, EST 로 04:00 — 둘 다 마감 전이라 기대 거래일은 전 평일이어야 하고, 판정이 ET
+    벽시계로 이뤄져야 합니다(KST 로 계산하면 표준시 기간에 1시간 어긋납니다).
+    """
+    import datetime
+    et = _et()
+    # 2026-01-15(목, EST) 18:00 KST = 04:00 EST → 기대 거래일 수(01-14)
+    jan = kst_ts(2026, 1, 15, 18, 0)
+    assert datetime.datetime.fromtimestamp(jan, et).strftime("%H:%M %Z") == "04:00 EST"
+    assert run_verdict(data_file_text("scrape_us.yml", "2026-01-14 16:35"), jan,
+                       "metadata.last_updated_at_et", "us")[0] == "yes"
+    assert run_verdict(data_file_text("scrape_us.yml", "2026-01-14 16:29"), jan,
+                       "metadata.last_updated_at_et", "us")[0] == "no"
+    # 2026-07-16(목, EDT) 18:00 KST = 05:00 EDT → 기대 거래일 수(07-15)
+    jul = kst_ts(2026, 7, 16, 18, 0)
+    assert datetime.datetime.fromtimestamp(jul, et).strftime("%H:%M %Z") == "05:00 EDT"
+    assert run_verdict(data_file_text("scrape_us.yml", "2026-07-15 16:35"), jul,
+                       "metadata.last_updated_at_et", "us")[0] == "yes"
+    assert run_verdict(data_file_text("scrape_us.yml", "2026-07-16 04:59"), jul,
+                       "metadata.last_updated_at_et", "us")[0] == "yes"   # KST 낮 재실행 = 수 세션
+    # 표준시 기간에 KST-14h 를 KST-13h 로 잘못 계산하면 목 16:30 ET 가 목 세션으로 잡히는 순간이 생깁니다.
+    # 월 18:00 KST 검사 → 지난 금(01-09) 세션. 토요일 새벽(ET) 수집분(= 금 세션)도 정상.
+    mon = kst_ts(2026, 1, 12, 18, 0)
+    assert run_verdict(data_file_text("scrape_us.yml", "2026-01-10 02:00"), mon,
+                       "metadata.last_updated_at_et", "us")[0] == "yes"
+
+
+def test_us_unreachable_or_malformed_file_counts_as_not_updated(tmp_path):
+    """404 / HTML / 키 없음 → "갱신 확인 못 함 = 미갱신"(안전한 쪽) — 예외로 워치독이 죽지 않습니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    files = _data_files_with(now, {"scrape_us.yml": None})                      # 404
+    files[DATA_TARGETS["scrape_report_snapshots.yml"][0]] = json.dumps({"metadata": {"fetched_any": True}})   # 키 없음
+    proc, calls, output = run_check_step(tmp_path, _all_ok_status(now), now_ts=now, data_files=files)
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_us.yml"),
+                                     expected_dispatch_args("scrape_report_snapshots.yml")], dispatch_calls(calls)
+    assert f"- scrape_us.yml ({STALE_PHRASE}: 데이터 파일의 타임스탬프(metadata.last_updated_at_et)를 읽지 못함" in output, output
+    assert f"- scrape_report_snapshots.yml ({STALE_PHRASE}: 데이터 파일의 타임스탬프(metadata.collected_at_et)를 읽지 못함" in output, output
+
+
+def test_us_constants_match_utils_constants_us():
+    """
+    워크플로우의 US_MARKET_CLOSE_MIN / US_COLLECT_AFTER_CLOSE_MINUTES 는 수집기가 쓰는
+    utils/constants_us.py 의 US_MARKET_CLOSE_HOUR/MINUTE / US_COLLECT_AFTER_CLOSE_MINUTES 와
+    **같은 값**이어야 합니다(체크아웃 없이 돌아 import 할 수 없어 값을 따로 들고 있음 — 한쪽만
+    바뀌면 빨간불). 판정 스크립트가 그 합(US_COLLECT_READY_MIN)을 실제로 인자로 받는지도 봅니다.
+    """
+    import re
+    from utils.constants_us import (US_MARKET_CLOSE_HOUR, US_MARKET_CLOSE_MINUTE,
+                                    US_COLLECT_AFTER_CLOSE_MINUTES, US_MARKET_TIMEZONE)
+    script = load_check_step_script()
+    close = re.search(r"^\s*US_MARKET_CLOSE_MIN=(\d+)", script, re.M)
+    after = re.search(r"^\s*US_COLLECT_AFTER_CLOSE_MINUTES=(\d+)", script, re.M)
+    assert close and after, "워크플로우에서 US_MARKET_CLOSE_MIN / US_COLLECT_AFTER_CLOSE_MINUTES 를 못 찾았습니다"
+    assert int(close.group(1)) == US_MARKET_CLOSE_HOUR * 60 + US_MARKET_CLOSE_MINUTE, (close.group(1), US_MARKET_CLOSE_HOUR, US_MARKET_CLOSE_MINUTE)
+    assert int(after.group(1)) == US_COLLECT_AFTER_CLOSE_MINUTES, (after.group(1), US_COLLECT_AFTER_CLOSE_MINUTES)
+    assert int(close.group(1)) + int(after.group(1)) == US_READY_MIN
+    assert "US_COLLECT_READY_MIN=$(( US_MARKET_CLOSE_MIN + US_COLLECT_AFTER_CLOSE_MINUTES ))" in script
+    assert '"$US_COLLECT_READY_MIN")' in script
+    # 시간대 이름도 상수 파일과 같아야 합니다(서머타임 처리를 zoneinfo 에 맡기는 근거).
+    assert US_MARKET_TIMEZONE == "America/New_York"
+    assert 'zoneinfo.ZoneInfo("America/New_York")' in script
+
+
+def test_us_rule_mirrors_collector_session_resolution():
+    """
+    워크플로우의 us 규칙은 collector_us_stocks.py::resolve_collection_session_et() 의 사본이 아니라
+    같은 규칙이어야 합니다 — 실제 수집기 함수에 여러 순간을 넣어 얻은 거래일과, 워치독이 그 순간을
+    "지금"으로 받았을 때 정상으로 치는 타임스탬프의 거래일이 일치하는지 대조합니다.
+    """
+    import datetime
+    from collector_us_stocks import resolve_collection_session_et
+    et = _et()
+    moments = [
+        datetime.datetime(2026, 9, 4, 5, 0, tzinfo=et),     # 금 05:00 EDT (워치독 정규 시각)
+        datetime.datetime(2026, 9, 4, 16, 29, tzinfo=et),   # 금 16:29 — 게이트 1분 전
+        datetime.datetime(2026, 9, 4, 16, 30, tzinfo=et),   # 금 16:30 — 게이트 정각
+        datetime.datetime(2026, 9, 6, 12, 0, tzinfo=et),    # 일요일 낮
+        datetime.datetime(2026, 1, 12, 4, 0, tzinfo=et),    # 월 04:00 EST
+    ]
+    for moment in moments:
+        collector_session = resolve_collection_session_et(now_et=moment)["session_date"]
+        assert us_session_date(moment) == collector_session, (moment, collector_session)
+        now_ts = int(moment.timestamp())
+        # 수집기가 그 거래일로 계산하는 "그 거래일 16:30 ET" 시각의 스냅샷 → 정상
+        ready_stamp = f"{collector_session} {US_READY_MIN // 60:02d}:{US_READY_MIN % 60:02d}"
+        assert run_verdict(data_file_text("scrape_us.yml", ready_stamp), now_ts,
+                           "metadata.last_updated_at_et", "us")[0] == "yes", (moment, ready_stamp)
+        # 그 거래일 16:29 ET 스냅샷 → 전 거래일 것 → 미갱신
+        pre_stamp = f"{collector_session} 16:29"
+        assert run_verdict(data_file_text("scrape_us.yml", pre_stamp), now_ts,
+                           "metadata.last_updated_at_et", "us")[0] == "no", (moment, pre_stamp)
+
+
+# ── daily@HH:MM (배당 감시 2종) ──────────────────────────────────────────────────────
+
+def test_daily_fresh_state_from_today_passes(tmp_path):
+    """정상 — 오늘 07:13 KST(cron 05:00 에서 GitHub 지연분) 상태 파일이면 ✅ + 로그 문구."""
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"watch_dividend_disclosures.yml": "2026-09-04 07:13",
+                                          "watch_dividend_payment_events.yml": "2026-09-04 07:30"}),
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert "has_failures=false" in output, output
+    assert ("data/cache/dividend_kr_2026_watch_state.json 갱신 확인(데이터 기준 2026-09-04 07:13 KST — "
+            "기대 실행일 2026-09-04(예약 05:00 KST)의 결과)") in proc.stdout, proc.stdout
+    assert ("data/cache/dividend_kr_2026_payment_state.json 갱신 확인(데이터 기준 2026-09-04 07:30 KST — "
+            "기대 실행일 2026-09-04(예약 05:30 KST)의 결과)") in proc.stdout, proc.stdout
+
+
+def test_daily_state_from_yesterday_is_flagged_and_redispatched(tmp_path):
+    """
+    ⭐ daily 핵심 — 어제 상태 파일 그대로면 오늘 05:00/05:30 KST 감시가 안 돈 것(또는 상태 파일을
+    못 남긴 것). ❌ + 재실행 + 이슈 항목 사유. 30시간 창만 보던 예전 판정으로는 어제 07:13 실행이
+    창 안에 들어 ✅ 였습니다.
+    """
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"watch_dividend_disclosures.yml": "2026-09-03 07:13",
+                                          "watch_dividend_payment_events.yml": "2026-09-03 07:30"}),
+    )
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("watch_dividend_disclosures.yml"),
+                                     expected_dispatch_args("watch_dividend_payment_events.yml")], dispatch_calls(calls)
+    assert "has_failures=true" in output, output
+    assert (f"- watch_dividend_disclosures.yml ({STALE_PHRASE}: 데이터 기준 2026-09-03 07:13 KST — "
+            "기대 실행일 2026-09-04(예약 05:00 KST)의 결과가 아님") in output, output
+    assert (f"- watch_dividend_payment_events.yml ({STALE_PHRASE}: 데이터 기준 2026-09-03 07:30 KST — "
+            "기대 실행일 2026-09-04(예약 05:30 KST)의 결과가 아님") in output, output
+
+
+@pytest.mark.parametrize("stamp, expect_flag, label", [
+    ("2026-09-04 00:00", False, "오늘 00:00 — 시각 조건 없음(어제까지 확인이라 같은 날 어느 시각이든 동일)"),
+    ("2026-09-04 04:59", False, "오늘 04:59 — cron 전 수동 실행도 오늘치로 침"),
+    ("2026-09-03 23:59", True,  "어제 23:59 — 날짜가 다르면 ❌"),
+    ("2026-09-05 00:00", True,  "내일(시계 오류) — 기대 실행일과 다르면 ❌"),
+])
+def test_daily_date_boundary_is_exact(tmp_path, stamp, expect_flag, label):
+    now = TS_FRI_INCIDENT_CHECK
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"watch_dividend_disclosures.yml": stamp}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    flagged = dispatch_calls(calls)
+    if expect_flag:
+        assert flagged == [expected_dispatch_args("watch_dividend_disclosures.yml")], (label, flagged)
+    else:
+        assert flagged == [], (label, flagged)
+        assert "has_failures=false" in output, (label, output)
+
+
+def test_daily_check_before_cron_time_expects_yesterday():
+    """사람이 cron(05:00 KST) 전인 금 03:00 에 워치독을 돌리면 오늘치를 기대할 수 없으니 어제 것이 정상."""
+    early = kst_ts(2026, 9, 4, 3, 0)
+    assert expected_daily_date(early, (5, 0)) == "2026-09-03"
+    ok, note = run_verdict(data_file_text("watch_dividend_disclosures.yml", "2026-09-03 07:13"),
+                           early, "updated_at_kst", "daily@05:00")
+    assert ok == "yes", note
+    ok, note = run_verdict(data_file_text("watch_dividend_disclosures.yml", "2026-09-02 07:13"),
+                           early, "updated_at_kst", "daily@05:00")
+    assert ok == "no" and "기대 실행일 2026-09-03" in note, note
+    # 05:30 대상은 05:00~05:29 사이엔 아직 어제를 기대합니다(두 cron 이 다름).
+    between = kst_ts(2026, 9, 4, 5, 10)
+    assert run_verdict(data_file_text("watch_dividend_disclosures.yml", "2026-09-04 05:05"),
+                       between, "updated_at_kst", "daily@05:00")[0] == "yes"
+    assert run_verdict(data_file_text("watch_dividend_payment_events.yml", "2026-09-03 07:30"),
+                       between, "updated_at_kst", "daily@05:30")[0] == "yes"
+
+
+def test_daily_runs_on_weekends_too():
+    """daily 대상은 주말에도 돕니다 — 토요일 18:00 KST 검사의 기대 실행일은 토요일(평일로 되감지 않음)."""
+    sat = kst_ts(2026, 9, 5, 18, 0)
+    assert kst_dow(sat) == 6
+    assert run_verdict(data_file_text("watch_dividend_payment_events.yml", "2026-09-05 07:30"),
+                       sat, "updated_at_kst", "daily@05:30")[0] == "yes"
+    ok, note = run_verdict(data_file_text("watch_dividend_payment_events.yml", "2026-09-04 07:30"),
+                           sat, "updated_at_kst", "daily@05:30")
+    assert ok == "no" and "기대 실행일 2026-09-05" in note, note
+
+
+def test_daily_unreachable_or_malformed_file_counts_as_not_updated(tmp_path):
+    """404 / 키 없음 → 미갱신(안전한 쪽)."""
+    now = TS_FRI_INCIDENT_CHECK
+    files = _data_files_with(now, {"watch_dividend_disclosures.yml": None})
+    files[DATA_TARGETS["watch_dividend_payment_events.yml"][0]] = json.dumps({"last_checked_de": "20260903"})
+    proc, calls, output = run_check_step(tmp_path, _all_ok_status(now), now_ts=now, data_files=files)
+    assert proc.returncode == 0, f"{proc.stdout}\n{proc.stderr}"
+    assert dispatch_calls(calls) == [expected_dispatch_args("watch_dividend_disclosures.yml"),
+                                     expected_dispatch_args("watch_dividend_payment_events.yml")], dispatch_calls(calls)
+    assert "타임스탬프(updated_at_kst)를 읽지 못함" in output, output
+
+
+def test_daily_deadlines_match_each_target_workflows_cron():
+    """
+    daily@HH:MM 의 HH:MM 은 그 워크플로우 schedule cron 을 KST 로 옮긴 값이어야 합니다 — 누군가 cron 을
+    옮기고 여기를 안 고치면 "기대 실행일" 판정이 어긋납니다(한쪽만 바뀌면 빨간불).
+    """
+    import re
+    script = load_check_step_script()
+    for wf in DAILY_DATA_TARGETS:
+        rule = DATA_TARGETS[wf][2]
+        m = re.match(r"^daily@(\d{2}):(\d{2})$", rule)
+        assert m, rule
+        declared = int(m.group(1)) * 60 + int(m.group(2))
+        crons = _schedule_crons(WORKFLOW_PATH.parent / wf)
+        assert len(crons) == 1, (wf, crons)
+        assert declared == _cron_kst_minute_of_day(crons[0]), (wf, rule, crons[0])
+        assert f"{wf}|daily|{DATA_TARGETS[wf][0]}|{DATA_TARGETS[wf][1]}|{rule}" in script
+
+
+def test_dividend_state_paths_match_each_target_workflows_year_and_cache_dir():
+    """
+    상태 파일 경로의 연도(2026)와 디렉터리는 그 워크플로우가 수집기에 넘기는 `--year` / `--cache-dir` 에서
+    나옵니다(collector_dividend_kr.py::watch_state_path / collector_dividend_payment_kr.py::payment_state_path).
+    연도가 바뀌어 워크플로우만 고치면 워치독이 없는 파일을 보고 매일 ❌ 를 찍으므로 여기서 대조합니다.
+    """
+    import re
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음")
+    for wf, suffix in (("watch_dividend_disclosures.yml", "watch_state"),
+                       ("watch_dividend_payment_events.yml", "payment_state")):
+        doc = yaml.safe_load((WORKFLOW_PATH.parent / wf).read_text(encoding="utf-8"))
+        run_blocks = "\n".join(step.get("run", "") for step in doc["jobs"]["watch"]["steps"])
+        year = re.search(r"--year\s+(\d{4})", run_blocks)
+        cache_dir = re.search(r"--cache-dir\s+(\S+)", run_blocks)
+        assert year and cache_dir, (wf, run_blocks)
+        expected_path = f"{cache_dir.group(1)}/dividend_kr_{year.group(1)}_{suffix}.json"
+        assert DATA_TARGETS[wf][0] == expected_path, (wf, DATA_TARGETS[wf][0], expected_path)
+        # 워크플로우의 커밋 목록에도 그 파일이 있어야 합니다(커밋 안 되면 main 에서 못 읽습니다).
+        assert expected_path in run_blocks, (wf, expected_path)
+
+
+def test_unknown_rule_is_reported_not_guessed():
+    """TARGETS 5번째 필드에 모르는 값이 들어가면 추측하지 않고 "미갱신 + 사유"로 안전한 쪽(§0-1)."""
+    ok, note = run_verdict(data_file_text("scrape.yml", "2026-09-04 16:05"),
+                           TS_FRI_INCIDENT_CHECK, "metadata.last_updated_at", "weekly")
+    assert ok == "no" and "알 수 없는 판정 규칙" in note, note
+    # 빈 규칙은 kr(#196 그대로).
+    assert run_verdict(data_file_text("scrape.yml", "2026-09-04 16:05"),
+                       TS_FRI_INCIDENT_CHECK, "metadata.last_updated_at", "")[0] == "yes"
+
+
+def test_kr_rule_wording_is_unchanged_by_the_extension():
+    """#196 의 kr 판정 문구(이슈 본문·§6 검사가 의존)는 확장 뒤에도 글자 그대로여야 합니다."""
+    now = TS_FRI_INCIDENT_CHECK
+    ok, note = run_verdict(data_file_text("scrape.yml", INCIDENT_STAMP), now, "metadata.last_updated_at", "kr")
+    assert (ok, note) == ("no", "데이터 기준 2026-09-04 07:04 KST — 날짜는 오늘이지만 장마감 15:30 이전 시각(장 시작 전·장중 값)")
+    ok, note = run_verdict(data_file_text("indicator_kr.yml", "2026-09-03 16:05"), now, "generated_at", "kr")
+    assert (ok, note) == ("no", "데이터 기준 2026-09-03 16:05 KST — 기대 거래일 2026-09-04(장마감 15:30 이후)의 데이터가 아님")
+    ok, note = run_verdict(data_file_text("scrape.yml", "2026-09-04 16:05"), now, "metadata.last_updated_at", "kr")
+    assert (ok, note) == ("yes", "데이터 기준 2026-09-04 16:05 KST — 거래일 2026-09-04 장마감 이후")
+
+
+def test_stale_us_and_daily_data_during_market_hours_is_reported_but_not_redispatched(tmp_path):
+    """장중(화 11:00 KST)엔 어떤 대상이든 재실행을 걸지 않는 종전 규칙이 새 대상에도 그대로 적용됩니다."""
+    now = TS_TUE_MARKET_MIDDAY
+    proc, calls, output = run_check_step(
+        tmp_path, _all_ok_status(now), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-08-27 16:35",
+                                          "watch_dividend_disclosures.yml": "2026-08-31 07:13"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [], dispatch_calls(calls)
+    assert f"- scrape_us.yml ({STALE_PHRASE}: 데이터 기준 2026-08-27 16:35 ET" in output, output
+    assert f"- watch_dividend_disclosures.yml ({STALE_PHRASE}: 데이터 기준 2026-08-31 07:13 KST" in output, output
+    assert output.count(MARKET_SKIP_PHRASE) == 2, output
 
 
 def main():
