@@ -889,6 +889,156 @@ def test_read_history_rows_goes_through_data_source():
 
 
 # =============================================================================
+# [9-c] `/kr` 최상단 코스피/환율 카드 `load_latest_kospi_usd()` 도 data_source 를 거치는지
+#       (2026-09-05, TASK_HISTORY #198 — [9-b] #196-A 와 같은 계열)
+#
+#  문제였던 것: [9]에서 같은 `market_history.csv` 를 읽는 `report_db.load_kospi_close_history()`
+#  (사장님 보고서 벤치마크)는 옮겼지만, **주력 공개 화면 `/kr` 최상단 카드가 쓰는
+#  `pegy_page.load_latest_kospi_usd()` 는 `pd.read_csv(HISTORY_FILE)` 로컬 직접 읽기 그대로**였습니다.
+#  원격 모드에서 데이터만 커밋되고 코드 배포가 없으면 카드가 하루 지난 값을 계속 보여줍니다.
+#  `load_kospi_close_history()` 는 코스피 종가만 돌려주고 환율이 없어 그대로 재사용할 수 없으므로,
+#  같은 원시 함수 `data_source.read_text()` 를 쓰도록 했습니다. 아래는 [9-b]와 대칭입니다.
+#  관리자 "히스토리 Excel 다운로드"(`_summary_history_csv_bytes`)도 같은 파일에서 같은 방식으로
+#  `pd.read_json(로컬 경로)` 를 쓰고 있어 함께 검증합니다.
+# =============================================================================
+def test_load_latest_kospi_usd_goes_through_data_source():
+    print("\n[9-c] load_latest_kospi_usd() 가 data_source 를 거치는지 (원격 성공/실패/캐시/꺼짐)")
+
+    import web.pages.pegy_page as pegy_page
+
+    name = "market_history.csv"
+    header = "날짜,종합 위험 점수,코스피 종가,원/달러 환율\r\n"
+    local_csv = "\ufeff" + header + "2026-09-03,45.7,6579.48,1358.0\r\n"
+    remote_csv = (header + "2026-09-03,45.7,6579.48,1358.0\r\n"
+                  "2026-09-04,44.6,6687.21,1347.4\r\n").encode("utf-8-sig")
+    local_expected = {"kospi": 6579.48, "usd": 1358.0, "date": "2026-09-03"}
+    remote_expected = {"kospi": 6687.21, "usd": 1347.4, "date": "2026-09-04"}
+
+    # ⓪ 기본 인자(csv_path=None) — 저장소의 실제 market_history.csv 를 읽어 세 키가 다 있어야 함.
+    saved_env = os.environ.get(data_source.ENV_BASE_URL)
+    try:
+        os.environ.pop(data_source.ENV_BASE_URL, None)
+        data_source.reset_cache()
+        real = pegy_page.load_latest_kospi_usd()
+        check(isinstance(real, dict) and set(real) == {"kospi", "usd", "date"}
+              and real["kospi"] > 0 and real["usd"] > 0 and real["date"],
+              "⓪ 기본 인자 — 저장소의 실제 market_history.csv 를 읽음(반환 모양 유지)", f"실제: {real}")
+        check(data_source.get_staleness_status() is None, "   배너 없음(예전과 동일)")
+    finally:
+        if saved_env is None:
+            os.environ.pop(data_source.ENV_BASE_URL, None)
+        else:
+            os.environ[data_source.ENV_BASE_URL] = saved_env
+        data_source.reset_cache()
+
+    # ① 원격 꺼짐(기본값) — 로컬 파일을 예전 그대로 읽음(마지막 행·BOM 처리), 배너 없음.
+    with Sandbox() as box:
+        path = box.write_local(name, local_csv)
+        got = pegy_page.load_latest_kospi_usd(path)
+        check(got == local_expected,
+              "① 원격 꺼짐 — 로컬 CSV 의 마지막 행을 예전과 똑같이 읽음(BOM 처리 포함)", f"실제: {got}")
+        check(box.requests.calls == [], "   네트워크 0회")
+        check(data_source.get_staleness_status() is None, "   배너 없음")
+        check(pegy_page.load_latest_kospi_usd(box.path("없는파일.csv")) is None,
+              "   파일이 없으면 None(예전과 동일 — 값을 지어내지 않음)")
+        box.write_local("컬럼없음.csv", "날짜,종합 위험 점수\r\n2026-09-03,45.7\r\n")
+        check(pegy_page.load_latest_kospi_usd(box.path("컬럼없음.csv")) is None,
+              "   코스피/환율 컬럼이 없으면 None(예전과 동일)")
+        box.write_local("빈값.csv", header + "2026-09-03,45.7,,1358.0\r\n")
+        check(pegy_page.load_latest_kospi_usd(box.path("빈값.csv")) is None,
+              "   마지막 행의 코스피가 비어 있으면 None(예전과 동일)")
+        box.write_local("빈파일.csv", "")
+        check(pegy_page.load_latest_kospi_usd(box.path("빈파일.csv")) is None,
+              "   빈 파일이면 None(예외를 밖으로 내지 않음)")
+
+    base = "https://example.invalid/main"
+
+    # ② 원격 성공 — 컨테이너의 얼어붙은 사본(09-03)이 아니라 **원격의 09-04 행**이 보여야 함.
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.write_local(name, local_csv)
+        box.script(FakeResponse(200, remote_csv, etag='"m1"', content_type="text/plain"))
+        got = pegy_page.load_latest_kospi_usd(path)
+        check(got == remote_expected,
+              "② 원격 성공 — 원격 최신 행(09-04)이 보임(얼어붙은 로컬 사본 아님)", f"실제: {got}")
+        check(box.requests.calls and box.requests.calls[0]["url"].endswith(f"/data/{name}"),
+              "   요청 URL 이 이력 파일을 가리킴", f"실제: {[c['url'] for c in box.requests.calls]}")
+        check(data_source.get_staleness_status() is None, "   배너 없음")
+
+        # ②-b TTL 안에서는 네트워크를 다시 타지 않고 같은 값(캐시).
+        before = len(box.requests.calls)
+        check(pegy_page.load_latest_kospi_usd(path) == remote_expected
+              and len(box.requests.calls) == before,
+              "   TTL 안 재호출 — 네트워크 없이 캐시로 같은 값")
+
+        # ③ TTL 뒤 원격 실패 + 캐시 있음 → 마지막 성공분(09-04) 유지 + 배너.
+        box.clock.advance(601)
+        box.script(FakeTimeout("synthetic"))
+        got = pegy_page.load_latest_kospi_usd(path)
+        check(got == remote_expected, "③ 원격 실패 + 캐시 있음 — 마지막 성공분으로 계속 서비스", f"실제: {got}")
+        status = data_source.get_staleness_status()
+        check(status is not None and f"data/{name}" in (status.get("files") or []),
+              "   전역 배너 대상에 이력 파일이 잡힘", f"실제: {status}")
+
+    # ④ 콜드 스타트에서 원격 실패 + 캐시 없음 → 로컬 사본으로 폴백하되 배너.
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.write_local(name, local_csv)
+        box.script(FakeTimeout("synthetic"))
+        got = pegy_page.load_latest_kospi_usd(path)
+        check(got == local_expected, "④ 원격 실패 + 캐시 없음 — 로컬 사본으로 폴백", f"실제: {got}")
+        status = data_source.get_staleness_status()
+        check(status is not None and status.get("local_fallback") is True,
+              "   배너: 배포 시점 사본을 쓰는 중이라고 표시", f"실제: {status}")
+
+    # ⑤ 셋 다 실패(원격 실패 + 캐시 없음 + 로컬 사본 없음) → None(값을 지어내지 않음).
+    with Sandbox(base_url=base, ttl=600) as box:
+        box.script(FakeTimeout("synthetic"))
+        check(pegy_page.load_latest_kospi_usd(box.path(name)) is None,
+              "⑤ 원격·캐시·로컬 셋 다 없으면 None(예외 없이)")
+
+    # ⑥ 관리자 "히스토리 Excel 다운로드" — 같은 원격 우선 경로(read_download_bytes)를 타야 함.
+    history_name = pegy_page.SUMMARY_HISTORY_FILENAME
+    local_json = '[{"date": "2026-09-03", "avg_pegy": 1.1}]'
+    remote_json = b'[{"date": "2026-09-03", "avg_pegy": 1.1}, {"date": "2026-09-04", "avg_pegy": 1.2}]'
+
+    with Sandbox() as box:
+        path = box.write_local(history_name, local_json)
+        blob = pegy_page._summary_history_csv_bytes(path)
+        old_blob = __import__("pandas").read_json(path).to_csv(index=False).encode("utf-8-sig")
+        check(blob == old_blob,
+              "⑥ 원격 꺼짐 — 관리자 히스토리 CSV 바이트가 예전 방식(pd.read_json(경로))과 동일")
+        check(box.requests.calls == [], "   네트워크 0회")
+        check(pegy_page._summary_history_csv_bytes(box.path("없음.json")) is None,
+              "   파일이 없으면 None(download_button 이 failure_text 를 띄움)")
+
+    with Sandbox(base_url=base, ttl=600) as box:
+        path = box.write_local(history_name, local_json)
+        box.script(FakeResponse(200, remote_json, etag='"j1"', content_type="text/plain"))
+        blob = pegy_page._summary_history_csv_bytes(path)
+        text = blob.decode("utf-8-sig") if blob else ""
+        check("2026-09-04" in text and "1.2" in text,
+              "   원격 성공 — 관리자 CSV 에 원격 최신 행(09-04)이 들어감(얼어붙은 로컬 사본 아님)",
+              f"실제: {text!r}")
+        check(box.requests.calls and box.requests.calls[0]["url"].endswith(f"/data/{history_name}"),
+              "   요청 URL 이 누적 요약 히스토리 파일을 가리킴")
+
+    # ⑦ 소스 수준 회귀 방지 — 화면 파일이 로컬 직접 읽기(pd.read_csv(HISTORY_FILE)/pd.read_json(경로))
+    #    로 되돌아가지 않도록. `_render_market_snapshot` 은 여전히 run_blocking 으로 스레드에서 부름.
+    page_src = (REPO_ROOT / "web" / "pages" / "pegy_page.py").read_text(encoding="utf-8")
+    check("from utils import data_source" in page_src
+          and 'data_source.read_text(path, encoding="utf-8-sig")' in page_src,
+          "⑦ pegy_page.load_latest_kospi_usd 가 data_source.read_text 를 씀")
+    check("pd.read_csv(HISTORY_FILE)" not in page_src,
+          "   pd.read_csv(HISTORY_FILE) 로컬 직접 읽기가 남아 있지 않음")
+    check("pd.read_json(history_path)" not in page_src
+          and "_summary_history_csv_bytes(history_path)" in page_src,
+          "   관리자 히스토리 CSV 버튼이 read_download_bytes 경로(_summary_history_csv_bytes)를 씀")
+    check("run_blocking(load_latest_kospi_usd)" in page_src,
+          "   _render_market_snapshot 은 여전히 load_latest_kospi_usd 를 스레드에서 부름(동기 시그니처 유지)")
+    check("open(" not in page_src.split("def load_latest_kospi_usd")[1].split("\ndef ")[0],
+          "   load_latest_kospi_usd 본문에 open() 직접 호출이 없음")
+
+
+# =============================================================================
 # [9] 🔴 화면이 데이터를 읽는 동안 **이벤트 루프가 멈추지 않는가** (2026-08-21 추가)
 #
 #     무슨 사고를 막는 검사인가
@@ -1155,6 +1305,7 @@ def main():
     test_response_size_and_type_guards()
     test_bypass_files_go_through_data_source()
     test_read_history_rows_goes_through_data_source()
+    test_load_latest_kospi_usd_goes_through_data_source()
     test_pages_never_block_the_event_loop()
     test_reaudit_medium1_concurrent_cold_start_no_duplicate_fetch()
 

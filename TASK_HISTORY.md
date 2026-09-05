@@ -3270,6 +3270,57 @@ tests/test_duel_batch_usd.py tests/test_suite_integrity.py` **379 passed / 73 sk
 "작업지시서 X-X-X" 였고, 실행 문자열에서 §번호가 확인된 곳도 없음). (c) `_freshness_reason()` 의 현재 문구("점검 대상 전부
 전일과 동일(휴장 또는 수집 실패)")는 8/29 오너 확인분이라 손대지 않음.
 
+### #198 — [실전 결함, #196-A 와 같은 계열] `/kr` 최상단 코스피/환율 카드가 컨테이너의 얼어붙은 로컬 `market_history.csv` 를 직접 읽음(`load_latest_kospi_usd` 원격 경로 누락) + 관리자 히스토리 Excel 다운로드도 로컬 직접 읽기 (2026-09-05)
+
+#196 직후 별도 조사 에이전트가 저장소 전체를 "화면용 데이터를 로컬 고정 사본으로 읽는 문제"(원격 우선
+`data_source.read_text()` 를 안 거치고 `open()`/`pd.read_*(경로)` 로 직접 읽어, 데이터만 새로 커밋되고 Render 가
+재배포 안 될 때 화면이 하루 지연) 로 감사해 남긴 우선순위 1·2번을 이번에 고침. 3·4번(`macro_page._load_history_df`/
+`fetch_verified_market_data` — `data_source.py` 에 "읽기·쓰기 짝을 맞추기 위해 의도적으로 제외" 로 문서화된 알려진
+트레이드오프 + 개발 중단된 관리자 화면, `macro_ai.generate_macro_commentary` 의 날짜만 비교하는 캐시 스킵 — 영향 미미)
+은 조사 에이전트 판단대로 백로그로 남김(손대지 않음).
+
+**결함 1 (최우선) — `/kr` 최상단 "📈 코스피 지수 / 💵 원/달러 환율" 카드가 하루 늦음.**
+- 원인: `web/pages/pegy_page.py::load_latest_kospi_usd()` 가 `pd.read_csv(HISTORY_FILE)` 로 저장소 루트의
+  `market_history.csv` 를 **컨테이너 로컬에서 직접** 읽음. 같은 파일을 읽는 `utils/report_db.py::load_kospi_close_history()`
+  (사장님 보고서 벤치마크)는 2026-08-17 [9] 마이그레이션 때 `data_source.read_text()` 로 옮겨졌고 `market_history.csv` 는
+  `data_source._REMOTE_ROOT_FILES` 에 이미 등록돼 있었는데, **이 화면의 카드 함수만 누락**. #196-A(`read_history_rows`)와
+  정확히 같은 유형이고, 노출 화면은 주력 공개 페이지 `/kr` 최상단이라 이쪽이 더 큼.
+- 수정 (`web/pages/pegy_page.py`): `load_latest_kospi_usd(csv_path=None)` 가 `data_source.read_text(path,
+  encoding="utf-8-sig")` 를 거쳐 받은 본문을 `pd.read_csv(io.StringIO(text))` 로 파싱. 뒤의 처리(COL_MAP 으로 한글 컬럼
+  복원 → 마지막 행 → `{"kospi","usd","date"}` / 실패 시 None)는 예전과 글자 하나 다르지 않음. 원격 성공이면 원격 최신,
+  실패+캐시면 마지막 성공분+전역 배너, 콜드스타트 실패면 로컬 사본+배너, 셋 다 없으면 None. `DATA_SOURCE_BASE_URL`
+  미설정(기본값)이면 예전과 100% 동일한 로컬 읽기. 시그니처(동기)·반환 모양·`run_blocking(load_latest_kospi_usd)`
+  호출 방식 그대로. `csv_path` 인자는 테스트용이며 `load_kospi_close_history(csv_path=None)` 와 같은 관례.
+- 지시서는 `load_kospi_close_history()` 를 재사용하라고 했으나, 그 함수는 **코스피 종가 dict 만** 돌려주고 이 카드에
+  필요한 **원/달러 환율이 없음**(파일 두 번 읽기·`report_db.py` 수정 모두 부적절). 그래서 그 함수가 쓰는 같은 원시 함수
+  `data_source.read_text()` 를 그대로 씀 — #196-A 와 동일한 처방이며 새 구조를 만들지 않음(§0-3-10). docstring 에 경위 기록.
+
+**결함 2 (낮은 우선순위) — 관리자 "📊 [관리자] 히스토리 다운로드 (Excel)" 버튼.**
+- 원인: 람다가 `pd.read_json(history_path)` 로 `data/pegy_summary_history.json` 을 로컬 직접 읽기. 바로 위 일반 JSON
+  다운로드 버튼은 `read_download_bytes()`(원격 우선)라 같은 화면의 두 버튼이 서로 다른 날짜의 파일을 내려줄 수 있었음.
+- 수정: 람다 본문을 `_summary_history_csv_bytes(history_path)` 로 빼내고, `read_download_bytes()` 가 돌려주는 바이트를
+  `pd.read_json(io.BytesIO(raw))` 에 넘김(뒤의 `to_csv(index=False).encode('utf-8-sig')` 동일). 못 읽으면 None →
+  `download_button` 이 기존 `failure_text` 를 띄움. 원격 꺼짐일 때 실제 파일로 바이트 단위 동일 확인.
+  `tests/test_event_loop_blocking.py::SYNC_CALL_ALLOWED` 에 새 함수 등록(사유: `_snapshot_csv_bytes` 와 같은 자리 —
+  클릭 시 `run.io_bound`), `load_latest_kospi_usd` 항목 사유도 갱신.
+
+**회귀 테스트 (`tests/test_data_source.py::test_load_latest_kospi_usd_goes_through_data_source`, [9-c]).** [9-b] #196-A
+와 대칭 — ⓪ 기본 인자로 저장소의 실제 `market_history.csv` 를 읽어 세 키 반환, ① 원격 꺼짐(로컬 마지막 행·BOM 처리·
+네트워크 0회·배너 없음·없는 파일/컬럼 없음/마지막 행 빈값/빈 파일 → None), ② 원격 성공 → 09-04 행(얼어붙은 사본의
+09-03 아님) + TTL 안 재호출은 네트워크 없이 캐시, ③ TTL 뒤 원격 실패+캐시 → 마지막 성공분 + 배너 대상, ④ 콜드스타트
+실패 → 로컬 사본 + `local_fallback` 배너, ⑤ 셋 다 없음 → None, ⑥ 관리자 히스토리 CSV(원격 꺼짐이면 예전 방식과 바이트
+동일·없는 파일 None·원격 성공이면 원격 최신 행 포함), ⑦ 소스 수준(`data_source.read_text` 사용, `pd.read_csv(HISTORY_FILE)`
+/`pd.read_json(history_path)` 부활 금지, `run_blocking(load_latest_kospi_usd)` 유지, 함수 본문에 `open()` 없음).
+`main()` 수동 호출 목록에도 추가(#168 H-3).
+
+**검증.** 관련: `pytest -q tests/test_data_source.py tests/test_event_loop_blocking.py tests/test_pegy_page.py` **55 passed**.
+전체 `pytest -q --ignore=archive` **2,187 passed / 73 skipped**(#197 의 2,186 + 신규 1, 회귀 0; `--collect-only`
+2,260건과 일치).
+
+**하지 않은 것(§0-1).** (a) 위 백로그 3·4번. (b) `utils/report_db.py::load_kospi_close_history()` 는 한 글자도
+바꾸지 않음(다른 화면이 검증된 채로 쓰는 중). (c) 실제 raw.githubusercontent.com 왕복은 여전히 오프라인 검증 밖 —
+배포 후 `/kr` 최상단 카드의 "(YYYY-MM-DD 장마감 기준)" 날짜가 `market_history.csv` 마지막 행과 같은지 오너 확인 필요.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

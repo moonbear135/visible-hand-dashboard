@@ -524,10 +524,15 @@ SYNC_CALL_ALLOWED = {
     ("web/auth.py", "_restore_session"):
         "이 함수 자체가 run_blocking 으로 스레드에서 실행되는 대상입니다.",
     ("web/pages/pegy_page.py", "load_latest_kospi_usd"):
-        "함수 자기 자신의 본문(pandas.read_csv). run_blocking 이 스레드에서 돌립니다.",
+        "함수 자기 자신의 본문(data_source.read_text → pandas.read_csv). run_blocking 이 "
+        "스레드에서 돌립니다. (2026-09-05 #198 — 로컬 직접 읽기에서 원격 우선 경로로 옮김)",
     ("web/pages/pegy_page.py", "_snapshot_csv_bytes"):
         "다운로드 버튼 클릭 시에만 실행되고, download_button 이 이미 run.io_bound 로 "
         "별도 스레드에서 돌립니다(1차 수정에서 확인된 자리).",
+    ("web/pages/pegy_page.py", "_summary_history_csv_bytes"):
+        "위 _snapshot_csv_bytes 와 같은 자리(관리자 히스토리 CSV 람다 → download_button → "
+        "run.io_bound). 2026-09-05 #198 에서 pd.read_json(로컬 경로) 를 read_download_bytes()"
+        "(원격 우선) 로 옮기면서 람다 본문을 이 이름 있는 함수로 빼냈습니다.",
     ("web/pages/pegy_page.py", "_render_raw_downloads"):
         "download_button 에 넘기는 람다 안. 실행 시점은 클릭이고, 그때 run.io_bound 를 탑니다.",
     ("web/pages/us_stocks_page.py", "_render_raw_downloads"):

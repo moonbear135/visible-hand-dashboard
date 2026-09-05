@@ -24,6 +24,7 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
   - 스냅샷이 없으면 숫자를 하나도 그리지 않고 빨간 배너만 띄웁니다 (§0-1, 완료기준 ⑦).
 """
 
+import io
 import os
 from datetime import datetime
 
@@ -47,6 +48,7 @@ def _kst_today_str() -> str:
     """
     return (datetime.now(KST) if KST else datetime.now()).strftime('%Y%m%d')
 
+from utils import data_source
 from utils.constants import GROWTH_CAP_PCT, SH_RETURN_CAP_PCT, GEFF_TOTAL_CAP_PCT
 from utils.db import COL_MAP, HISTORY_FILE
 from utils.guardrail import apply_valuation_guardrail
@@ -173,7 +175,7 @@ def resolve_preset_badges(preset: str, custom_badges, all_badge_options):
 # =============================================================================
 # 1. 데이터 로드 (읽기 전용 — 렌더링 중에 수집기를 절대 실행하지 않습니다)
 # =============================================================================
-def load_latest_kospi_usd():
+def load_latest_kospi_usd(csv_path=None):
     """
     market_history.csv에서 가장 최근 코스피 지수·원/달러 환율만 가볍게 읽어옵니다.
     실패해도 절대 지어내지 않고 None을 반환합니다.
@@ -186,11 +188,30 @@ def load_latest_kospi_usd():
        (`web/blocking.py` 모듈 독스트링).
        동기판을 남겨 두는 이유는 `web/state.load_json_file` 과 같습니다 — 읽기 규칙이
        한 곳에만 있어야 하고, 이벤트 루프 밖의 호출자도 그대로 쓸 수 있어야 합니다.
+
+    🌐 2026-09-05 (#198) — 파일을 여는 일은 `utils/data_source.py` 가 합니다.
+       예전에는 `pd.read_csv(<로컬 경로>)` 로 **컨테이너의 로컬 사본을 직접** 읽었습니다.
+       Render 는 `DATA_SOURCE_BASE_URL` 로 원격에서 읽고 `data/**`·`market_history.csv`
+       커밋은 Build Filters 로 재배포를 막아 두므로, 로컬 사본은 마지막 코드 배포 시점에
+       얼어붙습니다 → 이 화면 최상단 코스피/환율 카드만 하루 지난 값을 계속 보여줬습니다.
+       같은 날 `/indicator` 의 `read_history_rows()` 에서 고친 것(#196-A)과 정확히 같은
+       계열의 결함입니다. 같은 파일을 읽는 `utils/report_db.load_kospi_close_history()`
+       (사장님 보고서 벤치마크)는 2026-08-17 부터 이미 `data_source.read_text()` 를 거쳤는데,
+       그 함수는 **코스피 종가만** 돌려주고 여기서 필요한 원/달러 환율이 없어 그대로 재사용할
+       수 없습니다. 그래서 그 함수가 쓰는 **같은 원시 함수**(`data_source.read_text(path,
+       encoding="utf-8-sig")`)를 그대로 쓰고, 뒤의 파싱(컬럼 복원·마지막 행 추출)은 예전과
+       글자 하나 다르지 않습니다. 환경변수가 비어 있으면 예전처럼 로컬 파일만 읽습니다.
+
+    :param csv_path: 테스트용. 기본값(None)이면 `utils.db.HISTORY_FILE`(저장소 루트의
+        `market_history.csv`) — `load_kospi_close_history(csv_path=None)` 와 같은 관례입니다.
     """
+    path = csv_path or HISTORY_FILE
     try:
-        if not os.path.exists(HISTORY_FILE):
+        # utf-8-sig: 엑셀에서 저장된 BOM 이 있어도 첫 컬럼명이 깨지지 않게(report_db 와 동일 관례)
+        text, error, _version = data_source.read_text(path, encoding="utf-8-sig")
+        if error is not None or text is None:
             return None
-        df = pd.read_csv(HISTORY_FILE)
+        df = pd.read_csv(io.StringIO(text))
         df = df.rename(columns={v: k for k, v in COL_MAP.items()})
         if df.empty or "KOSPI" not in df.columns or "USD_KRW" not in df.columns:
             return None
@@ -1358,10 +1379,29 @@ def _render_raw_downloads(admin: bool) -> None:
                 download_button(
                     '📊 [관리자] 히스토리 다운로드 (Excel)',
                     f"pegy_summary_history_{_kst_today_str()}.csv",
-                    lambda: pd.read_json(history_path).to_csv(index=False).encode('utf-8-sig'),
+                    lambda: _summary_history_csv_bytes(history_path),
                     media_type='text/csv',
                     failure_text='[관리자] 히스토리를 CSV로 변환하지 못했습니다.',
                 )
+
+
+def _summary_history_csv_bytes(history_path: str):
+    """관리자용 누적 요약 히스토리 CSV (DataFrame → utf-8-sig).
+
+    🌐 2026-09-05 (#198) — 예전에는 `pd.read_json(<로컬 경로>)` 로 **컨테이너의 로컬 사본을
+       직접** 읽었습니다. 바로 위 일반 JSON 다운로드 버튼은 `read_download_bytes()`(원격
+       우선)를 쓰는데 관리자 CSV 버튼만 로컬을 읽어, 같은 화면에서 두 버튼이 서로 다른
+       날짜의 파일을 내려줄 수 있었습니다(`load_latest_kospi_usd()` 와 같은 계열). 같은
+       원격 우선 경로가 돌려주는 바이트를 `pd.read_json()` 에 넘기고, 뒤의 변환은 예전과
+       동일합니다. 못 읽으면 None → `download_button` 이 `failure_text` 를 띄웁니다.
+
+    ⚠️ `_snapshot_csv_bytes()` 와 같은 이유로 **동기** 함수입니다 — 클릭 시
+       `download_button` 이 `run.io_bound` 로 별도 스레드에서 돌립니다.
+    """
+    raw = read_download_bytes(history_path)
+    if raw is None:
+        return None
+    return pd.read_json(io.BytesIO(raw)).to_csv(index=False).encode('utf-8-sig')
 
 
 def _snapshot_csv_bytes(latest_path: str):
