@@ -528,14 +528,24 @@ def allocate_pending_orders(available_cash, pending_orders, close_prices, curren
         cash_before = cash
         price = close_prices.get(ticker)
         if price is None:
+            # 🗣️ 2026-09-05 오너 지적 — 이 문구는 `fail_reason` 으로 DB 에 남아 사용자
+            #    화면(주문 내역)에 **그대로** 뜹니다. 예전 문구는 "(작업지시서 2-4-5)" 같은
+            #    내부 문서 인용을 문장 안에 박아 두어, 취소당한 사용자 입장에서는 무슨 뜻인지·
+            #    뭘 해야 하는지 알 수 없었습니다. 근거 인용은 이 주석에만 남깁니다:
+            #    작업지시서 2-4-5 — 종가를 모르는 주문은 다음 날로 이월하지 않고 사유를 남겨
+            #    실패 확정(0원·전일 종가 대체 금지, §0-1). 예수금은 건드리지 않으므로
+            #    "예수금은 그대로" 와 "다음 접수 시간대에 다시 주문" 은 사실입니다
+            #    (`web/pages/duel_page.py::NOTICE_CRAWL_FAILURE` 가 주문 전에 미리 알리는
+            #    내용과 같은 말입니다).
             outcome = {
                 "status": ORDER_CANCELLED,
                 "filled_quantity": 0,
                 "filled_amount": 0.0,
                 "remaining_cash": cash,
                 "fail_reason": (
-                    f"{ticker}의 확정 종가를 확보하지 못해 체결하지 않고 취소했습니다"
-                    " — 모르는 가격으로 체결하거나 다음 날로 이월하지 않습니다(작업지시서 2-4-5)."
+                    f"{ticker}의 그날 확정 종가를 확보하지 못해 이 주문은 체결하지 않고"
+                    " 취소했습니다. 확인되지 않은 가격으로 체결하거나 다음 날로 넘기지 않습니다."
+                    " 예수금은 그대로 남아 있으니, 원하시면 다음 접수 시간대에 다시 주문하시면 됩니다."
                 ),
             }
         else:
@@ -778,9 +788,12 @@ def compute_twr(snapshots):
         day = _to_date(row.get("snapshot_date"), "스냅샷 날짜")
         total_value = _require_number(row.get("total_value"), f"총자산({day})")
         if "cash_flow_amount" not in row or row.get("cash_flow_amount") is None:
+            # 근거: 작업지시서 2-6(TWR — 외부 현금흐름을 모르면 0 으로 가정하지 않는다).
+            # 인용은 이 주석에만 두고 예외 문장에는 넣지 않습니다(예외 문장은 화면까지
+            # 올라갈 수 있는 사용자 노출 문자열입니다 — 2026-09-05 오너 지적).
             raise DuelRuleError(
                 f"{day} 스냅샷에 cash_flow_amount 가 없습니다 — 0 으로 가정하면 입금을 수익으로"
-                " 착각하게 됩니다(작업지시서 2-6). 값이 없는 구간의 TWR 은 계산하지 않습니다."
+                " 착각하게 됩니다. 값이 없는 구간의 수익률(TWR)은 계산하지 않습니다."
             )
         cash_flow = _require_number(row.get("cash_flow_amount"), f"외부 현금흐름({day})")
         parsed.append((day, total_value, cash_flow))

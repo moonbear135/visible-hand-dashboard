@@ -317,10 +317,13 @@ def select_probe_stocks(universe_index, *, stock_count=duel_rules.CRAWL_STOCK_CO
 
     ranked.sort(key=lambda item: (item[0], item[1]))   # 순위 동률이면 코드순(재현 가능하게)
     if len(ranked) < stock_count:
+        # 근거: 작업지시서 2-9(신선도 점검은 지수 + 상위 N종목 **전부**로 판정). 인용은
+        # 이 주석에만 두고 예외 문장에는 넣지 않습니다(2026-09-05 오너 지적 — 실행되는
+        # 문자열에는 내부 문서 번호를 남기지 않기).
         raise DuelBatchError(
             f"신선도 점검에 쓸 상위 {stock_count}종목을 채우지 못했습니다"
             f" (순위·종가가 함께 있는 종목이 {len(ranked)}개뿐)."
-            " 몇 종목만 보고 그날 수집 성패를 판정하지 않습니다(작업지시서 2-9)."
+            " 몇 종목만 보고 그날 수집 성패를 판정하지 않습니다."
         )
     return {code: price for _rank, code, price in ranked[:stock_count]}
 
@@ -759,9 +762,15 @@ def plan_order_fills(pending_orders, cash_balances, close_prices, existing_posit
 
             settled = None
             if price is None:
+                # 🗣️ 2026-09-05 오너 지적 — 사용자 화면에 뜨는 `fail_reason` 에 "(작업지시서
+                #    2-4-5)" 같은 내부 인용을 박지 않습니다(매수 쪽
+                #    `duel_rules.allocate_pending_orders()` 와 같은 정리). 근거는 작업지시서
+                #    2-4-5 — 종가를 모르는 주문은 이월하지 않고 사유를 남겨 실패 확정.
+                #    매도가 취소되면 보유 주식은 그대로이므로 그 사실만 덧붙입니다.
                 reason = (
-                    f"{ticker}의 확정 종가를 확보하지 못해 매도를 체결하지 않고 취소했습니다"
-                    " — 모르는 가격으로 팔거나 다음 날로 이월하지 않습니다(작업지시서 2-4-5)."
+                    f"{ticker}의 그날 확정 종가를 확보하지 못해 이 매도 주문은 체결하지 않고"
+                    " 취소했습니다. 확인되지 않은 가격으로 팔거나 다음 날로 넘기지 않습니다."
+                    " 보유 주식은 그대로 남아 있으니, 원하시면 다음 접수 시간대에 다시 주문하시면 됩니다."
                 )
             else:
                 try:
