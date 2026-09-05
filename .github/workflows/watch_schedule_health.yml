@@ -16,9 +16,12 @@
 #   집계" 성격의 것만 골랐습니다. 오너 확인 요청 — "scrape.yml 하나뿐이냐"는 질문에
 #   대한 답으로 아래처럼 범위를 넓혔습니다):
 #     · scrape.yml, scrape_us.yml, indicator_kr.yml, scrape_report_snapshots.yml,
-#       duel_daily.yml — 평일에만 돕니다(주말엔 검사 자체를 건너뜁니다).
+#       duel_daily.yml — 그 워크플로우 자신의 cron 이 평일(월~금)에만 발동합니다(weekdays).
+#       ⚠️ 2026-09-05 (#200) 이전에는 이 5개를 **주말엔 검사 자체에서 통째로 건너뛰었는데**,
+#          이제는 담당 데이터 파일이 있는 4개(duel_daily.yml 제외)를 주말에도 검사합니다 —
+#          아래 🔴 #200 문단 참고. 주말에 여전히 건너뛰는 것은 duel_daily.yml 하나뿐입니다.
 #     · duel_daily_us.yml, scorecard_publish_daily.yml, watch_dividend_disclosures.yml,
-#       watch_dividend_payment_events.yml, watch_data_sanity.yml — 매일 돕니다.
+#       watch_dividend_payment_events.yml, watch_data_sanity.yml — 매일 돕니다(daily).
 #       (watch_data_sanity.yml 은 2026-09-03 추가 — 8/30 신설 당시 이 목록에 빠져 있어서,
 #        그 워치독이 조용히 멈춰도 아무도 모르는 사각지대였습니다. 매일 09:30 KST 에 돌고
 #        트리거가 schedule / workflow_dispatch(입력 없음)뿐이라 다른 daily 대상과 같은
@@ -37,9 +40,9 @@
 #     안에 conclusion=success 인 실행이 하나라도 있는지 봅니다. 트리거 종류(event)는
 #     가리지 않습니다 — 아래 자동 재실행이 성공한 경우 그건 workflow_dispatch 로 남기
 #     때문에, event=schedule 만 세면 다음 날에도 "성공 없음"으로 잡혀 재실행을 매일
-#     헛되이 반복하게 됩니다(2026-08-31 필터 제거). 평일 전용 워크플로우는 주말엔
-#     건너뛰고, 월요일엔 지난 금요일 실행분까지 보이도록 창을
-#     넓힙니다(주말 동안은 검사가 없었으므로).
+#     헛되이 반복하게 됩니다(2026-08-31 필터 제거). 평일 전용(weekdays) 워크플로우는
+#     일요일·월요일에 지난 금요일 실행분까지 보이도록 창을 넓힙니다(그 워크플로우의 cron 이
+#     주말엔 발동하지 않으므로 — 값은 아래 WEEKDAY_WINDOW_HOURS 주석 참고).
 #
 #   🔴 2026-09-05 (#196) — "성공으로 끝났다"와 "데이터를 만들었다"는 다른 말입니다:
 #     scrape.yml / indicator_kr.yml 은 2026-09-04 부터 `--skip-if-not-ready` 로 돕니다 —
@@ -53,6 +56,8 @@
 #       · indicator_kr.yml → data/indicator_kr_latest.json   의 generated_at
 #     판정: 타임스탬프 날짜가 "기대 거래일"(지금이 평일 장마감 이후면 오늘, 아니면 가장
 #     최근 평일)이고 **시각이 장마감(15:30 KST) 이후**여야 "데이터를 만들었다"로 칩니다.
+#     (2026-09-05 #200 부터는 "기대 거래일의 장마감 **이후이기만 하면**" — 그 뒤 비거래일에
+#      찍힌 것도 포함 — 로 완화. 아래 🔴 #200 (2) 참고.)
 #     시각 조건은 collector_kospi200.py::kr_snapshot_time_is_after_close() /
 #     collector_indicator_kr.py::snapshot_time_is_after_close() 와 같은 규칙(15:30 정각
 #     포함, `utils/constants.py` 의 KR_MARKET_CLOSE_HOUR/MINUTE)입니다 — 이 워크플로우는
@@ -104,6 +109,45 @@
 #       · scorecard_publish_daily.yml — `permissions: contents: read`, git 산출물이 없습니다(Supabase 만).
 #       · watch_data_sanity.yml — 그 자체가 감시 스크립트이고 산출물이 없습니다(읽기만 함).
 #       · render_keep_awake.yml / collect_dividend_kr.yml — 애초에 감시 대상이 아님(위 "일부러 뺀 것").
+#
+#   🔴 2026-09-05 (#200) — "한국이 주말이면 5개를 통째로 건너뛴다"는 블랭킷 게이트 제거 (오너 실전 발견):
+#     오너가 토요일(09-05) 11:55 KST 에 이 워치독을 수동 실행해 봤더니 로그가 이랬습니다:
+#       scrape.yml / scrape_us.yml / indicator_kr.yml / scrape_report_snapshots.yml / duel_daily.yml
+#       — "주말이라 이번 검사에서 건너뜁니다."
+#     그 게이트는 2026-08-28 신설 당시 "이 5개는 자기 cron 이 평일에만 발동하니, 주말엔 '최근
+#     30시간 안에 성공 실행 없음'이 **정상**이고 그대로 두면 매주 토·일마다 거짓 경고가 난다"는
+#     이유로 넣은 것입니다(그때는 conclusion 만 봤으므로 그 판단이 맞았습니다). 그런데 #196/#199
+#     로 데이터 파일의 타임스탬프까지 보게 된 지금은 사정이 다릅니다:
+#       · 미국 2개(scrape_us.yml / scrape_report_snapshots.yml)는 금요일 미국 장마감분을 **한국
+#         토요일 새벽**(05:35 / 08:20 KST)에 커밋합니다. 오너가 데이터 파일로 직접 확인한 바로는
+#         9/4(금) 미국 마감분이 9/5(토) 새벽에 정상 반영됐지만, 만약 그게 실패했다면 이 게이트
+#         때문에 **한국 주말 내내(월요일 18:00 KST 까지) 아무도 몰랐을** 것입니다.
+#       · 데이터 판정 규칙(kr / us / daily@HH:MM)은 애초에 "지금 기준으로 가장 최근 기대 거래일"
+#         을 계산하도록 짜여 있어서(kr: 평일 장마감 이후면 오늘, 아니면 가장 최근 평일 / us:
+#         resolve_collection_session_et() 규칙 / daily: 자기 cron 기준), 주말에 돌려도 금요일치
+#         데이터를 정상으로 보고 목요일치는 미갱신으로 봅니다 — 오탐이 나지 않습니다
+#         (tests/test_watch_schedule_health_window.py §8 이 토·일 검사를 실제 스크립트로 못 박음).
+#     그래서 이제 게이트는 **"평일 전용(weekdays) 이면서 확인할 데이터 파일이 없는 대상"** 에만
+#     걸립니다 — 즉 duel_daily.yml 하나. 이 배치는 결과가 Supabase 에만 남아 conclusion 밖에
+#     볼 게 없고(#199 "일부러 넣지 않은 대상"), cron 이 평일 17:10 KST 뿐이라 주말엔 "최근 성공
+#     실행 없음"이 정상입니다 — 주말에 검사하면 매주 두 번 거짓 경고 + 헛된 재실행이 납니다.
+#     나머지 4개(kr 2 + us 2)와 원래 daily 였던 배당 감시 2개는 토·일 모두 검사합니다. 일요일도
+#     막지 않는 이유: 일요일에 봐야 "토요일 자동 재실행이 실제로 데이터를 채웠는지"가 하루 더
+#     빨리 확인되고, 판정 규칙상 일요일이라고 오탐이 생길 이유가 없습니다.
+#     함께 손본 것 두 가지:
+#       (1) 창(window): 토요일 30시간(금 16:05 KST 발동분이 26시간 전 — 평일 "어제치" 와 같은
+#           거리), 일요일 54시간(50시간 전 + 4시간 여유), 월요일 76시간(종전 그대로). 창이 좁으면
+#           금요일치가 안 보여 "실행 없음" 오탐이 나고, 넓어도 데이터 판정이 따로 있어 해롭지
+#           않습니다(넓은 창은 "언제 돌았든 파일이 최신인가" 로 귀결됨).
+#       (2) kr 판정: "타임스탬프 날짜 == 기대 거래일" 이던 것을 **"타임스탬프 ≥ 기대 거래일의
+#           장마감(15:30 KST)"** 으로 바꿨습니다. 주말에 kr 대상이 미갱신으로 잡혀 자동 재실행이
+#           걸리면 collector_kospi200.py / collector_indicator_kr.py 는 백필이 없어 "지금"을 긁고
+#           **토요일 날짜로** 저장합니다(내용은 네이버가 주말에 보여주는 금요일 종가 그대로).
+#           날짜 등호 규칙이면 그 파일이 일요일 검사에서 "기대 거래일(금)의 데이터가 아님"으로
+#           또 잡혀 재실행이 연쇄됩니다. "금요일 장마감 이후에 수집됐다" 가 곧 "금요일 종가를
+#           담았다" 이므로 부등호가 원래 의도에 더 정확합니다. 기존 세 문구(장마감 이전 시각 /
+#           기대 거래일의 데이터가 아님 / 장마감 이후)는 글자 그대로 유지했고, "기대 거래일 뒤
+#           비거래일에 수집" 인 경우의 ✅ 문구만 새로 하나 생겼습니다.
 #
 #   ⚠️ 한계 — 정직하게 밝혀둡니다:
 #     이 워치독도 결국 GitHub Actions 의 schedule 로 도는 워크플로우입니다. 즉 이
@@ -281,11 +325,16 @@ jobs:
           printf 'ℹ️  현재 %02d:%02d KST (요일 %s) — 한국 증시 장중 여부: %s\n' \
             "$(( KST_MINUTE_OF_DAY / 60 ))" "$(( KST_MINUTE_OF_DAY % 60 ))" "$DOW_KST" "$MARKET_HOURS"
 
-          if [ "$DOW_KST" = "1" ]; then
-            WEEKDAY_WINDOW_HOURS=76           # 월요일엔 지난 금요일 실행분까지 봐야 함
-          else
-            WEEKDAY_WINDOW_HOURS=30
-          fi
+          # weekdays 대상의 창 — 그 워크플로우 cron 이 평일에만 발동하므로, 주말을 지날수록
+          # "가장 최근 정규 발동(금요일)" 이 멀어집니다. 검사 시각 18:00 KST 기준으로 가장 이른
+          # 금요일 발동(scrape.yml 16:05 KST)이 토 26h / 일 50h / 월 74h 전이라 각각 30 / 54 / 76
+          # (2026-09-05 #200 — 토·일 값 추가. 종전엔 주말에 검사 자체를 안 해서 창이 필요 없었음).
+          # 창이 넓어도 데이터 파일 판정이 따로 있어 데이터 대상에는 해롭지 않습니다.
+          case "$DOW_KST" in
+            1) WEEKDAY_WINDOW_HOURS=76 ;;     # 월요일엔 지난 금요일 실행분까지 봐야 함
+            7) WEEKDAY_WINDOW_HOURS=54 ;;     # 일요일도 마찬가지(하루 덜 지남)
+            *) WEEKDAY_WINDOW_HOURS=30 ;;     # 화~토: 전날(또는 당일) 발동분이 30시간 안
+          esac
           DAILY_WINDOW_HOURS=30
 
           FAILED_LIST=""
@@ -293,8 +342,17 @@ jobs:
           while IFS='|' read -r FILE KIND DATA_FILE STAMP_KEY RULE; do
             [ -z "$FILE" ] && continue
 
-            if [ "$KIND" = "weekdays" ] && { [ "$DOW_KST" = "6" ] || [ "$DOW_KST" = "7" ]; }; then
-              echo "⏭  $FILE — 주말이라 이번 검사에서 건너뜁니다."
+            # ── 주말 건너뛰기 — "평일 전용 cron + 확인할 데이터 파일 없음" 인 대상만 (2026-09-05 #200) ──
+            # 종전엔 weekdays 5개를 주말에 통째로 건너뛰었습니다. 이제는 데이터 파일이 있는 대상은
+            # 주말에도 검사합니다(파일 판정이 "가장 최근 기대 거래일" 기준이라 오탐이 없음 — 헤더
+            # 🔴 #200 문단). 남는 것은 duel_daily.yml 하나: conclusion 밖에 볼 게 없는데 자기 cron 이
+            # 평일 17:10 KST 뿐이라, 주말엔 "최근 성공 실행 없음"이 **정상**입니다 — 검사하면 매주
+            # 토·일 거짓 경고 + 헛된 재실행. 그래서 이것만 예전처럼 건너뜁니다(월요일 76시간 창이
+            # 금요일치를 봅니다). ⚠️ 이 조건은 파일명이 아니라 "필드 모양"으로 판단하므로, 나중에
+            # duel_daily.yml 에 데이터 파일을 붙이면 자동으로 주말 검사에 들어갑니다.
+            if [ "$KIND" = "weekdays" ] && [ -z "${DATA_FILE:-}" ] \
+               && { [ "$DOW_KST" = "6" ] || [ "$DOW_KST" = "7" ]; }; then
+              echo "⏭  $FILE — 평일 전용 cron 이고 확인할 데이터 파일이 없어(실행 결과만 봄) 주말엔 '최근 실행 없음'이 정상이라 이번 검사에서 건너뜁니다."
               continue
             fi
 
@@ -415,12 +473,19 @@ jobs:
               while expected.isoweekday() > 5:
                   expected -= datetime.timedelta(days=1)
               close_label = f"{close_min // 60:02d}:{close_min % 60:02d}"
-              if stamp_date != expected.isoformat():
+              # 2026-09-05 (#200): "날짜 == 기대 거래일" 이 아니라 "타임스탬프 ≥ 기대 거래일의 장마감".
+              # 두 수집기는 백필이 없어 언제 돌든 "지금" 을 긁고 실행 날짜로 저장합니다 — 기대 거래일
+              # 장마감 뒤의 비거래일(토·일, 또는 다음 평일 장 시작 전)에 수집된 파일도 그 거래일의
+              # 종가를 담고 있으므로 정상입니다(주말 자동 재실행이 만든 토요일 날짜 파일이 일요일
+              # 검사에서 또 잡혀 재실행이 연쇄되는 것을 막음 — 헤더 🔴 #200 (2) 참고).
+              if stamp_day < expected:
                   verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 기대 거래일 {expected.isoformat()}(장마감 {close_label} 이후)의 데이터가 아님")
-              if hh * 60 + mm < close_min:
+              if stamp_day == expected and hh * 60 + mm < close_min:
                   # 수집기의 kr_snapshot_time_is_after_close()/snapshot_time_is_after_close() 와 같은
                   # 규칙 — 장마감 정각(15:30)은 "이후"로 칩니다. 이 분기가 #195 사고(07:04 SUCCESS)의 모양입니다.
                   verdict(False, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 날짜는 오늘이지만 장마감 {close_label} 이전 시각(장 시작 전·장중 값)")
+              if stamp_day > expected:
+                  verdict(True, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 거래일 {expected.isoformat()} 장마감 뒤 비거래일·장 시작 전에 수집됨(그 거래일 종가)")
               verdict(True, f"데이터 기준 {stamp_date} {hh:02d}:{mm:02d} KST — 거래일 {expected.isoformat()} 장마감 이후")
 
           if rule == "us":

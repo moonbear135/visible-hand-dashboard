@@ -547,8 +547,16 @@ ALL_TARGETS = [
     "watch_dividend_payment_events.yml",
     "watch_data_sanity.yml",   # 2026-09-03 추가 — 8/30 신설 때 감시 목록에서 빠져 있던 daily 대상
 ]
-WEEKDAY_ONLY_TARGETS = ALL_TARGETS[:5]
+WEEKDAY_ONLY_TARGETS = ALL_TARGETS[:5]   # TARGETS 2번째 필드가 weekdays (자기 cron 이 월~금)
 DAILY_TARGETS = ALL_TARGETS[5:]
+
+# ── 주말에 검사 자체를 건너뛰는 대상 (2026-09-05 #200 이후) ────────────────────────────
+# 예전엔 WEEKDAY_ONLY_TARGETS 5개를 주말에 통째로 건너뛰었습니다. 이제는 "평일 전용 cron
+# **이면서** 확인할 데이터 파일이 없는(conclusion 만 보는)" 대상만 건너뜁니다 — duel_daily.yml
+# 하나. 나머지 9개는 토·일에도 검사합니다(§8 참고). 아래 test_weekend_skip_set_is_exactly_...
+# 가 이 목록을 TARGETS 필드 모양에서 다시 계산해 대조합니다(여기 베껴 적은 값이 어긋나면 빨간불).
+WEEKEND_SKIPPED_TARGETS = ["duel_daily.yml"]
+WEEKEND_CHECKED_TARGETS = [f for f in ALL_TARGETS if f not in WEEKEND_SKIPPED_TARGETS]
 
 REPO_SLUG = "moonbear135/visible-hand-dashboard"
 
@@ -923,21 +931,27 @@ def test_workflow_run_triggered_success_also_counts(tmp_path):
     assert "has_failures=false" in output, output
 
 
-def test_weekend_skips_weekday_only_targets_entirely(tmp_path):
+def test_weekend_skips_only_the_conclusion_only_weekday_target(tmp_path):
     """
-    주말(토=6)에는 평일 전용 5개를 검사 자체에서 건너뜁니다 — 조회도, 재실행도 없어야
-    합니다(주말에 안 도는 게 정상인데 재실행을 걸면 매주 두 번씩 헛발동).
+    주말(토=6)에 검사 자체를 건너뛰는 것은 duel_daily.yml 하나뿐입니다(2026-09-05 #200 —
+    평일 전용 cron + 확인할 데이터 파일 없음 → 주말엔 "최근 실행 없음"이 정상이라 검사하면
+    매주 두 번 거짓 경고). 조회도, 재실행도 없어야 하고, 건너뛴 이유가 로그에 남아야 합니다.
+    나머지 9개(데이터 대상 6 + daily 3)는 전부 실행 기록이 없으므로 재실행이 나가야 합니다 —
+    예전엔 평일 전용 5개가 통째로 빠져 미국 2개가 주말 내내 안 보였습니다(오너 실전 발견).
     """
     proc, calls, output = run_check_step(
         tmp_path, status_map([], ALL_TARGETS), now_ts=TS_SAT_MIDDAY
     )
 
     assert proc.returncode == 0, proc.stderr
-    for f in WEEKDAY_ONLY_TARGETS:
+    for f in WEEKEND_SKIPPED_TARGETS:
         assert all(f not in " ".join(c) for c in calls), f"{f} 를 주말에 건드렸습니다: {calls}"
+        assert f"⏭  {f} — 평일 전용 cron 이고 확인할 데이터 파일이 없어" in proc.stdout, proc.stdout
     assert dispatch_calls(calls) == [
-        expected_dispatch_args(f) for f in DAILY_TARGETS
+        expected_dispatch_args(f) for f in WEEKEND_CHECKED_TARGETS
     ], dispatch_calls(calls)
+    assert "주말이라 이번 검사에서 건너뜁니다" not in proc.stdout, (
+        "예전 블랭킷 주말 스킵 문구가 되살아났습니다", proc.stdout)
 
 
 def test_monday_widened_window_applies_to_redispatch_decision(tmp_path):
@@ -1077,9 +1091,9 @@ def test_weekend_midday_is_not_market_hours(tmp_path):
     토요일 11:00 KST — **시각만 보면** 정규장 시간대지만 휴장입니다. 요일 조건이 빠지면
     이 검사가 빨간불이 됩니다.
 
-    평일 전용 5개는 원래 주말이라 검사 자체를 건너뛰므로(기존 로직), 여기서 재실행이
-    걸리는 대상은 매일 도는 4개뿐이어야 합니다 — 즉 장중 안전장치가 기존 주말 스킵과
-    충돌하지 않는지도 함께 봅니다.
+    주말에 검사 자체를 건너뛰는 duel_daily.yml(#200 이후 유일)을 뺀 9개가 전부 실행 기록이
+    없으므로, 장중 안전장치가 "토요일 11:00" 을 장중으로 오판하지 않았다면 9개 모두 재실행이
+    나가야 합니다 — 즉 장중 안전장치가 주말 스킵과 충돌하지 않는지도 함께 봅니다.
     """
     proc, calls, output = run_check_step(
         tmp_path, status_map([], ALL_TARGETS), now_ts=TS_SAT_MIDDAY
@@ -1087,10 +1101,10 @@ def test_weekend_midday_is_not_market_hours(tmp_path):
 
     assert proc.returncode == 0, proc.stderr
     assert "market_hours=false" in output, output
-    for f in WEEKDAY_ONLY_TARGETS:
+    for f in WEEKEND_SKIPPED_TARGETS:
         assert all(f not in " ".join(c) for c in calls), f"{f} 를 주말에 건드렸습니다: {calls}"
     assert dispatch_calls(calls) == [
-        expected_dispatch_args(f) for f in DAILY_TARGETS
+        expected_dispatch_args(f) for f in WEEKEND_CHECKED_TARGETS
     ], dispatch_calls(calls)
     assert MARKET_SKIP_PHRASE not in output, output
 
@@ -1978,6 +1992,258 @@ def test_stale_us_and_daily_data_during_market_hours_is_reported_but_not_redispa
     assert f"- scrape_us.yml ({STALE_PHRASE}: 데이터 기준 2026-08-27 16:35 ET" in output, output
     assert f"- watch_dividend_disclosures.yml ({STALE_PHRASE}: 데이터 기준 2026-08-31 07:13 KST" in output, output
     assert output.count(MARKET_SKIP_PHRASE) == 2, output
+
+
+# =====================================================================================
+# 8. 주말에도 검사한다 — "한국 주말이면 5개 통째로 스킵" 블랭킷 게이트 제거 (2026-09-05 #200)
+# =====================================================================================
+#
+# 배경: 오너가 토요일(2026-09-05) 11:55 KST 에 이 워치독을 수동 실행해 보니 평일 전용 5개
+# (scrape / scrape_us / indicator_kr / scrape_report_snapshots / duel_daily)가 전부 "주말이라
+# 건너뜁니다" 로 나왔습니다. 미국 2개는 금요일 마감분을 **한국 토요일 새벽**에 커밋하므로,
+# 그게 실패했다면 월요일 18:00 KST 까지 아무도 몰랐을 구조입니다. 그 게이트는 conclusion 만
+# 보던 시절(주말엔 "최근 실행 없음"이 정상)의 오탐 방지책이었고, 데이터 파일 판정(#196/#199)
+# 은 애초에 "가장 최근 기대 거래일" 을 계산하므로 주말에 돌려도 오탐이 없습니다.
+#
+# 새 규칙: 주말에 건너뛰는 것은 "평일 전용 cron + 데이터 파일 없음" 인 duel_daily.yml 뿐.
+# 창(window)은 토 30h / 일 54h / 월 76h. kr 판정은 "타임스탬프 ≥ 기대 거래일 장마감" 으로
+# 완화(주말 자동 재실행이 만든 토요일 날짜 파일이 일요일에 또 잡히지 않도록).
+
+TS_SAT_EVENING = kst_ts(2026, 9, 5, 18, 0)   # 토 18:00 KST — 워치독 정규 발동 시각(주말)
+TS_SUN_EVENING = kst_ts(2026, 9, 6, 18, 0)   # 일 18:00 KST
+OWNER_SAT_DISPATCH = kst_ts(2026, 9, 5, 11, 55)   # 오너가 실제로 수동 실행한 순간(로그 실측)
+
+
+def _targets_table():
+    """TARGETS 블록을 [(파일, kind, data_file 또는 ""), ...] 로 파싱합니다(사본 아님 — 스크립트에서)."""
+    import re
+    script = load_check_step_script()
+    block = re.search(r'TARGETS="(.*?)"', script, re.S)
+    assert block, "TARGETS=\"...\" 블록을 못 찾았습니다"
+    rows = []
+    for line in block.group(1).splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split("|")
+        rows.append((parts[0], parts[1], parts[2] if len(parts) > 2 else ""))
+    return rows
+
+
+def _weekend_runs(now_ts, weekday_ran_at, daily_hours_ago=2):
+    """주말 검사용 실행 목록 — weekdays 대상은 `weekday_ran_at`({파일: epoch}) 시각에, daily 대상은
+    `daily_hours_ago` 시간 전에 성공한 것으로."""
+    status = {}
+    for f in WEEKDAY_ONLY_TARGETS:
+        hours_ago = (now_ts - weekday_ran_at[f]) / HOUR
+        status[f] = [dict(run_entry(hours_ago, now_ts=now_ts), event="schedule")]
+    for f in DAILY_TARGETS:
+        status[f] = [dict(run_entry(daily_hours_ago, now_ts=now_ts), event="schedule")]
+    return status
+
+
+# 금요일(2026-09-04) 정규 발동 시각(KST) — 각 워크플로우 cron 을 KST 로 옮긴 값. 미국 2개는 금요일
+# 미국 마감분이 **한국 토요일 새벽**에 도는 점이 이 절의 핵심입니다.
+FRIDAY_REGULAR_RUNS_KST = {
+    "scrape.yml": kst_ts(2026, 9, 4, 16, 5),
+    "indicator_kr.yml": kst_ts(2026, 9, 4, 17, 0),
+    "duel_daily.yml": kst_ts(2026, 9, 4, 17, 10),
+    "scrape_us.yml": kst_ts(2026, 9, 5, 5, 35),                 # 20:35 UTC 금 = 토 05:35 KST
+    "scrape_report_snapshots.yml": kst_ts(2026, 9, 5, 8, 20),   # 23:20 UTC 금 = 토 08:20 KST
+}
+
+
+def test_weekend_skip_set_is_exactly_the_weekday_targets_without_a_data_file():
+    """
+    "주말에 건너뛰는 대상" 을 파일명으로 박지 않고 TARGETS 의 필드 모양(weekdays + 데이터 파일
+    없음)으로 정했으므로, 그 집합을 스크립트에서 다시 계산해 이 테스트의 WEEKEND_SKIPPED_TARGETS
+    와 대조합니다. 또 weekdays 로 적힌 대상의 cron 은 정말 월~금(1-5)뿐이고 daily 대상은 요일
+    제한이 없어야 합니다 — duel_daily_us.yml 이 daily 인 것도 여기서 확인됩니다.
+    """
+    rows = _targets_table()
+    skipped = [f for f, kind, data_file in rows if kind == "weekdays" and not data_file]
+    assert skipped == WEEKEND_SKIPPED_TARGETS == ["duel_daily.yml"], skipped
+    for f, kind, _ in rows:
+        dows = {c.split()[4] for c in _schedule_crons(WORKFLOW_PATH.parent / f)}
+        if kind == "weekdays":
+            assert dows == {"1-5"}, f"{f} 는 weekdays 로 적혀 있는데 cron 요일 필드가 {dows}"
+        else:
+            assert dows == {"*"}, f"{f} 는 daily 로 적혀 있는데 cron 요일 필드가 {dows}"
+    assert dict((f, k) for f, k, _ in rows)["duel_daily_us.yml"] == "daily"
+
+
+@pytest.mark.parametrize("now_ts, label", [
+    (TS_SAT_EVENING, "토 18:00"),
+    (TS_SUN_EVENING, "일 18:00"),
+    (OWNER_SAT_DISPATCH, "토 11:55 — 오너가 실제로 수동 실행한 순간"),
+])
+def test_weekend_with_fridays_data_in_place_is_quiet_and_checks_nine_targets(tmp_path, now_ts, label):
+    """
+    ⭐ 핵심 1 — 주말에 검사가 돌아도 **오탐이 없다.** 금요일 정규 발동분(미국 2개는 토 새벽)이
+    있고 데이터 파일이 각자 규칙으로 정상이면: 재실행 0건, has_failures=false, 6개 데이터 대상
+    모두 "갱신 확인" 로그, duel_daily.yml 만 건너뜀 로그. 창은 토 30h / 일 54h 가 로그에 찍혀야
+    합니다(창이 30 으로 남으면 일요일에 금요일치가 안 보여 "실행 없음" 오탐).
+    """
+    proc, calls, output = run_check_step(
+        tmp_path, _weekend_runs(now_ts, FRIDAY_REGULAR_RUNS_KST), now_ts=now_ts,
+        data_files=fresh_data_files(now_ts),
+    )
+    assert proc.returncode == 0, (label, proc.stdout, proc.stderr)
+    assert dispatch_calls(calls) == [], (label, dispatch_calls(calls))
+    assert "has_failures=false" in output, (label, output)
+    for wf, (path, _k, _r) in DATA_TARGETS.items():
+        assert f"✅ {wf} — " in proc.stdout and f"{path} 갱신 확인(" in proc.stdout, (label, wf, proc.stdout)
+    assert sorted(contents_calls(calls)) == sorted(p for p, _k, _r in DATA_TARGETS.values()), contents_calls(calls)
+    assert "⏭  duel_daily.yml — 평일 전용 cron 이고 확인할 데이터 파일이 없어" in proc.stdout, (label, proc.stdout)
+    assert proc.stdout.count("⏭") == 1, (label, proc.stdout)
+    window = 54 if kst_dow(now_ts) == 7 else 30
+    assert f"✅ scrape.yml — 최근 {window}시간 내 성공 실행 확인됨" in proc.stdout, (label, proc.stdout)
+    # 판정 사유에 기대 거래일이 금요일로 찍혀야 합니다(kr/us 모두 — 주말로 되감지 않음).
+    assert "거래일 2026-09-04 장마감 이후" in proc.stdout, (label, proc.stdout)
+    assert "거래일 2026-09-04 마감+30분(16:30 ET) 이후" in proc.stdout, (label, proc.stdout)
+
+
+def test_weekend_catches_stale_us_data_that_the_old_gate_hid(tmp_path):
+    """
+    ⭐ 핵심 2 — 오너가 지적한 바로 그 사각지대. 토 18:00 KST, 미국 2개 실행은 success 인데
+    파일은 목요일 마감분(2026-09-03)뿐이면 ❌ + 자동 재실행 + 이슈 항목. 예전 게이트라면
+    이 두 개는 로그에 "주말이라 건너뜁니다" 만 남고 월요일 저녁까지 조용했습니다.
+    """
+    now = TS_SAT_EVENING
+    proc, calls, output = run_check_step(
+        tmp_path, _weekend_runs(now, FRIDAY_REGULAR_RUNS_KST), now_ts=now,
+        data_files=_data_files_with(now, {"scrape_us.yml": "2026-09-03 16:35",
+                                          "scrape_report_snapshots.yml": "2026-09-03 19:20"}),
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_us.yml"),
+                                     expected_dispatch_args("scrape_report_snapshots.yml")], dispatch_calls(calls)
+    assert "has_failures=true" in output, output
+    assert f"- scrape_us.yml ({STALE_PHRASE}: 데이터 기준 2026-09-03 16:35 ET" in output, output
+    assert f"- scrape_report_snapshots.yml ({STALE_PHRASE}: 데이터 기준 2026-09-03 19:20 ET" in output, output
+    assert output.count("기대 거래일 2026-09-04") == 2, output
+    assert MARKET_SKIP_PHRASE not in output, ("토요일은 장중이 아니므로 재실행이 나가야 함", output)
+
+
+def test_weekend_catches_missing_us_run_entirely(tmp_path):
+    """미국 2개가 금요일 밤(토 새벽 KST) 아예 안 돌았다면 — 목요일치 실행은 30h 창 밖이라 "실행 없음" ❌ + 재실행."""
+    now = TS_SAT_EVENING
+    ran = dict(FRIDAY_REGULAR_RUNS_KST,
+               **{"scrape_us.yml": kst_ts(2026, 9, 4, 5, 35),                 # 목요일 마감분(금 새벽) 뿐
+                  "scrape_report_snapshots.yml": kst_ts(2026, 9, 4, 8, 20)})
+    proc, calls, output = run_check_step(tmp_path, _weekend_runs(now, ran), now_ts=now,
+                                         data_files=fresh_data_files(now))
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape_us.yml"),
+                                     expected_dispatch_args("scrape_report_snapshots.yml")], dispatch_calls(calls)
+    assert "- scrape_us.yml (자동 재실행 트리거함)" in output, output
+    assert "❌ scrape_us.yml — 최근 30시간 내 성공 실행 기록 없음!" in proc.stdout, proc.stdout
+
+
+def test_weekend_catches_stale_kr_data_too(tmp_path):
+    """한국 2개도 마찬가지 — 토요일에 목요일치 파일이면 ❌ + 재실행(토요일은 장중이 아니라 재실행 가능)."""
+    now = TS_SAT_EVENING
+    proc, calls, output = run_check_step(
+        tmp_path, _weekend_runs(now, FRIDAY_REGULAR_RUNS_KST), now_ts=now,
+        data_files=_data_files_with(now, {"scrape.yml": "2026-09-03 16:05",
+                                          "indicator_kr.yml": "2026-09-04 07:04"}),   # #195 모양도 주말에 잡힘
+    )
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml"),
+                                     expected_dispatch_args("indicator_kr.yml")], dispatch_calls(calls)
+    assert "기대 거래일 2026-09-04(장마감 15:30 이후)의 데이터가 아님" in output, output
+    assert "날짜는 오늘이지만 장마감 15:30 이전 시각" in output, output
+
+
+def test_sunday_window_reaches_fridays_runs_and_saturday_window_is_thirty(tmp_path):
+    """
+    창 값을 못 박습니다: 일요일 18:00 에 금요일 16:05 발동분(50시간 전)은 54h 창 안(✅), 그보다
+    5시간 더 이른 실행(55시간 전)은 창 밖(❌ 실행 없음). 토요일은 30h 창 — 금 16:05(26h) 안, 
+    목 16:05(50h) 밖. 월요일 76h 는 종전 검사(test_monday_widened_window_...)가 그대로 봅니다.
+    """
+    sun = TS_SUN_EVENING
+    (tmp_path / "in").mkdir()
+    proc, calls, output = run_check_step(tmp_path / "in", _weekend_runs(sun, FRIDAY_REGULAR_RUNS_KST),
+                                         now_ts=sun, data_files=fresh_data_files(sun))
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [] and "has_failures=false" in output, (dispatch_calls(calls), output)
+    assert "최근 54시간 내 성공 실행 확인됨" in proc.stdout, proc.stdout
+
+    (tmp_path / "out").mkdir()
+    too_old = dict(FRIDAY_REGULAR_RUNS_KST, **{"scrape.yml": sun - 55 * HOUR})
+    proc, calls, output = run_check_step(tmp_path / "out", _weekend_runs(sun, too_old),
+                                         now_ts=sun, data_files=fresh_data_files(sun))
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], dispatch_calls(calls)
+    assert "❌ scrape.yml — 최근 54시간 내 성공 실행 기록 없음!" in proc.stdout, proc.stdout
+
+    sat = TS_SAT_EVENING
+    (tmp_path / "sat").mkdir()
+    thursday = dict(FRIDAY_REGULAR_RUNS_KST, **{"scrape.yml": kst_ts(2026, 9, 3, 16, 5)})
+    proc, calls, output = run_check_step(tmp_path / "sat", _weekend_runs(sat, thursday),
+                                         now_ts=sat, data_files=fresh_data_files(sat))
+    assert proc.returncode == 0, proc.stderr
+    assert dispatch_calls(calls) == [expected_dispatch_args("scrape.yml")], dispatch_calls(calls)
+    assert "❌ scrape.yml — 최근 30시간 내 성공 실행 기록 없음!" in proc.stdout, proc.stdout
+
+
+def test_kr_rule_accepts_snapshot_collected_after_expected_close_on_a_non_trading_day():
+    """
+    kr 판정 완화(#200 (2)) — 토요일 자동 재실행이 만든 "2026-09-05 18:10" 파일은
+      · 일 18:00 검사(기대 거래일 금) → ✅ (금 장마감 뒤 수집 = 금 종가)
+      · 월 08:00 수동 검사(기대 거래일 금) → ✅
+      · 월 18:00 정규 검사(기대 거래일 월) → ❌ (월요일치가 아님)
+    예전 등호 규칙이면 첫 두 경우가 ❌ 라 일요일에 재실행이 또 걸리고 월요일 아침 수동 실행마다 오탐.
+    """
+    key = "metadata.last_updated_at"
+    sat_rerun = data_file_text("scrape.yml", "2026-09-05 18:10")
+    ok, note = run_verdict(sat_rerun, TS_SUN_EVENING, key, "kr")
+    assert ok == "yes" and "거래일 2026-09-04 장마감 뒤 비거래일·장 시작 전에 수집됨" in note, note
+    ok, note = run_verdict(sat_rerun, kst_ts(2026, 9, 7, 8, 0), key, "kr")
+    assert ok == "yes", note
+    ok, note = run_verdict(sat_rerun, TS_MON_AFTER_CLOSE, key, "kr")
+    assert ok == "no" and "기대 거래일 2026-09-07(장마감 15:30 이후)의 데이터가 아님" in note, note
+    # 같은 원리 — 금요일 tick 이 월요일 새벽에 늦게 발동한 "2026-09-07 07:04" 파일:
+    #   월 08:00(기대 금) → ✅ (금 종가) / 월 18:00(기대 월) → ❌ #195 모양 그대로.
+    mon_dawn = data_file_text("indicator_kr.yml", "2026-09-07 07:04")
+    assert run_verdict(mon_dawn, kst_ts(2026, 9, 7, 8, 0), "generated_at", "kr")[0] == "yes"
+    ok, note = run_verdict(mon_dawn, TS_MON_AFTER_CLOSE, "generated_at", "kr")
+    assert (ok, note) == ("no", "데이터 기준 2026-09-07 07:04 KST — 날짜는 오늘이지만 장마감 15:30 이전 시각(장 시작 전·장중 값)")
+
+
+def test_kr_rule_still_rejects_older_and_pre_close_snapshots_on_weekends():
+    """완화는 "기대 거래일 **뒤**" 쪽으로만 — 그 앞(목요일치)과 당일 장마감 전(#195)은 주말에도 여전히 ❌, 문구 불변."""
+    key = "metadata.last_updated_at"
+    for now in (TS_SAT_EVENING, TS_SUN_EVENING, OWNER_SAT_DISPATCH):
+        ok, note = run_verdict(data_file_text("scrape.yml", "2026-09-03 16:05"), now, key, "kr")
+        assert (ok, note) == ("no", "데이터 기준 2026-09-03 16:05 KST — 기대 거래일 2026-09-04(장마감 15:30 이후)의 데이터가 아님"), (now, note)
+        ok, note = run_verdict(data_file_text("scrape.yml", INCIDENT_STAMP), now, key, "kr")
+        assert (ok, note) == ("no", "데이터 기준 2026-09-04 07:04 KST — 날짜는 오늘이지만 장마감 15:30 이전 시각(장 시작 전·장중 값)"), (now, note)
+        ok, note = run_verdict(data_file_text("scrape.yml", "2026-09-04 16:05"), now, key, "kr")
+        assert (ok, note) == ("yes", "데이터 기준 2026-09-04 16:05 KST — 거래일 2026-09-04 장마감 이후"), (now, note)
+        # 15:30 정각 경계도 그대로(정각 = 이후)
+        assert run_verdict(data_file_text("scrape.yml", "2026-09-04 15:30"), now, key, "kr")[0] == "yes"
+        assert run_verdict(data_file_text("scrape.yml", "2026-09-04 15:29"), now, key, "kr")[0] == "no"
+
+
+def test_us_rule_on_weekends_accepts_saturday_rerun_and_expects_friday():
+    """us 판정은 원래 세션 기준이라 주말 재실행(토 05:10 ET) 파일도 금요일 세션으로 읽어 ✅, 목요일치는 ❌."""
+    key = "metadata.last_updated_at_et"
+    for now in (TS_SAT_EVENING, TS_SUN_EVENING):
+        assert expected_us_session(now) == "2026-09-04"
+        assert run_verdict(data_file_text("scrape_us.yml", "2026-09-05 05:10"), now, key, "us")[0] == "yes"
+        assert run_verdict(data_file_text("scrape_us.yml", "2026-09-04 16:35"), now, key, "us")[0] == "yes"
+        ok, note = run_verdict(data_file_text("scrape_us.yml", "2026-09-03 16:35"), now, key, "us")
+        assert ok == "no" and "기대 거래일 2026-09-04" in note, note
+
+
+def test_weekday_behaviour_is_unchanged_by_the_weekend_change(tmp_path):
+    """평일(화 18:00)엔 종전과 똑같이 10개 전부 검사 — 건너뜀 로그 0건, 창 30h."""
+    proc, calls, output = run_check_step(tmp_path, status_map(ALL_TARGETS, []))
+    assert proc.returncode == 0, proc.stderr
+    assert "⏭" not in proc.stdout, proc.stdout
+    assert proc.stdout.count("✅") == len(ALL_TARGETS), proc.stdout
+    assert "최근 30시간 내" in proc.stdout and "has_failures=false" in output
 
 
 def main():
