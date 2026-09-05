@@ -604,5 +604,16 @@
     "growth_sample_count": 239,
     "pegy_sample_count": 202,
     "collected_at": "2026-09-04 07:04"
+  },
+  {
+    "date": "2026-09-05 09:49",
+    "f_per": 13.0,
+    "growth": 16.7,
+    "pegy": 0.7,
+    "total_count": 500,
+    "f_per_sample_count": 256,
+    "growth_sample_count": 239,
+    "pegy_sample_count": 202,
+    "collected_at": "2026-09-05 09:49"
   }
 ]
