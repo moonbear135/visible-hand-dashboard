@@ -53,6 +53,16 @@
      을 빌려 씁니다. 결투가 커밋한 기준값 파일은 **읽기만** 하고, 판정에 따라 완전 중단
      (`failed`) / 오늘 발행 건너뜀(`failed_or_holiday`·`needs_review`) / 평소대로(`ok`·기준선
      없음)로 갈립니다 — 자세한 근거와 기준선 선택 규칙은 §4-b 머리말.
+  ⑦ (2026-09-07, #203) **원화·달러 발행이 결투처럼 워크플로우 두 개로 갈라졌습니다.**
+     `run_publish_batch(currencies=...)` 가 이번 실행이 담당하는 통화를 받고,
+     `scorecard_publish_daily.yml`(KRW, 07:35 KST) / `scorecard_publish_daily_us.yml`(USD,
+     11:35 KST)이 각각 한 통화만 넘깁니다. 계기: #202 가 미국 신선도 검사를 살리려고 cron 을
+     11:35 로 늦추자 **전날 저녁에 이미 확정된 코스피 성적표까지** 미국 지수를 기다리느라
+     함께 늦어졌습니다(오너 지적). 🔴 이 분리의 정합성 조건은 **통화 간 침범 금지**입니다 —
+     5단계 가지치기·6단계 당일 삭제·신선도 판정이 전부 **이번 실행이 담당하는 통화(시장)**
+     로만 좁혀집니다. 그렇지 않으면 한국 배치가 "오늘 나는 달러 그룹을 발행하지 않았다"고
+     오판해 달러 그룹의 과거 행을 전부 지우는 사고(§0-1 위반)가 납니다.
+     `tests/test_scorecard_publish.py` §14 가 양방향으로 그 사고를 회귀로 고정합니다.
 
 -------------------------------------------------------------------------------
 🔴 이 파일이 만드는 행은 **로그인한 모든 사용자가 읽습니다** (§0-3-8)
@@ -225,6 +235,50 @@ def _require_currency(currency, label="통화"):
             f" (허용: {', '.join(PUBLISHED_CURRENCIES)})."
         )
     return code
+
+
+def normalize_currencies(currencies):
+    """
+    (#203) 배치가 **이번 실행에서 담당하는 통화** 목록 → `PUBLISHED_CURRENCIES` 순서의 튜플.
+
+    `None` 이면 전체(두 통화 — 예전 호출과 같고, 테스트 하위호환). 지정하면 그 통화만 —
+    모르는 통화는 `_require_currency()` 가 거절하고, 빈 목록은 "아무것도 발행하지 않는 실행"
+    이라 뜻이 없으므로 예외입니다(§0-1: 조용히 빈 실행을 성공으로 남기지 않습니다).
+    순서를 `PUBLISHED_CURRENCIES` 로 고정하는 이유: 요약·삭제 필터·그룹 목록이 호출 순서에
+    따라 달라지지 않게 하기 위해서입니다.
+    """
+    if currencies is None:
+        return tuple(PUBLISHED_CURRENCIES)
+    if isinstance(currencies, str):
+        currencies = [currencies]
+    wanted = {_require_currency(code, "발행 대상 통화") for code in currencies}
+    if not wanted:
+        raise ScorecardPublishError(
+            "발행 대상 통화가 비어 있습니다 — 아무것도 발행하지 않는 실행은 만들지 않습니다"
+            f" (허용: {', '.join(PUBLISHED_CURRENCIES)}).")
+    return tuple(code for code in PUBLISHED_CURRENCIES if code in wanted)
+
+
+def markets_for_currencies(currencies):
+    """
+    (#203) 통화 튜플 → 그 통화들이 **담당하는 시장** 튜플(`scorecard_db.MARKETS` 순서).
+
+    통화 ↔ 시장 대응은 `scorecard_db.CURRENCY_BY_MARKET` 한 곳에서만 옵니다(§0-3-10 —
+    "KRW 는 KR, USD 는 US"를 여기서 다시 적지 않습니다). 신선도 검사(§4-b)가 **이번 실행
+    범위 밖 시장의 판정을 아예 보지 않게** 하는 데 씁니다.
+    """
+    wanted = set(normalize_currencies(currencies))
+    return tuple(market for market in scorecard_db.MARKETS
+                 if scorecard_db.CURRENCY_BY_MARKET[market] in wanted)
+
+
+def market_for_currency(currency):
+    """(#203) 통화 하나 → 시장 하나. 대응이 없으면 지어내지 않고 예외입니다(§0-1)."""
+    code = _require_currency(currency)
+    for market, market_currency in scorecard_db.CURRENCY_BY_MARKET.items():
+        if market_currency == code:
+            return market
+    raise ScorecardPublishError(f"통화 {code} 가 담당하는 시장을 찾지 못했습니다.")
 
 
 # =============================================================================
@@ -418,7 +472,7 @@ def assert_full_consent(consent_row):
 # 3. 발행 행 조립 — 여기서 **처음으로** 남에게 보일 값이 만들어집니다
 # =============================================================================
 def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
-                       brackets_by_user_currency):
+                       brackets_by_user_currency, currencies=None):
     """
     발행 대상 사용자들 → **그룹별 순위표 행 + 보유종목 행**.
 
@@ -431,6 +485,10 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
                                      **키 자체가 없습니다** — `split_by_currency()` 동작).
         nicknames_by_user         : `{user_id: nickname}`
         brackets_by_user_currency : `{(user_id, currency): bracket_key}`
+        currencies                : (#203) 이번 실행이 담당하는 통화. `None` 이면 전체.
+                                    범위 밖 통화의 보유는 "빠진 것"이 아니라 **이번 실행의
+                                    참가 대상이 아닌 것**이라 사유 목록에도 넣지 않습니다
+                                    (원화 배치 로그가 매일 "달러에서 빠졌다"고 적으면 안 됩니다).
 
     반환 dict
         groups   : `{(currency, bracket_key): [순위 매겨진 참가자 dict, ...]}`
@@ -462,6 +520,7 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
     """
     skipped = []
     by_group = {}
+    scope = normalize_currencies(currencies)
 
     for consent in consents or []:
         assert_full_consent(consent)                       # 🔴 위 §2 — 두 번째 확인.
@@ -482,8 +541,8 @@ def build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
         # 🔴 통화는 **고정된 순서의 상수 튜플**로 돕니다. 포트폴리오 dict 를 그대로 순회하면
         #    나중에 `build_portfolio()` 가 새 통화 키를 돌려주기 시작했을 때 이 배치가 그것을
         #    조용히 발행표로 날라 줍니다(DB CHECK 가 거절하겠지만, 거절되는 이유가 로그에서
-        #    드러나지 않습니다).
-        for currency in PUBLISHED_CURRENCIES:
+        #    드러나지 않습니다). (#203) 그 튜플을 이번 실행의 담당 통화로 좁힌 것이 `scope`.
+        for currency in scope:
             summary = portfolio.get(currency)
             if not summary or not (summary.get("rows") or []):
                 # 그 통화로는 보유가 없습니다 — 빠진 것이 아니라 **애초에 참가 대상이
@@ -714,7 +773,7 @@ def split_groups_by_threshold(groups):
     return publishable, blocked
 
 
-def all_possible_groups():
+def all_possible_groups(currencies=None):
     """
     발행표에 **나타날 수 있는 모든 (통화 × 체급) 조합**. 9 + 9 = 18개(고정).
 
@@ -727,11 +786,17 @@ def all_possible_groups():
     사라진** 그룹의 과거 행이 영원히 남습니다 — 그게 가장 위험한 경우입니다(한 명도 없는데
     어제 순위표가 그대로 보이는 상태).
 
+    🔴 (#203) `currencies` 로 **이번 실행이 담당하는 통화의 그룹만** 돌려줍니다(기본 전체).
+       한국 배치가 18개를 전부 청소 대상으로 삼으면 "오늘 나는 달러 그룹을 발행하지 않았다"
+       가 곧 "달러 그룹 과거 행 전부 삭제"가 됩니다 — 그 실행은 달러를 **보지도 않았는데**
+       말입니다. 이 함수의 인자가 그 사고를 막는 자리이고, 호출부(`run_publish_batch()` 5단계)
+       는 반드시 담당 통화를 넘깁니다(`tests/test_scorecard_publish.py` §14).
+
     ⚠️ 이 수는 사용자 수와 무관한 **상수**입니다. 그래서 이 목록을 훑는 청소 단계가 §0-3-2 를
        어기지 않습니다.
     """
     groups = []
-    for currency in PUBLISHED_CURRENCIES:
+    for currency in normalize_currencies(currencies):
         for bracket in CURRENCY_BRACKET_RULES[currency]["keys"]:
             groups.append((currency, bracket))
     return groups
@@ -763,8 +828,9 @@ def all_possible_groups():
 #  🔴 기준선을 고르는 규칙 — "결투 기준선 = 어제 값"이 **이 배치의 실행 시각에는 성립하지
 #     않습니다.** 실제 cron 으로 확인한 사실(§0-1):
 #       · 결투 KR 배치는 코스피 수집 직후(16:40~17:10 KST, 거래일 D)에 돌아 **D 의 값**을
-#         기준선으로 남깁니다. 이 발행 배치는 다음 날 오전(#201 당시 07:30 KST, #202 부터
-#         11:35 KST)에 도는데, 그때 가격 스냅샷도 여전히 D 의 값입니다(그날 코스피 수집은 16:05).
+#         기준선으로 남깁니다. 이 발행 배치는 다음 날 오전(#201 당시 07:30 KST, #202 에서
+#         11:35 KST 로 한 번 늦췄다가, #203 부터 **한국 배치 07:35 KST / 미국 배치 11:35 KST**
+#         로 분리)에 도는데, 그때 가격 스냅샷도 여전히 D 의 값입니다(그날 코스피 수집은 16:05).
 #         즉 평일 오전에는 결투 기준선과 오늘 스냅샷이 **같은 거래일의 같은 값**이라, 그대로
 #         비교하면 매일 "전부 무변동"(`failed_or_holiday`)이 나와
 #         **발행이 영원히 건너뛰어집니다.** 2026-09-05 저장소 데이터로 실제 확인했습니다.
@@ -785,10 +851,27 @@ def all_possible_groups():
 #        없이는 판정하지 않습니다). 미국 지수는 08:20 KST(`scrape_report_snapshots.yml`)에
 #        수집됩니다. #201 당시 이 배치는 07:30 KST 라 **미국 쪽 검사가 항상 이 이유로 생략**됐고,
 #        2026-09-06 #202 에서 오너 승인으로 cron 을 11:35 KST(02:35 UTC)로 옮겨 **미국 쪽 검사가
-#        활성화**됐습니다 — 시각의 근거(실제 커밋 시각·30분 여유 관례)는 워크플로우 머리말
-#        🕘 #202 문단에 있습니다. 미국 결투 기준선(`duel_daily_us.yml`, 12:00 KST 갱신)은 11:35 엔
-#        아직 D-1 값이라 결투 기준선을 그대로 쓰고, 지연으로 12:00 을 넘겨 돌면 위 "같은 날" 규칙이
-#        이력 CSV 대체 경로로 받습니다 — 어느 쪽이든 판정 함수는 같습니다.
+#        활성화**됐습니다. 그러자 원화 발행까지 같이 늦어져, 2026-09-07 #203 에서 **미국 통화만**
+#        11:35 KST(`scorecard_publish_daily_us.yml`)에 발행하고 원화는 07:35 KST
+#        (`scorecard_publish_daily.yml`)로 되돌렸습니다 — 각 시각의 근거(실제 커밋 시각·30분 여유
+#        관례)는 두 워크플로우 머리말 🕘 문단에 있습니다. 미국 결투 기준선(`duel_daily_us.yml`,
+#        12:00 KST 갱신)은 11:35 엔 아직 D-1 값이라 결투 기준선을 그대로 쓰고, 지연으로 12:00 을
+#        넘겨 돌면 위 "같은 날" 규칙이 이력 CSV 대체 경로로 받습니다 — 어느 쪽이든 판정 함수는
+#        같습니다.
+#     ⚠️ (#203) 결투 기준선에 **지수가 없으면**(`index_keys` 비어 있음) 그것도 "어제 값"으로 쓰지
+#        않고 이력 CSV 직전 행으로 대체합니다. #202 조사에서 결투 USD 배치가 토·일 대상으로 남기는
+#        기준값 파일엔 지수가 없어(그날 지수 종가가 없으니 당연) 매주 월·화는 미국 검사가
+#        `no_baseline` 으로 생략된다는 것이 확인됐습니다. 판정 함수는 기준선에 지수가 없으면
+#        판정하지 않으므로(그 동작은 그대로), 그런 기준선을 고르지 않는 것으로 충분합니다 —
+#        미국 휴장일(예: Labor Day) 대상 기준선도 같은 모양이라 같은 대체 경로를 탑니다.
+#
+#  🔴 (#203) 이 검사는 **이번 실행이 담당하는 통화의 시장만** 봅니다. 한국 배치(KRW)는 코스피만,
+#     미국 배치(USD)는 미국주식만 판정하고, 범위 밖 시장은 입력을 만들지도 판정하지도 않습니다
+#     (`load_freshness_inputs(markets=...)` / `run_publish_batch()` 가 입력을 담당 시장으로
+#     좁힘). 두 통화를 한 번에 발행하는 실행(`currencies=None`, 수동·테스트)에서도 판정은 **통화
+#     별**입니다 — 한 시장이 skip 이면 **그 통화만** 건너뛰고 다른 통화는 평소대로 발행합니다.
+#     #201 의 "시장 하나라도 skip 이면 전체 스킵" 정책은 5단계가 18개 그룹을 전부 청소 대상으로
+#     삼던 시절의 방어였고, 5·6단계가 담당 통화로 좁혀진 지금은 필요 없어졌습니다(아래 표).
 #
 #  판정 → 행동 표 (오너 확정 정책, 2026-09-05)
 #     판정                  행동                                 근거
@@ -802,9 +885,11 @@ def all_possible_groups():
 #
 #  ⚠️ 건너뛰는 날에도 **철회 청소(0단계)는 합니다.** 철회한 사람의 공개 기록을 지우는 일은
 #     가격과 무관한 의무이고, 이 모듈에서 "하루도 거르면 안 되는 일"입니다. 건너뛰는 것은
-#     그 뒤의 발행(1~6단계)뿐입니다. 시장 하나라도 skip 이면 그날 발행 전체를 건너뜁니다 —
-#     한 통화만 발행하면 5단계가 다른 통화 그룹을 "발행 대상 아님"으로 보고 **과거 행을
-#     지워 버리기** 때문입니다.
+#     그 뒤의 발행(1~6단계)뿐입니다. (#203) 통화가 둘인 실행에서 한 시장만 skip 이면 **그
+#     통화만** 건너뛰고 나머지는 발행합니다 — 5·6단계가 발행하는 통화의 그룹·행만 만지므로
+#     다른 통화의 과거 행은 건드리지 않습니다. 철회 청소는 통화와 무관하니 한국·미국 배치
+#     **둘 다** 실행합니다(멱등 — 두 번째 실행은 지울 것이 없어 조회 1개로 끝나고, 대신
+#     "하루도 거르면 안 되는 일"에 기회가 하루 두 번 생깁니다).
 # =============================================================================
 FRESHNESS_PROCEED = "proceed"          # 평소대로 발행
 FRESHNESS_SKIP = "skip"                # 오늘 발행 건너뜀(조용히 — CI 는 성공)
@@ -945,8 +1030,10 @@ def evaluate_publish_freshness(freshness_inputs):
     **하나의 결정**. 순수 함수입니다.
 
     합치는 규칙: 시장 하나라도 `abort` 면 abort, 아니면 하나라도 `skip` 이면 skip, 아니면 proceed.
-    (한 통화만 발행하면 다른 통화 그룹의 과거 행이 지워지므로 — §4-b 머리말 — 발행은 전부 아니면
-    전무입니다.)
+    (#203) `decision` 은 "입력에 들어온 시장들을 합친" 요약값입니다 — `abort` 는 배치 전체를
+    멈추지만, `skip` 은 **그 시장을 담당하는 통화만** 건너뛰게 합니다(`run_publish_batch()` 가
+    `markets[시장]["decision"]` 을 통화별로 읽습니다). 호출부는 이번 실행 범위 밖 시장을 입력에
+    넣지 않으므로, 여기서 "어느 통화가 담당인가"를 다시 가리지 않습니다.
 
     반환 dict: decision / markets({시장: judge_market_freshness() 결과}) / reasons(사람이 읽을 문장들)
     """
@@ -1028,7 +1115,7 @@ def _previous_probe_from_history(market, session_date, *, index_series, data_dir
     return probe, None
 
 
-def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None):
+def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None, markets=None):
     """
     (배치 전용 I/O) 시장별 신선도 검사 입력을 **읽기 전용**으로 준비합니다 —
     `evaluate_publish_freshness()` 에 그대로 넘길 `{시장: {...}}` 을 돌려줍니다.
@@ -1036,22 +1123,31 @@ def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None):
     `data_dir` 는 유니버스 스냅샷·미국 지수·이력 CSV 를 찾는 곳(기본 `data/`),
     `state_paths` 는 `{시장: 결투 기준값 파일 경로}` 덮어쓰기(기본은 결투 모듈의
     `default_state_path()` / `default_state_path_usd()`) — 둘 다 **테스트가 임시 디렉터리로
-    갈아끼우기 위한** 인자입니다.
+    갈아끼우기 위한** 인자입니다. `markets` 는 (#203) **이번 실행이 담당하는 시장만** 읽게
+    좁히는 인자입니다(기본 전체) — 범위 밖 시장은 결과 dict 에 키 자체가 생기지 않습니다
+    (한국 배치가 미국 파일을 읽고 판정까지 해 놓고 무시하는 것보다, 아예 보지 않는 편이
+    로그와 코드 모두에서 정직합니다).
 
     시장마다:
       ① 오늘 점검표 — 지수의 **가장 최근 종가**(결투 실행 스크립트와 같은 선택. 최신 날짜가
          스냅샷 거래일보다 낡은 지수는 뺍니다 — 결투 H-1 과 같은 이유) + 유니버스 스냅샷 상위
          50종목 → `duel_batch.build_freshness_probe()`.
       ② 기준선 — 결투 기준값 파일(`duel_batch.load_probe_state()`, 🔴 읽기만). 그 `target_date`
-         가 오늘 스냅샷 거래일과 **다르면** 그것을, 같으면 수집 이력 CSV 의 직전 날짜 행을 씁니다
-         (§4-b 머리말에 이유).
+         가 오늘 스냅샷 거래일과 **다르고 지수가 들어 있으면** 그것을, 같은 날이거나 지수가
+         없으면(#203 — 결투 USD 배치가 토·일·휴장일 대상으로 남기는 파일 모양) 수집 이력 CSV 의
+         직전 날짜 행을 씁니다(§4-b 머리말에 이유).
     어느 단계든 실패하면 예외를 올리지 않고 `notes` 에 사유를 적고 그 시장은 "검사 생략"이
     됩니다 — 기준선이 없거나 못 읽는 상태가 신규 배포 초기의 정상 상태이기 때문입니다.
 
     ⚠️ 이 함수는 파일을 **쓰지 않습니다.** 결투 기준값 파일의 갱신은 결투 배치만 합니다.
     """
+    wanted = tuple(FRESHNESS_MARKETS) if markets is None else tuple(markets)
+    unknown = [market for market in wanted if market not in FRESHNESS_MARKETS]
+    if unknown:
+        raise ScorecardPublishError(f"알 수 없는 신선도 검사 시장입니다: {unknown!r}")
     inputs = {}
-    for market, spec in FRESHNESS_MARKETS.items():
+    for market in wanted:
+        spec = FRESHNESS_MARKETS[market]
         session_date = (session_dates or {}).get(market)
         notes = []
         entry = {"session_date": session_date, "today_probe": None, "previous_probe": None,
@@ -1097,11 +1193,22 @@ def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None):
         except DuelBatchError as exc:
             notes.append(f"결투 신선도 기준선 파일을 읽지 못했습니다: {exc}")
 
-        if duel_probe is not None and duel_probe.get("target_date") != str(session_date):
+        duel_has_index = bool(duel_probe and duel_probe.get("index_keys"))
+        if duel_probe is not None and duel_probe.get("target_date") != str(session_date) \
+                and duel_has_index:
             entry["previous_probe"] = duel_probe
             entry["baseline_source"] = BASELINE_SOURCE_DUEL
             continue
-        if duel_probe is not None:
+        if duel_probe is not None and not duel_has_index:
+            # (#203) 결투 USD 배치는 토·일·휴장일 대상으로도 기준값 파일을 남기는데, 그날은 지수
+            # 종가가 없어 `index_keys` 가 빕니다. 판정 함수는 지수 없는 기준선으로는 판정하지
+            # 않으므로(`no_baseline`), 그 파일을 고르면 다음 거래일 검사가 통째로 생략됩니다
+            # (#202 조사: 매주 월·화). 그래서 그런 기준선은 "없는 것"으로 보고 이력 CSV 로 갑니다.
+            notes.append(
+                f"결투 기준선({duel_probe.get('target_date')})에 비교할 지수가 없어(휴장일·주말 대상"
+                " 파일) 기준선으로 쓰지 않고, 수집 이력의 직전 날짜 행을 기준선으로 씁니다."
+            )
+        elif duel_probe is not None:
             notes.append(
                 f"결투 기준선의 날짜({duel_probe.get('target_date')})가 오늘 스냅샷 거래일과 같습니다"
                 " — 결투 배치가 이미 오늘 값을 기준선으로 남긴 뒤라, 수집 이력의 직전 날짜 행을"
@@ -1124,9 +1231,10 @@ def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None):
 # 5. 하루치 발행 배치 본체
 # =============================================================================
 def run_publish_batch(service_client, published_date, *, dry_run=False, price_lookup=None,
-                      freshness_inputs=None):
+                      freshness_inputs=None, currencies=None):
     """
-    (배치 전용) 하루치 공개 순위표를 **통째로 다시 발행**합니다.
+    (배치 전용) 하루치 공개 순위표를 **통째로 다시 발행**합니다 — 이번 실행이 담당하는
+    통화의 몫만(#203).
 
     인자
         service_client : `scorecard_publish_db.create_service_client()` 결과
@@ -1164,26 +1272,40 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
                          검증하고, 둘 다 생략한 예전 테스트 호출(`price_lookup` 만 주입)은
                          검사 없이 예전과 똑같이 돕니다. 빈 dict 는 "검사할 시장 없음".
                          정책(§4-b 머리말): `failed` 는 **완전 중단**, `failed_or_holiday`·
-                         `needs_review` 는 **오늘 발행 건너뜀**(철회 청소만 하고 정상 종료),
-                         기준선이 없으면 검사 생략 후 평소대로.
+                         `needs_review` 는 **그 시장을 담당하는 통화의 오늘 발행 건너뜀**
+                         (철회 청소는 하고, 다른 통화가 있으면 그것만 발행), 기준선이
+                         없으면 검사 생략 후 평소대로. 범위 밖 시장의 입력은 판정하지
+                         않고 버립니다(요약 `freshness["markets"]` 에도 안 실림).
+        currencies     : (2026-09-07, #203) **이번 실행이 담당하는 통화** — `["KRW"]` /
+                         `["USD"]` / `None`(전체 — 예전 호출·테스트 하위호환). 🔴 아래
+                         3~6단계와 신선도 판정이 전부 이 범위로 좁혀집니다. 범위 밖 통화의
+                         발행표 행은 **읽지도 지우지도 쓰지도 않습니다** — 한국 배치가
+                         달러 그룹을 "오늘 발행 안 함"으로 보고 과거 행을 지우는 사고가
+                         이 인자 하나로 막히므로, `tests/test_scorecard_publish.py` §14 가
+                         양방향(한국 실행 → 달러 행 무사 / 미국 실행 → 원화 행 무사)으로
+                         고정합니다.
 
     반환: 요약 dict(로그·작업보고용). `format_summary_lines()` 로 사람이 읽는 줄로 바꿉니다.
+          (#203) `requested_currencies`(요청) / `currencies`(실제 발행한 통화) /
+          `skipped_currencies`({통화: 건너뛴 사유}) 가 추가됐고, `publish_skipped` 는
+          **요청한 통화가 전부** 건너뛰어졌을 때만 True 입니다.
 
-    ── 하루 한 번, 이 순서로 ────────────────────────────────────────────────────
-      ⓪-1. **신선도 검사**(#201) — 결투와 같은 무변동 검사. `failed` 면 여기서 중단
-      0. **철회 청소** — 철회한 사용자의 발행 기록을 모든 날짜에서 삭제
-      ⓪-2. 신선도 검사가 `skip` 이면 **여기서 정상 종료**(아래는 하지 않음)
+    ── 하루 한 번(통화마다), 이 순서로 ─────────────────────────────────────────
+      ⓪-1. **신선도 검사**(#201) — 담당 시장만, 결투와 같은 무변동 검사. `failed` 면 여기서 중단
+      0. **철회 청소** — 철회한 사용자의 발행 기록을 모든 날짜·모든 통화에서 삭제
+      ⓪-2. 신선도 검사가 `skip` 인 시장의 통화는 오늘 발행에서 뺌 — 남는 통화가 없으면
+           **여기서 정상 종료**(아래는 하지 않음)
       1. 발행 대상 고르기 — `final_confirmed=true` 그리고 `revoked_at is null`
       2. 그 사용자들의 "내 성적표" 보유종목을 한 번에 읽어 통화별 포트폴리오로 집계
-      3. 체급 — 통화별 매입원가합계 → 시즌 고정 규칙 적용
-      4. 수익률 → (통화 × 체급) 그룹별 순위
-      5. **최소 인원** 게이팅 — 미달 그룹은 발행 안 하고, 과거 행도 삭제
-      6. 그날 발행분 **통째로** 삭제 → 새로 삽입
+      3. 체급 — **담당 통화**의 매입원가합계 → 시즌 고정 규칙 적용
+      4. 수익률 → (담당 통화 × 체급) 그룹별 순위
+      5. **최소 인원** 게이팅 — 담당 통화의 미달 그룹은 발행 안 하고, 과거 행도 삭제
+      6. 그날 **담당 통화** 발행분 통째로 삭제 → 새로 삽입
 
     ── 질의 횟수 (§0-3-2) ───────────────────────────────────────────────────────
     사용자가 3명이든 3만명이든 **왕복 수가 사용자 수에 비례하지 않습니다.** 고정 왕복은
       동의 조회 1 · 철회 조회 1 · 시즌 체급 배정 1 · 발행표 존재 확인 1 ·
-      당일 발행분 삭제 2 · 미달 그룹 점검 18(상수)
+      당일 발행분 삭제 2 · 미달 그룹 점검 담당 통화당 9(상수 — 두 통화면 18)
     이고, 나머지(보유종목 조회 · 닉네임 조회 · 배정 기록 · 발행 삽입 · 철회 삭제)는 **요청
     크기를 자르는 청크 수**에 비례합니다 — 사용자마다 부르는 것이 아니라 한 요청이 지나치게
     커지지 않게 자르는 것입니다. `tests/test_scorecard_publish.py` 가 이 성질을 고정합니다.
@@ -1195,6 +1317,9 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         )
     day_iso = _to_date(published_date, "발행일").isoformat()
     season_key = duel_rules.season_key_for_date(day_iso)
+    # (#203) 이번 실행이 담당하는 통화와 그 시장. 아래 모든 단계가 이 두 튜플로 좁혀집니다.
+    requested = normalize_currencies(currencies)
+    markets = markets_for_currencies(requested)
 
     # 2026-08-29 재감사 H-3 — `price_lookup` 을 안 넘긴 실제 배치 실행에서는, 가격 스냅샷
     # (`data/*.json`) 을 하나도 못 읽는 것과 "이 구간에 사람이 최소 인원 미만이다"(정상적인
@@ -1202,24 +1327,35 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
     # 아래 5단계에서 "발행 대상이 없다"로 읽혀 **과거 발행 이력 전체를 영구 삭제**합니다.
     # `report_db.run_daily_snapshot_batch()` 가 같은 상황에서 이미 하는 것처럼, 스냅샷을
     # 아예 못 읽었으면 값을 추측해서 진행하지 않고 여기서 멈춥니다(§0-1).
+    # (#203) "어느 시장"은 **담당 시장** 기준입니다 — 한국 배치는 미국 스냅샷이 있어도 코스피
+    # 스냅샷을 못 읽었으면 멈춥니다(범위 밖 시장의 존재가 이 실행의 안전을 보증하지 않습니다).
     if price_lookup is None:
         available_dates, _notes = resolve_session_dates()
-        if not available_dates:
+        if not any((available_dates or {}).get(market) for market in markets):
             raise ScorecardPublishError(
-                "어느 시장의 거래일도 확인하지 못했습니다 — 가격 스냅샷(data/*.json)이 "
-                "없거나 형식이 바뀌었습니다. 값을 추측해서 발행하지 않고 중단합니다."
+                f"담당 시장({', '.join(markets)}) 어느 쪽의 거래일도 확인하지 못했습니다 — 가격 "
+                "스냅샷(data/*.json)이 없거나 형식이 바뀌었습니다. 값을 추측해서 발행하지 않고 중단합니다."
             )
         if freshness_inputs is None:
             # #201 — 실제 배치 실행(가격 조회도 파일에서)에서만 파일을 읽습니다. 읽기 전용.
-            freshness_inputs = load_freshness_inputs(session_dates=available_dates)
+            # (#203) 담당 시장만 읽습니다.
+            freshness_inputs = load_freshness_inputs(session_dates=available_dates,
+                                                     markets=markets)
     lookup = price_lookup if price_lookup is not None else build_price_lookup()
 
     # ── ⓪-1. 신선도(무변동) 검사 — 결투와 같은 판정, 정책은 §4-b 머리말 (#201) ─────────
-    freshness = evaluate_publish_freshness(freshness_inputs)
+    #    (#203) 🔴 범위 밖 시장의 입력은 **판정하지 않고 버립니다.** 손으로 만든 입력(테스트·
+    #    수동 호출)에 다른 시장이 섞여 있어도, 그 시장의 skip 이 이 통화의 발행을 막으면 안 됩니다.
+    scoped_inputs = {market: inputs for market, inputs in (freshness_inputs or {}).items()
+                     if market in markets}
+    freshness = evaluate_publish_freshness(scoped_inputs)
 
     summary = {
         "published_date": day_iso,
         "season_key": season_key,
+        "requested_currencies": list(requested),
+        "currencies": list(requested),
+        "skipped_currencies": {},
         "dry_run": bool(dry_run),
         "consent_count": 0,
         "skipped": [],
@@ -1261,11 +1397,22 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
             scorecard_publish_db.delete_published_rows_for_nicknames(
                 service_client, list(revoked_nicknames.values()))
 
-    # ── ⓪-2. 신선도 검사가 "건너뜀"이면 여기서 정상 종료 (#201) ──────────────────
+    # ── ⓪-2. 신선도 검사가 "건너뜀"인 시장의 통화는 오늘 발행에서 뺍니다 (#201 → #203) ──
     #    휴장일이거나 수집이 실패했는지 구분되지 않는 날(값이 전부 전일과 동일) · 무변동
     #    종목이 허용치를 넘어 사람이 봐야 하는 날은, 어제 발행분을 그대로 두는 것이 낡은
     #    가격에 오늘 날짜를 붙여 발행하는 것보다 낫습니다. 철회 청소는 위에서 이미 했습니다.
-    if freshness["decision"] == FRESHNESS_SKIP:
+    #    (#203) 판정은 **통화별**입니다 — 이 통화의 담당 시장이 skip 이면 이 통화만 빠지고,
+    #    남는 통화가 하나도 없을 때만 여기서 정상 종료합니다.
+    active = []
+    for currency in requested:
+        verdict = freshness["markets"].get(market_for_currency(currency))
+        if verdict is not None and verdict["decision"] == FRESHNESS_SKIP:
+            summary["skipped_currencies"][currency] = \
+                f"{verdict['market']}: [{verdict['status']}] {verdict['reason']}"
+        else:
+            active.append(currency)
+    summary["currencies"] = list(active)
+    if not active:
         summary["publish_skipped"] = True
         summary["publish_skip_reason"] = " / ".join(freshness["reasons"])
         return summary
@@ -1282,13 +1429,13 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         service_client, consent_user_ids)
     portfolios_by_user = build_portfolios_by_user(holding_rows, lookup)
 
-    # ── 3. 체급 (통화별) ────────────────────────────────────────────────────────
+    # ── 3. 체급 (담당 통화별 — #203) ─────────────────────────────────────────────
     existing_assignments = scorecard_publish_db.fetch_bracket_assignments(
         service_client, season_key)
     brackets_by_user_currency, new_assignments = {}, []
     for user_id in consent_user_ids:
         portfolio = portfolios_by_user.get(user_id) or {}
-        for currency in PUBLISHED_CURRENCIES:
+        for currency in active:
             summary_for_currency = portfolio.get(currency)
             if not summary_for_currency or not (summary_for_currency.get("rows") or []):
                 # 그 통화로는 보유가 없습니다 — 체급을 매길 대상이 아닙니다(배정 기록도
@@ -1317,7 +1464,7 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
 
     # ── 4. 조립 + 순위 ───────────────────────────────────────────────────────────
     built = build_publish_rows(consents, portfolios_by_user, nicknames_by_user,
-                               brackets_by_user_currency)
+                               brackets_by_user_currency, currencies=active)
     summary["skipped"] = built["skipped"]
     summary["group_counts"] = {f"{currency}/{bracket}": len(entries)
                                for (currency, bracket), entries in built["groups"].items()}
@@ -1327,9 +1474,13 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
     summary["published_groups"] = sorted(f"{c}/{b}" for c, b in publishable)
     summary["blocked_groups"] = sorted(f"{c}/{b}" for c, b in blocked)
 
-    #    발행하지 않는 그룹 = 전체 18개 중 오늘 발행되는 것을 뺀 나머지. 인원이 줄어 미달이
-    #    된 그룹뿐 아니라 **참가자가 전부 사라진 그룹**까지 포함해야 과거 행이 안 남습니다.
-    #    ⚡ 발행표가 아직 완전히 비어 있으면(초기 운영 기간) 18번이 전부 헛걸음이라,
+    #    발행하지 않는 그룹 = **담당 통화의** 전체 그룹(통화당 9개) 중 오늘 발행되는 것을 뺀
+    #    나머지. 인원이 줄어 미달이 된 그룹뿐 아니라 **참가자가 전부 사라진 그룹**까지 포함해야
+    #    과거 행이 안 남습니다.
+    #    🔴 (#203) 담당 통화로 좁히는 것이 이 분리의 핵심 정합성 조건입니다. 18개 전부를 훑으면
+    #       한국 배치가 달러 그룹 9개를 "오늘 발행 안 함"으로 보고 과거 행을 전부 지웁니다 —
+    #       달러는 이 실행이 **보지도 않은** 통화인데도(§0-1: 추측으로 지우지 않기).
+    #    ⚡ 발행표가 아직 완전히 비어 있으면(초기 운영 기간) 9번이 전부 헛걸음이라,
     #       질의 하나로 먼저 확인하고 건너뜁니다.
     #
     # 2026-08-29 재감사 H-3 — 위쪽 스냅샷 확인이 "완전히 못 읽음"은 잡아 주지만, "일부만
@@ -1346,13 +1497,13 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
             "지우지 않고 중단합니다(가격 스냅샷을 확인해 주세요)."
         )
 
-    to_prune = [key for key in all_possible_groups() if key not in publishable]
+    to_prune = [key for key in all_possible_groups(active) if key not in publishable]
     if not dry_run and to_prune and scorecard_publish_db.leaderboard_has_any_rows(service_client):
         for currency, bracket_key in to_prune:
             summary["pruned_group_rows_deleted"] += \
                 scorecard_publish_db.delete_published_group(service_client, currency, bracket_key)
 
-    # ── 6. 그날 발행분 통째로 갈아끼우기 ─────────────────────────────────────────
+    # ── 6. 그날 발행분(담당 통화) 통째로 갈아끼우기 ───────────────────────────────
     leaderboard_rows, holdings_rows = [], []
     for key, entries in sorted(publishable.items()):
         leaderboard_rows.extend(leaderboard_payload(key, entries))
@@ -1363,7 +1514,11 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
     if dry_run:
         return summary
 
-    scorecard_publish_db.delete_published_rows_for_date(service_client, day_iso)
+    # 🔴 (#203) 당일 삭제도 담당 통화로 좁힙니다. 한국 배치(07:35)가 먼저 원화를 발행한 날,
+    #    미국 배치(11:35)가 "그날 발행분"을 통화 구분 없이 지우면 아침에 발행된 원화 행이
+    #    사라집니다 — 같은 발행일에 두 통화가 **서로 다른 시각**에 쓰이는 것이 이 분리의 전제입니다.
+    scorecard_publish_db.delete_published_rows_for_date(service_client, day_iso,
+                                                        currencies=active)
     # 2026-08-29 재감사 M-2 — 원래는 순위표를 먼저, 보유종목을 나중에 썼습니다. 두 표는
     # 트랜잭션으로 묶이지 않고(Supabase REST 의 한계) 보유종목은 청크 단위로 여러 번
     # insert 되므로, "순위표 write 완료 ~ 보유종목 write 완료" 사이에는 순위표는 있는데
@@ -1425,9 +1580,15 @@ def format_summary_lines(summary):
        `tests/test_scorecard_publish.py` 가 이 성질을 회귀로 고정합니다.
     """
     data = summary or {}
+    requested = data.get("requested_currencies") or list(PUBLISHED_CURRENCIES)
     lines = [
         f"📅 발행일 {data.get('published_date')} (시즌 {data.get('season_key')})"
         + ("  ⚠️ DRY RUN — 아무것도 쓰지 않았습니다" if data.get("dry_run") else ""),
+        # (#203) 이 실행이 어느 통화를 담당했는지 — 두 워크플로우의 로그가 같은 모양이면
+        # "원화가 안 나왔다"를 미국 배치 로그에서 찾게 됩니다.
+        f"💱 담당 통화: {', '.join(requested)}"
+        + (f" → 오늘 발행: {', '.join(data.get('currencies') or []) or '없음'}"
+           if data.get("skipped_currencies") else ""),
         f"👥 발행 대상 동의 사용자: {data.get('consent_count', 0)}명",
         f"🧱 체급 배정: 새로 {data.get('new_bracket_assignments', 0)}건"
         f" (시즌 중 유지 포함 내역: {data.get('bracket_status_counts') or {}})",
@@ -1462,8 +1623,13 @@ def format_summary_lines(summary):
             "⏭️ 오늘 발행을 건너뛰었습니다(기존 발행 내역 유지) — "
             f"{data.get('publish_skip_reason') or '사유 없음'}")
     else:
+        for currency, reason in sorted((data.get("skipped_currencies") or {}).items()):
+            # (#203) 통화 둘을 한 번에 도는 실행에서 한쪽만 건너뛴 경우 — 건너뛴 통화가 로그에서
+            # "발행 0행"으로 뭉개지지 않게 따로 찍습니다.
+            lines.append(f"⏭️ {currency} 오늘 발행 건너뜀(기존 발행 내역 유지) — {reason}")
         lines.append(
-            f"📤 발행: 순위 {data.get('leaderboard_rows', 0)}행 /"
+            f"📤 발행({', '.join(data.get('currencies') or requested)}):"
+            f" 순위 {data.get('leaderboard_rows', 0)}행 /"
             f" 보유종목 {data.get('holdings_rows', 0)}행")
     return lines
 

@@ -31,6 +31,10 @@
        빌려 쓰는가, `ok`/`failed`/`failed_or_holiday`·`needs_review`/기준선 없음 네 경로가 오너
        정책대로 발행·완전 중단·조용한 건너뜀·검사 생략으로 갈리는가, 결투 기준값 파일을 **쓰지
        않는가**, 기준선이 오늘 스냅샷과 같은 날이면 자기 자신과 비교하지 않는가.
+    ⑪ 💱 **원화·달러 발행 분리**(2026-09-07, #203, §14) — 한 통화만 발행하는 실행이 다른 통화의
+       발행 행을 읽지도 지우지도 쓰지도 않는가(양방향, dry-run 아닌 실제 흐름), 신선도 판정이 담당
+       시장만 보는가, 두 통화 실행에서 한 시장 skip 이 그 통화만 건너뛰는가, 두 워크플로우의 cron
+       이 각자의 근거(원화: 미국을 기다리지 않음 / 달러: 벤치마크 뒤 30분~4시간)를 지키는가.
 
 실행: pytest tests/test_scorecard_publish.py -v
 """
@@ -2050,13 +2054,29 @@ def test_the_runner_script_and_workflow_exist_and_point_at_this_module():
     runner = (REPO_ROOT / "run_scorecard_publish_batch.py").read_text(encoding="utf-8")
     assert "scorecard_publish.run_publish_batch(" in runner
     assert "--dry-run" in runner and "--published-date" in runner
+    assert "--currency" in runner and "currencies=currencies" in runner, \
+        "(#203) 실행 스크립트가 담당 통화를 인자로 받아 배치에 넘겨야 합니다"
 
-    workflow = (REPO_ROOT / ".github" / "workflows"
-                / "scorecard_publish_daily.yml").read_text(encoding="utf-8")
-    assert "python run_scorecard_publish_batch.py" in workflow
-    assert "concurrency:" in workflow and "scorecard-publish-batch" in workflow
-    assert "secrets.SUPABASE_SERVICE_ROLE_KEY" in workflow
-    assert "workflow_dispatch:" in workflow
+    # (#203) 결투처럼 워크플로우는 두 파일 — 스크립트는 하나이고 `--currency` 만 다릅니다.
+    workflows = REPO_ROOT / ".github" / "workflows"
+    for name, currency, group in (
+            ("scorecard_publish_daily.yml", KRW, "group: scorecard-publish-batch\n"),
+            ("scorecard_publish_daily_us.yml", USD, "group: scorecard-publish-batch-usd\n")):
+        workflow = (workflows / name).read_text(encoding="utf-8")
+        assert "python run_scorecard_publish_batch.py" in workflow
+        assert f'ARGS="--currency {currency}"' in workflow, \
+            f"{name}: 담당 통화 인자가 고정돼 있어야 합니다(빠지면 두 통화를 한 번에 발행)"
+        assert "concurrency:" in workflow and group in workflow
+        assert "secrets.SUPABASE_SERVICE_ROLE_KEY" in workflow
+        assert "workflow_dispatch:" in workflow
+        assert "contents: read" in workflow and "contents: write" not in workflow
+    other = {KRW: USD, USD: KRW}
+    for name, currency in (("scorecard_publish_daily.yml", KRW),
+                           ("scorecard_publish_daily_us.yml", USD)):
+        run_lines = [line for line in (workflows / name).read_text(encoding="utf-8").splitlines()
+                     if "--currency" in line and not line.strip().startswith("#")]
+        assert run_lines and all(other[currency] not in line for line in run_lines), \
+            f"{name}: 다른 통화를 함께 넘기면 분리의 의미가 없습니다: {run_lines}"
 
 
 def _workflow_crons(name):
@@ -2075,42 +2095,82 @@ def _cron_kst_minute_of_day(cron_expr):
     return (int(hour) * 60 + int(minute) + 9 * 60) % (24 * 60)
 
 
-def test_publish_cron_runs_after_us_benchmark_with_repo_margin_and_before_watchdog():
+def test_usd_publish_cron_runs_after_us_benchmark_with_repo_margin_and_before_watchdog():
     """
     2026-09-06 (#202) — 발행 배치 cron 을 07:30 → 11:35 KST 로 옮긴 이유를 **파일에서 읽어** 고정합니다.
+    2026-09-07 (#203) — 그 시각은 이제 **달러 트랙**(`scorecard_publish_daily_us.yml`)의 것입니다.
 
       ① 미국 벤치마크 수집(`scrape_report_snapshots.yml`, §4-b 의 미국 지수 원천)보다 **30분 이상** 뒤.
          → 이보다 이르면 미국 쪽 신선도 검사가 "지수 원천이 낡음"으로 매일 생략됩니다(#201 의 상태).
            30분은 이 저장소의 관례(`duel_daily.yml` 머리말)이고, 실측으로는 그보다 훨씬 넉넉해야
-           합니다(워크플로우 머리말 🕘 #202) — 여기서는 관례의 하한만 지킵니다.
+           합니다(워크플로우 머리말 🕘) — 여기서는 관례의 하한만 지킵니다.
       ② 결투 USD 배치(`duel_daily_us.yml`)와 워치독(`watch_schedule_health.yml`)보다 앞.
          → §4-b 가 전제한 "미국 결투 기준선 = D-1" 이 명목 시간표에서 성립하고, 워치독이 "오늘 안 돈 것"을
            그날 저녁에 잡습니다(워치독 쪽 테스트도 같은 순서를 반대 방향에서 고정합니다).
       ③ 정각·정30분이 아닐 것(스케줄러 혼잡 회피 관례) · ④ 매일(요일 필드 `*`) — 철회 청소는 주말에도.
+      ⑤ (#203, 오너: "필요 이상으로 늦추지 말 것") 벤치마크 cron 뒤 **4시간 안** — 장애 기간 이상치
+         (13~16시대)까지 기준으로 삼아 뒤로 밀리는 것을 막는 상한입니다.
     나중에 누가 벤치마크 시각을 늦추거나 이 cron 을 앞당기면 이 테스트가 빨간불로 알려 줍니다.
     """
-    publish = _workflow_crons("scorecard_publish_daily.yml")
+    publish = _workflow_crons("scorecard_publish_daily_us.yml")
     assert len(publish) == 1, f"발행 배치 cron 은 하루 한 번이어야 합니다: {publish}"
     publish_min = _cron_kst_minute_of_day(publish[0])
 
     benchmark_min = max(_cron_kst_minute_of_day(c) for c in _workflow_crons("scrape_report_snapshots.yml"))
     assert publish_min >= benchmark_min + 30, (
-        f"발행 cron {publish[0]!r} = KST {publish_min // 60:02d}:{publish_min % 60:02d} 가 미국 벤치마크 수집"
+        f"달러 발행 cron {publish[0]!r} = KST {publish_min // 60:02d}:{publish_min % 60:02d} 가 미국 벤치마크 수집"
         f"(KST {benchmark_min // 60:02d}:{benchmark_min % 60:02d}) 뒤 30분 여유를 못 지킵니다 — "
         "미국 쪽 신선도 검사가 매일 생략됩니다(#201/#202)."
+    )
+    assert publish_min <= benchmark_min + 4 * 60, (
+        f"달러 발행 cron 이 벤치마크 뒤 4시간을 넘겨 KST {publish_min // 60:02d}:{publish_min % 60:02d} 입니다 — "
+        "정상 범위 실측 최댓값(10:52)+30분 관례면 충분하고, 장애 기간 이상치를 기준으로 늦추지 않습니다(#203)."
     )
 
     for later_name in ("duel_daily_us.yml", "watch_schedule_health.yml"):
         for cron_expr in _workflow_crons(later_name):
             later_min = _cron_kst_minute_of_day(cron_expr)
             assert publish_min < later_min, (
-                f"발행 cron(KST {publish_min // 60:02d}:{publish_min % 60:02d}) 이 {later_name} "
+                f"달러 발행 cron(KST {publish_min // 60:02d}:{publish_min % 60:02d}) 이 {later_name} "
                 f"({cron_expr!r} = KST {later_min // 60:02d}:{later_min % 60:02d}) 보다 뒤입니다 — "
-                "워크플로우 머리말 🕘 #202 의 순서 ③·④ 를 보세요."
+                "워크플로우 머리말 🕘 의 순서 ③·④ 를 보세요."
             )
 
     assert publish_min % 30 != 0, "정각·정30분은 GitHub 스케줄러 혼잡으로 지연·누락되기 쉽습니다(scrape.yml 관례)."
     assert publish[0].split()[4] == "*", "발행 배치는 주말에도 돌아야 합니다(철회 청소 — 머리말 참고)."
+
+
+def test_krw_publish_cron_is_an_early_morning_slot_that_does_not_wait_for_us_data():
+    """
+    2026-09-07 (#203) — 원화 트랙(`scorecard_publish_daily.yml`)은 **미국 데이터를 기다리지 않습니다.**
+    코스피 스냅샷·결투 KR 기준값은 전날 저녁(16:05 수집 → 늦어도 22:30 KST)에 확정되므로, 다음 날
+    이른 아침이면 충분하고 그보다 늦출 이유가 없습니다(오너: "한국 데이터는 기다릴 이유가 없다").
+
+      ① 미국 벤치마크 수집(08:20 KST)보다 **앞** — 뒤라면 #202 처럼 원화가 미국을 기다리는 모양입니다.
+      ② 달러 트랙·결투 USD·워치독보다 앞(순서가 뒤집히면 워치독이 그날 것을 못 봅니다).
+      ③ 정각·정30분이 아닐 것 · ④ 매일 · ⑤ 하루 한 번.
+    """
+    publish = _workflow_crons("scorecard_publish_daily.yml")
+    assert len(publish) == 1, f"원화 발행 cron 은 하루 한 번이어야 합니다: {publish}"
+    publish_min = _cron_kst_minute_of_day(publish[0])
+
+    benchmark_min = min(_cron_kst_minute_of_day(c) for c in _workflow_crons("scrape_report_snapshots.yml"))
+    assert publish_min < benchmark_min, (
+        f"원화 발행 cron {publish[0]!r} = KST {publish_min // 60:02d}:{publish_min % 60:02d} 가 미국 벤치마크"
+        f"(KST {benchmark_min // 60:02d}:{benchmark_min % 60:02d}) 뒤입니다 — 원화는 미국을 기다리지 않습니다(#203)."
+    )
+    for later_name in ("scorecard_publish_daily_us.yml", "duel_daily_us.yml", "watch_schedule_health.yml"):
+        for cron_expr in _workflow_crons(later_name):
+            later_min = _cron_kst_minute_of_day(cron_expr)
+            assert publish_min < later_min, (
+                f"원화 발행 cron(KST {publish_min // 60:02d}:{publish_min % 60:02d}) 이 {later_name} "
+                f"({cron_expr!r} = KST {later_min // 60:02d}:{later_min % 60:02d}) 보다 뒤입니다.")
+    usd = _cron_kst_minute_of_day(_workflow_crons("scorecard_publish_daily_us.yml")[0])
+    assert publish[0] != _workflow_crons("scorecard_publish_daily_us.yml")[0] and publish_min != usd, \
+        "두 트랙이 같은 분에 발동하면 분리한 의미가 없습니다"
+
+    assert publish_min % 30 != 0, "정각·정30분은 GitHub 스케줄러 혼잡으로 지연·누락되기 쉽습니다(scrape.yml 관례)."
+    assert publish[0].split()[4] == "*", "원화 발행 배치도 주말에 돌아야 합니다(철회 청소)."
 
 
 # =============================================================================
@@ -2246,11 +2306,13 @@ def test_freshness_holiday_or_review_skips_today_but_keeps_history(kwargs, expec
     """
     휴장일(전부 무변동)이거나 사람이 봐야 하는 날은 **예외 없이** 오늘 발행만 건너뜁니다 —
     어제 순위가 하루 더 유지되면 충분합니다(오너 정책). 그날 발행분 삭제·미달 그룹 정리·삽입은
-    하나도 나가지 않아야 합니다.
+    하나도 나가지 않아야 합니다. (#203) 실제 운영 모양대로 **원화 트랙**(`currencies=[KRW]`)으로
+    돌립니다 — 두 통화를 한 번에 도는 실행에서는 코스피 skip 이 원화만 건너뛰게 합니다(§14).
     """
     client = _publish_client(user_count=3, leaderboard_probe=[{"published_date": YESTERDAY}])
-    summary = _run(client, freshness_inputs=_kr_inputs(**kwargs))
+    summary = _run(client, freshness_inputs=_kr_inputs(**kwargs), currencies=[KRW])
     assert summary["publish_skipped"] is True
+    assert summary["skipped_currencies"] == {KRW: summary["publish_skip_reason"]}
     assert expected_status in summary["publish_skip_reason"]
     assert summary["freshness"]["decision"] == scorecard_publish.FRESHNESS_SKIP
     assert summary["freshness"]["markets"][KR]["status"] == expected_status
@@ -2270,7 +2332,8 @@ def test_freshness_skip_still_purges_revoked_users():
         user_count=0,
         revoked=[{"user_id": "user-x", "revoked_at": "2026-08-01T00:00:00+09:00"}],
         nicknames=[{"user_id": "user-x", "nickname": "철회닉"}])
-    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50))
+    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50),
+                   currencies=[KRW])
     assert summary["publish_skipped"] is True
     assert summary["revoked_users"] == 1
     nickname_deletes = [call for call in client.calls_for(op="delete")
@@ -2280,27 +2343,42 @@ def test_freshness_skip_still_purges_revoked_users():
     assert client.calls_for(op="insert") == []
 
 
-def test_one_skipping_market_skips_the_whole_day_never_half_a_publication():
-    """
-    한 통화만 발행하면 5단계가 다른 통화의 모든 그룹을 "발행 대상 아님"으로 보고 **과거 행을
-    지웁니다**. 그래서 시장 하나라도 skip 이면 그날 발행 전체를 건너뜁니다.
-    """
-    inputs = _kr_inputs()                                  # KR 은 ok
+def _us_inputs(*, frozen=True):
+    """미국 한 시장의 검사 입력. `frozen=True` 면 지수·종목 전부 전일과 동일(→ failed_or_holiday)."""
     us_stocks = _stocks(100.0)
-    inputs[US] = {"session_date": TODAY.isoformat(),
-                  "today_probe": _probe(TODAY.isoformat(),
-                                        {"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0},
-                                        us_stocks),
-                  "previous_probe": _probe(YESTERDAY,
-                                           {"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0},
-                                           us_stocks),
-                  "baseline_source": scorecard_publish.BASELINE_SOURCE_DUEL}
-    client = _publish_client(user_count=3)
+    today_stocks = us_stocks if frozen else {code: price + 1.0 for code, price in us_stocks.items()}
+    today_index = ({"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0} if frozen
+                   else {"SP500_PROXY_SPY": 503.0, "NASDAQ_PROXY_ONEQ": 71.0})
+    return {US: {"session_date": TODAY.isoformat(),
+                 "today_probe": _probe(TODAY.isoformat(), today_index, today_stocks),
+                 "previous_probe": _probe(YESTERDAY,
+                                          {"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0},
+                                          us_stocks),
+                 "baseline_source": scorecard_publish.BASELINE_SOURCE_DUEL}}
+
+
+def test_one_skipping_market_skips_only_its_own_currency_and_publishes_the_other():
+    """
+    (#201 → #203 정책 변경) 예전엔 "시장 하나라도 skip 이면 그날 발행 전체 건너뜀"이었습니다 — 5단계가
+    18개 그룹을 전부 청소 대상으로 삼아 한 통화만 발행하면 다른 통화의 과거 행이 지워졌기 때문입니다.
+    #203 부터 5·6단계가 발행하는 통화로 좁혀졌으므로, **그 시장을 담당하는 통화만** 건너뛰고 나머지는
+    평소대로 발행합니다. 두 통화를 한 번에 도는 실행(인자 생략)에서의 동작입니다.
+    """
+    inputs = {**_kr_inputs(), **_us_inputs(frozen=True)}   # KR ok / US failed_or_holiday
+    client = _publish_client(user_count=3)                  # 원화만 보유한 3명
     summary = _run(client, freshness_inputs=inputs)
-    assert summary["publish_skipped"] is True
+    assert summary["publish_skipped"] is False, "원화는 발행돼야 합니다"
+    assert summary["currencies"] == [KRW]
+    assert list(summary["skipped_currencies"]) == [USD]
+    assert duel_rules.CRAWL_FAILED_OR_HOLIDAY in summary["skipped_currencies"][USD]
     assert summary["freshness"]["markets"][KR]["decision"] == scorecard_publish.FRESHNESS_PROCEED
     assert summary["freshness"]["markets"][US]["decision"] == scorecard_publish.FRESHNESS_SKIP
-    assert client.calls_for(op="insert") == [] and client.calls_for(op="delete") == []
+    assert summary["published_groups"] == ["KRW/krw_5m_10m"] and summary["leaderboard_rows"] == 3
+    # 지우고 쓰는 것은 전부 원화 행뿐 — 달러 행은 하나도 건드리지 않습니다.
+    assert client.calls_for(op="insert") and client.calls_for(op="delete")
+    assert _touched_currencies(client) == {KRW}
+    text = "\n".join(scorecard_publish.format_summary_lines(summary))
+    assert "USD 오늘 발행 건너뜀" in text and "📤 발행(KRW)" in text
 
 
 def test_abort_wins_over_skip_across_markets():
@@ -2396,7 +2474,7 @@ def _snapshot_json(path, stocks, code_field):
 
 
 def _load_kr_inputs(tmp_path, *, session_date, today_stocks, history=None, duel_probe=None,
-                    kospi_closes=None, corrupt_state=False):
+                    kospi_closes=None, corrupt_state=False, markets=None):
     """
     코스피 한 시장에 대해 `load_freshness_inputs()` 를 임시 파일로 돌립니다. 지수·유니버스
     읽기는 이 모듈이 import 한 이름만 patch 합니다(파일 형식을 여기서 다시 흉내내지 않기).
@@ -2417,7 +2495,7 @@ def _load_kr_inputs(tmp_path, *, session_date, today_stocks, history=None, duel_
             mock.patch.object(scorecard_publish, "load_us_index_closes", return_value={}):
         return scorecard_publish.load_freshness_inputs(
             session_dates={KR: session_date}, data_dir=str(data_dir),
-            state_paths={KR: str(state_path)})
+            state_paths={KR: str(state_path)}, markets=markets)
 
 
 def test_load_inputs_uses_the_duel_baseline_when_it_is_from_another_day(tmp_path):
@@ -2521,9 +2599,10 @@ def test_real_batch_path_loads_inputs_only_when_prices_come_from_files():
                               return_value=loaded) as loader, \
             mock.patch.object(scorecard_publish, "build_price_lookup",
                               return_value=_prices(PRICES)):
-        summary = scorecard_publish.run_publish_batch(client, TODAY)
+        summary = scorecard_publish.run_publish_batch(client, TODAY, currencies=[KRW])
     assert loader.call_count == 1
     assert loader.call_args.kwargs["session_dates"] == {KR: TODAY.isoformat()}
+    assert loader.call_args.kwargs["markets"] == (KR,)
     assert summary["publish_skipped"] is True
 
 
@@ -2556,9 +2635,11 @@ def test_kr_probe_index_keys_match_the_duel_runner():
 
 def test_summary_lines_show_the_freshness_verdict_and_the_skip():
     client = _publish_client(user_count=3)
-    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50))
+    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50),
+                   currencies=[KRW])
     text = "\n".join(scorecard_publish.format_summary_lines(summary))
     assert "신선도" in text and duel_rules.CRAWL_FAILED_OR_HOLIDAY in text
+    assert "💱 담당 통화: KRW" in text
     assert "건너뛰었습니다" in text
     assert "📤 발행" not in text, "건너뛴 날에 '발행 0행'이라고 찍으면 발행한 것처럼 읽힙니다"
 
@@ -2575,3 +2656,274 @@ def test_summary_lines_show_the_freshness_verdict_and_the_skip():
 def test_runner_warns_visibly_when_the_day_is_skipped():
     runner = (REPO_ROOT / "run_scorecard_publish_batch.py").read_text(encoding="utf-8")
     assert "publish_skipped" in runner and "::warning" in runner
+    assert "skipped_currencies" in runner, "(#203) 한 통화만 건너뛴 날도 실행 요약에 드러나야 합니다"
+
+
+# =============================================================================
+# 14. 💱 원화·달러 발행 분리 — 🔴 통화 간 침범 금지 (2026-09-07, #203)
+# =============================================================================
+#  #202 가 미국 신선도 검사를 살리려고 cron 을 11:35 로 늦추자, 한 배치가 두 통화를 같이 발행하는
+#  구조 때문에 전날 저녁에 확정된 원화 성적표까지 네 시간 늦어졌습니다. 오너 결정으로 결투처럼
+#  워크플로우를 둘로 나누고(`scorecard_publish_daily.yml` 07:35 / `..._us.yml` 11:35),
+#  `run_publish_batch(currencies=...)` 가 담당 통화를 받습니다.
+#
+#  🔴 이 절이 지키는 것: **한 통화만 발행하는 실행이 다른 통화의 발행 행을 읽지도 지우지도 쓰지도
+#     않는다.** 예전 5단계(`all_possible_groups()` 18개 전부 가지치기)와 6단계(그날 발행분을 통화
+#     구분 없이 삭제)를 그대로 두고 통화만 좁혀 실행하면, 한국 배치가 "오늘 나는 달러 그룹을 발행하지
+#     않았다"고 오판해 달러 그룹의 과거 행을 전부 지우고, 미국 배치가 그날 아침 발행된 원화 행을
+#     지웁니다(§0-1 — 값을 추측해서 지우지 않음 — 정면 위반). 아래는 그 사고를 **양방향**으로,
+#     dry-run 이 아닌 실제 흐름(가짜 클라이언트에 과거 발행 행이 있는 상태)으로 고정합니다.
+def _touched_currencies(client):
+    """
+    발행표 두 개에 나간 **쓰기·삭제 질의가 건드린 통화**의 집합. 삭제는 필터(`eq`/`in` currency)로,
+    삽입은 payload 행의 `currency` 로 봅니다. 통화 필터가 **없는** 삭제(= 모든 통화)는 `"*"` 로
+    표시해 "좁히지 않았다"가 조용히 통과하지 않게 합니다.
+    """
+    touched = set()
+    for call in client.calls:
+        if call.table not in (scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE,
+                              scorecard_publish_db.PUBLIC_HOLDINGS_TABLE):
+            continue
+        if call.op == "insert":
+            touched.update(row["currency"] for row in call.rows)
+        elif call.op == "delete":
+            if "nickname" in call.filter_map and "published_date" not in call.filter_map:
+                continue                     # 철회 청소 — 일부러 통화를 가리지 않습니다(§0 단계)
+            found = None
+            for op, column, value in call.filters:
+                if column == "currency":
+                    found = set(value) if op == "in" else {value}
+            touched.update(found if found is not None else {"*"})
+    return touched
+
+
+def _history_everywhere(nickname="닉네임00000"):
+    """모든 (통화 × 체급) 그룹에 과거 발행 행이 있다고 답하는 순위표 select 응답."""
+    def leaderboard_select(query):
+        if "bracket_key" in query.filter_map:
+            return [{"published_date": YESTERDAY, "nickname": nickname}]
+        return [{"id": 1}]
+    return leaderboard_select
+
+
+def _isolated_client(user_count=3, *, currency=KRW):
+    """`_publish_client()` + 모든 그룹에 과거 발행 이력이 있는 상태(가지치기가 실제로 삭제를 보내게)."""
+    client = _publish_client(user_count=user_count, currency=currency)
+    client.responses[(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "select")] = _history_everywhere()
+    return client
+
+
+@pytest.mark.parametrize("mine, other", [(KRW, USD), (USD, KRW)])
+def test_single_currency_batch_never_touches_the_other_currencys_rows(mine, other):
+    """
+    🔴 핵심 회귀 — 담당 통화만 발행하는 실제 흐름(dry-run 아님)에서, 다른 통화의 행에는 삭제도 삽입도
+    한 건도 나가지 않아야 합니다. 모집단은 **담당 통화만 보유**한 사용자들이라 다른 통화 그룹은 전부
+    "오늘 참가자 없음"입니다 — 예전 코드라면 그 9개 그룹의 과거 행을 전부 지웠을 상황입니다.
+    """
+    client = _isolated_client(user_count=3, currency=mine)
+    summary = _run(client, currencies=[mine])
+    assert summary["currencies"] == [mine] and summary["requested_currencies"] == [mine]
+    assert summary["leaderboard_rows"] == 3
+    assert {g.split("/")[0] for g in summary["published_groups"]} == {mine}
+
+    assert _touched_currencies(client) == {mine}, \
+        f"{mine} 배치가 {other} 행을 건드렸습니다: {_touched_currencies(client)}"
+    # 가지치기 점검(select) 조차 다른 통화 그룹에는 나가지 않습니다 — 읽지도 않습니다.
+    probes = [call for call in client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "select")
+              if "bracket_key" in call.filter_map]
+    assert probes and {call.filter_map["currency"] for call in probes} == {mine}
+    assert len(probes) == len(scorecard_publish.CURRENCY_BRACKET_RULES[mine]["keys"]) - 1
+    # 당일 삭제 2건(두 표)은 통화 필터를 반드시 답니다.
+    date_deletes = [call for call in client.calls_for(op="delete")
+                    if call.filter_map.get("published_date") == TODAY.isoformat()]
+    assert len(date_deletes) == 2
+    assert all(("in", "currency", [mine]) in call.filters for call in date_deletes), date_deletes
+
+
+@pytest.mark.parametrize("mine, other", [(KRW, USD), (USD, KRW)])
+def test_single_currency_batch_with_nobody_in_scope_prunes_only_its_own_groups(mine, other):
+    """
+    담당 통화 보유자가 **한 명도 없는** 날(모집단 전원이 다른 통화만 보유) — 가장 위험한 모양입니다.
+    담당 통화 그룹 9개는 전부 "참가자 없음"으로 정리하되(정상: 그 통화 순위표는 비어야 함), 다른 통화
+    그룹의 과거 행은 절대 지우지 않습니다. 이 사용자들은 발행에서 "빠진 것"이 아니라 이 실행의 참가
+    대상이 아닌 것이므로 `skipped` 사유 목록에도 오르지 않습니다(H-3 브레이크가 오판하지 않게).
+    """
+    client = _isolated_client(user_count=3, currency=other)      # 전원 other 통화만 보유
+    summary = _run(client, currencies=[mine])
+    assert summary["consent_count"] == 3 and summary["leaderboard_rows"] == 0
+    assert summary["skipped"] == [], "범위 밖 통화 보유는 사유 목록에 오르지 않습니다"
+    assert summary["published_groups"] == [] and summary["blocked_groups"] == []
+    group_deletes = [call for call in client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "delete")
+                     if "bracket_key" in call.filter_map]
+    assert {call.filter_map["currency"] for call in group_deletes} == {mine}, \
+        "담당 통화 그룹의 과거 행은 정리돼야 합니다(가짜 클라이언트는 지운 행 수를 돌려주지 않아 질의로 봅니다)"
+    assert len(group_deletes) == len(scorecard_publish.CURRENCY_BRACKET_RULES[mine]["keys"])
+    assert _touched_currencies(client) == {mine}
+    probes = [call for call in client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "select")
+              if "bracket_key" in call.filter_map]
+    assert {call.filter_map["currency"] for call in probes} == {mine}
+    assert len(probes) == len(scorecard_publish.CURRENCY_BRACKET_RULES[mine]["keys"])
+
+
+def test_both_currencies_default_still_sweeps_all_eighteen_groups():
+    """인자를 생략한 실행(예전 동작·수동 백필)은 여전히 18개 그룹을 전부 봅니다 — 하위호환."""
+    client = _isolated_client(user_count=0)
+    summary = _run(client)
+    assert summary["requested_currencies"] == list(scorecard_publish.PUBLISHED_CURRENCIES)
+    probes = [call for call in client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "select")
+              if "bracket_key" in call.filter_map]
+    assert {(c.filter_map["currency"], c.filter_map["bracket_key"]) for c in probes} \
+        == set(scorecard_publish.all_possible_groups())
+    assert _touched_currencies(client) == {KRW, USD}
+
+
+def test_all_possible_groups_narrows_to_the_requested_currency():
+    assert scorecard_publish.all_possible_groups([KRW]) == \
+        [(KRW, key) for key in duel_rules.BRACKET_KEYS]
+    assert scorecard_publish.all_possible_groups([USD]) == \
+        [(USD, key) for key in duel_rules.BRACKET_KEYS_USD]
+    assert scorecard_publish.all_possible_groups(None) == scorecard_publish.all_possible_groups()
+    assert scorecard_publish.all_possible_groups([USD, KRW]) == scorecard_publish.all_possible_groups()
+
+
+def test_unknown_or_empty_currency_scope_is_refused():
+    """모르는 통화·빈 목록으로는 돌지 않습니다 — "아무것도 안 발행하는 실행"을 성공으로 남기지 않기."""
+    with pytest.raises(ScorecardPublishError, match="알 수 없는"):
+        scorecard_publish.normalize_currencies(["EUR"])
+    with pytest.raises(ScorecardPublishError, match="비어"):
+        scorecard_publish.normalize_currencies([])
+    with pytest.raises(ScorecardPublishError):
+        _run(_publish_client(user_count=1), currencies=["JPY"])
+    assert scorecard_publish.normalize_currencies("USD") == (USD,)
+    assert scorecard_publish.normalize_currencies([USD, KRW, USD]) == (KRW, USD)
+    assert scorecard_publish.markets_for_currencies([KRW]) == (KR,)
+    assert scorecard_publish.markets_for_currencies([USD]) == (US,)
+    assert scorecard_publish.market_for_currency(KRW) == KR and scorecard_publish.market_for_currency(USD) == US
+
+
+def test_date_delete_narrows_to_the_given_currencies_and_refuses_an_empty_list():
+    client = FakeClient()
+    scorecard_publish_db.delete_published_rows_for_date(client, TODAY, currencies=[USD])
+    deletes = client.calls_for(op="delete")
+    assert len(deletes) == 2
+    assert all(("in", "currency", [USD]) in call.filters for call in deletes)
+    assert all(call.filter_map["published_date"] == TODAY.isoformat() for call in deletes)
+    # 인자를 생략하면 예전처럼 통화를 가리지 않습니다(두 통화 한 번에 발행하는 실행 · 예전 테스트).
+    legacy = FakeClient()
+    scorecard_publish_db.delete_published_rows_for_date(legacy, TODAY)
+    assert all("currency" not in call.filter_map for call in legacy.calls_for(op="delete"))
+    with pytest.raises(DuelDbError, match="비어"):
+        scorecard_publish_db.delete_published_rows_for_date(FakeClient(), TODAY, currencies=[])
+    with pytest.raises(DuelDbError):
+        scorecard_publish_db.delete_published_rows_for_date(FakeClient(), TODAY, currencies=["EUR"])
+
+
+def test_bracket_assignments_are_only_written_for_the_currency_in_scope():
+    """3단계(체급 배정)도 담당 통화만 — 원화 배치가 달러 체급을 배정하면 책임이 두 곳으로 갈라집니다."""
+    both = [_kr_holding(f"user-{i}", 10, 700_000) for i in range(2)] + \
+           [_us_holding(f"user-{i}", 10, 100) for i in range(2)]
+    client = _publish_client(user_count=2, holdings=both)
+    _run(client, currencies=[USD])
+    inserted = [row for call in client.calls_for(scorecard_publish_db.BRACKET_ASSIGNMENTS_TABLE, "insert")
+                for row in call.rows]
+    assert inserted and {row["currency"] for row in inserted} == {USD}
+    assert _touched_currencies(client) == {USD}
+
+
+# ── 신선도 판정도 담당 시장만 ──────────────────────────────────────────────────
+def test_krw_batch_ignores_a_skipping_us_market_entirely():
+    """
+    🔴 한국 배치를 돌리는데 미국 시장이 skip(값 전부 무변동)이어도 — 그 시장은 이번 실행 범위 밖이라
+    **판정 자체를 하지 않습니다**(요약 `freshness["markets"]` 에 US 키가 없음). 원화는 평소대로 발행.
+    """
+    inputs = {**_kr_inputs(), **_us_inputs(frozen=True)}
+    client = _isolated_client(user_count=3, currency=KRW)
+    summary = _run(client, currencies=[KRW], freshness_inputs=inputs)
+    assert summary["publish_skipped"] is False and summary["skipped_currencies"] == {}
+    assert set(summary["freshness"]["markets"]) == {KR}
+    assert summary["leaderboard_rows"] == 3 and _touched_currencies(client) == {KRW}
+
+
+def test_usd_batch_ignores_a_skipping_kr_market_entirely():
+    inputs = {**_kr_inputs(index_moved=False, unchanged_stocks=50), **_us_inputs(frozen=False)}
+    client = _isolated_client(user_count=3, currency=USD)
+    summary = _run(client, currencies=[USD], freshness_inputs=inputs)
+    assert summary["publish_skipped"] is False and summary["skipped_currencies"] == {}
+    assert set(summary["freshness"]["markets"]) == {US}
+    assert summary["freshness"]["markets"][US]["status"] == duel_rules.CRAWL_OK
+    assert summary["leaderboard_rows"] == 3 and _touched_currencies(client) == {USD}
+
+
+def test_usd_batch_skips_its_own_day_when_the_us_market_is_frozen_and_leaves_krw_alone():
+    """담당 시장이 skip 이면 그 통화만 건너뜀 — 철회 청소는 하고, 삭제·삽입은 0건(원화 행 포함)."""
+    client = _isolated_client(user_count=3, currency=USD)
+    summary = _run(client, currencies=[USD], freshness_inputs=_us_inputs(frozen=True))
+    assert summary["publish_skipped"] is True and summary["currencies"] == []
+    assert list(summary["skipped_currencies"]) == [USD]
+    assert client.calls_for(op="insert") == [] and client.calls_for(op="delete") == []
+    assert client.calls_for(scorecard_db.HOLDINGS_TABLE, "select") == []
+
+
+def test_a_failed_market_out_of_scope_does_not_abort_the_other_currencys_batch():
+    """범위 밖 시장이 `failed`(수집 실패) 모양이어도 이 통화의 배치는 멈추지 않습니다 — 그건 그 통화 배치가 낼 경보입니다."""
+    inputs = {**_kr_inputs(unchanged_stocks=50), **_us_inputs(frozen=False)}   # KR: failed / US: ok
+    client = _isolated_client(user_count=3, currency=USD)
+    summary = _run(client, currencies=[USD], freshness_inputs=inputs)
+    assert summary["publish_skipped"] is False and summary["leaderboard_rows"] == 3
+    with pytest.raises(ScorecardPublishError, match="수집 실패로 판정"):
+        _run(_isolated_client(user_count=3, currency=KRW), currencies=[KRW], freshness_inputs=inputs)
+
+
+def test_real_batch_path_loads_freshness_inputs_only_for_the_markets_in_scope():
+    """실제 실행 경로(`price_lookup` 생략)에서 `load_freshness_inputs()` 에 담당 시장만 넘깁니다."""
+    client = _publish_client(user_count=3, currency=USD)
+    with mock.patch.object(scorecard_publish, "resolve_session_dates",
+                           return_value=({KR: TODAY.isoformat(), US: TODAY.isoformat()}, [])), \
+            mock.patch.object(scorecard_publish, "load_freshness_inputs",
+                              return_value=_us_inputs(frozen=False)) as loader, \
+            mock.patch.object(scorecard_publish, "build_price_lookup",
+                              return_value=_prices(PRICES)):
+        summary = scorecard_publish.run_publish_batch(client, TODAY, currencies=[USD])
+    assert loader.call_args.kwargs["markets"] == (US,)
+    assert summary["leaderboard_rows"] == 3
+
+
+def test_real_batch_path_requires_the_in_scope_markets_session_date():
+    """H-3 의 "거래일 확인"도 담당 시장 기준 — 미국 스냅샷만 있고 코스피가 없으면 한국 배치는 멈춥니다."""
+    client = _publish_client(user_count=3)
+    with mock.patch.object(scorecard_publish, "resolve_session_dates",
+                           return_value=({US: TODAY.isoformat()}, [])):
+        with pytest.raises(ScorecardPublishError, match="담당 시장"):
+            scorecard_publish.run_publish_batch(client, TODAY, currencies=[KRW])
+    assert client.calls == []
+
+
+def test_load_inputs_only_reads_the_requested_markets(tmp_path):
+    inputs = _load_kr_inputs(tmp_path, session_date=TODAY.isoformat(), today_stocks=_stocks(1007.0),
+                             markets=(KR,))
+    assert set(inputs) == {KR}
+    with pytest.raises(ScorecardPublishError, match="알 수 없는 신선도 검사 시장"):
+        scorecard_publish.load_freshness_inputs(session_dates={}, markets=("JP",))
+
+
+def test_load_inputs_replaces_a_duel_baseline_without_an_index_by_the_history_row(tmp_path):
+    """
+    (#203 — #202 조사에서 발견된 빈틈) 결투 USD 배치가 토·일·휴장일 대상으로 남기는 기준값 파일엔
+    지수가 없습니다(`index_keys: []`). 그 파일을 "다른 날짜"라는 이유로 기준선으로 고르면 판정이
+    `no_baseline` 으로 매주 월·화 생략됐습니다. 이제 그런 파일은 쓰지 않고 이력 CSV 직전 행으로
+    대체해 판정이 실제로 이뤄집니다.
+    """
+    today = TODAY.isoformat()
+    weekend_probe = _probe("2026-08-22", {}, _stocks(1000.0))          # 지수 없음(주말 대상 파일)
+    inputs = _load_kr_inputs(
+        tmp_path, session_date=today, today_stocks=_stocks(1007.0),
+        history={"2026-08-21": _stocks(1000.0), today: _stocks(1007.0)},
+        duel_probe=weekend_probe,
+        kospi_closes={"2026-08-21": 3200.0, today: 3210.5})
+    entry = inputs[KR]
+    assert entry["baseline_source"] == scorecard_publish.BASELINE_SOURCE_HISTORY
+    assert entry["previous_probe"]["target_date"] == "2026-08-21"
+    assert any("지수가 없어" in note for note in entry["notes"])
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["markets"][KR]["checked"] is True
+    assert result["markets"][KR]["status"] == duel_rules.CRAWL_OK

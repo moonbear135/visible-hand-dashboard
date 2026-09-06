@@ -903,7 +903,7 @@ def fetch_holdings_for_users(service_client, user_ids):
 
 
 # ── 발행표 쓰기·지우기 ─────────────────────────────────────────────────────────
-def delete_published_rows_for_date(service_client, published_date):
+def delete_published_rows_for_date(service_client, published_date, *, currencies=None):
     """
     (배치 전용) **그날 발행분을 통째로 지웁니다**(두 표 각각 질의 1개).
 
@@ -912,18 +912,35 @@ def delete_published_rows_for_date(service_client, published_date):
     코드는 항상 넣기 쉬운 코드가 아니고, 하나 빠뜨리면 그 행은 계속 공개된 채로 남습니다.
     통째로 지우고 다시 쓰면 "남는" 경우가 구조적으로 없습니다.
 
+    🔴 `currencies` (2026-09-07, #203) — 지우는 범위를 **그 통화의 행**으로 좁힙니다
+       (`in ('KRW')` / `in ('USD')`). 원화·달러 발행이 서로 다른 워크플로우·시각으로 갈라진
+       뒤로는, 미국 배치가 통화 구분 없이 "그날 발행분"을 지우면 그날 아침 한국 배치가 발행한
+       원화 행이 사라집니다. `None` 이면 예전처럼 통화를 가리지 않습니다(두 통화를 한 번에
+       발행하는 실행·예전 테스트 하위호환) — 호출부(`run_publish_batch()`)는 항상 담당 통화를
+       넘깁니다. 모르는 통화는 `_require_currency()` 가 거절합니다.
+
     ⚠️ 지우고 나서 넣기 전에 배치가 죽으면 그날 순위표가 잠깐 비어 있게 됩니다. 그 방향이
        안전한 쪽입니다 — 반대(지워야 할 것이 남아 있는 상태)는 §0-3-8 사고입니다.
     """
     _require_client(service_client, batch=True)
     day = _iso_date(published_date, "발행일")
+    codes = None
+    if currencies is not None:
+        codes = sorted({_require_currency(code) for code in currencies})
+        if not codes:
+            raise DuelDbError(
+                "당일 발행분 삭제의 통화 목록이 비어 있습니다 — 아무 통화도 지우지 않을 거면"
+                " 부르지 마세요(빈 목록을 '전부'로 읽지 않습니다).")
     # 표 이름을 반복문 변수로 감싸지 않고 **한 줄씩 그대로** 씁니다. §0-3-8 검토와 테스트의
     # AST 검사가 "어느 함수가 어느 표에 쓰는가"를 코드에서 바로 읽을 수 있어야 하기
     # 때문입니다(짧게 쓰는 것보다 보이는 게 중요).
-    _execute(service_client.table(PUBLIC_LEADERBOARD_TABLE).delete()
-             .eq("published_date", day), "순위표 당일 발행분 삭제")
-    _execute(service_client.table(PUBLIC_HOLDINGS_TABLE).delete()
-             .eq("published_date", day), "보유종목 당일 발행분 삭제")
+    leaderboard = service_client.table(PUBLIC_LEADERBOARD_TABLE).delete().eq("published_date", day)
+    holdings = service_client.table(PUBLIC_HOLDINGS_TABLE).delete().eq("published_date", day)
+    if codes is not None:
+        leaderboard = leaderboard.in_("currency", codes)
+        holdings = holdings.in_("currency", codes)
+    _execute(leaderboard, "순위표 당일 발행분 삭제")
+    _execute(holdings, "보유종목 당일 발행분 삭제")
     return None
 
 

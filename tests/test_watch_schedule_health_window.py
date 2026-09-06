@@ -543,6 +543,7 @@ ALL_TARGETS = [
     "duel_daily.yml",
     "duel_daily_us.yml",
     "scorecard_publish_daily.yml",
+    "scorecard_publish_daily_us.yml",   # 2026-09-07 #203 추가 — 성적표 발행 달러 트랙(원화와 분리)
     "watch_dividend_disclosures.yml",
     "watch_dividend_payment_events.yml",
     "watch_data_sanity.yml",   # 2026-09-03 추가 — 8/30 신설 때 감시 목록에서 빠져 있던 daily 대상
@@ -553,7 +554,7 @@ DAILY_TARGETS = ALL_TARGETS[5:]
 # ── 주말에 검사 자체를 건너뛰는 대상 (2026-09-05 #200 이후) ────────────────────────────
 # 예전엔 WEEKDAY_ONLY_TARGETS 5개를 주말에 통째로 건너뛰었습니다. 이제는 "평일 전용 cron
 # **이면서** 확인할 데이터 파일이 없는(conclusion 만 보는)" 대상만 건너뜁니다 — duel_daily.yml
-# 하나. 나머지 9개는 토·일에도 검사합니다(§8 참고). 아래 test_weekend_skip_set_is_exactly_...
+# 하나. 나머지 10개(#203 이후)는 토·일에도 검사합니다(§8 참고). 아래 test_weekend_skip_set_is_exactly_...
 # 가 이 목록을 TARGETS 필드 모양에서 다시 계산해 대조합니다(여기 베껴 적은 값이 어긋나면 빨간불).
 WEEKEND_SKIPPED_TARGETS = ["duel_daily.yml"]
 WEEKEND_CHECKED_TARGETS = [f for f in ALL_TARGETS if f not in WEEKEND_SKIPPED_TARGETS]
@@ -580,7 +581,7 @@ US_DATA_TARGETS = [wf for wf, (_p, _k, rule) in DATA_TARGETS.items() if rule == 
 DAILY_DATA_TARGETS = [wf for wf, (_p, _k, rule) in DATA_TARGETS.items() if rule.startswith("daily@")]
 # 일부러 데이터 확인을 붙이지 않은 대상 — 헤더 🔴 #199 문단의 "일부러 넣지 않은 대상"과 동일해야 합니다.
 CONCLUSION_ONLY_TARGETS = ["duel_daily.yml", "duel_daily_us.yml", "scorecard_publish_daily.yml",
-                           "watch_data_sanity.yml"]
+                           "scorecard_publish_daily_us.yml", "watch_data_sanity.yml"]
 KR_CLOSE_MIN = 15 * 60 + 30   # 15:30 KST — 아래 test_market_close_constant_... 가 상수 파일과 대조
 US_READY_MIN = 16 * 60 + 30   # 16:30 ET (마감 16:00 + 30분) — test_us_constants_match_... 가 상수 파일과 대조
 

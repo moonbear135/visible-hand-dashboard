@@ -45,7 +45,7 @@
 | `duel_public_leaderboard`/`_holdings`(window_type 축) | `scorecard_public_leaderboard`/`_holdings`(**currency 축만**) |
 | `utils/duel_db.py` 동의·닉네임·발행 CRUD | `utils/scorecard_publish_db.py`(신규) |
 | `utils/duel_publish.py` 배치 오케스트레이션 | `utils/scorecard_publish.py`(신규) |
-| `run_duel_publish_batch.py` + workflow | `run_scorecard_publish_batch.py` + `.github/workflows/scorecard_publish_daily.yml`(신규, 독립 cron) |
+| `run_duel_publish_batch.py` + workflow | `run_scorecard_publish_batch.py` + `.github/workflows/scorecard_publish_daily.yml`(신규, 독립 cron) — 2026-09-07 #203 부터 원화(`scorecard_publish_daily.yml`, 07:35 KST)·달러(`scorecard_publish_daily_us.yml`, 11:35 KST) 두 워크플로우가 같은 스크립트를 `--currency` 로 나눠 부름 |
 | `web/pages/duel_consent_page.py` | `web/pages/scorecard_consent_page.py`(신규, 계좌 루프 없음) |
 | `web/pages/duel_leaderboard_page.py` | `web/pages/scorecard_leaderboard_page.py`(신규) |
 
@@ -218,7 +218,9 @@ onerror=alert(1)>', ...})`를 호출한 결과와 `holdings_table()`이 만든 �
   `utils/scorecard_publish.py`(858줄)·`utils/scorecard_publish_db.py`(1053줄)·
   `run_scorecard_publish_batch.py`(135줄)·`.github/workflows/scorecard_publish_daily.yml`
   (138줄, cron `30 22 * * *` = 매일 07:30 KST — 2026-09-06 #202 에서 `35 2 * * *` = 매일
-  11:35 KST 로 이동, 근거는 그 파일 머리말)·`tests/test_scorecard_publish.py`(1516줄,
+  11:35 KST 로 이동 → 2026-09-07 #203 에서 **원화·달러 분리**: 원화는 이 파일 `35 22 * * *` =
+  07:35 KST, 달러는 신규 `scorecard_publish_daily_us.yml` `35 2 * * *` = 11:35 KST. 근거는 각 파일
+  머리말, 통화 간 침범 금지 조건은 `utils/scorecard_publish.py` 머리말 ⑦)·`tests/test_scorecard_publish.py`(1516줄,
   132개 전부 통과). AI가 직접 실행해 확인한 것: `resolve_portfolio_return_pct()`가
   `total_cost_priced`를 분모로 쓰는지(20% vs `total_cost`를 썼을 때의 16.67%로 실제
   구별됨), `resolve_bracket_cost_basis()`가 무조건 합계를 쓰는지, `all_possible_groups()`가
