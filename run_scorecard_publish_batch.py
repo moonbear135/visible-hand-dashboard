@@ -119,6 +119,11 @@ def main(argv=None):
 
     for line in scorecard_publish.format_summary_lines(summary):
         print(line)
+    if summary.get("publish_skipped"):
+        # #201 — 건너뛴 날은 잡이 성공(exit 0)이라 로그를 열어 보지 않으면 모릅니다. GitHub
+        # Actions 주석(::warning)으로 실행 요약 화면에 바로 보이게 합니다(watch_data_sanity.yml
+        # 이 같은 방식을 씁니다). 예외로 잡을 실패시키지 않는 것은 오너 정책입니다.
+        print(f"::warning title=성적표 발행 건너뜀::{summary.get('publish_skip_reason')}")
     print("=" * 70)
     return 0
 

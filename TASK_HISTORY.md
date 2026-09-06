@@ -3446,6 +3446,82 @@ conclusion 만 봤음. 오너가 "원래 감시하던 나머지도 전부 같은
 — 금요일이 휴장이면 그 주 토·일 검사는 목요일치를 미갱신으로 볼 수 있음(수집기와 같은 한계, 재실행은 안전한 쪽). (c) 실제
 GitHub 부수효과는 오프라인 검증 밖 — 오너가 다음 토·일에 로그에서 "⏭ duel_daily.yml" 1건 + 나머지 9개 ✅ 를 확인 필요.
 
+### #201 — [#195 후속, 오너 승인] "내 성적표" 발행 배치에 결투와 같은 **신선도(무변동) 검사** 추가 — 얼어붙은 어제 가격으로 순위를 매겨 발행하지 않기 (2026-09-05)
+
+**경위.** #195(코스피 수집기가 "오늘 날짜 라벨 + 어제 내용물" 스냅샷을 남기고 정식 수집을 건너뜀)를 고친 뒤 오너가 "이런 일이
+앞으로도 없었으면 좋겠다"고 요청. 두 소비자의 방어 수준을 비교 감사한 결과:
+- **결투**: `duel_rules.check_crawl_freshness()` + `duel_batch.judge_crawl_freshness()` 의 전일 대비 무변동 검사(지수 + 상위 50종목)가
+  있어 그날 값을 믿지 않고 체결하지 않음. 기준선은 `data/duel_freshness_probe_previous(.json|_usd.json)` 에 매일 커밋.
+- **성적표**: `scorecard_publish.run_publish_batch()` 는 "스냅샷을 **아예** 못 읽음"(H-3)만 막고, "읽히는데 내용이 어제 것 그대로"는
+  못 잡아 **낡은 가격으로 순위를 매겨 조용히 발행**. 오너가 "결투의 무변동 검사를 성적표에도"라고 명시적으로 승인.
+
+**조사 결과 — 원래 지시("결투가 커밋한 기준선 = 어제 값")가 이 배치의 실행 시각에는 성립하지 않음(§0-1, 실측).**
+- 결투 KR 배치는 거래일 D 의 코스피 수집 직후(16:40~17:10 KST)에 돌아 **D 의 값**을 기준선으로 남김. 성적표는 D+1 07:30 KST 에
+  도는데 그때 가격 스냅샷도 여전히 D 값 → 결투 기준선과 오늘 스냅샷이 **같은 거래일의 같은 값**. 그대로 비교하면 매일
+  `failed_or_holiday`("전부 무변동") → **발행이 영원히 건너뛰어짐**(조용한 스킵이라 아무도 모름). 저장소 실데이터(09-04 기준선 vs
+  09-04/09-05 스냅샷)로 직접 확인.
+- 미국: 결투 USD 기준선(target D-1, 12:00 KST 갱신)은 07:30 에 "어제 값"이 맞지만, **미국 벤치마크(`us_index_history.json`)가 08:20
+  KST 에 수집**되어 07:30 엔 지수가 D-1 까지뿐 → 지수는 그대로·종목만 움직임 → 매일 `failed`(규칙 ②) 오판 → 매일 CI 실패.
+- 즉 지시대로 "그대로" 붙이면 KR 은 영구 스킵, US 는 매일 실패. 두 문제 모두 코드가 아니라 **시간표** 때문.
+
+**결정 — 기준선을 고르는 규칙(임의 판단, 오너 확인 항목).**
+1. 결투 기준값 파일은 **`target_date` 가 오늘 스냅샷의 거래일과 다를 때만** 기준선으로 씀(읽기 전용). 같은 날이면 결투가 이미
+   오늘 값을 기준선으로 남긴 뒤라 "어제 값"이 아니므로 자기 자신과 비교하지 않음(`judge_market_freshness()` 안에서도 한 번 더 막음).
+2. 같은 날이면 **수집기가 매일 남기는 이력 CSV(`data/kospi200_stock_history.csv` / `us_stocks_history.csv`)의 직전 날짜 행**으로 어제
+   점검표를 만들어 대체(`_previous_probe_from_history()`). 이력은 스냅샷과 같은 수집기가 같은 실행에서 남기므로 #195 모양이면 오늘 행 =
+   직전 행 → 정확히 잡힘. 점검표는 `duel_batch.build_freshness_probe()` → `select_probe_stocks()` 그대로 재사용(`rank`/`price` 필드
+   이름이 스냅샷과 같음). 저장소 실데이터로 09-04(사고일, 07:04 저장분) vs 09-03 → **`failed`** 판정 확인.
+3. 결투 기준선 날짜가 스냅샷 거래일보다 **뒤**(수집기가 아예 안 돈 날·휴장일)면 값이 그대로라 `failed_or_holiday` → 그날 발행 건너뜀.
+4. 지수 원천(코스피 `market_history.csv`, 미국 `us_index_history.json`)의 최신 날짜가 스냅샷 거래일보다 낡으면 그 지수는 비교에서
+   빼고(결투 H-1 과 같은 이유), 지수가 하나도 안 남으면 검사 생략(규칙이 지수 없이는 판정하지 않음).
+
+**정책 (오너 확정) — 판정 → 행동.**
+
+| 판정 | 행동 | 비고 |
+|---|---|---|
+| `ok` | 평소대로 발행 | — |
+| `failed` | `ScorecardPublishError` — **완전 중단**(CI 실패) | 과거 발행 이력을 지우기 **전**, 철회 청소보다도 먼저(H-3 과 같은 자리). dry-run 도 예외 |
+| `failed_or_holiday` / `needs_review` | **오늘 발행 건너뜀**, 기존 발행 내역 유지, 정상 종료 | 철회 청소(0단계)는 **한다**(가격과 무관한 의무). 시장 하나라도 skip 이면 그날 전체 스킵(한 통화만 발행하면 5단계가 다른 통화의 과거 행을 지움). 실행 스크립트가 `::warning` 주석으로 실행 요약에 드러냄 |
+| `no_baseline` · 기준선 없음/못 읽음 · 지수 없음 · 규칙 함수 예외 | 검사 생략, 평소대로 발행 + 요약에 사유 | 신규 배포 초기·우리 쪽 사정이지 실패의 증거가 아님 |
+
+**구현.**
+- `utils/scorecard_publish.py` §4-b 신설: 상수(`FRESHNESS_PROCEED/SKIP/ABORT/NOT_CHECKED`, `BASELINE_SOURCE_*`, `KR_PROBE_INDEX_KEYS`,
+  `FRESHNESS_MARKETS`), `decision_for_freshness_status()`, **순수** `judge_market_freshness()` / `evaluate_publish_freshness()`,
+  I/O(읽기 전용) `load_freshness_inputs()` / `_previous_probe_from_history()` / `_index_series_for_market()`,
+  `format_freshness_lines()`. `run_publish_batch(..., freshness_inputs=None)` 인자 추가 — `price_lookup` 과 같은 주입 방식. 실제
+  배치(`price_lookup` 생략)에서만 파일을 읽고, 예전 테스트 호출(`price_lookup` 만 주입)은 검사 없이 종전과 동일. 요약 dict 에
+  `freshness` / `publish_skipped` / `publish_skip_reason` 추가, `format_summary_lines()` 가 판정·기준선 날짜·출처·비교 종목 수·생략
+  사유를 찍음(건너뛴 날은 "📤 발행 0행" 대신 "⏭️ 건너뜀").
+- 재사용: `duel_batch.judge_crawl_freshness()`(→ `duel_rules.check_crawl_freshness()`), `build_freshness_probe()`, `select_probe_stocks()`,
+  `load_probe_state()`, `default_state_path()` / `duel_batch_usd.default_state_path_usd()`, `PROBE_INDEX_KEYS_SPEC_USD`. 무변동을 세는
+  코드는 이 모듈에 없음(테스트가 고정). **`save_probe_state` 호출·파일 쓰기 코드 없음**(테스트가 고정) — 기준값 파일 갱신은 결투 배치만.
+- `run_scorecard_publish_batch.py`: 건너뛴 날 `::warning title=성적표 발행 건너뜀::` 출력. 워크플로우 머리말에 #201 문단.
+- 모듈 머리말 ⑥ 항목·"파일 나누기" 표에 근거 기록.
+
+**USD 처리.** 코드는 KR·US 대칭(`FRESHNESS_MARKETS`)으로 붙였고 US 도 `duel_batch_usd` 의 기준선 경로·지수 키를 그대로 재사용.
+다만 **현재 cron(07:30 KST)에서는 미국 검사가 "지수 원천이 낡음"으로 항상 생략**됨(위 조사 결과) — 억지로 지수 없이 판정하지 않음.
+cron 을 08:30 KST(23:30 UTC) 이후로 옮기면 그대로 살아남. 옮길지는 오너 결정(워크플로우 머리말에 적음).
+
+**회귀 테스트 (`tests/test_scorecard_publish.py` §13 신설, +33 → 191).** 판정→행동 표 5건 + 모르는 판정 거부 / 판정이 결투 함수
+호출인지(spy) + 무변동 세는 코드 부재 / (a) ok 발행·허용치 10 / (b) failed 완전 중단·질의 0건·dry-run 도 예외 / (c) 휴장·검토
+대기 조용한 스킵(삭제·삽입·holdings 조회 0건) + 스킵 날도 철회 청소 + 한 시장 skip 이면 전체 스킵 + abort 우선 / (d) 기준선
+없음 검사 생략·입력 없음 = 종전 동작 / 같은 날 기준선 자기 비교 금지 / 규칙 예외·지수 없음·기준선에 지수 없음 → 생략 /
+파일 I/O(임시 디렉터리): 다른 날 결투 기준선 채택·같은 날이면 이력 직전 행으로 대체(#195 모양 → failed)·정상일 ok·기준선 파일
+없음·손상 파일·지수 낡음·50종목 미달 / 실제 경로에서만 로더 호출 / 구조: 기준값 파일 쓰기 없음·지수 키가 결투 스크립트와 일치 /
+요약 줄·러너 `::warning`.
+
+**검증.** `pytest -q tests/test_scorecard_publish.py` **191 passed**. 전체 `pytest -q --ignore=archive` **2,260 passed / 73 skipped**
+(#200 의 2,227 + 신규 33, 회귀 0; 명령 시간 상한 때문에 3묶음 1,303 / 222 / 735+73 으로 나눠 돌린 합계). 저장소 실데이터로
+`load_freshness_inputs()` → KR 은 오늘(토, 09:49 수동 재수집) 스냅샷 거래일 09-05 > 지수 09-04 라 생략, US 는 결투 기준선 09-03
+대비 `ok`(비교 48종목) 확인.
+
+**하지 않은 것 / 오너 확인 필요(§0-1).** (a) 결투 기준값 파일은 한 글자도 안 씀·형식도 안 바꿈. (b) cron 을 옮기지 않음(미국 검사
+활성화는 오너 결정). (c) 이력 CSV 를 기준선으로 쓰는 것은 지시("결투 기준선 재사용")에서 벗어난 임의 판단 — 이유는 위 "조사 결과".
+빼면 #195 모양은 못 잡음(결투가 이미 오늘 값을 기준선으로 남긴 뒤라). (d) 평일 휴장일(추석 09-24·25 등)엔 수집기가 "오늘 라벨 +
+어제 값" 스냅샷을 남길 수 있고, 그때 `market_history.csv` 가 같은 종가를 적으면 `failed_or_holiday`(스킵), 다른 값을 적으면
+`failed`(CI 실패)가 됨 — 결투도 같은 규칙이라 같은 날 같은 판정이 남. 첫 평일 휴장일에 로그 확인 필요. (e) 실제 GitHub 실행은 오프라인
+검증 밖 — 다음 평일 아침 실행 요약에서 "🩺 … KR: 검사함 → ok — 기준선 <어제> (stock_history)" 줄 확인 필요.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

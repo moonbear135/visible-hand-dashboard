@@ -47,6 +47,12 @@
   ⑤ 결투가 필요로 했던 `FX_MIXED`(원화·달러 혼재라 하나로 합칠 수 없음) 판정이 **없습니다.**
      `scorecard_db.build_portfolio()` 가 애초에 통화별 dict 를 돌려주므로, 두 통화가 한
      숫자로 만날 자리 자체가 없습니다. 통화마다 따로 계산하고 따로 발행합니다.
+  ⑥ (2026-09-05, #201) **발행 전 신선도(무변동) 검사**가 결투와 같아졌습니다. 결투 체결
+     배치가 "오늘 종가를 믿어도 되는가"를 전일 대비 무변동으로 판정하듯, 이 배치도 발행
+     직전에 같은 판정(`duel_batch.judge_crawl_freshness()` → `duel_rules.check_crawl_freshness()`)
+     을 빌려 씁니다. 결투가 커밋한 기준값 파일은 **읽기만** 하고, 판정에 따라 완전 중단
+     (`failed`) / 오늘 발행 건너뜀(`failed_or_holiday`·`needs_review`) / 평소대로(`ok`·기준선
+     없음)로 갈립니다 — 자세한 근거와 기준선 선택 규칙은 §4-b 머리말.
 
 -------------------------------------------------------------------------------
 🔴 이 파일이 만드는 행은 **로그인한 모든 사용자가 읽습니다** (§0-3-8)
@@ -68,6 +74,9 @@
 -------------------------------------------------------------------------------
     utils/duel_rules.py           순수 규칙(체급·시즌·닉네임·순위·최소 인원·재동의 차단)
                                   — 이 모듈은 **읽기만** 하고 규칙을 새로 쓰지 않습니다.
+    utils/duel_batch.py           신선도 점검표 만들기·기준값 파일 읽기·무변동 판정(#201)
+    utils/duel_batch_usd.py       — 판정 함수와 기준값 파일 경로를 **빌려 쓰기만** 합니다.
+                                  기준값 파일을 쓰는 코드는 이 모듈에 없습니다(결투 배치 전용).
     utils/scorecard_db.py         "내 성적표" 평가 규칙(매입원가·평가금액·통화 분리)
                                   — 이 모듈은 **읽기만** 하고 한 줄도 고치지 않습니다.
     utils/scorecard_publish_db.py Supabase 접근(이 발행표를 만지는 **유일한** 자리)
@@ -82,9 +91,12 @@
 from __future__ import annotations
 
 import math
+import os
 from datetime import date, datetime
 
-from utils import duel_rules, scorecard_db, scorecard_publish_db
+from utils import (duel_batch, duel_batch_usd, duel_rules, scorecard_db,
+                   scorecard_publish_db, stock_history)
+from utils.duel_batch import DuelBatchError
 from utils.duel_rules import DuelRuleError
 
 # 🔴 현재가 조회 함수는 **"내 성적표" 화면과 완전히 같은 것**을 씁니다. 화면이 보여준
@@ -93,7 +105,8 @@ from utils.duel_rules import DuelRuleError
 #    없으면 전 종목 가격 파일 → 미국은 ETF 목록까지 합침). 함수 하나만 좁게 가져옵니다 —
 #    `report_db` 라는 이름을 이 모듈에 묶어 두면 같은 모듈의 `fetch_all_holdings()`
 #    (**전체 사용자**의 보유종목을 읽는 함수)가 이 파일에서 손에 닿는 거리에 놓입니다.
-from utils.report_db import build_price_lookup, resolve_session_dates
+from utils.report_db import (build_price_lookup, load_kospi_close_history,
+                             load_us_index_closes, resolve_session_dates)
 
 
 class ScorecardPublishError(DuelRuleError):
@@ -725,9 +738,388 @@ def all_possible_groups():
 
 
 # =============================================================================
+# 4-b. 발행 전 신선도(무변동) 검사 — 결투 배치의 검사를 **그대로 빌려** 씁니다 (2026-09-05, #201)
+# =============================================================================
+#  왜 생겼는가 — 2026-09-05 오너 요청("이런 일이 앞으로도 없었으면 좋겠다").
+#    #195 사고: 코스피 수집기가 새벽 07:04 에 한 번 돌아 "오늘 날짜 라벨 + 어제 내용물"인
+#    스냅샷을 남겼고, 정식 16:05 수집은 사전 점검이 "오늘 날짜면 됐다"고 보고 건너뛰었습니다.
+#    결투는 `duel_batch.judge_crawl_freshness()`(→ `duel_rules.check_crawl_freshness()`)의
+#    전일 대비 무변동 검사로 그날 값을 믿지 않고 체결하지 않았지만, 이 발행 배치는 "스냅샷을
+#    **아예** 못 읽음"(위 H-3)만 막고 있었기 때문에 **얼어붙은 어제 가격으로 순위를 매겨
+#    발행**했습니다. 두 소비자의 방어 수준이 달랐고, 오너가 "결투의 무변동 검사를 성적표에도"
+#    라고 명시적으로 승인했습니다.
+#
+#  무엇을 재사용하는가(§0-3-10 — 판정 코드를 이 파일에 다시 짜지 않습니다).
+#    · 판정: `duel_batch.judge_crawl_freshness()` — 안에서 `duel_rules.check_crawl_freshness()`
+#      를 부르고, 상위 50종목 명단이 어제와 조금 다른 경우(순위 교체)를 흡수합니다.
+#    · 오늘 점검표: `duel_batch.build_freshness_probe()` + `select_probe_stocks()`.
+#    · 기준선(어제 값): `duel_batch.load_probe_state()` 로 결투가 커밋해 둔
+#      `data/duel_freshness_probe_previous.json`(KR) / `..._usd.json`(US)을 읽습니다.
+#      🔴 **읽기 전용입니다.** 이 파일들을 새로 쓰거나 덮어쓰는 코드는 이 모듈에 없어야 합니다 —
+#         일별 갱신은 결투 배치(`duel_daily.yml` / `duel_daily_us.yml`)만의 책임입니다.
+#         `tests/test_scorecard_publish.py` 가 `save_probe_state` 를 이 파일이 부르지 않음을
+#         고정합니다.
+#
+#  🔴 기준선을 고르는 규칙 — "결투 기준선 = 어제 값"이 **이 배치의 실행 시각에는 성립하지
+#     않습니다.** 실제 cron 으로 확인한 사실(§0-1):
+#       · 결투 KR 배치는 코스피 수집 직후(16:40~17:10 KST, 거래일 D)에 돌아 **D 의 값**을
+#         기준선으로 남깁니다. 이 발행 배치는 다음 날 07:30 KST 에 도는데, 그때 가격 스냅샷도
+#         여전히 D 의 값입니다. 즉 평일 아침에는 결투 기준선과 오늘 스냅샷이 **같은 거래일의
+#         같은 값**이라, 그대로 비교하면 매일 "전부 무변동"(`failed_or_holiday`)이 나와
+#         **발행이 영원히 건너뛰어집니다.** 2026-09-05 저장소 데이터로 실제 확인했습니다.
+#       · 그래서 결투 기준선은 **그 `target_date` 가 오늘 스냅샷의 거래일과 다를 때만**
+#         씁니다. 같은 날이면 결투가 이미 오늘 값을 기준선으로 남긴 뒤라 "어제 값"이 아니고,
+#         그 경우 **수집기가 매일 남기는 이력 CSV(`data/kospi200_stock_history.csv` /
+#         `us_stocks_history.csv`)의 직전 날짜 행**으로 어제 점검표를 만들어 대신 씁니다
+#         (`_previous_probe_from_history()`). 이 이력은 스냅샷과 **같은 수집기가 같은 실행에서**
+#         남기므로, #195 모양("오늘 라벨 + 어제 내용물")이면 오늘 행과 직전 행이 같은 값이
+#         되어 정확히 잡힙니다. 판정 함수는 어느 쪽 기준선이든 같은 것을 씁니다.
+#       · 결투 기준선의 날짜가 스냅샷 거래일보다 **뒤**인 경우(결투는 D 를 처리했는데 스냅샷은
+#         D-1 에 멈춤 = 수집기가 아예 돌지 않은 날·휴장일)는 값이 그대로라 `failed_or_holiday`
+#         로 잡혀 그날 발행을 건너뜁니다 — 낡은 가격에 새 발행일을 붙이지 않습니다.
+#     ⚠️ 지수 원천(코스피 `market_history.csv`, 미국 `us_index_history.json`)은 결투와 마찬가지로
+#        **다른 파이프라인 산출물**입니다. 지수의 최신 날짜가 스냅샷 거래일보다 낡았으면 그
+#        지수는 비교에서 빼고(결투의 H-1 과 같은 이유 — 지수 파이프라인만 실패한 날을 "수집
+#        실패"로 오판하지 않기), 지수가 하나도 안 남으면 검사를 생략합니다(판정 규칙이 지수
+#        없이는 판정하지 않습니다). 미국 지수는 08:20 KST 에 수집되고 이 배치는 07:30 이라
+#        **현재 시간표에서는 미국 쪽 검사가 항상 이 이유로 생략됩니다** — 코드는 대칭으로
+#        두었고, cron 을 08:30 KST 이후로 옮기면 그대로 살아납니다(오너 결정 사항, #201).
+#
+#  판정 → 행동 표 (오너 확정 정책, 2026-09-05)
+#     판정                  행동                                 근거
+#     ─────────────────────────────────────────────────────────────────────────────
+#     ok                    평소대로 발행                        —
+#     failed                `ScorecardPublishError` — **완전 중단**  명백한 수집 실패. 과거 발행
+#                                                                이력을 지우기 **전에** 멈춤(H-3 과 동일)
+#     failed_or_holiday     오늘 발행 **건너뜀**(예외 없음)        휴장일엔 값이 그대로인 게 맞음 —
+#     needs_review          기존 발행 내역 그대로, 요약에 사유       어제 순위가 하루 더 유지되면 충분
+#     no_baseline / 생략    평소대로 발행 + 요약에 안내             우리 쪽 사정이지 실패의 증거가 아님
+#
+#  ⚠️ 건너뛰는 날에도 **철회 청소(0단계)는 합니다.** 철회한 사람의 공개 기록을 지우는 일은
+#     가격과 무관한 의무이고, 이 모듈에서 "하루도 거르면 안 되는 일"입니다. 건너뛰는 것은
+#     그 뒤의 발행(1~6단계)뿐입니다. 시장 하나라도 skip 이면 그날 발행 전체를 건너뜁니다 —
+#     한 통화만 발행하면 5단계가 다른 통화 그룹을 "발행 대상 아님"으로 보고 **과거 행을
+#     지워 버리기** 때문입니다.
+# =============================================================================
+FRESHNESS_PROCEED = "proceed"          # 평소대로 발행
+FRESHNESS_SKIP = "skip"                # 오늘 발행 건너뜀(조용히 — CI 는 성공)
+FRESHNESS_ABORT = "abort"              # ScorecardPublishError 로 완전 중단
+FRESHNESS_NOT_CHECKED = "not_checked"  # 검사 자체를 못 함(기준선 없음 등) — 발행은 진행
+
+#: 기준선을 어디서 가져왔는가(요약·로그용).
+BASELINE_SOURCE_DUEL = "duel_probe"        # 결투가 커밋한 data/duel_freshness_probe_previous*.json
+BASELINE_SOURCE_HISTORY = "stock_history"  # 수집기 이력 CSV 의 직전 날짜 행
+
+#: 코스피 점검에 실제로 넣는 지수. `run_duel_daily_batch.ACTIVE_PROBE_INDEX_KEYS` 와 같은 값이어야
+#: 합니다(코스닥 지수 원천이 아직 없어 코스피만 — 그 스크립트 머리말 참고). 실행 스크립트를 이
+#: 모듈이 import 하지 않으므로 리터럴을 옮기고 테스트로 일치를 고정합니다(`duel_batch_usd` 가
+#: `report_db.US_BENCHMARK_KEYS` 를 다루는 방식과 같습니다).
+KR_PROBE_INDEX_KEYS = ("KOSPI",)
+
+#: 시장별로 "어느 파일이 오늘 값·기준선·지수인가". 통화 축(`PUBLISHED_CURRENCIES`)과 1:1 입니다.
+FRESHNESS_MARKETS = {
+    scorecard_db.MARKET_KR: {
+        "label": "코스피",
+        "index_keys": KR_PROBE_INDEX_KEYS,
+        "state_path": duel_batch.default_state_path,
+        "history_filename": stock_history.KOSPI_HISTORY_FILENAME,
+        "code_field": "code",
+    },
+    scorecard_db.MARKET_US: {
+        "label": "미국주식",
+        "index_keys": duel_batch_usd.PROBE_INDEX_KEYS_SPEC_USD,
+        "state_path": duel_batch_usd.default_state_path_usd,
+        "history_filename": stock_history.US_HISTORY_FILENAME,
+        "code_field": "symbol",
+    },
+}
+
+
+def decision_for_freshness_status(status):
+    """
+    신선도 판정 문자열 → 이 배치가 **오늘 무엇을 할지**(위 §4-b 머리말의 표를 코드로).
+
+    `duel_rules.crawl_status_allows_fill()` 이 결투에서 하는 역할과 같습니다 — 판정 문자열을
+    호출부마다 비교하지 않고 한 곳에서만 행동으로 바꿉니다(§0-3-10). 모르는 판정은 추측해서
+    진행하지 않고 예외입니다(§0-1).
+    """
+    if status == duel_rules.CRAWL_OK:
+        return FRESHNESS_PROCEED
+    if status == duel_rules.CRAWL_FAILED:
+        return FRESHNESS_ABORT
+    if status in (duel_rules.CRAWL_FAILED_OR_HOLIDAY, duel_rules.CRAWL_NEEDS_REVIEW):
+        return FRESHNESS_SKIP
+    if status in (duel_batch.CRAWL_NO_BASELINE, FRESHNESS_NOT_CHECKED):
+        return FRESHNESS_PROCEED
+    raise ScorecardPublishError(f"알 수 없는 신선도 판정입니다: {status!r}")
+
+
+def judge_market_freshness(market, *, session_date, today_probe, previous_probe,
+                           baseline_source=None, notes=()):
+    """
+    시장 하나의 신선도를 판정합니다. **순수 함수** — 파일도 네트워크도 열지 않고, 오늘
+    점검표와 기준선을 인자로만 받습니다(`price_lookup` 을 인자로 열어 둔 것과 같은 이유:
+    `tests/test_scorecard_publish.py` 가 파일 없이 이 판정을 검증합니다).
+
+    인자
+        session_date   : 오늘 가격 스냅샷의 거래일(ISO). 없으면 그 시장은 검사하지 않습니다.
+        today_probe    : `duel_batch.build_freshness_probe()` 결과(못 만들었으면 None).
+        previous_probe : `duel_batch.load_probe_state()` 결과 또는 이력에서 만든 점검표(없으면 None).
+        baseline_source: 요약용 — `BASELINE_SOURCE_DUEL` / `BASELINE_SOURCE_HISTORY`.
+        notes          : 입력을 준비하며 남긴 안내 문장들(요약에 그대로 실립니다).
+
+    판정 자체는 `duel_batch.judge_crawl_freshness()`(→ `duel_rules.check_crawl_freshness()`)가
+    합니다. 이 함수가 새로 정하는 것은 두 가지뿐입니다:
+      ① **기준선의 날짜가 오늘 스냅샷 거래일과 같으면 비교하지 않습니다** — 결투 배치가 이미
+         오늘 값을 기준선으로 남긴 뒤라 "어제 값"이 아닙니다(§4-b 머리말). 같은 값끼리 비교해
+         "전부 무변동"이라고 하면 사실이 아닌 판정입니다(§0-1).
+      ② 판정 함수가 입력 상태 때문에 예외를 내면(값이 없음 등) 발행을 막지 않고 **검사 생략**
+         으로 처리해 사유만 남깁니다 — 이 검사가 발행 자체를 막는 원인이 되지 않게(오너 정책).
+
+    반환 dict: market / checked / decision / status / reason / session_date / baseline_date /
+               baseline_source / compared_stocks / dropped_stocks / notes
+    """
+    result = {
+        "market": market,
+        "checked": False,
+        "decision": FRESHNESS_PROCEED,
+        "status": FRESHNESS_NOT_CHECKED,
+        "reason": "",
+        "session_date": session_date,
+        "baseline_date": None,
+        "baseline_source": baseline_source,
+        "compared_stocks": 0,
+        "dropped_stocks": 0,
+        "notes": list(notes or ()),
+    }
+    if not session_date:
+        result["reason"] = "가격 스냅샷의 거래일을 확인하지 못해 이 시장은 검사를 생략합니다."
+        return result
+    if not isinstance(today_probe, dict) or not today_probe.get("values"):
+        result["reason"] = "오늘 신선도 점검표가 없어 검사를 생략합니다."
+        return result
+    if not today_probe.get("index_keys"):
+        result["reason"] = "오늘 점검표에 비교할 지수가 없어 검사를 생략합니다(지수 없이는 판정하지 않습니다)."
+        return result
+    if not isinstance(previous_probe, dict) or not previous_probe.get("values"):
+        result["reason"] = "신선도 기준선(어제 값)이 없어 이 검사를 생략합니다 — 최초 실행이거나 기준선 파일을 읽지 못한 경우입니다."
+        return result
+
+    baseline_date = previous_probe.get("target_date")
+    result["baseline_date"] = baseline_date
+    if baseline_date == session_date:
+        result["reason"] = (
+            f"기준선({baseline_source or '?'})의 날짜({baseline_date})가 오늘 스냅샷의 거래일과 같아"
+            " 비교 대상이 아닙니다 — 검사를 생략합니다."
+        )
+        return result
+
+    try:
+        judged = duel_batch.judge_crawl_freshness(today_probe, previous_probe)
+    except (DuelBatchError, DuelRuleError) as exc:
+        # 값이 없거나 형식이 맞지 않아 규칙 함수가 판정을 거부한 경우. 이 검사가 발행을
+        # 막는 원인이 되지 않게 "검사 생략"으로 두고 사유만 남깁니다(오너 정책).
+        result["reason"] = f"신선도 판정을 할 수 없어 검사를 생략합니다: {exc}"
+        return result
+
+    result["status"] = judged["status"]
+    result["compared_stocks"] = judged.get("compared_stocks", 0)
+    result["dropped_stocks"] = judged.get("dropped_stocks", 0)
+    result["reason"] = judged.get("reason") or ""
+    if judged["status"] == duel_batch.CRAWL_NO_BASELINE:
+        # 기준선에 지수가 없거나 공통 종목이 너무 적음 — 우리 쪽 사정이지 실패의 증거가 아닙니다.
+        return result
+    result["checked"] = True
+    result["decision"] = decision_for_freshness_status(judged["status"])
+    return result
+
+
+def evaluate_publish_freshness(freshness_inputs):
+    """
+    시장별 입력(`load_freshness_inputs()` 결과 또는 테스트가 손으로 만든 dict) → 그날 발행에 대한
+    **하나의 결정**. 순수 함수입니다.
+
+    합치는 규칙: 시장 하나라도 `abort` 면 abort, 아니면 하나라도 `skip` 이면 skip, 아니면 proceed.
+    (한 통화만 발행하면 다른 통화 그룹의 과거 행이 지워지므로 — §4-b 머리말 — 발행은 전부 아니면
+    전무입니다.)
+
+    반환 dict: decision / markets({시장: judge_market_freshness() 결과}) / reasons(사람이 읽을 문장들)
+    """
+    markets = {}
+    for market, inputs in (freshness_inputs or {}).items():
+        markets[market] = judge_market_freshness(market, **dict(inputs or {}))
+
+    decision = FRESHNESS_PROCEED
+    if any(item["decision"] == FRESHNESS_ABORT for item in markets.values()):
+        decision = FRESHNESS_ABORT
+    elif any(item["decision"] == FRESHNESS_SKIP for item in markets.values()):
+        decision = FRESHNESS_SKIP
+
+    reasons = []
+    for market in sorted(markets):
+        item = markets[market]
+        if item["decision"] != FRESHNESS_PROCEED or not item["checked"]:
+            reasons.append(f"{market}: [{item['status']}] {item['reason']}")
+    return {"decision": decision, "markets": markets, "reasons": reasons}
+
+
+def _index_series_for_market(market, data_dir=None):
+    """
+    시장별 지수 종가 이력 `{지수키: {날짜: 종가}}`. **읽기 전용.**
+    코스피는 `market_history.csv`(`report_db.load_kospi_close_history()`), 미국은
+    `data/us_index_history.json`(`report_db.load_us_index_closes()`) — 결투 실행 스크립트 두 개가
+    각각 쓰는 원천과 같습니다. 없으면 빈 dict 로 두고, 그 사실은 호출부가 안내 문장으로 남깁니다.
+    """
+    spec = FRESHNESS_MARKETS[market]
+    if market == scorecard_db.MARKET_KR:
+        return {key: dict(load_kospi_close_history() or {}) for key in spec["index_keys"]}
+    indices = load_us_index_closes(data_dir) or {}
+    return {key: dict((indices.get(key) or {}).get("closes") or {}) for key in spec["index_keys"]}
+
+
+def _previous_probe_from_history(market, session_date, *, index_series, data_dir=None):
+    """
+    수집기 이력 CSV 의 **직전 날짜 행**으로 "어제 점검표"를 만듭니다(§4-b 머리말 — 결투 기준선이
+    오늘 스냅샷과 같은 날일 때의 대체 기준선). **읽기 전용.**
+
+    이력 행에는 `rank`(시가총액 순위)와 `price` 가 스냅샷과 **같은 이름**으로 있어
+    (`utils/stock_history.py::KOSPI_HISTORY_FIELDS` / `US_HISTORY_FIELDS`),
+    `duel_batch.build_freshness_probe()` → `select_probe_stocks()` 를 그대로 재사용합니다 —
+    상위 50종목을 고르는 코드를 여기서 다시 짜지 않습니다(§0-3-10).
+
+    지수는 그 직전 날짜의 종가(`index_series[키][날짜]`)를 넣고, 없으면 그 지수를 뺀 채 만듭니다
+    (`allow_empty_index=True`) — 그러면 `judge_crawl_freshness()` 가 "기준값에 지수가 없다"로
+    `no_baseline` 을 돌려 검사가 생략됩니다(없는 값을 지어내지 않습니다, §0-1).
+
+    반환: (점검표 dict 또는 None, 못 만든 이유 문장 또는 None)
+    """
+    spec = FRESHNESS_MARKETS[market]
+    path = (os.path.join(data_dir, spec["history_filename"]) if data_dir
+            else stock_history.stock_history_path(spec["history_filename"]))
+    rows = stock_history.read_history_rows(path) or []
+    dates = sorted({str(row.get(stock_history.DATE_FIELD) or "").strip()[:10] for row in rows})
+    earlier = [day for day in dates if day and day < str(session_date)]
+    if not earlier:
+        return None, f"수집 이력({spec['history_filename']})에 {session_date} 이전 날짜 행이 없습니다."
+    previous_date = earlier[-1]
+
+    code_field = spec["code_field"]
+    universe_like = {}
+    for row in rows:
+        if str(row.get(stock_history.DATE_FIELD) or "").strip()[:10] != previous_date:
+            continue
+        code = str(row.get(code_field) or "").strip()
+        if code:
+            universe_like[code] = {"price": row.get("price"), "rank": row.get("rank")}
+
+    index_closes = {}
+    for key in spec["index_keys"]:
+        close = (index_series.get(key) or {}).get(previous_date)
+        if close is not None:
+            index_closes[key] = close
+
+    probe = duel_batch.build_freshness_probe(previous_date, index_closes, universe_like,
+                                            allow_empty_index=True)
+    return probe, None
+
+
+def load_freshness_inputs(*, session_dates, data_dir=None, state_paths=None):
+    """
+    (배치 전용 I/O) 시장별 신선도 검사 입력을 **읽기 전용**으로 준비합니다 —
+    `evaluate_publish_freshness()` 에 그대로 넘길 `{시장: {...}}` 을 돌려줍니다.
+
+    `data_dir` 는 유니버스 스냅샷·미국 지수·이력 CSV 를 찾는 곳(기본 `data/`),
+    `state_paths` 는 `{시장: 결투 기준값 파일 경로}` 덮어쓰기(기본은 결투 모듈의
+    `default_state_path()` / `default_state_path_usd()`) — 둘 다 **테스트가 임시 디렉터리로
+    갈아끼우기 위한** 인자입니다.
+
+    시장마다:
+      ① 오늘 점검표 — 지수의 **가장 최근 종가**(결투 실행 스크립트와 같은 선택. 최신 날짜가
+         스냅샷 거래일보다 낡은 지수는 뺍니다 — 결투 H-1 과 같은 이유) + 유니버스 스냅샷 상위
+         50종목 → `duel_batch.build_freshness_probe()`.
+      ② 기준선 — 결투 기준값 파일(`duel_batch.load_probe_state()`, 🔴 읽기만). 그 `target_date`
+         가 오늘 스냅샷 거래일과 **다르면** 그것을, 같으면 수집 이력 CSV 의 직전 날짜 행을 씁니다
+         (§4-b 머리말에 이유).
+    어느 단계든 실패하면 예외를 올리지 않고 `notes` 에 사유를 적고 그 시장은 "검사 생략"이
+    됩니다 — 기준선이 없거나 못 읽는 상태가 신규 배포 초기의 정상 상태이기 때문입니다.
+
+    ⚠️ 이 함수는 파일을 **쓰지 않습니다.** 결투 기준값 파일의 갱신은 결투 배치만 합니다.
+    """
+    inputs = {}
+    for market, spec in FRESHNESS_MARKETS.items():
+        session_date = (session_dates or {}).get(market)
+        notes = []
+        entry = {"session_date": session_date, "today_probe": None, "previous_probe": None,
+                 "baseline_source": None, "notes": notes}
+        inputs[market] = entry
+        if not session_date:
+            notes.append(f"{spec['label']} 가격 스냅샷의 거래일을 확인하지 못했습니다.")
+            continue
+
+        # ── ① 오늘 점검표 ─────────────────────────────────────────────────────
+        try:
+            index_series = _index_series_for_market(market, data_dir=data_dir)
+            today_index = {}
+            for key, closes in index_series.items():
+                if not closes:
+                    notes.append(f"지수 {key} 의 종가 원천이 없어 비교에서 뺐습니다.")
+                    continue
+                latest = max(closes)
+                if latest < str(session_date):
+                    notes.append(
+                        f"지수 {key} 원천이 {latest} 까지라 스냅샷 거래일({session_date})보다"
+                        " 낡았습니다 — 그 지수는 비교에서 뺍니다(다른 파이프라인 산출물)."
+                    )
+                    continue
+                today_index[key] = closes[latest]
+            if not today_index:
+                notes.append("비교할 지수가 하나도 남지 않아 이 시장 검사를 생략합니다.")
+                continue
+            universe_index, _meta = scorecard_db.load_universe_index(market, data_dir=data_dir)
+            entry["today_probe"] = duel_batch.build_freshness_probe(
+                session_date, today_index, universe_index)
+        except DuelBatchError as exc:
+            notes.append(f"오늘 신선도 점검표를 만들지 못해 검사를 생략합니다: {exc}")
+            continue
+
+        # ── ② 기준선 — 결투 기준값 파일(읽기만) → 같은 날이면 수집 이력 직전 행 ────
+        state_path = (state_paths or {}).get(market) or spec["state_path"]()
+        duel_probe = None
+        try:
+            duel_probe = duel_batch.load_probe_state(state_path)
+            if duel_probe is None:
+                notes.append(f"결투 신선도 기준선 파일이 없습니다({os.path.basename(state_path)}).")
+        except DuelBatchError as exc:
+            notes.append(f"결투 신선도 기준선 파일을 읽지 못했습니다: {exc}")
+
+        if duel_probe is not None and duel_probe.get("target_date") != str(session_date):
+            entry["previous_probe"] = duel_probe
+            entry["baseline_source"] = BASELINE_SOURCE_DUEL
+            continue
+        if duel_probe is not None:
+            notes.append(
+                f"결투 기준선의 날짜({duel_probe.get('target_date')})가 오늘 스냅샷 거래일과 같습니다"
+                " — 결투 배치가 이미 오늘 값을 기준선으로 남긴 뒤라, 수집 이력의 직전 날짜 행을"
+                " 기준선으로 씁니다."
+            )
+        try:
+            probe, why = _previous_probe_from_history(
+                market, session_date, index_series=index_series, data_dir=data_dir)
+        except DuelBatchError as exc:
+            probe, why = None, str(exc)
+        if probe is not None:
+            entry["previous_probe"] = probe
+            entry["baseline_source"] = BASELINE_SOURCE_HISTORY
+        else:
+            notes.append(f"수집 이력에서도 기준선을 만들지 못해 검사를 생략합니다: {why}")
+    return inputs
+
+
+# =============================================================================
 # 5. 하루치 발행 배치 본체
 # =============================================================================
-def run_publish_batch(service_client, published_date, *, dry_run=False, price_lookup=None):
+def run_publish_batch(service_client, published_date, *, dry_run=False, price_lookup=None,
+                      freshness_inputs=None):
     """
     (배치 전용) 하루치 공개 순위표를 **통째로 다시 발행**합니다.
 
@@ -758,11 +1150,24 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
                             지우지 않습니다, §0-1 — `report_db.run_daily_snapshot_batch()`
                             와 같은 판단). 그 아래 5단계에도 "동의자는 있는데 전원
                             `no_return`" 상황을 한 번 더 잡는 안전장치를 뒀습니다.
+        freshness_inputs : (2026-09-05, #201) 발행 전 **신선도(무변동) 검사**의 입력
+                         `{시장: {session_date, today_probe, previous_probe, ...}}`.
+                         생략하면 — `price_lookup` 도 생략한 실제 배치 실행에서는 —
+                         `load_freshness_inputs()` 가 저장소 파일에서 **읽기 전용**으로
+                         만듭니다(결투 기준값 파일 + 수집 이력 CSV + 지수 원천). 테스트는
+                         `price_lookup` 과 함께 이 dict 를 직접 넣어 파일 없이 판정을
+                         검증하고, 둘 다 생략한 예전 테스트 호출(`price_lookup` 만 주입)은
+                         검사 없이 예전과 똑같이 돕니다. 빈 dict 는 "검사할 시장 없음".
+                         정책(§4-b 머리말): `failed` 는 **완전 중단**, `failed_or_holiday`·
+                         `needs_review` 는 **오늘 발행 건너뜀**(철회 청소만 하고 정상 종료),
+                         기준선이 없으면 검사 생략 후 평소대로.
 
     반환: 요약 dict(로그·작업보고용). `format_summary_lines()` 로 사람이 읽는 줄로 바꿉니다.
 
     ── 하루 한 번, 이 순서로 ────────────────────────────────────────────────────
+      ⓪-1. **신선도 검사**(#201) — 결투와 같은 무변동 검사. `failed` 면 여기서 중단
       0. **철회 청소** — 철회한 사용자의 발행 기록을 모든 날짜에서 삭제
+      ⓪-2. 신선도 검사가 `skip` 이면 **여기서 정상 종료**(아래는 하지 않음)
       1. 발행 대상 고르기 — `final_confirmed=true` 그리고 `revoked_at is null`
       2. 그 사용자들의 "내 성적표" 보유종목을 한 번에 읽어 통화별 포트폴리오로 집계
       3. 체급 — 통화별 매입원가합계 → 시즌 고정 규칙 적용
@@ -799,7 +1204,13 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
                 "어느 시장의 거래일도 확인하지 못했습니다 — 가격 스냅샷(data/*.json)이 "
                 "없거나 형식이 바뀌었습니다. 값을 추측해서 발행하지 않고 중단합니다."
             )
+        if freshness_inputs is None:
+            # #201 — 실제 배치 실행(가격 조회도 파일에서)에서만 파일을 읽습니다. 읽기 전용.
+            freshness_inputs = load_freshness_inputs(session_dates=available_dates)
     lookup = price_lookup if price_lookup is not None else build_price_lookup()
+
+    # ── ⓪-1. 신선도(무변동) 검사 — 결투와 같은 판정, 정책은 §4-b 머리말 (#201) ─────────
+    freshness = evaluate_publish_freshness(freshness_inputs)
 
     summary = {
         "published_date": day_iso,
@@ -817,7 +1228,19 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         "pruned_group_rows_deleted": 0,
         "new_bracket_assignments": 0,
         "bracket_status_counts": {},
+        "freshness": freshness,
+        "publish_skipped": False,
+        "publish_skip_reason": None,
     }
+
+    if freshness["decision"] == FRESHNESS_ABORT:
+        # 명백한 수집 실패(지수·종목 움직임이 앞뒤가 안 맞음). 과거 발행 이력을 지우기 **전에**
+        # 멈춥니다 — H-3 과 같은 원칙(값을 추측해서 저장하거나 지우지 않습니다, §0-1).
+        raise ScorecardPublishError(
+            "발행 전 신선도 검사에서 가격 수집 실패로 판정돼 중단합니다(과거 발행 이력은 "
+            "그대로 둡니다 — 가격 스냅샷과 수집 워크플로우를 확인해 주세요): "
+            + " / ".join(freshness["reasons"])
+        )
 
     # ── 0. 철회 청소 — **다른 무엇보다 먼저** ────────────────────────────────────
     #    발행 대상을 고르는 것보다 먼저 지웁니다. 순서를 뒤집으면, 오늘 발행이 어떤 이유로
@@ -832,6 +1255,15 @@ def run_publish_batch(service_client, published_date, *, dry_run=False, price_lo
         summary["revoked_rows_deleted"] = \
             scorecard_publish_db.delete_published_rows_for_nicknames(
                 service_client, list(revoked_nicknames.values()))
+
+    # ── ⓪-2. 신선도 검사가 "건너뜀"이면 여기서 정상 종료 (#201) ──────────────────
+    #    휴장일이거나 수집이 실패했는지 구분되지 않는 날(값이 전부 전일과 동일) · 무변동
+    #    종목이 허용치를 넘어 사람이 봐야 하는 날은, 어제 발행분을 그대로 두는 것이 낡은
+    #    가격에 오늘 날짜를 붙여 발행하는 것보다 낫습니다. 철회 청소는 위에서 이미 했습니다.
+    if freshness["decision"] == FRESHNESS_SKIP:
+        summary["publish_skipped"] = True
+        summary["publish_skip_reason"] = " / ".join(freshness["reasons"])
+        return summary
 
     # ── 1. 발행 대상 고르기 ──────────────────────────────────────────────────────
     consents = scorecard_publish_db.fetch_publishable_consents(service_client)
@@ -1013,11 +1445,46 @@ def format_summary_lines(summary):
             reasons[row.get("reason")] = reasons.get(row.get("reason"), 0) + 1
         lines.append(f"⚠️ 발행에서 빠진 사용자 {len(skipped)}명 — 사유별: {reasons}")
 
+    if data.get("freshness"):
+        lines.extend(format_freshness_lines(data["freshness"]))
+
     lines.append(
         f"🧹 철회 사용자 {data.get('revoked_users', 0)}명 처리"
         f" (지운 공개 행 {data.get('revoked_rows_deleted', 0)}개),"
         f" 미달 그룹 정리로 지운 행 {data.get('pruned_group_rows_deleted', 0)}개")
-    lines.append(
-        f"📤 발행: 순위 {data.get('leaderboard_rows', 0)}행 /"
-        f" 보유종목 {data.get('holdings_rows', 0)}행")
+    if data.get("publish_skipped"):
+        lines.append(
+            "⏭️ 오늘 발행을 건너뛰었습니다(기존 발행 내역 유지) — "
+            f"{data.get('publish_skip_reason') or '사유 없음'}")
+    else:
+        lines.append(
+            f"📤 발행: 순위 {data.get('leaderboard_rows', 0)}행 /"
+            f" 보유종목 {data.get('holdings_rows', 0)}행")
+    return lines
+
+
+def format_freshness_lines(freshness):
+    """
+    `summary["freshness"]`(= `evaluate_publish_freshness()` 결과) → 사람이 읽는 줄 목록.
+    (#201) 검사한 시장은 판정·기준선 날짜·출처·비교 종목 수를, 생략한 시장은 **왜 생략했는지**를
+    반드시 찍습니다 — "검사했다"와 "검사하지 못했다"가 로그에서 같은 모양이면 안 됩니다(§0-1).
+    사용자 식별자는 이 자료에 애초에 없습니다(지수·종목 코드·가격뿐).
+    """
+    data = freshness or {}
+    markets = data.get("markets") or {}
+    if not markets:
+        return ["🩺 발행 전 신선도 검사: 검사할 시장 입력이 없어 생략했습니다."]
+    lines = [f"🩺 발행 전 신선도(무변동) 검사 — 결정: {data.get('decision')}"]
+    for market in sorted(markets):
+        item = markets[market] or {}
+        if item.get("checked"):
+            lines.append(
+                f"    · {market}: 검사함 → {item.get('status')} ({item.get('decision')})"
+                f" — 기준선 {item.get('baseline_date') or '?'} ({item.get('baseline_source') or '?'}),"
+                f" 비교 종목 {item.get('compared_stocks', 0)}개"
+                f"(명단 교체 {item.get('dropped_stocks', 0)}개) — {item.get('reason')}")
+        else:
+            lines.append(f"    · {market}: 검사 생략 — {item.get('reason')}")
+        for note in item.get("notes") or []:
+            lines.append(f"        ↳ {note}")
     return lines

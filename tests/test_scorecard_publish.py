@@ -27,6 +27,10 @@
     ⑨ 🔴 **종목별 상세지표 5종**(2026-08-23 신설) — 이미 계산된 값을 그대로 옮기는가,
        `consent_holding_details` 없이는 다섯 값이 전부 None 인가(0 이 아니라), 그리고
        스키마 추가분(ALTER)이 두 SQL 파일에 **같은 내용으로** 들어 있는가.
+    ⑩ 🩺 **발행 전 신선도(무변동) 검사**(2026-09-05, #201, §13) — 결투의 판정 함수를 그대로
+       빌려 쓰는가, `ok`/`failed`/`failed_or_holiday`·`needs_review`/기준선 없음 네 경로가 오너
+       정책대로 발행·완전 중단·조용한 건너뜀·검사 생략으로 갈리는가, 결투 기준값 파일을 **쓰지
+       않는가**, 기준선이 오늘 스냅샷과 같은 날이면 자기 자신과 비교하지 않는가.
 
 실행: pytest tests/test_scorecard_publish.py -v
 """
@@ -2053,3 +2057,467 @@ def test_the_runner_script_and_workflow_exist_and_point_at_this_module():
     assert "concurrency:" in workflow and "scorecard-publish-batch" in workflow
     assert "secrets.SUPABASE_SERVICE_ROLE_KEY" in workflow
     assert "workflow_dispatch:" in workflow
+
+
+# =============================================================================
+# 13. 🩺 발행 전 신선도(무변동) 검사 — 결투의 검사를 빌려 쓴다 (2026-09-05, #201)
+# =============================================================================
+#  #195 사고("오늘 날짜 라벨 + 어제 내용물" 스냅샷)가 결투에서는 무변동 검사로 잡혔는데 이 발행
+#  배치는 그대로 발행했습니다. 오너가 "결투에 이미 있는 무변동 검사를 성적표 발행에도"라고
+#  승인했고, 여기서는 그 판정이 **파일도 네트워크도 없이** 주입한 값으로 검증됩니다.
+#  정책(utils/scorecard_publish.py §4-b): ok → 발행 / failed → 예외로 완전 중단 /
+#  failed_or_holiday·needs_review → 조용히 건너뜀(기존 발행 내역 유지) / 기준선 없음 → 검사 생략.
+from utils import duel_batch, duel_batch_usd, stock_history  # noqa: E402
+
+KR = scorecard_db.MARKET_KR
+US = scorecard_db.MARKET_US
+YESTERDAY = "2026-08-22"
+
+
+def _probe(target_date, index_values, stock_values):
+    """결투 기준값 파일과 같은 모양의 점검표(`duel_batch.build_freshness_probe()` 반환형)."""
+    return {"version": duel_batch.PROBE_STATE_VERSION,
+            "generated_at_kst": f"{target_date}T17:00:00+09:00",
+            "target_date": target_date,
+            "index_keys": sorted(index_values),
+            "values": {**index_values, **stock_values}}
+
+
+def _stocks(base=1000.0, count=50):
+    return {f"{i:06d}": base + i for i in range(1, count + 1)}
+
+
+def _kr_inputs(*, index_moved=True, unchanged_stocks=0, previous=..., session_date=None,
+               baseline_source=scorecard_publish.BASELINE_SOURCE_DUEL):
+    """
+    코스피 한 시장의 검사 입력. `unchanged_stocks` 개의 종목은 어제와 같은 값, 나머지는 움직임.
+    `previous=None` 이면 기준선 없음(최초 실행), 생략하면 어제 점검표를 만들어 넣습니다.
+    """
+    session_date = session_date or TODAY.isoformat()
+    yesterday_stocks = _stocks(1000.0)
+    today_stocks = {code: (price if i < unchanged_stocks else price + 7.0)
+                    for i, (code, price) in enumerate(yesterday_stocks.items())}
+    today_index = {"KOSPI": 3210.5 if index_moved else 3200.0}
+    today_probe = _probe(session_date, today_index, today_stocks)
+    if previous is ...:
+        previous = _probe(YESTERDAY, {"KOSPI": 3200.0}, yesterday_stocks)
+    return {KR: {"session_date": session_date, "today_probe": today_probe,
+                 "previous_probe": previous, "baseline_source": baseline_source}}
+
+
+@pytest.mark.parametrize("status, decision", [
+    (duel_rules.CRAWL_OK, scorecard_publish.FRESHNESS_PROCEED),
+    (duel_rules.CRAWL_FAILED, scorecard_publish.FRESHNESS_ABORT),
+    (duel_rules.CRAWL_FAILED_OR_HOLIDAY, scorecard_publish.FRESHNESS_SKIP),
+    (duel_rules.CRAWL_NEEDS_REVIEW, scorecard_publish.FRESHNESS_SKIP),
+    (duel_batch.CRAWL_NO_BASELINE, scorecard_publish.FRESHNESS_PROCEED),
+])
+def test_freshness_status_maps_to_exactly_the_owner_policy(status, decision):
+    """§4-b 판정 → 행동 표를 그대로 고정합니다(오너 확정, 2026-09-05)."""
+    assert scorecard_publish.decision_for_freshness_status(status) == decision
+
+
+def test_unknown_freshness_status_is_refused_not_guessed():
+    with pytest.raises(ScorecardPublishError, match="알 수 없는 신선도 판정"):
+        scorecard_publish.decision_for_freshness_status("maybe_fine")
+
+
+def test_freshness_judgement_is_the_duel_rule_not_a_reimplementation():
+    """
+    판정은 `duel_batch.judge_crawl_freshness()`(→ `duel_rules.check_crawl_freshness()`)가 합니다.
+    이 모듈이 무변동을 세는 코드를 따로 갖고 있으면 언젠가 두 판정이 갈라집니다(§0-3-10).
+    """
+    code = _executable_source("scorecard_publish.py")
+    assert "judge_crawl_freshness" in code
+    assert "unchanged" not in code.lower().replace("unchanged_tolerance", ""), \
+        "무변동을 직접 세는 코드가 있어서는 안 됩니다"
+
+    with mock.patch.object(scorecard_publish.duel_batch, "judge_crawl_freshness",
+                           wraps=duel_batch.judge_crawl_freshness) as spy:
+        result = scorecard_publish.evaluate_publish_freshness(_kr_inputs())
+    assert spy.call_count == 1
+    assert result["markets"][KR]["checked"] is True
+    assert result["markets"][KR]["status"] == duel_rules.CRAWL_OK
+
+
+# ── (a) ok → 평소대로 발행 ──────────────────────────────────────────────────
+def test_freshness_ok_publishes_as_usual():
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=_kr_inputs())
+    assert summary["publish_skipped"] is False
+    assert summary["leaderboard_rows"] == 3
+    assert summary["freshness"]["decision"] == scorecard_publish.FRESHNESS_PROCEED
+    assert summary["freshness"]["markets"][KR]["checked"] is True
+    assert summary["freshness"]["markets"][KR]["baseline_date"] == YESTERDAY
+    assert client.calls_for(scorecard_publish_db.PUBLIC_LEADERBOARD_TABLE, "insert")
+
+
+def test_freshness_tolerates_a_few_unchanged_stocks_like_the_duel_does():
+    """허용치(무변동 10종목) 안이면 정상 — 결투와 같은 임계값을 그대로 씁니다."""
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=_kr_inputs(
+        unchanged_stocks=duel_rules.CRAWL_UNCHANGED_TOLERANCE))
+    assert summary["publish_skipped"] is False and summary["leaderboard_rows"] == 3
+
+
+# ── (b) failed → 예외로 완전 중단, 아무것도 지우지 않음 ───────────────────────
+def test_freshness_failed_aborts_before_touching_anything():
+    """
+    🔴 #195 모양(지수는 움직였는데 상위 종목이 **전부** 전일과 동일)은 명백한 수집 실패입니다.
+    과거 발행 이력을 지우기 **전에** 멈춰야 하고, 철회 청소조차 하기 전입니다(H-3 과 같은 자리).
+    """
+    client = _publish_client(
+        user_count=3,
+        revoked=[{"user_id": "user-x", "revoked_at": "2026-08-01T00:00:00+09:00"}],
+        nicknames=[{"user_id": "user-x", "nickname": "철회닉"}])
+    with pytest.raises(ScorecardPublishError, match="수집 실패로 판정"):
+        _run(client, freshness_inputs=_kr_inputs(unchanged_stocks=50))
+    assert client.calls == [], "중단 전에는 Supabase 에 아무 질의도 보내면 안 됩니다"
+
+
+def test_freshness_failed_aborts_even_in_dry_run():
+    """dry-run 이라도 수집 실패는 시끄럽게 알립니다 — 미리 볼 값 자체가 틀린 값입니다."""
+    client = _publish_client(user_count=3)
+    with pytest.raises(ScorecardPublishError):
+        _run(client, dry_run=True, freshness_inputs=_kr_inputs(unchanged_stocks=50))
+    assert client.calls == []
+
+
+# ── (c) failed_or_holiday / needs_review → 조용히 건너뜀, 기존 발행 내역 유지 ──
+@pytest.mark.parametrize("kwargs, expected_status", [
+    ({"index_moved": False, "unchanged_stocks": 50}, duel_rules.CRAWL_FAILED_OR_HOLIDAY),
+    ({"index_moved": True, "unchanged_stocks": 20}, duel_rules.CRAWL_NEEDS_REVIEW),
+])
+def test_freshness_holiday_or_review_skips_today_but_keeps_history(kwargs, expected_status):
+    """
+    휴장일(전부 무변동)이거나 사람이 봐야 하는 날은 **예외 없이** 오늘 발행만 건너뜁니다 —
+    어제 순위가 하루 더 유지되면 충분합니다(오너 정책). 그날 발행분 삭제·미달 그룹 정리·삽입은
+    하나도 나가지 않아야 합니다.
+    """
+    client = _publish_client(user_count=3, leaderboard_probe=[{"published_date": YESTERDAY}])
+    summary = _run(client, freshness_inputs=_kr_inputs(**kwargs))
+    assert summary["publish_skipped"] is True
+    assert expected_status in summary["publish_skip_reason"]
+    assert summary["freshness"]["decision"] == scorecard_publish.FRESHNESS_SKIP
+    assert summary["freshness"]["markets"][KR]["status"] == expected_status
+    assert summary["leaderboard_rows"] == 0 and summary["holdings_rows"] == 0
+    assert client.calls_for(op="delete") == [], "기존 발행 내역을 건드리면 안 됩니다"
+    assert client.calls_for(op="insert") == []
+    assert client.calls_for(scorecard_db.HOLDINGS_TABLE, "select") == [], \
+        "건너뛰는 날은 실제 자산을 읽을 이유도 없습니다"
+
+
+def test_freshness_skip_still_purges_revoked_users():
+    """
+    ⚠️ 건너뛰는 날에도 **철회 청소는 합니다** — 철회한 사람의 공개 기록을 지우는 일은 가격과
+    무관한 의무이고, 이 모듈에서 하루도 거르면 안 되는 일입니다.
+    """
+    client = _publish_client(
+        user_count=0,
+        revoked=[{"user_id": "user-x", "revoked_at": "2026-08-01T00:00:00+09:00"}],
+        nicknames=[{"user_id": "user-x", "nickname": "철회닉"}])
+    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50))
+    assert summary["publish_skipped"] is True
+    assert summary["revoked_users"] == 1
+    nickname_deletes = [call for call in client.calls_for(op="delete")
+                        if "nickname" in call.filter_map]
+    assert len(nickname_deletes) == 2
+    assert all("published_date" not in call.filter_map for call in nickname_deletes)
+    assert client.calls_for(op="insert") == []
+
+
+def test_one_skipping_market_skips_the_whole_day_never_half_a_publication():
+    """
+    한 통화만 발행하면 5단계가 다른 통화의 모든 그룹을 "발행 대상 아님"으로 보고 **과거 행을
+    지웁니다**. 그래서 시장 하나라도 skip 이면 그날 발행 전체를 건너뜁니다.
+    """
+    inputs = _kr_inputs()                                  # KR 은 ok
+    us_stocks = _stocks(100.0)
+    inputs[US] = {"session_date": TODAY.isoformat(),
+                  "today_probe": _probe(TODAY.isoformat(),
+                                        {"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0},
+                                        us_stocks),
+                  "previous_probe": _probe(YESTERDAY,
+                                           {"SP500_PROXY_SPY": 500.0, "NASDAQ_PROXY_ONEQ": 70.0},
+                                           us_stocks),
+                  "baseline_source": scorecard_publish.BASELINE_SOURCE_DUEL}
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=inputs)
+    assert summary["publish_skipped"] is True
+    assert summary["freshness"]["markets"][KR]["decision"] == scorecard_publish.FRESHNESS_PROCEED
+    assert summary["freshness"]["markets"][US]["decision"] == scorecard_publish.FRESHNESS_SKIP
+    assert client.calls_for(op="insert") == [] and client.calls_for(op="delete") == []
+
+
+def test_abort_wins_over_skip_across_markets():
+    inputs = _kr_inputs(index_moved=False, unchanged_stocks=50)          # KR: skip
+    inputs[US] = {"session_date": TODAY.isoformat(),
+                  "today_probe": _probe(TODAY.isoformat(), {"SP500_PROXY_SPY": 501.0},
+                                        _stocks(100.0)),
+                  "previous_probe": _probe(YESTERDAY, {"SP500_PROXY_SPY": 500.0},
+                                           _stocks(100.0)),                 # US: failed
+                  "baseline_source": scorecard_publish.BASELINE_SOURCE_DUEL}
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["decision"] == scorecard_publish.FRESHNESS_ABORT
+
+
+# ── (d) 기준선이 없으면 검사 생략 → 평소대로 ───────────────────────────────────
+def test_no_baseline_skips_the_check_and_publishes_as_usual():
+    """최초 실행(기준선 파일 없음)이 신규 배포를 막으면 안 됩니다 — 검사만 생략하고 진행."""
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=_kr_inputs(previous=None))
+    assert summary["publish_skipped"] is False and summary["leaderboard_rows"] == 3
+    item = summary["freshness"]["markets"][KR]
+    assert item["checked"] is False
+    assert item["status"] == scorecard_publish.FRESHNESS_NOT_CHECKED
+    assert "기준선" in item["reason"] and "생략" in item["reason"]
+
+
+def test_no_freshness_inputs_at_all_means_no_check_and_the_old_behaviour():
+    """`price_lookup` 만 주입한 예전 호출(이 파일의 다른 모든 테스트)은 검사 없이 예전과 같습니다."""
+    client = _publish_client(user_count=3)
+    summary = _run(client)
+    assert summary["publish_skipped"] is False and summary["leaderboard_rows"] == 3
+    assert summary["freshness"]["decision"] == scorecard_publish.FRESHNESS_PROCEED
+    assert summary["freshness"]["markets"] == {}
+    summary_empty = _run(_publish_client(user_count=3), freshness_inputs={})
+    assert summary_empty["leaderboard_rows"] == 3
+
+
+def test_same_day_baseline_is_not_compared_against_itself():
+    """
+    🔴 결투 KR 배치는 거래일 D 저녁에 D 의 값을 기준선으로 남기고, 이 배치는 D+1 아침에 같은 D
+    값을 스냅샷으로 봅니다. 그대로 비교하면 매일 "전부 무변동"이 나와 **발행이 영원히 건너뛰어
+    집니다**(2026-09-05 저장소 데이터로 실측). 기준선 날짜 == 스냅샷 거래일이면 비교하지 않습니다.
+    """
+    today = TODAY.isoformat()
+    same = _probe(today, {"KOSPI": 3200.0}, _stocks(1000.0))
+    inputs = {KR: {"session_date": today, "today_probe": same, "previous_probe": dict(same),
+                   "baseline_source": scorecard_publish.BASELINE_SOURCE_DUEL}}
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["decision"] == scorecard_publish.FRESHNESS_PROCEED
+    assert result["markets"][KR]["checked"] is False
+    assert "같아" in result["markets"][KR]["reason"]
+
+
+def test_rule_errors_from_the_judge_become_a_skipped_check_not_a_failed_batch():
+    """값이 비었거나 형식이 틀려 규칙 함수가 판정을 거부하면 — 검사 생략 + 사유(발행은 진행)."""
+    inputs = _kr_inputs()
+    inputs[KR]["today_probe"]["values"]["000001"] = None            # 값 없음 → DuelRuleError
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["decision"] == scorecard_publish.FRESHNESS_PROCEED
+    assert result["markets"][KR]["checked"] is False
+    assert "판정을 할 수 없어" in result["markets"][KR]["reason"]
+
+    missing_index = _kr_inputs()
+    missing_index[KR]["today_probe"]["index_keys"] = []
+    result = scorecard_publish.evaluate_publish_freshness(missing_index)
+    assert result["markets"][KR]["checked"] is False
+
+
+def test_baseline_without_our_index_is_no_baseline_not_a_failure():
+    """기준선에 지수가 없으면(형식이 바뀐 경우) `no_baseline` — 우리 쪽 사정이라 발행은 진행."""
+    inputs = _kr_inputs()
+    del inputs[KR]["previous_probe"]["values"]["KOSPI"]
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["markets"][KR]["status"] == duel_batch.CRAWL_NO_BASELINE
+    assert result["markets"][KR]["checked"] is False
+    assert result["decision"] == scorecard_publish.FRESHNESS_PROCEED
+
+
+# ── 입력 준비(파일 I/O) — 임시 디렉터리로 ─────────────────────────────────────
+def _write_history(path, rows_by_date, code_field):
+    lines = [f"date,rank,{code_field},price"]
+    for day, stocks in rows_by_date.items():
+        for rank, (code, price) in enumerate(stocks.items(), start=1):
+            lines.append(f"{day},{rank},{code},{price}")
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+
+
+def _snapshot_json(path, stocks, code_field):
+    import json
+    payload = {"metadata": {}, "stocks": [{code_field: code, "price": price, "rank": rank}
+                                          for rank, (code, price) in enumerate(stocks.items(), 1)]}
+    path.write_text(json.dumps(payload), encoding="utf-8")
+
+
+def _load_kr_inputs(tmp_path, *, session_date, today_stocks, history=None, duel_probe=None,
+                    kospi_closes=None, corrupt_state=False):
+    """
+    코스피 한 시장에 대해 `load_freshness_inputs()` 를 임시 파일로 돌립니다. 지수·유니버스
+    읽기는 이 모듈이 import 한 이름만 patch 합니다(파일 형식을 여기서 다시 흉내내지 않기).
+    """
+    import json
+    data_dir = tmp_path / "data"
+    data_dir.mkdir(exist_ok=True)
+    _snapshot_json(data_dir / scorecard_db.SNAPSHOT_FILENAMES[KR], today_stocks, "code")
+    if history:
+        _write_history(data_dir / stock_history.KOSPI_HISTORY_FILENAME, history, "code")
+    state_path = tmp_path / "duel_freshness_probe_previous.json"
+    if corrupt_state:
+        state_path.write_text("{not json", encoding="utf-8")
+    elif duel_probe is not None:
+        state_path.write_text(json.dumps(duel_probe), encoding="utf-8")
+    closes = kospi_closes if kospi_closes is not None else {YESTERDAY: 3200.0, session_date: 3210.5}
+    with mock.patch.object(scorecard_publish, "load_kospi_close_history", return_value=closes), \
+            mock.patch.object(scorecard_publish, "load_us_index_closes", return_value={}):
+        return scorecard_publish.load_freshness_inputs(
+            session_dates={KR: session_date}, data_dir=str(data_dir),
+            state_paths={KR: str(state_path)})
+
+
+def test_load_inputs_uses_the_duel_baseline_when_it_is_from_another_day(tmp_path):
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(tmp_path, session_date=today, today_stocks=_stocks(1007.0),
+                             duel_probe=_probe(YESTERDAY, {"KOSPI": 3200.0}, _stocks(1000.0)))
+    entry = inputs[KR]
+    assert entry["baseline_source"] == scorecard_publish.BASELINE_SOURCE_DUEL
+    assert entry["previous_probe"]["target_date"] == YESTERDAY
+    assert entry["today_probe"]["target_date"] == today
+    assert entry["today_probe"]["values"]["KOSPI"] == 3210.5
+    assert scorecard_publish.evaluate_publish_freshness(inputs)["markets"][KR]["status"] \
+        == duel_rules.CRAWL_OK
+    assert inputs[US]["today_probe"] is None and inputs[US]["previous_probe"] is None
+
+
+def test_load_inputs_falls_back_to_the_history_row_when_the_duel_baseline_is_same_day(tmp_path):
+    """
+    🔴 평일 아침의 실제 상황: 결투 기준선 = 오늘 스냅샷과 같은 날. 수집 이력 CSV 의 직전 날짜 행이
+    기준선이 되고, #195 모양(오늘 라벨 + 어제 값)이면 `failed` 로 잡힙니다.
+    """
+    today = TODAY.isoformat()
+    frozen = _stocks(1000.0)                                   # 오늘 스냅샷 = 어제 값 그대로
+    inputs = _load_kr_inputs(
+        tmp_path, session_date=today, today_stocks=frozen,
+        history={YESTERDAY: _stocks(1000.0), today: frozen},
+        duel_probe=_probe(today, {"KOSPI": 3210.5}, frozen))   # 결투가 이미 오늘 값을 남김
+    entry = inputs[KR]
+    assert entry["baseline_source"] == scorecard_publish.BASELINE_SOURCE_HISTORY
+    assert entry["previous_probe"]["target_date"] == YESTERDAY
+    assert entry["previous_probe"]["values"]["KOSPI"] == 3200.0
+    assert any("같습니다" in note for note in entry["notes"])
+    result = scorecard_publish.evaluate_publish_freshness(inputs)
+    assert result["markets"][KR]["status"] == duel_rules.CRAWL_FAILED
+    assert result["decision"] == scorecard_publish.FRESHNESS_ABORT
+
+
+def test_load_inputs_history_fallback_says_ok_on_a_normal_day(tmp_path):
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(
+        tmp_path, session_date=today, today_stocks=_stocks(1007.0),
+        history={YESTERDAY: _stocks(1000.0), today: _stocks(1007.0)},
+        duel_probe=_probe(today, {"KOSPI": 3210.5}, _stocks(1007.0)))
+    assert scorecard_publish.evaluate_publish_freshness(inputs)["markets"][KR]["status"] \
+        == duel_rules.CRAWL_OK
+
+
+def test_load_inputs_without_any_baseline_file_skips_the_check(tmp_path):
+    """(d) 기준선 파일도 이력도 없는 최초 실행 — 검사 생략, 배치는 평소대로."""
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(tmp_path, session_date=today, today_stocks=_stocks(1007.0))
+    entry = inputs[KR]
+    assert entry["previous_probe"] is None and entry["baseline_source"] is None
+    assert any("기준선 파일이 없습니다" in note for note in entry["notes"])
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=inputs)
+    assert summary["publish_skipped"] is False and summary["leaderboard_rows"] == 3
+    assert summary["freshness"]["markets"][KR]["checked"] is False
+
+
+def test_load_inputs_with_a_corrupt_baseline_file_skips_the_check_instead_of_crashing(tmp_path):
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(tmp_path, session_date=today, today_stocks=_stocks(1007.0),
+                             corrupt_state=True)
+    assert inputs[KR]["previous_probe"] is None
+    assert any("읽지 못했습니다" in note for note in inputs[KR]["notes"])
+    assert scorecard_publish.evaluate_publish_freshness(inputs)["decision"] \
+        == scorecard_publish.FRESHNESS_PROCEED
+
+
+def test_load_inputs_drops_a_lagging_index_and_skips_when_none_is_left(tmp_path):
+    """
+    지수 원천이 스냅샷 거래일보다 낡았으면(다른 파이프라인만 실패) 그 지수를 빼고, 지수가 하나도
+    안 남으면 검사 생략 — 결투 H-1 과 같은 이유(지수 파이프라인 실패를 수집 실패로 오판하지 않기).
+    """
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(tmp_path, session_date=today, today_stocks=_stocks(1007.0),
+                             duel_probe=_probe(YESTERDAY, {"KOSPI": 3200.0}, _stocks(1000.0)),
+                             kospi_closes={YESTERDAY: 3200.0})
+    entry = inputs[KR]
+    assert entry["today_probe"] is None
+    assert any("낡았습니다" in note for note in entry["notes"])
+    assert scorecard_publish.evaluate_publish_freshness(inputs)["markets"][KR]["checked"] is False
+
+
+def test_load_inputs_skips_when_the_universe_cannot_fill_fifty_stocks(tmp_path):
+    today = TODAY.isoformat()
+    inputs = _load_kr_inputs(tmp_path, session_date=today, today_stocks=_stocks(1007.0, count=20),
+                             duel_probe=_probe(YESTERDAY, {"KOSPI": 3200.0}, _stocks(1000.0)))
+    assert inputs[KR]["today_probe"] is None
+    assert any("점검표를 만들지 못해" in note for note in inputs[KR]["notes"])
+
+
+def test_real_batch_path_loads_inputs_only_when_prices_come_from_files():
+    """`price_lookup` 을 생략한 실제 실행에서만 파일을 읽고, 그 결과가 배치에 실제로 쓰입니다."""
+    client = _publish_client(user_count=3)
+    loaded = _kr_inputs(index_moved=False, unchanged_stocks=50)     # → skip
+    with mock.patch.object(scorecard_publish, "resolve_session_dates",
+                           return_value=({KR: TODAY.isoformat()}, [])), \
+            mock.patch.object(scorecard_publish, "load_freshness_inputs",
+                              return_value=loaded) as loader, \
+            mock.patch.object(scorecard_publish, "build_price_lookup",
+                              return_value=_prices(PRICES)):
+        summary = scorecard_publish.run_publish_batch(client, TODAY)
+    assert loader.call_count == 1
+    assert loader.call_args.kwargs["session_dates"] == {KR: TODAY.isoformat()}
+    assert summary["publish_skipped"] is True
+
+
+# ── 구조 검사 — 이 모듈은 결투 기준값 파일을 **읽기만** 합니다 ───────────────────
+def test_publish_module_never_writes_the_duel_baseline_files():
+    """
+    🔴 `data/duel_freshness_probe_previous(.json|_usd.json)` 의 갱신은 결투 배치만의 책임입니다.
+    이 모듈에 `save_probe_state` 호출이나 파일 쓰기 코드가 생기면 두 배치가 같은 기준선을 두고
+    서로 덮어쓰게 됩니다.
+    """
+    code = _executable_source("scorecard_publish.py")
+    assert "save_probe_state" not in code
+    assert "load_probe_state" in code
+    assert "open(" not in code, "이 모듈은 파일을 직접 열지 않습니다(읽기도 재사용 함수로만)"
+    assert ".write(" not in code and "os.replace" not in code and "json.dump" not in code
+
+
+def test_kr_probe_index_keys_match_the_duel_runner():
+    """코스피 점검 지수 목록은 결투 실행 스크립트의 `ACTIVE_PROBE_INDEX_KEYS` 와 같아야 합니다."""
+    import importlib
+    runner = importlib.import_module("run_duel_daily_batch")
+    assert scorecard_publish.KR_PROBE_INDEX_KEYS == runner.ACTIVE_PROBE_INDEX_KEYS
+    assert scorecard_publish.FRESHNESS_MARKETS[US]["index_keys"] \
+        == duel_batch_usd.PROBE_INDEX_KEYS_SPEC_USD
+    assert scorecard_publish.FRESHNESS_MARKETS[KR]["state_path"] is duel_batch.default_state_path
+    assert scorecard_publish.FRESHNESS_MARKETS[US]["state_path"] \
+        is duel_batch_usd.default_state_path_usd
+    assert set(scorecard_publish.FRESHNESS_MARKETS) == {KR, US}
+
+
+def test_summary_lines_show_the_freshness_verdict_and_the_skip():
+    client = _publish_client(user_count=3)
+    summary = _run(client, freshness_inputs=_kr_inputs(index_moved=False, unchanged_stocks=50))
+    text = "\n".join(scorecard_publish.format_summary_lines(summary))
+    assert "신선도" in text and duel_rules.CRAWL_FAILED_OR_HOLIDAY in text
+    assert "건너뛰었습니다" in text
+    assert "📤 발행" not in text, "건너뛴 날에 '발행 0행'이라고 찍으면 발행한 것처럼 읽힙니다"
+
+    ok_text = "\n".join(scorecard_publish.format_summary_lines(
+        _run(_publish_client(user_count=3), freshness_inputs=_kr_inputs())))
+    assert "검사함 → ok" in ok_text and "📤 발행" in ok_text
+    assert "duel_probe" in ok_text and YESTERDAY in ok_text
+
+    skipped_text = "\n".join(scorecard_publish.format_summary_lines(
+        _run(_publish_client(user_count=3), freshness_inputs=_kr_inputs(previous=None))))
+    assert "검사 생략" in skipped_text
+
+
+def test_runner_warns_visibly_when_the_day_is_skipped():
+    runner = (REPO_ROOT / "run_scorecard_publish_batch.py").read_text(encoding="utf-8")
+    assert "publish_skipped" in runner and "::warning" in runner
