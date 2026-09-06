@@ -217,7 +217,8 @@ onerror=alert(1)>', ...})`를 호출한 결과와 `holdings_table()`이 만든 �
 - **Phase A(규칙·DB·배치 계층, 2026-08-23, 오푸스 서브에이전트 + AI 직접 재검증)** —
   `utils/scorecard_publish.py`(858줄)·`utils/scorecard_publish_db.py`(1053줄)·
   `run_scorecard_publish_batch.py`(135줄)·`.github/workflows/scorecard_publish_daily.yml`
-  (138줄, cron `30 22 * * *` = 매일 07:30 KST)·`tests/test_scorecard_publish.py`(1516줄,
+  (138줄, cron `30 22 * * *` = 매일 07:30 KST — 2026-09-06 #202 에서 `35 2 * * *` = 매일
+  11:35 KST 로 이동, 근거는 그 파일 머리말)·`tests/test_scorecard_publish.py`(1516줄,
   132개 전부 통과). AI가 직접 실행해 확인한 것: `resolve_portfolio_return_pct()`가
   `total_cost_priced`를 분모로 쓰는지(20% vs `total_cost`를 썼을 때의 16.67%로 실제
   구별됨), `resolve_bracket_cost_basis()`가 무조건 합계를 쓰는지, `all_possible_groups()`가

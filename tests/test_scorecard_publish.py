@@ -2059,6 +2059,60 @@ def test_the_runner_script_and_workflow_exist_and_point_at_this_module():
     assert "workflow_dispatch:" in workflow
 
 
+def _workflow_crons(name):
+    """`.github/workflows/<name>` 의 `on.schedule` cron 문자열 목록 — 파일에서 읽습니다(베끼지 않음)."""
+    yaml = pytest.importorskip("yaml", reason="PyYAML 없음")
+    doc = yaml.safe_load((REPO_ROOT / ".github" / "workflows" / name).read_text(encoding="utf-8"))
+    trigger = doc.get("on", doc.get(True))     # YAML 1.1 에서 `on:` 이 True 로 읽히는 환경도 있음
+    crons = [entry["cron"] for entry in (trigger.get("schedule") or [])]
+    assert crons, f"{name}: schedule cron 을 찾지 못했습니다."
+    return crons
+
+
+def _cron_kst_minute_of_day(cron_expr):
+    """`분 시 일 월 요일`(UTC) → KST 하루 중 분(0~1439). 한국은 서머타임이 없어 +9h 고정."""
+    minute, hour = cron_expr.split()[0], cron_expr.split()[1]
+    return (int(hour) * 60 + int(minute) + 9 * 60) % (24 * 60)
+
+
+def test_publish_cron_runs_after_us_benchmark_with_repo_margin_and_before_watchdog():
+    """
+    2026-09-06 (#202) — 발행 배치 cron 을 07:30 → 11:35 KST 로 옮긴 이유를 **파일에서 읽어** 고정합니다.
+
+      ① 미국 벤치마크 수집(`scrape_report_snapshots.yml`, §4-b 의 미국 지수 원천)보다 **30분 이상** 뒤.
+         → 이보다 이르면 미국 쪽 신선도 검사가 "지수 원천이 낡음"으로 매일 생략됩니다(#201 의 상태).
+           30분은 이 저장소의 관례(`duel_daily.yml` 머리말)이고, 실측으로는 그보다 훨씬 넉넉해야
+           합니다(워크플로우 머리말 🕘 #202) — 여기서는 관례의 하한만 지킵니다.
+      ② 결투 USD 배치(`duel_daily_us.yml`)와 워치독(`watch_schedule_health.yml`)보다 앞.
+         → §4-b 가 전제한 "미국 결투 기준선 = D-1" 이 명목 시간표에서 성립하고, 워치독이 "오늘 안 돈 것"을
+           그날 저녁에 잡습니다(워치독 쪽 테스트도 같은 순서를 반대 방향에서 고정합니다).
+      ③ 정각·정30분이 아닐 것(스케줄러 혼잡 회피 관례) · ④ 매일(요일 필드 `*`) — 철회 청소는 주말에도.
+    나중에 누가 벤치마크 시각을 늦추거나 이 cron 을 앞당기면 이 테스트가 빨간불로 알려 줍니다.
+    """
+    publish = _workflow_crons("scorecard_publish_daily.yml")
+    assert len(publish) == 1, f"발행 배치 cron 은 하루 한 번이어야 합니다: {publish}"
+    publish_min = _cron_kst_minute_of_day(publish[0])
+
+    benchmark_min = max(_cron_kst_minute_of_day(c) for c in _workflow_crons("scrape_report_snapshots.yml"))
+    assert publish_min >= benchmark_min + 30, (
+        f"발행 cron {publish[0]!r} = KST {publish_min // 60:02d}:{publish_min % 60:02d} 가 미국 벤치마크 수집"
+        f"(KST {benchmark_min // 60:02d}:{benchmark_min % 60:02d}) 뒤 30분 여유를 못 지킵니다 — "
+        "미국 쪽 신선도 검사가 매일 생략됩니다(#201/#202)."
+    )
+
+    for later_name in ("duel_daily_us.yml", "watch_schedule_health.yml"):
+        for cron_expr in _workflow_crons(later_name):
+            later_min = _cron_kst_minute_of_day(cron_expr)
+            assert publish_min < later_min, (
+                f"발행 cron(KST {publish_min // 60:02d}:{publish_min % 60:02d}) 이 {later_name} "
+                f"({cron_expr!r} = KST {later_min // 60:02d}:{later_min % 60:02d}) 보다 뒤입니다 — "
+                "워크플로우 머리말 🕘 #202 의 순서 ③·④ 를 보세요."
+            )
+
+    assert publish_min % 30 != 0, "정각·정30분은 GitHub 스케줄러 혼잡으로 지연·누락되기 쉽습니다(scrape.yml 관례)."
+    assert publish[0].split()[4] == "*", "발행 배치는 주말에도 돌아야 합니다(철회 청소 — 머리말 참고)."
+
+
 # =============================================================================
 # 13. 🩺 발행 전 신선도(무변동) 검사 — 결투의 검사를 빌려 쓴다 (2026-09-05, #201)
 # =============================================================================
