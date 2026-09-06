@@ -82,6 +82,43 @@
 #   ⚠️ 여유를 더 두고 싶으면 늦추세요 — 늦어서 손해 보는 것은 "순위표가 몇 시간 늦게
 #      갱신된다"뿐이고, 일러서 생기는 손해는 "틀린 값이 남에게 공개된다"입니다. 두 위험의
 #      크기가 다릅니다(§0-3-8). 단 워치독(18:00 KST)보다는 앞이어야 합니다.
+#      → (#204) 단, "늦추기"는 더 이상 cron 을 옮기는 방식이 아닙니다 — 아래 문단.
+#
+# -----------------------------------------------------------------------------
+# 🔴 2026-09-07 (#204) — `scrape.yml` 완료의 `workflow_run` 을 주 트리거로 추가, cron 은 **순수 안전망**
+# -----------------------------------------------------------------------------
+#   오너 방향 지시: "전부 다 크롤링 끝나고 연결해서 작업이 발생하게 … 크롤링 후 현재가가 적용이
+#   최대한 빨리 되는 방향으로." 위 🕘 문단들은 전부 "코스피는 전날 저녁에 확정되니 다음 날 아침이면
+#   충분하다"는 **타이밍 추정**이었고, 결과적으로 16:05 에 수집된 종가가 순위표에 실리기까지
+#   14시간(실측으로는 GitHub 스케줄러 지연까지 겹쳐 09:07~10:21 KST — 17시간)이 걸렸습니다.
+#
+#   트리거 원천 = `scrape.yml`("Daily Market Scraper") 완료. 이 트랙이 읽는 코스피 쪽 입력은 그 한
+#   워크플로우가 **한 실행에서 전부** 만듭니다 — 종목 스냅샷(`collector_kospi200.py`)과 코스피 지수
+#   (`scrape_daily.py` → `market_history.csv`)가 같은 커밋에 실립니다. 결투 KR 기준값(`duel_daily.yml`
+#   산출물)은 §4-b 가 "같은 날이면 이력 CSV 로 대체"하므로 기다릴 필요가 없습니다(결투가 먼저 커밋했든
+#   아직이든 판정 경로만 다르고 결과는 같습니다 — `utils/scorecard_publish.py::load_freshness_inputs()`).
+#   실측(공개 Actions API, 2026-09-02~06): Cloudflare Worker 의 16:10 dispatch 가 진짜 수집이고
+#   17:19~17:59 종료 → 이 배치는 그 직후 1~2분 안에 발행됩니다(종전 다음 날 09:07~10:21).
+#
+#   `duel_daily.yml` 과 같은 조건(`conclusion == 'success'` + 원천 실행이 schedule 또는 workflow_dispatch)
+#   으로 받되, "오늘 값인가"는 게이트 단계 `crawl_ready_gate.py scorecard-kr` 가 **데이터로** 봅니다 —
+#   수집기 자체의 사전 점검 함수(#189/#195: 오늘 자 SUCCESS 스냅샷이 장마감 뒤에 저장됨)를 그대로
+#   재사용하므로, 백필 dispatch·새벽 수동 실행·이미 처리한 뒤의 두 번째 완료(GitHub cron 지연분)는
+#   건너뜁니다. 두 번째 완료를 그냥 돌려도 무해하지만(아래 멱등성) 불필요한 발행이라 거릅니다.
+#
+#   🔁 멱등성 — 이 배치는 원래 "그날 발행분(담당 통화) 통째로 삭제 후 재작성"(⑥)입니다. 그래서
+#      workflow_run(저녁)과 cron(다음 날 아침)이 **둘 다** 돌아도 데이터가 깨지거나 중복되지 않습니다:
+#      저녁 실행은 `published_date = D`, 아침 실행은 `published_date = D+1` 로 같은 값을 한 번 더
+#      발행하고, 화면은 그룹별 가장 최근 발행일을 읽습니다 — 주말에 이미 매일 일어나는 것과 같은
+#      모양(`tests/test_scorecard_publish.py` 가 "같은 날 두 번 발행 = 삭제 후 재작성"을 고정). 그래서
+#      cron 쪽엔 게이트를 걸지 않습니다(안전망은 언제나 돕니다 — 철회 청소가 하루 두 번).
+#   📅 발행일 의미 변화(정직하게): 종전엔 "D 종가 → D+1 아침 발행"이었고 이제 평일엔 "D 종가 → D
+#      저녁 발행"이 먼저 나갑니다. 화면·문서에 "다음 날 아침 발행"을 약속한 문구는 없음을 확인
+#      (`web/pages/scorecard_leaderboard_page.py` 는 발행일만 표시). #203 이 "당기지 않는 이유"로 적었던
+#      전제는 이번 오너 지시로 뒤집힌 것입니다.
+#   🕰️ cron(07:35) 은 그대로 두되 의미가 바뀝니다 — 타이밍 추정이 아니라 **workflow_run 이 그날 안
+#      왔을 때 + 주말·휴일의 철회 청소** 를 위한 안전망. 시각은 옮기지 않았습니다(오너: 고정 시각을
+#      뒤로 미루는 방향 금지). `workflow_dispatch` 는 게이트를 거치지 않고 예전처럼 항상 실행.
 #
 #   🩺 2026-09-05 (#201) — 발행 직전에 **결투와 같은 신선도(무변동) 검사**를 합니다
 #      (`utils/scorecard_publish.py` §4-b). 수집 실패로 판정(`failed`)되면 이 잡이 실패로
@@ -106,7 +143,15 @@ on:
   schedule:
     # 매일 22:35 UTC = KST 07:35 (다음 날 아침 — 코스피 수집·결투 KR 기준값은 전날 저녁에 확정.
     # 위 머리말 🕘 #203 문단에 근거. #202 의 02:35 UTC(11:35 KST)는 달러 트랙으로 옮겨 감).
+    # 🔴 (#204) 이 값은 더 이상 타이밍 추정이 아니라 **순수 안전망**입니다 — 평일엔 아래
+    #    workflow_run 이 전날 저녁에 먼저 발행하고, 이 cron 은 그 이벤트가 안 온 날과 주말·휴일
+    #    (철회 청소)을 받칩니다. 게이트 없이 항상 돕니다(멱등 — 머리말 🔁).
     - cron: "35 22 * * *"
+  # (#204) 코스피 수집(scrape.yml, "Daily Market Scraper")이 끝나면 곧바로 원화 발행. 조건은
+  # 아래 job 의 if 와 게이트 단계 참고.
+  workflow_run:
+    workflows: ["Daily Market Scraper"]
+    types: [completed]
   # 수동 실행. 처음 며칠은 dry-run 으로 "무엇이 발행될 뻔했는지"부터 확인하는 것을 권합니다.
   workflow_dispatch:
     inputs:
@@ -137,6 +182,13 @@ jobs:
   scorecard-publish:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    # (#204) workflow_run 으로 깨어났을 때만 거릅니다 — scrape.yml 이 성공으로 끝났고 그 실행이
+    # 자기 cron 또는 workflow_dispatch(Cloudflare Worker 의 16:10 발동이 실제 수집) 였을 때.
+    # cron·workflow_dispatch 로 직접 불렸을 땐 항상 참(예전과 동일).
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch'))
 
     steps:
       - name: 저장소 체크아웃
@@ -145,6 +197,8 @@ jobs:
         # ⚠️ 다만 `data/` 의 가격 스냅샷 파일은 **체크아웃으로 함께 받아야** 합니다
         #    (수익률 계산이 그 파일을 읽습니다). 얕은 클론이라도 최신 커밋의 파일은
         #    전부 들어 있으므로 추가 설정이 필요 없습니다.
+        # (#204) workflow_run 이면 ref 없이 main 의 그 시점 최신 커밋 = scrape.yml 이 방금
+        #    push 한 스냅샷 커밋이 딸려 옵니다(duel_daily.yml 과 같은 전제).
 
       - name: 파이썬 준비
         uses: actions/setup-python@v5
@@ -156,7 +210,16 @@ jobs:
           python -m pip install --upgrade pip
           pip install -r requirements.txt
 
+      - name: 🚦 크롤링 완료 게이트 (#204 — workflow_run 으로 깨어났을 때만)
+        id: gate
+        if: github.event_name == 'workflow_run'
+        # "오늘(KST) 자 코스피 SUCCESS 스냅샷이 장마감 뒤에 저장됨"일 때만 아래가 돕니다
+        # (수집기의 #189/#195 사전 점검 함수 재사용). cron·수동은 게이트 없이 항상 진행(멱등).
+        run: |
+          python crawl_ready_gate.py scorecard-kr --role event
+
       - name: 성적표 발행 배치 실행 (KRW)
+        if: github.event_name != 'workflow_run' || steps.gate.outputs.ready == 'true'
         env:
           # 🔴 배치 전용 키. 사용자가 접속하는 앱 서버(Render)에는 **절대** 넣지 않습니다
           #    (§0-3-8 · utils/duel_db.py 머리말). 변수 이름은 duel_db.py 가 읽는 것과

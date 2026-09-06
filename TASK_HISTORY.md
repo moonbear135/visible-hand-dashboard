@@ -3679,6 +3679,152 @@ YAML 파싱 확인. 실제 GitHub 실행은 오프라인 검증 밖 — 첫 확�
 코스피 스냅샷 거래일이 `2026-09-06`(일요일 라벨)로 찍혀 있고 `market_history.csv` 는 09-04 까지라, 09-07(월) 원화 트랙의 코스피
 검사는 "지수 원천 낡음"으로 생략될 것(이 작업과 무관한 기존 상태 — 보고만).
 
+### #204 — [오너 방향 지시] 크롤링 소비 배치를 **"크롤링이 실제로 끝나는 이벤트"** 에 연결 — `workflow_run` 확산 + 데이터 게이트(`crawl_ready_gate.py`) 신설, cron 은 순수 안전망으로 강등 + 전체 워크플로우 감사 (2026-09-07)
+
+**경위 — 오너 지시(그대로).** "어느쪽이든 전부다 크롤링 끝나고 연결해서 작업이 발생하게 해줘 지금 시간이 너무 뒤로 밀리도록 이야기를
+하는것 같은데 그건 목표하는 방향이 아니야. 크롤링의 안전빵을 고려하는 것뿐이지 시간을 뒤로 영원히 미뤄도 OK라는건 절대로 아닌거야. 이거
+끝나고 전체적으로 돌아가는 프로세서들 싹다 검사해줘. 크롤링 후 현재가가 적용이 최대한 빨리 되는 방향으로 언제 크롤링이 되는 타이밍까지
+고려하면서." → 고정 시각(cron)으로 "이쯤이면 끝났겠지" 기다리는 방식을 주된 방법으로 쓰지 않는다. 크롤링 완료 이벤트(`workflow_run`)로
+즉시 다음 배치를 돌리고, cron 은 이벤트가 안 왔을 때의 **안전망**으로만 남긴다(참고 구현체 `duel_daily.yml`, 2026-08-26). 고정 시각을
+뒤로 미루는 변경은 금지.
+
+**시작 전 확인.** `git pull --rebase origin main` → Already up to date. HEAD = origin/main = `0ebe96f`(#203 성적표 한국·미국 발행 분리) ✅.
+
+**실측 조사 (§0-1 — 공개 Actions API `workflows/{file}/runs`, 오너 컴퓨터에서 2026-09-07 조회, 시각은 전부 KST).**
+
+| 워크플로우 | 실행 | 실제 시각(시작→종료) |
+|---|---|---|
+| `scrape.yml`(코스피) | Cloudflare Worker `workflow_dispatch` 16:10 | 09-02 16:10→**17:59** · 09-03 16:10→**17:46** · 09-06(일, 수동) 16:10→17:19 |
+| 〃 | GitHub 자체 cron(16:05 예정) | 09-02 **21:04**→22:12 · 09-03 **21:03**→22:11 · 09-04 **21:05**→21:06(사전 점검 건너뜀 1분) |
+| `duel_daily.yml`(결투 KR) | workflow_run(Worker dispatch 완료) | 09-02 17:59 · 09-03 17:46 · 09-06 17:19 → 전부 **skipped**(`event == 'schedule'` 필터) |
+| 〃 | workflow_run(GitHub cron 완료) | 09-02 **22:12** · 09-03 **22:12** · 09-04 21:07 → 실제 처리 |
+| 〃 | 자체 cron(17:10 예정) | 09-02 21:44 · 09-03 21:47 · 09-04 21:41 (같은 지연) |
+| `scrape_us.yml`(미국 종목) | schedule(05:35/06:35 예정, 두 줄) | 09-02 07:44→**08:36** / 08:31→09:30(실패) · 09-03 →08:39 · 09-04 →08:37/08:38 · 09-05 →08:20/08:21 |
+| `scrape_report_snapshots.yml`(벤치마크) | schedule(08:20 예정) | 09-01 10:51 · 09-02 10:04 · 09-03 10:10 · 09-04 10:03 · 09-05 10:04 (종료 +1분) |
+| `duel_daily_us.yml`(결투 USD) | schedule(12:00 예정) | 09-02 16:32 · 09-03 16:39 · 09-04 16:37 · 09-05 16:18 · 09-06 16:31 |
+| `scorecard_publish_daily.yml`(성적표, #203 전 통합) | schedule(07:30/11:35 예정) | 09-02 09:24 · 09-03 09:30 · 09-04 09:16 · 09-05 09:16 · 09-06 09:07 |
+| `scorecard_publish_daily_us.yml` | — | #203 신설, 실행 이력 0 |
+
+- 🔴 **참고 구현체(`duel_daily.yml`) 자체가 이미 4시간 늦고 있었음.** 2026-09-01 부터 `cloudflare_worker.js` 가 16:10 에 `workflow_dispatch` 로
+  scrape.yml 을 깨우고 그 실행이 진짜 수집(68~109분)을 합니다. 그런데 workflow_run 가드의 `event == 'schedule'` 이 그 완료를 걸러
+  skipped 로 버리고, 4~5시간 지연된 GitHub 자체 cron 완료(수집기 사전 점검이 "오늘 이미 SUCCESS"라 1분 만에 종료)에야 통과해 **데이터
+  준비 17:19~17:59 → 처리 22:11~22:12**. 필터가 전제한 "정식 수집 = schedule 이벤트"가 Worker 도입(#184/#185 후속) 뒤로 깨진 것.
+- 미국 쪽 순서: 종목(08:20~08:39 종료) → 벤치마크(10:04~10:52 — 항상 1.5~2시간 뒤, GitHub cron 지연) → 결투 USD(16:18~18:39) ·
+  성적표(#202/#203 의 11:35 도 같은 지연폭을 받으면 13시 전후). 데이터는 08:4x 에 다 있는데 6~8시간 뒤 처리.
+- 벤치마크 원천(stockanalysis) 가용 시각: `us_index_history.json` 커밋 이력에서 08-19~08-26 의 08:41~08:44 KST(= 19:41~19:44 ET)
+  수집분이 전부 그날 종가를 받았음 → 종목 수집 직후(19:2x~19:4x ET)에 벤치마크를 받는 것이 실측상 가능. 안 되면 cron 안전망이 재수집.
+
+**설계 — 이벤트만 믿지 않고 데이터로 확인하는 게이트(`crawl_ready_gate.py`, 신설).** `workflow_run` 은 "앞 워크플로우가 끝났다"만
+알려 줄 뿐 "오늘 데이터가 실제로 들어왔다"가 아닙니다(위 실측: Worker dispatch/GitHub cron 하루 두 번 완료, scrape_us cron 두 줄로 하루
+두 번 완료, 백필 dispatch, #195 형 새벽 실행 — 전부 success). 그래서 소비 워크플로우는 ① job `if` 를 `duel_daily.yml` 과 같은 모양
+(`conclusion == 'success'` + 원천 실행이 `schedule` **또는 `workflow_dispatch`**)으로 받고 ② 게이트 단계가 **데이터로** 판정한 뒤
+③ 실제 작업 단계를 `steps.gate.outputs.ready == 'true'` 에 묶습니다. 판정은 전부 기존 함수 재사용(§0-3-10):
+코스피 완료 = `collector_kospi200.evaluate_kospi200_collection_readiness()` 가 "오늘 자 SUCCESS 가 장마감 뒤 저장됨"이라 수집을 건너뛰겠다고
+답함(#189/#195 규칙 그대로) / 미국 완료 = `report_db.resolve_session_info()` 의 미국 거래일 == 처리 거래일(어제, 한국 날짜 —
+`run_duel_daily_batch_us.py` 와 같은 정의) + status SUCCESS / 벤치마크 = `report_db.load_us_index_closes()` 두 키에 처리 거래일 종가 /
+이미 처리 = 결투 기준값 파일(`duel_batch.load_probe_state()`) `target_date` == 처리 거래일. 읽기 전용, 종료 코드 항상 0(준비 안 됨은
+실패가 아님), `$GITHUB_OUTPUT` 에 `ready`/`reason`, 건너뛴 날은 `::notice` 로 실행 요약에 드러남. 수동 `workflow_dispatch` 는 게이트를
+거치지 않음(관리자 override·백필 경로 종전과 동일).
+
+| 소비자(게이트 이름) | workflow_run 으로 깨어났을 때 | cron 안전망일 때 |
+|---|---|---|
+| `duel-kr` | 평일 + 코스피 오늘 수집 완료 + 오늘 미처리 | 오늘 미처리 |
+| `duel-us` | 미국 스냅샷=처리일 + 벤치마크=처리일 + 처리일 미처리 | 처리일 미처리 |
+| `scorecard-kr` / `scorecard-us` | 위와 같은 수집 조건(미처리 검사 없음 — 멱등) | 게이트 없음(항상) |
+| `report-snapshots` | 미국 스냅샷=처리일 + 벤치마크 수집 시각이 그 스냅샷 수집 시각보다 앞 | 게이트 없음(항상) |
+
+- 🔴 결투에 "이미 처리" 검사가 **필요한** 이유(발견): 결투 배치는 같은 날 두 번 돌면 두 번째 실행이 첫 실행이 남긴 기준값과 비교해
+  "전부 무변동" → `failed_or_holiday` → `resolve_action()` 이 `cancel_pending=True` — 첫 실행이 **보류**(no_baseline·지수 낡음 등)해 둔
+  주문을 두 번째 실행이 **취소**할 수 있음. 2026-08-26 머리말의 "멱등이라 안 깨짐"은 체결까지 끝난 날에만 맞았음. 실측으로 09-02·09-03 은
+  cron(21:44/21:47)과 workflow_run(22:12) 이 실제로 같은 날 두 번 돌았음(첫 실행이 체결이라 무해했을 뿐). 게이트가 cron 쪽에도 걸려
+  이 경로를 막음(안전망은 "미처리"일 때만). 배치 코드 자체는 손대지 않음 — 아래 "하지 않은 것".
+- 결투 USD 가 **벤치마크까지** 기다려야 하는 이유: 지수가 처리일보다 낡으면 `run_duel_daily_batch_us.py` H-1 이 판정을 믿지 않고 보류 →
+  종목만 들어온 시점에 돌리면 체결 대신 보류가 되고, 그 다음 실행이 위 경로로 취소. 그래서 두 워크플로우 완료를 모두 트리거로 걸고
+  게이트가 둘 다 확인.
+
+**1단계 — 지시된 3곳 (+ 참고 구현체 수정 1곳, 감사에서 추가 1곳).**
+- `.github/workflows/duel_daily_us.yml`(결투 미국) — **트리거 원천 = `"Daily US Stocks Scraper"`(scrape_us.yml) + `"Daily Report
+  Snapshots"`(scrape_report_snapshots.yml) 둘 다.** 근거: 입력이 종목 스냅샷과 벤치마크 둘이고(위), 실측(09-01~05)으론 벤치마크가 항상
+  나중이지만 이번에 벤치마크 워크플로우 자체를 scrape_us 완료의 workflow_run 으로 바꿔 앞으로의 정상 순서는 "종목 → 1~2분 뒤 벤치마크"이며
+  실패·안전망 cron 이 먼저 돈 날엔 뒤집힐 수 있음. 지수 하나만 걸면 뒤집힌 날 종목 없이(또는 종목만으로) 돌게 되므로 둘 다 걸고 게이트가
+  "둘 다 있음 + 미처리"를 확인 — 먼저 끝난 쪽 이벤트는 조용히 건너뛰고 나중 쪽이 처리. `gh api` 로 다른 워크플로우 상태를 묻는 방식 대신
+  **저장소 파일(데이터)로** 확인 — 워크플로우 상태보다 정확하고(성공했는데 그날 값이 없는 경우까지 잡음) 토큰·API 호출이 없음.
+  cron `0 3 * * *`(12:00) 은 그대로, 의미만 안전망으로. 머리말에 실측 표·근거.
+- `.github/workflows/scorecard_publish_daily.yml`(성적표 한국) — 원천 = `"Daily Market Scraper"`(scrape.yml). 코스피 쪽 입력(종목 스냅샷
+  + `market_history.csv` 지수)이 그 한 실행·한 커밋에 다 실리고, 결투 KR 기준값은 §4-b 가 "같은 날이면 이력 CSV 대체"로 어느 순서든 판정.
+  cron `35 22 * * *`(07:35) 그대로(주말·이벤트 누락 안전망, 철회 청소). 📅 발행일 의미 변화를 정직하게 적음: 평일엔 "D 종가 → D 저녁
+  발행"이 먼저 나가고 다음 날 07:35 cron 이 같은 값을 `published_date = D+1` 로 한 번 더 발행(주말과 같은 모양,
+  `test_running_twice_on_the_same_day_does_not_duplicate_rows` 가 멱등을 고정). 화면·문서에 "다음 날 아침 발행" 약속 문구 없음 확인.
+  #203 이 "당기지 않는 이유"로 적은 전제는 이번 오너 지시로 뒤집힘.
+- `.github/workflows/scorecard_publish_daily_us.yml`(성적표 미국) — 결투 USD 와 **같은 기준·같은 원천 둘**. cron `35 2 * * *`(11:35) 그대로.
+  #203 머리말의 "근본 해결은 별도 결정" 문단에 → ✅ #204 표시.
+- `.github/workflows/duel_daily.yml`(참고 구현체) — job `if` 를 `schedule || workflow_dispatch` 로 넓히고(Worker dispatch 완료 수신)
+  게이트 추가(workflow_run: 평일+수집 완료+미처리 / cron: 미처리). 머리말에 #204 실측·수정 근거.
+- `.github/workflows/scrape_report_snapshots.yml`(감사에서 발견 — 아래 (b)) — 원천 = scrape_us.yml. 게이트 `report-snapshots`.
+  cron `20 23 * * 1-5` 그대로. scrape.yml 완료엔 걸지 않음(하루 한 번, 한국·미국 종가를 함께 담는 설계).
+- 모든 워크플로우 머리말에 "cron 은 더 이상 타이밍 추정이 아니라 순수 안전망"을 명시. **cron 값은 하나도 옮기지 않음**(오너 금지 방향) —
+  `tests/test_crawl_ready_gate.py` 가 #203 값에서 뒤로 밀리지 않았음을 고정.
+
+**2단계 — `.github/workflows/` 17개 전수 감사 (a/b/c).**
+
+| 워크플로우 | 분류 | 근거 |
+|---|---|---|
+| `scrape.yml` | (c) 원천 | 코스피 종목+지수 크롤링 자체. Worker(16:10)+GitHub cron 이 깨움 |
+| `scrape_us.yml` | (c) 원천 | 미국 종목 크롤링 자체(cron 두 줄, 사전 점검으로 하루 한 번 수집) |
+| `indicator_kr.yml` | (c) 독립 수집기 | FDR 에서 종가 시계열을 **스스로** 받아 지표 계산. 코스피 산출물은 `kr_all_market_prices.json` 을 분기 리밸런싱 후보로만 읽고 "며칠 지나도 안전"(수집기 머리말). 17:00/Worker 17:05 는 push 충돌 창 회피(TECHNICAL_INDICATOR §7). 이벤트 연결 불필요 |
+| `scrape_report_snapshots.yml` | **(b) → 처리** | 사용자 평가금액 스냅샷이 미국 종목 스냅샷을 소비 + 후속 US 배치의 벤치마크 원천. scrape_us 완료 workflow_run + 게이트 |
+| `duel_daily.yml` | (a) + 수정 | 이미 workflow_run. 단 `event == 'schedule'` 필터가 실측상 4시간 지연 유발 → 넓히고 게이트 추가 |
+| `duel_daily_us.yml` | **(b) → 처리** | scrape_us + report_snapshots 완료 workflow_run + 게이트 |
+| `scorecard_publish_daily.yml` | **(b) → 처리** | scrape.yml 완료 workflow_run + 게이트 |
+| `scorecard_publish_daily_us.yml` | **(b) → 처리** | scrape_us + report_snapshots 완료 workflow_run + 게이트 |
+| `watch_dividend_disclosures.yml` | (c) 독립 수집기 | DART 공시목록 감시(05:00), 유니버스는 자체 파일 `dividend_history_kr_2023_2025.json`. 다른 크롤링 소비 없음 |
+| `watch_dividend_payment_events.yml` | (c) 독립 수집기 | DART 지급일정(05:30), 위와 같음 |
+| `collect_dividend_kr.yml` | (c) 독립 수집기 | 분기 8회 cron 의 DART 배당 수집, 자체 유니버스 |
+| `collect_dividend_kr_delta_2026_08.yml` | (c) 1회성 수동 | workflow_dispatch 만 |
+| `probe_indicator_timing.yml` | (c) 진단 전용 수동 | workflow_dispatch 만 |
+| `render_keep_awake.yml` | (c) warm-up | 10분마다 /healthz 핑 — 크롤링과 무관, 손 안 댐 |
+| `watch_data_sanity.yml` | (c) 사후 점검 | 09:30 에 수집기가 남긴 산티체크 상태 파일을 읽어 알림만. 데이터 소비 배치가 아니라 감시. 손 안 댐 |
+| `watch_schedule_health.yml` | (c) 사후 점검 | 18:00 워치독 — 감시 대상 전부의 예정 시각 **뒤**여야 하는 제약(테스트 고정)이 있고 이벤트와 무관. workflow_run 으로 돈 성공도 이미 인정(#150 테스트). 손 안 댐 |
+| `test_suite.yml` | (c) | push 트리거 CI |
+
+**바꾼 파일.** 신규 `crawl_ready_gate.py`(게이트, 머리말에 판정표·출력 계약 — 처음 이름 `check_crawl_ready.py` 는 `.gitignore` 의 `check_*.py` 패턴에 걸려 커밋되지 않아 개명), 신규 `tests/test_crawl_ready_gate.py`(45건),
+워크플로우 5개(`duel_daily.yml` · `duel_daily_us.yml` · `scorecard_publish_daily.yml` · `scorecard_publish_daily_us.yml` ·
+`scrape_report_snapshots.yml`), `utils/scorecard_publish.py` §4-b 머리말(#204 문단 — 코드 변경 없음), `TASK_HISTORY.md`.
+
+**회귀 테스트 (`tests/test_crawl_ready_gate.py`, 신규 45).** §1 워크플로우 YAML 배선 — 소비자 5개 × (① workflow_run 이 원천 파일의
+`name` 과 글자 그대로 일치 + `types=[completed]` + 게이트 시장↔원천 대조 ② cron 이 #203 값 그대로(뒤로 안 밀림) + workflow_dispatch 유지
+③ job if 에 success·schedule·**workflow_dispatch** ④ 게이트 단계 존재·의존성 설치 뒤·소비자 이름·역할(`safety-net` 분기 / `--role event`)
+⑤ 작업 단계 전부가 게이트 결과에 묶임, 게이트 뒤 느슨한 단계 없음) + 게이트가 읽기 전용·exit 0. §2 판정표 — 임시 디렉터리 픽스처로
+duel-kr(준비/어제 스냅샷/새벽 07:04/DEGRADED/주말/이미 처리/안전망은 미처리만/깨진 기준값), scorecard-kr(주말 포함·미처리 검사 없음),
+duel-us(둘 다/종목만/지수 하나 결손/세션 불일치·DEGRADED/이미 처리 양 역할/토요일 대상 기준값은 미처리), scorecard-us, report-snapshots
+(수집분당 1회·첫 실행·세션 대기), 파일 없음 = 준비 안 됨(예외 아님), 모르는 소비자·역할 거절. §3 `$GITHUB_OUTPUT` 계약·종료 코드.
+
+**검증.** `pytest -q tests/test_crawl_ready_gate.py` **45 passed**. 관련 스위트 `test_scorecard_publish.py` + `test_watch_schedule_health_window.py`
++ `test_report.py`(`test_workflow` 의 cron 문자열 검사 통과) + `test_suite_integrity.py` + `test_duel_batch.py` + `test_duel_batch_usd.py`
+**560 passed / 75 skipped, 실패 0**. 전체 스위트 `pytest -q --ignore=archive`(47개 파일, 명령 시간 상한 때문에 24+23 두 묶음)
+**2,325 passed / 75 skipped, 실패 0**(#203 의 2,156 + 신규 45 + 이 환경에서 추가로 도는 기존 테스트). 저장소 실데이터(2026-09-07 상태)로
+게이트 5개 실행: duel-kr(09-05 토 가정) → 주말·스냅샷 09-06 이라 건너뜀 / duel-us·scorecard-us(09-05 10:30 가정) → 09-04 세션+벤치마크
+확보 → 준비 / report-snapshots → 벤치마크 수집 10:04 > 스냅샷 08:20 이라 "이미 돌았음" 건너뜀 — 전부 실제 상황과 일치. 워크플로우 5개
+YAML 파싱·`if`·단계 조건 덤프로 눈 확인.
+
+**기대 효과 — "크롤링 완료 후 몇 분 안에 도는가"(실측 기반 추정, 실제 발동 지연은 GitHub 쪽).**
+- 코스피: Worker dispatch 완료(17:19~17:59) → 결투 KR·성적표 원화가 **1~2분 뒤**(checkout+pip 설치 ≈ 1분). 종전 결투 21:41~22:12(−4h),
+  성적표 다음 날 09:07~10:21(−16h).
+- 미국: 종목 수집 완료(08:20~08:39) → 벤치마크·리포트 스냅샷 **+1~2분** → 결투 USD·성적표 달러 **+1~2분**(벤치마크 커밋 완료 직후).
+  종전 벤치마크 10:04~10:52(−1.5~2h), 결투 USD 16:18~18:39(−8h), 성적표 달러 11:35+지연(−3h 이상).
+- ⚠️ 한계(정직하게): ① GitHub 이 `workflow_run` 이벤트를 실제로 언제 발동하는지는 오프라인 검증 밖 — #150 실전에서는 완료 직후 수 초 내
+  였음(duel_daily.yml #7). 다음 평일 첫 실행에서 확인 필요: scrape.yml Worker 완료 → `duel_daily.yml`·`scorecard_publish_daily.yml` 의
+  workflow_run 실행이 **skipped 가 아니라 success 로 게이트 "준비 완료 → 진행"** 인지, 그 뒤 GitHub cron 완료분·자체 cron 은 게이트
+  "이미 처리 → 건너뜀"(::notice) 인지. 미국은 scrape_us 완료 → snapshots(진행) → duel_us/scorecard_us 두 번 깨어남(첫 번째 종목만: 건너뜀,
+  두 번째 벤치마크 뒤: 진행). ② 벤치마크가 19:2x ET 에 아직 없으면 그날은 cron 안전망(08:20+지연)까지 기다림 — 종전과 같음.
+  ③ 미국 휴장일(예: 09-07 Labor Day → 09-08 KST): 스냅샷 세션이 금요일이라 게이트 "처리 거래일 아님" → cron 안전망이 종전처럼 처리.
+
+**하지 않은 것 / 오너 확인 필요(§0-1).** (a) 결투 배치 코드·기준값 파일 형식은 한 글자도 안 씀 — "같은 날 두 번째 실행이 보류 주문을
+취소" 경로는 **워크플로우 게이트로만** 막았고, 배치 자체에 "기준값 target_date == 오늘이면 취소하지 않기" 방어를 넣는 것은 별도 결정
+(백로그 등재). (b) cron 값 이동 없음(오너 금지). (c) `indicator_kr.yml`·`watch_data_sanity.yml` 은 (c) 로 두었지만, 산티체크를 "수집
+직후 알림"으로 당기고 싶다면 같은 패턴을 적용할 수 있음 — 지시 범위(크롤링 소비 배치) 밖이라 안 함. (d) `.github/workflows/` 는 원격
+도구가 보호 경로로 막아(#203 전례) `device_bash` 로 전달·md5 대조. (e) GitHub push 권한 없는 세션 — **로컬 커밋까지만**, 오너가 push.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
@@ -3698,6 +3844,10 @@ YAML 파싱 확인. 실제 GitHub 실행은 오프라인 검증 밖 — 첫 확�
   "고정 점수 하드컷오프" 서술이 2026-08-06 개편(z-score/윈저라이즈 기반 %대 캡)
   이후로도 안 고쳐진 채 방치돼 있었음 — `utils/guardrail.py`·`utils/scoring.py`를
   직접 재확인해 3단으로(종목 차단/배지만/점수 캡) 다시 정리. 코드 변경 없음.
+- 🆕 #204 결투 배치 자체의 "같은 날 두 번째 실행" 방어 — 기준값 파일 `target_date` 가 처리 거래일과 같으면(그날 이미 돌았음)
+  `failed_or_holiday` 로 보류 주문을 취소하지 않고 "이미 처리한 날"로 조용히 넘기기. 지금은 워크플로우 게이트(`crawl_ready_gate.py`)
+  가 cron·workflow_run 양쪽에서 막고 있어 실제로는 도달하지 않지만, 수동 `workflow_dispatch` 를 같은 날 두 번 누르면 여전히 가능.
+  배치 코드 변경이라 오너 결정 사항(TASK_HISTORY #204 "하지 않은 것" (a)).
 - 🆕 #175 역성장 종목(`g_eff<=0`)은 배당 미수집 배지를 못 받음(`guardrail.py` 조기
   return) — 현재 실데이터로 두 조건이 안 겹쳐 안 보이지만 구조적 갭.
 - ✅ #175 `utils/data_validator.py` 커버리지 50% → #178에서 100%로 보강 완료
