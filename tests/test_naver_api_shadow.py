@@ -241,6 +241,36 @@ def test_normal_data_produces_no_warning():
           "페이지 내부의 8배 낙폭은 경계 경고를 유발하지 않음", f"({warns[:1]})")
 
 
+def test_market_hours_are_warned_but_not_blocked():
+    """
+    🔴 이 저장소는 **장중 실행으로 실제 사고를 겪었습니다**(백필 없는 수집기가 장중에 돌면
+    그 순간 가격이 그날 종가로 저장됨 — `watch_schedule_health.yml` 이 그래서 장중에는
+    자동 재실행을 생략합니다).
+
+    섀도는 실전을 건드리지 않으므로 **막지는 않습니다.** 다만 장중에는 신 API 가 오늘
+    실시간가를, 대조 상대인 실전 스냅샷은 어제 종가를 담고 있어 현재가가 전부 불일치로
+    나옵니다 — **값이 틀린 게 아니라 기준 시점이 다른 것**이고, 모르고 보면
+    "신 API 가 틀렸다"고 잘못 읽게 됩니다(§0-1).
+    """
+    from datetime import datetime, timedelta, timezone
+    kst = timezone(timedelta(hours=9))
+    cases = [
+        ("화 07:50 개장 전", datetime(2026, 9, 8, 7, 50, tzinfo=kst), False),
+        ("화 09:00 개장",    datetime(2026, 9, 8, 9, 0, tzinfo=kst), True),
+        ("화 10:30 장중",    datetime(2026, 9, 8, 10, 30, tzinfo=kst), True),
+        ("화 15:30 마감",    datetime(2026, 9, 8, 15, 30, tzinfo=kst), True),
+        ("화 16:30 마감 후", datetime(2026, 9, 8, 16, 30, tzinfo=kst), False),
+        ("토 10:30 휴장",    datetime(2026, 9, 12, 10, 30, tzinfo=kst), False),
+    ]
+    for label, when, expect in cases:
+        got = bool(SH.market_session_warning(when))
+        check(got == expect, f"{label} → {'경고' if expect else '조용'}")
+
+    src = (REPO_ROOT / "run_naver_api_shadow.py").read_text(encoding="utf-8")
+    check("raise" not in src.split("def market_session_warning")[1].split("def ")[0],
+          "장중이어도 예외로 막지 않음 (경고만)")
+
+
 def test_security_type_is_never_used_as_a_filter():
     """
     🔴 2026-09-08 오너 지적으로 바로잡은 것.

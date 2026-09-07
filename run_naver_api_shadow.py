@@ -446,6 +446,34 @@ def build_alert_message() -> str:
 
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 한국 증시 정규장 (평일 09:00~15:30 KST).
+MARKET_OPEN_HHMM, MARKET_CLOSE_HHMM = (9, 0), (15, 30)
+
+
+def market_session_warning(now=None) -> str:
+    """장중이면 경고 문장, 아니면 빈 문자열.
+
+    🔴 왜 필요한가: 이 저장소는 **장중 실행으로 실제 사고를 겪었습니다**
+       (`watch_schedule_health.yml` 이 그래서 장중에는 수집기 자동 재실행을 생략합니다 —
+       백필 기능이 없는 수집기가 장중에 돌면 그 순간의 가격이 그날 종가로 저장됩니다).
+
+    섀도는 실전 데이터를 건드리지 않으므로 **막지는 않습니다.** 다만 장중에 돌리면
+    신 API 는 **오늘 실시간가**, 대조 상대인 실전 스냅샷은 **어제 종가**라
+    현재가가 전부 불일치로 나옵니다 — 값이 틀린 게 아니라 **기준 시점이 다른 것**인데,
+    그걸 모르고 보면 "신 API 가 틀렸다"고 잘못 읽게 됩니다(§0-1).
+    """
+    now = now or datetime.now(KST)
+    if now.weekday() >= 5:                      # 토·일
+        return ""
+    hm = (now.hour, now.minute)
+    if MARKET_OPEN_HHMM <= hm <= MARKET_CLOSE_HHMM:
+        return ("⚠️ 지금은 한국 증시 장중(평일 09:00~15:30 KST)입니다. 신 API 는 오늘 실시간가를, "
+                "대조 상대인 실전 스냅샷은 어제 종가를 담고 있어 **현재가가 전부 불일치로 나옵니다** "
+                "— 값이 틀린 게 아니라 기준 시점이 다른 것입니다. "
+                "장 마감 후(16:00 이후)나 개장 전에 돌리면 깨끗하게 대조됩니다.")
+    return ""
+
+
 def main() -> int:
     ap = argparse.ArgumentParser(description="네이버 신 API 섀도 수집 (실전 미접촉)")
     ap.add_argument("--compare-only", action="store_true",
@@ -482,6 +510,9 @@ def main() -> int:
         shadow = json.load(files[-1].open(encoding="utf-8"))
         print(f"📂 {files[-1].name} 으로 대조합니다 (네트워크 요청 0건).")
     else:
+        warning = market_session_warning()
+        if warning:
+            print(warning)
         sess = PoliteSession()
         print(f"🕷️ 섀도 수집 시작 — 딜레이 {DELAY_MIN_SEC}~{DELAY_MAX_SEC}초, "
               f"요청 상한 {MAX_REQUESTS_PER_RUN}건, KRX 고정")
@@ -492,6 +523,9 @@ def main() -> int:
             shadow = {"collected_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
                       "list_rows": [], "detail": {}, "errors": [str(e)],
                       "stopped_reason": str(e)}
+        if warning:
+            shadow.setdefault("errors", []).append(warning)
+            shadow["ran_during_market_hours"] = True
         shadow["request_log"] = sess.log if not args.compare_only else []
         shadow["request_count"] = getattr(sess, "request_count", 0)
         json.dump(shadow, _assert_shadow_path(raw_path).open("w", encoding="utf-8"),
