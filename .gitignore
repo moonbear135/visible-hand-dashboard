@@ -11,3 +11,7 @@ archive/
 check_*.py
 data/us_sample/
 .coverage
+
+# 오너가 웹페이지 저장(완전) 시 딸려온 JS/CSS 등 — 저장소에 넣지 않습니다.
+_to_delete/
+*_files/

@@ -37,6 +37,15 @@ model: inherit
   여전히 구 HTML 파서를 씁니다. 배선은 **오너 승인 사항**(§0-3-6).
   ⚠️ 이 픽스처는 **합성이 아니라 실제 응답**입니다(오너가 DevTools 에서 복사).
   쓰기 전에 `NAVER_MIGRATION_WORK_ORDER.md` §1-5-11(NXT 함정)을 반드시 읽으세요.
+- ⏳ `run_naver_api_shadow.py` + `.github/workflows/naver_api_shadow.yml` +
+  `tests/test_naver_api_shadow.py` + `data/naver_api_shadow/` — **섀도 관찰(한시적).**
+  신 API 를 매일 받아 실전 스냅샷과 대조만 합니다. 🔴 **실전 데이터에 쓰지 않습니다**
+  (`_assert_shadow_path()` 가 코드로 강제). 이관이 끝나면 **워크플로우째 정리**하세요 —
+  필요 없어진 주기 작업을 남겨두는 것도 §0-3-2 위반입니다.
+- 🆕 `utils/wisereport_parser.py` + `tests/test_wisereport_parser.py` —
+  **WiseReport `c1010001.aspx` 재무요약 파서** (ROE·Forward ROE·순이익·자본총계·EV/EBITDA).
+  🔴 **아직 배선 안 됨** — `_fetch_ev_ebitda()` 는 그대로입니다. 배선할 때는 그 함수를
+  이 모듈 호출로 **대체**해 중복을 없애세요(§0-3-10). 픽스처는 **실제 저장 페이지**입니다.
 
 ## 읽기만 (수정하려면 인계)
 

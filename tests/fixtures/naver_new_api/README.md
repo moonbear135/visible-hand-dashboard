@@ -14,6 +14,7 @@
 | `detail_000660_codeType_KRX.json` | `stock.naver.com/api/domestic/detail/000660/detail?codeType=KRX` | 🟢 **KRX**. 추정PER·EPS·BPS 포함 |
 | `consensus_000660.json` | `stock.naver.com/api/domestic/detail/000660/consensus` | 투자의견·목표주가만 (4필드) |
 | `market_list_marketSum_NXT_top10.json` | `stock.naver.com/api/domestic/market/stock/default?tradeType=NXT&marketType=ALL&orderType=marketSum&startIdx=0&pageSize=10` | 🔴 **NXT**(시간외 혼입) — 그래서 **NXT 차단 테스트용으로도 씁니다** |
+| `wisereport_c1010001_000660.html` | `navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd=000660` | 🟢 **오너가 브라우저에서 직접 저장한 실제 페이지**(2026-09-07). ROE·Forward ROE·EV/EBITDA·순이익·자본총계 포함. 저장 시 딸려온 JS/CSS `_files` 폴더는 저장소에 넣지 않았습니다 |
 
 ## ⚠️ 원문에서 **뺀 것** (§0-1 — 숨기지 않고 밝힙니다)
 
