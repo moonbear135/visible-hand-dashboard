@@ -137,7 +137,8 @@ https://stock.naver.com/domestic/stock/<6자리 종목코드>/price
 - [x] `000660` 정체 확인 → **실시간 시세 API**(현재가·시총만, 투자정보 없음). §1-5-2
 - [x] `consensus` 정체 확인 → **투자의견·목표주가만**(추정 PER·EPS 없음). §1-5-3
 - [x] 🟢 **투자정보 API 확인** → `detail?codeType=KRX`. **추정 PER·EPS 포함 — §2-2 병목 해소.** §1-5-4
-- [ ] 종목 목록(시총 순위) API 가 따로 있는가 — `sise_market_sum` 대체용, **ROE 포함 여부**
+- [x] 🟢 **종목 목록 API 확인** → `market/stock/default?orderType=marketSum&startIdx=&pageSize=`. §1-5-9
+- [ ] ⏳ 위 목록 응답에 **ROE 가 포함되는가** (미확인)
 - [x] ✅ **인증 불필요** — 시크릿 창에서 JSON 반환 확인(§1-5-7). 단 헤더 검사 여부는 미확인
 - [x] 상장주식수 → `listedStockCnt` 있음 / 🔴 **ROE·Forward ROE 는 없음** — 새 병목
 - [ ] 호출 빈도 제한이 있는가 (500종목 × 1회/일 이 감당되는가)
@@ -520,6 +521,32 @@ https://polling.finance.naver.com/api/realtime/domestic/NXT/stock/005930,000660,
 
 ⚠️ 이 API 는 여전히 **시세 전용**입니다(§1-5-2) — PER·ROE 등은 없습니다.
    그리고 **"시총 상위 500 종목이 무엇인가"라는 목록 자체는 주지 않습니다.** §1-6 참고.
+
+### 1-5-9. 🟢 **종목 목록(시총 순위) API 확인 — 마지막 조각** (2026-09-07 저녁, 오너 복사)
+
+구 `sise/sise_market_sum.naver?sosok=` 를 대체하는 자리입니다.
+
+```
+https://stock.naver.com/api/domestic/market/stock/default?tradeType=NXT&marketType=ALL&orderType=marketSum&startIdx=0&pageSize=10
+```
+
+| 파라미터 | 값(실측) | 뜻(화면 대조) |
+|---|---|---|
+| `tradeType` | `NXT` | 거래소 구분. `KRX` 값도 있는 것으로 **보이나 미확인** |
+| `marketType` | `ALL` | 화면의 `전체`/`코스피`/`코스닥` 버튼에 대응 |
+| `orderType` | `marketSum` | **시가총액 순**. 화면에 `거래대금 상위`·`상승`·`하락`·`거래량 상위` 탭이 있으므로 다른 값도 존재 |
+| `startIdx` / `pageSize` | `0` / `10` | **페이징** |
+
+**화면 실측 대조** — 이 요청이 그린 표(시가총액 탭, KRX 기준):
+1 삼성전자 1,578조 4,952억 · 2 SK하이닉스 1,302조 4,679억 · 3 SK스퀘어 148조 4,145억 ·
+4 삼성전기 · 5 LG에너지솔루션 · 6 현대차 · 7 삼성바이오로직스 · 8 삼성생명 · 9 KB금융 · 10 삼성물산.
+
+⚠️ **`pageSize` 를 크게 넣어 시험하지 않습니다(§0-3-2).** 화면이 실제로 쓰는 값을 따릅니다.
+   `전체 종목보기` 화면이 어떤 `pageSize` 를 쓰는지 확인한 뒤 그 값에 맞춥니다.
+
+⏳ **미확인 — 응답에 ROE 가 포함되는가.** 구 사이트 목록 페이지는 ROE 를 함께 줬습니다.
+   포함되면 목록 요청만으로 ROE 가 해결되고, 아니면 §1-5-6 계획대로 `c1010001.aspx` 에서 읽습니다.
+   **어느 쪽이든 막히지 않습니다.**
 
 ### 1-6. 남은 미확인
 
