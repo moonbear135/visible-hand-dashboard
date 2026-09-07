@@ -626,6 +626,8 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
 
 
+- **2026-09-07 (#213·#214)** 섀도 관찰 신설(실전 미접촉, scrape.yml 완료 이벤트에 연결, 하루 45요청) + WiseReport 파서 신설 — **t_roe·f_roe·ev_ebitda 가 현행 수집값과 완전 일치**. 사보타주가 검사 구멍 1개를 찾아내 검사 2건 추가. 🔴 배선은 여전히 오너 승인 대기.
+
 - **2026-09-07 (#212)** 네이버 신 증권 JSON API 실측 조사 완료 — 대체 불가 항목 0개. `utils/naver_stock_api.py` 파서 모듈 신설(실제 응답 픽스처, 사보타주 9종 검증). 🔴 배선은 오너 승인 대기. 조사 중 배당 결함 2건 발견 → 오너 결정 완료.
 - **2026-09-07 — 🔧 `fetch_naver_item_dps_and_eps()` 372줄 → 112줄 분해 (#210).** #209 에 이어
   같은 파일의 파서를 분해. 이 함수는 **이 저장소에서 §0-1 사고가 가장 많이 났던 자리**라
@@ -1156,17 +1158,31 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 | **Forward ROE**·순이익·자본총계·EV/EBITDA·목표주가 | `navercomp.wisereport.co.kr/v2/company/c1010001.aspx` | 🟢 **이미 매일 받는 페이지** |
 | 배치 시세(1요청 20종목) | `polling.finance.naver.com/.../stock/코드,코드,...` | 🟢 실측 |
 
-**만들어 둔 것** — `utils/naver_stock_api.py` + `tests/test_naver_stock_api.py`(16검사) +
-`tests/fixtures/naver_new_api/`(**실제 응답** 픽스처). 사보타주 9종 전부 잡힘.
-🔴 **아직 배선하지 않았습니다** — `collector_kospi200.py` 는 그대로 구 HTML 파서를 씁니다.
+**만들어 둔 것 (전부 실제 응답/실제 페이지로 검증, 🔴 아직 배선 안 함)**
+
+| | 파일 | 검증 |
+|---|---|---|
+| JSON API 파서 | `utils/naver_stock_api.py` + 테스트 16검사 | 사보타주 9종 잡힘 |
+| WiseReport 파서 | `utils/wisereport_parser.py` + 테스트 12검사 | **현행 값과 완전 일치**(t_roe 44.15 / f_roe 101.67 / ev_ebitda 19.51), 사보타주 8종 |
+| 섀도 관찰 | `run_naver_api_shadow.py` + `naver_api_shadow.yml` + 테스트 16검사 | 사보타주 9종 잡힘 |
+| 픽스처 | `tests/fixtures/naver_new_api/` | **합성 아님** — 오너가 DevTools·브라우저에서 직접 확보 |
+
+🔴 **`collector_kospi200.py` 는 한 글자도 안 바뀌었습니다.** 그대로 구 HTML 파서를 씁니다.
+
+🕶️ **섀도 관찰이 붙었습니다** — `scrape.yml` 이 끝날 때마다 신 API 로 따로 받아
+실전 스냅샷과 대조하고, 일치율이 95% 아래로 떨어지면 디스코드로 알립니다.
+**실전 데이터는 건드리지 않습니다**(`_assert_shadow_path()` 가 코드로 강제).
+하루 약 45요청, 2~3초 딜레이, 403/429 즉시 중단. ⏳ 이관이 끝나면 **워크플로우째 정리**하세요.
 
 #### 🔴 다음 세션이 할 일 (우선순위 순)
 
-1. **`c1010001.aspx` 실제 HTML 픽스처 확보** — Forward ROE 파서의 **선행 조건**.
-   세션은 웹 접근이 차단돼 받아올 수 없습니다. **오너가 저장해 주셔야 합니다**
-   (Chrome 에서 그 주소를 열고 `Ctrl+S` 또는 DevTools `Copy response` → 메모장 저장).
+1. **섀도 첫 실행 결과 확인** — `data/naver_api_shadow/latest_compare.json`.
+   여기서 두 가지 미확인이 자동으로 풀립니다: ① `requests` 호출에 헤더가 필요한가
+   (403 이면 그 자체가 답 — **우회하지 말고 기록만**) ② 목록 API 에 `tradeType=KRX` 가 있는가.
 2. **`collector_kospi200.py` 배선 — 오너 승인 필요**(§0-3-6). 구 경로를 지우지 말고
    **출처 전환 스위치**로 붙여, 구 URL 이 살아 있는 동안 양쪽을 대조하는 것을 권합니다.
+   배선 시 `_fetch_ev_ebitda()` 는 `utils/wisereport_parser.py` 호출로 **대체**하세요 —
+   같은 페이지를 두 곳에서 파싱하는 상태를 남기면 안 됩니다(§0-3-10).
 3. **`f_per` 을 응답값으로 둘지 `현재가 ÷ f_eps` 로 계산할지 — 오너 판단.**
    현행 `f_per` 은 네이버 표시값이며, `현재가÷추정EPS` 와 1% 이내로 맞는 종목이
    258개 중 88개(34.1%)뿐입니다. `f_pegy` 에 들어가는 값이라 세션이 정하지 않습니다.
