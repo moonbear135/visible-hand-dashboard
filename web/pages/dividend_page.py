@@ -105,13 +105,14 @@
 """
 
 import calendar as calendar_module
-import os
 from datetime import date, datetime, timedelta, timezone
 
 from fastapi import Request
 from nicegui import ui
 
+from utils import data_source
 from web.auth import is_admin
+from web.blocking import run_blocking
 from web.components import (
     NA_TEXT,
     disclaimer_footer,
@@ -1697,6 +1698,17 @@ async def _render_body() -> None:
     payload, load_error = await load_json_file_async(data_path(DATA_FILENAME))
     history_payload, history_error = await load_json_file_async(data_path(HISTORY_FILENAME))
 
+    # 🔴 2026-09-07 (#205) — raw 다운로드 용량 상한 판정에 쓸 크기를 **실제로 내려줄 파일**
+    #    기준으로 잽니다(`data_source.content_length` — 원격 모드면 HEAD, 아니면 로컬 크기).
+    #    예전에는 `os.path.getsize(로컬 사본)` 으로 판정하고 원격 최신 바이트를 내려줘 판정
+    #    기준과 실물이 달랐습니다(§0-1). 원격 모드에서는 네트워크 왕복이라 스레드로 넘깁니다.
+    try:
+        raw_size, _raw_size_error = await run_blocking(
+            data_source.content_length, data_path(RAW_FILENAME))
+    except Exception as exc:                       # noqa: BLE001 — 상세는 로그로만 (§0-3-4)
+        print(f'⚠️ 배당 원본(raw) 파일 크기 조회 중단: {type(exc).__name__}: {exc}')
+        raw_size = None
+
     # 🟢 "실제 지급일정" 배지용 — 완전히 별도 수집기(`collector_dividend_payment_kr.py`)가
     #    만드는 파일입니다. 위 두 파일과 달리 **파일이 아직 없을 때는 에러 배너를 띄우지
     #    않습니다** — 이 파일은 덧붙는 정보일 뿐이라, 없으면 배지만 안 붙고 달력은 예전과
@@ -1929,7 +1941,7 @@ async def _render_body() -> None:
     ui.separator()
 
     # ── 배경 설명 · 알려진 한계 · 원본 다운로드 (기본 접힘) ───────────────
-    _render_notice_panel(summary, confirmed, pending, payment_payload)
+    _render_notice_panel(summary, confirmed, pending, payment_payload, raw_size=raw_size)
 
     @ui.refreshable
     def _pending_section() -> None:
@@ -2080,7 +2092,7 @@ def _render_summary(summary, confirmed, pending, grouped) -> None:
         )
 
 
-def _render_notice_panel(summary, confirmed, pending, payment_payload=None) -> None:
+def _render_notice_panel(summary, confirmed, pending, payment_payload=None, raw_size=None) -> None:
     """달력 아래 접이식 패널 하나 — 배경 설명 · 알려진 한계 · 원본 다운로드.
 
     2026-08-24 (오너 피드백: "정보량이 너무 많아서 열자마자 한숨부터 나온다") — 예전에는
@@ -2134,7 +2146,7 @@ def _render_notice_panel(summary, confirmed, pending, payment_payload=None) -> N
         _render_payment_report_block(payment_payload)
 
         ui.separator()
-        _render_raw_downloads()
+        _render_raw_downloads(raw_size)
 
 
 def _render_payment_report_block(payment_payload) -> None:
@@ -2200,13 +2212,29 @@ def _render_known_limitations(summary) -> None:
         ui.label(str(line)).classes('vh-notice-text vh-keep-all')
 
 
-def raw_download_exceeds_cap(raw_size_bytes) -> bool:
-    """🔴 M9/S5(2026-08-29) — raw 파일 크기(바이트)가 `RAW_DOWNLOAD_MAX_BYTES`를 넘는가.
+def effective_raw_download_cap_bytes() -> int:
+    """이 화면이 **실제로 내려줄 수 있는** raw 파일 크기 상한.
+
+    2026-09-07 (#205) — 원격 모드(`DATA_SOURCE_BASE_URL`)에서는 `read_download_bytes()` 가
+    `data_source.read_text()` 를 타고, 그 경로는 `MAX_RESPONSE_BYTES`(20MB)를 넘는 응답을
+    받지 않습니다(OOM 방어). 즉 원격 모드의 진짜 상한은 `min(50MB, 20MB)` 입니다 — 50MB 로
+    판정해 버튼을 그려 놓고 클릭하면 20MB 에서 실패하는 것은 "판정 기준 ≠ 실물"(§0-1).
+    원격이 꺼져 있으면 로컬 읽기에 그런 상한이 없으므로 `RAW_DOWNLOAD_MAX_BYTES` 그대로.
+    """
+    if data_source.is_remote_enabled():
+        return min(RAW_DOWNLOAD_MAX_BYTES, data_source.MAX_RESPONSE_BYTES)
+    return RAW_DOWNLOAD_MAX_BYTES
+
+
+def raw_download_exceeds_cap(raw_size_bytes, cap_bytes=None) -> bool:
+    """🔴 M9/S5(2026-08-29) — raw 파일 크기(바이트)가 상한을 넘는가.
 
     NiceGUI 위젯을 만들지 않는 순수 함수라(§1 관례) 렌더링 없이 이 판정 로직만 따로
-    검증할 수 있습니다.
+    검증할 수 있습니다. `cap_bytes` 를 주지 않으면 `RAW_DOWNLOAD_MAX_BYTES`(원격 모드에서는
+    화면이 `effective_raw_download_cap_bytes()` 를 넘겨 줍니다 — #205).
     """
-    return raw_size_bytes > RAW_DOWNLOAD_MAX_BYTES
+    cap = RAW_DOWNLOAD_MAX_BYTES if cap_bytes is None else cap_bytes
+    return raw_size_bytes > cap
 
 
 def raw_download_oversize_link_html(raw_size_bytes) -> str:
@@ -2226,8 +2254,21 @@ def raw_download_oversize_link_html(raw_size_bytes) -> str:
     )
 
 
-def _render_raw_downloads() -> None:
+def _render_raw_downloads(raw_size=None) -> None:
     """원본(raw)·가공·기준선 파일 전부 다운로드 가능하게 합니다.
+
+    :param raw_size: raw 파일의 크기(바이트) — 호출부(`_render_body`)가 **실제로 내려줄
+        파일** 기준으로 `data_source.content_length()` 로 잰 값. None 이면 "크기를 모름"
+        (§0-1 — 모르는 값으로 상한 초과를 단정하지 않고 버튼을 그대로 그립니다. 정말 크면
+        클릭 시 `data_source` 의 응답 상한이 막고 `failure_text` 가 뜹니다).
+
+    🔴 2026-09-07 (#205) — 예전엔 `os.path.exists(로컬 경로)` 로 버튼 3개를 그릴지 정하고,
+       raw 상한은 `os.path.getsize(로컬 사본)` 으로 판정하면서 실제 바이트는
+       `read_download_bytes()`(원격 우선)가 내려줬습니다. 원격 모드에서는 로컬 사본이
+       배포 시점에 얼어붙은 것이라 (a) 사본이 없으면 화면엔 데이터가 보이는데 버튼만 사라지고,
+       (b) 사본이 작아서 상한을 통과한 버튼이 실제로는 더 큰 원격 파일을 내려주는 불일치가
+       있었습니다. `us_stocks_page.py` M11 과 같은 처방(존재 판정 없이 항상 그리기) +
+       크기는 실물 기준으로 통일.
 
     `DIVIDEND_MODULE_WORK_ORDER.md` §3 "§0-3-3 raw/가공 분리" 표가 지적한 미충족 절반
     ("raw·가공 둘 다 사용자 다운로드 가능")을 채웁니다. 화면이 이미 읽은 파일을 그대로
@@ -2242,36 +2283,32 @@ def _render_raw_downloads() -> None:
 
     with ui.row().classes('w-full gap-3 items-center flex-wrap'):
         ui.label('📥 데이터 다운로드:').classes('vh-muted font-bold')
-        if os.path.exists(latest_path):
+        download_button(
+            '2026년 수집 결과 (가공, JSON)',
+            f'dividend_kr_2026_latest_{today}.json',
+            lambda: read_download_bytes(latest_path),
+            media_type='application/json',
+            failure_text='2026년 수집 결과 파일을 읽지 못했습니다.',
+        )
+        if raw_size is not None and raw_download_exceeds_cap(raw_size, effective_raw_download_cap_bytes()):
+            # 🔴 M9/S5(2026-08-29) — 상한을 넘으면 이 화면에서 직접 내려받게 하지 않고
+            # GitHub 저장소 링크로 안내합니다(위 RAW_DOWNLOAD_MAX_BYTES 주석 참고).
+            ui.html(raw_download_oversize_link_html(raw_size))
+        else:
             download_button(
-                '2026년 수집 결과 (가공, JSON)',
-                f'dividend_kr_2026_latest_{today}.json',
-                lambda: read_download_bytes(latest_path),
-                media_type='application/json',
-                failure_text='2026년 수집 결과 파일을 읽지 못했습니다.',
+                '2026년 수집 원본 (raw, JSONL)',
+                f'dividend_kr_2026_raw_{today}.jsonl',
+                lambda: read_download_bytes(raw_path),
+                media_type='application/x-ndjson',
+                failure_text='2026년 원본 파일을 읽지 못했습니다.',
             )
-        if os.path.exists(raw_path):
-            raw_size = os.path.getsize(raw_path)
-            if not raw_download_exceeds_cap(raw_size):
-                download_button(
-                    '2026년 수집 원본 (raw, JSONL)',
-                    f'dividend_kr_2026_raw_{today}.jsonl',
-                    lambda: read_download_bytes(raw_path),
-                    media_type='application/x-ndjson',
-                    failure_text='2026년 원본 파일을 읽지 못했습니다.',
-                )
-            else:
-                # 🔴 M9/S5(2026-08-29) — 상한을 넘으면 이 화면에서 직접 내려받게 하지 않고
-                # GitHub 저장소 링크로 안내합니다(위 RAW_DOWNLOAD_MAX_BYTES 주석 참고).
-                ui.html(raw_download_oversize_link_html(raw_size))
-        if os.path.exists(history_path):
-            download_button(
-                '2023~2025년 배당 기준선 (JSON)',
-                f'dividend_history_kr_2023_2025_{today}.json',
-                lambda: read_download_bytes(history_path),
-                media_type='application/json',
-                failure_text='기준선 파일을 읽지 못했습니다.',
-            )
+        download_button(
+            '2023~2025년 배당 기준선 (JSON)',
+            f'dividend_history_kr_2023_2025_{today}.json',
+            lambda: read_download_bytes(history_path),
+            media_type='application/json',
+            failure_text='기준선 파일을 읽지 못했습니다.',
+        )
 
 
 # =============================================================================

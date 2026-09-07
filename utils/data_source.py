@@ -515,13 +515,48 @@ def _mark_success(entry: dict) -> None:
 #     코드는 이 파일을 `open()` 으로 직접 읽어서 `data_source` 의 최신성 추적 밖에 있었고,
 #     그래서 값이 아무리 오래돼도 `web/layout.py` 의 전역 배너가 뜨지 않았습니다(§0-1 위반).
 #
-# ⚠️ **읽기 경로만** 원격을 탑니다 — "쓰기 충돌 때문에 이 파일은 원격 전환 안 함" 이라는
-#    기존 결정은 그대로 유지됩니다. 이 파일은 앱이 직접 쓰기도 하는 유일한 데이터 파일이고
-#    (`utils/db.py` 관리자 수동 입력 ← `web/pages/macro_page.py`), 그 읽기·쓰기 짝은 지금도
-#    pandas 로 **로컬 파일만** 다루며 이번 변경에서 한 줄도 건드리지 않았습니다.
+# ⚠️ (2026-08-17 원문) **읽기 경로만** 원격을 탑니다 — "쓰기 충돌 때문에 이 파일은 원격 전환
+#    안 함" 이라는 기존 결정은 그대로 유지됩니다. 이 파일은 앱이 직접 쓰기도 하는 유일한
+#    데이터 파일이고(`utils/db.py` 관리자 수동 입력 ← `web/pages/macro_page.py`), 그 읽기·쓰기
+#    짝은 지금도 pandas 로 **로컬 파일만** 다루며 이번 변경에서 한 줄도 건드리지 않았습니다.
 #    즉 원격을 켜면 매크로 화면은 로컬 사본을, 보고서의 벤치마크는 원격(=배치가 저장소에
 #    커밋해 온 누적 이력)을 봅니다. 벤치마크 용도로는 "확정 커밋된 이력"쪽이 맞습니다.
+#
+# 🔁 2026-09-07 (#205) — 위 "의도적 예외"를 **해제**했습니다. 근거를 코드로 직접 확인한 결과:
+#    · `utils/db.py::save_and_load_history()` 가 로컬에 쓰는 것은 `market_history.csv` 한 파일
+#      (+ `.bak`)뿐이고, 병합된 DataFrame 을 돌려주긴 하지만 **호출부(`macro_page._submit`)는 그
+#      반환값을 버리고(`_, _, save_log, save_score, _, _`) `ui.navigate.reload()` 로 화면을 통째로
+#      다시 엽니다.** 즉 "쓴 값을 같은 요청 안에서 메모리로 바로 보여주는" 경로는 없고, 실제
+#      흐름은 "로컬에 쓰기 → 새 요청에서 파일을 다시 읽기"입니다. 이 재읽기가 원격 우선으로
+#      바뀌면 관리자가 방금 쓴 행이 (원격 캐시 TTL 과 무관하게, 원격에는 **영원히** 그 행이
+#      없으므로) 보이지 않게 됩니다 — Render 의 로컬 디스크는 휘발성이고 저장소로 되돌아가지
+#      않기 때문입니다. 그래서 무작정 `read_text()` 로만 바꾸면 새 버그가 생깁니다.
+#    · 반대로 예외를 그대로 두면, 같은 `/admin/macro` 화면 안에서 "📅 기준 영업일"·"마지막
+#      동기화"·트렌드 차트(로컬 사본, 배포 시점에 얼어붙음)와 AI 코멘트 "생성 일자"(원격 우선)
+#      가 서로 다른 날짜를 말합니다(2026-09-06 실측: 09-04 vs 09-06). §0-1 위반입니다.
+#    → 처방: **평소에는 원격 우선**(다른 화면과 같은 기준)이되, 앱이 그 파일을 로컬에 **쓴 직후
+#      부터는 로컬을 신뢰**하는 "로컬 덮개(local overlay)"를 이 모듈이 관리합니다
+#      (`note_local_write()` — `utils/db.py::_safe_write_history` 가 쓰고 나서 부릅니다).
+#      덮개는 원격 내용이 **그 뒤에 실제로 바뀔 때**(배치가 다음 커밋을 올려 리비전이 증가)
+#      자동으로 걷힙니다 — 관리자 수동 입력은 컨테이너 안에만 남는 임시 보정이고, 배치가
+#      새로 커밋한 이력이 그때부터 "확정 커밋된 이력"이므로 그쪽이 맞습니다. 과정을 흉내
+#      내지 않기 위해 덮개 상태에서도 원격 확인(TTL·ETag)은 평소대로 계속합니다.
+#      쓰기 경로의 병합 기준(base)도 같은 `read_text()` 를 거치므로(`utils/db.py`), 관리자가
+#      얼어붙은 사본 위에 오늘 행을 얹어 며칠치 배치 행을 잃어버리는 일도 사라집니다.
+#    · 원격이 꺼져 있으면(`DATA_SOURCE_BASE_URL` 미설정) 덮개는 아무 일도 하지 않고 예전과
+#      똑같이 로컬 파일만 읽습니다.
 _REMOTE_ROOT_FILES = ('market_history.csv',)
+
+# ── 로컬 덮개(local overlay) — 앱이 직접 쓴 파일 (2026-09-07, #205) ──────────
+# 키는 저장소 기준 상대경로, 값은 {'baseline_revision': 쓰기 시점에 알고 있던 원격 리비전
+# (원격을 아직 한 번도 못 받았으면 None → 그 뒤 첫 성공분이 기준이 됨), 'noted_at_wall': 시각}.
+# ⚠️ 이 덮개가 가리키는 것도 **모든 접속자에게 동일한 시장 데이터**입니다(§0-3-8) — 관리자
+#    수동 입력은 화면을 여는 사람마다 다른 값이 아니라 그 서버 프로세스의 단일 상태입니다.
+_LOCAL_OVERLAY = {}
+
+# ── 파일 크기 조회 캐시 (2026-09-07, #205) — `content_length()` 전용 ────────
+# 키는 상대경로, 값은 {'size', 'fetched_at'(monotonic), 'next_attempt', 'reason'}.
+_SIZE_CACHE = {}
 
 
 def remote_relative_path(path: str) -> Optional[str]:
@@ -569,7 +604,186 @@ def read_text(path: str, *, encoding: str = 'utf-8',
     if rel_path is None:
         return _read_local(path, encoding, known_version)
 
-    return _read_remote(rel_path, path, base, encoding, known_version)
+    result = _read_remote(rel_path, path, base, encoding, known_version)
+    with _LOCK:
+        overlay_active = rel_path in _LOCAL_OVERLAY
+    if overlay_active:
+        return _apply_local_overlay(rel_path, path, encoding, known_version, result)
+    return result
+
+
+# =============================================================================
+# 5-b. 로컬 덮개 — 앱이 직접 쓴 파일은 원격이 그 뒤에 바뀔 때까지 로컬을 신뢰 (#205)
+# =============================================================================
+def note_local_write(path: str) -> None:
+    """앱이 `path` 를 **로컬에 방금 썼다**고 알립니다 (`utils/db.py::_safe_write_history` 가 부름).
+
+    원격 대상이 아닌 경로(테스트 임시경로 등)나 원격이 꺼진 상태에서는 아무 일도 하지 않습니다
+    — 그때는 `read_text()` 가 어차피 로컬만 읽습니다. 원격이 켜져 있으면 이 순간부터
+    `read_text(path)` 는 원격 내용이 **이 시점 이후 실제로 바뀔 때까지** 로컬 파일을 돌려줍니다
+    (자세한 이유는 `_REMOTE_ROOT_FILES` 위 2026-09-07 주석).
+    """
+    rel_path = remote_relative_path(path)
+    if rel_path is None:
+        return
+    with _LOCK:
+        entry = _CACHE.get(rel_path)
+        baseline = (entry['revision']
+                    if entry is not None and entry['text'] is not None else None)
+        _LOCAL_OVERLAY[rel_path] = {'baseline_revision': baseline,
+                                    'noted_at_wall': _now_wall()}
+        # 크기 캐시는 더 이상 원격 값이 아니므로 버립니다(로컬 파일 크기를 새로 잽니다).
+        _SIZE_CACHE.pop(rel_path, None)
+
+
+def local_overlay_active(path: str) -> bool:
+    """`path` 가 지금 로컬 덮개 상태인지 (관리자 화면의 '읽기 경로' 표시용 · 테스트용)."""
+    rel_path = remote_relative_path(path)
+    if rel_path is None:
+        return False
+    with _LOCK:
+        return rel_path in _LOCAL_OVERLAY
+
+
+def _apply_local_overlay(rel_path: str, local_path: str, encoding: str, known_version,
+                         remote_result) -> Tuple[Optional[str], Optional[str], Any]:
+    """덮개가 걸린 파일: 원격 확인 결과(`remote_result`)를 보고 덮개를 유지할지 걷을지 정합니다.
+
+    · 원격 리비전이 쓰기 시점 기준(`baseline_revision`)과 **다르면** 배치가 그 뒤에 새 이력을
+      커밋한 것 → 덮개를 걷고 원격 결과를 그대로 돌려줍니다.
+    · 기준이 아직 없었으면(쓰기 시점에 원격을 한 번도 못 받은 콜드 상태) 지금 받은 첫 성공분을
+      기준으로 삼습니다. (그 첫 성공분이 하필 "쓴 직후 올라온 새 커밋"일 가능성은 이론상
+      있지만, 배치 커밋은 하루 2~3회라 그 창은 분 단위이며, 그 경우에도 다음 커밋에서
+      정상적으로 걷힙니다.)
+    · 로컬 파일이 사라졌으면(읽기 실패) 덮개를 걷고 원격 결과로 돌아갑니다 — 없는 파일을
+      계속 신뢰하는 것은 §0-1 위반입니다.
+    """
+    with _LOCK:
+        overlay = _LOCAL_OVERLAY.get(rel_path)
+        if overlay is None:
+            return remote_result
+        entry = _CACHE.get(rel_path)
+        revision = (entry['revision']
+                    if entry is not None and entry['text'] is not None else None)
+        if revision is not None:
+            if overlay['baseline_revision'] is None:
+                overlay['baseline_revision'] = revision
+            elif revision != overlay['baseline_revision']:
+                _LOCAL_OVERLAY.pop(rel_path, None)
+                return remote_result
+
+    text, local_error, version = _read_local(local_path, encoding, known_version)
+    if text is None and local_error is not None:
+        with _LOCK:
+            _LOCAL_OVERLAY.pop(rel_path, None)
+        return remote_result
+    return text, local_error, version
+
+
+# =============================================================================
+# 5-c. 파일 크기 조회 — "실제로 내려줄 파일"의 크기 (#205)
+# =============================================================================
+def _local_size(path: str) -> Tuple[Optional[int], Optional[str]]:
+    try:
+        return os.path.getsize(path), None
+    except OSError:
+        return None, f'스냅샷 파일({os.path.basename(path)})이 없습니다.'
+
+
+def _http_head_length(url: str) -> Tuple[Optional[int], Optional[str]]:
+    """HEAD 1회로 `Content-Length` 만 받습니다. 예외를 밖으로 내지 않습니다.
+
+    `Accept-Encoding: identity` — 압축 협상을 끄지 않으면 `Content-Length` 가 **압축된**
+    크기가 되어 실제로 내려줄 바이트 수와 달라집니다(2026-09-07 raw.githubusercontent.com
+    실측: identity 로 물으면 원본 크기 그대로, `Accept-Ranges: bytes` 도 내려줌).
+    """
+    if requests is None:                              # pragma: no cover
+        return None, '원격 로더 구성요소 없음'
+    headers = {'User-Agent': USER_AGENT, 'Accept-Encoding': 'identity'}
+    try:
+        response = requests.head(
+            url, headers=headers, allow_redirects=True,
+            timeout=_positive_float(ENV_TIMEOUT_SECONDS, DEFAULT_TIMEOUT_SECONDS))
+    except Exception as exc:                          # noqa: BLE001 — 상세는 로그로만 (§0-3-4)
+        print(f'⚠️ 원격 파일 크기 조회 실패 ({url}): {type(exc).__name__}: {exc}')
+        name = type(exc).__name__.lower()
+        return None, ('응답 시간 초과' if 'timeout' in name else '네트워크 연결 실패')
+    try:
+        status = getattr(response, 'status_code', None)
+        if status != 200:
+            print(f'⚠️ 원격 파일 크기 조회 응답 코드 이상 ({url}): {status}')
+            return None, f'서버 응답 코드 {status}'
+        raw = _header(response, 'Content-Length')
+        if raw is None:
+            return None, '서버가 파일 크기를 알려주지 않음'
+        try:
+            return int(raw.strip()), None
+        except (TypeError, ValueError):
+            return None, '서버가 알려준 파일 크기를 해석하지 못함'
+    finally:
+        try:
+            response.close()
+        except Exception:                             # pragma: no cover
+            pass
+
+
+def content_length(path: str, *, encoding: str = 'utf-8') -> Tuple[Optional[int], Optional[str]]:
+    """`read_text(path)` 가 **실제로 돌려줄** 파일의 크기(바이트)를 `(크기, 실패사유)` 로.
+
+    왜 필요한가 — 다운로드 버튼을 그릴지/용량 상한을 넘었는지는 "사용자에게 실제로 주는 것"
+    과 같은 기준으로 판단해야 합니다(§0-1). 예전에는 로컬 사본 크기로 판정하고 원격 최신
+    바이트를 내려줘, 판정 기준과 실물이 달랐습니다(`web/pages/dividend_page.py` #205).
+
+    · 원격 꺼짐 / 원격 대상 아님 / 로컬 덮개 상태 → `os.path.getsize`.
+    · 원격 켜짐 → HEAD 로 `Content-Length` (TTL 캐시 + 실패 백오프, `read_text` 와 같은 값).
+      HEAD 가 실패하면 **이미 받아 둔 본문**이 있을 때만 그 길이로 대답합니다 — 그것이
+      실제로 내려줄 바이트이므로 정확합니다. 그것도 없으면 `(None, 사유)` — 호출자는 크기를
+      **모른다**로 다뤄야 합니다(추측으로 상한 판정을 하지 마세요).
+
+    ⚠️ 원격 모드에서는 **동기 네트워크 왕복**입니다 — 화면에서는 `run_blocking()` 으로 부르세요.
+    """
+    base, config_error = resolve_base_url()
+    _remember_config_error(config_error)
+    rel_path = remote_relative_path(path) if base is not None else None
+    if rel_path is None:
+        return _local_size(path)
+    with _LOCK:
+        if rel_path in _LOCAL_OVERLAY:
+            return _local_size(path)
+
+    ttl = _positive_float(ENV_TTL_SECONDS, DEFAULT_TTL_SECONDS)
+    now = time.monotonic()
+    with _LOCK:
+        cached = _SIZE_CACHE.get(rel_path)
+        if cached is not None:
+            if cached['size'] is not None and (now - cached['fetched_at']) < ttl:
+                return cached['size'], None
+            if now < cached['next_attempt']:
+                return _known_body_length(rel_path, encoding, cached['reason'] or '원인 미상')
+
+    size, reason = _http_head_length(f'{base}/{rel_path}')
+    with _LOCK:
+        if size is not None:
+            _SIZE_CACHE[rel_path] = {'size': size, 'fetched_at': time.monotonic(),
+                                     'next_attempt': float('-inf'), 'reason': None}
+            return size, None
+        _SIZE_CACHE[rel_path] = {'size': None, 'fetched_at': 0.0,
+                                 'next_attempt': time.monotonic() + RETRY_BACKOFF_SECONDS,
+                                 'reason': reason}
+    return _known_body_length(rel_path, encoding, reason or '원인 미상')
+
+
+def _known_body_length(rel_path: str, encoding: str, reason: str) -> Tuple[Optional[int], Optional[str]]:
+    """HEAD 실패 시 폴백 — 이미 캐시된 본문이 있으면 그 바이트 길이(=실제로 내려줄 것)."""
+    with _LOCK:
+        entry = _CACHE.get(rel_path)
+        text = entry['text'] if entry is not None else None
+    if text is None:
+        return None, f'파일 크기를 확인하지 못했습니다({reason})'
+    try:
+        return len(text.encode(encoding)), None
+    except Exception:                                 # pragma: no cover
+        return None, f'파일 크기를 확인하지 못했습니다({reason})'
 
 
 _CONFIG_ERROR_KEY = '__config__'
@@ -657,3 +871,5 @@ def reset_cache() -> None:
     """테스트 전용 — 프로세스 캐시를 비웁니다. 운영 코드에서 부르지 마세요."""
     with _LOCK:
         _CACHE.clear()
+        _LOCAL_OVERLAY.clear()
+        _SIZE_CACHE.clear()

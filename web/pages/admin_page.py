@@ -16,6 +16,7 @@ import os
 
 from nicegui import ui
 
+from utils import data_source
 from utils.db import HISTORY_FILE
 from web.auth import admin_logout, get_admin_password_hash, is_admin, try_admin_login
 from web.layout import layout
@@ -61,6 +62,20 @@ def render_admin_login() -> None:
     ui.button('로그인', on_click=_submit)
 
 
+def history_source_text() -> str:
+    """관리자 콘솔의 '읽기 경로' 한 줄 — 지금 화면이 누적 이력을 어디서 읽고 있는지 (§0-1).
+
+    `/admin` 과 `/admin/macro` 가 같은 줄을 그리므로 여기 한 곳에만 둡니다(§0-3-10 —
+    `render_admin_login` 을 매크로 화면이 재사용하는 것과 같은 방향).
+    """
+    if not data_source.is_remote_enabled():
+        return "로컬 파일 (원격 데이터 주소 미설정)"
+    if data_source.local_overlay_active(HISTORY_FILE):
+        return ("로컬 파일 — 관리자가 이 서버에서 수동 입력한 뒤라, 자동 수집이 다음 이력을 "
+                "커밋할 때까지 로컬을 우선합니다")
+    return "원격(저장소 최신 커밋) 우선 — 실패 시 서버에 함께 배포된 사본"
+
+
 def _render_console() -> None:
     ui.label('🔓 관리자 권한 인증 성공').classes('text-green-700 font-bold')
 
@@ -80,7 +95,9 @@ def _render_console() -> None:
         #    없습니다(§0-3-4). 여기서 실제로 알고 싶은 건 "그 파일이 있느냐"뿐이라
         #    저장소 기준 파일명 + 있음/없음으로 줄였습니다.
         ui.label(f'누적 이력 파일: {os.path.basename(HISTORY_FILE)} (저장소 루트)')
-        ui.label(f'파일 존재 여부: {"있음" if os.path.exists(HISTORY_FILE) else "없음"}')
+        # 2026-09-07 (#205): "파일 존재 여부(로컬)" 는 화면이 실제로 읽는 곳(원격 우선)과 달라
+        # 사실을 말하지 못했습니다. 매크로 화면과 같은 '읽기 경로' 한 줄로 바꿉니다(§0-1).
+        ui.label(f'읽기 경로: {history_source_text()}')
 
     # 2026-08-17(6단계) — 수동 데이터 입력 콘솔은 원본(`views/macro_view.py` 가
     # `render_admin_console()` 을 화면 안에서 호출)과 **같은 자리**인 매크로 화면에

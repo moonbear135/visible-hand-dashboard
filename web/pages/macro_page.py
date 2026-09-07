@@ -46,8 +46,36 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
    호출하지는 않습니다"). 그래서 Render 에 두 키가 없어도 이 화면은 원본과 **동일하게**
    동작합니다 — AI 코멘트 파일이 없으면 지표마다 "AI 코멘트가 준비되지 않았습니다."가
    뜨고, KRX 실측 컬럼이 없으면 그 지표만 "데이터 없음 / 산출 불가"로 빠집니다(§0-1).
+
+🌐 데이터 읽기 경로 — 2026-09-07 (#205) **원격 우선으로 통일 + 관리자 쓰기 직후는 로컬 덮개**
+   문제: 이 화면의 "📅 기준 영업일"·"📅 마지막 동기화"·노후 경고·관리자 통계·트렌드 차트/표/
+   CSV 는 `_load_history_df()` 가 `pd.read_csv(HISTORY_FILE)` 로 **컨테이너 로컬을 직접** 읽었고,
+   같은 화면의 AI 코멘트 "생성 일자"만 `load_json_file_async`(원격 우선)를 탔습니다. Render 는
+   `market_history.csv` 커밋으로 재배포하지 않으므로 로컬 사본은 배포 시점에 얼어붙고, 며칠
+   지나면 한 화면 안에서 두 날짜가 어긋났습니다(2026-09-06 실측 09-04 vs 09-06 — §0-1).
+   `utils/data_source.py` 는 이 로컬 읽기를 "관리자 수동 입력(`utils/db.py::
+   save_and_load_history`)과 읽기·쓰기 짝을 맞추기 위한 의도적 예외"로 문서화하고 있었습니다.
+   조사(코드로 직접 확인):
+     · `save_and_load_history()` 는 `market_history.csv`(+`.bak`) 한 파일만 로컬에 쓰고 병합된
+       DataFrame 을 돌려주지만, 유일한 호출부인 이 화면의 `_submit()` 은 그 반환값을 **버리고**
+       (`_, _, save_log, save_score, _, _`) `ui.navigate.reload()` 로 화면을 다시 엽니다. 즉 "쓴
+       값을 같은 요청 안에서 메모리로 보여주는" 흐름은 없고, 실제로는 **다음 요청이 파일을
+       다시 읽어** 반영을 확인합니다. `scrape_daily.py` 등 다른 호출자는 없습니다.
+     · 따라서 읽기를 무작정 원격 우선으로 바꾸면 관리자가 방금 쓴 행이 보이지 않습니다 —
+       원격 캐시 TTL(10분) 문제가 아니라, Render 의 로컬 쓰기는 저장소로 되돌아가지 않으므로
+       **원격에는 그 행이 영원히 없기** 때문입니다.
+   결론(설계): 읽기는 전부 `data_source.read_text()`(원격 우선, AI 코멘트와 같은 기준)로 통일
+   하고, `utils/db.py::_safe_write_history` 가 쓰고 나서 `data_source.note_local_write()` 로
+   "방금 로컬에 썼다"를 알리면 `data_source` 가 그 파일에 **로컬 덮개**를 걸어 원격 내용이
+   그 뒤에 실제로 바뀔 때(배치가 다음 이력을 커밋)까지 로컬을 돌려줍니다. 쓰기 경로의 병합
+   기준도 같은 `read_text()` 를 거칩니다. 이 화면의 파일은 **읽는 함수만** 바뀌었고 계산·
+   레이아웃·문구는 그대로입니다. 근거 전문은 `utils/data_source.py` `_REMOTE_ROOT_FILES` 주석.
+   ⚠️ 관리자 수동 입력은 컨테이너 안에만 남는 임시 보정입니다 — 배치가 다음 커밋을 올리면
+      그 값은 화면에서 사라지고(원격이 다시 기준), 재배포 시에도 사라집니다. 관리자 콘솔의
+      "읽기 경로" 줄이 지금 어느 쪽을 보고 있는지 알려 줍니다.
 """
 
+import io
 import os
 from datetime import datetime, timedelta
 
@@ -61,6 +89,7 @@ import pandas as pd
 from nicegui import ui
 
 # 2026-08-06 2차 감사 5-1/5-2: 가중치·정규화 로직을 scrape_daily.py와 공유하는 단일 출처
+from utils import data_source
 from utils.constants import RISK_WEIGHTS, INVESTOR_WEIGHTS
 from utils.db import COL_MAP, HISTORY_FILE, save_and_load_history
 from utils.macro_scoring import (
@@ -75,10 +104,10 @@ from web.auth import is_admin
 from web.blocking import run_blocking
 from web.components import (
     banner, chart_layout, compact, download_button, error_banner, esc,
-    info_banner, success_banner, warning_banner,
+    info_banner, kst_today_str, success_banner, warning_banner,
 )
 from web.layout import layout
-from web.pages.admin_page import render_admin_login
+from web.pages.admin_page import history_source_text, render_admin_login
 from web.state import (
     PAGE_RESPONSE_TIMEOUT_SECONDS,
     data_path,
@@ -539,12 +568,28 @@ def _today_kst():
     return datetime.now(KST).date() if KST else datetime.today().date()
 
 
+def _load_history_text():
+    """누적 이력 CSV 본문 — 원격 우선(`data_source.read_text`), 관리자가 방금 썼으면 로컬 덮개.
+
+    2026-09-07 (#205): 예전 `pd.read_csv(HISTORY_FILE)`(로컬 직접) 자리. 반환은 `(본문 또는 None,
+    실패사유 또는 None)`. `utf-8-sig` 는 같은 파일을 읽는 `utils/report_db.py`·`pegy_page.py`
+    와 같은 관례(엑셀 BOM 방어).
+    """
+    text, error, _version = data_source.read_text(HISTORY_FILE, encoding="utf-8-sig")
+    return text, error
+
+
 def _load_history_df():
-    """읽기 전용으로 누적 이력 CSV 를 로드합니다 (실패 시 빈 DataFrame)."""
-    if not os.path.exists(HISTORY_FILE):
+    """읽기 전용으로 누적 이력 CSV 를 로드합니다 (실패 시 빈 DataFrame).
+
+    2026-09-07 (#205): 파일을 여는 일은 `_load_history_text()`(원격 우선)가 하고, 그 뒤의
+    처리(한글 컬럼 복원·Date 문자열화)는 예전과 글자 하나 다르지 않습니다.
+    """
+    text, _error = _load_history_text()
+    if text is None:
         return pd.DataFrame()
     try:
-        df = pd.read_csv(HISTORY_FILE)
+        df = pd.read_csv(io.StringIO(text))
         df = df.rename(columns={v: k for k, v in COL_MAP.items()})
         df["Date"] = df["Date"].astype(str)
         return df
@@ -619,9 +664,12 @@ def fetch_verified_market_data(override_date=None, override_kospi=None, override
         date_key = target_date.strftime("%Y-%m-%d")
         display_date = target_date.strftime("%Y년 %m월 %d일")
         
-        if os.path.exists(HISTORY_FILE):
+        # 2026-09-07 (#205): `os.path.exists(HISTORY_FILE)` + `pd.read_csv(HISTORY_FILE)`(로컬 직접)
+        # 대신 `_load_history_df()`(원격 우선 → 로컬 덮개 → 로컬). 아래 분기 순서·계산은 그대로.
+        _history_text, _history_error = _load_history_text()
+        if _history_text is not None:
             try:
-                history_df = pd.read_csv(HISTORY_FILE)
+                history_df = pd.read_csv(io.StringIO(_history_text))
                 if not history_df.empty:
                     history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
                     history_df["Date"] = history_df["Date"].astype(str)
@@ -1032,10 +1080,12 @@ async def _render_admin_console() -> None:
     # ⚠️ 2026-08-17 — 서버 **절대경로** 노출을 걷어냈습니다(`web/pages/admin_page.py` 와 동일한
     #    이유·표기). 관리자 전용이라 위험도는 낮지만 화면에 서버 내부 디렉터리 구조를 그릴
     #    이유가 없고(§0-3-4), 여기서 실제로 알고 싶은 건 "그 파일이 있느냐"뿐입니다.
+    # 2026-09-07 (#205): 예전의 "파일 존재 여부(로컬)" 줄은 이 화면이 실제로 읽는 곳과 달라
+    # (원격 우선) 사실을 말하지 못했습니다. 지금 어느 경로를 보고 있는지로 바꿉니다(§0-1).
     banner('info',
            f'⚙️ [관리자 시스템 정보]<br>· <b>누적 이력 파일:</b> {esc(os.path.basename(HISTORY_FILE))}'
            ' (저장소 루트)'
-           f'<br>· <b>파일 존재 여부:</b> {esc("있음" if os.path.exists(HISTORY_FILE) else "없음")}')
+           f'<br>· <b>읽기 경로:</b> {esc(history_source_text())}')
 
     with ui.expansion('🛠️ 관리자 전용 데이터 수동 제어실 (비상 입력 및 가이드)', value=True).classes('w-full'):
         ui.markdown(
@@ -1244,15 +1294,22 @@ async def _render_ai_commentary(details, score) -> None:
     ai_comments_data = {}
     ai_comment_dates = {}
     ai_commentary_file = data_path('macro_commentary.json')
-    if os.path.exists(ai_commentary_file):
-        payload, load_error = await load_json_file_async(ai_commentary_file)
-        if load_error:
+    # 2026-09-07 (#205): 예전엔 `os.path.exists(...)`(로컬 사본 유무)로 먼저 걸렀습니다 —
+    # `load_json_file_async` 는 원격에서도 읽으므로, 사본이 없는 원격 모드에서는 원격에 코멘트가
+    # 있어도 조용히 건너뛰었습니다. `us_stocks_page.py` M11 처방: 실제로 읽어 보고 "파일이 아직
+    # 없음"(배치가 아직 안 돈 정상 상태)만 조용히, 그 밖의 실패는 예전처럼 경고 배너.
+    payload, load_error = await load_json_file_async(ai_commentary_file)
+    if load_error:
+        # "파일 없음"(`…이 없습니다.`)만 조용히. 원격 실패("내려받지 못했고 … 사본도 없습니다")
+        # 와 손상("읽지 못했습니다")은 파일이 없는 게 아니라 못 읽은 것이므로 배너.
+        if ("없습니다" not in load_error or "내려받지" in load_error
+                or "읽지 못했습니다" in load_error):
             # 🔴 원본은 `st.warning(f"...: {e}")` 로 **예외 원문을 화면에 그대로** 노출했습니다
             #    (§0-3-4 위반). 상세는 `load_json_file` 이 서버 로그로만 보냅니다.
             warning_banner('⚠️ AI 코멘트 파일을 읽지 못했습니다. 지표별 코멘트는 표시되지 않습니다.')
-        else:
-            ai_comments_data = (payload or {}).get("comments", {}) or {}
-            ai_comment_dates = (payload or {}).get("comment_dates", {}) or {}
+    else:
+        ai_comments_data = (payload or {}).get("comments", {}) or {}
+        ai_comment_dates = (payload or {}).get("comment_dates", {}) or {}
 
     today_str_kr = _today_kst().strftime("%Y-%m-%d")
     warning_items_html = ""
@@ -1450,7 +1507,9 @@ def _render_trend_chart(history_df) -> None:
 
         download_button(
             '📥 전체 시장 리스크 역사적 데이터 다운로드 (CSV)',
-            lambda: f"market_risk_history_{datetime.now().strftime('%Y%m%d')}.csv",
+            # 2026-09-07 (#205): 파일명 날짜는 KST 단일 출처(`kst_today_str`) — 예전 `datetime.now()`
+            # 는 서버 로컬(Render=UTC)이라 자정~09시 사이 다른 화면의 버튼과 하루 어긋났습니다.
+            lambda: f"market_risk_history_{kst_today_str()}.csv",
             _csv_bytes,
             media_type='text/csv',
         )
@@ -1532,8 +1591,9 @@ async def _render_dashboard() -> None:
     admin_mode = is_admin()
 
     # 🔴 2026-08-21 — `fetch_verified_market_data()` 는 인자 없이 부르면 **읽기 전용**
-    #    경로를 타는데, 그 안에서 `market_history.csv` 를 `pandas.read_csv()` 로 여러 번
-    #    읽습니다(`_load_history_df()` 포함). 관리자 전용 화면이라 영향받는 사람이 적을
+    #    경로를 타는데, 그 안에서 `market_history.csv` 를 여러 번 읽어 파싱합니다
+    #    (`_load_history_df()` 포함 — 2026-09-07 #205 부터 원격 우선이라 네트워크 왕복도 여기).
+    #    관리자 전용 화면이라 영향받는 사람이 적을
     #    뿐, 이벤트 루프를 붙잡는다는 점은 다른 화면과 똑같습니다 — 관리자가 이 화면을
     #    여는 동안 **일반 방문자 전원**이 끊깁니다(`web/blocking.py` 모듈 독스트링).
     #    ⚠️ 인자 없이 부르는 이 경로에는 콜백(`on_admin_note`/`on_warning`/`on_error`)을

@@ -25,7 +25,6 @@ Streamlit 쪽 원본은 컷오버까지 그대로 살려둡니다(듀얼런 — 
 """
 
 import io
-import os
 from datetime import datetime
 
 try:
@@ -38,15 +37,10 @@ import pandas as pd
 from nicegui import ui
 
 
-def _kst_today_str() -> str:
-    """다운로드 파일명용 오늘 날짜(KST, YYYYMMDD).
-
-    2026-08-29 재감사 L-5: 다운로드 버튼 4곳이 `datetime.now()`(서버 시각 — Render는
-    UTC)로 파일명을 만들고 있어, 한국 자정 근처에 받으면 파일명 날짜가 실제 한국
-    날짜와 하루 어긋날 수 있었습니다. `dividend_page.py`(커밋 `ba2b62b`)와 같은 계열
-    수정이며, 이 파일이 이미 갖고 있는 KST 헬퍼(위 :23-27)를 그대로 씁니다.
-    """
-    return (datetime.now(KST) if KST else datetime.now()).strftime('%Y%m%d')
+# 다운로드 파일명용 오늘 날짜(KST, YYYYMMDD) — 2026-08-29 재감사 L-5 에서 이 파일 안의
+# `_kst_today_str()` 로 고쳤던 것을, 2026-09-07 (#205) 에 공용 `web.components.kst_today_str`
+# 로 옮겼습니다(같은 화면에 붙는 종목 다운로드 도구·매크로 CSV 가 서버 UTC 를 써서 자정~09시
+# 사이 파일명 날짜가 하루 어긋났음). 아래 `from web.components import ...` 에서 가져옵니다.
 
 from utils import data_source
 from utils.constants import GROWTH_CAP_PCT, SH_RETURN_CAP_PCT, GEFF_TOTAL_CAP_PCT
@@ -77,6 +71,7 @@ from web.components import (
     graham_reference_box,
     graham_unavailable_box,
     info_banner,
+    kst_today_str,
     loss_banner_html,
     market_label_html,
     pager,
@@ -253,11 +248,14 @@ async def load_kospi200_snapshot():
 async def load_pegy_summary_history():
     """data/pegy_summary_history.json 누적 수치 이력을 로드합니다. 없으면 빈 목록."""
     path = data_path(SUMMARY_HISTORY_FILENAME)
-    if not os.path.exists(path):
-        return []
+    # 2026-09-07 (#205): 예전엔 `os.path.exists(path)`(로컬 사본 유무)로 미리 걸러 원격 모드에서
+    # 원격에 파일이 있어도 조용히 빈 목록을 돌려줄 수 있었습니다 — `us_stocks_page.py::
+    # load_us_summary_history()` 의 M11(2026-08-29) 수정과 같은 처방: 존재 판정 없이 실제로
+    # 읽어 보고, "파일이 아직 없음"만 조용히 빈 목록으로 처리합니다.
     payload, load_error = await load_json_file_async(path)
     if payload is None:
-        warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
+        if load_error and "없습니다" not in load_error:
+            warning_banner(f"⚠️ 누적 요약 히스토리를 읽지 못했습니다. {load_error}")
         return []
     return payload
 
@@ -1352,37 +1350,42 @@ def _render_raw_downloads(admin: bool) -> None:
     latest_path = data_path(SNAPSHOT_FILENAME)
     history_path = data_path(SUMMARY_HISTORY_FILENAME)
 
+    # 2026-09-07 (#205): 예전엔 `os.path.exists(...)`(로컬 사본 유무)로 버튼을 그릴지 정했습니다.
+    # 버튼이 내려주는 바이트는 `read_download_bytes()`(원격 우선)라, 배포 이미지에 사본이 없는
+    # 원격 모드에서는 화면엔 데이터가 보이는데 버튼만 조용히 사라지는 비대칭이 있었습니다.
+    # `us_stocks_page.py::_render_raw_downloads`(M11)·`dividend_page.py`(M10)와 같은 처방 —
+    # 존재 판정 없이 항상 그리고, 실패는 `download_button` 의 `failure_text` 알림에 맡깁니다.
     with ui.row().classes('w-full gap-3 items-center'):
-        if os.path.exists(latest_path):
+        download_button(
+            '📥 시가총액 상위 500 최신 스냅샷 다운로드 (JSON)',
+            f"kospi200_latest_{kst_today_str()}.json",
+            lambda: read_download_bytes(latest_path),
+            media_type='application/json',
+            failure_text='최신 스냅샷 파일을 읽지 못했습니다.',
+        )
+        if admin:
             download_button(
-                '📥 시가총액 상위 500 최신 스냅샷 다운로드 (JSON)',
-                f"kospi200_latest_{_kst_today_str()}.json",
-                lambda: read_download_bytes(latest_path),
-                media_type='application/json',
+                '📊 [관리자] 최신 스냅샷 다운로드 (Excel)',
+                f"kospi200_latest_{kst_today_str()}.csv",
+                lambda: _snapshot_csv_bytes(latest_path),
+                media_type='text/csv',
+                failure_text='[관리자] 스냅샷을 CSV로 변환하지 못했습니다.',
             )
-            if admin:
-                download_button(
-                    '📊 [관리자] 최신 스냅샷 다운로드 (Excel)',
-                    f"kospi200_latest_{_kst_today_str()}.csv",
-                    lambda: _snapshot_csv_bytes(latest_path),
-                    media_type='text/csv',
-                    failure_text='[관리자] 스냅샷을 CSV로 변환하지 못했습니다.',
-                )
-        if os.path.exists(history_path):
+        download_button(
+            '📥 누적 요약 히스토리 다운로드 (JSON)',
+            f"pegy_summary_history_{kst_today_str()}.json",
+            lambda: read_download_bytes(history_path),
+            media_type='application/json',
+            failure_text='누적 요약 히스토리 파일을 읽지 못했습니다.',
+        )
+        if admin:
             download_button(
-                '📥 누적 요약 히스토리 다운로드 (JSON)',
-                f"pegy_summary_history_{_kst_today_str()}.json",
-                lambda: read_download_bytes(history_path),
-                media_type='application/json',
+                '📊 [관리자] 히스토리 다운로드 (Excel)',
+                f"pegy_summary_history_{kst_today_str()}.csv",
+                lambda: _summary_history_csv_bytes(history_path),
+                media_type='text/csv',
+                failure_text='[관리자] 히스토리를 CSV로 변환하지 못했습니다.',
             )
-            if admin:
-                download_button(
-                    '📊 [관리자] 히스토리 다운로드 (Excel)',
-                    f"pegy_summary_history_{_kst_today_str()}.csv",
-                    lambda: _summary_history_csv_bytes(history_path),
-                    media_type='text/csv',
-                    failure_text='[관리자] 히스토리를 CSV로 변환하지 못했습니다.',
-                )
 
 
 def _summary_history_csv_bytes(history_path: str):

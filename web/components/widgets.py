@@ -12,11 +12,30 @@ Streamlit 에는 있었지만 NiceGUI 에는 동등 위젯이 없는 것들(`st.
    원인 상세는 `print()` 로 서버 로그에만 남기고, 화면에는 사람이 읽는 문장만 둡니다.
 """
 
+from datetime import datetime, timedelta, timezone
 from typing import Callable, Optional, Union
 
 from nicegui import run, ui
 
 from web.components.html import FOOTER_NOTICE_HTML, compact, esc, fmt_num
+
+# 한국 표준시 — `zoneinfo` 가 아니라 고정 오프셋(+09:00)입니다. 한국은 서머타임이 없어 값이
+# 같고, tzdata 가 없는 배포 이미지에서도 조용히 서버 로컬 시각으로 떨어지지 않습니다
+# (`web/pages/dividend_page.py::today_kst()` 와 같은 방식).
+KST = timezone(timedelta(hours=9))
+
+
+def kst_today_str() -> str:
+    """다운로드 파일명에 붙이는 **오늘 날짜(KST, YYYYMMDD)** — 모든 화면의 단일 출처.
+
+    🔴 2026-09-07 (#205) — 예전에는 파일명 날짜를 화면마다 따로 만들었습니다: `pegy_page.py`
+       (`_kst_today_str`, 2026-08-29 L-5 에서 KST 로 고침)와 `dividend_page.py`(`today_kst()`)는
+       KST 인데, 같은 화면에 붙는 공용 종목 다운로드 도구(`stock_download.py`)와
+       `macro_page.py` 의 CSV 버튼은 `datetime.now()`(서버 로컬 = Render 는 UTC)를 썼습니다.
+       그래서 한국 자정~오전 9시 사이에는 **같은 화면의 두 버튼이 하루 다른 날짜**를 파일명에
+       박았습니다(§0-1 — 같은 "오늘"을 두 기준으로 말하지 않기). 이 함수 하나만 쓰세요.
+    """
+    return datetime.now(timezone.utc).astimezone(KST).strftime('%Y%m%d')
 
 # 배너 종류별 색상 (프로젝트 카드 팔레트와 동일 계열)
 _BANNER_PALETTE = {

@@ -15,7 +15,6 @@
   - 이 검색창은 **다운로드 전용**이라 아래 카드 목록 필터와 공유하지 않습니다(회귀 위험 회피).
 """
 
-from datetime import datetime
 from typing import Callable, List
 
 from nicegui import ui
@@ -30,7 +29,7 @@ from utils.stock_history import load_stock_history, stock_history_path
 
 from web.blocking import run_blocking
 from web.components.html import compact, esc
-from web.components.widgets import download_button, info_banner, warning_banner
+from web.components.widgets import download_button, info_banner, kst_today_str, warning_banner
 
 
 async def render_stock_download_tool(
@@ -170,7 +169,10 @@ async def render_stock_download_tool(
                 </div>
             """)).classes('w-full')
 
-            date_str = datetime.now().strftime('%Y%m%d')
+            # 2026-09-07 (#205): 파일명 날짜는 KST 단일 출처(`kst_today_str`). 예전 `datetime.now()`
+            # (서버 로컬 = Render 는 UTC)는 같은 화면의 raw 다운로드 버튼(KST)과 자정~09시
+            # 사이 하루 어긋났습니다.
+            date_str = kst_today_str()
             with ui.row().classes('w-full gap-3'):
                 download_button(
                     '⬇ CSV로 다운로드',

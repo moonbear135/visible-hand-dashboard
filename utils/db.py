@@ -22,8 +22,20 @@
       보내는가" 뿐입니다.
    ⚠️ 콜백에 넘기는 문구에는 예외 원문·경로·트레이스백을 넣지 않습니다(§0-3-4).
       상세 원인은 `print()`/로거로 서버 쪽에만 남깁니다.
+
+🌐 2026-09-07 (#205) — **읽기는 `utils/data_source.read_text()`(원격 우선), 쓰기는 로컬.**
+   예전에는 병합 기준(base)을 `pd.read_csv(HISTORY_FILE)` 로 컨테이너 로컬에서 직접 읽었습니다.
+   Render 는 `DATA_SOURCE_BASE_URL` 로 원격에서 읽고 `market_history.csv` 커밋은 재배포를
+   부르지 않으므로, 로컬 사본은 마지막 코드 배포 시점에 얼어붙습니다 → 관리자가 오늘 행을
+   입력하면 **며칠치 배치 행이 빠진 사본 위에** 얹혀 저장됐습니다. 이제 병합 기준은 화면이
+   읽는 것과 같은 경로(원격 우선 → 관리자가 방금 썼으면 로컬 덮개)에서 가져옵니다.
+   쓰고 나서는 `data_source.note_local_write()` 로 "방금 로컬에 썼다"를 알려, 다음 요청
+   (`macro_page._submit` 의 `ui.navigate.reload()`)이 원격 캐시가 아니라 방금 쓴 로컬 파일을
+   읽게 합니다. 경위·근거는 `utils/data_source.py` 의 `_REMOTE_ROOT_FILES` 위 주석.
+   ⚠️ 계산·병합·저장 로직과 수치는 그대로입니다 — 바뀐 것은 "기준 파일을 어디서 읽는가"뿐.
 """
 
+import io
 import logging
 import os
 import shutil
@@ -37,6 +49,8 @@ except Exception:
 import pandas as pd
 import requests
 from bs4 import BeautifulSoup
+
+from utils import data_source
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -101,6 +115,29 @@ def _safe_write_history(df):
     except Exception as e:
         print(f"⚠️ 이력 백업(.bak) 생성 실패: {e}")
     df.rename(columns=COL_MAP).to_csv(HISTORY_FILE, index=False)
+    # 2026-09-07 (#205): 방금 쓴 로컬 파일을 다음 읽기가 원격 캐시 대신 신뢰하도록 알립니다
+    # (원격이 꺼져 있거나 이 경로가 원격 대상이 아니면 아무 일도 하지 않습니다).
+    data_source.note_local_write(HISTORY_FILE)
+
+
+def _read_history_text():
+    """누적 이력 CSV 본문을 화면과 **같은 경로**(원격 우선 → 로컬 덮개 → 로컬)로 읽습니다.
+
+    :return: `(본문 문자열 또는 None, 실패사유 또는 None)`. 파일이 아예 없으면
+        `(None, '…이 없습니다.')` — 호출부는 이것을 "신규 파일 작성" 분기로 씁니다.
+    """
+    text, error, _version = data_source.read_text(HISTORY_FILE, encoding="utf-8-sig")
+    return text, error
+
+
+def _history_missing(error) -> bool:
+    """`_read_history_text()` 의 실패사유가 '파일 없음'(정상적으로 있을 수 있는 상태)인지."""
+    return bool(error) and "없습니다" in error
+
+
+def _frame_from_text(text):
+    """CSV 본문 → 영문 컬럼 DataFrame (예전 `pd.read_csv(HISTORY_FILE)` 직후와 같은 모양)."""
+    return pd.read_csv(io.StringIO(text))
 
 # 한글 파일 보관용 컬럼 매핑 딕셔너리 정의
 COL_MAP = {
@@ -260,9 +297,14 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
         if is_admin:
             _notify(on_admin_note, message, level=logging.INFO)
 
-    if os.path.exists(HISTORY_FILE):
+    # 2026-09-07 (#205): 병합 기준을 로컬 사본이 아니라 화면과 같은 경로(원격 우선)에서 읽습니다.
+    # "파일 없음"만 신규 작성 분기로 가고, 그 밖의 읽기 실패는 예전처럼 아무것도 쓰지 않습니다.
+    base_text, base_error = _read_history_text()
+    if base_text is not None or not _history_missing(base_error):
         try:
-            history_df = pd.read_csv(HISTORY_FILE)
+            if base_text is None:
+                raise RuntimeError(base_error or "이력 파일을 읽지 못했습니다")
+            history_df = _frame_from_text(base_text)
             history_df = history_df.rename(columns={v: k for k, v in COL_MAP.items()})
             history_df["Date"] = history_df["Date"].astype(str)
 
@@ -299,7 +341,8 @@ def save_and_load_history(date_key, score, kospi_close, usd_close, retail, forei
             )
             # 원본 파일을 그대로 다시 읽어 최대한 살려서 반환 (실패하면 빈 DataFrame)
             try:
-                history_df = pd.read_csv(HISTORY_FILE).rename(columns={v: k for k, v in COL_MAP.items()})
+                salvage_text, _salvage_error = _read_history_text()
+                history_df = _frame_from_text(salvage_text).rename(columns={v: k for k, v in COL_MAP.items()})
                 history_df["Date"] = history_df["Date"].astype(str)
             except Exception:
                 history_df = pd.DataFrame()

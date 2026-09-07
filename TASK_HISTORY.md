@@ -3825,6 +3825,57 @@ YAML 파싱·`if`·단계 조건 덤프로 눈 확인.
 직후 알림"으로 당기고 싶다면 같은 패턴을 적용할 수 있음 — 지시 범위(크롤링 소비 배치) 밖이라 안 함. (d) `.github/workflows/` 는 원격
 도구가 보호 경로로 막아(#203 전례) `device_bash` 로 전달·md5 대조. (e) GitHub push 권한 없는 세션 — **로컬 커밋까지만**, 오너가 push.
 
+### #205 — [오너 지적, "이참에 정리하자"] 화면 시각/날짜 라벨 전수 감사 후속 — `/macro` 원격·로컬 혼재 해소 + 다운로드 파일명 KST 통일 + 잔여 로컬 존재 게이트 제거 + 재발 방지 회귀 테스트 (2026-09-07)
+
+**경위.** #196-A(`/indicator`)·#198(`/kr`)에 이어, 오너가 "다른 페이지에도 같은 유형의 불일치가 더 있는지 찾아봐 달라"고 요청. 감사(코드
+수정 없이 보고만) 결과 공개 페이지 9개는 새 불일치가 없었고, `/macro`(관리자 전용) 한 곳에서 진짜 드리프트가 확인됨 — "📅 기준
+영업일"·"마지막 동기화"(`market_history.csv`, 로컬 직접)와 AI 코멘트 "생성 일자"(원격 우선)가 같은 화면 안에서 서로 다른 날짜를 말함
+(실측 09-04 vs 09-06). 부수적으로 (1) 다운로드 파일명 날짜가 화면마다 KST/UTC(서버 로컬)로 갈려 자정~09시 KST 사이 같은 화면 두 버튼이
+하루 다른 날짜를 찍을 수 있는 것, (2) `pegy_page.py`·`dividend_page.py`·`macro_page.py`에 남은 "로컬 사본 존재 여부"로 버튼 노출·용량
+상한을 판정하는 잔여 지점(원격 모드에서 판정 기준과 실물이 어긋남) 두 가지를 더 찾음. 오너가 "이참에 정리하자"고 승인.
+
+**1) `/macro` 원격·로컬 혼재 — 근거 조사 후 해제.** `utils/data_source.py`는 이 로컬 읽기를 "관리자 수동 입력(`utils/db.py::
+save_and_load_history`)과 읽기·쓰기 짝을 맞추기 위한 의도적 예외"로 문서화하고 있었음. 코드로 직접 확인한 결과: `save_and_load_history()`의
+유일한 호출부(`macro_page._submit`)는 반환값을 버리고 `ui.navigate.reload()`로 화면을 다시 열 뿐, "쓴 값을 같은 요청 안에서 바로 보여주는"
+흐름은 없음 — 실제로는 항상 "로컬에 쓰기 → 새 요청에서 파일 다시 읽기"였음. 즉 예외의 전제("쓰고 바로 읽는다")가 애초에 성립하지 않았음.
+
+처방: **읽기는 전부 `data_source.read_text()`(원격 우선)로 통일**하되, 앱이 그 파일을 로컬에 **쓴 직후부터는 로컬을 신뢰**하는 "로컬
+덮개(local overlay)"를 `data_source.py`에 신설(`note_local_write()` / `_LOCAL_OVERLAY`). 덮개는 원격 리비전이 쓰기 시점 기준과 **실제로
+달라질 때**(배치가 다음 이력을 커밋) 자동으로 걷힘 — 관리자 수동 입력은 컨테이너 안에만 남는 임시 보정이고, 배치가 새로 커밋한 이력
+그 뒤부터 "확정 커밋된 이력"이므로 그쪽이 맞음. `utils/db.py::_safe_write_history`가 쓰고 나서 `note_local_write()`를 부르고, 병합
+기준(base)도 같은 `read_text()`를 거치게 바꿔 "관리자가 얼어붙은 사본 위에 얹어 며칠치 배치 행을 잃는" 부수 위험도 없앰. 원격이
+꺼져 있으면(`DATA_SOURCE_BASE_URL` 미설정) 덮개는 아무 일도 하지 않고 예전과 동일. 관리자 콘솔(`/admin`, `/admin/macro`)의 "파일 존재
+여부(로컬)" 표시도 실제로 읽는 경로를 말하는 `history_source_text()`(원격/로컬 덮개/원격 꺼짐 3분기)로 교체.
+
+**2) 다운로드 파일명 날짜 KST 통일.** `web/components/stock_download.py`(공용 종목 다운로드 도구)와 `macro_page.py`의 CSV 버튼이
+`datetime.now()`(서버 로컬 = Render 는 UTC)를 썼던 것을, `pegy_page.py`의 기존 `_kst_today_str()`(2026-08-29 L-5)를 `web/components/
+widgets.py::kst_today_str()`로 옮겨 공용화하고 전부 그것만 쓰도록 통일. `pegy_page.py`도 자체 정의를 지우고 공용 함수를 가져다 씀.
+
+**3) 잔여 "로컬 존재 여부" 게이트 제거.** `us_stocks_page.py`(M11)·`dividend_page.py`(M10)가 이미 쓰던 처방("존재 판정 없이 항상 그리고,
+실패는 `failure_text`에 맡긴다")을 나머지 지점에 적용:
+- `pegy_page.py::load_pegy_summary_history()` / `_render_raw_downloads()` — `os.path.exists()` 선판정 제거.
+- `macro_page.py::_render_ai_commentary()` — `os.path.exists()` 선판정 제거, "파일 없음"만 조용히·그 밖의 실패는 경고 배너로 구분.
+- `dividend_page.py::_render_raw_downloads()` — raw 원본 용량 상한 판정을 로컬 파일 크기(`os.path.getsize`)가 아니라 **실제로 내려줄
+  바이트 기준**으로 통일. `data_source.py`에 `content_length()`(원격 모드는 HEAD 요청의 `Content-Length`, `Accept-Encoding: identity`로
+  압축 크기 혼동 방지 + TTL 캐시, 로컬/원격 꺼짐은 `os.path.getsize`) 신설. 원격 모드의 실제 상한이 `read_download_bytes()`가 우회하는
+  응답 크기 상한(`MAX_RESPONSE_BYTES`, 20MB)과 `RAW_DOWNLOAD_MAX_BYTES`(50MB) 중 더 작은 쪽이라는 것도 이번에 확인해
+  `effective_raw_download_cap_bytes()`로 반영(예전엔 50MB 기준으로 버튼을 그려 놓고 클릭 시 20MB 에서 실패할 수 있었음).
+
+**4) 재발 방지 — `tests/test_screen_reads_data_source.py` 신설(20건).** #197의 AST 전수 스캔 방식을 재사용해, `web/pages/`·
+`web/components/`의 모든 `.py`를 AST로 훑어 (a) 내장 `open(...)` 호출, (b) `pd.read_csv`/`pd.read_json`에 `io.StringIO`/`io.BytesIO`가
+아닌 인자를 넘기는 호출을 전부 금지. 허용 목록(`ALLOWED_OPEN`/`ALLOWED_RAW_PANDAS_READ`)은 **현재 비어 있음** — 이번 정리로 두 패키지
+안의 직접 파일 읽기가 전부 없어졌기 때문(이 테스트가 그 상태를 고정). `utils/`는 대상 밖(배치 스크립트의 로컬 체크아웃 읽기·`db.py`의
+로컬 쓰기는 의도된 것이며 `test_data_source.py`가 개별 회귀를 잡음).
+
+**검증.** `test_data_source.py`(18) · `test_pegy_page.py` + `test_dividend_page_calendar.py` + `test_dividend_us_page.py`(95) ·
+`test_event_loop_blocking.py`(15) · `test_macro_scoring.py` + `test_macro_scoring_coverage.py`(54) · 신규 `test_screen_reads_data_source.py`
+(20) 전부 통과, 회귀 없음.
+
+**하지 않은 것 / 오너 확인 필요(§0-1).** (a) `/macro` 화면 자체의 기능·레이아웃·계산은 한 글자도 안 바꿈 — 데이터를 읽는 경로만 교체.
+(b) 로컬 덮개는 프로세스 메모리 상태라 Render 재배포(다중 인스턴스·재시작) 시 초기화됨 — 그 순간 관리자가 방금 쓴 값이 다시 안 보일
+수 있으나, 애초에 로컬 쓰기 자체가 재배포에서 사라지는 것과 같은 성격의 한계라 새로 생긴 문제는 아님. (c) `content_length()`의 HEAD
+요청은 캐시 미스 시 동기 네트워크 왕복 — 화면에서는 `run_blocking()`으로 넘겨 처리(이벤트 루프 블로킹 방지, `dividend_page.py`).
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
