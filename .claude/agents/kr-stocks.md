@@ -31,6 +31,12 @@ model: inherit
 - 🔒 `tests/test_naver_item_characterization.py` + `tests/_naver_item_baseline.py` +
   `tests/fixtures/naver_item/` · `tests/fixtures/naver_item_baseline.json` — **파서 결과 고정 기준선.**
   ⚠️ 입력 HTML 은 합성 픽스처입니다 — 한계는 아래 고유 규칙 9번을 반드시 읽으세요
+- 🆕 `utils/naver_stock_api.py` + `tests/test_naver_stock_api.py` +
+  `tests/fixtures/naver_new_api/` — **네이버 신 증권(`stock.naver.com`) JSON API 파서.**
+  2026-09-10 구 서비스 종료 대비(#211). 🔴 **아직 실전에 배선돼 있지 않습니다** — 수집기는
+  여전히 구 HTML 파서를 씁니다. 배선은 **오너 승인 사항**(§0-3-6).
+  ⚠️ 이 픽스처는 **합성이 아니라 실제 응답**입니다(오너가 DevTools 에서 복사).
+  쓰기 전에 `NAVER_MIGRATION_WORK_ORDER.md` §1-5-11(NXT 함정)을 반드시 읽으세요.
 
 ## 읽기만 (수정하려면 인계)
 
