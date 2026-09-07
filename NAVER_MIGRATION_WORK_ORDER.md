@@ -136,10 +136,10 @@ https://stock.naver.com/domestic/stock/<6자리 종목코드>/price
 확인 후 이 문서에 아래를 채웁니다:
 - [x] `000660` 정체 확인 → **실시간 시세 API**(현재가·시총만, 투자정보 없음). §1-5-2
 - [x] `consensus` 정체 확인 → **투자의견·목표주가만**(추정 PER·EPS 없음). §1-5-3
-- [ ] 🔴 **투자정보(PER·추정PER·PBR·배당수익률·상장주식수) API** — `stock.naver.com/api/domestic/detail/<코드>/` 형제 중 하나로 추정, **미확인**
+- [x] 🟢 **투자정보 API 확인** → `detail?codeType=KRX`. **추정 PER·EPS 포함 — §2-2 병목 해소.** §1-5-4
 - [ ] 종목 목록(시총 순위) API 가 따로 있는가 — `sise_market_sum` 대체용, **ROE 포함 여부**
 - [ ] 인증(쿠키·토큰·Referer)이 필요한가 — 필요하면 §0-3-2 관점에서 이용 가능 여부 재검토
-- [ ] 응답에 상장주식수·ROE 가 있는가
+- [x] 상장주식수 → `listedStockCnt` 있음 / 🔴 **ROE·Forward ROE 는 없음** — 새 병목
 - [ ] 호출 빈도 제한이 있는가 (500종목 × 1회/일 이 감당되는가)
 
 ### 1-5-1. Network 탭 실측 — API 후보 확인 (2026-09-07 저녁, 오너 캡처)
@@ -266,6 +266,88 @@ https://stock.naver.com/api/domestic/detail/000660/consensus
 **화면에는 있습니다(오너 캡처).** 좌측 패널 "투자정보" 에 `시총` · `PER` · `추정PER` ·
 `PBR` · `배당수익률` 이 표시되고 있으므로, **이 값을 주는 요청이 반드시 존재합니다.**
 
+### 1-5-4. 🟢 **실측 3건 — 투자정보 API 확인. §2-2 최대 병목이 해소됩니다** (2026-09-07 저녁, 오너 복사)
+
+**주소 (원문 그대로)**
+```
+https://stock.naver.com/api/domestic/detail/000660/detail?codeType=KRX
+```
+> 형제 요청에 `detail?codeType=NXT` 도 있습니다. 우리는 **KRX** 를 씁니다.
+
+**🔴 여기에 추정 PER·EPS 가 있습니다.** `NAVER_MIGRATION_WORK_ORDER.md` §2-2 에서
+"대체 출처가 없다"고 적었던 애널리스트 컨센서스 추정치가 **이 응답에 들어 있습니다.**
+
+#### 현행 파싱 항목 → 신 API 필드 대응표 (실측 · SK하이닉스 000660)
+
+| 현행 `fetch_naver_item_dps_and_eps` 결과 | 신 API 필드 | 실측값 |
+|---|---|---|
+| 현재가 | `nowPrice` | `"1783000"` |
+| 시가총액 | `marketSum` | `"1302467886000000"` |
+| **상장주식수** | `listedStockCnt` | `"730492365"` |
+| `t_per` | `per` | `"7.95"` |
+| `t_eps` | `eps` | `"224313.0"` |
+| 🔴 **추정 PER** | `estimatedPer` | `"5.1"` |
+| 🔴 **추정 EPS** | `estimatedEps` | `"349342"` |
+| `t_pbr` | `pbr` | `"4.81"` |
+| (BPS — 현행은 안 씀) | `bps` | `"370432.11885"` |
+| **주당배당금(DPS)** | `dividendAmount` | `"3000.0"` |
+| **배당수익률** | `dividendRate` | `"0.168"` (**퍼센트 단위**) |
+| 동일업종 PER | `sameIndustryPer` | `"8.54602"` |
+
+부가로 딸려오는 것: `itemname` · `upJongName`(업종명) · `upjongCode` · **`type`(`"ST"`)** ·
+`facePrice`(액면가) · `settlement`(결산) · `frgnHoldRate`(외국인보유율) ·
+`week52HighPrice`/`week52LowPrice` · `upperLimitPrice`/`lowerLimitPrice`(상·하한가) ·
+`tradeStopYn`/`isManagement`/`marketAlertType`(거래정지·관리종목·시장경보) ·
+`comment1~3`(기업개요 3문장).
+
+#### ✅ 필드 의미를 **산술로 교차검증**했습니다 (이름만 믿지 않음 — §0-1)
+
+| 검증식 | 계산 | 응답값 | |
+|---|---|---|---|
+| `nowPrice ÷ eps` | 7.9487 | `per` = 7.95 | ✅ |
+| `nowPrice ÷ estimatedEps` | 5.1039 | `estimatedPer` = 5.1 | ✅ |
+| `nowPrice ÷ bps` | 4.8133 | `pbr` = 4.81 | ✅ |
+| `dividendAmount ÷ nowPrice × 100` | 0.1683 | `dividendRate` = 0.168 | ✅ |
+| `listedStockCnt × nowPrice` | 1,302,467,886,**795,000** | `marketSum` = 1,302,467,886,**000,000** | 🟡 |
+
+→ 앞의 4개는 필드 이름이 실제 의미와 일치함이 **수치로 확인**됐습니다.
+   특히 **`dividendRate` 는 비율(0.00168)이 아니라 퍼센트(0.168)** 입니다 — 착각하면 1000배 틀립니다.
+→ 🟡 `marketSum` 은 **백만원 단위 아래가 잘려 있습니다.** 정확한 시총이 필요하면
+   §1-5-2 의 `marketValueFullRaw`(1,302,467,886,795,000)를 쓰거나 직접 곱해야 합니다.
+
+#### 🔴 이 API 에도 **없는 것**
+
+| 항목 | 현행 출처 | 신 API |
+|---|---|---|
+| **ROE (지배주주)** | 종목상세 재무제표 표 | ❌ 없음 |
+| **Forward ROE (추정 ROE)** | 〃 (연도별 컬럼) | ❌ 없음 |
+| **EV/EBITDA** | `navercomp.wisereport.co.kr` (별도 도메인) | ❌ 없음 |
+
+→ **병목이 "추정 PER·EPS" 에서 "ROE" 로 옮겨갔습니다.** 다만 성격이 다릅니다:
+  ROE 는 **`순이익 ÷ 자기자본`** 이라 `bps`·`listedStockCnt`·`eps` 로 계산 가능성이 있고,
+  DART 에 순이익 실측치도 있습니다(§2-1). **다만 계산값은 반드시 마킹해야 합니다**
+  (§0-1 — `t_eps_calculated` 전례). Forward ROE 는 추정 순이익이 필요해 별개 문제입니다.
+  **아직 계산식을 확정하지 않았습니다 — 검증 전에 적지 않습니다.**
+
+#### 🟡 주의해야 할 필드 1개 — `krxEps`
+
+`eps` = `224313.0` 인데 `krxEps` = `"62044"` 로 **3.6배 차이**가 납니다.
+`per`(7.95)와 맞아떨어지는 쪽은 **`eps`** 이므로 현행 `t_eps` 의 대응은 `eps` 입니다.
+`krxEps` 가 무엇인지(별도재무제표? 직전 사업연도?)는 **확인하지 않았습니다 — 추측하지 않습니다.**
+🔴 **이름이 비슷한 두 필드를 혼동하면 EPS 가 조용히 3.6배 틀립니다.** 이관 시 반드시 못 박을 것.
+
+#### 🟢 덤으로 얻는 것 — 재감사 H12(우선주 부모 검증)
+
+응답에 **`type`: `"ST"`** 가 있습니다. 현행은 우선주의 부모가 진짜 보통주인지
+마스터 파일로 확인하는데, 이 필드가 종목 유형을 직접 알려줄 가능성이 있습니다.
+**단, 우선주·ETF 에서 어떤 값이 오는지 아직 안 봤습니다** — 확인 전에 쓰지 않습니다.
+
+#### §0-3-2(매너) — 요청 수가 줄어듭니다
+
+현행: 종목당 **2요청**(`item/main.naver` + WiseReport).
+이관 후: 종목당 **1요청**(`detail?codeType=KRX`) + EV/EBITDA 를 계속 쓸 경우에만 1요청 추가.
+목록 페이지를 대체할 API 는 아직 미확인(§1-6)이므로 총량은 그 결과에 달려 있습니다.
+
 ### 1-6. 남은 미확인
 
 | # | 확인할 것 |
@@ -289,9 +371,10 @@ https://stock.naver.com/api/domestic/detail/000660/consensus
 | 주당배당금(DPS) | 98% | KIND 연간요약 `dps_krw` (`data/dividend_history_kr_2023_2025.json`) | 70% | 🟡 |
 | 배당수익률 | — | KIND `dividend_yield_pct` | 70% | 🟡 |
 | PER (Trailing) | 79% | **가격 ÷ EPS 계산** | 계산 | 🟡 |
-| PBR | 98% | BPS 출처 필요 | **미확인** | ❔ |
-| **추정 PER·EPS** | **50%** | **없음** | — | 🔴 |
-| **Forward ROE** | **72%** | **없음** | — | 🔴 |
+| PBR | 98% | 🟢 **신 API `pbr`** (+ `bps` 원본까지 제공) | 미측정 | 🟢 |
+| **추정 PER·EPS** | **50%** | 🟢 **신 API `estimatedPer`·`estimatedEps`** (§1-5-4) | 미측정 | 🟢 |
+| **Forward ROE** | **72%** | **없음** | — | 🔴 **새 병목** |
+| ROE (Trailing) | — | 계산 가능성(`bps`·`eps`) — **미검증** | — | ❔ |
 
 ### 2-1. 이미 저장소 안에 있는 대체 출처 3개 (새로 붙일 필요 없음)
 
@@ -301,11 +384,16 @@ https://stock.naver.com/api/domestic/detail/000660/consensus
 - **KIND 연간 배당요약** — `data/dividend_history_kr_2023_2025.json` 8,202건(2023~2025 각 2,734종목).
   `dps_krw` · `dividend_yield_pct` · `shares_outstanding_year_end` 포함.
 
-### 2-2. 🔴 진짜 병목 — 애널리스트 컨센서스
+### 2-2. 🟢 병목 해소 — 그리고 새 병목 하나
 
-⚠️ **2026-09-07 저녁 정정** — 아래 서술은 "구 사이트가 죽고 신 사이트에도 없다면"을 가정한
-것이었습니다. §1-2 에서 **신 사이트에 추정 PER·EPS 가 있음이 확인**되어, 이 시나리오의 발생
-확률은 크게 낮아졌습니다. 아래는 그래도 최악의 경우를 위해 남겨 둡니다.
+⚠️ **2026-09-07 저녁 2차 정정** — 아래 서술은 "구 사이트가 죽고 신 사이트에도 없다면"을
+가정한 것이었습니다. §1-5-4 에서 **신 사이트 API 응답에 `estimatedPer`·`estimatedEps` 가
+실제로 들어 있음을 실측**했으므로, **이 시나리오는 사실상 해소**되었습니다.
+
+🔴 **대신 새 병목이 생겼습니다 — `ROE` 와 `Forward ROE`.** 지금은 종목상세 재무제표 표에서
+연도별로 읽는데 신 API 응답에는 없습니다. 남은 조사는 **여기에 집중**합니다(§1-6).
+
+아래는 그래도 최악의 경우를 위해 남겨 둡니다.
 
 **공공 API·기존 보유 데이터 범위에서는 추정 PER·EPS 와 Forward ROE 의 대체 출처가 없습니다.** 이건 증권사 애널리스트 추정치라
 공공 API 로 안 나옵니다. `ENGINEERING_SPEC.md` §5-1 의 PEGY 공식이 이 값들을 쓰므로,
