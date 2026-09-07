@@ -917,7 +917,10 @@ teardown 오류를 놓친 것이었습니다(이 저장소 하네스는 `check()
   🔴 이 24건은 **원격 VM 에 `fastapi`·`FinanceDataReader` 가 없어서 나는 기존 실패**입니다.
   **`git stash` 로 이번 변경을 통째로 뺀 뒤 같은 파일을 돌려 결과가 완전히 동일함을
   확인했습니다**(6 failed / 37 passed / 2 errors — 변경 전후 같음). 내 변경과 무관합니다.
-  **CI(GitHub Actions)에서 재확인 필요.**
+- ✅ **CI 확인 완료 (2026-09-08 07:2x KST)** — GitHub Actions `Test Suite #50`
+  (커밋 `5cf25f5`) **통과, 2분 29초.** 원격 VM 에 없던 `fastapi`·`FinanceDataReader` 가
+  깔린 환경에서 위 8개 파일까지 전부 돌았고 초록불입니다. **더 이상 미확인이 아닙니다.**
+  (#212 의 `Test Suite #49`(커밋 `1995949`)도 통과했습니다.)
 
 ### 6-6. 다음 단계 (아직 안 함)
 

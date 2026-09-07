@@ -1169,6 +1169,8 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 🔴 **`collector_kospi200.py` 는 한 글자도 안 바뀌었습니다.** 그대로 구 HTML 파서를 씁니다.
 
+✅ **CI 통과 확인**(2026-09-08) — `Test Suite #50`/`#49` 초록. 원격 VM 에서 못 돌리던 `fastapi`·`FinanceDataReader` 의존 테스트 8개 파일까지 전부 통과했습니다.
+
 🕶️ **섀도 관찰이 붙었습니다** — `scrape.yml` 이 끝날 때마다 신 API 로 따로 받아
 실전 스냅샷과 대조하고, 일치율이 95% 아래로 떨어지면 디스코드로 알립니다.
 **실전 데이터는 건드리지 않습니다**(`_assert_shadow_path()` 가 코드로 강제).
