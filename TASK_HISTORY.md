@@ -4001,6 +4001,35 @@ workflow_run 으로 도는 워크플로우면 'workflow_run' 값도 받아야 �
 검증은 오프라인 밖 — 다음에 cron 이 크롤링보다 먼저 도는 날 Actions 로그에서 "기준값이 … 자이지만 … 보류 … 아직 처리 전" →
 진행 → 체결 순서를 확인 필요. 이미 배포된 `data/duel_freshness_probe_previous(_usd).json` 은 다음 배치 실행 때부터 자연히 새 키를 갖게 됨.
 
+### #208 — [오너 지시 "각 모듈별로 에이전트들을 배치하고 그 에이전트들이 또 작업을 할 수 있게 하고 싶은 지시서"] 에이전트 계층 신설 — `CLAUDE.md` 진입점 + `AGENT_ORCHESTRATION.md` 배치도 + `.claude/agents/` 12개, 그리고 그 절차를 **테스트로 강제** (2026-09-07)
+
+**경위.** 시작 전 HEAD = `f164cb8`(#207 문서 최신화). 저장소를 훑어 확인한 사실 3가지:
+① 오너가 원하는 "절대준수 / 전체 흐름 / 현재 현황" 3종 지시서는 **이미 있었다** — `ENGINEERING_SPEC.md`(§0-1·§0-2·§0-3 15개항·§2 NEVER Rules·§5 수식),
+`ENGINEERING_SPEC.md` §1·§6·§10 + `PROJECT_STATUS.md` §5, `PROJECT_STATUS.md` + `TASK_HISTORY.md`. 그래서 3개를 새로 쓰면 §0-3-10 위반(같은 규칙이 두 곳에 생겨 시간이 지나면 어긋남)이라 판단, **기존 문서 위에 얹고 §번호로 가리키기만** 하는 방식을 오너에게 제안해 승인받음.
+② 없던 것은 **에이전트 계층 자체** — `CLAUDE.md` 도 `.claude/` 도 존재하지 않았다. 새 세션이 시작돼도 "`ENGINEERING_SPEC.md`·`PROJECT_STATUS.md` 부터 읽어라"(§0-2)를 자동으로 알려주는 장치가 하나도 없었음. §0-2 가 "모든 AI 는 코드를 열기 전에 읽어야 한다"고 요구하는데 그 요구를 전달하는 경로가 없었던 셈.
+③ 작업 중 발견한 **문서 부패 2건** — `PROJECT_STATUS.md` §2 파일 구조 표가 2026-08-13 에서 멈춰 #160(2026-08-29)에 `archive/` 로 옮긴 `app.py`·`visiblehand.py`·`views/*` 를 현역처럼 가리키고 있었고(그걸 읽고 시작한 세션은 없는 파일을 찾게 됨 — §0-1 "겉보기 정상"의 문서판), §4 "지금 열려있는 일" 에는 이미 끝난 #106~#113 이 미완료로 남아 있었음. 오너 승인받아 같이 고침.
+
+**처방 (1) — 에이전트 계층.**
+- `CLAUDE.md` **신설** — 세션 진입점. §1 시작 절차 5단계 / §2 절대준수 17개항 요약표(전부 `ENGINEERING_SPEC.md` §번호 포인터, 규칙 본문 복사 없음) + 🔑 비밀값 취급(환경변수에서만·URL 금지·값 없으면 기동 거부, `main.py` `NICEGUI_STORAGE_SECRET`·`utils/krx_openapi.py` 헤더 전달이 표준 예시) / §3 라우팅 표 / §4 ⛔ 오너 결정 사항 7가지 / §5 종료 절차 / §6 문서 지도.
+- `AGENT_ORCHESTRATION.md` **신설** — 1부: 데이터 흐름 다이어그램, 워크플로우 17개의 `workflow_run` 연쇄를 **cron 값까지 실물 대조**해 KR 트랙·US 트랙·독립 트랙으로 정리(#204/#207 의 게이트 소비자 5종 포함), `main.py` 등록 순서 기준 화면 지도 15개 라우트. 2부: 에이전트 12명 명부 + 🚧 경계 규칙 6가지(남의 파일은 읽기만 / 공통 기반은 영향 범위 열거 후 착수 / 계층 넘나들기 금지 / **KR·US 분리는 의도된 설계라 "중복이니 합치자"는 설계 위반** / `macro` 동결 / 개인정보 코드는 `web-security` 경유) + 인계 프로토콜(증상·재현 / 원인 추정과 **미확인 표시** / 배제한 것 / 넘기는 이유 / 영향 범위 5항목).
+- `.claude/agents/*.md` **12개 신설** — 서비스 8(`kr-stocks`·`us-stocks`·`dividend`·`indicator`·`scorecard`·`report`·`duel`·`macro`) + 공통 4(`data-foundation`·`web-security`·`automation-ops`·`test-audit`). 각 파일에 담당 범위 / 소유 파일 / 읽기만 / 모듈 고유 절대규칙 / 절대 금지 / 검증 명령 / 인계 대상. 고유 규칙은 일반론이 아니라 **이 저장소에서 실제로 사고가 났던 지점**으로 채움(장중 재실행이 실시간 가격을 종가로 저장 #185, 결투 원장 멱등성 #204/#207, 배당기준일 ≠ 배당락일, `conftest` 하네스가 빠지면 항상 초록불, `PERIOD_KEYWORDS` 사본 이중화, KRX 약관 제6조② 광고 충돌 등). `macro` 는 동결 상태라 **`tools` 에서 Edit/Write 를 뺐다** — 고쳐야 하는 상황 자체가 "오너 승인이 먼저 필요하다"는 신호.
+
+**처방 (2) — 절차를 테스트로 강제 (오너 질문 "새로운 모듈을 만들게 되면 그 담당 에이전트가 주어질까?" 에서 출발).**
+처음엔 `AGENT_ORCHESTRATION.md` §2-6 에 5단계 절차를 **글로만** 적어 뒀는데, 그 상태는 이 저장소가 이미 두 번 당한 모양과 같음 — `tests/conftest.py` 머리말의 하네스 복사 사고(2026-08-21 `test_data_source.py`, 2026-08-30 `test_us_stocks_page.py`)도, 위 ③ 의 낡은 §2 표도, 전부 "사람이 기억해야만 지켜지는 규칙" 이었음. 오너가 "테스트로 강제" 를 선택해 아래를 추가:
+- `tests/test_agent_registry.py` **신설, 검사 9건.** ⓪ 스캐너 자기검사(`tests/test_suite_integrity.py` 와 같은 방식 — 목록이 비면 조용히 전부 통과하는 것을 독립 테스트로 차단) ① 🔴 **주인 없는 파일 금지** — `web/pages/*.py`·`web/*.py`·`utils/*.py`·`.github/workflows/*.yml`·루트 `collector_*`·`run_*`·`scrape_*`·`crawl_*`·`corp_*`·`probe_*`·`main.py` 를 훑어 어느 에이전트도 소유하지 않는 파일이 있으면 실패(현재 소유 등록 139개, 주인 없음 0) ② 소유 중복 금지 ③ 소유 섹션 부재 시 **skip 이 아니라 실패**(검사망 구멍) ④ frontmatter 유효·`name` 이 파일명과 일치·이름 중복 없음 ⑤ 동결 `macro` 에 쓰기 도구 없음 ⑥ `CLAUDE.md`·`AGENT_ORCHESTRATION.md` **양쪽** 라우팅 등재(한쪽만이면 "정의 없는 에이전트로 보냄" 또는 "아무도 안 보냄") ⑦ 역방향 — 문서가 가리키는 에이전트 정의 존재 ⑧ 죽은 경로 금지(축약 표기 `db.py` = `utils/db.py` 허용, basename 대조).
+- 소유 판정은 **`## 소유 파일` / `## 담당 범위 · 소유 파일` 섹션 안에서만** 인정하고 `## 읽기만` 섹션은 제외. 처음엔 소유 섹션 안에서 `⚠️` 줄만 빼는 방식을 썼는데 **`⚠️` 는 평범한 경고에도 쓰는 기호라 `utils/constants_us.py`·`render_keep_awake.yml` 같은 정상 소유 파일까지 걸러졌다** — 기호 규칙을 버리고 섹션 구조로 분리(`macro.md`·`duel.md` 재구성).
+- `.claude/agents/_TEMPLATE.md` **신설** — 새 에이전트 서식. `_` 접두사라 `AGENT_FILES` 수집에서 제외됨.
+- `AGENT_ORCHESTRATION.md` §2-6 을 7단계로 재작성 + "이 검사가 잡는 것" 표 + **작성 주체를 "그 모듈을 만든 세션" 으로 못 박음**(오너 선택 — 그 세션이 모듈을 가장 잘 알고, `test-audit` 에게 넘기면 코드를 처음부터 다시 읽어야 함). `CLAUDE.md` §3·§5 에도 반영.
+
+**검증.** `pytest tests/test_agent_registry.py -q` **9 passed**. `tests/test_suite_integrity.py` Check A·B 도 이 파일에 대해 PASSED(Check C 는 원격 리눅스 VM 에 `fastapi`·`nicegui` 미설치라 하위 수집이 실패해 skip — 이 파일과 무관, 오너 로컬·CI 에서는 정상).
+**사보타주 5종으로 실제로 빨간불이 나는지 확인**(§0-1 — "테스트가 통과했다" 는 "검사가 작동한다" 의 증거가 아니므로, `conftest.py` 도입 때의 사보타주 검증 선례를 따름): ⓐ `web/pages/fake_newmodule_page.py` 추가 → 🔴 ⓑ `collector_fake_thing.py` + `.github/workflows/fake_collect.yml` 추가 → 🔴 ⓒ `report.md` 가 `duel_rules.py` 를 중복 소유 → 🔴 2건 ⓓ `CLAUDE.md` 에서 `indicator` 라우팅 제거 → 🔴 ⓔ `duel.md` 의 소유 섹션 제목 변경 → 🔴 2건. 전부 복구 후 9 passed 재확인.
+**작성 중 발견·수정한 실제 결함 2건**: (i) `scorecard.md` 가 파일명 조각 `_us.yml` 을 가리키고 있었음(검사 ⑧ 이 첫 실행에서 잡음) → `scorecard_publish_daily_us.yml` 로 수정. (ii) `test_suite_integrity.py` Check A 가 이 새 파일을 **skip 하고 있었음** — 하네스를 `check` 만 import 해서 `_uses_check_failures_harness()` 가 "하네스 미사용" 으로 판정(그 함수는 `FAILURES` 와 `check` 를 **둘 다** 요구). 감시망 구멍이라 `from conftest import FAILURES, check` 로 고치고 이유를 파일 머리말에 남김. autouse 픽스처 자체는 원래 걸려 있어 실제 보호에는 공백이 없었음(사보타주 ⓓⓔ 가 ERROR 로 뜬 것이 그 증거).
+문서 경로 참조 **402건 전수 대조** — 저장소에 실재함 확인. `git status` 로 **코드 변경 0건**(신설 테스트 1개 외 `.py`/`.yml` 무변경) 확인.
+
+**처방 (3) — 문서 부패 수정.** `PROJECT_STATUS.md` §2 를 저장소 실물과 1:1 대조해 전면 재작성(지시서 / 화면 / 수집 / 검증·가공·데이터기반 / 🔴 사용자 데이터 계층 / 배치·자동화 / 테스트 / 데이터·보관 8계층으로 재편), §4 를 🔴오너 직접 / 🟡오너 확인 대기 / 🔵오너 결정 대기 / 🟠구조적 부채 / 🛑매크로 동결 / ⚪참고 6단계로 재분류(완료 항목은 `TASK_HISTORY.md` 에 있으므로 삭제). 머리말에 "진입점이 `CLAUDE.md` 로 바뀌었다" 안내 추가. 234줄 추가 / 104줄 삭제.
+
+**하지 않은 것(§0-1).** (a) **전체 `pytest --ignore=archive -q` 를 못 돌렸다** — 이번 세션의 원격 리눅스 VM 에 `fastapi`·`nicegui` 등 프로젝트 의존성이 없어 대부분의 테스트 모듈이 import 단계에서 실패함(`pytest` 자체는 설치해 신설 파일과 `test_suite_integrity` 는 실행). 코드 변경이 0건이라 결과가 달라질 이유는 없지만 **실측하지 않았으므로 통과했다고 적지 않는다.** 오너 로컬 확인 필요. (b) 이 검사는 **"주인이 있는가" 만** 본다 — 에이전트 문서의 내용이 좋은지, 규칙이 맞는지는 검사하지 못하고 서식만 맞춘 빈 껍데기도 통과한다(최저선). (c) `tests/*.py` 자체는 소유 검사 대상(`OWNED_GLOBS`)에 넣지 않았다 — `test-audit` 가 `tests/*` 전체를 맡는 구조라 파일 단위 소유를 요구하면 새 테스트마다 문서를 고쳐야 해 소음이 큼. (d) 매크로 관련 항목은 §4 에 **기록만** 옮기고 손대지 않음(2026-08-10 동결 지시). (e) 커밋·푸시는 오너 확인 후 진행.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

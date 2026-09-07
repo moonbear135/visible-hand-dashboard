@@ -1,5 +1,9 @@
 # 프로젝트 현황판 (PROJECT_STATUS.md)
 
+> 🧭 **2026-09-07 — 진입점이 `CLAUDE.md` 로 바뀌었습니다.** 세션을 시작할 때는 `CLAUDE.md` →
+> 이 문서 §0·§4 → `AGENT_ORCHESTRATION.md` 순으로 읽으세요. 이 문서는 여전히 **"지금 이 순간의
+> 진행 상태"**를 담는 현재 개발 현황 지시서이고, 매 세션 종료 시 갱신하는 문서입니다.
+
 > **다음에 이 프로젝트를 다시 열 때는 (나 자신이든, 제미나이든, 다른 클로드 세션이든) 전체 파일을 처음부터 다 읽지 말고 이 문서부터 읽으세요.**
 > 이 문서 하나로 "지금까지 뭘 했고, 지금 뭐가 문제고, 다음에 뭘 해야 하는지"를 알 수 있게 유지하는 게 목적입니다.
 > 작업할 때마다 이 문서의 **최근 작업 로그**와 **지금 열려있는 일** 섹션을 업데이트해주세요.
@@ -487,59 +491,178 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 2. 파일 구조 한눈에 보기 (다시 다 안 읽어도 되게)
 
-| 파일/폴더 | 역할 |
+> 🔄 **2026-09-07 전면 갱신.** 이 표는 2026-08-13 이후 갱신이 멈춰 있어서, 이미 `archive/`로
+> 옮긴 `app.py`·`visiblehand.py`·`views/*`를 현역처럼 가리키고 있었습니다. 실제 저장소와 1:1로
+> 대조해 다시 썼습니다. 파일별 **수정 시 주의사항**은 `ENGINEERING_SPEC.md` §6,
+> **누가 어느 파일을 맡는지**는 `AGENT_ORCHESTRATION.md` 2-2를 보세요.
+
+### 🧭 지시서·문서 (여기부터 읽습니다)
+
+| 파일 | 역할 |
 |---|---|
-| `scrape_daily.py` | 코스피 지수/환율/수급 데이터 수집 → `market_history.csv`에 누적. 백필 모드 지원 |
-| `collector_kospi200.py` | 코스피+코스닥 통합 시가총액 상위 500개 종목(2026-08-26 확대 전엔 코스피 단독 상위 200) PEGY 데이터 수집 → `data/*.json`. 상장주식수(FDR 우선), Trailing EPS 계산값 예외, 그레이엄 넘버 등이 여기 있음 |
-| `.github/workflows/scrape.yml` | **코스피 자동화 워크플로우.** 매일 평일 KST 16:05 실행 |
-| `.github/workflows/scrape_us.yml` | **🇺🇸 미국주식 자동화 워크플로우 (2026-08-07 신설).** 서머타임 대응으로 cron 2개(20:35/21:35 UTC)를 걸고, 수집기의 `--skip-if-not-ready` 사전 점검이 하루 한 번만 실제 수집되게 걸러냄 |
-| `.github/workflows/keep_awake.yml` | (2026-08-09 신설) Streamlit 무료 호스팅이 **12시간 무방문 시 앱을 재우는 정책** 대응 — 8시간마다 실제 Streamlit 앱 URL(커스텀 도메인 아님)을 방문해 타이머 리셋. 데이터 수집과 무관, 실패해도 영향 없음 |
-| `collector_dividend_kr.py` | (2026-08-23 신설) 💰 **배당금 모듈(6번째 모듈)** 수집기. DART OpenAPI `alotMatter.json`("배당에 관한 사항")을 종목별로 불러 **당해 사업연도의 가장 최근 확정 누적치**(사업보고서→3분기→반기→1분기 순으로 찾아 첫 번째 쓸 수 있는 것에서 멈춤)를 수집 → `data/dividend_kr_2026_latest.json`(가공) + `data/dividend_kr_2026_raw.jsonl`(원본, §0-3-3). 파싱은 전부 `se` 라벨 **키워드 매칭**(위치 인덱스 없음, §0-1). 실패·무데이터 종목도 **같은 스키마의 레코드로** 남김 |
-| `corp_code_mapper.py` | (2026-08-23 신설) 종목코드(6자리) ↔ DART 고유번호(`corp_code` 8자리) 매핑. `corpCode.xml` ZIP 을 받아 `data/cache/` 에 캐시 |
-| `.github/workflows/collect_dividend_kr.yml` | (2026-08-23 신설) 💰 **배당 수집 워크플로우.** DART 정기보고서는 1년에 4번만 갱신되므로 원칙은 수동(`workflow_dispatch`) — 2026-08-25부터 분기 마감일 8-cron 안전망 추가(§0 참고). 5시간 예산에서 스스로 멈추고 체크포인트를 남김(job timeout 340분) |
-| `.github/workflows/watch_dividend_disclosures.yml` | (2026-08-25 신설) 💰 **배당 일일 공시감시 워크플로우.** DART `list.json`(공시검색)으로 매일 KST 05:00 "새로 정기보고서 낸 회사"만 가볍게 확인 후 그 회사만 재수집·반영(`--watch-disclosures`). `collect_dividend_kr.yml`과 같은 `concurrency` 그룹 공유(동시 쓰기 방지), 반영 실패 시 상태파일을 커밋하지 않음(§0-1) |
-| `collector_dividend_payment_kr.py` | (2026-08-25 신설) 💰 **배당 지급일정 수집기(완전히 독립된 새 파이프라인).** 기존 배당 수집기와 데이터·파일이 전혀 안 겹침. DART 수시공시("현금ㆍ현물배당결정" 등, `pblntf_ty="I"`)의 원본문서(`document.xml`)를 받아 **진짜 배당기준일·배당금지급 예정일자**를 파싱 → `data/dividend_kr_2026_payment_events.json`(append-only). `--universe` 없음(유니버스 밖 신규 배당회사도 잡힘) |
-| `.github/workflows/watch_dividend_payment_events.yml` | (2026-08-25 신설) 💰 **배당 지급일정 감시 워크플로우.** 매일 KST 05:30(기존 05:00 워크플로우와 30분 띄움) 자동 실행, 세 배당 워크플로우 전부 같은 `concurrency` 그룹 공유 |
-| `.github/workflows/backfill_dividend_payment_events_2026_08.yml` | ✅ (2026-08-25 신설, **오너가 수동 실행 완료 — 91건 확보, §3 로그 참고**) 🧹 **일회성 백필 워크플로우.** 감시 워크플로우의 첫 실행 lookback 창(08-22~08-24)보다 앞선 08-20 롯데케미칼 공시 등 놓친 8월분을 한 번 훑음. 실행·커밋 확인 끝났으니 이제 지워도 되는 파일 |
-| `probe_reit_disclosure_document.py` / `.github/workflows/probe_reit_disclosure_document.yml` | 🟡 (2026-08-25 신설, **아직 오너가 수동 실행 전 — yml은 채팅으로 파일만 전달됨, 저장소에 배치 필요**) 🔍 **일회성 조사 스크립트.** 8월 백필로 이미 받아둔 리츠(REIT) PARTIAL 레코드 4건(롯데리츠·SK리츠·코람코더원리츠·NH올원리츠)의 원문을 rcept_no로 다시 받아 실제 표 라벨을 로그에 그대로 찍음 — 새 API 조회 없음. 조사 끝나면(로그 확보) 파서에 리츠 전용 라벨 인식 추가 예정, 그 후 둘 다 지워도 되는 파일(§3 2026-08-25 로그 참고) |
-| `web/pages/dividend_page.py` | (2026-08-24 신설, 2026-08-25 지급일정 표시 3단계 추가, 2026-08-25 배당락일 계산 추가) 💰 **배당 캘린더 화면** (`/dividend`, 공개·로그인불필요). 결산기준일 기준 월간 달력 그리드 + 미확정 종목 "작년 배당율" 폴백. `DIVIDEND_ENABLED`(기본 꺼짐) 게이트는 `web/layout.py`. 2026-08-25 지급일정 표시 — ① `dividend_kr_2026_payment_events.json`을 종목코드로 색인(`build_payment_event_index`)해 확정 표(`confirmed_row_cells`)·미확정 목록(`pending_row_cells`) 양쪽에 "💰 실제 지급일정 확인됨" 배지(`payment_badge_html`) ② 같은 파일을 **날짜 축**으로도 색인(`build_payment_date_index`)해 달력 격자에 🟡 배당기준일ㆍ🟢 지급예정일 표시를 직접 붙이고, 날짜를 누르면 툴팁 없이 바로 펼쳐짐(`payment_date_block_html`, 오너 요청 "툴팁 말고 달력에 표시"). 파일이 없어도 조용히 표시만 안 붙고 나머지는 그대로 동작. "배당기준일"은 원문 라벨 그대로이며 **배당락일이 아님**(거래일 계산을 안 하므로) — `PAYMENT_NOTICE`에 명시. 🔴 2026-08-25(같은 날, 오너가 직접 "이건 추측이 아니라 계산" 요청) — 이 마지막 문장이 뒤집혔습니다: `KRX_HOLIDAYS_2025_2026`(2025년 12월ㆍ2026년 검증 완료 휴장일 표, 뉴스 교차확인으로 `exchange_calendars` 라이브러리의 누락 2건(6/3 지방선거·7/17 제헌절)까지 보정) + `is_krx_trading_day()`/`previous_krx_trading_day()`/`ex_dividend_date()`(배당기준일의 1영업일 전, 기준일 자체가 휴장일이면 직전 개장일로 보정 후 다시 1영업일 전)로 **배당락일을 직접 계산**해 세 번째 날짜 축(`ex`)으로 `build_payment_date_index()`에 추가, 달력에 🔴 세 번째 색으로 표시. 확인 안 된 연도(2027~)는 조용히 값을 내지 않고 `ValueError`로 막음(§0-1). 계산값이라는 사실은 "🧮 계산값" 배지로 항상 별도 표시 |
-| `market_history.csv` | 날짜별 종합 위험 점수 이력 |
-| `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json` | 종목별 최신 데이터 + **시장 전체** 요약 이력 (⚠️ `*summary_history.json` 은 중앙값 요약이지 종목별 이력이 아닙니다 — 종목별 이력은 2026-08-09 신설된 `*_stock_history.csv`) |
-| `views/pegy_view.py` | **공개** PEGY 밸류에이션 화면. Forward 데이터 없으면 해당 섹션만 마스킹 처리 |
-| `views/macro_view.py` | **관리자 전용** 매크로 방공망 화면 (2026-08-05부로 비공개 전환) |
-| `views/admin_view.py` | 관리자 인증 + 관리자 전용 메뉴(매크로 화면 진입 체크박스 등) |
-| `utils/guardrail.py` | 종목 차단/마스킹 판정 (필수 조건은 이제 `price`뿐, Forward 결측은 차단 아님) |
-| `utils/scoring.py` | 퀀트 스코어링. 만점(score_max)은 종목마다 실제 산출 가능한 항목만 합산(고정 100 아님, 배지엔 %도 함께 표시). 역성장/적자·PER이상·극단고평가 하드컷오프는 오늘 수집분 전체 분포 대비 z-score로 심각도 스케일링 |
-| `utils/db.py` / `utils/gdrive_helper.py` | DB 저장, 구글드라이브 백업(백업 폴더ID는 `GDRIVE_TARGET_FOLDER_ID` 환경변수로 오버라이드 가능) |
-| `collector_us_stocks.py` | (2026-08-06 신설) 🇺🇸 미국주식 수집기 **기초틀**. 유니버스 CSV 수집·필터(550개), 상품유형 분류, 히스테리시스(550/600), stockanalysis.com 통계 페이지 파서, `_now_et()`/ET 세션 계산, 샘플 프로토타입 CLI. **아직 전수 수집·스코어링·화면은 없음** |
-| `utils/scoring_us.py` | (2026-08-07 신설) 🇺🇸 미국주식 전용 퀀트 스코어링 + 파생 밸류에이션(PEGY/목표가/그레이엄) + 미국판 가드레일. 배점: PEGY 35 + ROE·ROIC 30 + 주주환원 20 + F-Score 10 + 베타 5 |
-| `views/us_stocks_view.py` | (2026-08-07 신설) 🇺🇸 미국주식 화면. **공개 화면**(2026-08-08 오너 승인으로 §0-3-6 스테이징 종료, 베타 배너 제거). 상단 지수 3종 + 코스피와 동일 카드 구조 + USD 단독 표기 + 30개 페이지네이션 |
-| `utils/company_names_kr.py` | (2026-08-07 신설) 미국 종목 한글 표기. 정식 한글명 사전(티커 키, 오너가 직접 수정) 우선 + 규칙 기반 음역 폴백(완벽하지 않음을 코드에 명시) |
-| `tests/test_us_scoring.py` | (2026-08-07 신설) 미국주식 스코어링·전수수집 배선 오프라인 검증 78건 (실데이터 12종목 + 합성 극단케이스 + end-to-end + 화면 렌더링) |
-| `utils/constants_us.py` | (2026-08-06 신설) 미국주식 전용 상수. 밸류에이션 임계값은 전부 🚧잠정값+TODO🚧 (코스피 값을 그대로 쓰지 않음) |
-| `tests/test_us_stocks.py` | (2026-08-06 신설) 미국주식 기초틀 오프라인 검증(네트워크 불필요). 실제 CSV 종목명·실제 페이지 원문 라벨로 74개 체크 |
-| `tests/test_stock_history.py` | (2026-08-09 신설) 종목별 시계열 이력·다운로드 오프라인 검증 98건. 필드 스펙(내부 필드 유출 0/한국어 라벨), 상태 가드, **실제 수집기 함수를 직접 호출한 실패·차단 시나리오**, 같은 날 중복 방지, 실데이터 end-to-end(BOM·pandas 재파싱·종목코드 0 보존) |
-| `utils/constants.py` | (2026-08-06 신설) 프로젝트 전역 임계값·가중치 단일 출처. PER 오염 판정, 목표가 캡, ROE 기준선, 매크로 `RISK_WEIGHTS`/`INVESTOR_WEIGHTS` 등 |
-| `utils/macro_scoring.py` | (2026-08-06 신설) 매크로 종합점수 계산(z-score 정규화+시그모이드 변환+동시충격 증폭기) 단일 모듈. `scrape_daily.py`(저장)와 `views/macro_view.py`(표시)가 공용으로 호출. 2026-08-10(#68) **실측 지표 정규화 함수**(`measured_downside_risk` 등) 추가, (#70) 값이 클수록 위험인 지표용 `measured_upside_risk` + 이력 컬럼 분포 생성기 `history_column_population` 추가 |
-| `utils/krx_openapi.py` | (2026-08-10 신설, TASK_HISTORY #70) **KRX OPEN API 최소 클라이언트.** VKOSPI 지수값 / KOSPI200 지수 종가 / KOSPI200 선물 근월물 종가만 가져와 매크로 2지표에 씁니다. 인증키는 환경변수 `KRX_OPENAPI_KEY`에서만 읽고 **HTTP 헤더 `AUTH_KEY`로만** 전달(URL에 실으면 서버 로그에 남음). 외부 래퍼 라이브러리 **미채택**(근거는 파일 상단 주석·#70). 실패는 전부 `None` → 그 지표만 배점 제외. **⚠️ 실서버 응답으로 검증된 적 없음** — 지수명·선물 근월물 식별이 미확인이라, 못 찾으면 응답에 있던 이름을 전부 로그로 출력합니다 |
-| `app.py` / `visiblehand.py` | 앱 진입점. 공개 메뉴는 코스피 PEGY 화면(기본) + 🇺🇸 미국주식(사이드바 상단 체크박스, 2026-08-08 공개 전환) 두 개. 매크로는 관리자 인증 후에만 |
-| `utils/stock_history.py` | (2026-08-09 신설) **종목별 시계열 이력의 단일 출처.** 다운로드에 내보낼 필드 목록 + 한국어 라벨(`KOSPI_HISTORY_FIELDS` 26개 / `US_HISTORY_FIELDS` 40개 — 카드에 실제로 보이는 재무 지표만, 내부 진단·색상 필드 전부 제외) + 이력 append/조회. `record_daily_history()` 가 수집 상태를 보고 **SUCCESS/DEGRADED 일 때만** 기록하고 같은 날짜는 중복 없이 교체. streamlit 미의존 |
-| `data/kospi200_stock_history.csv`, `data/us_stocks_history.csv` | (2026-08-09부터 생성) **종목별 날짜 이력**(하루 한 종목 = 한 줄). 컬럼명은 영문 키(라벨 문구가 바뀌어도 과거 행이 안 깨지게), 인코딩 `utf-8-sig`. ⚠️ **과거 소급 없음 — 도입 후 첫 수집분부터 쌓입니다.** 워크플로우의 `git add data/` 범위에 자동 포함 |
-| `utils/stock_export.py` | (2026-08-08 신설 → 2026-08-09 재작성) "종목별 데이터 다운로드" 내보내기 모듈. 이력 행 목록 → **날짜=행 / 지표=열** CSV(한국어 헤더 · **UTF-8 BOM**, 엑셀 한글 깨짐 방지) / JSON(`ensure_ascii=False`, 숫자 컬럼만 숫자로 복원해 종목코드 `005930` 이 안 깨짐) + 파일명 안전화(`BRK/B`→`BRK_B`). streamlit 미의존 순수 함수라 코스피·미국 양쪽이 같은 형식을 공유 |
-| `ENGINEERING_SPEC.md` | 코딩 원칙 문서. **하드코딩·더미 데이터 금지가 최우선 규칙.** §0-3(절대 준수 메뉴얼: 후행지표 전용, 크롤링 매너 등), 예시2-보충(계산값 허용 예외), 예시2-보충2(섹션별 마스킹 원칙)까지 포함 |
-| `AUDIT_REPORT.md` | 2026-08-05 오푸스 코드베이스 감사 보고서 (13개 파일, 50여 건) |
-| `MACRO_REDESIGN_PROPOSAL.md` | (2026-08-09 신설, TASK_HISTORY #66) 매크로 14개 위험 지표의 실측 소스 조사 결과와 재설계 제안. 지표별 A/B/C 판정 · 소스/필드/지연(T+n)/난이도 · 가중치 재분배안 · 구현 순서. **§5 구현순서 1번(#68, 실측 2지표)·2번(#69, C 6개 제외+가중치 재분배)·3·4번(#70, VKOSPI·선물 베이시스, 실서버 검증 완료)·6번(#72, 공매도 2종을 실측 불가로 재분류 — 오너 결정 옵션②)까지 반영됨. 남은 건 5번(SMBS 스왑포인트)과 `Put_OTM_OI`. §4-3 가중치 재설계는 미적용(활성 6개 전부 실측 전환 후)** |
-| `collector_us_indices.py` | (2026-08-12 신설, #95 / 파싱 버그 수정 #96) 📈 리포트용 **미국 벤치마크 일별 종가** 수집기. stockanalysis.com 의 ETF 프록시(SPY=S&P500, ONEQ=나스닥종합) 과거주가 엔드포인트를 요청 1회씩 불러 `data/us_index_history.json` 에 누적(요청 1회당 125행 확인). ⚠️ 지수 포인트가 아니라 **ETF 종가**(키 이름에 PROXY 명시). devalue 디코더·HTTP 헬퍼는 `collector_us_stocks.py` 에서 import 재사용. 행 탐색은 **깊이 우선 재귀 + 날짜(`t`) 필수** — 최상위만 훑던 #95 버전은 실응답에서 0행이었음 |
-| `utils/report_db.py` | (2026-08-12 신설, #95) 📈 리포트 데이터 계층. 기간(일/주/월/분기/반기/연) 경계 계산 · 스냅샷 행 생성 · 기간 집계와 데이터 부족 판정 · 벤치마크 기간 수익률 · Supabase 접근. **⚠️ 2026-08-19부터 더 이상 유일하지 않음 — `utils/duel_db.py`·`run_duel_daily_batch.py`·`run_duel_publish_batch.py`(2026-08-20 신설, 5단계 발행 배치)도 같은 `service_role` 격리 패턴으로 씀(아래 결투 모듈 항목 참고)**(환경변수에서만 읽고 streamlit 미import) |
-| `views/report_view.py` | (2026-08-12 신설, #95) 📈 리포트 화면. **사용자에게 보이는 이름은 "📈 사장님 보고서"**(2026-08-13 #107 개명 — 파일명·함수명·플래그는 그대로 `report_*`). 기본 숨김 `REPORT_ENABLED`, `visiblehand.py` 에서 "📊 내 성적표"의 하위 메뉴로 배선됨(#102·#105) |
-| `sql/report_schema.sql` | (2026-08-12 신설, #95) `portfolio_daily_snapshots` 테이블 + **RLS select 정책 1개**(사용자는 읽기만, 쓰기는 배치 전용). 오너가 Supabase SQL Editor 에서 1회 실행 |
-| `.github/workflows/scrape_report_snapshots.yml` | (2026-08-12 신설, #95) 평일 23:20 UTC — 미국 벤치마크 수집 → 사용자별 스냅샷 적재(Supabase) → `data/us_index_history.json` 커밋 |
-| `data/us_index_history.json` | (#95, **아직 실제 수집 미실행**) 미국 벤치마크(SPY/ONEQ) 일별 종가 누적 파일. 공개 데이터라 기존 `data/` 관례대로 GitHub 에 커밋 |
-| `tests/test_report.py` | (2026-08-12 신설, #95 / #96 에서 실응답 픽스처로 교체) 리포트 모듈 오프라인 검증 **270체크**(기간 경계·데이터 부족 판정·스냅샷 생성·벤치마크·**실제 응답 원문**으로 수집기 실행·가짜 Supabase 배선·범위 확인) |
-| `TASK_HISTORY.md` | Cowork 작업 목록 위젯에서 정리(삭제)한 완료 항목 전체 이력 |
-| `credentials.json` 등 | 구글 API 비밀키. `.gitignore` 등록되어 git에는 안 올라감 (확인 완료) |
+| `CLAUDE.md` | 🆕 (2026-09-07 신설) **모든 AI 세션의 진입점.** 시작·종료 절차, 절대준수 요약과 원문 위치, 에이전트 라우팅, 오너 결정 사항 |
+| `ENGINEERING_SPEC.md` | **절대준수 지시서.** §0-1 하드코딩·더미 금지 / §0-2 작업 절차 / §0-3 절대준수 메뉴얼 15개항 / §1 아키텍처 / §2 NEVER Rules / §3 PERIOD_KEYWORDS / §4 3단계 검증 / §5 수식 / §6 파일별 역할 / §7 네이버 파싱 / §8~9 체크리스트·검증 / §10 디렉터리 |
+| `AGENT_ORCHESTRATION.md` | 🆕 (2026-09-07 신설) **전체 흐름 지시서.** 데이터 흐름 + 자동화 연쇄(워크플로우 17개) + 화면 지도 + 모듈별 에이전트 12명의 경계·권한·인계 프로토콜 |
+| `PROJECT_STATUS.md` | **현재 개발 현황 지시서** (이 문서). 지금 상태와 열려있는 일 |
+| `.claude/agents/_TEMPLATE.md` | 🆕 (2026-09-07 신설) 새 에이전트 정의 서식. 새 모듈을 만들면 이걸 복사해 채웁니다 |
+| `.claude/agents/*.md` | 🆕 (2026-09-07 신설) 에이전트 12개 정의. 서비스 8(`kr-stocks`·`us-stocks`·`dividend`·`indicator`·`scorecard`·`report`·`duel`·`macro`) + 공통 4(`data-foundation`·`web-security`·`automation-ops`·`test-audit`) |
+| `TASK_HISTORY.md` | 번호별 상세 작업 이력 (#154~) |
+| `TASK_HISTORY_ARCHIVE.md` | 닫힌 구간 이력 (#1~#153, 2026-08-30 분리 — 정책은 `ENGINEERING_SPEC.md` §0-3-14) |
+| `*_WORK_ORDER.md` | 모듈별 설계·작업지시서 — `DUEL_MODULE_WORK_ORDER.md`(271KB, 최대), `DIVIDEND_MODULE_WORK_ORDER.md`, `US_DIVIDEND_MODULE_WORK_ORDER.md`, `REPORT_WORK_ORDER.md`, `TECHNICAL_INDICATOR_WORK_ORDER.md`, `SCORECARD_WORK_ORDER.md`, `SCORECARD_V2_OCR_WORK_ORDER.md`, `SCORECARD_PUBLIC_LEADERBOARD_WORK_ORDER.md`, `US_STOCKS_WORK_ORDER.md` |
+| `AUDIT_REPORT.md`, `AUDIT_REPORT_V2.md`, `AUDIT_2026-09-03_전반점검.md`, `SPAGHETTI_AUDIT_2026-08-29.md` | 감사 보고서 |
+| `MACRO_REDESIGN_PROPOSAL.md`, `MY_SCORECARD_MODULE_NOTES.md`, `NICEGUI_MIGRATION_PLAN.md` | 설계 제안·이전 계획 (이전은 완료, 참고용) |
+
+### 🚀 진입점 · 화면 (표현 계층)
+
+| 파일 | 역할 |
+|---|---|
+| `main.py` | **NiceGUI 진입점.** `@ui.page` 등록 · `/healthz` · `/ads.txt` · `ui.run`. 데이터 가공 로직 금지 |
+| `web/layout.py` | 공통 레이아웃 + **공개 스위치 게이트** (`*_ENABLED`, `*_MENU_ADMIN_ONLY`) |
+| `web/auth.py` / `web/auth_ui.py` | 로그인·세션·관리자 판정 / 로그인 화면 |
+| `web/state.py` / `web/blocking.py` | 페이지 상태·응답 타임아웃 / `run_blocking` 이벤트 루프 보호 |
+| `web/theme.py` / `web/static_html.py` | 테마 / 크롤러 UA 전용 순수 HTML 응답 (같은 스냅샷 파일을 읽음 — 클로킹 아님) |
+| `web/ads.py` | 구글 애드센스 3단계 공개 (꺼짐 → 관리자 전용 → 전체) |
+| `web/components/` | `html.py`, `widgets.py`, `stock_download.py` |
+| `web/pages/landing_page.py` | `/` 공개 · 순수 FastAPI 정적 소개 페이지 (2026-09-04 애드센스 대응) |
+| `web/pages/pegy_page.py` | `/kr` 공개 · 코스피·코스닥 PEGY (2026-09-04 `/` 에서 이동) |
+| `web/pages/us_stocks_page.py` | `/us` 공개 · 미국주식 |
+| `web/pages/dividend_page.py` | `/dividend` 공개 · 배당 캘린더 (`DIVIDEND_ENABLED`) |
+| `web/pages/dividend_us_page.py`, `dividend_us_logic.py` | `/dividend/us` 관리자 · 미국 배당 (`DIVIDEND_US_ENABLED`) |
+| `web/pages/indicator_page.py` | `/indicator` 관리자 · 보조지표 (`INDICATOR_ENABLED`) |
+| `web/pages/scorecard_page.py` | `/scorecard` 로그인 · 내 성적표 |
+| `web/pages/scorecard_consent_page.py` | `/scorecard/consent` · 공개 동의 관리 (`SCORECARD_CONSENT_ENABLED`) |
+| `web/pages/scorecard_leaderboard_page.py` | `/scorecard/leaderboard` · 공개 순위표 (`SCORECARD_LEADERBOARD_ENABLED`) |
+| `web/pages/report_page.py` | `/report` 로그인 · **"📈 사장님 보고서"** (파일·함수·플래그는 `report_*` 그대로) |
+| `web/pages/duel_page.py` | `/duel` 로그인 · "결투다!" (`DUEL_ENABLED`) |
+| `web/pages/macro_page.py` | `/admin/macro` 관리자 · 🛑 개발 중단 |
+| `web/pages/admin_page.py` | `/admin` 관리자 게이트 |
+| `web/pages/privacy_page.py` | `/privacy` **항상 공개** · 개인정보 처리방침 (법적 고지문이라 공개 절차 없음) |
+
+### 🕷️ 수집 계층
+
+| 파일 | 역할 |
+|---|---|
+| `collector_kospi200.py` | 코스피+코스닥 시총 상위 500 PEGY 수집 (네이버 증권). 슬립 2.0~3.0초가 이 저장소의 매너 기준값 |
+| `collector_us_stocks.py` | 미국 종목·ETF 수집 (stockanalysis.com). 히스테리시스 550/600, `--skip-if-not-ready` 사전 점검 |
+| `collector_us_indices.py` | 미국 벤치마크 일별 종가 (SPY·ONEQ **ETF 프록시**, 지수 포인트 아님) |
+| `collector_dividend_kr.py` | 배당 확정치 (DART `alotMatter.json`). 당해 사업연도 최근 확정 누적치 |
+| `collector_dividend_payment_kr.py` | 배당 지급일정 (DART 수시공시 `document.xml`). 위와 **완전히 독립된 파이프라인** |
+| `corp_code_mapper.py` | 종목코드 ↔ DART `corp_code` 매핑 (`data/cache/` 캐시) |
+| `collector_indicator_kr.py` | 보조지표 (RSI·MACD·볼린저) 수집·계산 |
+| `scrape_daily.py` | 매크로 위험 지표 수집 → `market_history.csv`. ⚠️ `PERIOD_KEYWORDS` **사본** 보유 (원본과 수동 동기화 필요) |
+| `probe_indicator_universe_timing.py` | 일회성 조사 스크립트 |
+
+### 🛡️ 검증 · 가공 · 데이터 기반
+
+| 파일 | 역할 |
+|---|---|
+| `utils/data_validator.py` | **3단계 검증 + `PERIOD_KEYWORDS` 원본.** ① raw↔가공 대조 ② PER 산티(≤5%) ③ 출처 간 교차(≤3%) |
+| `utils/data_sanity.py` | 데이터 건전성 감시 (외부 사이트 구조 변경 감지) |
+| `utils/data_source.py` | `data/*.json` 원격 로드 (`DATA_SOURCE_BASE_URL`, ETag 조건부 GET, 실패 시 60초 백오프 + 로컬 사본 폴백) |
+| `utils/db.py` | 저장·이력 (`COL_MAP`, `HISTORY_FILE`) |
+| `utils/constants.py` / `utils/constants_us.py` | 전역 임계값·가중치 단일 출처 / 미국 전용 (다수 잠정값 + TODO) |
+| `utils/scoring.py` / `utils/scoring_us.py` | 퀀트 스코어 (만점은 실제 산출 가능한 항목만 합산) / 미국판 |
+| `utils/guardrail.py` | 종목 차단·마스킹 판정 |
+| `utils/indicators.py`, `indicator_universe.py`, `indicator_ai.py` | 보조지표 계산 · 유니버스 · AI 코멘트 |
+| `utils/macro_scoring.py`, `macro_ai.py`, `krx_openapi.py` | 매크로 점수 · AI 코멘트 · KRX OPEN API 최소 클라이언트 (키는 헤더로만 전달) |
+| `utils/stock_history.py` / `utils/stock_export.py` | 종목별 시계열 이력 단일 출처 / CSV(UTF-8 BOM)·JSON 내보내기 |
+| `utils/company_names_kr.py` | 미국 종목 한글 표기 (사전 우선 + 음역 폴백, 한계 명시) |
+| `utils/expiry_alarms.py` | 검증 연도 만료 경고 (`KRX_VERIFIED_LAST_YEAR`) |
+| `utils/gdrive_helper.py` | 구글드라이브 백업 |
+
+### 👤 사용자 데이터 계층 (🔴 §0-3-8 최상위 금지사항 적용 구간)
+
+| 파일 | 역할 |
+|---|---|
+| `utils/scorecard_db.py` | 내 성적표 포트폴리오 (Supabase `service_role` 격리) |
+| `utils/scorecard_ocr.py` | 스크린샷 OCR (사용자별 하루 한도 `DAILY_OCR_UPLOAD_LIMIT` = 15) |
+| `utils/scorecard_publish.py` / `scorecard_publish_db.py` | 공개 순위표 발행 (동의자만) |
+| `utils/report_db.py` | 리포트 기간 집계·스냅샷·벤치마크 |
+| `utils/duel_db.py` / `duel_db_usd.py` | 결투 원장 (원화 / 달러) |
+| `utils/duel_batch.py` / `duel_batch_usd.py` | 결투 일일 배치 |
+| `utils/duel_rules.py` | 결투 규칙 **단일 출처** (성적표 동의·순위표 화면도 여기서 읽음) |
+| `sql/scorecard_schema.sql`, `scorecard_public_schema.sql`, `report_schema.sql`, `duel_schema.sql` + 마이그레이션 | 오너가 Supabase SQL Editor 에서 직접 실행 |
+
+### ⚙️ 배치 실행 · 자동화
+
+| 파일 | 역할 |
+|---|---|
+| `crawl_ready_gate.py` | 🆕 (#204) **데이터 게이트.** 소비자 5종 `duel-kr`·`duel-us`·`scorecard-kr`·`scorecard-us`·`report-snapshots`. `--role event`(정상) / `--role safety-net`(cron) |
+| `run_duel_daily_batch.py` / `run_duel_daily_batch_us.py` | 결투 일일 배치 실행 (원화 / 달러) |
+| `run_scorecard_publish_batch.py` | 성적표 발행 배치 실행 |
+| `.github/workflows/` 17개 | 연쇄 구조 전체는 `AGENT_ORCHESTRATION.md` §1-2 참고 |
+| `Dockerfile`, `requirements.txt`, `.devcontainer/`, `cloudflare_worker.js` | 배포 · 의존성 · 개발환경 |
+
+### 🧪 테스트
+
+| 파일 | 역할 |
+|---|---|
+| `tests/conftest.py` | **공용 `check()`/`FAILURES` 하네스 단일 출처.** 파일마다 복사하던 방식이 두 번 사고를 내서 2026-08-30 통합 |
+| `tests/test_suite_integrity.py` | **테스트 스위트 자신을 검사.** Check A 가 하네스 3종 존재를 직접 확인 |
+| `tests/test_agent_registry.py` | 🆕 **에이전트 등록부 정합성.** 새 모듈에 담당 에이전트가 없으면 빨간불 — `AGENT_ORCHESTRATION.md` §2-6 절차를 테스트로 강제 |
+| `tests/test_web_session_isolation.py` | 🔴 **개인정보 세션 격리** (148KB, 최대 테스트). 사용자 데이터 코드를 고치면 필수 |
+| `tests/test_event_loop_blocking.py` | 동기 I/O 가 이벤트 루프를 막지 않는지 |
+| `tests/test_user_facing_wording.py` | 화면 문구 (§0-3-1 "실시간" 금지 등) |
+| `tests/test_screen_reads_data_source.py` | 화면이 `data_source` 를 거쳐 읽는지 (원격·로컬 혼재 방지) |
+| `tests/test_watch_schedule_health_window.py` | 워치독 cron 이 **장중이 아닌지** 파일에서 직접 읽어 검사 |
+| `tests/test_crawl_ready_gate.py` | 데이터 게이트 판정 |
+| 나머지 약 40개 | 모듈별 오프라인 검증. 실행: `pytest --ignore=archive -q` (기준선 2026-08-30: 2041 passed / 65 skipped) |
+
+### 📦 데이터 · 보관
+
+| 경로 | 역할 |
+|---|---|
+| `data/kospi200_*` | 코스피 PEGY 최신·요약이력·종목별 이력·산티 |
+| `data/us_stocks_*`, `us_all_*`, `us_index_history.json`, `us_summary_history.json` | 미국주식·ETF·벤치마크 |
+| `data/dividend_*` | 배당 확정치(가공 `.json` + 원본 `.jsonl`, §0-3-3) · 지급일정 이벤트 |
+| `data/indicator_*` | 보조지표 최신·이력·유니버스·산티 |
+| `data/duel_freshness_probe_previous*.json` | 결투 신선도 기준값 (`outcome`: settled/held + 값 원천 거래일, #207) |
+| `market_history.csv` | 날짜별 매크로 종합 위험 점수 이력 (매크로 동결 중에도 계속 누적) |
+| `archive/` | 은퇴한 Streamlit 스택 — `app.py`, `visiblehand.py`, `streamlit_views/`, 구 스크립트. **서비스 경로에서 완전히 제외** (2026-08-29 #160). `pytest --ignore=archive` 로 테스트에서도 제외 |
+| `credentials.json` 등 | 비밀키. `.gitignore` 등록 (확인 완료) |
 
 ## 3. 최근 작업 로그 (요약, 최신순 — 2026-08-09 정리, 상세는 전부 TASK_HISTORY.md에 있음)
+
+- **2026-09-07 — 🧭 에이전트 계층 신설 + 지시서 체계 정리 (#208).** 이 저장소에는 `CLAUDE.md`도
+  `.claude/` 도 없어서, 새 AI 세션이 시작돼도 "`ENGINEERING_SPEC.md`·`PROJECT_STATUS.md` 부터
+  읽어라"를 자동으로 알려주는 장치가 없었습니다. 오너 지시(모듈별로 에이전트를 배치하고 그
+  에이전트들이 다시 작업할 수 있게 하는 지시서)에 따라 **기존 문서 위에 얹는 방식**으로
+  세 겹을 만들었습니다 — 기존 규칙을 복사하지 않고 §번호로 가리키기만 합니다 (§0-3-10).
+  · `CLAUDE.md` **신설** — 세션 진입점. 시작·종료 절차, 절대준수 17개항 요약과 원문 위치,
+    에이전트 라우팅 표, 🔑 비밀값 취급, ⛔ 오너 결정 사항 7가지.
+  · `AGENT_ORCHESTRATION.md` **신설** — 전체 흐름 지시서. 1부: 데이터 흐름 다이어그램 +
+    워크플로우 17개의 `workflow_run` 연쇄(KR 트랙·US 트랙·독립 트랙) + 화면 지도 15개 라우트.
+    2부: 에이전트 12명의 소유 파일, 경계 규칙 6가지, 인계 프로토콜(5항목 서식), 작업 프로토콜.
+  · `.claude/agents/*.md` **신설 12개** — 서비스 8(`kr-stocks`·`us-stocks`·`dividend`·
+    `indicator`·`scorecard`·`report`·`duel`·`macro`) + 공통 4(`data-foundation`·
+    `web-security`·`automation-ops`·`test-audit`). 각 파일에 담당 범위·소유 파일·읽기 전용
+    파일·모듈 고유 절대규칙·절대 금지·검증 명령·인계 대상을 명시. `macro` 는 동결 상태라
+    **쓰기 도구 없이** 정의했습니다(고쳐야 하는 상황 자체가 오너 승인이 필요한 신호).
+  · 같은 작업에서 발견한 문서 부패 2건 수정 — **§2 파일 구조 표**가 2026-08-13 에서 멈춰
+    이미 `archive/` 로 옮긴 `app.py`·`visiblehand.py`·`views/*` 를 현역처럼 가리키고 있었고
+    (그걸 읽고 시작한 에이전트는 없는 파일을 찾게 됩니다), **§4 열려있는 일**에는 이미 끝난
+    #106~#113 이 미완료로 남아 있었습니다. 둘 다 실제 저장소와 1:1 대조해 다시 썼습니다.
+    §2 는 계층별(지시서/화면/수집/검증·가공/사용자데이터/자동화/테스트/데이터)로 재편했고,
+    §4 는 🔴오너 직접 / 🟡오너 확인 대기 / 🔵오너 결정 대기 / 🟠구조적 부채 / 🛑매크로 동결 /
+    ⚪참고 6단계로 분류했습니다. 코드 변경은 없습니다(문서만).
+  · **같은 날 추가 — 절차를 테스트로 강제 (#208-2).** 오너 질문("새 모듈을 만들면 담당
+    에이전트가 자동으로 주어지나?")에 답하며 확인한 결과, §2-6 의 5단계는 **글로만** 적혀
+    있어 다음 세션이 잊으면 그대로 새어나가는 상태였습니다 — `conftest.py` 하네스 복사 사고
+    (2026-08-21·08-30)와 낡은 §2 파일 구조 표와 **정확히 같은 종류**의 "사람이 기억해야만
+    지켜지는 규칙"이었습니다. `tests/test_agent_registry.py` 신설(검사 9건)로 바꿨습니다:
+    ① 🔴 주인 없는 파일 금지 — `web/pages/*`·`web/*`·`utils/*`·워크플로우·루트 스크립트
+    전체를 훑어 어느 에이전트도 소유하지 않는 파일이 있으면 실패 ② 소유 중복 금지
+    ③ frontmatter·이름 일치 ④ `CLAUDE.md`·`AGENT_ORCHESTRATION.md` **양쪽** 라우팅 등재
+    ⑤ 죽은 경로 금지 ⑥ 동결된 `macro` 에 쓰기 도구 없음.
+    소유 판정은 `## 소유 파일` 섹션 **안에서만** 인정하고 `## 읽기만` 섹션은 제외합니다
+    (처음엔 `⚠️` 줄만 빼는 방식을 썼는데 `⚠️` 가 평범한 경고에도 쓰이는 기호라 정상 소유
+    파일까지 걸러졌습니다 — 기호 규칙 대신 섹션 구조로 분리).
+    **사보타주 5종으로 실제로 빨간불이 나는지 확인**했습니다(새 화면 추가 / 새 수집기+
+    워크플로우 추가 / 소유 중복 / 라우팅 누락 / 섹션 제목 변경). 첫 실행에서 실제 결함도
+    1건 잡았습니다 — `scorecard.md` 가 파일명 조각(`_us.yml`)을 가리키고 있었음.
+    Check A 가 이 파일을 건너뛰던 것(하네스를 `check` 만 import 해서 "하네스 미사용"으로
+    판정)도 발견해 `FAILURES, check` 둘 다 import 하도록 고쳤습니다.
+    `.claude/agents/_TEMPLATE.md` 신설, §2-6 을 7단계로 재작성, `CLAUDE.md` 종료 절차에 반영.
 
 - **2026-08-28 — CI: EV/EBITDA 서킷브레이커(#153) 실전 검증 완료 +
   예약 실행(schedule) 감시 워치독(#154) 신설.** #153(2026-08-27 커밋)이 실제
@@ -979,62 +1102,89 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 4. 지금 열려있는 일 (다음에 반드시 확인/처리할 것)
 
-> **📌 2026-08-13 세션 종료 메모** — 오너 주간 토큰 한도로 세션이 여기서 멈췄었고, 바로 아래
-> 항목(#114)의 오너 확인 3가지가 그때부터 지금까지 확인 대기 상태입니다.
+> 🔄 **2026-09-07 정리.** 이 섹션은 2026-08-13 에서 멈춰 있어서 이미 완료된 항목(#106~#113)이
+> "열려있는 일"로 남아 있었습니다. 완료 항목은 전부 `TASK_HISTORY.md` / `TASK_HISTORY_ARCHIVE.md`
+> 에 남아 있으므로 여기서는 지웠고, **실제로 아직 안 끝난 것만** 아래에 남깁니다.
 
-- **🟡 오너 확인 대기 — 리포트 3종 세트 (2026-08-13, TASK_HISTORY #114 / §10-9).**
-  ① '이전/최신/다음 기간' **버튼 버그 수정** ② 화면 **문구 대폭 간소화** ③ 📊 **종목별 비중(%) +
-  비중 변화 표 신설**. **오너가 실행할 SQL 은 없습니다**(비중은 이미 저장된 값으로 조회 시점에
-  계산 — 새 테이블 없음). git commit/push 후 재배포하면 바로 보입니다.
-  **다음 세션에서 오너에게 확인받을 것 3가지**:
-  ㉮ 일간으로 두고 '◀ 이전 기간' 을 눌렀을 때 **기준일 달력의 날짜가 실제로 바뀌는지**,
-  ㉯ 화면이 "한눈에 들어오게" 줄었는지(더 지울 문구가 있는지),
+### 🔴 오너가 직접 해야 하는 일 (코드로 못 함)
+
+- **애드센스 슬롯 ID 3개 입력** — `ADS_SLOT_ID_LEFT` / `_RIGHT` / `_INFEED` 를 Render 환경변수에
+  넣으면 그 자리가 바로 켜집니다. 코드는 이미 배포돼 있습니다 (#148).
+- **애드센스 사이트 심사 결과 확인** (2026-08-25 검토 요청). 승인되면 관리자 화면에서 자리 4개가
+  실제로 뜨는지 확인한 뒤 `web/ads.py` 의 `ADS_ADMIN_ONLY` 를 `False` 로 바꿔 3단계(전체 공개) 전환.
+- **Streamlit Cloud 구 앱 중지** — 코드로 내릴 수 없습니다. Streamlit Cloud 대시보드에서 직접
+  중지해야 합니다 (`main.py` 머리말).
+
+### 🟡 오너 확인 대기 (AI 쪽 작업은 끝남)
+
+- **리포트 3종 세트 (2026-08-13, TASK_HISTORY #114 / §10-9).** ① '이전/최신/다음 기간' 버튼 버그
+  수정 ② 화면 문구 간소화 ③ 종목별 비중(%)+비중 변화 표 신설. **실행할 SQL 없음.**
+  확인할 것 3가지:
+  ㉮ 일간에서 '◀ 이전 기간' 을 눌렀을 때 기준일 달력 날짜가 실제로 바뀌는지
+  ㉯ 화면이 한눈에 들어오게 줄었는지 (더 지울 문구가 있는지)
   ㉰ 비중 변화 표의 비교 시작점이 **"이 기간 첫 기록일"** 인 게 괜찮은지 — 오너의 수기 표처럼
-     **직전 달 마지막 주와 비교**하려면 종목별 스냅샷 조회 범위를 기간 이전까지 넓히는 별도
-     작업이 필요합니다(지금은 없는 값을 끌어오지 않으려고 기간 안에서만 비교).
-- **✅ 완료 — 종목별 일일 스냅샷 신설(#113) + 종가 수집 시각 표시(#112) (2026-08-13).** 새 테이블
-  `portfolio_holding_snapshots`(종목별 히스토리 — §10-8)와 `price_as_of_kst` 컬럼(§10-7)을
-  추가했고, **오너가 Supabase SQL Editor에서 `sql/report_schema.sql` 전체 실행 + git push까지
-  완료** — 다음 배치부터 종목별 스냅샷·수집 시각이 쌓입니다. 자세한 이력은 `TASK_HISTORY.md`
-  #112·#113 참고.
-- **✅ 완료 — "내 성적표"·"사장님 보고서" 공개 전환(#106·#107) + 비밀번호 찾기 실사용
-  검증(#109·#110) (2026-08-13).** 공개 전 보안 최종 점검(발견 2건·수정 2건 — §9-6) 후 오너가
-  Streamlit Cloud Secrets에 `SCORECARD_ENABLED`/`REPORT_ENABLED` 2줄을 켜서 공개 절차 완전 종료
-  (캡처로 확인). 비밀번호 찾기는 Resend Custom SMTP 연결·실사용(실측 8자리 코드로 변경·재로그인·
-  보유 종목 유지)까지 오너가 직접 확인 — §9-7. 자세한 이력은 `TASK_HISTORY.md` #106~#110 참고.
-- **✅ 종목별 시계열 이력 검증 완료 (2026-08-09, TASK_HISTORY #64).** 코스피 200종목·미국 548종목 둘 다 첫 기록 확인.
-- **🟡 매크로 14개 위험 지표 재설계 — 1~4·6단계 완료 후 오너 지시로 중단 상태 (TASK_HISTORY #66 제안서 기반).**
-    - **✅ 완료(2026-08-10, TASK_HISTORY #68~#72)** — 실측 2지표 z-score 정규화(#68) → 실측 불가
-      6개 제외 + 가중치 비례 재분배(#69) → `VKOSPI_Skew`·`Synthetic_Futures`를 KRX OPEN API
-      실측으로 교체 + 실서버 검증(#70·#71) → 공매도 2종 "실측 불가" 재분류(#72, 오너 옵션②
-      확정 — 데이터가 없어서가 아니라 pykrx의 로그인 우회가 §0-3-2와 충돌해 **안 쓰기로 한** 것).
-      단계별 가중치 산정·검증 로그·삭제/이동 사유 전문은 `TASK_HISTORY.md` #66~#72 참고.
-    - **📌 현재 매크로 상태 (2026-08-10 최종)** — 활성 **6개** 중 **4개가 실측**: `KOSPI_5D_Return`·
-      `Stock_Net_Sell`(#68) + `VKOSPI_Skew`·`Synthetic_Futures`(#70, KRX OPEN API 실서버 검증
-      완료). **아직 프록시는 2개**: `FX_Swap_Point`(환율 레벨) · `Put_OTM_OI`(코스피 등락률).
-      점수에서 뺀 8개 = 공부용 참고 섹션 6개 + 개념 중복 완전제외 2개(`Foreign_Broker_Dump`·
-      `Put_Buy_Simple`). 신규 실측 지표 정규화는 이력 20행이 쌓일 때까지 중립(0.5)으로
-      나옵니다(표본 부족 시 지어내지 않음 — 버그 아님).
-    - **⏸️ 남은 프록시 2개는 둘 다 보류(오너 결정, 2026-08-10).** ⑤ `FX_Swap_Point` — ECOS·SMBS
-      경로 조사까지 끝났으나(#71) "일이 너무 커진다"로 보류. 재개 옵션: ① 오너가 브라우저
-      Network 탭으로 SMBS 실제 데이터 엔드포인트 확인 후 공유, ② `appdev@smbs.biz` 정식 문의,
-      ③ 6단계처럼 실측 불가 재분류. ⑥ `Put_OTM_OI` — 행사가 파싱 시도 또는 풋/콜 미결제약정
-      비율 재라벨링(지표 의미가 바뀌므로 **오너 승인 필요**) 중 미착수. 둘 다 실측되면 그때
-      `MACRO_REDESIGN_PROPOSAL.md` §4-3(가중치 재설계)을 한 번에 적용. **현재 매크로 관련 활성
-      작업 없음.**
-    - **✅ 선행 조건 전부 완료(2026-08-10)** — KRX OPEN API 인증키 발급(**유효기간 2026-08-10 ~
-      2027-08-09**), 4개 서비스 이용신청 승인, GitHub Secret `KRX_OPENAPI_KEY` 등록·배선 완료.
-      **인증키 값 자체는 어떤 문서·코드·로그에도 남기지 않습니다**(환경변수에서만 읽고 HTTP
-      헤더로만 전달 — URL에 실으면 서버 로그에 남기 때문).
-    - **⚠️ 약관 주의 — KRX OPEN API 제6조②: "비상업적 목적으로만 이용 가능, 결과에 대한 대가를
-      제3자에게 청구 불가."** 오너가 사이트에 **광고를 붙일 계획**이 있음(2026-08-10 확인) —
-      매크로 화면이 비공개인 지금은 충돌 없지만, 이 화면을 공개 전환하거나 광고 붙은 페이지에 이
-      데이터를 섞으려면 ① 그 페이지 광고 제외 ② KRX 유료 상업 라이선스 전환 중 하나를 선택해야
-      합니다. **공개 전환 전에 반드시 이 조항을 재검토할 것.**
-- **⚪ 참고만** — 미국주식 페이지 상단 지수가 아직 단일 출처(§0-3-3 미충족, 화면에 "근사치입니다" 고지 있어 공개 블로커 아님). `GEMINI_API_KEY` 미등록이어도 자동화는 정상 작동(AI 코멘트만 생략).
+     직전 달 마지막 주와 비교하려면 조회 범위를 기간 이전까지 넓히는 **별도 작업**이 필요합니다.
 
-> 완료된 항목(AUDIT_REPORT_V2 27건, git filter-repo 히스토리 정리, 해외주식 페이지 구축 전체, bcrypt 지원 등)은 전부 `TASK_HISTORY.md`에 남아있습니다.
-> **처리 순서(오너 확정): 0(AUDIT_REPORT_V2) → 4(git filter-repo) → 1(해외주식 페이지) 전부 완료. 다음은 2번(매크로 재설계)입니다.**
+### 🔵 오너 결정 대기 (설계 판단이 필요함)
+
+- **#204 결투 배치의 "같은 날 두 번째 실행" 방어.** 수동 `workflow_dispatch` 를 같은 날 두 번
+  누르면 여전히 가능합니다. 기준값 파일의 `target_date` 가 처리 거래일과 같으면
+  `failed_or_holiday` 로 주문을 취소하지 않고 "이미 처리한 날"로 조용히 넘기는 방식.
+  워크플로우 게이트(`crawl_ready_gate.py`)가 cron·`workflow_run` 양쪽을 막고 있어 평소엔
+  도달하지 않지만, 배치 코드 변경이라 오너 결정 사항입니다.
+- **회원탈퇴(계정 삭제) 셀프서비스 신설 여부** — 2026-08-25 오너 판단 보류. 지금은 `/privacy` 에
+  "메일로 요청받아 처리"라고 정직하게 적어둔 상태 (#149).
+
+### 🟠 구조적 부채 (알고 있으나 아직 안 고침)
+
+- **#175 역성장 종목(`g_eff<=0`)은 배당 미수집 배지를 못 받음** — `utils/guardrail.py` 조기 return.
+  현재 실데이터로 두 조건이 안 겹쳐 화면에는 안 보이지만 구조적 갭입니다. 담당: `kr-stocks`.
+- **`PERIOD_KEYWORDS` 사본 이중화** — 원본은 `utils/data_validator.py`, 사본은 `scrape_daily.py`.
+  수동 동기화가 필요합니다. 사본 쪽이 매크로(동결) 소관이라 통합 시 `macro` 동결 상태를 고려해야
+  합니다. 담당: `data-foundation`.
+- **`render_keep_awake.yml`(10분 간격) 정리 대상** — Render Starter(유료·상시 기동) 전환으로
+  무료 티어 슬립 문제 자체가 사라졌습니다. 필요 없어진 핑을 계속 보내는 것도 §0-3-2 위반입니다.
+  다음에 손볼 때 빈도를 낮추거나 워크플로우를 정리하세요. 담당: `automation-ops`.
+- **`tests/test_scorecard.py`(약 1464·1469행), `tests/test_duel_page_usd.py`(약 1749행)의
+  "코스피 상위 200" 표현** — 순수 코멘트/독스트링이라 테스트 정확성에는 영향 없음. #151 에서 보류.
+
+### 🛑 매크로 — 동결 (오너 지시 2026-08-10)
+
+> 이 항목들은 **기록으로만** 둡니다. 오너가 먼저 명시적으로 지시하지 않는 한 조사·코딩·제안
+> 어느 것도 하지 않습니다. "다음에 뭘 할까요?" 질문에도 매크로를 꺼내지 마세요.
+> 상세는 `.claude/agents/macro.md` 와 `MACRO_REDESIGN_PROPOSAL.md` 참고.
+
+- **현재 상태 (2026-08-10 최종)**: 활성 6개 중 4개 실측 (`KOSPI_5D_Return`·`Stock_Net_Sell`·
+  `VKOSPI_Skew`·`Synthetic_Futures`). 프록시 2개 남음: `FX_Swap_Point`(환율 레벨) ·
+  `Put_OTM_OI`(코스피 등락률). 신규 실측 지표는 이력 20행이 쌓일 때까지 중립(0.5) —
+  **표본 부족 시 지어내지 않는 것이며 버그가 아닙니다.**
+- **⏸️ 남은 프록시 2개 보류.** `FX_Swap_Point` 는 ECOS·SMBS 경로 조사까지 끝냈으나(#71)
+  "일이 너무 커진다"로 보류. `Put_OTM_OI` 는 행사가 파싱 또는 풋/콜 미결제약정 비율 재라벨링
+  (지표 의미가 바뀌므로 오너 승인 필요) 중 미착수. 둘 다 실측되면 그때
+  `MACRO_REDESIGN_PROPOSAL.md` §4-3(가중치 재설계)을 한 번에 적용.
+- 🔑 **KRX OPEN API 인증키 유효기간: 2026-08-10 ~ 2027-08-09.** 만료 시 오너가 재발급.
+  키 값은 어떤 문서·코드·로그에도 남기지 않습니다 (환경변수 → HTTP 헤더 `AUTH_KEY` 로만).
+- ⚠️ **KRX OPEN API 약관 제6조② — "비상업적 목적으로만 이용 가능, 결과에 대한 대가를 제3자에게
+  청구 불가."** 오너가 사이트에 광고를 붙일 계획이 있습니다. 매크로 화면이 비공개인 지금은
+  충돌이 없지만, **공개 전환하거나 광고 붙은 페이지에 이 데이터를 섞으려면** ① 그 페이지 광고
+  제외 ② KRX 유료 상업 라이선스 전환 중 하나를 골라야 합니다. **공개 전환 전 재검토 필수.**
+- 중단 직전 확인: `market_history.csv` 자동 누적은 정상 작동 중입니다. 동결해도 데이터
+  파이프라인 자체는 계속 건강하게 쌓입니다.
+
+### ⚪ 참고만 (블로커 아님)
+
+- **미국주식 상단 지수가 단일 출처** (§0-3-3 미충족). 화면에 "근사치입니다" 고지가 있어 공개
+  블로커는 아닙니다. 이 고지를 지우지 마세요.
+- **`GEMINI_API_KEY` 미등록이어도 자동화는 정상 작동** — AI 코멘트만 생략됩니다.
+- **GitHub Actions schedule 트리거 자체의 지연·누락** (2026-08-27·28·31 반복 관측)의 근본 원인은
+  여전히 미확인입니다. GitHub 쪽 스케줄러 인프라 문제로 추정되나 저장소 설정으로 특정하거나
+  고칠 수 있는 부분이 아닙니다 (§0-1 — 못 고치는 것을 고쳤다고 하지 않습니다).
+  #184·#185 에서 워치독에 **누락 감지 즉시 1회 자동 재실행**을 붙여 완화했고, cron 을 18:00 KST
+  (장 마감 후)로 옮겨 장중 재실행 위험도 막았습니다. "원인 제거"가 아니라 "놓치지 않고 알아채고,
+  가능하면 스스로 한 번 고쳐보기" 용도임을 오너도 인지하고 있습니다.
+
+> 완료된 항목은 전부 `TASK_HISTORY.md`(#154~) 와 `TASK_HISTORY_ARCHIVE.md`(#1~#153) 에 있습니다.
+> 이 섹션에는 **아직 안 끝난 것만** 남깁니다 — 완료 항목을 여기 쌓지 마세요 (§0-2 작업 종료 절차).
 
 ## 5. 자동화 동작 방식 요약
 
