@@ -128,6 +128,17 @@ def test_consumer_job_filters_the_workflow_run_event_like_duel_daily_does(filena
     assert "github.event.workflow_run.event == 'workflow_dispatch'" in condition, (
         f"{filename}: workflow_dispatch 로 돈 크롤링(Cloudflare Worker 16:10 발동)의 완료도 받아야 합니다(#204 실측)"
     )
+    # 🔴 2026-09-07 마무리 점검: 원천 중 하나가 **그 자체로 workflow_run 으로 도는** 워크플로우(벤치마크
+    #    `scrape_report_snapshots.yml` ← scrape_us.yml 완료)이면, 그 완료가 이 소비자를 깨울 때
+    #    `github.event.workflow_run.event` 는 'workflow_run' 입니다. 이 값을 안 받으면 #204 가 설계한
+    #    "종목 → 벤치마크 → 결투 USD·성적표 달러" 연쇄의 마지막 고리가 job 단계에서 skipped 로 끊깁니다.
+    _consumer, sources, _crons, _gate_on_cron = CONSUMER_WORKFLOWS[filename]
+    chained_sources = [src for src in sources if _triggers(_load_workflow(src)).get("workflow_run")]
+    if chained_sources:
+        assert "github.event.workflow_run.event == 'workflow_run'" in condition, (
+            f"{filename}: 원천 {chained_sources} 는 스스로 workflow_run 으로 도는 워크플로우라, 그 완료 이벤트의 "
+            "workflow_run.event 값이 'workflow_run' 입니다 — 이걸 받지 않으면 연쇄가 끊깁니다"
+        )
 
 
 @pytest.mark.parametrize("filename", sorted(CONSUMER_WORKFLOWS))

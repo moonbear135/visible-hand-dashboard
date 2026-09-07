@@ -3876,6 +3876,75 @@ widgets.py::kst_today_str()`로 옮겨 공용화하고 전부 그것만 쓰도�
 수 있으나, 애초에 로컬 쓰기 자체가 재배포에서 사라지는 것과 같은 성격의 한계라 새로 생긴 문제는 아님. (c) `content_length()`의 HEAD
 요청은 캐시 미스 시 동기 네트워크 왕복 — 화면에서는 `run_blocking()`으로 넘겨 처리(이벤트 루프 블로킹 방지, `dividend_page.py`).
 
+### #206 — [오너 요청, 마무리 점검] #195~#205 하루치 변경 전반 재감사 — 전체 스위트 실행(실패 1건 수정) + 워크플로우 `workflow_run` 연쇄의 끊긴 고리 1곳 수정 + 설계 결정 필요 사항 보고 (2026-09-07)
+
+**경위.** 오너: "마지막으로 전반적으로 한번 다 훑어봐 달라" — 새 기능 없이, 오늘 쌓인 #195~#205 가 서로 부딪히거나 빠뜨린 게 없는지
+신선한 눈으로 확인. 시작 전 `git pull --rebase origin main` → Already up to date, HEAD = `6553c6d`(#205) ✅.
+
+**1) 전체 테스트 스위트 — 이번엔 정말 전체(한 번에).** `pytest -q --ignore=archive` 47개 파일 2,423건을 묶지 않고 한 번에 실행:
+**2,346 passed / 77 skipped / 1 error**. 스킵 77건은 전부 `test_suite_integrity.py` 의 파일별 Check A/B "대상 아님"(종전 75 + #205 신설
+`test_screen_reads_data_source.py` 2건) — 새로 생긴 실질 스킵 없음. **실패 1건**: `test_web_session_isolation.py::test_no_mutable_globals`
+— #205 가 `utils/data_source.py` 에 신설한 모듈 전역 `_LOCAL_OVERLAY` / `_SIZE_CACHE` 가 `ALLOWED_MUTABLE_GLOBALS` 화이트리스트에 없음
+(#205 검증이 관련 파일만 골라 돌려 이 메타 테스트를 지나침). 둘 다 키가 저장소 상대경로뿐인 시장 데이터 캐시라(§0-3-8 구분선) 사유를
+적어 등록 → 수정 후 전체 **2,346 passed / 77 skipped / 실패 0**.
+
+**2) 워크플로우 YAML 상호 정합성.** cron 17개 값 전수 대조 — 같은 분에 겹치는 것 없음(`render_keep_awake` :03/:13/… 과도 안 겹침).
+순서 전제 유지: 성적표 원화 07:35 < 벤치마크 08:20 < 산티체크 09:30 < 성적표 달러 11:35 < 결투 USD 12:00 < 워치독 18:00(KST). #204 의
+workflow_run 배선은 4곳 + `scrape_report_snapshots.yml` 전부 YAML 파싱해 `workflows:` 이름·`types: [completed]`·job `if`·게이트 스텝·
+후속 스텝 `if` 연결을 확인 — 문법·연결 모두 정상. #203 의 `--currency KRW/USD` 인자·통화별 가지치기는 #204 게이트 스텝 뒤 작업 스텝에
+그대로 살아 있고(`ARGS="--currency X"`), 게이트는 발행 로직과 독립이라 서로의 전제를 깨지 않음. §4-b "결투 기준선 = D-1" 전제는 #204 로
+결투와 성적표가 **동시에** 깨어나게 되면서 "같은 날/다른 날" 어느 쪽이든 판정 경로만 다르고 결과가 같음(#203 이 이미 봉합).
+
+🔴 **발견·수정 — US 연쇄의 마지막 고리가 job `if` 에서 끊겨 있었음.** #204 는 "scrape_us 완료 → 벤치마크(`scrape_report_snapshots.yml`,
+workflow_run) → 결투 USD·성적표 달러(두 번째 깨어남에서 진행)" 를 설계했는데, 벤치마크 워크플로우가 workflow_run 으로 돈 실행의 완료
+이벤트는 `github.event.workflow_run.event == 'workflow_run'` 이라 `duel_daily_us.yml`·`scorecard_publish_daily_us.yml` 의
+`(schedule || workflow_dispatch)` 필터에 걸려 **job 자체가 skipped** 됐을 것(첫 번째 깨어남은 벤치마크 없음으로 게이트 건너뜀 → 두 번째는
+필터에서 탈락 → 결국 벤치마크 cron 안전망(08:20+지연) 완료나 자체 cron 까지 대기 — #204 이전과 비슷한 지연). 두 파일의 job `if` 에
+`|| github.event.workflow_run.event == 'workflow_run'` 추가(값이 다 있고 미처리인지는 게이트가 데이터로 보므로 안전). GitHub 의
+"workflow_run 연쇄는 3단계까지" 제한 안(scrape_us → snapshots → 소비자 = 3단). `tests/test_crawl_ready_gate.py` §1 ③ 에 "원천이 스스로
+workflow_run 으로 도는 워크플로우면 'workflow_run' 값도 받아야 한다" 단언 추가 — 수정 전 파일로 되돌리면 2건 실패 확인. KR 쪽(원천
+`scrape.yml` 은 schedule/workflow_dispatch 로만 돎)은 해당 없음.
+
+**3) `crawl_ready_gate.py` 재검증.** 로직 재독 + 오늘(2026-09-07 월 13:25 KST) 실데이터로 5개 소비자 실행: duel-kr/scorecard-kr(event)
+→ 스냅샷 09-06 자라 미완료 ✓ / duel-kr(safety-net) → 기준값 09-04 라 진행 ✓ / duel-us·scorecard-us(event) → 스냅샷·벤치마크 09-04 라
+09-06 미확보 ✓ / report-snapshots → 이미 돌았음 ✓ / `--now 2026-09-05T10:30` 로 미국 2개 → 준비 ✓ / `--now 2026-09-06T17:30` 로 duel-kr
+→ 주말 건너뜀 ✓, scorecard-kr → 진행 ✓(일요일 수동 수집분). 전부 실제 상황과 일치.
+
+**4) `data_source.py` 로컬 덮개 동시성.** `_LOCAL_OVERLAY`·`_SIZE_CACHE` 의 모든 읽기·쓰기가 `_LOCK`(RLock) 안에 있음을 코드로 확인
+(`read_text` 의 덮개 판정 → `_apply_local_overlay` 의 리비전 비교·pop, `note_local_write`, `local_overlay_active`, `content_length`,
+`reset_cache`). 로컬 파일 읽기·HEAD 요청은 락 밖(맞음). `run_blocking` 스레드 여러 개가 동시에 와도 상태가 꼬이는 경로 없음. 남는 경계 두
+가지(문제 아님, 기록만): ⓐ `_read_remote` 반환 뒤 `_apply_local_overlay` 의 리비전 확인 사이에 다른 스레드가 새 리비전을 받으면 덮개는
+걷히고 그 요청은 직전 원격 본문을 한 번 돌려줌(다음 요청부터 최신). ⓑ `content_length()` 는 `_read_remote` 와 달리 콜드 캐시에서 동시
+요청을 합치지 않아 HEAD 가 N번 나갈 수 있음(HEAD 라 가볍고 파일 하나 — 개선 여지만 있음).
+
+**5) #195~#205 "하지 않은 것" 재정리** — 본문 최종 보고에 표로 정리(중복 제거). 이번 세션 안에서 우연히 해결된 것: #201(b) cron 이동 →
+#202 / #202 월·화 `no_baseline` 빈틈 → #203 / #202 "근본 해결은 workflow_run" → #204 / #198(a) 백로그 3번(`macro_page` 로컬 직접 읽기)
+→ #205 / #203(c) 09-06 일요일 스냅샷 문제 → 월요일 정식 수집이 덮으면 자연 해소. 나머지는 여전히 유효한 백로그(아래 백로그 절에 새 항목 1건 추가).
+
+**6) 자유 감사에서 나온 것.**
+- 🔴 **설계 결정 필요(코드 안 고침, 백로그 등재)** — #204 게이트가 만든 새 빈틈: 결투 cron 안전망(KR 17:10 / USD 12:00)이 **크롤링이
+  끝나기 전에** 돌면(KR 은 Worker 수집이 17:19~17:59 에 끝나므로 GitHub cron 이 제때 발동한 날엔 실제로 가능 — 08-19~26 처럼 지연 20분
+  안팎이던 시기) 배치는 "스냅샷 거래일 ≠ 처리 거래일" 로 **보류**하면서도 ⑤단계에서 오늘 `target_date` 로 기준값 파일을 저장·커밋함
+  (`run_duel_daily_batch.py` — 보류일에도 `today_probe` 가 만들어지므로). 그 뒤 진짜 수집 완료 workflow_run 이 와도 게이트가 "결투
+  기준값이 이미 오늘 자 → 이미 처리" 로 건너뛰어 보류 주문이 그날 체결되지 못하고 다음 날 배치의 정체 주문 만료(`expire`)로 끝남.
+  #204 이전에는 같은 날 두 번째 실행(GitHub cron 완료분)이 이 보류를 체결로 되살렸는데(첫 실행이 남긴 기준값 = 어제 값이라 "변동 있음"),
+  게이트가 그 경로를 막음. 처방 후보: (a) 배치가 "우리 쪽 자료 낡음"으로 보류한 날은 기준값 파일을 갱신하지 않기(가장 작은 변경 —
+  `today_probe=None` 과 같은 분기), (b) 게이트 safety-net 에도 "수집 완료" 조건 걸기(안전망의 존재 이유와 충돌 — #204 머리말), (c) 기준값
+  파일에 "어느 스냅샷으로 만들었는가" 를 적고 게이트가 그것을 보기. 어느 쪽이든 결투 배치·기준값 형식에 손대는 일이라 오너 결정.
+- 문서 정정: `scorecard_publish_daily.yml` #204 문단이 "이미 처리한 뒤의 두 번째 완료(GitHub cron 지연분)는 건너뜁니다" 라고 적었으나
+  `scorecard-kr` 게이트는 "이미 처리" 를 보지 않아(머리말 판정표대로) 두 번째 완료에도 한 번 더 발행함(멱등이라 무해). 문구를 사실대로 고침.
+- 소소(고치지 않음): `web/components/widgets.py` 가 `KST = timezone(timedelta(hours=9))` 를 또 정의(저장소 5번째 사본 — `utils/duel_rules.KST`
+  등과 값은 같음) / `dividend_page.py` raw 다운로드 파일명은 공용 `kst_today_str()` 이 아니라 자체 `today_kst()` 를 계속 씀(같은 KST 라
+  불일치는 없고, 그 파일이 "날짜 계산 자리를 하나로" 라고 명시한 의도적 선택) / 저장소 루트의 추적되지 않는 `Claude outputs/`
+  폴더(이전 세션 산출물 SQL·PNG)가 `.gitignore` 에 없음 — 커밋에 섞이지 않게 오너가 처리.
+
+**검증.** 수정 후 전체 `pytest -q --ignore=archive` **2,346 passed / 77 skipped / 실패 0**(한 번에 실행, 98초). 워크플로우 3개 YAML 파싱·job `if`
+덤프 확인. GitHub push 권한 없는 세션 — **로컬 커밋까지만**, 오너가 push.
+
+**하지 않은 것(§0-1).** (a) 위 🔴 설계 결정 사항은 코드를 고치지 않고 보고·백로그 등재만. (b) `workflow_run` 필터 확장의 실제 발동은
+오프라인 검증 밖 — 다음 평일(09-08 화) 아침 scrape_us 완료 → snapshots → `duel_daily_us.yml`·`scorecard_publish_daily_us.yml` 두 번째
+깨어남이 skipped 가 아니라 게이트 "준비 완료 → 진행" 인지 Actions 탭에서 확인 필요. (c) 백로그 항목 이외의 코드는 한 줄도 바꾸지 않음.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
@@ -3895,6 +3964,10 @@ widgets.py::kst_today_str()`로 옮겨 공용화하고 전부 그것만 쓰도�
   "고정 점수 하드컷오프" 서술이 2026-08-06 개편(z-score/윈저라이즈 기반 %대 캡)
   이후로도 안 고쳐진 채 방치돼 있었음 — `utils/guardrail.py`·`utils/scoring.py`를
   직접 재확인해 3단으로(종목 차단/배지만/점수 캡) 다시 정리. 코드 변경 없음.
+- 🆕 #206 [🔴 오너 결정] 결투 cron 안전망이 **크롤링 완료 전에** 돈 날(KR 17:10 vs Worker 수집 종료 17:19~17:59 — GitHub cron 이 제때
+  발동하면 실제로 가능) 배치가 "스냅샷 거래일 ≠ 처리 거래일" 로 보류하면서도 오늘 `target_date` 기준값을 저장·커밋 → 뒤이은 진짜 수집
+  완료 workflow_run 을 #204 게이트가 "이미 처리" 로 건너뜀 → 보류 주문이 그날 체결되지 못하고 다음 날 만료. 처방 후보 (a) 보류일엔 기준값
+  미갱신(`run_duel_daily_batch(_us).py` ⑤) (b) safety-net 에도 수집 완료 조건 (c) 기준값에 원천 스냅샷 날짜 기록 — TASK_HISTORY #206 6).
 - 🆕 #204 결투 배치 자체의 "같은 날 두 번째 실행" 방어 — 기준값 파일 `target_date` 가 처리 거래일과 같으면(그날 이미 돌았음)
   `failed_or_holiday` 로 보류 주문을 취소하지 않고 "이미 처리한 날"로 조용히 넘기기. 지금은 워크플로우 게이트(`crawl_ready_gate.py`)
   가 cron·workflow_run 양쪽에서 막고 있어 실제로는 도달하지 않지만, 수동 `workflow_dispatch` 를 같은 날 두 번 누르면 여전히 가능.

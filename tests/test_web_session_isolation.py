@@ -184,6 +184,17 @@ ALLOWED_MUTABLE_GLOBALS = {
         "캐시. 키는 저장소 기준 상대경로 문자열뿐이고, 값에 들어가는 것은 모든 접속자에게 "
         "동일한 시세 스냅샷 텍스트입니다. 사용자별 데이터는 이 모듈을 거치는 경로 자체가 "
         "없습니다 — `read_text()` 는 `data/` 안의 파일 경로만 받습니다 (§0-3-8 구분선).",
+    ("utils/data_source.py", "_LOCAL_OVERLAY"):
+        "(2026-09-07 #205) 앱이 로컬에 방금 쓴 **시장 데이터 파일**(`market_history.csv` — 관리자 수동 "
+        "입력)의 '로컬 덮개' 상태. 키는 위 `_CACHE` 와 같은 저장소 기준 상대경로뿐이고 값은 "
+        "{쓰기 시점 원격 리비전, 시각}. 관리자 수동 입력은 접속자마다 다른 값이 아니라 그 서버 "
+        "프로세스가 모든 접속자에게 똑같이 보여주는 단일 시장 데이터입니다(§0-3-8 구분선). "
+        "사용자별 데이터가 들어올 경로는 `note_local_write()` 가 `remote_relative_path()` 로 "
+        "`data/` 바로 아래·`_REMOTE_ROOT_FILES` 만 받으므로 구조적으로 없습니다.",
+    ("utils/data_source.py", "_SIZE_CACHE"):
+        "(2026-09-07 #205) `content_length()` 전용 — 원격 시장 데이터 파일의 HEAD `Content-Length` "
+        "캐시. 키는 상대경로, 값은 {정수 크기, 시각, 백오프, 사유}. 위 `_CACHE` 와 같은 파일 집합만 "
+        "대상이라 사용자 데이터가 들어올 자리가 없습니다.",
     ("web/components/widgets.py", "_BANNER_PALETTE"):
         "배너 색상 상수표(문자열 튜플). 값이 CSS 색상 문자열이라 데이터가 들어갈 자리가 없음.",
     ("web/layout.py", "_MENU_GROUPS"):

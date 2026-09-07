@@ -129,10 +129,17 @@ jobs:
     # (#204) workflow_run 으로 깨어났을 때만 거릅니다 — 앞 워크플로우가 성공으로 끝났고, 그
     # 실행이 자기 cron 또는 workflow_dispatch(수동·Worker) 였을 때. "오늘 값인가·이미 처리했나"는
     # 아래 게이트 단계가 데이터로 봅니다. cron·workflow_dispatch 로 직접 불렸을 땐 항상 참.
+    # 🔴 (2026-09-07 마무리 점검) `workflow_run` 도 받습니다 — 정상 순서에서 벤치마크 워크플로우
+    #    ("Daily Report Snapshots")는 scrape_us.yml 완료의 workflow_run 으로 돌기 때문에, 그 완료가
+    #    이 워크플로우를 깨울 때 `github.event.workflow_run.event` 값은 'schedule' 이 아니라
+    #    **'workflow_run'** 입니다. 이걸 거르면 위 머리말의 "나중에 끝난 쪽(벤치마크) 이벤트가 실제로
+    #    처리" 경로가 job 단계에서 skipped 로 버려지고, 벤치마크 cron 안전망(08:20+지연) 완료까지
+    #    기다리게 됩니다. 어차피 "값이 다 있고 아직 처리 전"은 게이트가 데이터로 봅니다.
     if: >-
       github.event_name != 'workflow_run' ||
       (github.event.workflow_run.conclusion == 'success' &&
-       (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch'))
+       (github.event.workflow_run.event == 'schedule' || github.event.workflow_run.event == 'workflow_dispatch' ||
+        github.event.workflow_run.event == 'workflow_run'))
 
     steps:
       - name: 저장소 체크아웃
