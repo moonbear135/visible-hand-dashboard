@@ -1,6 +1,6 @@
 {
   "summary": {
-    "generated_at_kst": "2026-09-03T07:31:38.590859+09:00",
+    "generated_at_kst": "2026-09-08T07:41:29.659812+09:00",
     "total_records": 2590,
     "by_status": {
       "OK": 2482,
@@ -905,41 +905,40 @@
     "bsns_year": "2026",
     "universe_size_input": 2735,
     "universe_size": 2735,
-    "requests_used": 5372,
-    "elapsed_sec": 18732.399999999998,
+    "requests_used": 5374,
+    "elapsed_sec": 18930.6,
     "completed": false,
-    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.))))",
+    "stopped_reason": "기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(기존 실행 미완료(실행 시간 예산(5.0시간)을 넘겼습니다. 체크포인트를 저장했으니 다음 실행에서 이어집니다.)))))",
     "corpcode_source": "network",
     "corpcode_stats": {
-      "total_entries": 118831,
-      "listed_entries": 3988,
-      "unlisted_entries": 114843,
+      "total_entries": 118942,
+      "listed_entries": 3989,
+      "unlisted_entries": 114953,
       "malformed_stock_codes": [],
       "duplicates": [],
       "invalid_entries": 0,
-      "total_list_nodes": 118831
+      "total_list_nodes": 118942
     },
-    "watch_update_performed_at_kst": "2026-09-03T07:31:38.588730+09:00",
-    "watch_date_range_checked": "20260902~20260902",
+    "watch_update_performed_at_kst": "2026-09-08T07:41:29.656458+09:00",
+    "watch_date_range_checked": "20260907~20260907",
     "watch_replaced_stock_codes": [
-      "003670",
-      "143210"
+      "388610"
     ],
     "watch_added_stock_codes": [],
     "watch_skipped_replacements": [],
     "watch_unexpected_report_regressions": [],
     "watch_filings_outside_universe": [],
     "watch_delta_summary": {
-      "generated_at_kst": "2026-09-03T07:31:38.389823+09:00",
-      "total_records": 2,
+      "generated_at_kst": "2026-09-08T07:41:29.417755+09:00",
+      "total_records": 1,
       "by_status": {
-        "OK": 2
+        "OK": 1
       },
       "by_report_used": {
-        "반기보고서": 2
+        "반기보고서": 1
       },
       "ok_with_common_dps": 0,
-      "ok_without_common_dps": 2,
+      "ok_without_common_dps": 1,
       "unmapped_stock_codes": 0,
       "unmapped_detail": [],
       "unknown_se_labels": [],
@@ -953,9 +952,9 @@
       "name_fallback_attempted": true,
       "name_fallback_universe_names": 2734,
       "name_fallback_index_stats": {
-        "total_entries": 118831,
-        "total_named_entries": 118831,
-        "named_entries": 110956,
+        "total_entries": 118942,
+        "total_named_entries": 118942,
+        "named_entries": 111056,
         "unnamed_entries": 0,
         "duplicate_names": [
           {
@@ -12589,11 +12588,16 @@
           {
             "corp_name": "마이크로닉스",
             "chosen": {
-              "corp_code": "00673365",
+              "corp_code": "02047157",
               "corp_name": "마이크로닉스",
-              "modify_date": "20240628"
+              "modify_date": "20260907"
             },
             "dropped": [
+              {
+                "corp_code": "00673365",
+                "corp_name": "마이크로닉스",
+                "modify_date": "20240628"
+              },
               {
                 "corp_code": "00112068",
                 "corp_name": "마이크로닉스",
@@ -12987,6 +12991,22 @@
               {
                 "corp_code": "00413064",
                 "corp_name": "성신산업",
+                "modify_date": "20170630"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
+            "corp_name": "우림홀딩스",
+            "chosen": {
+              "corp_code": "02047689",
+              "corp_name": "우림홀딩스",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "00454061",
+                "corp_name": "우림홀딩스",
                 "modify_date": "20170630"
               }
             ],
@@ -31787,7 +31807,7 @@
             "chosen": {
               "corp_code": "00406329",
               "corp_name": "루멘스",
-              "modify_date": "20260331"
+              "modify_date": "20260903"
             },
             "dropped": [
               {
@@ -35002,11 +35022,16 @@
           {
             "corp_name": "한성기업",
             "chosen": {
-              "corp_code": "01397851",
+              "corp_code": "02047388",
               "corp_name": "한성기업",
-              "modify_date": "20231031"
+              "modify_date": "20260907"
             },
             "dropped": [
+              {
+                "corp_code": "01397851",
+                "corp_name": "한성기업",
+                "modify_date": "20231031"
+              },
               {
                 "corp_code": "00161860",
                 "corp_name": "한성기업",
@@ -38410,16 +38435,11 @@
           {
             "corp_name": "대영금속",
             "chosen": {
-              "corp_code": "00216452",
+              "corp_code": "01232165",
               "corp_name": "대영금속",
-              "modify_date": "20220228"
+              "modify_date": "20190228"
             },
             "dropped": [
-              {
-                "corp_code": "01232165",
-                "corp_name": "대영금속",
-                "modify_date": "20190228"
-              },
               {
                 "corp_code": "00449786",
                 "corp_name": "대영금속",
@@ -61317,11 +61337,16 @@
           {
             "corp_name": "제이앤씨",
             "chosen": {
-              "corp_code": "01215399",
+              "corp_code": "02047449",
               "corp_name": "제이앤씨",
-              "modify_date": "20220225"
+              "modify_date": "20260907"
             },
             "dropped": [
+              {
+                "corp_code": "01215399",
+                "corp_name": "제이앤씨",
+                "modify_date": "20220225"
+              },
               {
                 "corp_code": "01299683",
                 "corp_name": "제이앤씨",
@@ -68688,6 +68713,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "지디개발",
+            "chosen": {
+              "corp_code": "02047458",
+              "corp_name": "지디개발",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "01208539",
+                "corp_name": "지디개발",
+                "modify_date": "20200225"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "청송산업개발",
             "chosen": {
               "corp_code": "01647437",
@@ -71396,6 +71437,22 @@
                 "corp_code": "00240723",
                 "corp_name": "삼화기업",
                 "modify_date": "20200421"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
+            "corp_name": "태성화학",
+            "chosen": {
+              "corp_code": "02047528",
+              "corp_name": "태성화학",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "01023752",
+                "corp_name": "태성화학",
+                "modify_date": "20200414"
               }
             ],
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
@@ -79657,6 +79714,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "한국청과",
+            "chosen": {
+              "corp_code": "02047616",
+              "corp_name": "한국청과",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "00159759",
+                "corp_name": "한국청과",
+                "modify_date": "20220225"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "고광산업",
             "chosen": {
               "corp_code": "00579838",
@@ -87749,6 +87822,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "번영",
+            "chosen": {
+              "corp_code": "02047643",
+              "corp_name": "번영",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "01686393",
+                "corp_name": "번영",
+                "modify_date": "20220914"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "티에스스틸",
             "chosen": {
               "corp_code": "00921086",
@@ -89121,7 +89210,7 @@
             "chosen": {
               "corp_code": "02046149",
               "corp_name": "상명건설",
-              "modify_date": "20260902"
+              "modify_date": "20260904"
             },
             "dropped": [
               {
@@ -91243,6 +91332,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "디엠아이",
+            "chosen": {
+              "corp_code": "02046927",
+              "corp_name": "디엠아이",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "00927035",
+                "corp_name": "디엠아이",
+                "modify_date": "20230213"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "에이엔피",
             "chosen": {
               "corp_code": "01361801",
@@ -92715,15 +92820,15 @@
           {
             "corp_name": "케이씨",
             "chosen": {
-              "corp_code": "01012206",
+              "corp_code": "00209780",
               "corp_name": "케이씨",
-              "modify_date": "20260331"
+              "modify_date": "20260907"
             },
             "dropped": [
               {
-                "corp_code": "00209780",
+                "corp_code": "01012206",
                 "corp_name": "케이씨",
-                "modify_date": "20241111"
+                "modify_date": "20260331"
               },
               {
                 "corp_code": "00410049",
@@ -97609,7 +97714,7 @@
             "chosen": {
               "corp_code": "00210856",
               "corp_name": "코아스",
-              "modify_date": "20260330"
+              "modify_date": "20260907"
             },
             "dropped": [
               {
@@ -98003,7 +98108,7 @@
             "chosen": {
               "corp_code": "00532943",
               "corp_name": "신한정밀공업",
-              "modify_date": "20260219"
+              "modify_date": "20260904"
             },
             "dropped": [
               {
@@ -99774,6 +99879,22 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "플럭서스",
+            "chosen": {
+              "corp_code": "02046468",
+              "corp_name": "플럭서스",
+              "modify_date": "20260903"
+            },
+            "dropped": [
+              {
+                "corp_code": "01897500",
+                "corp_name": "플럭서스",
+                "modify_date": "20250226"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "지에이코리아",
             "chosen": {
               "corp_code": "00465340",
@@ -100995,6 +101116,38 @@
             "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
           },
           {
+            "corp_name": "특수건설",
+            "chosen": {
+              "corp_code": "02047607",
+              "corp_name": "특수건설",
+              "modify_date": "20260907"
+            },
+            "dropped": [
+              {
+                "corp_code": "00186939",
+                "corp_name": "특수건설",
+                "modify_date": "20260622"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
+            "corp_name": "브이핑크홀딩스",
+            "chosen": {
+              "corp_code": "02046194",
+              "corp_name": "브이핑크홀딩스",
+              "modify_date": "20260903"
+            },
+            "dropped": [
+              {
+                "corp_code": "01947346",
+                "corp_name": "브이핑크홀딩스",
+                "modify_date": "20250821"
+              }
+            ],
+            "note": "modify_date 가 가장 최신인 항목을 선택했습니다."
+          },
+          {
             "corp_name": "동양에너지",
             "chosen": {
               "corp_code": "00672348",
@@ -101050,27 +101203,27 @@
         "corp_cls 값은 삼성전자의 'Y' 외에는 실제 응답으로 확인하지 못했습니다."
       ],
       "bsns_year": "2026",
-      "universe_size_input": 2,
-      "universe_size": 2,
+      "universe_size_input": 1,
+      "universe_size": 1,
       "reprt_priority_used": [
         "11014",
         "11012",
         "11013"
       ],
       "skip_not_yet_due": false,
-      "requests_used": 4,
-      "elapsed_sec": 247.0,
+      "requests_used": 2,
+      "elapsed_sec": 198.2,
       "completed": true,
       "stopped_reason": null,
       "corpcode_source": "network",
       "corpcode_stats": {
-        "total_entries": 118831,
-        "listed_entries": 3988,
-        "unlisted_entries": 114843,
+        "total_entries": 118942,
+        "listed_entries": 3989,
+        "unlisted_entries": 114953,
         "malformed_stock_codes": [],
         "duplicates": [],
         "invalid_entries": 0,
-        "total_list_nodes": 118831
+        "total_list_nodes": 118942
       },
       "limit_applied": null,
       "cross_source_baseline_path": null,
@@ -101081,7 +101234,7 @@
       "checkpoint_write_failures": 0,
       "verification_status": "⚠️ 이 수집기의 requests 경로는 개발 세션에서 실행 검증되지 않았습니다. 첫 GitHub Actions 실행 로그로 반드시 확인하세요."
     },
-    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 2종목을 최신 보고서로 교체하고 0종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
+    "verification_status": "⚠️ 이 리포트는 단일 전수 수집의 결과가 아니라 daily watch(list.json 공시검색)로 **부분 갱신**된 결과입니다 — 이번 실행에서 1종목을 최신 보고서로 교체하고 0종목을 새로 추가했습니다. 나머지 종목의 값과 generated_at_kst 이전의 사정은 직전 전수 수집 그대로이며, 어느 종목이 언제 갱신됐는지는 summary.watch_* 필드와 dividend_kr_2026_watch_log.json 에 남아 있습니다."
   },
   "records": [
     {
@@ -247342,11 +247495,10 @@
       "reprt_code": "11012",
       "reprt_name": "반기보고서",
       "stlm_dt": "2026-06-30",
-      "rcept_no": "20260813001144",
-      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260813001144",
+      "rcept_no": "20260907000314",
+      "dart_url": "https://dart.fss.or.kr/dsaf001/main.do?rcpNo=20260907000314",
       "dps_cash_common": null,
       "dps_cash_preferred": null,
-      "dps_cash_unspecified": null,
       "dps_cash_common_all": [],
       "dps_cash_preferred_all": [],
       "dps_stock_common": null,
@@ -247373,12 +247525,20 @@
       "cross_source_notes": [],
       "status": "OK",
       "status_reason": "반기보고서 기준 누적치",
-      "collected_at_kst": "2026-08-29T16:06:42.668274+09:00",
+      "collected_at_kst": "2026-09-08T07:41:27.092016+09:00",
       "parse_notes": [],
       "unknown_se_labels": [],
       "unit_mismatch_notes": [],
       "yield_reliability_note": "현금배당수익률(%)은 DART 정기보고서 원문값 그대로입니다. 분기·반기보고서에서는 주당배당금이 누적으로 늘어도 수익률이 갱신되지 않는 사례를 실측 확인했습니다(삼성전자 2026 1분기 0.20% → 반기 746원인데 여전히 0.20%). 누적 정합을 보장하지 않으므로, 화면에 수익률을 쓸 거라면 (누적 주당배당금 ÷ 현재가)로 직접 계산하고 그 사실을 표시하는 편이 안전합니다.",
       "source": "DART OpenAPI alotMatter.json",
+      "dps_cash_unspecified": null,
+      "dps_cash_unspecified_all": [],
+      "dps_stock_unspecified": null,
+      "dps_stock_unspecified_all": [],
+      "cash_yield_unspecified": null,
+      "cash_yield_unspecified_all": [],
+      "stock_yield_unspecified": null,
+      "stock_yield_unspecified_all": [],
       "probe_log": [
         {
           "reprt_code": "11014",
