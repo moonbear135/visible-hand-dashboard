@@ -1139,6 +1139,80 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 > "열려있는 일"로 남아 있었습니다. 완료 항목은 전부 `TASK_HISTORY.md` / `TASK_HISTORY_ARCHIVE.md`
 > 에 남아 있으므로 여기서는 지웠고, **실제로 아직 안 끝난 것만** 아래에 남깁니다.
 
+### 🔴🔴 최우선 — 네이버 증권 개편, **2026-09-10 기존 서비스 종료 예고** (2026-09-07 오너 발견)
+
+> **오너가 네이버 증권 화면에서 직접 발견한 배너**: *"기존 증권 서비스는 9월 10일 종료되며,
+> 더 향상된 투자 경험으로 개편됩니다."* — 구 `finance.naver.com` → 신 `stock.naver.com`("Npay 증권").
+> 발견일 기준 **3일 남았습니다.**
+
+#### 무엇이 걸려 있나 — 저장소가 쓰는 `finance.naver.com` 엔드포인트 **7개**
+
+| 엔드포인트 | 쓰는 파일 | 가져오는 것 |
+|---|---|---|
+| `sise/sise_market_sum.naver?sosok=` | `collector_kospi200.py` | **종목 목록(시총 순위 500) + ROE** |
+| `item/main.naver?code=` | `collector_kospi200.py` | **종목 상세 — PER·EPS·추정PER·추정EPS·PBR·배당수익률·상장주식수·주당배당금·Forward ROE** |
+| `sise/investorDealTrendDay.naver` (3종) | `scrape_daily.py`, `utils/db.py`, `web/pages/macro_page.py` | 투자자별 매매동향(수급) |
+| `sise/sise_index.naver?code=KOSPI` | `scrape_daily.py`, `web/pages/macro_page.py` | 코스피 지수 |
+| `marketindex/` | `scrape_daily.py`, `web/pages/macro_page.py` | 환율 등 시장지표 |
+
+#### 🔴 멈추면 번지는 범위 — `/kr` 화면 하나가 아닙니다
+
+워크플로우가 `workflow_run` 으로 엮여 있어(§0-3-15, #204) **앞이 죽으면 뒤도 안 돕니다**:
+
+```
+scrape.yml ("Daily Market Scraper")  ← 여기가 죽으면
+   ├── /kr 코스피·코스닥 PEGY  ......... 공개 화면
+   ├── duel_daily.yml ................. ⚔️ 결투 원화 트랙
+   └── scorecard_publish_daily.yml .... 📊 성적표 원화 발행
+```
+
+- 🟡 **매크로** — 이미 동결(2026-08-10)이지만 `market_history.csv` 누적이 멈춥니다.
+- ✅ **영향 없음** — 미국주식(stockanalysis.com) · 배당(DART OpenAPI) · **보조지표(FinanceDataReader — 네이버 미사용, 2026-09-07 확인)**.
+- ❔ **EV/EBITDA** — `navercomp.wisereport.co.kr` 은 **다른 도메인**이라 이번 종료 대상인지 불명.
+
+#### 다행인 것 — 조용히 틀리지는 않습니다
+
+§0-1 설계 덕분에 파싱이 깨지면 값을 지어내지 않고 `None`("데이터 없음")이 됩니다. 그러면
+`watch_data_sanity.yml`(매일 09:30 KST)이 `unusable_ratio` 급등을 잡아 **디스코드로 알립니다**
+(오너가 2026-09-07 오전 알림 정상 수신 확인). 즉 **틀린 데이터가 아니라 빈 화면**이 됩니다.
+
+⚠️ 단, 현재 산티체크 감시 필드는 **`price`·`market_cap` 두 개뿐**입니다. 목록 페이지가 깨지면
+바로 걸리지만, **종목 상세만 깨지면(DPS·PBR·추정치) 이 감시망에 안 걸립니다.**
+
+#### 🔴 아직 모르는 것 (확인 전에 단정하지 않음 — §0-1)
+
+배너는 "기존 증권 서비스 종료"라고만 합니다. 아래는 **전부 미확인**입니다:
+
+1. `finance.naver.com` **URL 자체가 죽는지**, 새 주소로 리디렉트되는지, UI만 바뀌고 데이터 경로는 남는지
+2. `stock.naver.com` 이 같은 데이터(특히 **추정 PER·EPS 컨센서스**, 주당배당금)를 주는지
+3. 새 사이트가 HTML 인지 **JSON API** 인지 — 후자면 오히려 파싱이 안정적일 수 있음
+4. `navercomp.wisereport.co.kr`(EV/EBITDA)이 종료 대상인지
+
+#### 📄 상세 조사 결과와 대응 계획: **`NAVER_MIGRATION_WORK_ORDER.md`** (2026-09-07 신설)
+
+필드 단위 의존 목록 · 대체 후보 실측 커버리지 · 단계별 대응 4안(3-A~3-D)이 거기 있습니다.
+🔴 **진짜 병목은 추정 PER·EPS 와 Forward ROE** — 애널리스트 컨센서스라 공공 출처로 대체 불가.
+다만 지금도 520종목 중 279종목(53.7%)이 이미 Forward 없이 돌고 있어, 최악의 경우 `/kr` 은
+**Trailing 전용 화면으로 축소되지만 죽지는 않습니다.**
+
+#### 다음 세션이 할 일
+
+1. **위 4가지를 먼저 확인**한다. 확인 전에 코드를 고치지 않는다 — 엉뚱한 걸 만들게 된다.
+2. 대체 출처 검토: `FinanceDataReader`·KRX OPEN API 로 덮이는 항목과 안 덮이는 항목을 가른다.
+   ⚠️ **추정 PER·EPS(애널리스트 컨센서스)는 대체가 어려울 가능성이 큽니다** — 이게 PEGY 공식의
+   분자·분모 양쪽에 들어가므로, 못 구하면 `/kr` 의 핵심 지표가 산출 불가가 됩니다.
+   ⚠️ KRX OPEN API 를 늘려 쓸 경우 **약관 제6조②(비상업적 목적 한정)** 재검토 필수 — `/kr` 은
+   광고가 붙는 공개 화면입니다(§4 매크로 항목 참고).
+3. 새 출처를 붙이면 §0-3-2 매너 장치(딜레이·재시도 상한·차단 시 중단)와 §0-3-3(raw/가공 분리)을
+   그대로 적용하고, `ENGINEERING_SPEC.md` §0-3-2 의 매너 장치 목록에도 추가한다.
+4. 파서를 고치면 `tests/test_naver_item_characterization.py` 기준선을 **새 구조 HTML 로 재생성**해야
+   합니다(오너 승인 필요). 지금 기준선은 **구 구조 합성 HTML** 이라 새 구조를 보증하지 못합니다.
+
+> 📌 2026-09-07 에 `collector_kospi200.py` 의 파서를 구획 4개로 분해해 둔 것이 여기서 도움이 됩니다
+> (#210). 예전엔 372줄 한 덩어리를 통째로 봐야 했지만, 이제 바뀐 구획만 열면 됩니다 —
+> aside 표기가 바뀌면 `_parse_aside_invest_info`(108줄), 재무제표 표가 바뀌면
+> `_parse_financial_statement`(147줄).
+
 ### 🔴 오너가 직접 해야 하는 일 (코드로 못 함)
 
 - **애드센스 슬롯 ID 3개 입력** — `ADS_SLOT_ID_LEFT` / `_RIGHT` / `_INFEED` 를 Render 환경변수에
