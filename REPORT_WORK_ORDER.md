@@ -202,6 +202,13 @@ create index if not exists snapshots_date_idx on public.portfolio_daily_snapshot
 - `.github/workflows/scrape_report_snapshots.yml` (신규 워크플로우, 매일 장마감 후 실행 —
   기존 `scrape_us.yml`/`scrape.yml`이 끝난 뒤 시간대로 cron 잡으세요, 가격 데이터가 이미 갱신된
   뒤에 스냅샷을 찍어야 정확합니다)
+
+  > 📌 **(2026-09-07 추가)** 위 "끝난 뒤 시간대로 cron" 방식은 #204 에서 바뀌었습니다 — 이 워크플로우는 이제
+  > `scrape_us.yml`(`Daily US Stocks Scraper`) **완료 이벤트(`workflow_run`)** 로 깨어나고, `crawl_ready_gate.py`
+  > (`report-snapshots`: 미국 스냅샷 = 처리 거래일 + 벤치마크 수집 시각이 그 스냅샷보다 앞일 때만 진행)를 통과한
+  > 뒤에 벤치마크 수집·스냅샷 적재를 합니다. cron `20 23 * * 1-5`(08:20 KST)는 값 그대로 **안전망**입니다.
+  > 이 워크플로우의 완료는 다시 결투 USD·성적표 달러 배치의 트리거가 됩니다(3단 연쇄, #206 에서 job `if` 보정).
+  > 원칙은 `ENGINEERING_SPEC.md` §0-3-15, 상세는 `TASK_HISTORY.md` #204·#206.
 - `tests/test_report.py`
 
 ---

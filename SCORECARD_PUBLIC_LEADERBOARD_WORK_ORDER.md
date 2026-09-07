@@ -22,6 +22,25 @@
 > 미달 그룹 청소 로직은 그대로 두고 값만 1 로 낮췄습니다. 아래 본문의 "500명"은 그 이전
 > 기록입니다.
 
+> 📌 **발행 배치 운영 방식 변경 안내 (2026-09-07 추가)**: 아래 본문·"구현 이력" Phase A 가 전제한 "매일 07:30 KST cron
+> 한 번에 원화·달러를 같이 발행" 은 2026-09-05~07 세션에서 다음과 같이 바뀌었습니다(본문 문장은 기록이라 고치지 않음).
+> - **#201 (2026-09-05)** — 발행 배치에 결투와 같은 **신선도(무변동) 검사** 추가(`utils/scorecard_publish.py` §4-b).
+>   결투 기준값 파일 `data/duel_freshness_probe_previous(_usd).json` 을 읽기 전용으로 재사용하되, 기준값 날짜가 스냅샷
+>   거래일과 같으면(결투가 이미 오늘 값을 남긴 뒤) 이력 CSV 직전 행으로 대체. 판정 → 행동: `failed` = 완전 중단(CI 실패),
+>   `failed_or_holiday`/`needs_review` = 그날 발행 건너뜀(철회 청소는 함), `no_baseline` 등 우리 쪽 사정 = 검사 생략·평소대로.
+> - **#202 → #203 (2026-09-06~07)** — cron 을 11:35 KST 로 옮겨 미국 검사를 살렸다가, 원화가 미국 지수를 네 시간 기다리는
+>   부작용 때문에 **원화·달러 워크플로우 분리**: `scorecard_publish_daily.yml`(`--currency KRW`, 07:35 KST) / 신규
+>   `scorecard_publish_daily_us.yml`(`--currency USD`, 11:35 KST). 🔴 **통화 간 침범 금지** — 담당 통화의 9개 그룹만
+>   가지치기·당일 삭제·조립(`run_publish_batch(currencies=)`, `delete_published_rows_for_date(currencies=)`), 신선도 skip 도
+>   "그 시장을 담당하는 통화만". 월·화 `no_baseline` 빈틈(지수 없는 토·일 결투 기준선)도 같은 대체 경로로 봉합.
+> - **#204 / #206 (2026-09-07)** — 두 워크플로우가 **크롤링 완료 이벤트(`workflow_run`)** 로 깨어나고(원화: `Daily Market
+>   Scraper`, 달러: `Daily US Stocks Scraper` + `Daily Report Snapshots` 둘 다), `crawl_ready_gate.py` 가 저장소 데이터로
+>   "오늘 자 수집 완료" 를 확인한 뒤에만 발행. cron 은 값 그대로 **안전망**(주말·이벤트 누락·철회 청소). 발행은 "그날
+>   발행분 통째 갈아끼우기" 라 멱등이므로 "이미 처리" 검사는 하지 않고, 평일엔 "D 종가 → D 저녁 발행" 이 먼저 나가고
+>   다음 날 아침 cron 이 같은 값을 `published_date = D+1` 로 한 번 더 발행합니다. #206 이 미국 연쇄의 job `if` 필터
+>   누락(벤치마크가 `workflow_run` 으로 돈 완료 이벤트 탈락)을 수정.
+> 자세한 경위·cron 근거·회귀 테스트(§13·§14, `tests/test_crawl_ready_gate.py`)는 `TASK_HISTORY.md` #201~#204·#206.
+
 ## `/duel`(결투 가상계좌)과의 관계 — 가장 먼저 읽어야 하는 절
 
 **이 모듈은 결투 가상계좌 트레이딩 기능(`/duel`)과 완전히 무관합니다.** `duel_page.py`,

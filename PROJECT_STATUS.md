@@ -104,6 +104,15 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 `archive/streamlit_views/`로 옮겨졌습니다 — §2 표의 `views/` 관련 행은 이제 과거 기록입니다
 (아래 §0-5 항목 4 참고).
 
+> 📌 **(2026-09-07 추가)** `utils/data_source.py` 는 #205 부터 "원격 우선" 에 **로컬 덮개(local overlay)** 가 붙었습니다
+> — 관리자가 `/admin/macro` 에서 `market_history.csv` 를 수동 입력하면 `utils/db.py::_safe_write_history` 가
+> `note_local_write()` 를 불러 그 파일만 로컬을 신뢰하고, 원격 리비전이 실제로 바뀌면(배치가 다음 이력을 커밋) 덮개가
+> 자동으로 걷힙니다(원격 꺼짐이면 아무 일도 안 함). 이로써 `/macro` 의 "기준 영업일" 과 AI 코멘트 날짜가 어긋나던
+> 원격·로컬 혼재가 없어졌고, `web/pages/`·`web/components/` 안의 직접 파일 읽기(`open`·`pd.read_csv(경로)`)는
+> `tests/test_screen_reads_data_source.py` 가 **전면 금지**합니다(허용 목록 현재 비어 있음). 다운로드 파일명 날짜는
+> `web/components/widgets.py::kst_today_str()` 하나로 통일. 저장소 루트에는 크롤링 소비 배치 공용 게이트
+> `crawl_ready_gate.py`(#204·#207, §5 상단 표)가 추가됐습니다.
+
 ### 0-5. 지금 열려있는 일 (다음에 반드시 확인/처리할 것) — §4는 낡았으니 여기부터
 
 - ✅ **완료 — SPEC §5-1 "2중 Cap" 코스피 PEGY 계산에 반영 (2026-08-30,
@@ -1029,6 +1038,31 @@ tests/test_web_session_isolation.py   §0-3-8(개인정보 격리) 자동 검증
 
 ## 5. 자동화 동작 방식 요약
 
+> 📌 **크롤링 → 소비 배치 연쇄, 지금 모양 (2026-09-07 추가, TASK_HISTORY #201~#207)**: 아래 본문은 원천
+> 크롤러 2개(코스피·미국)만 설명하고, 그 산출물을 소비하는 배치들은 이 절이 쓰인 뒤에 생겨 "cron 시각" 으로
+> 각자 문서에 흩어져 있었습니다. 2026-09-07 #204 부터 소비 배치는 전부 **크롤링 완료 이벤트(`workflow_run`)** 로
+> 깨어나고, 저장소 루트의 **`crawl_ready_gate.py`** 가 데이터로 "오늘 자 수집 완료 + 아직 미처리" 를 확인한 뒤에만
+> 실제 작업을 합니다. cron 은 값 그대로 **안전망**(원칙: `ENGINEERING_SPEC.md` §0-3-15). 현재 연쇄:
+>
+> | 원천(크롤러) | 완료 이벤트로 깨어나는 소비자 | 게이트 이름 | 안전망 cron(KST) |
+> |---|---|---|---|
+> | `scrape.yml` "Daily Market Scraper"(Cloudflare Worker 16:10 dispatch + 자체 cron 16:05) | `duel_daily.yml` 결투 KR 체결 | `duel-kr` | 17:10 평일 |
+> | 〃 | `scorecard_publish_daily.yml` 성적표 **원화** 발행(`--currency KRW`, #203 분리) | `scorecard-kr` | 07:35 매일 |
+> | `scrape_us.yml` "Daily US Stocks Scraper"(cron 두 줄 05:35/06:35) | `scrape_report_snapshots.yml` 벤치마크 + 리포트 스냅샷 | `report-snapshots` | 08:20 평일 |
+> | `scrape_us.yml` **+** `scrape_report_snapshots.yml` "Daily Report Snapshots"(둘 다) | `duel_daily_us.yml` 결투 USD 체결 | `duel-us` | 12:00 매일 |
+> | 〃 | `scorecard_publish_daily_us.yml` 성적표 **달러** 발행(`--currency USD`, #203 신설) | `scorecard-us` | 11:35 매일 |
+>
+> - 결투 소비자 2개는 "이미 처리" 검사를 포함(같은 날 두 번째 실행이 첫 실행의 보류 주문을 취소하는 사고 방지).
+>   #207 부터 결투 기준값 파일 `data/duel_freshness_probe_previous(_usd).json` 에 그날 결과(`outcome`: `settled`/`held` +
+>   값 원천 거래일)가 기록돼, 안전망 cron 이 크롤링 **전에** 돌아 보류한 날은 진짜 완료 이벤트가 재실행을 허용합니다.
+>   "오늘 자료로 보류된 것"(`needs_review`·첫 실행)은 의도적으로 여전히 관리자 `--override` 수동 처리(오너 확정).
+> - 성적표 발행 2개는 #201 부터 결투와 같은 신선도(무변동) 검사를 거치고(`utils/scorecard_publish.py` §4-b), 담당
+>   통화의 행만 만집니다(#203, 통화 간 침범 금지). 발행은 멱등이라 "이미 처리" 검사 없음.
+> - 미국 연쇄는 3단(`scrape_us` → `snapshots` → 결투 USD·성적표 달러) — #206 이 두 번째 깨어남의 job `if` 필터
+>   누락을 고쳤습니다. 워치독 `watch_schedule_health.yml`(18:00, 대상 11개)은 그대로 사후 감시.
+> - 나머지 워크플로우(`indicator_kr.yml`·배당 3종·`watch_data_sanity.yml`·`render_keep_awake.yml`·`test_suite.yml` 등)는
+>   원천·독립 수집기·사후 감시라 이 연쇄 밖(#204 감사표).
+
 **🇰🇷 코스피 — `.github/workflows/scrape.yml`**
 
 - 트리거: 매일 평일 KST 16:05 (cron), 또는 Actions 탭에서 수동(`Run workflow`)
@@ -1349,6 +1383,10 @@ Streamlit 프레임워크 한계 확인으로 이어져 **§0의 NiceGUI 전면 
 | `views/report_view.py` | 리포트 화면(기간 선택·이전/다음 기간·시장별 블록·벤치마크 비교·데이터 부족 안내). 기본 숨김 |
 | `.github/workflows/scrape_report_snapshots.yml` | 평일 23:20 UTC 실행(코스피·미국 수집이 끝난 뒤) |
 | `tests/test_report.py` | 오프라인 **547체크** (네트워크·Supabase 불필요. 2026-08-16 #117 기준 — #112 +41, #113 +113, #114 +47, #115 +23, #116 +21, #117 +24). #96 부터 파싱 검증은 **실제 응답 원문 픽스처**(`tests/fixtures/us_index_history_{spy,oneq}_data_json_head.json`, 2026-08-12 캡처)로 합니다 |
+
+> 📌 **(2026-09-07 추가)** 위 표의 `scrape_report_snapshots.yml` "평일 23:20 UTC 실행" 은 #204 부터 **안전망**이고,
+> 정상 경로는 `scrape_us.yml` 완료 이벤트(`workflow_run`) → `crawl_ready_gate.py`(`report-snapshots`) 통과 → 실행입니다.
+> 이 워크플로우의 완료가 다시 결투 USD·성적표 달러 배치를 깨웁니다(§5 상단 표, `REPORT_WORK_ORDER.md` §7 📌).
 
 ### 10-3. 🔍 벤치마크 소스 — 실응답으로 확인한 결과와 채택 근거 (§0-1)
 
@@ -1764,6 +1802,11 @@ import(scorecard_view 무수정)하고, 상위 550 유니버스의 미리 계산
    를 추가했습니다(회귀 테스트 4개). **롤오버 전략 자체는 여전히 미정** — 지금 증가
    속도(5일 2배)가 유지되면 다음 분기 갱신(11월경) 전에 상한에 도달할 가능성이 있어,
    그 전에 연 단위 분할이나 압축 방안을 정해야 합니다.
+   📌 **(2026-09-07 추가, #205)** 상한 판정 기준이 바뀌었습니다 — 로컬 파일 크기(`os.path.getsize`)가 아니라
+   **실제로 내려줄 바이트**(`utils/data_source.content_length()`: 원격 모드는 HEAD 의 `Content-Length`, 로컬은
+   파일 크기) 기준이고, 실효 상한은 `effective_raw_download_cap_bytes()` = `RAW_DOWNLOAD_MAX_BYTES`(50MB)와
+   `data_source.MAX_RESPONSE_BYTES`(20MB) 중 **작은 쪽**입니다(예전엔 50MB 기준으로 버튼을 그려 놓고 클릭 시
+   20MB 에서 실패할 수 있었음). 롤오버 전략 미정은 그대로.
 6. ✅ **오너 실기기 확인 → 화면 재구성 → 전체 공개 — 전부 완료(2026-08-25).**
    `DIVIDEND_ENABLED=true`로 Render에 실제 배포하고 `/dividend`를 열어본 오너 피드백:
    "정보량이 너무 많은데... 열자마자 한숨부터 나온다 — 달력으로 보는 가장 간단한 구조를
@@ -2047,6 +2090,14 @@ daily.yml`, USD 대응)를 "삭제"라고 적었지만, **실제로는 삭제되
    없음을 검증 완료했지만, 화면에 보이는 `seed_amount`/`anchor_date` 값을 사용자가
    조작해 넣을 여지가 있어 회수하고 `duel_opt_in()` RPC를 유일한 참여 경로로 만들지
    여부(항목 2 마지막 문단).
+
+> 📌 **(2026-09-07 추가)** 위 3번의 cron `03:00 UTC`(12:00 KST)는 #204 부터 **안전망**으로만 남고, 정상 경로는
+> 미국 종목 + 벤치마크 수집 완료 이벤트(`workflow_run`) → `crawl_ready_gate.py` 게이트입니다(원화 배치도 같은
+> 모양, §5 상단 표). #207 로 기준값 파일에 `outcome`(settled/held + 값 원천 거래일)이 기록되며, 2번(`needs_review`
+> 영구 대기)은 여전히 열려 있습니다 — 오히려 "오늘 자료로 보류된 주문은 자동 재실행하지 않는다" 가 오너 확정으로
+> 굳어졌습니다. #201 부터 성적표 발행 배치가 결투의 무변동 검사·기준값 파일을 읽기 전용으로 재사용합니다.
+> 상세는 `DUEL_MODULE_WORK_ORDER.md` 상단 📌 안내와 `TASK_HISTORY.md` #201·#204·#206·#207.
+
 ## 13. 📉 "여기서부터는 신앙입니다" 보조지표 모듈 (7번째 모듈) — 진행 상황 (2026-08-25 신설·완료, `TECHNICAL_INDICATOR_WORK_ORDER.md` 참고)
 
 ### 13-1. 지금 상태 = 🔓 **전체 공개 완료 — 0단계부터 5단계까지 하루 만에 완주**
