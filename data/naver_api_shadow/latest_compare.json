@@ -1,0 +1,49 @@
+{
+ "compared_at_kst": "2026-09-08T07:20:16+09:00",
+ "fields": {
+  "price": {
+   "label": "현재가",
+   "match": 40,
+   "mismatch": 0,
+   "not_comparable": 0,
+   "match_ratio": 1.0,
+   "worst": []
+  },
+  "t_roe": {
+   "label": "ROE",
+   "match": 38,
+   "mismatch": 0,
+   "not_comparable": 2,
+   "match_ratio": 1.0,
+   "worst": []
+  },
+  "t_eps": {
+   "label": "Trailing EPS",
+   "match": 33,
+   "mismatch": 0,
+   "not_comparable": 7,
+   "match_ratio": 1.0,
+   "worst": []
+  },
+  "t_per": {
+   "label": "Trailing PER",
+   "match": 33,
+   "mismatch": 0,
+   "not_comparable": 7,
+   "match_ratio": 1.0,
+   "worst": []
+  },
+  "outstanding_shares": {
+   "label": "상장주식수",
+   "match": 40,
+   "mismatch": 0,
+   "not_comparable": 0,
+   "match_ratio": 1.0,
+   "worst": []
+  }
+ },
+ "matched_codes": 40,
+ "shadow_only": 120,
+ "production_only": 480,
+ "note": ""
+}
