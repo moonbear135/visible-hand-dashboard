@@ -134,7 +134,7 @@ def test_403_and_429_stop_immediately_without_retry():
         with mock.patch.object(sess.session, "get", fake_get), \
              mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
             with pytest.raises(SH.BlockedByServer):
-                sess.get_json(SH.LIST_URL.format(start=0, size=20))
+                sess.get_json(SH.LIST_URL.format(page=0, size=20))
         check(len(calls) == 1, f"{status} 응답에 재시도하지 않음 (요청 {len(calls)}건)")
 
 
@@ -144,9 +144,9 @@ def test_circuit_breaker_opens_after_consecutive_failures():
     with mock.patch.object(sess.session, "get", lambda url, timeout=None: _FakeResponse(status=500)), \
          mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
         for _ in range(SH.CIRCUIT_CONSECUTIVE_FAILURES):
-            sess.get_json(SH.LIST_URL.format(start=0, size=20))
+            sess.get_json(SH.LIST_URL.format(page=0, size=20))
         with pytest.raises(SH.CircuitOpen):
-            sess.get_json(SH.LIST_URL.format(start=0, size=20))
+            sess.get_json(SH.LIST_URL.format(page=0, size=20))
     check(sess.request_count == SH.CIRCUIT_CONSECUTIVE_FAILURES,
           "서킷이 열린 뒤에는 실제 요청이 더 나가지 않음", f"({sess.request_count}건)")
 
@@ -156,7 +156,7 @@ def test_request_cap_is_enforced():
     sess = SH.PoliteSession()
     sess.request_count = SH.MAX_REQUESTS_PER_RUN
     with pytest.raises(SH.CircuitOpen):
-        sess.get_json(SH.LIST_URL.format(start=0, size=20))
+        sess.get_json(SH.LIST_URL.format(page=0, size=20))
 
 
 def test_delay_is_actually_applied_between_requests():
@@ -167,11 +167,173 @@ def test_delay_is_actually_applied_between_requests():
                            lambda url, timeout=None: _FakeResponse(payload=[])), \
          mock.patch.object(SH.time, "sleep", lambda s: slept.append(s)):
         for _ in range(3):
-            sess.get_json(SH.LIST_URL.format(start=0, size=20))
+            sess.get_json(SH.LIST_URL.format(page=0, size=20))
     check(len(slept) == 2, "첫 요청 앞에는 대기하지 않고, 이후 요청마다 대기",
           f"({len(slept)}회)")
     check(all(SH.DELAY_MIN_SEC <= s <= SH.DELAY_MAX_SEC for s in slept),
           "대기 시간이 2.0~3.0초 범위", f"({[round(s,2) for s in slept]})")
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# ②-2 🔴 페이지네이션 — 2026-09-08 실제 사고의 회귀 검사
+# ─────────────────────────────────────────────────────────────────────────────
+
+BROKEN_PAGINATION_FIXTURE = FIXTURES / "broken_pagination_2026-09-08.json"
+
+
+def _broken_rows():
+    return json.loads(BROKEN_PAGINATION_FIXTURE.read_text(encoding="utf-8"))["rows"]
+
+
+def test_start_idx_is_a_page_index_not_an_offset():
+    """
+    🔴 2026-09-08 실제 사고. `startIdx` 를 항목 오프셋으로 착각해 0,20,40… 으로 요청했더니
+    1~20위 다음에 **401위대**가 이어붙었습니다(실제 오프셋 = startIdx × pageSize).
+    오너가 브라우저로 실측 확인: `startIdx=1&pageSize=20` → 첫 종목 **하나금융지주**(21위).
+    """
+    check("{page}" in SH.LIST_URL, "URL 이 페이지 인덱스를 받도록 돼 있음")
+    check("{start}" not in SH.LIST_URL, "오프셋을 뜻하는 이름이 남아 있지 않음")
+    check(SH.LIST_PAGE_COUNT * SH.LIST_PAGE_SIZE == SH.LIST_TARGET_COUNT,
+          "페이지 수 × 페이지 크기 == 목표 종목 수",
+          f"({SH.LIST_PAGE_COUNT}×{SH.LIST_PAGE_SIZE} vs {SH.LIST_TARGET_COUNT})")
+    # 페이지 번호가 0,1,2… 로 나가는지 실제 URL 로 확인
+    urls = [SH.LIST_URL.format(page=p, size=SH.LIST_PAGE_SIZE) for p in range(3)]
+    check("startIdx=0&" in urls[0] and "startIdx=1&" in urls[1] and "startIdx=2&" in urls[2],
+          "요청이 startIdx=0,1,2… 로 나감 (0,20,40 이 아님)")
+
+
+def test_the_real_2026_09_08_failure_is_caught():
+    """
+    🔴 이 검사의 존재 이유. **실제로 잘못 모아 온 응답**을 그대로 넣어 잡히는지 봅니다.
+    겉보기엔 멀쩡했습니다 — 첫 페이지가 맞았고 전체가 시총 내림차순이라
+    "정렬됐는가" 같은 검사로는 절대 못 잡습니다.
+    """
+    assert BROKEN_PAGINATION_FIXTURE.is_file(), "회귀 픽스처가 없습니다"
+    rows = _broken_rows()
+    warnings = SH.check_pagination_continuity(rows, list(range(0, len(rows), 20)))
+    check(any("페이지 경계" in w and "급락" in w for w in warnings),
+          "경계에서의 비정상 낙폭을 잡음", f"({warnings})")
+    check(any("맵스리얼티" in w for w in warnings),
+          "실제로 끊긴 지점(현대모비스 → 맵스리얼티)을 짚어 줌")
+    check(any("160종목" in w for w in warnings), "수집량 부족도 함께 보고")
+
+
+def test_normal_data_produces_no_warning():
+    """
+    🔴 **오탐이 나는 경보는 곧 무시당하는 경보입니다.**
+    시총 상위권은 원래 낙폭이 큽니다(실측: SK하이닉스 → 삼성전자우가 8배).
+    절대 임계값을 쓰면 여기서 오탐이 나므로, 같은 구간의 정상 낙폭과 비교합니다.
+    """
+    import math
+    good = [{"code": f"{i:06d}", "name": f"종목{i}",
+             "market_cap_api_truncated": 1.6e15 * math.exp(-i / 40) + 3e11}
+            for i in range(500)]
+    warnings = SH.check_pagination_continuity(good, list(range(0, 500, 20)))
+    check(not warnings, "정상적으로 감소하는 500종목에는 경고가 없음", f"({warnings})")
+
+    # 상위권의 큰 낙폭 자체는 경고 대상이 아님을 직접 확인
+    # 상위권의 큰 낙폭 자체는 경고 대상이 아님을 직접 확인 (SK하이닉스 → 삼성전자우 = 8배)
+    steep = [{"code": f"{i:06d}", "name": f"종목{i}",
+              "market_cap_api_truncated": c}
+             for i, c in enumerate([1578e12, 1302e12, 160e12, 148e12, 108e12] * 100)]
+    warns = SH.check_pagination_continuity(steep, list(range(0, len(steep), 20)))
+    check(not any("경계" in w for w in warns),
+          "페이지 내부의 8배 낙폭은 경계 경고를 유발하지 않음", f"({warns[:1]})")
+
+
+def test_collect_actually_requests_page_0_1_2_not_0_20_40():
+    """
+    ⚠️ **사보타주가 찾아낸 구멍**(2026-09-08). URL 상수만 보는 검사는
+    호출부가 `page*PAGE_SIZE` 를 넘기는 실수를 못 잡습니다 — 그게 바로 원래 사고였습니다.
+    **실제로 나가는 주소**를 셉니다.
+    """
+    sess = SH.PoliteSession()
+    sent = []
+
+    def fake_get(url, timeout=None):
+        sent.append(url)
+        if "startIdx=" not in url:                      # 상세 요청
+            return _FakeResponse(payload=_detail_payload())
+        start = int(url.split("startIdx=")[1].split("&")[0])
+        # 0,1,2 페이지는 값을 주고 그 뒤는 비웁니다 — 페이지 번호가 어떻게 올라가는지 봅니다.
+        return _FakeResponse(payload=_list_payload() if start < 3 else [])
+
+    with mock.patch.object(sess.session, "get", fake_get), \
+         mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
+        SH.collect(sess)
+
+    idxs = [int(u.split("startIdx=")[1].split("&")[0]) for u in sent if "startIdx=" in u]
+    check(idxs[:3] == [0, 1, 2], "실제 요청이 startIdx=0,1,2 로 나감", f"({idxs[:5]})")
+    check(20 not in idxs[:3], "0,20,40 (오프셋 방식)으로 나가지 않음")
+
+
+def test_collect_carries_the_pagination_warnings_out():
+    """
+    ⚠️ 이것도 사보타주가 찾은 구멍입니다. 검사 함수가 아무리 잘 잡아도
+    `collect()` 가 그 결과를 버리면 아무도 모릅니다(§0-1 — 로그만 남기는 건 조치가 아님).
+    """
+    sess = SH.PoliteSession()
+    broken = _broken_rows()
+
+    def fake_get(url, timeout=None):
+        if "/market/stock/default" not in url:      # 상세 요청은 목록과 다른 응답
+            return _FakeResponse(payload=_detail_payload())
+        start = int(url.split("startIdx=")[1].split("&")[0])
+        chunk = broken[start * 20:(start + 1) * 20]
+        return _FakeResponse(payload=[
+            {"itemcode": r["code"], "itemname": r["name"], "nowPrice": "1000",
+             "marketSum": str(int(r["market_cap_api_truncated"] or 0))} for r in chunk])
+
+    with mock.patch.object(sess.session, "get", fake_get), \
+         mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
+        out = SH.collect(sess)
+
+    check(out.get("pagination_warnings"), "collect() 결과에 경고가 담김",
+          f'({out.get("pagination_warnings")})')
+    check(any("급락" in e for e in out["errors"]),
+          "경고가 errors 에도 실려 호출부가 반드시 보게 됨")
+
+
+def test_a_steep_but_legitimate_drop_at_a_page_boundary_is_not_flagged():
+    """
+    ⚠️ 사보타주가 찾은 세 번째 구멍 — **오탐 방지가 실제로 검증되지 않았습니다.**
+    상위권의 큰 낙폭이 **하필 페이지 경계에 놓이는** 경우를 아무도 안 보고 있었습니다.
+    절대 임계값(5배)으로 되돌리면 여기서 오탐이 나고, 상대 기준이면 조용해야 합니다.
+    (실측 근거: 1~20위 구간 내부의 정상 낙폭 최대치가 8.1배 — SK하이닉스 → 삼성전자우)
+    """
+    caps = [1578e12, 1302e12, 160e12] + [150e12 - i * 2e12 for i in range(17)]  # 내부 8.1배 낙폭
+    caps += [caps[-1] / 8]                                                       # 경계에서 8배
+    caps += [caps[-1] * (0.97 ** i) for i in range(1, 20)]
+    rows = [{"code": f"{i:06d}", "name": f"종목{i}", "market_cap_api_truncated": c}
+            for i, c in enumerate(caps)]
+    warnings = SH.check_pagination_continuity(rows, [0, 20])
+    check(not any("경계" in w for w in warnings),
+          "구간 내부의 정상 낙폭과 비슷한 경계 낙폭은 경고하지 않음", f"({warnings})")
+
+
+def test_overlapping_pages_are_caught():
+    """페이지가 겹쳐 같은 종목이 두 번 들어오는 것도 잘못 넘긴 신호입니다."""
+    rows = [{"code": "005930", "name": "삼성전자", "market_cap_api_truncated": 1578e12},
+            {"code": "000660", "name": "SK하이닉스", "market_cap_api_truncated": 1302e12},
+            {"code": "005930", "name": "삼성전자", "market_cap_api_truncated": 1578e12}]
+    warnings = SH.check_pagination_continuity(rows, [0, 2])
+    check(any("두 번 이상" in w for w in warnings), "중복 종목을 잡음", f"({warnings})")
+
+
+def test_pagination_warning_reaches_the_alert(tmp_path):
+    """
+    경고가 파일에만 남고 사람에게 안 가면 없는 것과 같습니다(§0-1).
+    섀도 파일의 `pagination_warnings` 가 디스코드 알림 문구에 실리는지 확인합니다.
+    """
+    (tmp_path / "latest_compare.json").write_text(json.dumps(
+        {"matched_codes": 500, "fields": {"t_roe": {"label": "ROE", "match_ratio": 1.0}}}),
+        encoding="utf-8")
+    (tmp_path / "2026-09-08_shadow.json").write_text(json.dumps(
+        {"pagination_warnings": ["🔴 페이지 경계에서 시가총액이 58배 급락"]}), encoding="utf-8")
+    with mock.patch.object(SH, "SHADOW_DIR", tmp_path):
+        msg = SH.build_alert_message()
+    check("58배 급락" in msg,
+          "일치율이 100%여도 페이지네이션 경고는 알림에 실림", f"({msg})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────

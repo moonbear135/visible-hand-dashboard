@@ -1,0 +1,806 @@
+{
+ "_why": "2026-09-08 섀도 1회차 실제 출력. startIdx 를 '항목 오프셋'으로 착각해 요청한 결과 — 1~20위 다음에 401위대가 이어붙었습니다. 이 종류의 오류를 검사가 실제로 잡는지 증명하는 회귀 픽스처입니다.",
+ "_source": "run_naver_api_shadow.py 1회차 (Naver API Shadow #1), 시총·코드·이름만 남기고 축약",
+ "rows": [
+  {
+   "code": "005930",
+   "name": "삼성전자",
+   "market_cap_api_truncated": 1578495224000000.0
+  },
+  {
+   "code": "000660",
+   "name": "SK하이닉스",
+   "market_cap_api_truncated": 1302467886000000.0
+  },
+  {
+   "code": "005935",
+   "name": "삼성전자우",
+   "market_cap_api_truncated": 160153292000000.0
+  },
+  {
+   "code": "402340",
+   "name": "SK스퀘어",
+   "market_cap_api_truncated": 148414497000000.0
+  },
+  {
+   "code": "009150",
+   "name": "삼성전기",
+   "market_cap_api_truncated": 108604633000000.0
+  },
+  {
+   "code": "373220",
+   "name": "LG에너지솔루션",
+   "market_cap_api_truncated": 84825000000000.0
+  },
+  {
+   "code": "005380",
+   "name": "현대차",
+   "market_cap_api_truncated": 80469802000000.0
+  },
+  {
+   "code": "207940",
+   "name": "삼성바이오로직스",
+   "market_cap_api_truncated": 67862534000000.0
+  },
+  {
+   "code": "032830",
+   "name": "삼성생명",
+   "market_cap_api_truncated": 62400000000000.0
+  },
+  {
+   "code": "105560",
+   "name": "KB금융",
+   "market_cap_api_truncated": 62389572000000.0
+  },
+  {
+   "code": "028260",
+   "name": "삼성물산",
+   "market_cap_api_truncated": 62272351000000.0
+  },
+  {
+   "code": "034020",
+   "name": "두산에너빌리티",
+   "market_cap_api_truncated": 56305324000000.0
+  },
+  {
+   "code": "012450",
+   "name": "한화에어로스페이스",
+   "market_cap_api_truncated": 53574373000000.0
+  },
+  {
+   "code": "055550",
+   "name": "신한지주",
+   "market_cap_api_truncated": 53470382000000.0
+  },
+  {
+   "code": "000270",
+   "name": "기아",
+   "market_cap_api_truncated": 50129028000000.0
+  },
+  {
+   "code": "329180",
+   "name": "HD현대중공업",
+   "market_cap_api_truncated": 47127590000000.0
+  },
+  {
+   "code": "034730",
+   "name": "SK",
+   "market_cap_api_truncated": 44299151000000.0
+  },
+  {
+   "code": "006400",
+   "name": "삼성SDI",
+   "market_cap_api_truncated": 43596771000000.0
+  },
+  {
+   "code": "068270",
+   "name": "셀트리온",
+   "market_cap_api_truncated": 43336579000000.0
+  },
+  {
+   "code": "012330",
+   "name": "현대모비스",
+   "market_cap_api_truncated": 38802492000000.0
+  },
+  {
+   "code": "094800",
+   "name": "맵스리얼티",
+   "market_cap_api_truncated": 668407000000.0
+  },
+  {
+   "code": "251970",
+   "name": "펌텍코리아",
+   "market_cap_api_truncated": 665880000000.0
+  },
+  {
+   "code": "268280",
+   "name": "미원에스씨",
+   "market_cap_api_truncated": 665500000000.0
+  },
+  {
+   "code": "328130",
+   "name": "루닛",
+   "market_cap_api_truncated": 660444000000.0
+  },
+  {
+   "code": "044490",
+   "name": "태웅",
+   "market_cap_api_truncated": 657242000000.0
+  },
+  {
+   "code": "093050",
+   "name": "LF",
+   "market_cap_api_truncated": 656438000000.0
+  },
+  {
+   "code": "253450",
+   "name": "스튜디오드래곤",
+   "market_cap_api_truncated": 652269000000.0
+  },
+  {
+   "code": "001680",
+   "name": "대상",
+   "market_cap_api_truncated": 652075000000.0
+  },
+  {
+   "code": "425420",
+   "name": "티에프이",
+   "market_cap_api_truncated": 650696000000.0
+  },
+  {
+   "code": "317450",
+   "name": "명인제약",
+   "market_cap_api_truncated": 650430000000.0
+  },
+  {
+   "code": "002960",
+   "name": "한국쉘석유",
+   "market_cap_api_truncated": 648050000000.0
+  },
+  {
+   "code": "033240",
+   "name": "자화전자",
+   "market_cap_api_truncated": 646004000000.0
+  },
+  {
+   "code": "293940",
+   "name": "신한알파리츠",
+   "market_cap_api_truncated": 645820000000.0
+  },
+  {
+   "code": "000400",
+   "name": "롯데손해보험",
+   "market_cap_api_truncated": 645499000000.0
+  },
+  {
+   "code": "005690",
+   "name": "파미셀",
+   "market_cap_api_truncated": 644443000000.0
+  },
+  {
+   "code": "456160",
+   "name": "지투지바이오",
+   "market_cap_api_truncated": 636907000000.0
+  },
+  {
+   "code": "053800",
+   "name": "안랩",
+   "market_cap_api_truncated": 635323000000.0
+  },
+  {
+   "code": "006650",
+   "name": "대한유화",
+   "market_cap_api_truncated": 633750000000.0
+  },
+  {
+   "code": "001060",
+   "name": "JW중외제약",
+   "market_cap_api_truncated": 633377000000.0
+  },
+  {
+   "code": "001570",
+   "name": "금양",
+   "market_cap_api_truncated": 633275000000.0
+  },
+  {
+   "code": "030210",
+   "name": "다올투자증권",
+   "market_cap_api_truncated": 237248000000.0
+  },
+  {
+   "code": "064820",
+   "name": "케이프",
+   "market_cap_api_truncated": 236389000000.0
+  },
+  {
+   "code": "114190",
+   "name": "강원에너지",
+   "market_cap_api_truncated": 235891000000.0
+  },
+  {
+   "code": "0030R0",
+   "name": "대신밸류리츠",
+   "market_cap_api_truncated": 235832000000.0
+  },
+  {
+   "code": "001460",
+   "name": "BYC",
+   "market_cap_api_truncated": 235792000000.0
+  },
+  {
+   "code": "012210",
+   "name": "삼미금속",
+   "market_cap_api_truncated": 235126000000.0
+  },
+  {
+   "code": "900140",
+   "name": "엘브이엠씨홀딩스",
+   "market_cap_api_truncated": 234787000000.0
+  },
+  {
+   "code": "043370",
+   "name": "피에이치에이",
+   "market_cap_api_truncated": 234780000000.0
+  },
+  {
+   "code": "000490",
+   "name": "대동",
+   "market_cap_api_truncated": 234362000000.0
+  },
+  {
+   "code": "000680",
+   "name": "LS네트웍스",
+   "market_cap_api_truncated": 233650000000.0
+  },
+  {
+   "code": "389260",
+   "name": "대명에너지",
+   "market_cap_api_truncated": 233449000000.0
+  },
+  {
+   "code": "094480",
+   "name": "갤럭시아머니트리",
+   "market_cap_api_truncated": 233417000000.0
+  },
+  {
+   "code": "348950",
+   "name": "제이알글로벌리츠",
+   "market_cap_api_truncated": 233298000000.0
+  },
+  {
+   "code": "0001A0",
+   "name": "덕양에너젠",
+   "market_cap_api_truncated": 232276000000.0
+  },
+  {
+   "code": "190510",
+   "name": "나무가",
+   "market_cap_api_truncated": 232126000000.0
+  },
+  {
+   "code": "036030",
+   "name": "케이티알파",
+   "market_cap_api_truncated": 231615000000.0
+  },
+  {
+   "code": "298830",
+   "name": "슈어소프트테크",
+   "market_cap_api_truncated": 231475000000.0
+  },
+  {
+   "code": "002320",
+   "name": "한진",
+   "market_cap_api_truncated": 231382000000.0
+  },
+  {
+   "code": "094360",
+   "name": "칩스앤미디어",
+   "market_cap_api_truncated": 230423000000.0
+  },
+  {
+   "code": "001340",
+   "name": "PKC",
+   "market_cap_api_truncated": 230093000000.0
+  },
+  {
+   "code": "267320",
+   "name": "나인테크",
+   "market_cap_api_truncated": 125165000000.0
+  },
+  {
+   "code": "432720",
+   "name": "퀄리타스반도체",
+   "market_cap_api_truncated": 125134000000.0
+  },
+  {
+   "code": "142210",
+   "name": "유니트론텍",
+   "market_cap_api_truncated": 125130000000.0
+  },
+  {
+   "code": "211270",
+   "name": "AP위성",
+   "market_cap_api_truncated": 124881000000.0
+  },
+  {
+   "code": "307750",
+   "name": "국전",
+   "market_cap_api_truncated": 124708000000.0
+  },
+  {
+   "code": "001360",
+   "name": "삼성제약",
+   "market_cap_api_truncated": 124670000000.0
+  },
+  {
+   "code": "285490",
+   "name": "노바텍",
+   "market_cap_api_truncated": 124583000000.0
+  },
+  {
+   "code": "052860",
+   "name": "아이앤씨",
+   "market_cap_api_truncated": 124531000000.0
+  },
+  {
+   "code": "089470",
+   "name": "HDC현대EP",
+   "market_cap_api_truncated": 124250000000.0
+  },
+  {
+   "code": "950190",
+   "name": "고스트스튜디오",
+   "market_cap_api_truncated": 124052000000.0
+  },
+  {
+   "code": "078000",
+   "name": "텔코웨어",
+   "market_cap_api_truncated": 123909000000.0
+  },
+  {
+   "code": "007540",
+   "name": "샘표",
+   "market_cap_api_truncated": 123659000000.0
+  },
+  {
+   "code": "008830",
+   "name": "대동기어",
+   "market_cap_api_truncated": 123531000000.0
+  },
+  {
+   "code": "009070",
+   "name": "KCTC",
+   "market_cap_api_truncated": 123450000000.0
+  },
+  {
+   "code": "192410",
+   "name": "오늘이엔엠",
+   "market_cap_api_truncated": 123410000000.0
+  },
+  {
+   "code": "018470",
+   "name": "조일알미늄",
+   "market_cap_api_truncated": 123212000000.0
+  },
+  {
+   "code": "008040",
+   "name": "사조동아원",
+   "market_cap_api_truncated": 122795000000.0
+  },
+  {
+   "code": "149950",
+   "name": "아바텍",
+   "market_cap_api_truncated": 122735000000.0
+  },
+  {
+   "code": "102120",
+   "name": "어보브반도체",
+   "market_cap_api_truncated": 122509000000.0
+  },
+  {
+   "code": "240550",
+   "name": "동방메디컬",
+   "market_cap_api_truncated": 122463000000.0
+  },
+  {
+   "code": "214330",
+   "name": "금호에이치티",
+   "market_cap_api_truncated": 74557000000.0
+  },
+  {
+   "code": "208140",
+   "name": "정다운",
+   "market_cap_api_truncated": 74520000000.0
+  },
+  {
+   "code": "063160",
+   "name": "종근당바이오",
+   "market_cap_api_truncated": 74444000000.0
+  },
+  {
+   "code": "085670",
+   "name": "뉴프렉스",
+   "market_cap_api_truncated": 74237000000.0
+  },
+  {
+   "code": "210980",
+   "name": "SK디앤디",
+   "market_cap_api_truncated": 74190000000.0
+  },
+  {
+   "code": "020710",
+   "name": "시공테크",
+   "market_cap_api_truncated": 74177000000.0
+  },
+  {
+   "code": "013870",
+   "name": "지엠비코리아",
+   "market_cap_api_truncated": 73905000000.0
+  },
+  {
+   "code": "084680",
+   "name": "이월드",
+   "market_cap_api_truncated": 73881000000.0
+  },
+  {
+   "code": "142280",
+   "name": "녹십자엠에스",
+   "market_cap_api_truncated": 73806000000.0
+  },
+  {
+   "code": "128660",
+   "name": "피제이메탈",
+   "market_cap_api_truncated": 73666000000.0
+  },
+  {
+   "code": "170030",
+   "name": "현대공업",
+   "market_cap_api_truncated": 73632000000.0
+  },
+  {
+   "code": "475430",
+   "name": "키스트론",
+   "market_cap_api_truncated": 73534000000.0
+  },
+  {
+   "code": "017480",
+   "name": "삼현철강",
+   "market_cap_api_truncated": 73430000000.0
+  },
+  {
+   "code": "338220",
+   "name": "뷰노",
+   "market_cap_api_truncated": 73369000000.0
+  },
+  {
+   "code": "389140",
+   "name": "포바이포",
+   "market_cap_api_truncated": 73346000000.0
+  },
+  {
+   "code": "265560",
+   "name": "영화테크",
+   "market_cap_api_truncated": 73334000000.0
+  },
+  {
+   "code": "011320",
+   "name": "유니크",
+   "market_cap_api_truncated": 73322000000.0
+  },
+  {
+   "code": "253840",
+   "name": "수젠텍",
+   "market_cap_api_truncated": 73167000000.0
+  },
+  {
+   "code": "290660",
+   "name": "다이나믹솔루션",
+   "market_cap_api_truncated": 73038000000.0
+  },
+  {
+   "code": "019540",
+   "name": "일지테크",
+   "market_cap_api_truncated": 72837000000.0
+  },
+  {
+   "code": "084870",
+   "name": "TBH글로벌",
+   "market_cap_api_truncated": 45212000000.0
+  },
+  {
+   "code": "005030",
+   "name": "부산주공",
+   "market_cap_api_truncated": 45092000000.0
+  },
+  {
+   "code": "0010V0",
+   "name": "제이피아이헬스케어",
+   "market_cap_api_truncated": 45080000000.0
+  },
+  {
+   "code": "382150",
+   "name": "온코크로스",
+   "market_cap_api_truncated": 45075000000.0
+  },
+  {
+   "code": "072470",
+   "name": "우리산업홀딩스",
+   "market_cap_api_truncated": 45046000000.0
+  },
+  {
+   "code": "003080",
+   "name": "SB성보",
+   "market_cap_api_truncated": 45045000000.0
+  },
+  {
+   "code": "361570",
+   "name": "알비더블유",
+   "market_cap_api_truncated": 44983000000.0
+  },
+  {
+   "code": "023350",
+   "name": "한국종합기술",
+   "market_cap_api_truncated": 44895000000.0
+  },
+  {
+   "code": "159580",
+   "name": "제로투세븐",
+   "market_cap_api_truncated": 44873000000.0
+  },
+  {
+   "code": "074610",
+   "name": "이엔플러스",
+   "market_cap_api_truncated": 44815000000.0
+  },
+  {
+   "code": "026940",
+   "name": "부국철강",
+   "market_cap_api_truncated": 44800000000.0
+  },
+  {
+   "code": "229000",
+   "name": "젠큐릭스",
+   "market_cap_api_truncated": 44771000000.0
+  },
+  {
+   "code": "162120",
+   "name": "루켄테크놀러지스",
+   "market_cap_api_truncated": 44737000000.0
+  },
+  {
+   "code": "290670",
+   "name": "대보마그네틱",
+   "market_cap_api_truncated": 44710000000.0
+  },
+  {
+   "code": "180060",
+   "name": "탑선",
+   "market_cap_api_truncated": 44588000000.0
+  },
+  {
+   "code": "476040",
+   "name": "오가노이드사이언스",
+   "market_cap_api_truncated": 44585000000.0
+  },
+  {
+   "code": "052790",
+   "name": "액토즈소프트",
+   "market_cap_api_truncated": 44572000000.0
+  },
+  {
+   "code": "007680",
+   "name": "대원",
+   "market_cap_api_truncated": 44494000000.0
+  },
+  {
+   "code": "050120",
+   "name": "ES큐브",
+   "market_cap_api_truncated": 44286000000.0
+  },
+  {
+   "code": "208860",
+   "name": "다산디엠씨",
+   "market_cap_api_truncated": 44236000000.0
+  },
+  {
+   "code": "146060",
+   "name": "율촌",
+   "market_cap_api_truncated": 25864000000.0
+  },
+  {
+   "code": "073540",
+   "name": "에프알텍",
+   "market_cap_api_truncated": 25764000000.0
+  },
+  {
+   "code": "311060",
+   "name": "엘에이티",
+   "market_cap_api_truncated": 25702000000.0
+  },
+  {
+   "code": "368600",
+   "name": "아이씨에이치",
+   "market_cap_api_truncated": 25640000000.0
+  },
+  {
+   "code": "016670",
+   "name": "디모아",
+   "market_cap_api_truncated": 25638000000.0
+  },
+  {
+   "code": "005360",
+   "name": "모나미",
+   "market_cap_api_truncated": 25586000000.0
+  },
+  {
+   "code": "004870",
+   "name": "티웨이홀딩스",
+   "market_cap_api_truncated": 25574000000.0
+  },
+  {
+   "code": "114630",
+   "name": "폴라리스우노",
+   "market_cap_api_truncated": 25542000000.0
+  },
+  {
+   "code": "377030",
+   "name": "비트맥스",
+   "market_cap_api_truncated": 25482000000.0
+  },
+  {
+   "code": "038870",
+   "name": "에코심플렉스",
+   "market_cap_api_truncated": 25451000000.0
+  },
+  {
+   "code": "002355",
+   "name": "넥센타이어1우B",
+   "market_cap_api_truncated": 25447000000.0
+  },
+  {
+   "code": "076080",
+   "name": "웰크론한텍",
+   "market_cap_api_truncated": 25418000000.0
+  },
+  {
+   "code": "169330",
+   "name": "엠브레인",
+   "market_cap_api_truncated": 25387000000.0
+  },
+  {
+   "code": "177830",
+   "name": "파버나인",
+   "market_cap_api_truncated": 25256000000.0
+  },
+  {
+   "code": "060380",
+   "name": "동양에스텍",
+   "market_cap_api_truncated": 25255000000.0
+  },
+  {
+   "code": "058110",
+   "name": "멕아이씨에스",
+   "market_cap_api_truncated": 25167000000.0
+  },
+  {
+   "code": "301300",
+   "name": "바이브컴퍼니",
+   "market_cap_api_truncated": 25138000000.0
+  },
+  {
+   "code": "354390",
+   "name": "바스칸바이오제약",
+   "market_cap_api_truncated": 25125000000.0
+  },
+  {
+   "code": "043200",
+   "name": "파루",
+   "market_cap_api_truncated": 25082000000.0
+  },
+  {
+   "code": "002070",
+   "name": "비비안",
+   "market_cap_api_truncated": 25065000000.0
+  },
+  {
+   "code": "000325",
+   "name": "노루홀딩스우",
+   "market_cap_api_truncated": 6673000000.0
+  },
+  {
+   "code": "199730",
+   "name": "바이오인프라",
+   "market_cap_api_truncated": 6527000000.0
+  },
+  {
+   "code": "199290",
+   "name": "바이오프로테크",
+   "market_cap_api_truncated": 6469000000.0
+  },
+  {
+   "code": "224810",
+   "name": "엄지하우스",
+   "market_cap_api_truncated": 6468000000.0
+  },
+  {
+   "code": "234070",
+   "name": "에이원큐브텍",
+   "market_cap_api_truncated": 6431000000.0
+  },
+  {
+   "code": "004985",
+   "name": "성신양회우",
+   "market_cap_api_truncated": 6355000000.0
+  },
+  {
+   "code": "302920",
+   "name": "더콘텐츠온",
+   "market_cap_api_truncated": 6327000000.0
+  },
+  {
+   "code": "299480",
+   "name": "지앤이헬스케어",
+   "market_cap_api_truncated": 6105000000.0
+  },
+  {
+   "code": "008290",
+   "name": "원풍물산",
+   "market_cap_api_truncated": 6083000000.0
+  },
+  {
+   "code": "011080",
+   "name": "형지I&C",
+   "market_cap_api_truncated": 5996000000.0
+  },
+  {
+   "code": "225430",
+   "name": "케이엠제약",
+   "market_cap_api_truncated": 5986000000.0
+  },
+  {
+   "code": "025870",
+   "name": "신라에스지",
+   "market_cap_api_truncated": 5980000000.0
+  },
+  {
+   "code": "004835",
+   "name": "덕성우",
+   "market_cap_api_truncated": 5971000000.0
+  },
+  {
+   "code": "012205",
+   "name": "계양전기우",
+   "market_cap_api_truncated": 5962000000.0
+  },
+  {
+   "code": "253610",
+   "name": "루트락",
+   "market_cap_api_truncated": 5939000000.0
+  },
+  {
+   "code": "236030",
+   "name": "씨알푸드",
+   "market_cap_api_truncated": 5937000000.0
+  },
+  {
+   "code": "447690",
+   "name": "아이오바이오",
+   "market_cap_api_truncated": 5933000000.0
+  },
+  {
+   "code": "26490K",
+   "name": "크라운제과우",
+   "market_cap_api_truncated": 5886000000.0
+  },
+  {
+   "code": "002995",
+   "name": "금호건설우",
+   "market_cap_api_truncated": 5874000000.0
+  },
+  {
+   "code": "312610",
+   "name": "에이에프더블류",
+   "market_cap_api_truncated": 5793000000.0
+  }
+ ]
+}

@@ -68,14 +68,29 @@ CIRCUIT_CONSECUTIVE_FAILURES = 5
 MAX_REQUESTS_PER_RUN = 60          # 목록 25 + 상세 표본 20 + 여유
 LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
 LIST_TARGET_COUNT = 500            # 현행 수집 범위와 동일
+LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
+
+# 🔴 2026-09-08 정정 (섀도 1회차에서 실제로 겪은 오류).
+#    `startIdx` 는 **항목 오프셋이 아니라 페이지 인덱스**입니다.
+#    실제 오프셋 = startIdx × pageSize.
+#    처음에 오프셋으로 착각해 0, 20, 40 … 으로 요청했더니
+#      startIdx=0  → 1~20위 (정상처럼 보임)
+#      startIdx=20 → 20×20 = **401위부터** (맵스리얼티 — 실전 기준 400위)
+#      startIdx=40 → **801위부터**
+#      startIdx=160 → 3201위 → 상장 종목 수를 넘어 **빈 배열**
+#    …이 되어 "상위 500" 대신 "1~20위 + 401위 이하"를 모았습니다.
+#    실측 확인(오너, 2026-09-08): `startIdx=1&pageSize=20` → 첫 종목 **하나금융지주**(21위).
+#    ⚠️ 겉보기엔 정상이었습니다 — 첫 페이지가 맞았고, 전체가 시총 내림차순이기도 했습니다.
+#       그래서 아래 `check_pagination_continuity()` 로 **코드가 스스로 잡게** 했습니다.
 DETAIL_SAMPLE_SIZE = 20            # 상세는 전 종목이 아니라 표본만 (상대 서버 배려)
 
 # 봇임을 숨기지 않습니다. 차단 우회용 위장이 아니라 **정직한 식별**입니다.
 USER_AGENT = "visible-hand-dashboard/shadow (+https://github.com/moonbear135/visible-hand-dashboard)"
 
+# `{page}` 는 **페이지 인덱스**입니다(0,1,2,…). 오프셋이 아닙니다 — 위 주석 참고.
 LIST_URL = ("https://stock.naver.com/api/domestic/market/stock/default"
             "?tradeType=KRX&marketType=ALL&orderType=marketSum"
-            "&startIdx={start}&pageSize={size}")
+            "&startIdx={page}&pageSize={size}")
 DETAIL_URL = "https://stock.naver.com/api/domestic/detail/{code}/detail?codeType=KRX"
 
 
@@ -166,6 +181,82 @@ class PoliteSession:
 # 수집
 # ─────────────────────────────────────────────────────────────────────────────
 
+# 🔴 페이지 **경계**의 낙폭이, **같은 구간 내부**의 정상 낙폭보다 이 배수 이상 크면 이상으로 봅니다.
+#
+#    왜 절대 임계값(예: "5배 넘으면 이상")을 쓰지 않는가 — 2026-09-08 실측:
+#    시총 상위권은 원래 낙폭이 큽니다. SK하이닉스(1,302조) → 삼성전자우(160조)가 **8배**인데
+#    이건 진짜 시장 분포지 우리 버그가 아닙니다. 절대 임계값을 쓰면 여기서 오탐이 나고,
+#    **오탐이 나는 경보는 곧 무시당하는 경보**입니다.
+#    대신 "그 구간에서 정상적으로 나타나는 낙폭"과 비교합니다:
+#      · 상위 페이지 내부 최대 낙폭 8배 → 경계 임계 24배 → 실제 경계 **58배** ⇒ 잡힘 ✅
+#      · 하위 페이지 내부 낙폭 ≈ 1.0배 → 경계 임계 5배(하한) ⇒ 정상이면 안 잡힘 ✅
+PAGINATION_BOUNDARY_JUMP_MULTIPLE = 3.0
+PAGINATION_BOUNDARY_JUMP_FLOOR = 5.0    # 내부 낙폭이 거의 없는 구간용 하한
+
+
+def _ratio(a, b):
+    """앞 종목 시총 ÷ 뒤 종목 시총. 값이 없으면 None."""
+    if not a or not b or a <= 0 or b <= 0:
+        return None
+    return a / b
+
+
+def check_pagination_continuity(rows, page_boundaries) -> list[str]:
+    """페이지를 잘못 넘겨 **엉뚱한 구간이 이어붙지 않았는지** 확인합니다.
+
+    🔴 왜 필요한가 (2026-09-08 실제 사고):
+       `startIdx` 를 항목 오프셋으로 착각해 요청했더니 1~20위 다음에 **401위대**가
+       이어붙었습니다. **겉보기엔 멀쩡했습니다** — 첫 페이지가 맞았고, 전체가 시총
+       내림차순이기도 해서 "정렬은 되어 있다"는 검사로는 절대 못 잡습니다.
+       사람이 값을 눈으로 봐서 찾았는데, 그건 다음에도 통할 방법이 아닙니다.
+
+    잡는 것: ① 페이지 경계에서만 나타나는 비정상 낙폭 ② 중복 종목(페이지 겹침) ③ 수집량 부족.
+    반환: 사람이 읽을 경고 문장 목록(정상이면 빈 목록).
+    """
+    warnings: list[str] = []
+    if not rows:
+        return ["목록을 한 종목도 받지 못했습니다"]
+
+    caps = [(r.get("code"), r.get("name"), r.get("market_cap_api_truncated") or 0) for r in rows]
+
+    # 페이지 내부에서 정상적으로 나타나는 낙폭의 최댓값 — 비교 기준선입니다.
+    boundaries = sorted(set(page_boundaries) - {0})
+    inside_ratios = [
+        r for i in range(len(caps) - 1)
+        if (i + 1) not in boundaries and (r := _ratio(caps[i][2], caps[i + 1][2])) is not None
+    ]
+    baseline = max(inside_ratios) if inside_ratios else 1.0
+    threshold = max(baseline * PAGINATION_BOUNDARY_JUMP_MULTIPLE, PAGINATION_BOUNDARY_JUMP_FLOOR)
+
+    for i in boundaries:
+        if i == 0 or i >= len(caps):
+            continue
+        ratio = _ratio(caps[i - 1][2], caps[i][2])
+        if ratio is not None and ratio >= threshold:
+            warnings.append(
+                f"🔴 페이지 경계에서 시가총액이 {ratio:.0f}배 급락 "
+                f"(같은 구간 내부의 정상 낙폭은 최대 {baseline:.1f}배) — "
+                f"{caps[i-1][1]}({caps[i-1][2]/1e12:.1f}조) → {caps[i][1]}({caps[i][2]/1e12:.1f}조). "
+                "페이지를 잘못 넘겼을 수 있습니다(startIdx 는 오프셋이 아니라 페이지 인덱스)."
+            )
+
+    seen, dupes = set(), set()
+    for code, _, _ in caps:
+        (dupes if code in seen else seen).add(code)
+    if dupes:
+        warnings.append(
+            f"🔴 같은 종목이 두 번 이상 들어왔습니다({len(dupes)}종목) — 페이지가 겹쳤을 수 있습니다: "
+            f"{sorted(dupes)[:5]}"
+        )
+
+    if len(rows) < LIST_TARGET_COUNT * 0.9:
+        warnings.append(
+            f"🟡 목표 {LIST_TARGET_COUNT}종목 중 {len(rows)}종목만 받았습니다 "
+            "(페이지가 일찍 비었거나 요청이 실패했을 수 있습니다)"
+        )
+    return warnings
+
+
 def collect(sess: PoliteSession) -> dict:
     """목록 전체 + 상세 표본. 실패도 **같은 스키마로** 기록합니다(빼지 않습니다)."""
     result = {
@@ -175,26 +266,33 @@ def collect(sess: PoliteSession) -> dict:
     }
 
     # ── 1) 목록 (시가총액 순) ────────────────────────────────────────────────
+    page_boundaries = []          # 각 페이지가 list_rows 의 몇 번째부터 시작했는지
     try:
-        for start in range(0, LIST_TARGET_COUNT, LIST_PAGE_SIZE):
-            url = LIST_URL.format(start=start, size=LIST_PAGE_SIZE)
+        for page in range(LIST_PAGE_COUNT):
+            url = LIST_URL.format(page=page, size=LIST_PAGE_SIZE)
             payload = sess.get_json(url)
             if payload is None:
-                result["errors"].append(f"목록 startIdx={start} 수집 실패")
+                result["errors"].append(f"목록 {page}페이지 수집 실패")
                 continue
-            if start == 0:
+            if page == 0:
                 result["list_raw_sample"] = payload[:3]   # raw 보관은 표본만(§0-3-3)
+            page_boundaries.append(len(result["list_rows"]))
             try:
                 result["list_rows"].extend(
                     parse_market_list(payload, source_url=url, market_label="UNKNOWN")
                 )
             except NaverApiSourceError as e:
-                result["errors"].append(f"목록 startIdx={start} 파싱 거부: {e}")
+                result["errors"].append(f"목록 {page}페이지 파싱 거부: {e}")
             if not payload:
                 break                                     # 더 줄 게 없으면 그만 요청합니다
     except (CircuitOpen, BlockedByServer) as e:
         result["stopped_reason"] = str(e)
         return result
+
+    # 🔴 페이지를 잘못 넘겼는지 **코드가 직접 확인**합니다(2026-09-08 신설, 위 주석 참고).
+    result["pagination_warnings"] = check_pagination_continuity(
+        result["list_rows"], page_boundaries)
+    result["errors"].extend(result["pagination_warnings"])
 
     # ── 2) 상세 표본 ────────────────────────────────────────────────────────
     #    특정 종목을 코드에 박지 않습니다(§2-2). **규칙**으로 고릅니다 —
@@ -310,6 +408,16 @@ def build_alert_message() -> str:
         return f"대조 리포트를 읽지 못했습니다: {e}"
 
     problems = []
+    # 페이지네이션 경고는 **일치율보다 먼저** 봅니다 — 엉뚱한 구간을 모아 왔다면
+    # 일치율 숫자 자체가 의미가 없습니다.
+    shadow_files = sorted(SHADOW_DIR.glob("*_shadow.json"))
+    if shadow_files:
+        try:
+            latest = json.loads(shadow_files[-1].read_text(encoding="utf-8"))
+            for w in latest.get("pagination_warnings", [])[:3]:
+                problems.append(w.replace("🔴 ", "").replace("🟡 ", ""))
+        except (ValueError, OSError):
+            pass
     if r.get("matched_codes", 0) < ALERT_MIN_COMMON_CODES:
         problems.append(f'공통 종목이 {r.get("matched_codes")}개뿐 (대조 불가 수준)')
     for f in r.get("fields", {}).values():
