@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "collected_at_et": "2026-09-04T21:04:52.665805-04:00",
-    "collected_at_kst": "2026-09-05T10:04:52.665810+09:00",
+    "collected_at_et": "2026-09-07T19:50:52.182583-04:00",
+    "collected_at_kst": "2026-09-08T08:50:52.182588+09:00",
     "source_template": "https://stockanalysis.com/etf/{symbol}/history/__data.json",
     "is_etf_proxy": true,
     "close_kind": "unadjusted_close",
@@ -21,7 +21,7 @@
       "close_kind": "unadjusted_close",
       "source_symbol": "SPY",
       "source_provider": "tiingo",
-      "source_updated": "Sat, 05 Sep 2026 00:17:58 GMT",
+      "source_updated": "Mon, 07 Sep 2026 23:50:32 GMT",
       "proxy_symbol_verified": true,
       "proxy_name": "State Street SPDR S&P 500 ETF",
       "proxy_name_verified": true,
@@ -173,7 +173,7 @@
       "count": 143,
       "first_date": "2026-02-11",
       "last_date": "2026-09-04",
-      "last_collected_at_kst": "2026-09-05T10:04:49.619863+09:00",
+      "last_collected_at_kst": "2026-09-08T08:50:49.354681+09:00",
       "last_error": null
     },
     "NASDAQ_PROXY_ONEQ": {
@@ -186,7 +186,7 @@
       "close_kind": "unadjusted_close",
       "source_symbol": "ONEQ",
       "source_provider": "spg",
-      "source_updated": "Fri, 04 Sep 2026 23:46:50 GMT",
+      "source_updated": "Sat, 05 Sep 2026 05:22:14 GMT",
       "proxy_symbol_verified": true,
       "proxy_name": "Fidelity Nasdaq Composite Index ETF",
       "proxy_name_verified": true,
@@ -338,7 +338,7 @@
       "count": 143,
       "first_date": "2026-02-11",
       "last_date": "2026-09-04",
-      "last_collected_at_kst": "2026-09-05T10:04:52.665751+09:00",
+      "last_collected_at_kst": "2026-09-08T08:50:52.182513+09:00",
       "last_error": null
     }
   }
