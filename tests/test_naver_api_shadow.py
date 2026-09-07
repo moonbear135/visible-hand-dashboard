@@ -241,6 +241,61 @@ def test_normal_data_produces_no_warning():
           "페이지 내부의 8배 낙폭은 경계 경고를 유발하지 않음", f"({warns[:1]})")
 
 
+def test_security_type_is_never_used_as_a_filter():
+    """
+    🔴 2026-09-08 오너 지적으로 바로잡은 것.
+
+    처음에 저는 신 API 의 `type` 이 `ST` 가 아닌 종목(리츠 RT · 인프라투자회사 IF ·
+    예탁증서 DR · 뮤추얼펀드 MF)을 "비주식이니 걸러야 한다"고 적었습니다. **틀렸습니다.**
+
+    실측으로 확인한 것:
+      · 현행은 `kr_ticker_master.json`(FinanceDataReader)로 **STOCK/ETF 두 갈래만** 나누고,
+        위 유형을 **전부 STOCK 으로 수집**합니다(맥쿼리인프라·SK리츠·롯데리츠·맵스리얼티·
+        코오롱티슈진 모두 현행 스냅샷에 있고 `is_visible=True`).
+      · 지표가 없는 종목은 **거르는 게 아니라 검증에서 막습니다**(`is_valid=False`,
+        배지 "⚠️ 데이터 검증 필요", 점수 None) — §0-1 설계 그대로입니다.
+
+    → `type` 으로 거르면 **종목 유형 판정이 두 곳**이 되고(FDR vs 네이버, 실제로 어긋남),
+      어긋나는 순간 종목이 조용히 사라집니다(§0-3-10).
+    """
+    src = (REPO_ROOT / "run_naver_api_shadow.py").read_text(encoding="utf-8")
+    for banned in ('== "ST"', "== 'ST'", '!= "ST"', "securityType ==", 'type") == "ST"'):
+        check(banned not in src, f"종목 유형으로 거르지 않음: {banned}")
+
+    # 실제로도 비주식이 결과에 남는지 확인 (걸러지면 여기서 빨간불)
+    sess = SH.PoliteSession()
+    payload = _list_payload()[:2] + [dict(_list_payload()[0], itemcode="395400",
+                                          itemname="SK리츠", type="RT")]
+
+    def fake_get(url, timeout=None):
+        if "startIdx=0&" in url:
+            return _FakeResponse(payload=payload)
+        if "/market/stock/default" in url:
+            return _FakeResponse(payload=[])
+        return _FakeResponse(payload=_detail_payload())
+
+    with mock.patch.object(sess.session, "get", fake_get), \
+         mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
+        out = SH.collect(sess)
+    types = {r.get("api_security_type") for r in out["list_rows"]}
+    check("RT" in types, "리츠(RT)가 결과에 그대로 남음 — 현행과 같은 범위", f"({types})")
+
+
+def test_target_count_matches_production_tracking_range():
+    """
+    실전은 **상위 500 + 히스테리시스 버퍼 20 = 520종목**을 추적합니다.
+    섀도가 500만 받으면 경계에서 21종목이 어긋나 "안 맞는다"는 착시가 납니다
+    (2026-09-08 실측 — 상위 490 까지는 500 수집으로도 100% 일치했습니다).
+    """
+    check(SH.LIST_TARGET_COUNT == 520, "실전과 같은 520종목을 목표로 함",
+          f"({SH.LIST_TARGET_COUNT})")
+    check(SH.LIST_PAGE_COUNT * SH.LIST_PAGE_SIZE >= 520, "페이지 수가 520종목을 덮음",
+          f"({SH.LIST_PAGE_COUNT}×{SH.LIST_PAGE_SIZE})")
+    check(SH.LIST_PAGE_COUNT + SH.DETAIL_SAMPLE_SIZE <= SH.MAX_REQUESTS_PER_RUN,
+          "늘어난 페이지 수가 요청 상한 안에 있음",
+          f"({SH.LIST_PAGE_COUNT + SH.DETAIL_SAMPLE_SIZE} / {SH.MAX_REQUESTS_PER_RUN})")
+
+
 def test_collect_actually_requests_page_0_1_2_not_0_20_40():
     """
     ⚠️ **사보타주가 찾아낸 구멍**(2026-09-08). URL 상수만 보는 검사는

@@ -67,7 +67,9 @@ TIMEOUT_SEC = 10
 CIRCUIT_CONSECUTIVE_FAILURES = 5
 MAX_REQUESTS_PER_RUN = 60          # 목록 25 + 상세 표본 20 + 여유
 LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
-LIST_TARGET_COUNT = 500            # 현행 수집 범위와 동일
+LIST_TARGET_COUNT = 520            # 🔴 현행과 동일한 범위: 상위 500 + 히스테리시스 버퍼 20.
+#    2026-09-08 실측 — 500 만 받으면 실전 520 중 21종목이 빠져 "안 맞는다"는 착시가 납니다.
+#    (실전 시총 상위 490 까지는 500 수집으로도 100% 일치했습니다. 순수한 경계 문제였습니다.)
 LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
 
 # 🔴 2026-09-08 정정 (섀도 1회차에서 실제로 겪은 오류).
@@ -83,6 +85,19 @@ LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
 #    ⚠️ 겉보기엔 정상이었습니다 — 첫 페이지가 맞았고, 전체가 시총 내림차순이기도 했습니다.
 #       그래서 아래 `check_pagination_continuity()` 로 **코드가 스스로 잡게** 했습니다.
 DETAIL_SAMPLE_SIZE = 20            # 상세는 전 종목이 아니라 표본만 (상대 서버 배려)
+
+# 🔴 신 API 의 `type` 필드(ST/RT/IF/DR/MF)를 **종목 선별 필터로 쓰지 않습니다.**
+#    2026-09-08 오너 지적으로 확인한 사실:
+#      · 현행은 `data/kr_ticker_master.json`(FinanceDataReader)로 STOCK/ETF **두 갈래만** 나누며,
+#        리츠(RT)·인프라투자회사(IF)·예탁증서(DR)·뮤추얼펀드(MF)를 **전부 STOCK 으로 수집**합니다.
+#        실측: 맥쿼리인프라·SK리츠·롯데리츠·맵스리얼티·코오롱티슈진 모두 현행 스냅샷에 있고
+#        화면에도 노출됩니다(`is_visible=True`).
+#      · 지표가 안 나오는 종목은 **거르는 게 아니라 검증에서 막습니다** —
+#        맥쿼리인프라는 `is_valid=False`, 배지 "⚠️ 데이터 검증 필요", 점수 None.
+#        §0-1 대로 "지어내지 않고 못 구했다고 보여주는" 설계입니다.
+#    → 여기에 `type=="ST"` 필터를 넣으면 **종목 유형 판정이 두 곳이 되어**(FDR vs 네이버)
+#      두 판정이 어긋날 때 종목이 조용히 사라집니다(§0-3-10 위반, 실제로 어긋납니다).
+#    `type` 은 `api_security_type` 으로 **참고 보관만** 합니다.
 
 # 봇임을 숨기지 않습니다. 차단 우회용 위장이 아니라 **정직한 식별**입니다.
 USER_AGENT = "visible-hand-dashboard/shadow (+https://github.com/moonbear135/visible-hand-dashboard)"
