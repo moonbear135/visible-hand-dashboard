@@ -134,7 +134,8 @@ https://stock.naver.com/domestic/stock/<6자리 종목코드>/price
 **Headers → Request URL** 을 기록.
 
 확인 후 이 문서에 아래를 채웁니다:
-- [ ] 종목 상세 지표 API 주소·응답 필드명 — 후보: `000660` · `consensus` · `detail?codeType=KRX` (§1-5-1)
+- [x] `000660` 정체 확인 → **실시간 시세 API**(현재가·시총만, 투자정보 없음). §1-5-2
+- [ ] 종목 상세 **투자정보** API 주소·응답 필드명 — 남은 후보: `consensus` · `detail?codeType=KRX`
 - [ ] 종목 목록(시총 순위) API 가 따로 있는가 — `sise_market_sum` 대체용, **ROE 포함 여부**
 - [ ] 인증(쿠키·토큰·Referer)이 필요한가 — 필요하면 §0-3-2 관점에서 이용 가능 여부 재검토
 - [ ] 응답에 상장주식수·ROE 가 있는가
@@ -160,6 +161,68 @@ https://stock.naver.com/domestic/stock/<6자리 종목코드>/price
 📌 **§0-3-2 관점에서 유리합니다.** 화면은 290 요청을 보내지만 **우리가 필요한 건 종목당 1~2개**
 입니다. 현재는 종목당 페이지 2개(종목상세 + WiseReport)를 크롤링하므로, 이관하면 **상대 서버
 요청 수가 오히려 줄어듭니다.**
+
+### 1-5-2. ✅ **실측 1건 — 실시간 시세 API 확인** (2026-09-07 저녁, 오너가 DevTools 에서 직접 복사)
+
+**주소 (오너 복사, 원문 그대로)**
+```
+https://polling.finance.naver.com/api/realtime/domestic/NXT/stock/000660
+```
+
+🔴 **가장 중요한 발견 — 도메인이 `polling.finance.naver.com` 입니다.**
+신 사이트(`stock.naver.com`)가 화면만 새로 만들고 **데이터는 구 도메인
+`finance.naver.com` 의 서브도메인에서 받아옵니다.** 배너의 "기존 증권 서비스 종료"가
+이 API 도메인까지 포함하는지는 **알 수 없습니다** — 확인 전에 단정하지 않습니다(§0-1).
+
+**응답에 실제로 있는 것 (실측)**
+
+| 우리가 쓰는 항목 | 필드명 | 예시값 |
+|---|---|---|
+| 현재가(종가) | `closePriceRaw` / `closePrice` | `"1783000"` / `"1,783,000"` |
+| **시가총액** | `marketValueFullRaw` / `marketValueFull` | `"1302467886795000"` |
+| 종목명 | `stockName` | `"SK하이닉스"` |
+| 시장 구분 | `stockExchangeType.nameKor` | `"코스피"` |
+| 종목코드 | `symbolCode` / `itemCode` | `"000660"` |
+| ISIN | `isinCode` | `"KR7000660001"` |
+| 전일대비·등락률 | `compareToPreviousClosePriceRaw` · `fluctuationsRatioRaw` | `"136000"` · `"8.26"` |
+| 시·고·저 | `openPriceRaw` · `highPriceRaw` · `lowPriceRaw` | |
+| 거래량·거래대금 | `accumulatedTradingVolumeRaw` · `accumulatedTradingValueRaw` | |
+| 거래정지 여부 | `tradeStopType` · `tradableStatus` | `"운영.Trading"` · `"tradable"` |
+| 장 상태·기준시각 | `marketStatus` · `localTradedAt` | `"CLOSE"` · `"2026-09-07T15:30:00+09:00"` |
+
+부가: `overMarketPriceInfo`(시간외 단일가) · `integratedPriceInfo`(KRX+NXT 통합) —
+현재 저장소는 쓰지 않습니다.
+
+🔴 **응답에 없는 것 (실측 — 필드 자체가 존재하지 않음)**
+`PER` · `EPS` · `PBR` · `BPS` · `배당수익률` · `주당배당금(DPS)` · `상장주식수` · `ROE` ·
+**추정 PER·EPS(컨센서스)** · `EV/EBITDA`.
+
+**판정**
+
+| 대체 대상 | 이 API 로 되는가 |
+|---|---|
+| `sise_market_sum.naver` 의 **현재가·시가총액** | ✅ 됩니다 (`Raw` 필드가 있어 쉼표 파싱도 불필요) |
+| `sise_market_sum.naver` 의 **ROE** | ❌ 없습니다 |
+| `item/main.naver` 의 **투자정보 전부** | ❌ 없습니다 — **§2-2 병목은 그대로입니다** |
+
+**§0-3-2(매너) 관점에서 기록해야 할 사실 2가지**
+
+1. 응답 첫 필드가 **`"pollingInterval": 7000`** — 서버가 **7초 간격 폴링을 전제**로 설계된
+   엔드포인트입니다. 우리는 **하루 1회 배치**이므로 이보다 훨씬 가볍지만, 이 값은
+   "서버가 스스로 밝힌 허용 간격"이므로 이관 시 딜레이 산정의 근거로 남깁니다.
+2. 경로가 `/stock/000660` — **종목 1개당 1요청**으로 보입니다. 현행 목록 페이지는
+   한 번에 ~50종목을 받으므로, **이 API 만으로 목록을 대체하면 요청 수가 크게 늘어납니다.**
+   → **종목 목록을 한 번에 주는 별도 API 가 있는지 반드시 먼저 확인**해야 합니다(§1-5 미확인 항목).
+
+**아직 모르는 것 (추측하지 않음 — §0-1)**
+- 경로의 **`NXT`** 가 무엇인지. 대체거래소(넥스트레이드) 구분자로 **보이지만** 확인 안 됨.
+  `KRX` 등 다른 값이 있는지도 미확인.
+- **인증(쿠키·Referer·토큰) 필요 여부.** 브라우저가 보낸 요청이라 쿠키가 실려 있었을 수
+  있습니다. 주소만으로는 판단 불가 — 이관 결정 전 반드시 확인.
+- **호출 빈도 제한**. 응답에 명시 없음.
+
+**다음 후보 (§1-5-1 에서 이미 지목)** — 이 API 는 병목을 풀지 못했으므로 계속 확인합니다:
+`consensus`(추정 PER·EPS 유력) → `detail?codeType=KRX`(상장주식수·투자정보 가능성).
 
 ### 1-6. 남은 미확인
 
