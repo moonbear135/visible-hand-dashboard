@@ -138,7 +138,7 @@ https://stock.naver.com/domestic/stock/<6자리 종목코드>/price
 - [x] `consensus` 정체 확인 → **투자의견·목표주가만**(추정 PER·EPS 없음). §1-5-3
 - [x] 🟢 **투자정보 API 확인** → `detail?codeType=KRX`. **추정 PER·EPS 포함 — §2-2 병목 해소.** §1-5-4
 - [x] 🟢 **종목 목록 API 확인** → `market/stock/default?orderType=marketSum&startIdx=&pageSize=`. §1-5-9
-- [ ] ⏳ 위 목록 응답에 **ROE 가 포함되는가** (미확인)
+- [x] 🟢 **목록 응답에 `roe` 포함 확인** — 스냅샷과 10/10 일치. §1-5-10
 - [x] ✅ **인증 불필요** — 시크릿 창에서 JSON 반환 확인(§1-5-7). 단 헤더 검사 여부는 미확인
 - [x] 상장주식수 → `listedStockCnt` 있음 / 🔴 **ROE·Forward ROE 는 없음** — 새 병목
 - [ ] 호출 빈도 제한이 있는가 (500종목 × 1회/일 이 감당되는가)
@@ -547,6 +547,45 @@ https://stock.naver.com/api/domestic/market/stock/default?tradeType=NXT&marketTy
 ⏳ **미확인 — 응답에 ROE 가 포함되는가.** 구 사이트 목록 페이지는 ROE 를 함께 줬습니다.
    포함되면 목록 요청만으로 ROE 가 해결되고, 아니면 §1-5-6 계획대로 `c1010001.aspx` 에서 읽습니다.
    **어느 쪽이든 막히지 않습니다.**
+
+### 1-5-10. 🟢 **목록 API 응답 실측 — ROE 포함. 그리고 현행 결함 1건이 드러났습니다** (2026-09-07 저녁)
+
+`.../market/stock/default?...&orderType=marketSum&startIdx=0&pageSize=10` 응답 전문(10종목)을
+오너가 복사. **한 종목당 필드 60여 개.**
+
+#### 응답에 있는 것 (우리가 쓰는 항목 기준)
+
+`nowPrice` · `marketSum` · `listedStockCnt` · **`roe`** · `roa` · `eps` · `per` · `pbr` ·
+**`dividend`(주당배당금)** · `dividendRate`(배당수익률 %) · `netIncome` · `sales` ·
+`operatingProfit` · `propertyTotal`(자산총계) · `debtTotal`(부채총계) · `reserveRatio` ·
+`frgnHoldRate` · `week52HighPrice`/`Low` · `type`(`ST`) · `sosok` · `tradeStopYn` ·
+`marketAlertType` · `listedDate` · `upperLimitPrice`/`lowerLimitPrice`.
+
+없는 것: **추정 PER·EPS**(→ `detail?codeType=KRX`) · **Forward ROE**(→ `c1010001.aspx`) ·
+`BPS` · `EV/EBITDA`.
+
+#### ✅ 저장소 스냅샷과 교차검증 (10종목 × 6항목)
+
+| 항목 | 결과 |
+|---|---|
+| **ROE** | **10/10 완전 일치** (44.15 · 10.85 · 37.82 · 7.7 · -5.19 · 8.41 · 19.44 · 4.96 · 9.98 · 6.02) |
+| **EPS** | **10/10 일치** |
+| **PER** | **10/10 일치** |
+| **상장주식수** | **10/10 일치** |
+| PBR | 전부 2~8% 낮음 → **원인 규명됨(아래)** |
+| DPS | 4종목 일치, **4종목 어긋남 → 현행 결함 발견(아래)** |
+
+→ 🟢 **현행 `t_roe`·`t_eps`·`t_per` 의 원 출처가 이 API 와 같은 계열임이 확정**됐습니다.
+   §1-5-5 에서 반증한 "계산 복원"은 불필요. **목록 요청 한 번에 ROE 까지 옵니다.**
+
+#### 🔎 PBR 차이의 원인 — 기준 가격이 다릅니다 (실측 규명)
+
+`pbr` 4.44616(SK하이닉스) ÷ 스냅샷 4.81 → 7.6% 차이. 계산해 보면:
+`전일종가 1,647,000 ÷ 4.44616 = 370,432` = **`detail` API 의 `bps` 와 정확히 일치.**
+
+→ **목록 API 의 `pbr` 은 전일 종가 기준**, 스냅샷 `t_pbr` 은 **현재가 기준**입니다.
+   버그가 아니라 기준 차이지만, **섞으면 급등·급락일에 조용히 틀립니다.**
+   이관 시 `pbr` 은 목록 API 값을 그대로 쓰지 말고 **`bps` 로 직접 계산**하는 편이 안전합니다.
 
 ### 1-6. 남은 미확인
 
