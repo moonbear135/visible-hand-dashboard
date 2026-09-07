@@ -1,9 +1,9 @@
 {
- "compared_at_kst": "2026-09-08T07:37:18+09:00",
+ "compared_at_kst": "2026-09-08T07:59:29+09:00",
  "fields": {
   "price": {
    "label": "현재가",
-   "match": 499,
+   "match": 516,
    "mismatch": 0,
    "not_comparable": 0,
    "match_ratio": 1.0,
@@ -11,39 +11,39 @@
   },
   "t_roe": {
    "label": "ROE",
-   "match": 480,
+   "match": 496,
    "mismatch": 0,
-   "not_comparable": 19,
+   "not_comparable": 20,
    "match_ratio": 1.0,
    "worst": []
   },
   "t_eps": {
    "label": "Trailing EPS",
-   "match": 401,
+   "match": 412,
    "mismatch": 0,
-   "not_comparable": 98,
+   "not_comparable": 104,
    "match_ratio": 1.0,
    "worst": []
   },
   "t_per": {
    "label": "Trailing PER",
-   "match": 401,
+   "match": 412,
    "mismatch": 0,
-   "not_comparable": 98,
+   "not_comparable": 104,
    "match_ratio": 1.0,
    "worst": []
   },
   "outstanding_shares": {
    "label": "상장주식수",
-   "match": 499,
+   "match": 516,
    "mismatch": 0,
    "not_comparable": 0,
    "match_ratio": 1.0,
    "worst": []
   }
  },
- "matched_codes": 499,
- "shadow_only": 1,
- "production_only": 21,
+ "matched_codes": 516,
+ "shadow_only": 4,
+ "production_only": 4,
  "note": ""
 }
