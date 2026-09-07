@@ -1923,3 +1923,234 @@ def test_monthly_deposit_catch_up_dates_are_every_tenth_in_the_window():
     # 10일 당일에도 그날이 포함됩니다(경계 포함).
     assert duel_batch._pending_monthly_deposit_dates(date(2026, 9, 10), lookback_days=0) \
         == [date(2026, 9, 10)]
+
+
+# =============================================================================
+# 15. (#207) 기준값 파일의 "그날 결과(outcome)" — 크롤링 전에 돈 안전망의 보류를 게이트가
+#     "이미 처리" 로 막지 않게 하기 위한 기록 (`annotate_probe_outcome()` /
+#     `probe_outcome_allows_rerun()`). 형식 버전은 그대로, 키 **추가**만.
+# =============================================================================
+def _held_summary_before_crawl(client=None):
+    """cron 안전망이 크롤링 전에 돈 날의 모양 — 스냅샷 거래일이 어제라 보류(no_baseline)."""
+    client = client or _client(accounts=_accounts(1),
+                               orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")])
+    return _run(client, session_date=YESTERDAY.isoformat(),
+                close_price_of=_price_lookup({"000001": 10_000.0}))
+
+
+def test_outcome_is_settled_after_a_fill_and_after_a_cancel():
+    """체결한 날도, 실패로 일괄 취소한 날도 '운명이 정해진 날'(settled) — 다시 돌 이유가 없습니다."""
+    filled = _run(_client(accounts=_accounts(1),
+                          orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")]),
+                  session_date=TARGET_DATE.isoformat(), close_price_of=_price_lookup({"000001": 10_000.0}))
+    probe = _probe(TARGET_DATE)
+    annotated = duel_batch.annotate_probe_outcome(probe, filled, session_date=TARGET_DATE.isoformat())
+    outcome = annotated[duel_batch.PROBE_OUTCOME_KEY]
+    assert outcome["kind"] == duel_batch.PROBE_OUTCOME_SETTLED
+    assert outcome["status"] == duel_rules.CRAWL_OK
+    assert outcome["source_session_date"] == TARGET_DATE.isoformat()
+
+    same = _stock_prices()
+    cancelled = _run(_client(cancelled_rows=[{"id": "o-1"}]),
+                     today_probe=_probe(TARGET_DATE, kospi=3200.0, stock_prices=same),
+                     previous_probe=_probe(YESTERDAY, kospi=3200.0, stock_prices=same))
+    outcome = duel_batch.annotate_probe_outcome(probe, cancelled)[duel_batch.PROBE_OUTCOME_KEY]
+    assert outcome["kind"] == duel_batch.PROBE_OUTCOME_SETTLED
+    assert outcome["status"] == duel_rules.CRAWL_FAILED_OR_HOLIDAY
+    assert outcome["source_session_date"] is None       # 모르면 지어내지 않습니다
+
+
+def test_outcome_is_held_with_the_source_session_date_when_the_safety_net_ran_before_the_crawl():
+    """🔴 #206 백로그의 그 날 — 보류 + 값의 원천이 어제(스냅샷 거래일)임이 파일에 남아야 합니다."""
+    summary = _held_summary_before_crawl()
+    probe = _probe(TARGET_DATE)
+    annotated = duel_batch.annotate_probe_outcome(probe, summary, session_date=YESTERDAY.isoformat())
+    outcome = annotated[duel_batch.PROBE_OUTCOME_KEY]
+    assert outcome["kind"] == duel_batch.PROBE_OUTCOME_HELD
+    assert outcome["status"] == duel_batch.CRAWL_NO_BASELINE
+    assert outcome["source_session_date"] == YESTERDAY.isoformat()
+    assert YESTERDAY.isoformat() in outcome["reason"]
+    # 기존 키는 하나도 바뀌지 않고(하위 호환), 원본 dict 도 그대로입니다.
+    for key in ("version", "generated_at_kst", "target_date", "index_keys", "values"):
+        assert annotated[key] == probe[key], key
+    assert duel_batch.PROBE_OUTCOME_KEY not in probe
+    assert annotated["version"] == duel_batch.PROBE_STATE_VERSION     # 버전은 올리지 않습니다
+
+
+def test_outcome_kind_follows_the_actual_action_not_the_raw_verdict():
+    """관리자 `--override cancel` 로 보류를 취소한 날은 판정이 no_baseline 이어도 settled 입니다."""
+    client = _client(accounts=_accounts(1), cancelled_rows=[{"id": "o-1"}])
+    summary = _run(client, session_date=YESTERDAY.isoformat(),
+                   close_price_of=_price_lookup({"000001": 10_000.0}),
+                   override=duel_batch.OVERRIDE_CANCEL)
+    outcome = duel_batch.annotate_probe_outcome(_probe(TARGET_DATE), summary,
+                                                session_date=YESTERDAY.isoformat())[duel_batch.PROBE_OUTCOME_KEY]
+    assert outcome["kind"] == duel_batch.PROBE_OUTCOME_SETTLED
+    assert outcome["status"] == duel_batch.CRAWL_NO_BASELINE
+
+
+def test_outcome_survives_the_state_file_round_trip_and_old_files_still_load(tmp_path):
+    """(a) outcome 이 파일에 그대로 남고 (b) outcome 없는 #207 이전 파일도 예전처럼 읽힙니다."""
+    path = tmp_path / "state.json"
+    annotated = duel_batch.annotate_probe_outcome(_probe(TARGET_DATE), _held_summary_before_crawl(),
+                                                  session_date=YESTERDAY.isoformat())
+    duel_batch.save_probe_state(str(path), annotated)
+    restored = duel_batch.load_probe_state(str(path))
+    assert restored[duel_batch.PROBE_OUTCOME_KEY] == annotated[duel_batch.PROBE_OUTCOME_KEY]
+    assert restored["values"] == annotated["values"]
+
+    duel_batch.save_probe_state(str(path), _probe(TARGET_DATE, stock_prices=_stock_prices()))   # 옛 형식(outcome 없음)
+    legacy = duel_batch.load_probe_state(str(path))
+    assert duel_batch.PROBE_OUTCOME_KEY not in legacy
+    assert duel_batch.judge_crawl_freshness(_probe(date(2026, 8, 21), kospi=3300.0,
+                                                   stock_prices=_stock_prices(bump=7.0)),
+                                            legacy)["status"] == duel_rules.CRAWL_OK
+
+
+def test_the_next_day_judgement_ignores_the_outcome_key():
+    """outcome 은 게이트용 기록일 뿐 — 다음 날 신선도 비교는 예전과 똑같이 `values` 만 봅니다."""
+    yesterday = duel_batch.annotate_probe_outcome(_probe(YESTERDAY, kospi=3200.0, stock_prices=_stock_prices()),
+                                                  _held_summary_before_crawl(),
+                                                  session_date=date(2026, 8, 18).isoformat())
+    verdict = duel_batch.judge_crawl_freshness(
+        _probe(TARGET_DATE, kospi=3210.0, stock_prices=_stock_prices(bump=10.0)), yesterday)
+    assert verdict["status"] == duel_rules.CRAWL_OK
+    assert verdict["baseline_date"] == YESTERDAY.isoformat()
+
+
+def _probe_with_outcome(kind, *, status=duel_batch.CRAWL_NO_BASELINE, source=None, target=TARGET_DATE):
+    probe = _probe(target)
+    probe[duel_batch.PROBE_OUTCOME_KEY] = {"kind": kind, "status": status,
+                                            "source_session_date": source, "reason": "x"}
+    return probe
+
+
+def test_rerun_is_allowed_only_for_a_hold_whose_values_are_not_from_the_target_date():
+    """
+    🔴 게이트 규칙의 핵심. 보류인데 값이 어제 자료 → 다시 돌면 오늘 진짜 값과 어제 값을 비교하므로
+    정상 체결 경로(#204 이전의 '같은 날 두 번째 실행'). 그 외에는 전부 "이미 처리".
+    """
+    allowed, why = duel_batch.probe_outcome_allows_rerun(
+        _probe_with_outcome(duel_batch.PROBE_OUTCOME_HELD, source=YESTERDAY.isoformat()))
+    assert allowed is True and YESTERDAY.isoformat() in why and "아직 처리 전" in why
+
+
+@pytest.mark.parametrize("probe, expect_in_why", [
+    (_probe(TARGET_DATE), "outcome"),                                                         # #207 이전 파일
+    (_probe_with_outcome(duel_batch.PROBE_OUTCOME_SETTLED, status=duel_rules.CRAWL_OK,
+                         source=TARGET_DATE.isoformat()), "settled"),                          # 체결한 날
+    (_probe_with_outcome(duel_batch.PROBE_OUTCOME_SETTLED, status=duel_rules.CRAWL_FAILED_OR_HOLIDAY,
+                         source=TARGET_DATE.isoformat()), "settled"),                          # 취소한 날
+    (_probe_with_outcome(duel_batch.PROBE_OUTCOME_HELD, status=duel_rules.CRAWL_NEEDS_REVIEW,
+                         source=TARGET_DATE.isoformat()), "--override"),                       # 관리자 확인 대기
+    (_probe_with_outcome(duel_batch.PROBE_OUTCOME_HELD, source=TARGET_DATE.isoformat()), "--override"),  # 첫 실행
+    (_probe_with_outcome(duel_batch.PROBE_OUTCOME_HELD, source=None), "알 수 없음"),            # 원천 미상
+])
+def test_rerun_is_refused_when_it_would_compare_todays_values_with_themselves(probe, expect_in_why):
+    """
+    보류라도 값이 **오늘 자료**면 다시 돌 때 오늘 값끼리 비교돼 failed_or_holiday → 보류 주문 취소.
+    #204 게이트 머리말이 막으려던 바로 그 사고 — 그 보류는 관리자 --override 가 푸는 것이 맞습니다.
+    """
+    allowed, why = duel_batch.probe_outcome_allows_rerun(probe)
+    assert allowed is False
+    assert expect_in_why in why
+
+
+def test_both_runner_scripts_write_the_outcome_into_the_baseline_they_save(tmp_path, monkeypatch):
+    """
+    실행 스크립트(원화·USD) ⑤단계의 실제 배선 — 안전망이 크롤링 전에 돈 날의 모양(스냅샷 거래일 = 어제)
+    으로 한 판 돌리면, 저장된 기준값에 `outcome = held / source_session_date = 어제` 가 남아야 합니다.
+    Supabase·가격 파일은 전부 monkeypatch(오프라인) — 배치 본체는 위 테스트들이 이미 검증한 것을 그대로 씁니다.
+    """
+    import importlib
+    from utils import report_db, scorecard_db
+
+    cases = [
+        ("run_duel_daily_batch", "duel_db", scorecard_db.MARKET_KR, "2026-08-20", "2026-08-19", []),
+        ("run_duel_daily_batch_us", "duel_db_usd", scorecard_db.MARKET_US, "2026-08-19", "2026-08-18",
+         ["--today-date", "2026-08-20"]),
+    ]
+    for module_name, db_name, market, target, session, extra in cases:
+        runner = importlib.import_module(module_name)
+        db_module = importlib.import_module(f"utils.{db_name}")
+        universe = _universe(60)
+        monkeypatch.setattr(report_db, "resolve_session_info",
+                            lambda data_dir=None, _s=session, _m=market: ({_m: _s}, {_m: f"{_s} 17:30"}, []))
+        monkeypatch.setattr(scorecard_db, "load_universe_index",
+                            lambda m, data_dir=None, _u=universe: (_u, {}))
+        monkeypatch.setattr(report_db, "load_kospi_close_history", lambda csv_path=None: {target: 3200.0})
+        monkeypatch.setattr(report_db, "load_us_index_closes",
+                            lambda data_dir=None: {k: {"closes": {target: 100.0}}
+                                                   for k in ("SP500_PROXY_SPY", "NASDAQ_PROXY_ONEQ")})
+        monkeypatch.setattr(db_module, "create_service_client", lambda: _client(accounts=_accounts(1)))
+        state_path = tmp_path / f"{module_name}.json"
+        assert runner.main(["--target-date", target, "--data-dir", str(tmp_path),
+                            "--state-path", str(state_path)] + extra) == 0
+
+        saved = duel_batch.load_probe_state(str(state_path))
+        assert saved["target_date"] == target, module_name
+        outcome = saved[duel_batch.PROBE_OUTCOME_KEY]
+        assert outcome["kind"] == duel_batch.PROBE_OUTCOME_HELD, module_name
+        assert outcome["status"] == duel_batch.CRAWL_NO_BASELINE
+        assert outcome["source_session_date"] == session, module_name
+        allowed, _why = duel_batch.probe_outcome_allows_rerun(saved)
+        assert allowed is True, f"{module_name}: 게이트가 진짜 수집 완료 뒤 재실행을 허용해야 합니다"
+
+
+def test_the_whole_day_safety_net_before_crawl_then_real_completion_fills_then_second_completion_is_blocked(
+        tmp_path, monkeypatch):
+    """
+    🔴 #207 시나리오 통째로(원화, 게이트까지 — 실제 파일 없이):
+      ① 17:10 cron 안전망 — 스냅샷은 어제 것 → 보류, 기준값(값=어제) 오늘 자로 저장
+      ② 진짜 수집 완료 workflow_run → 게이트 "아직 처리 전" → 배치 재실행 → 어제 값과 비교해 ok → **체결**
+      ③ 21:03 GitHub cron 의 두 번째 완료 → 게이트 "이미 처리"(settled) → 차단(멱등 유지)
+    """
+    import importlib
+    import crawl_ready_gate as gate
+    from utils import report_db, scorecard_db
+
+    runner = importlib.import_module("run_duel_daily_batch")
+    target, yesterday = TARGET_DATE.isoformat(), YESTERDAY.isoformat()
+    state_path = tmp_path / "probe.json"
+    duel_batch.save_probe_state(str(state_path), _probe(YESTERDAY, kospi=3200.0, stock_prices=_stock_prices()))
+
+    world = {"session": yesterday, "universe": _universe(60), "kospi": 3200.0}
+    monkeypatch.setattr(report_db, "resolve_session_info",
+                        lambda data_dir=None: ({scorecard_db.MARKET_KR: world["session"]}, {}, []))
+    monkeypatch.setattr(scorecard_db, "load_universe_index", lambda m, data_dir=None: (world["universe"], {}))
+    monkeypatch.setattr(report_db, "load_kospi_close_history", lambda csv_path=None: {target: world["kospi"]})
+    clients = []
+
+    def make_client():
+        clients.append(_client(accounts=_accounts(1),
+                               orders=[_order("o-1", "acc-1", "000001", 1, "2026-08-19T19:00:00+09:00")]))
+        return clients[-1]
+    monkeypatch.setattr(duel_db, "create_service_client", make_client)
+
+    def gate_says(role):
+        return gate.duel_already_done(str(state_path), target)[0]
+
+    # ① 안전망 — 크롤링 전(어제 값·어제 거래일). 유니버스 값은 _universe 기본(=어제 기준값과 같음).
+    assert gate_says(gate.ROLE_SAFETY_NET) is False
+    runner.main(["--target-date", target, "--data-dir", str(tmp_path), "--state-path", str(state_path)])
+    first = duel_batch.load_probe_state(str(state_path))
+    assert first["target_date"] == target
+    assert first[duel_batch.PROBE_OUTCOME_KEY]["kind"] == duel_batch.PROBE_OUTCOME_HELD
+    assert _order_updates_excluding_stale_sweep(clients[-1]) == []          # 주문은 pending 그대로
+
+    # ② 진짜 수집 완료 — 오늘 거래일·오늘 값(전부 변동).
+    world.update(session=target, universe=_universe(60, base_price=10_010.0), kospi=3210.0)
+    done, why = gate.duel_already_done(str(state_path), target)
+    assert done is False and "보류" in why                                   # #207 — 게이트가 길을 엽니다
+    runner.main(["--target-date", target, "--data-dir", str(tmp_path), "--state-path", str(state_path)])
+    second = duel_batch.load_probe_state(str(state_path))
+    assert second[duel_batch.PROBE_OUTCOME_KEY]["kind"] == duel_batch.PROBE_OUTCOME_SETTLED
+    assert second[duel_batch.PROBE_OUTCOME_KEY]["status"] == duel_rules.CRAWL_OK
+    fills = [c for c in _order_updates_excluding_stale_sweep(clients[-1])
+             if c.payload.get("status") == duel_rules.ORDER_FILLED]
+    assert len(fills) == 1                                                   # 보류가 체결로 되살아남
+
+    # ③ 두 번째 완료(건너뛰기 실행) — 이미 체결한 날이라 차단.
+    done, why = gate.duel_already_done(str(state_path), target)
+    assert done is True and "settled" in why
+    assert len(clients) == 2                                                 # 배치는 정확히 두 번만 돌았음

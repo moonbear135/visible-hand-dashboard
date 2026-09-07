@@ -15,7 +15,8 @@ DUEL_MODULE_WORK_ORDER.md 2-5 의 야간 배치를 하루 한 번 돌립니다. 
   · 그날 가격 파일을 **이미 있는 로더로** 읽습니다
     (`scorecard_db.load_universe_index()` · `report_db.build_price_lookup()` ·
      `report_db.load_kospi_close_history()` — §0-3-10, 파싱을 새로 짜지 않습니다).
-  · 신선도 기준값 파일(`data/duel_freshness_probe_previous.json`)을 읽고, 끝에 덮어씁니다.
+  · 신선도 기준값 파일(`data/duel_freshness_probe_previous.json`)을 읽고, 끝에 덮어씁니다
+    (#207 — 그날 결과 settled/held 와 값의 원천 거래일을 `outcome` 키로 함께 적습니다).
   · 요약을 사람이 읽을 수 있게 출력합니다.
 
 하지 않는 일: **판단.** 순서·판정·행 만들기는 전부 `utils/duel_batch.py` 에 있고,
@@ -281,8 +282,16 @@ def main(argv=None):
         print("  ⚠️ 오늘 점검표를 만들지 못해 기준값 파일을 갱신하지 않았습니다"
               " (예전 기준값을 그대로 둡니다).")
     else:
-        duel_batch.save_probe_state(state_path, today_probe)
-        print(f"  ✅ 내일 비교용 기준값을 남겼습니다: {state_path}")
+        # (#207) 그날 결과(체결·취소 = settled / 보류 = held)와 값의 원천 거래일을 함께 적습니다 —
+        # 크롤링 전에 돈 안전망이 보류로 끝난 날, 뒤이은 진짜 수집 완료 이벤트를
+        # `crawl_ready_gate.py` 가 "이미 처리"로 막지 않게 하기 위해서입니다. 기존 키는 그대로.
+        annotated = duel_batch.annotate_probe_outcome(today_probe, summary,
+                                                      session_date=kr_session_date)
+        duel_batch.save_probe_state(state_path, annotated)
+        outcome = annotated[duel_batch.PROBE_OUTCOME_KEY]
+        print(f"  ✅ 내일 비교용 기준값을 남겼습니다: {state_path}"
+              f" (그날 결과 {outcome['kind']} / 판정 {outcome['status']}"
+              f" / 값 원천 거래일 {outcome['source_session_date'] or '(미상)'})")
 
     for line in duel_batch.format_summary_lines(summary):
         print(line)

@@ -52,6 +52,7 @@ YESTERDAY_TARGET = date(2026, 8, 18)
     "judge_crawl_freshness", "resolve_action", "plan_order_fills", "last_snapshot_dates",
     "collect_external_cash_flows", "build_snapshot_rows", "compute_twr_by_account",
     "is_monthly_deposit_date", "default_state_dir",
+    "annotate_probe_outcome", "PROBE_OUTCOME_KEY",          # (#207) 기준값의 '그날 결과' 기록도 한 벌
     "_to_date", "_positive_price", "_round6",
 ])
 def test_shared_batch_helpers_are_the_same_object_as_the_krw_module(name):

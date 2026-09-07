@@ -128,6 +128,8 @@ from utils.duel_batch import (
     build_freshness_probe,
     load_probe_state,
     save_probe_state,
+    PROBE_OUTCOME_KEY,
+    annotate_probe_outcome,
     judge_crawl_freshness,
     resolve_action,
     plan_order_fills,

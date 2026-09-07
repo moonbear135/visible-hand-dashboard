@@ -100,6 +100,22 @@ PROBE_STATE_FILENAME = "duel_freshness_probe_previous.json"
 #: 버전을 만나면 **추측해서 읽지 않고** 기준값 없음으로 처리합니다(§0-1).
 PROBE_STATE_VERSION = 1
 
+#: (#207) 기준값 파일에 **"그날 배치가 어떻게 끝났는가"** 를 함께 적는 키와 값.
+#: 왜 필요한가 — #204 게이트(`crawl_ready_gate.py`)는 "기준값 파일의 `target_date` 가 오늘이면
+#: 오늘 배치가 이미 돌았다"로 보고 같은 날 두 번째 실행을 막습니다. 그런데 결투 cron 안전망이
+#: **크롤링이 끝나기 전에** 돈 날은 배치가 "스냅샷 거래일 ≠ 처리 거래일"로 주문을 **보류**하면서도
+#: 오늘 `target_date` 로 기준값을 남기므로(다음 날 비교를 위해 필요), 잠시 뒤 진짜 수집 완료
+#: 이벤트가 와도 게이트가 "이미 처리"로 건너뛰어 보류 주문이 그날 체결될 기회를 잃었습니다
+#: (TASK_HISTORY #206 백로그 → #207). 그래서 기준값에 결과를 적고, 게이트가 그것을 함께 봅니다.
+#:
+#: ⚠️ 형식 버전(`PROBE_STATE_VERSION`)은 올리지 않습니다 — 키 **추가**일 뿐이고, 옛 파일(키 없음)은
+#:    "정상 반영(settled)" 으로 읽혀 #204 그대로 동작합니다(`probe_outcome_allows_rerun()` 참고).
+PROBE_OUTCOME_KEY = "outcome"
+#: 그날 주문의 운명이 정해짐 — 체결(fill) 또는 일괄 취소(cancel). 같은 날 다시 돌 이유가 없습니다.
+PROBE_OUTCOME_SETTLED = "settled"
+#: 보류 — 주문이 `pending` 그대로(needs_review / no_baseline). 결론이 아직 나지 않은 날입니다.
+PROBE_OUTCOME_HELD = "held"
+
 #: 작업지시서 2-9 가 정한 점검 대상 지수. **이 저장소에는 코스닥 지수 종가 원천이 없습니다**
 #: (`market_history.csv` 에 코스피만 — PROJECT_STATUS.md §10-3 이 "코스닥 지수는 이 파일에
 #: 없어 v1 은 코스피만"이라고 이미 적어 뒀습니다). 그래서 실제로 돌릴 수 있는 기본값은
@@ -420,6 +436,79 @@ def load_probe_state(path):
     if not isinstance(payload.get("values"), dict) or not payload["values"]:
         raise DuelBatchError(f"신선도 기준값 파일에 값이 없습니다({path}).")
     return payload
+
+
+def annotate_probe_outcome(probe, summary, *, session_date=None):
+    """
+    (#207) 오늘 점검표에 **그날 배치가 어떻게 끝났는가**를 적어 돌려줍니다 — 기준값 파일로
+    저장하기 직전에 실행 스크립트가 부릅니다. 원본 dict 는 건드리지 않고 복사본을 돌려줍니다.
+
+    적는 것(`PROBE_OUTCOME_KEY` 아래 dict — 기존 키는 하나도 바꾸지 않습니다):
+        kind                : `PROBE_OUTCOME_SETTLED`(체결 또는 취소 — 운명 확정) /
+                              `PROBE_OUTCOME_HELD`(보류 — 주문이 pending 그대로)
+        status              : 그날 신선도 판정(ok / failed / failed_or_holiday / needs_review / no_baseline)
+        source_session_date : 점검표의 **값**을 만든 가격 스냅샷의 실제 거래일
+                              (`report_db.resolve_session_info()` 결과 — 모르면 None).
+                              `target_date` 와 다르면 "값이 처리 거래일 자료가 아니다"는 뜻입니다.
+        reason              : 판정 사유 한 문장(사람이 파일만 열어도 그날 사정을 알 수 있게).
+
+    ⚠️ `kind` 는 **실제 행동**(`resolve_action()` 결과 — 관리자 덮어쓰기 반영 뒤)으로 정합니다.
+       판정 문자열로 다시 계산하지 않습니다 — 행동을 정하는 곳이 둘이 되면 어긋납니다(§0-3-10).
+    """
+    if not isinstance(probe, dict):
+        raise DuelBatchError("결과를 적을 점검표가 dict 가 아닙니다.")
+    action = (summary or {}).get("action") or {}
+    freshness = (summary or {}).get("freshness") or {}
+    settled = bool(action.get("fill")) or bool(action.get("cancel_pending"))
+    annotated = dict(probe)
+    annotated[PROBE_OUTCOME_KEY] = {
+        "kind": PROBE_OUTCOME_SETTLED if settled else PROBE_OUTCOME_HELD,
+        "status": freshness.get("status"),
+        "source_session_date": str(session_date) if session_date else None,
+        "reason": freshness.get("reason") or "",
+    }
+    return annotated
+
+
+def probe_outcome_allows_rerun(probe):
+    """
+    (#207) 기준값 파일이 **처리 거래일 자인데도** 그날 배치를 한 번 더 돌려도 되는가.
+    `crawl_ready_gate.duel_already_done()` 이 "이미 처리" 판정 직전에 묻습니다.
+
+    True 인 유일한 경우 — **보류로 끝났고, 점검표 값이 처리 거래일 자료로 만든 것이 아닐 때**
+    (`outcome.kind == held` 이고 `outcome.source_session_date` 가 있으며 `target_date` 와 다름).
+    이때 다시 돌면 오늘 진짜 값을 "어제 값(오늘 날짜로 저장된)" 과 비교하므로 정상적으로
+    "변동 있음 → ok → 체결" 로 갑니다 — #204 이전에 같은 날 두 번째 실행이 보류를 되살리던
+    바로 그 경로입니다.
+
+    False 인 경우와 그 이유:
+      · `outcome` 키가 없음(#207 이전 파일) → 옛 동작 그대로 "이미 처리".
+      · `kind == settled`(체결·취소) → 운명이 정해진 날. 다시 돌 이유가 없고, 돌면 오늘 값끼리
+        비교돼 `failed_or_holiday` 가 됩니다.
+      · `kind == held` 인데 값이 **처리 거래일 자료로 만든 것**(source_session_date == target_date,
+        needs_review·첫 실행 no_baseline 등) → 다시 돌면 오늘 값과 오늘 값을 비교해 "전부 무변동
+        → failed_or_holiday → **보류해 둔 주문을 취소**" 합니다. #204 게이트 머리말이 막으려던
+        바로 그 사고라, 이 보류는 게이트가 아니라 관리자(`--override`)가 푸는 것이 맞습니다.
+      · `kind == held` 인데 source_session_date 를 모름 → 위와 같은 사고가 가능하므로 보수적으로 막음.
+    반환: (allows: bool, why: str) — 사유는 게이트 로그에 그대로 찍힙니다.
+    """
+    outcome = (probe or {}).get(PROBE_OUTCOME_KEY)
+    if not isinstance(outcome, dict):
+        return False, "기준값에 그날 결과(outcome) 기록이 없음(#207 이전 형식) — 이미 처리로 봅니다"
+    kind = outcome.get("kind")
+    status = outcome.get("status")
+    if kind != PROBE_OUTCOME_HELD:
+        return False, f"그날 배치가 {kind or '(미상)'} 로 끝남(판정 {status}) — 이미 처리로 봅니다"
+    source = outcome.get("source_session_date")
+    target = (probe or {}).get("target_date")
+    if not source:
+        return False, (f"그날 배치가 보류(판정 {status})로 끝났지만 값의 원천 거래일을 알 수 없음"
+                       " — 다시 돌면 보류 주문이 취소될 수 있어 이미 처리로 봅니다")
+    if str(source) == str(target):
+        return False, (f"그날 배치가 보류(판정 {status})로 끝났지만 값이 이미 {target} 자료로 만든 것"
+                       " — 다시 돌면 오늘 값끼리 비교돼 보류 주문이 취소되므로 관리자 --override 로 풀어야 합니다")
+    return True, (f"그날 배치가 보류(판정 {status})로 끝났고 값은 {source} 자료(처리 거래일 {target} 이전)"
+                  " — 진짜 수집분으로 다시 평가해야 하므로 아직 처리 전으로 봅니다")
 
 
 def save_probe_state(path, probe):

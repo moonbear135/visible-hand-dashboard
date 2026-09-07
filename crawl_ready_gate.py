@@ -43,6 +43,11 @@
                         하므로(`run_duel_daily_batch_us.py` H-1), 지수 없이 돌리면 안 됩니다.
   · 이미 처리했는가   : 결투 기준값 파일(`duel_batch.load_probe_state()`)의 `target_date` 가 처리
                         거래일과 같으면 그날 배치가 이미 돌아 커밋한 것 — 다시 돌리지 않습니다.
+                        (#207) 예외 하나: 기준값의 `outcome` 이 **보류(held)** 이고 그 값이 처리
+                        거래일 자료로 만든 게 아니면(안전망이 크롤링 전에 돌아 보류한 날) "아직
+                        처리 전" — 진짜 수집 완료 이벤트가 그 보류를 체결로 되살립니다. 체결·취소로
+                        끝난 날과 `outcome` 없는 옛 파일은 그대로 "이미 처리"입니다
+                        (`duel_batch.probe_outcome_allows_rerun()`).
                         (성적표 발행은 "그날 발행분 통째로 갈아끼우기"라 두 번 돌아도 무해 —
                         이 검사를 하지 않습니다. 리포트 스냅샷은 벤치마크 수집 시각이 미국 스냅샷
                         수집 시각보다 뒤이면 "이미 이번 수집분으로 돌았다"로 봅니다.)
@@ -211,7 +216,15 @@ def _parse_price_stamp(stamp):
 
 
 def duel_already_done(state_path, target_date):
-    """결투 기준값 파일의 `target_date` 가 처리 거래일과 같으면 그날 배치가 이미 돌아 커밋한 것."""
+    """
+    결투 기준값 파일의 `target_date` 가 처리 거래일과 같으면 그날 배치가 이미 돌아 커밋한 것.
+
+    (#207) 단, 기준값에 적힌 그날 결과(`outcome`)가 **보류**이고 그 값이 처리 거래일 자료로 만든
+    것이 아니면(cron 안전망이 크롤링 전에 돌아 "스냅샷 거래일 ≠ 처리 거래일"로 보류한 날) 아직
+    처리 전으로 봅니다 — 진짜 수집 완료 이벤트가 그 보류를 체결로 되살릴 수 있게. 판단 기준은
+    전부 `duel_batch.probe_outcome_allows_rerun()` 에 있고(기준값 형식과 같은 파일), 체결·취소로
+    끝난 날과 `outcome` 이 없는 옛 파일은 예전처럼 "이미 처리"입니다(중복 실행 차단 유지).
+    """
     try:
         probe = duel_batch.load_probe_state(state_path)
     except DuelBatchError as exc:
@@ -222,7 +235,10 @@ def duel_already_done(state_path, target_date):
         return False, f"결투 기준값 파일 없음({os.path.basename(state_path)}) — 첫 실행"
     baseline = probe.get("target_date")
     if str(baseline) == str(target_date):
-        return True, f"결투 기준값이 이미 {target_date} 자 — 그날 배치가 이미 돌아 커밋했습니다"
+        allows_rerun, why = duel_batch.probe_outcome_allows_rerun(probe)
+        if allows_rerun:
+            return False, f"결투 기준값이 {target_date} 자이지만 {why}"
+        return True, f"결투 기준값이 이미 {target_date} 자 — {why}"
     return False, f"결투 기준값은 {baseline} 자 — {target_date} 는 아직 처리 전"
 
 

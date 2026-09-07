@@ -3945,6 +3945,62 @@ workflow_run 으로 도는 워크플로우면 'workflow_run' 값도 받아야 �
 오프라인 검증 밖 — 다음 평일(09-08 화) 아침 scrape_us 완료 → snapshots → `duel_daily_us.yml`·`scorecard_publish_daily_us.yml` 두 번째
 깨어남이 skipped 가 아니라 게이트 "준비 완료 → 진행" 인지 Actions 탭에서 확인 필요. (c) 백로그 항목 이외의 코드는 한 줄도 바꾸지 않음.
 
+### #207 — [#206 후속, 오너 승인 "고쳐야되 그거 고쳐야되"] 결투 기준값 파일에 **그날 결과(체결·취소 / 보류)와 값의 원천 거래일** 기록 — 크롤링 전에 돈 cron 안전망의 보류를 진짜 수집 완료 이벤트가 되살릴 수 있게 `crawl_ready_gate.py` 의 "이미 처리" 판정 보정 (2026-09-07)
+
+**경위.** #206 6) 이 백로그로만 남겨 둔 🔴 설계 결정 사항을 오너가 승인 — 방향은 ③ "기준값/probe 파일에 그날 처리가 정상
+반영이었는지 vs 보류였는지 구분하는 필드를 추가하고, 게이트가 그것을 같이 본다". 시작 전 HEAD = `08a52c2`(#206).
+문제 재확인(코드 정독): `run_duel_daily_batch(_us).py` ⑤ 는 `today_probe` 가 만들어지기만 하면 배치 결과와 무관하게
+`save_probe_state()` 로 오늘 `target_date` 기준값을 남기고, `crawl_ready_gate.duel_already_done()` 은 그 `target_date == 처리
+거래일` 하나로 "이미 처리" 를 판정. cron 안전망(KR 17:10 / USD 12:00)이 크롤링 전에 돈 날은 `run_nightly_batch()` 의
+`our_side_stale`("가격 스냅샷의 거래일 ≠ 처리 거래일") 경로로 `no_baseline` **보류**(체결도 취소도 안 함)인데 기준값은 오늘
+날짜로 저장되므로, 뒤이은 진짜 수집 완료 `workflow_run` 이 게이트에서 건너뛰어짐 — 실제 코드와 #206 서술이 일치함을 확인.
+
+**보고 시 설명과 다른 점(코드 기준으로 조정).** 오너 지시문의 "check_crawl_freshness() 가 정체로 판정하면 보류" 는 부정확 —
+그 판정(`failed_or_holiday`)은 보류가 아니라 **일괄 취소**(`resolve_action()` 표)이고, 보류는 `needs_review` 와 `no_baseline`
+(첫 실행·지수 누락·공통 종목 부족·**우리 쪽 자료 낡음**)뿐. 그리고 "보류였던 날은 전부 재실행 허용" 을 글자 그대로 구현하면
+**새 사고**가 생김: 보류라도 값이 **오늘 자료**로 만든 것(needs_review 관리자 확인 대기, 첫 실행 no_baseline)이면 재실행은
+오늘 값과 오늘 값(오늘 날짜로 저장된 기준값)을 비교 → 전부 무변동 → `failed_or_holiday` → **보류해 둔 주문을 취소** — #204
+게이트 머리말이 막으려던 바로 그 경로. 그래서 "보류" 만이 아니라 **"보류 + 점검표 값이 처리 거래일 자료로 만든 것이
+아님(스냅샷 거래일 ≠ 처리 거래일)"** 일 때만 재실행을 허용하도록 조건을 좁혔다(#206 처방 후보 (c) "원천 스냅샷 날짜 기록" 을
+③ 안에 합친 모양). 이 경우 재실행은 오늘 진짜 값을 "어제 값" 과 비교하므로 정상적으로 ok → 체결(#204 이전의 자연스러운 경로).
+
+**처방.**
+- `utils/duel_batch.py`: 상수 `PROBE_OUTCOME_KEY = "outcome"` / `PROBE_OUTCOME_SETTLED` / `PROBE_OUTCOME_HELD` +
+  `annotate_probe_outcome(probe, summary, session_date=)` — 점검표 복사본에 `outcome = {kind: settled|held, status: 판정,
+  source_session_date: 값을 만든 스냅샷 거래일(모르면 None), reason}` 을 **추가**(기존 키·`PROBE_STATE_VERSION` 은 그대로 —
+  하위 호환, 옛 파일은 `outcome` 없음 = settled 취급). `kind` 는 판정 문자열이 아니라 **실제 행동**(`resolve_action()` 결과,
+  관리자 덮어쓰기 반영 뒤)으로 정함. `probe_outcome_allows_rerun(probe) -> (bool, why)` — True 는 `held` 이면서
+  `source_session_date` 가 있고 `target_date` 와 다를 때뿐; settled / outcome 없음 / held 인데 오늘 자료 / 원천 미상은 False(사유
+  문장 포함, 게이트 로그에 그대로).
+- `run_duel_daily_batch.py` · `run_duel_daily_batch_us.py` ⑤: `save_probe_state()` 직전에 `annotate_probe_outcome(today_probe,
+  summary, session_date=kr/us_session_date)` 를 거치고, 로그에 "그날 결과 held / 판정 no_baseline / 값 원천 거래일 …" 한 줄.
+  `utils/duel_batch_usd.py` 는 원화 모듈의 것을 그대로 import(재정의 없음).
+- `crawl_ready_gate.py::duel_already_done()`: `target_date` 가 같을 때 `duel_batch.probe_outcome_allows_rerun()` 을 묻고 True 면
+  "아직 처리 전" 으로 답함. 게이트는 outcome 값을 직접 해석하지 않음(규칙은 기준값 형식과 같은 파일에 한 벌). 머리말 판정표 갱신.
+  성적표·리포트 스냅샷 소비자는 이 검사 자체를 안 하므로 영향 없음(`scorecard_publish.py` 는 기준값의 `values`·`target_date` 만
+  읽어 새 키를 무해하게 무시 — 회귀 테스트 통과로 확인).
+- 무한 재실행·과도한 재크롤링 검토: 재실행은 **읽기 전용 게이트가 허용할 때만** 배치가 돎. KR 은 cron 1회/일 + `scrape.yml` 완료
+  이벤트 ≤2회/일(진짜 수집 + 21:03 건너뛰기 실행 — 후자는 event 역할의 "코스피 오늘 수집 완료" 검사에서 여전히 탈락), USD 는
+  cron 1회 + scrape_us 완료 2회(서머타임 이중 cron) + 벤치마크 완료. 진짜 완료 뒤 한 번 돌면 settled 로 바뀌어 그날 나머지 완료
+  이벤트는 전부 차단. 공휴일처럼 값이 계속 안 변하는 날은 그날 수집 완료 이벤트 자체가 "오늘 자 SUCCESS" 를 못 만들거나(#189/#195
+  규칙) 만들면 `failed_or_holiday` → 취소 = settled 로 닫힘. 재크롤링을 유발하는 경로는 없음(게이트·배치 모두 수집기를 안 부름).
+
+**검증.** 새 테스트 26건: `tests/test_duel_batch.py` §15 (settled 는 체결·취소 양쪽 / held + source_session_date 기록 + 기존 키 불변 +
+버전 유지 + 원본 dict 불변 / `--override cancel` 은 판정이 no_baseline 이어도 settled / 파일 왕복 + 옛 형식 파일 로드·판정 정상 /
+다음 날 판정은 outcome 을 무시 / `probe_outcome_allows_rerun` 허용 1경로 + 거부 6경로 / **실행 스크립트 원화·USD 를 monkeypatch 로
+실제 실행**해 저장된 파일에 held+원천 거래일이 남는지 / 🔴 하루 통째 시나리오 — 안전망 보류 → 진짜 완료에 게이트가 열림 → 재실행이
+어제 값과 비교해 **체결** → 두 번째 완료는 settled 로 차단, 배치 정확히 2회), `tests/test_crawl_ready_gate.py` §2 ((a) held+어제 원천
+→ event·safety-net 모두 준비 / (b) settled(ok·failed_or_holiday)·held(needs_review·첫 실행·원천 미상) 5경로는 그대로 차단 / (c) outcome
+없는 옛 파일은 "이미 처리" 폴백 / held 날도 event 역할은 진짜 수집 완료를 여전히 요구 / USD 대칭 / 게이트가 outcome 값을 직접
+해석하지 않는다는 원천 검사), `tests/test_duel_batch_usd.py` 재사용 정체성 목록에 2개 추가. 관련 6개 파일 534 passed / 77 skipped →
+**전체 `pytest -q --ignore=archive` 한 번에 2,372 passed / 77 skipped / 실패 0**(142초). GitHub push 권한 없는 세션 — **로컬 커밋까지만**.
+
+**하지 않은 것(§0-1).** (a) 위 "보류 + 오늘 자료" 인 날(needs_review·첫 실행)의 재실행은 의도적으로 계속 차단 — 그 보류는 관리자
+`--override` 가 푸는 것이 맞고, 자동으로 여는 순간 보류 주문 취소 사고가 됨. 오너가 "보류는 무조건 재실행" 을 원한다면 별도 결정
+필요. (b) 다른 백로그(#204 배치 자체의 같은 날 두 번째 실행 방어, 공휴일 캘린더, #201 기준선 폴백)는 손대지 않음. (c) 실제 발동
+검증은 오프라인 밖 — 다음에 cron 이 크롤링보다 먼저 도는 날 Actions 로그에서 "기준값이 … 자이지만 … 보류 … 아직 처리 전" →
+진행 → 체결 순서를 확인 필요. 이미 배포된 `data/duel_freshness_probe_previous(_usd).json` 은 다음 배치 실행 때부터 자연히 새 키를 갖게 됨.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
@@ -3964,10 +4020,8 @@ workflow_run 으로 도는 워크플로우면 'workflow_run' 값도 받아야 �
   "고정 점수 하드컷오프" 서술이 2026-08-06 개편(z-score/윈저라이즈 기반 %대 캡)
   이후로도 안 고쳐진 채 방치돼 있었음 — `utils/guardrail.py`·`utils/scoring.py`를
   직접 재확인해 3단으로(종목 차단/배지만/점수 캡) 다시 정리. 코드 변경 없음.
-- 🆕 #206 [🔴 오너 결정] 결투 cron 안전망이 **크롤링 완료 전에** 돈 날(KR 17:10 vs Worker 수집 종료 17:19~17:59 — GitHub cron 이 제때
-  발동하면 실제로 가능) 배치가 "스냅샷 거래일 ≠ 처리 거래일" 로 보류하면서도 오늘 `target_date` 기준값을 저장·커밋 → 뒤이은 진짜 수집
-  완료 workflow_run 을 #204 게이트가 "이미 처리" 로 건너뜀 → 보류 주문이 그날 체결되지 못하고 다음 날 만료. 처방 후보 (a) 보류일엔 기준값
-  미갱신(`run_duel_daily_batch(_us).py` ⑤) (b) safety-net 에도 수집 완료 조건 (c) 기준값에 원천 스냅샷 날짜 기록 — TASK_HISTORY #206 6).
+- ✅ #206 [🔴 오너 결정] 결투 cron 안전망이 크롤링 완료 전에 돈 날의 보류를 #204 게이트가 "이미 처리" 로 막던 빈틈 → #207 에서
+  완료(2026-09-07): 기준값에 `outcome`(settled/held + 값 원천 거래일) 기록, 게이트가 "held + 원천 ≠ 처리 거래일" 일 때만 재실행 허용.
 - 🆕 #204 결투 배치 자체의 "같은 날 두 번째 실행" 방어 — 기준값 파일 `target_date` 가 처리 거래일과 같으면(그날 이미 돌았음)
   `failed_or_holiday` 로 보류 주문을 취소하지 않고 "이미 처리한 날"로 조용히 넘기기. 지금은 워크플로우 게이트(`crawl_ready_gate.py`)
   가 cron·workflow_run 양쪽에서 막고 있어 실제로는 도달하지 않지만, 수동 `workflow_dispatch` 를 같은 날 두 번 누르면 여전히 가능.

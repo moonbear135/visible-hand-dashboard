@@ -263,8 +263,14 @@ def main(argv=None):
         print("  ⚠️ 오늘 점검표를 만들지 못해 기준값 파일을 갱신하지 않았습니다"
               " (예전 기준값을 그대로 둡니다).")
     else:
-        duel_batch_usd.save_probe_state(state_path, today_probe)
-        print(f"  ✅ 다음 비교용 기준값을 남겼습니다: {state_path}")
+        # (#207, 원화 스크립트의 같은 자리와 같은 이유) 그날 결과와 값의 원천 거래일을 함께 적습니다.
+        annotated = duel_batch_usd.annotate_probe_outcome(today_probe, summary,
+                                                          session_date=us_session_date)
+        duel_batch_usd.save_probe_state(state_path, annotated)
+        outcome = annotated[duel_batch_usd.PROBE_OUTCOME_KEY]
+        print(f"  ✅ 다음 비교용 기준값을 남겼습니다: {state_path}"
+              f" (그날 결과 {outcome['kind']} / 판정 {outcome['status']}"
+              f" / 값 원천 거래일 {outcome['source_session_date'] or '(미상)'})")
 
     for line in duel_batch_usd.format_summary_lines_usd(summary):
         print(line)

@@ -218,9 +218,24 @@ def _us_benchmark(data_dir, *, dates=("2026-09-04", "2026-09-08"), collected_at_
     })
 
 
-def _probe_state(path, target_date):
-    _write_json(path, {"version": duel_batch.PROBE_STATE_VERSION, "target_date": target_date,
-                       "index_keys": ["KOSPI"], "values": {"KOSPI": 3000.0, "005930": 70000.0}})
+def _probe_state(path, target_date, *, outcome=None):
+    """결투 기준값 파일. `outcome` 을 주지 않으면 #207 이전 형식(키 없음) — 게이트는 '이미 처리'로 읽어야 합니다."""
+    payload = {"version": duel_batch.PROBE_STATE_VERSION, "target_date": target_date,
+               "index_keys": ["KOSPI"], "values": {"KOSPI": 3000.0, "005930": 70000.0}}
+    if outcome is not None:
+        payload[duel_batch.PROBE_OUTCOME_KEY] = outcome
+    _write_json(path, payload)
+
+
+def _held(source_session_date, status=duel_batch.CRAWL_NO_BASELINE):
+    """보류로 끝난 날의 outcome(`duel_batch.annotate_probe_outcome()` 이 쓰는 모양)."""
+    return {"kind": duel_batch.PROBE_OUTCOME_HELD, "status": status,
+            "source_session_date": source_session_date, "reason": "테스트"}
+
+
+def _settled(source_session_date, status="ok"):
+    return {"kind": duel_batch.PROBE_OUTCOME_SETTLED, "status": status,
+            "source_session_date": source_session_date, "reason": "테스트"}
 
 
 @pytest.fixture
@@ -283,6 +298,84 @@ def test_duel_kr_safety_net_only_asks_whether_today_was_already_processed(data_d
     again = gate.evaluate(gate.CONSUMER_DUEL_KR, gate.ROLE_SAFETY_NET, now=TUE, data_dir=str(data_dir),
                           state_path=str(tmp_path / "probe.json"))
     assert again["ready"] is False
+
+
+# ── (#207) 기준값의 '그날 결과' — 크롤링 전에 돈 안전망의 보류를 진짜 완료 이벤트가 되살릴 수 있게 ──
+def test_duel_kr_reruns_when_todays_baseline_came_from_a_hold_on_yesterdays_snapshot(data_dir, tmp_path):
+    """
+    🔴 #206 백로그의 그 날: 17:10 cron 안전망이 크롤링(17:19~17:59 종료) 전에 돌아 "스냅샷 거래일 ≠
+    처리 거래일"로 보류하고 오늘 자 기준값(값은 어제 것)을 남김 → 진짜 수집 완료 workflow_run 이 오면
+    게이트가 "이미 처리"로 막지 말고 **진행**해야 보류 주문이 그날 체결됩니다(#204 이전의 자연스러운 경로).
+    """
+    _kr_snapshot(data_dir)                                                     # 진짜 수집 완료(17:30)
+    _probe_state(tmp_path / "probe.json", "2026-09-08", outcome=_held("2026-09-07"))
+    for role in (gate.ROLE_EVENT, gate.ROLE_SAFETY_NET):
+        result = gate.evaluate(gate.CONSUMER_DUEL_KR, role, now=TUE, data_dir=str(data_dir),
+                               state_path=str(tmp_path / "probe.json"))
+        assert result["ready"] is True, role
+        assert _names(result)["오늘 아직 미처리"] is True
+        assert "보류" in result["reason"] and "2026-09-07" in result["reason"]
+
+
+@pytest.mark.parametrize("outcome, why", [
+    (_settled("2026-09-08", "ok"), "체결로 끝난 날 — 두 번째 완료(GitHub cron 지연분)는 그대로 차단(멱등)"),
+    (_settled("2026-09-08", "failed_or_holiday"), "취소로 끝난 날 — 다시 돌 이유 없음"),
+    (_held("2026-09-08", "needs_review"), "오늘 자료로 보류(관리자 확인 대기) — 다시 돌면 오늘 값끼리 비교돼 보류 주문이 취소됨"),
+    (_held("2026-09-08"), "오늘 자료로 첫 실행 no_baseline — 위와 같은 이유로 차단"),
+    (_held(None), "원천 거래일 미상 — 보수적으로 차단"),
+])
+def test_duel_kr_still_blocks_the_second_run_when_today_was_settled_or_held_on_todays_data(
+        data_dir, tmp_path, outcome, why):
+    """(b) 회귀 방지 — #207 이 여는 문은 '보류 + 값이 어제 자료' 하나뿐. 나머지는 #204 그대로 '이미 처리'."""
+    _kr_snapshot(data_dir)
+    _probe_state(tmp_path / "probe.json", "2026-09-08", outcome=outcome)
+    for role in (gate.ROLE_EVENT, gate.ROLE_SAFETY_NET):
+        result = gate.evaluate(gate.CONSUMER_DUEL_KR, role, now=TUE, data_dir=str(data_dir),
+                               state_path=str(tmp_path / "probe.json"))
+        assert result["ready"] is False, f"{role}: {why}"
+        assert _names(result)["오늘 아직 미처리"] is False and "이미" in result["reason"]
+
+
+def test_duel_kr_treats_a_pre_207_baseline_without_an_outcome_as_already_processed(data_dir, tmp_path):
+    """(c) `outcome` 키가 없는 옛 파일 — 죽지 않고 #204 그대로 '이미 처리'(정상 반영으로 폴백)."""
+    _kr_snapshot(data_dir)
+    _probe_state(tmp_path / "probe.json", "2026-09-08")                         # outcome 없음
+    result = gate.evaluate(gate.CONSUMER_DUEL_KR, gate.ROLE_EVENT, now=TUE, data_dir=str(data_dir),
+                           state_path=str(tmp_path / "probe.json"))
+    assert result["ready"] is False and "outcome" in result["reason"] and "이미" in result["reason"]
+
+
+def test_duel_kr_hold_rerun_still_requires_the_real_crawl_to_have_finished(data_dir, tmp_path):
+    """보류 날이라도 event 역할은 '코스피 오늘 수집 완료'를 여전히 요구 — 21:03 GitHub cron 의 건너뛰기 완료로는 안 돎."""
+    _kr_snapshot(data_dir, last_updated_at="2026-09-07 17:30")                 # 아직 어제 스냅샷
+    _probe_state(tmp_path / "probe.json", "2026-09-08", outcome=_held("2026-09-07"))
+    result = gate.evaluate(gate.CONSUMER_DUEL_KR, gate.ROLE_EVENT, now=TUE, data_dir=str(data_dir),
+                           state_path=str(tmp_path / "probe.json"))
+    assert result["ready"] is False and _names(result)["코스피 수집 완료"] is False
+    assert _names(result)["오늘 아직 미처리"] is True
+
+
+def test_duel_us_reruns_after_a_hold_on_the_previous_session_but_not_after_a_fill(data_dir, tmp_path):
+    """USD 도 같은 규칙 — 12:00 cron 이 미국 수집 지연 전에 돌아 보류한 날, 뒤이은 완료 이벤트가 진행."""
+    _us_snapshot(data_dir)
+    _us_benchmark(data_dir)
+    _probe_state(tmp_path / "probe_usd.json", "2026-09-08", outcome=_held("2026-09-04"))
+    for role in (gate.ROLE_EVENT, gate.ROLE_SAFETY_NET):
+        result = gate.evaluate(gate.CONSUMER_DUEL_US, role, now=WED_MORNING, data_dir=str(data_dir),
+                               state_path=str(tmp_path / "probe_usd.json"))
+        assert result["ready"] is True, role
+    _probe_state(tmp_path / "probe_usd.json", "2026-09-08", outcome=_settled("2026-09-08"))
+    for role in (gate.ROLE_EVENT, gate.ROLE_SAFETY_NET):
+        result = gate.evaluate(gate.CONSUMER_DUEL_US, role, now=WED_MORNING, data_dir=str(data_dir),
+                               state_path=str(tmp_path / "probe_usd.json"))
+        assert result["ready"] is False, role
+
+
+def test_gate_reads_the_outcome_rule_from_duel_batch_not_its_own_copy():
+    """판정 기준은 기준값 형식과 같은 파일(`duel_batch.probe_outcome_allows_rerun`)에 하나만 — 게이트는 부르기만."""
+    source = (REPO_ROOT / "crawl_ready_gate.py").read_text(encoding="utf-8")
+    assert "duel_batch.probe_outcome_allows_rerun(" in source
+    assert "PROBE_OUTCOME_HELD" not in source and '"held"' not in source, "게이트가 outcome 값을 직접 해석하면 두 벌이 됩니다"
 
 
 def test_duel_kr_treats_a_broken_baseline_file_as_not_processed(data_dir, tmp_path):
