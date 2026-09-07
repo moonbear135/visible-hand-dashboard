@@ -61,6 +61,31 @@ def _detail_payload():
 # ① 실전 데이터 미접촉
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_this_is_a_probe_not_a_collector():
+    """
+    🔴 2026-09-08 오너가 실제로 혼동한 지점입니다:
+       *"우리가 매일 500종목을 긁어오는 구조인데 그걸 6일로 나눠서 하겠다는 거야?"* → 아닙니다.
+
+    실전 수집(`collector_kospi200.py` + `scrape.yml`)은 **매일 520종목 전부**를 긁어
+    화면에 씁니다. 이 스크립트는 그 뒤에 붙어 **확인만** 합니다.
+    여기서 상세를 표본만 받는 것은 **시험 표본**이지 수집 범위가 아닙니다.
+
+    이 검사는 그 구분이 코드와 문서에 실제로 남아 있는지 못 박습니다.
+    """
+    src = (REPO_ROOT / "run_naver_api_shadow.py").read_text(encoding="utf-8")
+    check("수집기가 아닙니다" in src, "스스로를 수집기가 아니라고 밝힘")
+
+    # 목록은 표본이 아니라 **전 종목**입니다 — 여기를 줄이면 대조 자체가 무의미해집니다.
+    check(SH.LIST_TARGET_COUNT >= 520, "목록은 실전과 같은 전 종목 범위",
+          f"({SH.LIST_TARGET_COUNT})")
+
+    # 실전 수집기는 이 모듈을 **아직 쓰지 않습니다**(§0-3-6 오너 승인 사항).
+    collector = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
+    for banned in ("naver_stock_api", "naver_api_shadow", "wisereport_parser"):
+        check(banned not in collector, f"실전 수집기가 아직 {banned} 를 쓰지 않음")
+    check("finance.naver.com" in collector, "실전 수집기는 여전히 구 출처를 씀")
+
+
 def test_writing_outside_the_shadow_folder_is_refused():
     """🔴 이 파일에서 가장 중요한 검사입니다."""
     SH._assert_shadow_path(SH.SHADOW_DIR / "2026-09-07_shadow.json")   # 정상 경로는 통과
