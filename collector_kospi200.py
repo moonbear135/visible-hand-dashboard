@@ -1312,6 +1312,254 @@ def apply_hysteresis_buffer(candidates, previous_codes, entry_rank=500, exit_ran
     return tracked
 
 
+def _resolve_dividend(item, real_dps, n_div_yield, price):
+    """
+    배당금(DPS)·배당수익률 확정. 반환: (dps, dps_source, dps_inherited_from, div_yield, notes)
+
+    ⚠️ 2026-08-06 2차 감사 1-4: 예전엔 "무배당"과 "수집 실패"를 둘 다 dps=0 /
+    dps_source="no_dividend_or_not_collected" 로 뭉갰습니다. 그 결과 배당 데이터를 못 가져온
+    종목이 "실측된 저배당"으로 취급돼 주주환원 20점 만점 중 3점을 받았고, sh_return=0 인
+    33종목 중 어느 것이 진짜 무배당인지 **아무도 알 수 없었습니다.**
+    이제 상태를 명확히 분리합니다:
+      naver_financial_statement / derived_from_div_yield / inherited_from_common → 값 있음(dps > 0)
+      no_dividend_confirmed → 실제로 배당이 없음이 확인됨 (dps=0, sh_return=0.0 로 채점)
+      not_collected         → 값을 모름 (dps=None, sh_return=None → 배점에서 자동 제외)
+
+    ⚠️ 2026-08-29 재감사 H3: '무배당 확정'은 ⓐ 재무제표에서 실제로 전부 비었음을 확인했고
+    ⓑ 배당수익률 행도 명시적으로 비어 있을 때(N/A), **두 근거가 모두 갖춰진 경우에만** 내립니다.
+    예전 조건(`... or div_yield_row_found`)은 표에 행이 있기만 하면 참이라, 재무제표를 못 읽은
+    종목까지 전부 무배당(dps=0)으로 채점했습니다.
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에서 옮겼습니다. 계산·분기는 그대로이고,
+       `data_issues.append(...)` 만 `notes.append(...)` 로 바꿔 호출부가 받아 붙이게 했습니다.
+    """
+    notes = []
+    item_dps_status = item.get("dps_status", "not_collected")
+    div_yield_row_found = bool(item.get("div_yield_row_found"))
+    div_yield_row_explicit_na = bool(item.get("div_yield_row_explicit_na"))
+    dps_source = None
+    dps_inherited_from = None
+    if real_dps and real_dps > 0:
+        dps = real_dps
+        if item_dps_status == "inherited_from_common":
+            dps_source = "inherited_from_common"
+            dps_inherited_from = item.get("dps_inherited_from")
+            notes.append(
+                f"DPS를 보통주({dps_inherited_from})에서 상속 — 이 우선주의 실측 배당금이 아님"
+            )
+        else:
+            dps_source = "naver_financial_statement"
+    elif n_div_yield and n_div_yield > 0 and price > 0:
+        dps = int(price * (n_div_yield / 100.0))
+        dps_source = "derived_from_div_yield"
+    elif item_dps_status == "no_dividend_confirmed" and div_yield_row_explicit_na:
+        # 재무제표 '주당배당금' 행을 실제로 확인했고 값이 없음 → 무배당 확정.
+        # ⚠️ 2026-08-29 재감사 H3: 예전 조건은
+        #   `item_dps_status == "no_dividend_confirmed" or div_yield_row_found`
+        # 였습니다. div_yield_row_found 는 aside 표에 '배당수익률' 행이 **있기만 하면**
+        # True 라(숫자가 있든 없든) 사실상 모든 종목에서 True 였고, or 로 묶여 있어
+        # 재무제표를 못 읽은 종목까지 전부 '무배당 확정(dps=0)'으로 채점됐습니다.
+        # 이제 ⓐ 재무제표에서 실제로 전부 비었음을 확인했고(H2 덕분에 파싱 오류가
+        # 있으면 이 상태가 되지 않습니다) ⓑ 배당수익률 행도 명시적으로 비어 있을 때
+        # (N/A) 두 근거가 모두 갖춰진 경우에만 무배당으로 확정합니다.
+        dps = 0
+        dps_source = "no_dividend_confirmed"
+    else:
+        dps = None
+        dps_source = "not_collected"
+        notes.append("배당(DPS·배당수익률) 미수집 — 무배당이 아니라 '값을 모름'이므로 배점에서 제외")
+
+    # 배당수익률 (%) — 실측 우선. 수집 실패면 0%로 채우지 않고 None(=모름)으로 둡니다.
+    if n_div_yield is not None and n_div_yield > 0:
+        div_yield = n_div_yield
+    elif dps is None:
+        div_yield = None
+    elif price > 0 and dps > 0:
+        div_yield = dps / price * 100.0
+    else:
+        div_yield = 0.0
+    return dps, dps_source, dps_inherited_from, div_yield, notes
+
+
+def _compute_graham_number(name, t_eps, t_pbr, price):
+    """
+    그레이엄 넘버 — Forward 데이터가 없어도 쓸 수 있는 Trailing 전용 참고 목표가.
+    반환: (graham_target, 금융업종 여부, data_issues 에 붙일 문구 또는 None)
+
+    벤저민 그레이엄의 원전 공식(PER 15배 × PBR 1.5배 = 22.5)을 그대로 사용하며, 성장률 등
+    미래 추정치를 전혀 쓰지 않습니다 (ENGINEERING_SPEC §0-1 예시2-보충2).
+    공식: √(22.5 × Trailing EPS × BPS), BPS = 현재가 ÷ Trailing PBR
+
+    한계 (반드시 배지로 경고):
+      - 적자 기업(EPS ≤ 0)은 제곱근 안이 음수가 되어 **수학적으로 산출 자체가 불가능**합니다
+        (지어내지 않고 None 으로 둡니다 — 오너 요청으로 적자 종목이라고 표에서 빼지는 않습니다).
+      - 은행/보험/증권 등 금융업종은 장부가(BPS)의 의미가 제조업과 달라 전제가 잘 안 맞습니다.
+        계산 자체는 하되 화면에 강한 경고 배지를 붙입니다 — 그래서 판정 결과를 함께 돌려줍니다.
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에서 **한 글자도 바꾸지 않고** 옮겼습니다.
+    """
+    graham_target = None
+    graham_is_financial_sector = any(kw in name for kw in FINANCIAL_SECTOR_NAME_KEYWORDS)
+    note = None
+    try:
+        t_pbr_val = float(t_pbr) if t_pbr not in (None, '') else None
+    except (ValueError, TypeError):
+        t_pbr_val = None
+    if t_eps is not None and t_eps > 0 and t_pbr_val and t_pbr_val > 0 and price > 0:
+        bps = price / t_pbr_val
+        graham_target = round((22.5 * t_eps * bps) ** 0.5)
+    elif t_eps is not None and t_eps <= 0:
+        note = "그레이엄 넘버 산출 불가 (적자 기업, EPS ≤ 0)"
+    return graham_target, graham_is_financial_sector, note
+
+
+def _judge_value_trap(t_roe):
+    """
+    착시 저평가(value trap) 판정. 반환: (value_trap, severity, basis 문자열)
+
+    ⚠️ 2026-08-06 2차 감사 1-8: 예전엔 `t_roe < 8.0` 이진 판정이었고, 화면 설명은
+    "ROE<8% 또는 ROIC<6%"라고 적혀 있었는데 ROIC 는 수집조차 하지 않았습니다.
+    → ① 기준값을 `utils/constants.py` 단일 출처로 옮기고 근거를 명시,
+       ② 이진 플래그 대신 '얼마나 낮은지'(severity)를 함께 기록해 화면이 강도를 표시할 수 있게,
+       ③ ROIC 미수집 사실을 판정 근거 문자열에 그대로 노출(화면 설명과 코드 일치).
+
+    ROE 를 모르면 **거짓이 아니라 '판정 불가'** 입니다 — 미수집을 "함정 아님"으로 단정하지
+    않습니다(§0-1). 그래서 severity 도 0 이 아니라 None 입니다.
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에서 **한 글자도 바꾸지 않고** 옮겼습니다.
+    """
+    if t_roe is None:
+        return False, None, "판정 불가 (Trailing ROE 미수집)"
+    if t_roe < VALUE_TRAP_ROE_PCT:
+        severity = round(VALUE_TRAP_ROE_PCT - t_roe, 2)   # 기준선 미달 폭(%p)
+        return True, severity, (
+            f"Trailing ROE {t_roe}% < 기준선 {VALUE_TRAP_ROE_PCT}% "
+            f"(기준선 대비 {severity}%p 미달) · ROIC는 원천 데이터 미수집으로 판정에서 제외"
+        )
+    return False, 0.0, (
+        f"Trailing ROE {t_roe}% ≥ 기준선 {VALUE_TRAP_ROE_PCT}% "
+        "· ROIC는 원천 데이터 미수집으로 판정에서 제외"
+    )
+
+
+def _build_common_roe_lookup(stocks_raw):
+    """
+    우선주 ROE 상속 전처리 — 보통주(코드 끝 0)의 ROE 룩업 테이블을 만듭니다.
+    키는 종목코드 앞 5자리 (005930 → 00593, 005935 → 00593).
+
+    우선주(코드 끝 5/7/K/L)는 네이버 시총 테이블에서 ROE 를 0 으로 주므로, 같은 회사
+    보통주의 ROE 를 상속받아야 합니다 (범용 로직, 종목 하드코딩 금지 — §2-2).
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에서 **한 글자도 바꾸지 않고** 옮겼습니다.
+    """
+    common_roe_lookup = {}
+    for s in stocks_raw:
+        c = s["code"]
+        # 보통주(끝자리 0)이고 ROE가 유효한 종목만 등록
+        if c[-1] == '0' and s.get("t_roe") not in (None, 0):
+            common_roe_lookup[c[:5]] = s["t_roe"]
+    return common_roe_lookup
+
+
+def _inherit_preferred_roe(code, name, t_roe, common_roe_lookup):
+    """
+    우선주 ROE 상속: ROE=0 이고 우선주로 판별되면 같은 회사 보통주 ROE 를 씁니다.
+    반환: (적용된 t_roe, 상속 출처 키 또는 None, data_issues 에 붙일 문구 또는 None)
+
+    ⚠️ 2026-08-06 2차 감사 1-7: 상속받은 값은 '이 종목의 실측치'가 아니므로 반드시
+    마킹합니다(예전엔 아무 흔적 없이 실측값처럼 저장·표시됐습니다). 그래서 이 함수는
+    값만 돌려주지 않고 **상속했다는 사실을 알리는 문구까지 함께** 돌려줍니다 — 호출부가
+    그 문구를 빠뜨리면 §0-1 위반이 됩니다.
+
+    ⚠️ 2026-08-29 재감사 L12: 이름 부분일치(`'우' in name`) 조건을 제거했습니다.
+    한국 상장 종목코드 체계에서 우선주는 끝자리 5/7/K/L 로 판정하는 것이 표준이고,
+    종목명에 '우'가 들어가는 보통주(예: '우리금융지주', '동우…')를 우선주로 오탐해
+    엉뚱한 보통주 ROE 를 상속시키는 부작용만 있었습니다.
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에서 **한 글자도 바꾸지 않고** 옮겼습니다.
+    """
+    t_roe_inherited_from = None
+    note = None
+    is_preferred = code[-1] in ('5', '7', 'K', 'L')
+    if (t_roe is None or t_roe == 0) and is_preferred:
+        parent_key = code[:5]
+        inherited_roe = common_roe_lookup.get(parent_key)
+        if inherited_roe:
+            t_roe = inherited_roe
+            t_roe_inherited_from = parent_key
+            note = (f"Trailing ROE를 같은 회사 보통주({parent_key}*)에서 상속 — "
+                    f"이 우선주의 실측치가 아님")
+            print(f"  [우선주 ROE 상속] {name}({code}): 보통주 ROE {inherited_roe}% 적용")
+    return t_roe, t_roe_inherited_from, note
+
+
+def _apply_cross_sectional_scoring(enriched_stocks):
+    """
+    퀀트 스코어링 2차 패스 — `enriched_stocks` 를 **제자리에서** 채웁니다(반환값 없음).
+
+    📌 2026-09-07 분리: `enrich_quant_metrics()` 본문에 있던 블록을 **한 글자도 바꾸지 않고**
+       그대로 옮겨왔습니다(구조만 분리, 계산 결과 불변 —
+       `tests/test_enrich_quant_metrics_characterization.py` 가 이를 증명합니다).
+
+    왜 2차 패스인가: 하드컷오프(역성장/적자, 극단고평가)의 점수 상한을 "오늘 수집된 종목 전체
+    분포 대비 z-score"로 정하려면, 평균·표준편차를 구할 수 있게 **모든 종목의 raw 지표가 먼저
+    다 모여야** 합니다. 그래서 종목별 루프가 끝난 뒤에 한 번에 돕니다.
+    """
+    # =========================================================
+    # 2026-08-06 추가: 퀀트 스코어링 2차 패스 (횡단면 population 통계 계산 후 일괄 적용)
+    # utils/scoring.py의 하드컷오프(역성장/적자, 극단고평가) 점수 상한은 "오늘 수집된 종목
+    # 전체 분포 대비 몇 표준편차 벗어났는지(z-score)"로 정합니다 — Barra/Fama-French류
+    # 퀀트 팩터 모델에서 쓰는 표준 횡단면 정규화 기법(오너 요청: "랜덤한 가중치 말고
+    # 금융공학적 표준"). 표본이 5개 미만이면 population 통계 없이 진행하며, 이 경우
+    # scoring.py가 자동으로 중간값 캡으로 안전하게 대체합니다(크래시·임의값 없음).
+    # =========================================================
+    _score_pool = [st for st in enriched_stocks if st.get('is_valid', False) and not st.get('is_unverified', False)]
+
+    def _pop_stats(values):
+        vals = [v for v in values if v is not None]
+        if len(vals) < 5:
+            return None
+        mean = statistics.mean(vals)
+        std = statistics.pstdev(vals)
+        return (mean, std) if std > 0 else None
+
+    growth_pop_stats = _pop_stats([st.get('growth') for st in _score_pool])
+    roe_pop_stats = _pop_stats([st.get('t_roe') for st in _score_pool])
+    pegy_pop_stats = _pop_stats([
+        st.get('f_pegy') for st in _score_pool
+        if st.get('f_pegy') is not None and 0 < st['f_pegy'] < 50.0
+    ])
+
+    for stock_dict in _score_pool:
+        score_res = calculate_quant_score(
+            f_pegy=stock_dict.get('f_pegy'),
+            f_roe=stock_dict.get('f_roe'),
+            roic=stock_dict.get('roic'),
+            sh_return=stock_dict.get('sh_return'),
+            t_roe=stock_dict.get('t_roe'),
+            # 2차 감사 2-4: UI 표시 문자열("정상"/"데이터 없음") 파싱 대신 실측 수치를 그대로 넘깁니다.
+            vol_std=stock_dict.get('vol_std'),
+            vol_penalty=stock_dict.get('vol_penalty'),
+            vol=stock_dict.get('vol'),
+            f_per=stock_dict.get('f_per'),
+            price=stock_dict.get('price'),
+            f_target=stock_dict.get('f_target'),
+            # 2차 감사 2-1: 캡 상수와 현재가를 비교하는 건 무의미하므로 교차검증 블록을 건너뜁니다.
+            f_target_capped=stock_dict.get('f_target_capped', False),
+            growth=stock_dict.get('growth'),
+            growth_pop_stats=growth_pop_stats,
+            roe_pop_stats=roe_pop_stats,
+            pegy_pop_stats=pegy_pop_stats
+        )
+        stock_dict["quant_score"] = score_res["quant_score"]
+        stock_dict["score_max"] = score_res["score_max"]
+        stock_dict["badge"] = score_res["badge"]
+        stock_dict["badge_bg"] = score_res["badge_bg"]
+        stock_dict["badge_fg"] = score_res["badge_fg"]
+        stock_dict["score_excluded_items"] = score_res.get("excluded_items", [])
+        stock_dict["growth_score_capped"] = score_res.get("growth_score_capped", False)
+
+
 def enrich_quant_metrics(stocks_raw, shares_lookup=None):
     """
     수집된(코스피+코스닥 통합, 최대 수백 개) 실데이터 종목에 네이버 공식 투자정보
@@ -1328,18 +1576,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
     # 상장주식수 1차 출처: FinanceDataReader 구조화 데이터 (한 번만 조회, 종목별 재조회 안 함)
     outstanding_shares_lookup = shares_lookup if shares_lookup is not None else _load_outstanding_shares_lookup()
 
-    # =========================================================
-    # 우선주 ROE 상속 전처리: 보통주(코드 끝 0) ROE 룩업 테이블 구축
-    # 우선주(코드 끝 5/K/L)는 네이버 시총 테이블에서 ROE를 0으로 주므로
-    # 같은 회사 보통주의 ROE를 상속받아야 함 (범용 로직, 하드코딩 금지)
-    # =========================================================
-    common_roe_lookup = {}
-    for s in stocks_raw:
-        c = s["code"]
-        # 보통주(끝자리 0)이고 ROE가 유효한 종목만 등록
-        if c[-1] == '0' and s.get("t_roe") not in (None, 0):
-            # 코드 앞 5자리를 키로 사용 (005930 → 00593, 005935 → 00593)
-            common_roe_lookup[c[:5]] = s["t_roe"]
+    common_roe_lookup = _build_common_roe_lookup(stocks_raw)
 
     for idx, s in enumerate(stocks_raw):
         code = s["code"]
@@ -1349,28 +1586,10 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         t_roe = s["t_roe"]
         data_issues = []   # 이 종목에서 수집하지 못한 항목 (JSON/UI에 그대로 노출)
 
-        # =========================================================
-        # 우선주 ROE 상속: ROE=0이고 우선주로 판별되면 보통주 ROE 사용
-        # 우선주 판별 기준: 코드 끝자리 5(1우), 7(2우B), K, L
-        # ⚠️ 2026-08-06 2차 감사 1-7: 상속받은 값은 '이 종목의 실측치'가 아니므로 반드시
-        # 마킹합니다(예전엔 아무 흔적 없이 실측값처럼 저장·표시됐습니다).
-        # =========================================================
-        t_roe_inherited_from = None
-        # ⚠️ 2026-08-29 재감사 L12: 이름 부분일치(`'우' in name`) 조건을 제거했습니다.
-        # 한국 상장 종목코드 체계에서 우선주는 끝자리 5/7/K/L 로 판정하는 것이 표준이고,
-        # 종목명에 '우'가 들어가는 보통주(예: '우리금융지주', '동우…')를 우선주로 오탐해
-        # 엉뚱한 보통주 ROE를 상속시키는 부작용만 있었습니다.
-        is_preferred = code[-1] in ('5', '7', 'K', 'L')
-        if (t_roe is None or t_roe == 0) and is_preferred:
-            parent_key = code[:5]
-            inherited_roe = common_roe_lookup.get(parent_key)
-            if inherited_roe:
-                t_roe = inherited_roe
-                t_roe_inherited_from = parent_key
-                data_issues.append(
-                    f"Trailing ROE를 같은 회사 보통주({parent_key}*)에서 상속 — 이 우선주의 실측치가 아님"
-                )
-                print(f"  [우선주 ROE 상속] {name}({code}): 보통주 ROE {inherited_roe}% 적용")
+        t_roe, t_roe_inherited_from, _roe_inherit_note = _inherit_preferred_roe(
+            code, name, t_roe, common_roe_lookup)
+        if _roe_inherit_note:
+            data_issues.append(_roe_inherit_note)
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
         item = fetch_naver_item_dps_and_eps(code)
@@ -1464,17 +1683,10 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         # - 은행/보험/증권 등 금융업종은 장부가(BPS)의 의미가 제조업과 달라 그레이엄 넘버의
         #   전제가 잘 안 맞습니다. 계산 자체는 하되 화면에 강한 경고 배지를 붙입니다.
         # =========================================================
-        graham_target = None
-        graham_is_financial_sector = any(kw in name for kw in FINANCIAL_SECTOR_NAME_KEYWORDS)
-        try:
-            t_pbr_val = float(t_pbr) if t_pbr not in (None, '') else None
-        except (ValueError, TypeError):
-            t_pbr_val = None
-        if t_eps is not None and t_eps > 0 and t_pbr_val and t_pbr_val > 0 and price > 0:
-            bps = price / t_pbr_val
-            graham_target = round((22.5 * t_eps * bps) ** 0.5)
-        elif t_eps is not None and t_eps <= 0:
-            data_issues.append("그레이엄 넘버 산출 불가 (적자 기업, EPS ≤ 0)")
+        graham_target, graham_is_financial_sector, _graham_note = _compute_graham_number(
+            name, t_eps, t_pbr, price)
+        if _graham_note:
+            data_issues.append(_graham_note)
 
         # Forward PER / EPS — 네이버 '추정PER|EPS' (실제 컨센서스) 만 사용
         f_per = n_f_per if (n_f_per and n_f_per > 0) else None
@@ -1494,50 +1706,9 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         #   no_dividend_confirmed  → 실제로 배당이 없음이 확인됨 (dps=0, sh_return=0.0로 채점)
         #   not_collected          → 값을 모름 (dps=None, sh_return=None → 배점에서 자동 제외)
         # =========================================================
-        item_dps_status = item.get("dps_status", "not_collected")
-        div_yield_row_found = bool(item.get("div_yield_row_found"))
-        div_yield_row_explicit_na = bool(item.get("div_yield_row_explicit_na"))
-        dps_source = None
-        dps_inherited_from = None
-        if real_dps and real_dps > 0:
-            dps = real_dps
-            if item_dps_status == "inherited_from_common":
-                dps_source = "inherited_from_common"
-                dps_inherited_from = item.get("dps_inherited_from")
-                data_issues.append(
-                    f"DPS를 보통주({dps_inherited_from})에서 상속 — 이 우선주의 실측 배당금이 아님"
-                )
-            else:
-                dps_source = "naver_financial_statement"
-        elif n_div_yield and n_div_yield > 0 and price > 0:
-            dps = int(price * (n_div_yield / 100.0))
-            dps_source = "derived_from_div_yield"
-        elif item_dps_status == "no_dividend_confirmed" and div_yield_row_explicit_na:
-            # 재무제표 '주당배당금' 행을 실제로 확인했고 값이 없음 → 무배당 확정.
-            # ⚠️ 2026-08-29 재감사 H3: 예전 조건은
-            #   `item_dps_status == "no_dividend_confirmed" or div_yield_row_found`
-            # 였습니다. div_yield_row_found 는 aside 표에 '배당수익률' 행이 **있기만 하면**
-            # True 라(숫자가 있든 없든) 사실상 모든 종목에서 True 였고, or 로 묶여 있어
-            # 재무제표를 못 읽은 종목까지 전부 '무배당 확정(dps=0)'으로 채점됐습니다.
-            # 이제 ⓐ 재무제표에서 실제로 전부 비었음을 확인했고(H2 덕분에 파싱 오류가
-            # 있으면 이 상태가 되지 않습니다) ⓑ 배당수익률 행도 명시적으로 비어 있을 때
-            # (N/A) 두 근거가 모두 갖춰진 경우에만 무배당으로 확정합니다.
-            dps = 0
-            dps_source = "no_dividend_confirmed"
-        else:
-            dps = None
-            dps_source = "not_collected"
-            data_issues.append("배당(DPS·배당수익률) 미수집 — 무배당이 아니라 '값을 모름'이므로 배점에서 제외")
-
-        # 배당수익률 (%) — 실측 우선. 수집 실패면 0%로 채우지 않고 None(=모름)으로 둡니다.
-        if n_div_yield is not None and n_div_yield > 0:
-            div_yield = n_div_yield
-        elif dps is None:
-            div_yield = None
-        elif price > 0 and dps > 0:
-            div_yield = dps / price * 100.0
-        else:
-            div_yield = 0.0
+        (dps, dps_source, dps_inherited_from, div_yield,
+         _dps_notes) = _resolve_dividend(item, real_dps, n_div_yield, price)
+        data_issues.extend(_dps_notes)
 
         # =========================================================
         # 주주환원율: 자사주 매입 공시를 수집하지 않으므로 '배당수익률'만 사용합니다.
@@ -1746,24 +1917,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         #    ② 이진 플래그 대신 '얼마나 낮은지'를 함께 기록해 화면이 강도를 표시할 수 있게,
         #    ③ ROIC 미수집 사실을 판정 근거 문자열에 그대로 노출(화면 설명과 코드 일치).
         # =========================================================
-        if t_roe is None:
-            value_trap = False
-            value_trap_basis = "판정 불가 (Trailing ROE 미수집)"
-            value_trap_severity = None
-        elif t_roe < VALUE_TRAP_ROE_PCT:
-            value_trap = True
-            value_trap_severity = round(VALUE_TRAP_ROE_PCT - t_roe, 2)   # 기준선 미달 폭(%p)
-            value_trap_basis = (
-                f"Trailing ROE {t_roe}% < 기준선 {VALUE_TRAP_ROE_PCT}% "
-                f"(기준선 대비 {value_trap_severity}%p 미달) · ROIC는 원천 데이터 미수집으로 판정에서 제외"
-            )
-        else:
-            value_trap = False
-            value_trap_severity = 0.0
-            value_trap_basis = (
-                f"Trailing ROE {t_roe}% ≥ 기준선 {VALUE_TRAP_ROE_PCT}% "
-                "· ROIC는 원천 데이터 미수집으로 판정에서 제외"
-            )
+        value_trap, value_trap_severity, value_trap_basis = _judge_value_trap(t_roe)
 
         # =========================================================
         # 3단계 데이터 검증 하네스 파이프라인 (DataValidator) 수행
@@ -1893,59 +2047,7 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
         # Polite Scraping: 대상 서버(네이버)에 부하를 주지 않기 위해 종목별 크롤링 간격 부여
         time.sleep(random.uniform(2.0, 3.0))
 
-    # =========================================================
-    # 2026-08-06 추가: 퀀트 스코어링 2차 패스 (횡단면 population 통계 계산 후 일괄 적용)
-    # utils/scoring.py의 하드컷오프(역성장/적자, 극단고평가) 점수 상한은 "오늘 수집된 종목
-    # 전체 분포 대비 몇 표준편차 벗어났는지(z-score)"로 정합니다 — Barra/Fama-French류
-    # 퀀트 팩터 모델에서 쓰는 표준 횡단면 정규화 기법(오너 요청: "랜덤한 가중치 말고
-    # 금융공학적 표준"). 표본이 5개 미만이면 population 통계 없이 진행하며, 이 경우
-    # scoring.py가 자동으로 중간값 캡으로 안전하게 대체합니다(크래시·임의값 없음).
-    # =========================================================
-    _score_pool = [st for st in enriched_stocks if st.get('is_valid', False) and not st.get('is_unverified', False)]
-
-    def _pop_stats(values):
-        vals = [v for v in values if v is not None]
-        if len(vals) < 5:
-            return None
-        mean = statistics.mean(vals)
-        std = statistics.pstdev(vals)
-        return (mean, std) if std > 0 else None
-
-    growth_pop_stats = _pop_stats([st.get('growth') for st in _score_pool])
-    roe_pop_stats = _pop_stats([st.get('t_roe') for st in _score_pool])
-    pegy_pop_stats = _pop_stats([
-        st.get('f_pegy') for st in _score_pool
-        if st.get('f_pegy') is not None and 0 < st['f_pegy'] < 50.0
-    ])
-
-    for stock_dict in _score_pool:
-        score_res = calculate_quant_score(
-            f_pegy=stock_dict.get('f_pegy'),
-            f_roe=stock_dict.get('f_roe'),
-            roic=stock_dict.get('roic'),
-            sh_return=stock_dict.get('sh_return'),
-            t_roe=stock_dict.get('t_roe'),
-            # 2차 감사 2-4: UI 표시 문자열("정상"/"데이터 없음") 파싱 대신 실측 수치를 그대로 넘깁니다.
-            vol_std=stock_dict.get('vol_std'),
-            vol_penalty=stock_dict.get('vol_penalty'),
-            vol=stock_dict.get('vol'),
-            f_per=stock_dict.get('f_per'),
-            price=stock_dict.get('price'),
-            f_target=stock_dict.get('f_target'),
-            # 2차 감사 2-1: 캡 상수와 현재가를 비교하는 건 무의미하므로 교차검증 블록을 건너뜁니다.
-            f_target_capped=stock_dict.get('f_target_capped', False),
-            growth=stock_dict.get('growth'),
-            growth_pop_stats=growth_pop_stats,
-            roe_pop_stats=roe_pop_stats,
-            pegy_pop_stats=pegy_pop_stats
-        )
-        stock_dict["quant_score"] = score_res["quant_score"]
-        stock_dict["score_max"] = score_res["score_max"]
-        stock_dict["badge"] = score_res["badge"]
-        stock_dict["badge_bg"] = score_res["badge_bg"]
-        stock_dict["badge_fg"] = score_res["badge_fg"]
-        stock_dict["score_excluded_items"] = score_res.get("excluded_items", [])
-        stock_dict["growth_score_capped"] = score_res.get("growth_score_capped", False)
+    _apply_cross_sectional_scoring(enriched_stocks)
 
     return enriched_stocks
 

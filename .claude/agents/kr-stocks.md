@@ -23,6 +23,11 @@ model: inherit
 - `data/kospi200_pegy_latest.json`, `data/pegy_summary_history.json`, `data/kospi200_stock_history.csv`, `data/kospi200_sanity.json`, `data/kr_ticker_master.json`, `data/kr_all_market_prices.json`
 - `.github/workflows/scrape.yml`
 - 테스트: `tests/test_collector_kospi200_ranking.py`, `tests/test_pegy_page.py`, `tests/test_geff_cap.py`, `tests/test_quant.py`, `tests/test_scoring_coverage.py`
+- 🔒 `tests/test_enrich_quant_metrics_characterization.py` + `tests/_enrich_baseline.py` +
+  `tests/fixtures/enrich_quant_metrics_input.json` · `_baseline.json` — **계산 결과 고정 기준선.**
+  `enrich_quant_metrics()` 의 출력이 한 글자라도 바뀌면 빨간불입니다. 리팩터 중 빨간불이면
+  **리팩터가 틀린 것**이니 기준선을 고치지 마세요. 수식·배점을 의도적으로 바꿨을 때만
+  오너 승인 후 `python tests/_enrich_baseline.py --regenerate`
 
 ## 읽기만 (수정하려면 인계)
 
@@ -44,7 +49,11 @@ model: inherit
 6. **수식은 `ENGINEERING_SPEC.md` §5가 원본입니다.** g_eff 2중 Cap(성장률 35%p·주주환원 10%p·
    총합 40%p), 목표주가 상한(현재가 2.5배), 배점 비율 — 이 값들을 바꾸는 것은 **오너 결정 사항**입니다.
    코드를 고치면 §5 문서도 같은 커밋에서 고칩니다.
-7. **계산값은 계산값이라고 표시합니다.** 캡이 걸린 성장률에는 "🧮 상한 적용값" 배지가 붙습니다.
+7. 🔒 **`enrich_quant_metrics()` 를 손볼 때는 기준선 테스트를 먼저 돌리세요.** 이 함수는
+   2026-09-07 에 636줄 → 490줄로 분해했고, 떼어낸 조각(`_resolve_dividend` 등)은 **경고 문구를
+   돌려주고 호출부가 `data_issues` 에 붙이는** 구조입니다. 붙이는 걸 빠뜨리면 값은 맞는데
+   경고만 사라져 §0-1 위반이 됩니다(사보타주로 실증 — 기준선이 잡습니다).
+8. **계산값은 계산값이라고 표시합니다.** 캡이 걸린 성장률에는 "🧮 상한 적용값" 배지가 붙습니다.
    새로 파생값을 만들면 배지도 같이 만드세요 (§0-1 예시2-보충).
 
 ## 절대 하지 말 것

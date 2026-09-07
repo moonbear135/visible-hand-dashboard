@@ -4046,6 +4046,39 @@ backdated_monthly_deposit.sql` 은 `sql/` 의 추적 파일과 **md5 완전 일�
 
 **하지 않은 것(§0-1).** (a) **전체 `pytest --ignore=archive -q` 를 못 돌렸다** — 이번 세션의 원격 리눅스 VM 에 `fastapi`·`nicegui` 등 프로젝트 의존성이 없어 대부분의 테스트 모듈이 import 단계에서 실패함(`pytest` 자체는 설치해 신설 파일과 `test_suite_integrity` 는 실행). 코드 변경이 0건이라 결과가 달라질 이유는 없지만 이 세션에서는 실측하지 못했다. → ✅ **push 후 GitHub Actions "테스트 스위트" #40 이 `bf4e663` 에서 성공(2분 26초)** — CI 실측으로 해소됨. (b) 이 검사는 **"주인이 있는가" 만** 본다 — 에이전트 문서의 내용이 좋은지, 규칙이 맞는지는 검사하지 못하고 서식만 맞춘 빈 껍데기도 통과한다(최저선). (c) `tests/*.py` 자체는 소유 검사 대상(`OWNED_GLOBS`)에 넣지 않았다 — `test-audit` 가 `tests/*` 전체를 맡는 구조라 파일 단위 소유를 요구하면 새 테스트마다 문서를 고쳐야 해 소음이 큼. (d) 매크로 관련 항목은 §4 에 **기록만** 옮기고 손대지 않음(2026-08-10 동결 지시). (e) 커밋·푸시는 오너 확인 후 진행.
 
+### #209 — [오너 지시 "크기가 큰 애들을 좀 손을 보는게 맞다고 생각하는데"] `enrich_quant_metrics()` 636줄 → 490줄 분해 — 먼저 **결과 고정 기준선**을 만들고, 결과가 한 글자도 안 바뀜을 리팩터 전 코드 재실행으로 증명 (2026-09-07)
+
+**경위.** 시작 전 HEAD = `33738a4`(#208 후속). 오너가 "규모가 너무 커졌다"며 큰 파일 정리를 요청. 착수 전 실측으로 **진단이 뒤집혔습니다** — 파일이 큰 게 문제가 아니었습니다. `web/pages/duel_page.py` 는 3,840줄이지만 함수 84개(평균 45줄)로 이미 잘 나뉘어 있어, 파일을 쪼개도 읽을 양이 줄지 않습니다. 진짜 비대한 것은 **특정 함수 몇 개**였습니다: `scorecard_page::_render_input_form`(750줄) · `collector_kospi200::enrich_quant_metrics`(636줄) · `collector_us_stocks::run_us_collector`(373줄) · `collector_kospi200::fetch_naver_item_dps_and_eps`(372줄) · `collector_dividend_kr::run_collection`(349줄) · `macro_page::fetch_verified_market_data`(348줄) · `duel_page::_render_order_form`(276줄) · `dividend_page::_render_body`(262줄).
+오너와 범위를 정함: **한 함수만 먼저, 단계마다 보고.** 첫 대상은 `enrich_quant_metrics` — 개인정보와 무관한 공개 계층이고 순수 계산에 가까워 결과 동일성을 실데이터로 증명하기 가장 쉬움. `macro_page` 는 동결(2026-08-10)이라 후보에서 제외. 자산 계층(성적표 750줄·결투 276줄)은 개인정보 격리(§0-3-8)가 걸려 실패 비용이 다르므로 마지막으로 미룸.
+
+**처방 (1) — 리팩터보다 먼저 결과 고정 기준선.**
+"쪼개기 전과 후가 같은가"를 증명할 장치 없이 하는 리팩터는 "잘 된 것 같다"로 끝나는 도박이고 §0-1 위반입니다. 특성화(characterization) 테스트를 먼저 만들었습니다.
+- `tests/_enrich_baseline.py` — 얼린 입력 로드 · 외부 호출 5가지만 차단하고 **계산은 진짜 코드로** 실행 · 정규화 · `--regenerate`.
+- `tests/fixtures/enrich_quant_metrics_input.json` — **얼린 입력 61종목**. 실수집 스냅샷에서 분기별 최대 5개씩 결정적으로 선별(적자·역성장·무배당 확정·배당 미수집·우선주 상속·g_eff 캡·목표가 캡·착시 저평가·Forward 없음·변동성 없음·금융업·차단·정상 13갈래).
+- `tests/fixtures/enrich_quant_metrics_baseline.json` — 그 입력의 현재 출력 전문(162KB).
+- `tests/test_enrich_quant_metrics_characterization.py` — 검사 5건(픽스처 존재·기준선 완전 일치·두 번 실행 동일·분기 커버리지 유지·매일 갱신 파일을 안 읽음).
+
+**만들면서 걸린 함정 3건(전부 실측으로 발견·수정).**
+- ⓐ **움직이는 과녁.** 처음엔 입력을 `data/kospi200_pegy_latest.json` 에서 매번 만들려 했는데 그 파일은 **매일 수집 배치가 갱신**합니다 — 기준이 매일 흔들려 기준선 구실을 못 합니다. 픽스처로 얼리고, `test_frozen_input_does_not_read_the_daily_snapshot` 으로 그 파일을 다시 읽으면 실패하게 못 박음.
+- ⓑ **환경마다 다른 결과.** `HAS_YFINANCE`/`HAS_FDR` 는 패키지 설치 여부로 갈리는 모듈 전역이라, 깔린 기계와 안 깔린 기계에서 yfinance 교차검증 분기를 타느냐가 달라져 기준선이 서로 달라집니다. 두 값을 고정하고 `yf` 를 얼린 값만 답하는 가짜로 주입(`create=True`).
+- ⓒ **통째로 안 밟히던 60줄.** 첫 기준선에서 `t_roe_inherited_from` 이 **전부 None** — 우선주 ROE 상속 전처리가 0번 실행되고 있었습니다. 원인은 스냅샷의 `t_roe` 가 **이미 상속이 끝난 값**이라 그대로 넣으면 상속이 다시 일어날 이유가 없었던 것. 상속 흔적이 있는 종목의 입력 `t_roe` 를 0으로 되돌리고 짝 보통주를 함께 넣어 **7종목에서 실제로 밟히게** 함.
+
+**처방 (2) — 분해.** 계산 로직은 **한 글자도 바꾸지 않고 위치만** 옮겼습니다. `enrich_quant_metrics` **636줄 → 490줄**, 떼어낸 함수 6개:
+`_build_common_roe_lookup`(17) · `_inherit_preferred_roe`(30) · `_compute_graham_number`(30) · `_judge_value_trap`(27) · `_resolve_dividend`(67) · `_apply_cross_sectional_scoring`(65).
+각 함수 docstring 에 원래 붙어 있던 감사 이력 주석(2차 감사 1-4/1-7/1-8, 재감사 H3/L12 등)을 그대로 옮겨 근거가 코드에서 떨어지지 않게 했습니다.
+⚠️ 이 분해가 **새로 만든 위험**: 떼어낸 조각들은 경고 문구(`data_issues` 에 붙일 문자열)를 **돌려주고 호출부가 붙이는** 구조입니다. 붙이는 걸 빠뜨리면 **값은 맞는데 경고만 사라져** §0-1 위반이 됩니다. 아래 사보타주 ③④가 정확히 그 경우이고, 기준선이 잡아냅니다.
+
+**검증.**
+- 🔴 **리팩터 전 코드를 실제로 다시 실행해 대조** — 같은 얼린 입력으로 `33738a4` 시점 파일과 현재 파일의 출력을 각각 뽑아 비교: **143,565 bytes 완전 일치**(문자열 동일). 테스트 통과만이 아니라 원본 재실행으로 증명.
+- 사보타주(리팩터 전) 5종 전부 🔴: 그레이엄 상수 22.5→22.4 / 목표가 캡 2.5→2.6배 / 우선주 상속 무력화 / 배당 미수집을 무배당 확정으로 뭉갬 / 성장률 부호 뒤집기.
+  ⚠️ 이 중 한 번은 "안 잡힘"으로 나왔는데 확인해보니 **제 사보타주가 계산이 아니라 주석의 숫자를 고친 것**이었습니다 — 테스트가 옳았습니다(§0-1 — 확인 전에 결함이라고 적지 않음).
+- 사보타주(리팩터 후) 5종 전부 🔴: 분리된 함수 안의 그레이엄 상수 / 착시 저평가 부등호 뒤집기 / **배당 notes 안 붙임** / **상속 note 안 붙임** / **2차 패스 호출 누락**.
+- `tests/test_collector_kospi200_ranking.py`(56건) · `test_geff_cap` · `test_scoring_coverage` · `test_agent_registry`(9건) · `test_suite_integrity` Check A·B 통과. 이 세션 실행분 **164 passed / 127 skipped**.
+
+**문서.** `.claude/agents/kr-stocks.md` 소유 목록에 기준선 4파일 등재 + 고유 규칙 7번 신설("이 함수를 손볼 때는 기준선을 먼저 돌릴 것, 경고 문구를 붙이는 걸 빠뜨리지 말 것"). `PROJECT_STATUS.md` §2 테스트 표·§3 로그 갱신.
+
+**하지 않은 것(§0-1).** (a) **전체 `pytest --ignore=archive -q` 를 이 세션에서 못 돌렸습니다** — 원격 VM 에 `FinanceDataReader`·`fastapi`·`nicegui` 가 없고 PyPI 접근도 막혀 설치가 안 됩니다(8개 테스트 모듈이 import 단계에서 실패). 그래서 `test_suite_integrity.py::test_pytest_collection_subprocess_is_healthy` 만 이 환경에서 빨간불인데, 원인이 전부 `ModuleNotFoundError` 임을 확인했고 리팩터와 무관합니다. **push 후 CI 확인 필요.** (b) 남은 큰 함수 7개는 손대지 않음 — 다음 대상은 `fetch_naver_item_dps_and_eps`(372줄, 같은 파일·공개 계층)가 자연스럽고, 자산 계층은 개인정보 격리 검토를 먼저 해야 함. (c) 루프 본문에 아직 남은 큰 블록(Trailing PER/EPS 약 75줄, PEGY·g_eff 약 55줄, 목표주가 약 60줄, 결과 dict 조립 약 80줄)은 이번에 안 뗐음 — 지역 변수 공유가 많아 인자 목록이 길어지므로, 쪼개는 게 오히려 읽기 나쁜지 한 번 판단이 필요함. (d) `duel_page.py` 등 **파일 분할은 하지 않았고 권하지도 않습니다** — 함수 단위로 이미 나뉘어 있어 실익이 없습니다.
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.
