@@ -4079,6 +4079,39 @@ backdated_monthly_deposit.sql` 은 `sql/` 의 추적 파일과 **md5 완전 일�
 
 **하지 않은 것(§0-1).** (a) **전체 `pytest --ignore=archive -q` 를 이 세션에서 못 돌렸습니다** — 원격 VM 에 `FinanceDataReader`·`fastapi`·`nicegui` 가 없고 PyPI 접근도 막혀 설치가 안 됩니다(8개 테스트 모듈이 import 단계에서 실패). 그래서 `test_suite_integrity.py::test_pytest_collection_subprocess_is_healthy` 만 이 환경에서 빨간불인데, 원인이 전부 `ModuleNotFoundError` 임을 확인했고 리팩터와 무관합니다. **push 후 CI 확인 필요.** (b) 남은 큰 함수 7개는 손대지 않음 — 다음 대상은 `fetch_naver_item_dps_and_eps`(372줄, 같은 파일·공개 계층)가 자연스럽고, 자산 계층은 개인정보 격리 검토를 먼저 해야 함. (c) 루프 본문에 아직 남은 큰 블록(Trailing PER/EPS 약 75줄, PEGY·g_eff 약 55줄, 목표주가 약 60줄, 결과 dict 조립 약 80줄)은 이번에 안 뗐음 — 지역 변수 공유가 많아 인자 목록이 길어지므로, 쪼개는 게 오히려 읽기 나쁜지 한 번 판단이 필요함. (d) `duel_page.py` 등 **파일 분할은 하지 않았고 권하지도 않습니다** — 함수 단위로 이미 나뉘어 있어 실익이 없습니다.
 
+### #210 — [#209 후속, 오너 "이어서 진행해줘"] `fetch_naver_item_dps_and_eps()` 372줄 → 112줄 분해 — 합성 HTML 기준선으로 **과거에 실제로 났던 사고 6종을 재현 검증**한 뒤 구획 4개 분리 (2026-09-07)
+
+**경위.** 시작 전 HEAD = `f686471`(#209). #209 에서 다음 대상으로 지목한 함수. 이 파서가 특히 위험한 이유는 **이 저장소에서 §0-1 사고가 가장 많이 났던 자리**이기 때문입니다 — 적자 기업의 마이너스 부호를 정규식이 버려 24종목이 흑자로 둔갑(2차 감사 1-1), "수집 실패"와 "무배당"을 뭉개 미수집 종목이 20점 만점 중 3점을 받음(1-4), `iloc` 고정 위치로 최신 연도를 잘못 집음(1-6), 상속값에 마킹이 없어 실측치처럼 보임(1-7), 구획 하나가 터지면 이미 읽은 값까지 통째로 버림(재감사 H1), 파싱 실패를 "배당 없음"이라는 실측 사실로 승격(H2), 행 존재만으로 무배당 확정(H3), 추측한 부모 코드를 검증 없이 크롤링해 상속(H12). 전부 "값은 그럴듯한데 의미가 틀린" 종류라 눈으로는 안 보입니다.
+
+**처방 (1) — 합성 HTML 기준선.**
+🔴 **입력이 #209 와 성격이 다릅니다.** `enrich_quant_metrics` 는 실수집 스냅샷에서 입력을 뽑았지만, 이 함수의 입력은 **네이버 페이지 HTML** 이고 저장소에 원본이 없습니다. 새로 받아오려면 네이버를 다시 긁어야 하는데 §0-3-2 위반이라, `tests/fixtures/naver_item/` 의 HTML 은 **실제 구조를 본뜬 합성 픽스처**입니다(저장소가 이미 쓰던 방식 — `_FAKE_ASIDE_ONLY_HTML`·`_FIN_TABLE_TEMPLATE` 와 동일 계열).
+**이 기준선이 보증하는 것과 못 하는 것을 문서에 명시했습니다**: 리팩터가 파싱 **동작**을 바꿨는지는 잡지만, 네이버가 **실제 페이지 구조를 바꿨을 때**는 못 잡습니다(그건 `data_sanity` 와 실운영 로그의 몫). 이 한계를 잊고 "파서가 안전하다"고 믿으면 그게 §0-1 이 말하는 겉보기 정상입니다.
+- `tests/_naver_item_baseline.py` — HTTP·대기만 막고 파싱·헤더분류·산티체크는 진짜 코드로 실행. 🔴 **서킷브레이커 상태가 모듈 전역이라 사례마다 초기화**합니다 — 안 하면 앞 사례의 실패가 뒤 사례의 EV/EBITDA 를 건너뛰게 만들어 기준선이 실행 순서에 따라 달라집니다.
+- `tests/fixtures/naver_item/*.html` **15개**, `_generate.py` 포함 — 13사례: 정상 / 적자(부호) / 무배당 확정 / DPS 셀 파싱오류 / aside만 / 표 없음 / 자본잠식(PBR 음수) / 상장주식수 산티실패 / ROE 이상치 / 연간컬럼 분류실패 / 우선주 상속 성공 / 우선주 상속 보류 / 빈 페이지.
+- `tests/fixtures/naver_item_baseline.json` — 위 사례의 현재 출력 + 서킷 상태 전문.
+- `tests/test_naver_item_characterization.py` — 검사 5건(픽스처 존재·기준선 일치·두 번 실행 동일·과거 사고 커버리지·실제 네트워크 미호출 트립와이어).
+
+**작업 중 확인한 코드 사실 2건(둘 다 버그 아님, 기록용).**
+- ⓐ **`t_pbr`·`ev_ebitda` 만 문자열입니다.** `t_per`/`t_eps` 는 숫자인데 이 둘만 원본 표기를 문자열로 보존합니다(소비부 `_compute_graham_number` 가 `float()` 로 변환). 반환 dict 안에 타입이 섞여 있다는 뜻이라, 숫자로 가정하면 `TypeError` 가 납니다 — 테스트를 쓰다 실제로 걸렸습니다.
+- ⓑ **무배당 확정 판정의 두 elif 가 같은 값을 냅니다.** `... and dps_all_annual_cells_blank` 가 붙은 분기와 안 붙은 분기 둘 다 `no_dividend_confirmed` 를 내며, **앞 분기를 통째로 죽여도 결과가 안 바뀝니다**(실측 확인). 답은 양쪽 다 맞으므로 버그는 아니지만, 읽는 사람은 "이 구분이 뭔가를 지키고 있다"고 믿게 됩니다. 주석이 서로 다른 '이유'를 문서화하고 있어 **임의로 합치지 않고 `_parse_financial_statement()` docstring 에 사실만 기록**했습니다(오너 판단 사항).
+
+**처방 (2) — 분해.** 계산·정규식은 **한 글자도 바꾸지 않고 위치만** 옮겼습니다. **372줄 → 112줄**, 함수 4개:
+`_parse_aside_invest_info`(108) · `_parse_financial_statement`(147) · `_fetch_ev_ebitda`(82) · `_inherit_preferred_dps`(37). 각 docstring 에 해당 구획이 막고 있는 과거 사고(1-1/1-4/1-6/1-7/H1/H2/H3/H12)를 그대로 옮겨 근거가 코드에서 떨어지지 않게 했습니다.
+⚠️ **이 분해가 새로 만든 위험**: `_parse_aside_invest_info` 는 값 **10개짜리 튜플**을 돌려주고 호출부가 순서대로 풀어 받습니다 — **순서 하나만 틀려도 조용히 값이 뒤바뀝니다.** 사보타주 ②가 정확히 그 경우이고 기준선이 잡아냅니다.
+
+**작업 중 겪은 실수 2건(기록).**
+- 구획 A 를 뗄 때 `s.index("soup = BeautifulSoup(...)")` 를 그냥 썼더니 **파일 앞쪽 다른 함수(388행)의 같은 줄**이 잡혀 범위가 500줄 넘게 벌어졌고, 앞서 만든 함수들이 통째로 잘려나갈 뻔했습니다(`assert len(block) < 6000` 과 함수 시작 오프셋 지정으로 수정). 파일이 실제로 망가지기 전에 `ValueError` 로 멈춰 피해는 없었습니다.
+- `.claude/agents/kr-stocks.md` 소유 목록에 남의 파일(`utils/data_sanity.py`, 소유 `data-foundation`)을 백틱으로 언급했다가 **#208 에서 만든 `test_agent_registry.py::test_no_file_is_owned_by_two_agents` 에 걸렸습니다.** 의도대로 동작한 것이고, 한계 설명을 고유 규칙 9번으로 옮겨 해소했습니다.
+
+**검증.**
+- 🔴 **리팩터 전 코드를 실제로 다시 실행해 대조** — 같은 픽스처로 `f686471` 시점 파일과 현재 파일의 출력을 각각 뽑아 비교: **8,810 bytes 완전 일치.**
+- 사보타주(리팩터 전) — 과거 사고 재현 6종 전부 🔴: 정규식 `-?` 제거(1-1) / `dps_cell_parse_error` 무력화(H2) / `div_yield_row_explicit_na` 무력화(H3) / 부모 코드 검증 제거(H12) / 연간컬럼 실패 시 `iloc` 폴백(§2-1) / 상장주식수 산티체크 무력화.
+  ⚠️ H3 는 처음에 "안 잡힘"이 나왔는데, 확인해보니 **제 사보타주가 아무것도 안 바꾼 것**이었습니다(위 ⓑ — 두 elif 가 같은 값). 진짜 근거인 `div_yield_row_explicit_na` 를 겨냥해 다시 하니 잡혔습니다. §0-1 — 확인 전에 결함이라고 적지 않음.
+- 사보타주(리팩터 후) 5종 전부 🔴: 분리된 구획 A 안의 정규식 / **반환 튜플 순서 뒤바꿈** / 구획 B 에 `errors` 를 안 넘김 / EV/EBITDA 호출 누락 / 우선주 상속 호출 누락.
+- `test_suite_integrity` Check A·B 가 새 파일에 대해 PASSED. 이 세션 실행분 **171 passed / 128 skipped**.
+
+**하지 않은 것(§0-1).** (a) **전체 `pytest --ignore=archive -q` 를 이 세션에서 못 돌렸습니다** — #209 와 같은 이유(원격 VM 에 `FinanceDataReader`·`fastapi` 없음, PyPI 접근 차단). `test_pytest_collection_subprocess_is_healthy` 만 이 환경에서 빨간불이고 원인은 전부 `ModuleNotFoundError` 로 리팩터와 무관합니다. **push 후 CI 확인 필요.** (b) 위 ⓑ(같은 값을 내는 두 elif)를 합치지 않았습니다 — 오너 판단 사항. (c) `t_pbr`/`ev_ebitda` 의 문자열 타입을 숫자로 통일하지 않았습니다 — 동작 변경이라 리팩터 범위 밖. (d) `fetch_naver_item_dps_and_eps` 본문에 남은 112줄(요청·재시도·반환 dict 조립)은 그대로 뒀습니다. (e) 다음 대상 후보: `collector_us_stocks::run_us_collector`(373줄, `us-stocks` 소관) 또는 자산 계층(`scorecard_page::_render_input_form` 750줄 — 개인정보 격리 검토 선행 필요).
+
 ## 진행 예정 (백로그)
 
 - ✅ #177 `scorecard_leaderboard_page()` "발행분 있음" 렌더 스모크 → #181에서 완료(2026-08-30). §0-1 재검토 결과 `test_scorecard_public_ui.py::_leaderboard_client()`가 이미 쓰던 합성 픽스처 관례를 그대로 재사용하면 위반이 아님을 확인, 진입점 ④ 분기로 위/아래 두 구간 배선까지 실제 실행 확인.

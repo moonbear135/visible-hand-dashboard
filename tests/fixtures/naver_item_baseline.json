@@ -1,0 +1,358 @@
+{
+  "000010": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": 2.5,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": true,
+      "dps": 1200,
+      "dps_inherited_from": null,
+      "dps_status": "collected",
+      "errors": [],
+      "ev_ebitda": "6.7",
+      "f_eps": 7000,
+      "f_per": 10.0,
+      "f_roe": 10.5,
+      "outstanding_shares": 59700000,
+      "raw_period": "TTM",
+      "t_eps": 5678,
+      "t_pbr": "1.23",
+      "t_per": 12.34
+    }
+  },
+  "000020": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "no_dividend_confirmed",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 12300000,
+      "raw_period": "TTM",
+      "t_eps": -6851,
+      "t_pbr": "0.80",
+      "t_per": -49.26
+    }
+  },
+  "000030": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "no_dividend_confirmed",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 8800000,
+      "raw_period": "TTM",
+      "t_eps": 2000,
+      "t_pbr": "0.70",
+      "t_per": 8.0
+    }
+  },
+  "000040": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "not_collected",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
+        "DPS 셀 파싱 실패(col=2): could not convert string to float: '미공시'",
+        "DPS 셀 파싱 실패(col=1): could not convert string to float: '미공시'",
+        "DPS 셀 파싱 오류가 있어 무배당 확정 불가 — 미수집(not_collected) 처리"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 5000000,
+      "raw_period": "TTM",
+      "t_eps": 3000,
+      "t_pbr": null,
+      "t_per": 15.0
+    }
+  },
+  "000050": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": 2.5,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "not_collected",
+      "errors": [],
+      "ev_ebitda": null,
+      "f_eps": 7000,
+      "f_per": 10.0,
+      "f_roe": null,
+      "outstanding_shares": 59700000,
+      "raw_period": "TTM",
+      "t_eps": 5678,
+      "t_pbr": "1.23",
+      "t_per": 12.34
+    }
+  },
+  "000060": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": false,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "not_collected",
+      "errors": [
+        "주요재무제표 파싱 실패: Missing optional dependency 'html5lib'.  Use pip or conda to install html5lib. — DPS/Forward ROE 미수집, 나머지는 계속 진행"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 59700000,
+      "raw_period": "TTM",
+      "t_eps": 5678,
+      "t_pbr": null,
+      "t_per": 12.34
+    }
+  },
+  "000070": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": 1.1,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": true,
+      "dps": 60,
+      "dps_inherited_from": null,
+      "dps_status": "collected",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 3300000,
+      "raw_period": "TTM",
+      "t_eps": 1000,
+      "t_pbr": "-1.10",
+      "t_per": 5.0
+    }
+  },
+  "000080": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": 0.5,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": true,
+      "dps": 10,
+      "dps_inherited_from": null,
+      "dps_status": "collected",
+      "errors": [
+        "상장주식수 파싱 실패 (후보값=[1234])",
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": null,
+      "raw_period": "TTM",
+      "t_eps": 900,
+      "t_pbr": null,
+      "t_per": 9.0
+    }
+  },
+  "000090": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": 2.5,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": true,
+      "dps": 100,
+      "dps_inherited_from": null,
+      "dps_status": "collected",
+      "errors": [
+        "Forward ROE 컨센서스 이상치 의심(범위 초과, 412.0%) — 제외",
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": 7000,
+      "f_per": 10.0,
+      "f_roe": null,
+      "outstanding_shares": 59700000,
+      "raw_period": "TTM",
+      "t_eps": 5678,
+      "t_pbr": "1.23",
+      "t_per": 12.34
+    }
+  },
+  "000100": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "not_collected",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
+        "재무제표 연간 컬럼 헤더 분류 실패 → DPS 수집 생략",
+        "주당배당금(DPS) 행/연간 컬럼을 찾지 못했습니다 — 배당 미수집(무배당과 구분)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 2000000,
+      "raw_period": null,
+      "t_eps": null,
+      "t_pbr": null,
+      "t_per": null
+    }
+  },
+  "00011K": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": 850,
+      "dps_inherited_from": "000110",
+      "dps_status": "inherited_from_common",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
+        "우선주 DPS를 보통주(000110)에서 상속 — 실측 아님(우선주 배당은 통상 더 높음)"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 1500000,
+      "raw_period": "TTM",
+      "t_eps": 1400,
+      "t_pbr": null,
+      "t_per": 7.0
+    }
+  },
+  "00012K": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": true,
+      "div_yield_row_found": true,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "no_dividend_confirmed",
+      "errors": [
+        "Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)",
+        "우선주 DPS 상속 보류 — 추정 부모 코드(000120)가 마스터 목록의 보통주(STOCK)로 확인되지 않음(type='ETF')"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": 1100000,
+      "raw_period": null,
+      "t_eps": null,
+      "t_pbr": null,
+      "t_per": null
+    }
+  },
+  "000130": {
+    "circuit": {
+      "consecutive_failures": 0,
+      "open": false,
+      "skipped_count": 0
+    },
+    "result": {
+      "div_yield": null,
+      "div_yield_row_explicit_na": false,
+      "div_yield_row_found": false,
+      "dps": null,
+      "dps_inherited_from": null,
+      "dps_status": "not_collected",
+      "errors": [
+        "주요재무제표 파싱 실패: Missing optional dependency 'html5lib'.  Use pip or conda to install html5lib. — DPS/Forward ROE 미수집, 나머지는 계속 진행"
+      ],
+      "ev_ebitda": null,
+      "f_eps": null,
+      "f_per": null,
+      "f_roe": null,
+      "outstanding_shares": null,
+      "raw_period": null,
+      "t_eps": null,
+      "t_pbr": null,
+      "t_per": null
+    }
+  }
+}
