@@ -186,12 +186,42 @@ def test_list_pbr_is_not_promoted_to_t_pbr():
           f"({implied_bps:.2f})")
 
 
-def test_detail_pbr_is_computed_from_bps():
-    """상세 `t_pbr` 은 현재가 ÷ BPS 로 직접 계산해 가격 기준을 보장합니다."""
+def test_detail_pbr_is_taken_as_given_not_computed():
+    """
+    🔴 2026-09-08 정정 (오너 방침: **"우리 목표로 따지면 그대로 받는 게 맞다"**).
+
+    처음엔 `현재가 ÷ bps` 로 계산해 넣었는데 두 가지가 틀렸습니다:
+      · `f_per` 은 응답값을 그대로 쓰면서 `t_pbr` 만 계산하면 같은 dict 에
+        "받은 값"과 "우리가 만든 값"이 섞입니다(§0-1 — 계산값은 마킹해야 합니다).
+      · 계산할 이유도 없었습니다 — 상세의 `pbr` 은 **이미 현재가 기준**이고
+        현행 스냅샷 값(4.81)과 정확히 같습니다. 전일종가 기준이라 문제였던 것은
+        **목록**의 `pbr` 뿐이고 그건 `t_pbr` 로 승격하지 않습니다.
+    """
     out = parse_stock_detail(detail(), source_url=KRX_DETAIL_URL)
-    expected = float(detail()["nowPrice"]) / float(detail()["bps"])
-    check(abs(out["t_pbr"] - expected) < 1e-6, "t_pbr == nowPrice ÷ bps",
-          f'({out["t_pbr"]} vs {expected})')
+    check(out["t_pbr"] == 4.81, "t_pbr 은 응답값 그대로", f'({out["t_pbr"]})')
+    computed = float(detail()["nowPrice"]) / float(detail()["bps"])
+    check(abs(out["t_pbr"] - computed) > 1e-6, "계산값(4.8133)이 아님", f"({computed:.6f})")
+    check(not any("교차검증" in e for e in out["errors"]),
+          "응답값과 계산값이 2% 안이면 경고 없음")
+
+    # 두 값이 크게 어긋나면 **기록은 남깁니다** (값은 여전히 응답값)
+    tampered = dict(detail(), bps="1000")
+    out2 = parse_stock_detail(tampered, source_url=KRX_DETAIL_URL)
+    check(out2["t_pbr"] == 4.81, "어긋나도 값은 응답값을 유지")
+    check(any("교차검증" in e for e in out2["errors"]), "어긋난 사실은 errors 에 기록")
+
+
+def test_forward_per_is_taken_as_given():
+    """
+    오너 방침 — 신 API 의 `estimatedPer` 을 그대로 씁니다.
+    실측 근거: 현행 `f_per` 은 **258종목 전부가 정수**였습니다(네이버 구 사이트가 추정PER 을
+    정수로만 표시). 신 API 는 소수점을 주므로 **더 정밀합니다.**
+    """
+    out = parse_stock_detail(detail(), source_url=KRX_DETAIL_URL)
+    check(out["f_per"] == 5.1, "f_per 은 estimatedPer 그대로", f'({out["f_per"]})')
+    computed = float(detail()["nowPrice"]) / float(detail()["estimatedEps"])
+    check(abs(out["f_per"] - computed) > 1e-6,
+          "현재가÷추정EPS 계산값(5.1039)이 아님", f"({computed:.4f})")
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -215,6 +245,37 @@ def test_market_and_type_fields_are_kept_for_reference_only():
     src = (REPO_ROOT / "utils" / "naver_stock_api.py").read_text(encoding="utf-8")
     for banned in ('if _text(row.get("type")) != "ST"', 'sosok") != "0"', 'continue  # ETF'):
         check(banned not in src, f"파서가 종목을 거르지 않음: {banned}")
+
+
+def test_forward_metrics_are_never_computed():
+    """
+    🔴 오너 지시 (2026-09-08): *"포워드 자료 같은 경우에는 애널리스트들이 정해주는 것이지
+    우리가 계산해서 나오는 게 아니지 않아? 재무제표를 다 읽을 수는 없잖아."*
+
+    추정 PER·추정 EPS·Forward ROE·목표주가는 **증권사 애널리스트의 미래 추정치**입니다.
+    확정 재무제표를 아무리 잘 읽어도 나오지 않습니다. 계산으로 흉내내면 §0-1 이 금지하는
+    **지어내기**이고, 받은 값과 만든 값이 같은 칸에서 섞입니다.
+
+    → 이 파서는 Forward 계열을 **받은 그대로만** 씁니다. 못 받으면 못 받은 대로 둡니다.
+    """
+    d = detail()
+    out = parse_stock_detail(d, source_url=KRX_DETAIL_URL)
+    check(out["f_eps"] == float(d["estimatedEps"]), "추정 EPS 는 응답값 그대로")
+    check(out["f_per"] == float(d["estimatedPer"]), "추정 PER 은 응답값 그대로")
+
+    # 계산해서 넣었다면 이 값들과 같아졌을 것입니다 — 그렇지 않아야 합니다.
+    check(abs(out["f_per"] - float(d["nowPrice"]) / float(d["estimatedEps"])) > 1e-6,
+          "f_per 이 '현재가 ÷ 추정EPS' 계산값이 아님")
+
+    # 추정치가 없는 응답이면 **지어내지 않고 None**
+    blank = parse_stock_detail(dict(d, estimatedPer=None, estimatedEps=None),
+                               source_url=KRX_DETAIL_URL)
+    check(blank["f_per"] is None and blank["f_eps"] is None,
+          "추정치가 없으면 계산으로 메우지 않고 None")
+
+    src = (REPO_ROOT / "utils" / "naver_stock_api.py").read_text(encoding="utf-8")
+    check("Forward 계열은 받는 값이지 만드는 값이 아닙니다" in src,
+          "이 원칙이 모듈 머리말에 적혀 있음")
 
 
 def test_negative_values_keep_their_sign():

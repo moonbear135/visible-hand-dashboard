@@ -36,11 +36,12 @@ FIXTURES = REPO_ROOT / "tests" / "fixtures" / "naver_new_api"
 
 
 class _FakeResponse:
-    def __init__(self, status=200, payload=None, raise_json=False):
+    def __init__(self, status=200, payload=None, raise_json=False, text=""):
         self.status_code = status
         self._payload = payload if payload is not None else []
         self._raise = raise_json
         self.content = b"x" * 10
+        self.text = text
 
     def json(self):
         if self._raise:
@@ -103,12 +104,90 @@ def test_manner_constants_are_not_weakened():
     check(SH.DELAY_MAX_SEC >= SH.DELAY_MIN_SEC, "최대 딜레이가 최소보다 크거나 같음")
     check(SH.CIRCUIT_CONSECUTIVE_FAILURES <= 5, "서킷 브레이커 임계 5회 이하",
           f"({SH.CIRCUIT_CONSECUTIVE_FAILURES})")
-    check(SH.MAX_REQUESTS_PER_RUN <= 100, "1회 실행 요청 상한 100건 이하",
+    # 2026-09-08 오너 지시로 표본을 넓혔습니다(상세 20→100, 위즈리포트 20 신설).
+    # 🔴 그래도 **현행 수집기가 이미 매일 하는 요청(종목당 2회 × 520 = 약 1,040건)의
+    #    15% 수준**입니다. 이 상한을 더 올릴 때는 그 비율을 다시 따져 보세요(§0-3-2).
+    check(SH.MAX_REQUESTS_PER_RUN <= 200, "1회 실행 요청 상한 200건 이하",
           f"({SH.MAX_REQUESTS_PER_RUN})")
+    planned = SH.LIST_PAGE_COUNT + SH.DETAIL_SAMPLE_SIZE + SH.WISEREPORT_SAMPLE_SIZE
+    check(planned <= SH.MAX_REQUESTS_PER_RUN, "계획된 요청 수가 상한 안",
+          f"({planned} / {SH.MAX_REQUESTS_PER_RUN})")
+    check(SH.WISEREPORT_SAMPLE_SIZE <= 50, "위즈리포트도 표본만",
+          f"({SH.WISEREPORT_SAMPLE_SIZE})")
     check(SH.LIST_PAGE_SIZE == 20, "pageSize 는 화면이 쓰는 20 그대로 (한도 탐색 금지)",
           f"({SH.LIST_PAGE_SIZE})")
-    check(SH.DETAIL_SAMPLE_SIZE <= 30, "상세는 전 종목이 아니라 표본만",
-          f"({SH.DETAIL_SAMPLE_SIZE})")
+    # 상세는 여전히 **전 종목이 아닙니다.** 520종목 중 100 → 매일 다른 구간을 돌아
+    # 6일이면 한 바퀴입니다(§0-3-2 — 요청량은 낮게, 커버리지는 시간으로).
+    check(SH.DETAIL_SAMPLE_SIZE < SH.LIST_TARGET_COUNT / 4,
+          "상세는 전 종목이 아니라 표본만 (전체의 1/4 미만)",
+          f"({SH.DETAIL_SAMPLE_SIZE} / {SH.LIST_TARGET_COUNT})")
+
+
+def test_sample_rotates_so_coverage_grows_over_days():
+    """
+    ⚠️ **사보타주가 찾아낸 구멍**(2026-09-08). 회전이 이번 작업의 **핵심 목적**인데
+    아무 검사도 없었습니다 — 회전을 없애도 테스트가 전부 초록이었습니다.
+
+    회전이 없으면 매일 같은 100종목만 보게 되어 커버리지가 영원히 19% 에 멈춥니다.
+    (오너 지적: *"지금은 목록만 가지고 오는 거야? 전체는 아니잖아"*)
+    """
+    codes = [f"{i:06d}" for i in range(520)]
+
+    # 같은 날이면 같은 표본 — 재현 가능해야 합니다
+    check(SH.rotating_sample(codes, 100, day=5) == SH.rotating_sample(codes, 100, day=5),
+          "같은 날 재실행하면 같은 표본 (재현 가능)")
+
+    # 날이 바뀌면 다른 표본
+    check(SH.rotating_sample(codes, 100, day=5) != SH.rotating_sample(codes, 100, day=6),
+          "날이 바뀌면 다른 구간을 봄")
+
+    # 며칠이면 전체를 덮어야 합니다
+    seen = set()
+    for day in range(520 // 100 + 1):
+        seen |= set(SH.rotating_sample(codes, 100, day=day))
+    check(len(seen) == 520, "6일이면 520종목 전부 한 바퀴", f"({len(seen)}/520)")
+
+    # 상세 표본과 위즈리포트 표본이 같은 종목만 반복해 보지 않아야 합니다
+    d = set(SH.rotating_sample(codes, 100, day=3))
+    w = set(SH.rotating_sample(codes, 20, salt=7, day=3))
+    check(not w <= d, "위즈리포트 표본이 상세 표본에 완전히 묻히지 않음")
+
+    # 종목 수보다 표본이 크면 전체를 돌려줍니다(경계)
+    check(len(SH.rotating_sample(codes[:10], 100)) == 10, "표본이 종목 수보다 크면 전체")
+    check(SH.rotating_sample([], 100) == [], "빈 목록이면 빈 표본")
+
+
+def test_wisereport_sample_is_actually_collected():
+    """
+    ⚠️ 이것도 사보타주가 찾은 구멍입니다. `WISEREPORT_SAMPLE_SIZE = 0` 으로 만들어도
+    아무 테스트가 빨간불을 내지 않았습니다.
+
+    🔴 위즈리포트는 **Forward ROE·EV/EBITDA 의 유일한 출처**이고, 3회차까지 검증률이
+    **0%** 였던 자리입니다. 표본이 0 이 되면 그 공백으로 조용히 되돌아갑니다.
+    """
+    check(SH.WISEREPORT_SAMPLE_SIZE > 0, "위즈리포트 표본이 0 이 아님",
+          f"({SH.WISEREPORT_SAMPLE_SIZE})")
+
+    sess = SH.PoliteSession()
+    wise_urls = []
+
+    def fake_get(url, timeout=None):
+        if "wisereport" in url:
+            wise_urls.append(url)
+            return _FakeResponse(payload=None, text="<html></html>")
+        if "/market/stock/default" in url:
+            start = int(url.split("startIdx=")[1].split("&")[0])
+            return _FakeResponse(payload=_list_payload() if start == 0 else [])
+        return _FakeResponse(payload=_detail_payload())
+
+    with mock.patch.object(sess.session, "get", fake_get), \
+         mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
+        out = SH.collect(sess)
+
+    check(wise_urls, "위즈리포트를 실제로 요청함", f"({len(wise_urls)}건)")
+    check(all("cmp_cd=" in u for u in wise_urls), "종목코드를 붙여 요청함")
+    check(out.get("wisereport"), "결과에 위즈리포트 파싱 결과가 담김")
+    check(out.get("wisereport_sample_codes"), "어떤 종목을 봤는지 기록됨")
 
 
 def test_no_parallel_requests():
@@ -361,6 +440,8 @@ def test_collect_carries_the_pagination_warnings_out():
     broken = _broken_rows()
 
     def fake_get(url, timeout=None):
+        if "wisereport" in url:
+            return _FakeResponse(payload=None, text="<html></html>")
         if "/market/stock/default" not in url:      # 상세 요청은 목록과 다른 응답
             return _FakeResponse(payload=_detail_payload())
         start = int(url.split("startIdx=")[1].split("&")[0])
@@ -451,6 +532,8 @@ def test_collect_runs_end_to_end_without_network():
     lst, det = _list_payload(), _detail_payload()
 
     def fake_get(url, timeout=None):
+        if "wisereport" in url:
+            return _FakeResponse(payload=None, text="<html></html>")
         if "/market/stock/default" in url:
             # startIdx 가 커지면 빈 페이지를 돌려 종료 조건을 밟게 합니다
             start = int(url.split("startIdx=")[1].split("&")[0])
@@ -474,6 +557,8 @@ def test_failed_pages_are_recorded_not_silently_dropped():
     sess = SH.PoliteSession()
 
     def fake_get(url, timeout=None):
+        if "wisereport" in url:
+            return _FakeResponse(payload=None, text="<html></html>")
         if "startIdx=0&" in url:
             return _FakeResponse(payload=_list_payload())
         return _FakeResponse(status=500)

@@ -49,6 +49,7 @@ from pathlib import Path
 import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
+from utils.wisereport_parser import parse_financial_summary  # noqa: E402
 from utils.naver_stock_api import (  # noqa: E402
     NaverApiSourceError,
     assert_krx_source,
@@ -65,7 +66,7 @@ KST = timezone(timedelta(hours=9))
 DELAY_MIN_SEC, DELAY_MAX_SEC = 2.0, 3.0
 TIMEOUT_SEC = 10
 CIRCUIT_CONSECUTIVE_FAILURES = 5
-MAX_REQUESTS_PER_RUN = 60          # 목록 25 + 상세 표본 20 + 여유
+MAX_REQUESTS_PER_RUN = 160         # 목록 26 + 상세 100 + 위즈리포트 20 + 여유
 LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
 LIST_TARGET_COUNT = 520            # 🔴 현행과 동일한 범위: 상위 500 + 히스테리시스 버퍼 20.
 #    2026-09-08 실측 — 500 만 받으면 실전 520 중 21종목이 빠져 "안 맞는다"는 착시가 납니다.
@@ -84,7 +85,17 @@ LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
 #    실측 확인(오너, 2026-09-08): `startIdx=1&pageSize=20` → 첫 종목 **하나금융지주**(21위).
 #    ⚠️ 겉보기엔 정상이었습니다 — 첫 페이지가 맞았고, 전체가 시총 내림차순이기도 했습니다.
 #       그래서 아래 `check_pagination_continuity()` 로 **코드가 스스로 잡게** 했습니다.
-DETAIL_SAMPLE_SIZE = 20            # 상세는 전 종목이 아니라 표본만 (상대 서버 배려)
+DETAIL_SAMPLE_SIZE = 100           # 상세는 전 종목이 아니라 표본만 (상대 서버 배려)
+WISEREPORT_SAMPLE_SIZE = 20        # Forward ROE·EV/EBITDA 검증용 표본
+
+# 🔴 표본은 **매일 다른 구간**을 돕니다 (2026-09-08 오너 지시 "표본 확대 + 회전").
+#    왜: 3회차까지 상세 검증률이 4%(20/520), Forward ROE 는 0% 였습니다. `f_pegy` 의
+#    재료가 거의 검증 안 된 상태였고, 오너가 "목록만 가지고 오는 거야? 전체는 아니잖아"
+#    라고 짚었습니다. 전량을 매일 받으면 상대 서버 요청이 크게 늘어나므로(§0-3-2),
+#    **요청량은 낮게 유지하면서 날마다 다른 구간을 훑어** 며칠이면 넓게 덮습니다.
+#    회전 오프셋은 **날짜로 결정**되므로 같은 날 다시 돌리면 같은 표본이 나옵니다(재현 가능).
+#      · 상세 100종목/일 → 520종목을 약 6일이면 한 바퀴
+#      · 위즈리포트 20종목/일 → 약 26일이면 한 바퀴 (Forward ROE 는 분기마다 바뀌므로 충분)
 
 # 🔴 신 API 의 `type` 필드(ST/RT/IF/DR/MF)를 **종목 선별 필터로 쓰지 않습니다.**
 #    2026-09-08 오너 지적으로 확인한 사실:
@@ -107,6 +118,9 @@ LIST_URL = ("https://stock.naver.com/api/domestic/market/stock/default"
             "?tradeType=KRX&marketType=ALL&orderType=marketSum"
             "&startIdx={page}&pageSize={size}")
 DETAIL_URL = "https://stock.naver.com/api/domestic/detail/{code}/detail?codeType=KRX"
+# 🔴 현행 수집기(`collector_kospi200._fetch_ev_ebitda`)가 **이미 매일 부르는 바로 그 주소**입니다.
+#    섀도는 별도 프로세스라 따로 받아야 하므로, 표본만 받습니다(§0-3-2).
+WISEREPORT_URL = "https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}"
 
 
 class CircuitOpen(RuntimeError):
@@ -137,12 +151,28 @@ class PoliteSession:
 
     def __init__(self):
         self.session = requests.Session()
-        self.session.headers.update({"User-Agent": USER_AGENT, "Accept": "application/json"})
+        self.session.headers.update({"User-Agent": USER_AGENT})
         self.request_count = 0
         self.consecutive_failures = 0
         self.log: list[dict] = []
 
+    def get_text(self, url: str):
+        """HTML 응답용(위즈리포트). `get_json` 과 **같은 매너 장치**를 그대로 지나갑니다."""
+        res = self._request(url)
+        return None if res is None else res.text
+
     def get_json(self, url: str):
+        res = self._request(url)
+        if res is None:
+            return None
+        try:
+            return res.json()
+        except ValueError:
+            self.consecutive_failures += 1
+            self.log[-1].update(ok=False, error="JSON 파싱 실패 — 응답 구조가 바뀌었을 수 있음")
+            return None
+
+    def _request(self, url: str):
         assert_krx_source(url)          # 🔴 NXT 차단 (§1-5-11)
 
         if self.request_count >= MAX_REQUESTS_PER_RUN:
@@ -178,18 +208,10 @@ class PoliteSession:
             self.log.append(entry)
             return None
 
-        try:
-            payload = res.json()
-        except ValueError:
-            self.consecutive_failures += 1
-            entry.update(ok=False, error="JSON 파싱 실패 — 응답 구조가 바뀌었을 수 있음")
-            self.log.append(entry)
-            return None
-
         self.consecutive_failures = 0
         entry.update(ok=True, bytes=len(res.content))
         self.log.append(entry)
-        return payload
+        return res
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -272,11 +294,32 @@ def check_pagination_continuity(rows, page_boundaries) -> list[str]:
     return warnings
 
 
+def rotating_sample(codes, size, *, salt=0, day=None):
+    """오늘 볼 표본을 고릅니다 — **날짜로 결정되는 회전**.
+
+    같은 날 다시 돌리면 **같은 표본**이 나옵니다(재현 가능). 날이 바뀌면 다음 구간으로
+    넘어가 며칠이면 전체를 한 바퀴 돕니다.
+
+    🔴 특정 종목을 코드에 박지 않습니다(§2-2). 순서와 날짜만으로 정합니다.
+    `salt` 는 상세 표본과 위즈리포트 표본이 **같은 종목만 반복해서 보지 않도록** 어긋냅니다.
+    """
+    if not codes or size <= 0:
+        return []
+    day = day if day is not None else datetime.now(KST).toordinal()
+    n = len(codes)
+    start = ((day + salt) * size) % n
+    if size >= n:
+        return list(codes)
+    idx = [(start + i) % n for i in range(size)]
+    return [codes[i] for i in idx]
+
+
 def collect(sess: PoliteSession) -> dict:
     """목록 전체 + 상세 표본. 실패도 **같은 스키마로** 기록합니다(빼지 않습니다)."""
     result = {
         "collected_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
         "list_rows": [], "list_raw_sample": [], "detail": {}, "detail_raw_sample": {},
+        "wisereport": {}, "detail_sample_codes": [], "wisereport_sample_codes": [],
         "errors": [], "stopped_reason": None,
     }
 
@@ -309,29 +352,45 @@ def collect(sess: PoliteSession) -> dict:
         result["list_rows"], page_boundaries)
     result["errors"].extend(result["pagination_warnings"])
 
-    # ── 2) 상세 표본 ────────────────────────────────────────────────────────
-    #    특정 종목을 코드에 박지 않습니다(§2-2). **규칙**으로 고릅니다 —
-    #    시총 상위·중위·하위를 고르게 섞어 구조 변화를 넓게 관찰합니다.
-    rows = result["list_rows"]
-    if rows:
-        n = len(rows)
-        step = max(1, n // DETAIL_SAMPLE_SIZE)
-        sample = [rows[i]["code"] for i in range(0, n, step)][:DETAIL_SAMPLE_SIZE]
-        try:
-            for i, code in enumerate(sample):
-                url = DETAIL_URL.format(code=code)
-                payload = sess.get_json(url)
-                if payload is None:
-                    result["detail"][code] = {"errors": ["상세 수집 실패"]}
-                    continue
-                if i == 0:
-                    result["detail_raw_sample"][code] = payload
-                try:
-                    result["detail"][code] = parse_stock_detail(payload, source_url=url)
-                except NaverApiSourceError as e:
-                    result["detail"][code] = {"errors": [f"상세 파싱 거부: {e}"]}
-        except (CircuitOpen, BlockedByServer) as e:
-            result["stopped_reason"] = str(e)
+    codes = [r["code"] for r in result["list_rows"]]
+
+    # ── 2) 상세 표본 (추정PER·추정EPS·BPS) ──────────────────────────────────
+    detail_codes = rotating_sample(codes, DETAIL_SAMPLE_SIZE)
+    result["detail_sample_codes"] = detail_codes
+    try:
+        for i, code in enumerate(detail_codes):
+            url = DETAIL_URL.format(code=code)
+            payload = sess.get_json(url)
+            if payload is None:
+                result["detail"][code] = {"errors": ["상세 수집 실패"]}
+                continue
+            if i == 0:
+                result["detail_raw_sample"][code] = payload
+            try:
+                result["detail"][code] = parse_stock_detail(payload, source_url=url)
+            except NaverApiSourceError as e:
+                result["detail"][code] = {"errors": [f"상세 파싱 거부: {e}"]}
+    except (CircuitOpen, BlockedByServer) as e:
+        result["stopped_reason"] = str(e)
+        return result
+
+    # ── 3) 위즈리포트 표본 (Forward ROE·EV/EBITDA) ──────────────────────────
+    #    🔴 3회차까지 이 두 값의 검증률이 **0%** 였습니다 — `f_pegy` 의 재료인데도요.
+    #    `salt` 로 상세 표본과 어긋내 같은 종목만 반복해 보지 않게 합니다.
+    wise_codes = rotating_sample(codes, WISEREPORT_SAMPLE_SIZE, salt=7)
+    result["wisereport_sample_codes"] = wise_codes
+    try:
+        for i, code in enumerate(wise_codes):
+            url = WISEREPORT_URL.format(code=code)
+            html = sess.get_text(url)
+            if html is None:
+                result["wisereport"][code] = {"errors": ["위즈리포트 수집 실패"]}
+                continue
+            if i == 0:
+                result["wisereport_raw_sample_bytes"] = len(html)
+            result["wisereport"][code] = parse_financial_summary(html)
+    except (CircuitOpen, BlockedByServer) as e:
+        result["stopped_reason"] = str(e)
 
     return result
 
@@ -340,14 +399,35 @@ def collect(sess: PoliteSession) -> dict:
 # 대조 — 현행 스냅샷과 얼마나 맞는가
 # ─────────────────────────────────────────────────────────────────────────────
 
+# (섀도 키, 현행 스냅샷 키, 허용 오차 비율, 설명)
 COMPARE_FIELDS = [
-    # (섀도 키, 현행 스냅샷 키, 허용 오차 비율, 설명)
     ("price", "price", 0.005, "현재가"),
     ("t_roe", "t_roe", 0.01, "ROE"),
     ("t_eps", "t_eps", 0.01, "Trailing EPS"),
     ("t_per", "t_per", 0.01, "Trailing PER"),
     ("outstanding_shares", "outstanding_shares", 0.0001, "상장주식수"),
 ]
+
+# 상세 API 표본에서만 나오는 항목 — `f_pegy` 의 재료입니다.
+COMPARE_FIELDS_DETAIL = [
+    ("f_eps", "f_eps", 0.01, "추정 EPS"),
+    ("t_pbr", "t_pbr", 0.02, "PBR"),
+    # 🟡 `f_per` 은 **의도적으로 어긋납니다.** 현행은 네이버 구 사이트의 표시값이라
+    #    258종목 **전부가 정수**로 반올림돼 있고, 신 API 는 소수점을 줍니다.
+    #    오너 방침대로 신 API 값을 그대로 받으므로, 여기서는 **관찰만** 하고
+    #    알림 임계에서는 제외합니다(아래 `ALERT_EXEMPT_FIELDS`).
+    ("f_per", "f_per", 0.01, "추정 PER (현행은 정수 반올림 — 어긋나는 것이 정상)"),
+]
+
+# 위즈리포트 표본에서만 나오는 항목 — 3회차까지 검증률 0% 였던 자리입니다.
+COMPARE_FIELDS_WISEREPORT = [
+    ("f_roe", "f_roe", 0.01, "Forward ROE"),
+    ("t_roe", "t_roe", 0.01, "ROE(위즈리포트)"),
+    ("ev_ebitda", "ev_ebitda", 0.01, "EV/EBITDA"),
+]
+
+# 어긋나는 것이 **정상인** 항목 — 알림을 울리지 않습니다(§0-1: 이유를 알고 두는 것).
+ALERT_EXEMPT_FIELDS = {"f_per"}
 
 
 def _f(v):
@@ -373,11 +453,21 @@ def compare_with_production(shadow: dict) -> dict:
     out["shadow_only"] = len(set(shad) - set(prod))
     out["production_only"] = len(set(prod) - set(shad))
 
-    for skey, pkey, tol, label in COMPARE_FIELDS:
+    detail = shadow.get("detail", {})
+    wise = shadow.get("wisereport", {})
+    out["detail_sample_size"] = len(detail)
+    out["wisereport_sample_size"] = len(wise)
+
+    groups = [(COMPARE_FIELDS, shad, common, ""),
+              (COMPARE_FIELDS_DETAIL, detail, set(detail) & set(prod), "상세: "),
+              (COMPARE_FIELDS_WISEREPORT, wise, set(wise) & set(prod), "위즈: ")]
+
+    for fields, source, codes, prefix in groups:
+      for skey, pkey, tol, label in fields:
         ok = ng = na = 0
         worst = []
-        for code in sorted(common):
-            a, b = _f(shad[code].get(skey)), _f(prod[code].get(pkey))
+        for code in sorted(codes):
+            a, b = _f(source[code].get(skey)), _f(prod[code].get(pkey))
             if a is None or b is None:
                 na += 1
                 continue
@@ -394,10 +484,11 @@ def compare_with_production(shadow: dict) -> dict:
                               "diff_pct": round(diff * 100, 3)})
         worst.sort(key=lambda x: -x["diff_pct"])
         total = ok + ng
-        out["fields"][skey] = {
-            "label": label, "match": ok, "mismatch": ng, "not_comparable": na,
+        out["fields"][prefix + skey] = {
+            "label": prefix + label, "match": ok, "mismatch": ng, "not_comparable": na,
             "match_ratio": round(ok / total, 4) if total else None,
             "worst": worst[:10],
+            "alert_exempt": skey in ALERT_EXEMPT_FIELDS,
         }
     return out
 
@@ -436,6 +527,8 @@ def build_alert_message() -> str:
     if r.get("matched_codes", 0) < ALERT_MIN_COMMON_CODES:
         problems.append(f'공통 종목이 {r.get("matched_codes")}개뿐 (대조 불가 수준)')
     for f in r.get("fields", {}).values():
+        if f.get("alert_exempt"):
+            continue                    # 어긋나는 것이 정상인 항목 (예: f_per — 사유는 상수 주석)
         ratio = f.get("match_ratio")
         if ratio is None:
             problems.append(f'{f["label"]}: 비교 가능한 종목이 없음')
