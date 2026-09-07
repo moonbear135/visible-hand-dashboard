@@ -132,54 +132,103 @@ def test_manner_constants_are_not_weakened():
     # 2026-09-08 오너 지시로 표본을 넓혔습니다(상세 20→100, 위즈리포트 20 신설).
     # 🔴 그래도 **현행 수집기가 이미 매일 하는 요청(종목당 2회 × 520 = 약 1,040건)의
     #    15% 수준**입니다. 이 상한을 더 올릴 때는 그 비율을 다시 따져 보세요(§0-3-2).
-    check(SH.MAX_REQUESTS_PER_RUN <= 200, "1회 실행 요청 상한 200건 이하",
+    # 2026-09-08 오너 결정으로 "좁게(200종목), 매일 전부"로 바꾸며 상한을 올렸습니다.
+    # 🔴 그래도 **현행 수집기가 이미 매일 하는 약 1,040요청의 41% 수준**입니다.
+    #    이 상한을 더 올릴 때는 그 비율을 다시 따져 보세요(§0-3-2).
+    check(SH.MAX_REQUESTS_PER_RUN <= 500, "1회 실행 요청 상한 500건 이하",
           f"({SH.MAX_REQUESTS_PER_RUN})")
     planned = SH.LIST_PAGE_COUNT + SH.DETAIL_SAMPLE_SIZE + SH.WISEREPORT_SAMPLE_SIZE
     check(planned <= SH.MAX_REQUESTS_PER_RUN, "계획된 요청 수가 상한 안",
           f"({planned} / {SH.MAX_REQUESTS_PER_RUN})")
-    check(SH.WISEREPORT_SAMPLE_SIZE <= 50, "위즈리포트도 표본만",
-          f"({SH.WISEREPORT_SAMPLE_SIZE})")
+    check(SH.SHADOW_UNIVERSE_SIZE <= SH.LIST_TARGET_COUNT / 2,
+          "섀도가 깊게 보는 범위는 전체의 절반 이하 (요청량 통제)",
+          f"({SH.SHADOW_UNIVERSE_SIZE} / {SH.LIST_TARGET_COUNT})")
     check(SH.LIST_PAGE_SIZE == 20, "pageSize 는 화면이 쓰는 20 그대로 (한도 탐색 금지)",
           f"({SH.LIST_PAGE_SIZE})")
     # 상세는 여전히 **전 종목이 아닙니다.** 520종목 중 100 → 매일 다른 구간을 돌아
     # 6일이면 한 바퀴입니다(§0-3-2 — 요청량은 낮게, 커버리지는 시간으로).
-    check(SH.DETAIL_SAMPLE_SIZE < SH.LIST_TARGET_COUNT / 4,
-          "상세는 전 종목이 아니라 표본만 (전체의 1/4 미만)",
-          f"({SH.DETAIL_SAMPLE_SIZE} / {SH.LIST_TARGET_COUNT})")
+    check(SH.DETAIL_SAMPLE_SIZE <= SH.SHADOW_UNIVERSE_SIZE,
+          "상세는 섀도 범위를 넘지 않음",
+          f"({SH.DETAIL_SAMPLE_SIZE} / {SH.SHADOW_UNIVERSE_SIZE})")
 
 
-def test_sample_rotates_so_coverage_grows_over_days():
+def test_shadow_looks_at_the_same_universe_every_day():
     """
-    ⚠️ **사보타주가 찾아낸 구멍**(2026-09-08). 회전이 이번 작업의 **핵심 목적**인데
-    아무 검사도 없었습니다 — 회전을 없애도 테스트가 전부 초록이었습니다.
+    🔴 2026-09-08 **오너 결정** — 회전 표본을 걷어내고 "좁게, 매일 전부"로 바꿨습니다.
 
-    회전이 없으면 매일 같은 100종목만 보게 되어 커버리지가 영원히 19% 에 멈춥니다.
-    (오너 지적: *"지금은 목록만 가지고 오는 거야? 전체는 아니잖아"*)
+    오너: *"데이터 오염을 잡는 게 어렵기 때문에 이것저것 계속 안전막을 막고 있는 건데,
+    지금 매일 100개씩 받는 걸로는 그걸 커버할 수가 없다고 생각해. 차라리 크롤링 종목을
+    시가총액 순위 200개로 해서 **전체적으로 매일 받으면서** 확인을 하는 게 맞아."*
+
+    **오염은 시계열로만 보입니다.** 회전은 그 시계열을 끊어서, "오늘 일치"만 알 뿐
+    어느 날 어긋났는지·왜 어긋났는지를 못 짚습니다. 폭을 줄이고 깊이를 택했습니다.
     """
+    check(SH.DETAIL_SAMPLE_SIZE == SH.SHADOW_UNIVERSE_SIZE,
+          "상세는 섀도 범위 전부를 봄 (표본 아님)",
+          f"({SH.DETAIL_SAMPLE_SIZE} / {SH.SHADOW_UNIVERSE_SIZE})")
+    check(SH.WISEREPORT_SAMPLE_SIZE == SH.SHADOW_UNIVERSE_SIZE,
+          "위즈리포트도 같은 범위 전부를 봄 — 한 종목의 재료를 같은 날 함께 봐야 함")
+
+    src = (REPO_ROOT / "run_naver_api_shadow.py").read_text(encoding="utf-8")
+    check("detail_codes = codes[:DETAIL_SAMPLE_SIZE]" in src,
+          "상세 대상이 회전이 아니라 '시총 상위 N' 고정")
+    check("rotating_sample(codes, DETAIL_SAMPLE_SIZE" not in src,
+          "상세에 회전을 쓰지 않음")
+    check("wise_codes = codes[:WISEREPORT_SAMPLE_SIZE]" in src,
+          "위즈리포트도 회전이 아님")
+
+    # 같은 종목을 매일 본다는 것이 핵심입니다 — 날짜가 달라도 대상이 같아야 합니다.
     codes = [f"{i:06d}" for i in range(520)]
+    check(codes[:SH.DETAIL_SAMPLE_SIZE] == codes[:SH.DETAIL_SAMPLE_SIZE],
+          "대상이 날짜에 의존하지 않음 (매일 같은 종목)")
 
-    # 같은 날이면 같은 표본 — 재현 가능해야 합니다
-    check(SH.rotating_sample(codes, 100, day=5) == SH.rotating_sample(codes, 100, day=5),
-          "같은 날 재실행하면 같은 표본 (재현 가능)")
+    # 목록은 여전히 전 범위 — 순위·집합 검증에 필요하고 26요청으로 쌉니다.
+    check(SH.LIST_TARGET_COUNT > SH.SHADOW_UNIVERSE_SIZE,
+          "목록은 섀도 범위보다 넓게 받아 순위·집합을 검증", 
+          f"({SH.LIST_TARGET_COUNT} > {SH.SHADOW_UNIVERSE_SIZE})")
 
-    # 날이 바뀌면 다른 표본
-    check(SH.rotating_sample(codes, 100, day=5) != SH.rotating_sample(codes, 100, day=6),
-          "날이 바뀌면 다른 구간을 봄")
 
-    # 며칠이면 전체를 덮어야 합니다
-    seen = set()
-    for day in range(520 // 100 + 1):
-        seen |= set(SH.rotating_sample(codes, 100, day=day))
-    check(len(seen) == 520, "6일이면 520종목 전부 한 바퀴", f"({len(seen)}/520)")
+def test_timing_is_recorded_start_to_finish():
+    """
+    🔴 2026-09-08 오너 요구: *"받아지는 시간까지 확인을 해야 하는 것도 지금 필요하니까,
+    크롤링 시작 종료 시간."*
 
-    # 상세 표본과 위즈리포트 표본이 같은 종목만 반복해 보지 않아야 합니다
-    d = set(SH.rotating_sample(codes, 100, day=3))
-    w = set(SH.rotating_sample(codes, 20, salt=7, day=3))
-    check(not w <= d, "위즈리포트 표본이 상세 표본에 완전히 묻히지 않음")
+    왜 필요한가: ① **이관 후 실전이 얼마나 걸릴지** 추정하려면 실측이 있어야 합니다
+    ② 수집이 길어져 **장 시작까지 걸치면** 백필 없는 수집기가 장중 가격을 종가로
+    저장하는 사고가 납니다 ③ **응답이 느려지는 것은 상대 서버 부하 신호**입니다(§0-3-2).
+    """
+    sess = SH.PoliteSession()
 
-    # 종목 수보다 표본이 크면 전체를 돌려줍니다(경계)
-    check(len(SH.rotating_sample(codes[:10], 100)) == 10, "표본이 종목 수보다 크면 전체")
-    check(SH.rotating_sample([], 100) == [], "빈 목록이면 빈 표본")
+    def fake_get(url, timeout=None):
+        if "wisereport" in url:
+            return _FakeResponse(payload=None, text="<html></html>")
+        if "/market/stock/default" in url:
+            start = int(url.split("startIdx=")[1].split("&")[0])
+            return _FakeResponse(payload=_list_payload() if start == 0 else [])
+        return _FakeResponse(payload=_detail_payload())
+
+    with mock.patch.object(sess.session, "get", fake_get), \
+         mock.patch.object(SH.time, "sleep", lambda *a, **kw: None):
+        out = SH.collect(sess)
+
+    t = out.get("timing", {})
+    check(out.get("started_at_kst"), "시작 시각을 기록")
+    check(t.get("ended_at_kst"), "종료 시각을 기록")
+    check(t.get("total_sec") is not None, "총 소요를 기록")
+    for stage in ("list_sec", "detail_sec", "wisereport_sec"):
+        check(stage in t, f"단계별 소요를 기록: {stage}")
+    check(t.get("requests") == sess.request_count, "요청 수가 맞음")
+    check("response_sec_median" in t, "응답 시간 중앙값을 기록")
+    check("waiting_sec" in t, "딜레이에 쓴 시간을 따로 기록 (매너 장치가 실제로 도는지)")
+
+    # 느려지면 경고, 정상이면 조용
+    check(not SH.check_timing({"response_sec_median": 0.3, "total_sec": 1000}),
+          "정상 속도에는 경고 없음")
+    w = SH.check_timing({"response_sec_median": 5.0, "response_sec_max": 9.0,
+                         "total_sec": 1000})
+    check(any("응답이 느립니다" in x for x in w), "느린 응답을 잡음", f"({w})")
+    w2 = SH.check_timing({"response_sec_median": 0.3, "total_sec": 7200})
+    check(any("걸칠 위험" in x for x in w2), "너무 오래 걸리면 잡음", f"({w2})")
 
 
 def test_wisereport_sample_is_actually_collected():
@@ -528,8 +577,80 @@ def test_pagination_warning_reaches_the_alert(tmp_path):
 
 
 # ─────────────────────────────────────────────────────────────────────────────
-# ③ KRX 고정 — NXT 는 어떤 경로로도 들어오지 못합니다
+# ②-3 🔴 "값이 같은가"를 넘어 — 정제까지 제대로 되는가 (2026-09-08 오너 지적)
 # ─────────────────────────────────────────────────────────────────────────────
+
+def test_rank_integrity_catches_a_wrong_order():
+    """
+    🔴 오너: *"크롤링해서 제대로 제 위치를 잡을 수 있을지 없을지도 봐야 할 것 아냐.
+       현재 국내주식은 위아래가 다 롤러코스터라서."*
+
+    실측(히스토리): 시총 순위가 하루 중앙값 2~3계단, **최대 70계단**까지 뜁니다.
+    받은 순서를 그냥 믿으면 안 되고, **직접 계산한 시총으로 다시 세워도 같은지** 봅니다.
+    """
+    good = [{"code": f"{i:06d}", "name": f"종목{i}",
+             "market_cap_api_truncated": (520 - i) * 1e11,
+             "price": 1000.0, "outstanding_shares": (520 - i) * 1e8}
+            for i in range(520)]
+    check(not SH.check_rank_integrity(good), "정상 순서에는 경고 없음")
+
+    # 순서가 뒤집힌 경우
+    swapped = list(good)
+    swapped[10], swapped[11] = swapped[11], swapped[10]
+    w = SH.check_rank_integrity(swapped)
+    check(any("내림차순이 아닙니다" in x for x in w), "뒤바뀐 순서를 잡음", f"({w})")
+
+    # 받은 순서와 '직접 계산한 시총' 순서가 어긋나는 경우 (진짜 위험한 쪽)
+    liar = [dict(r) for r in good]
+    liar[5]["outstanding_shares"] = 1e12          # 실제로는 1위여야 할 종목
+    w2 = SH.check_rank_integrity(liar)
+    check(any("재정렬하면" in x for x in w2), "직접 계산과 어긋나는 순위를 잡음", f"({w2})")
+
+
+def test_change_sync_catches_one_side_missing_an_update():
+    """
+    🔴 오너: *"매일 다른 종목 100개를 쌓으면, 그 사이사이에 데이터가 바뀌었을 때
+       바뀐 데이터를 정리하는 것까지 오류를 잡을 수 있겠어?"*
+
+    실측: `t_eps` 는 거의 매일 바뀝니다 — 실적 시즌엔 하루 **74종목**(2026-08-24).
+    실적이 반영되면 신 API 도 실전도 **함께** 바뀌어야 정상입니다.
+    한쪽만 바뀌면 갱신을 놓친 것인데, **값이 같은지만 봐서는 안 보입니다**
+    (바뀌기 전에는 둘 다 옛 값이라 '일치'로 나옵니다).
+    """
+    y = {f"{i:06d}": {"t_eps": 100.0, "t_roe": 10.0} for i in range(20)}
+    # 정상: 양쪽이 같은 종목에서 같이 바뀜
+    t = {c: dict(v) for c, v in y.items()}
+    p_y = {c: dict(v) for c, v in y.items()}
+    p_t = {c: dict(v) for c, v in y.items()}
+    for c in list(y)[:5]:
+        t[c]["t_eps"] = 200.0
+        p_t[c]["t_eps"] = 200.0
+    check(not SH.check_change_sync(t, y, p_t, p_y), "양쪽이 같이 바뀌면 조용함")
+
+    # 🔴 실전만 바뀌고 신 API 는 그대로 — 신 API 가 갱신을 놓친 경우
+    t2 = {c: dict(v) for c, v in y.items()}
+    w = SH.check_change_sync(t2, y, p_t, p_y)
+    check(any("바뀐 종목이 서로 다릅니다" in x for x in w), "한쪽만 바뀐 것을 잡음", f"({w})")
+    check(any("실전만 바뀜" in x for x in w), "어느 쪽이 놓쳤는지 짚어 줌")
+
+    # 어제 자료가 없으면 조용히 넘어가지 않고 사실을 남깁니다(§0-1)
+    check(any("확인하지 못했습니다" in x for x in SH.check_change_sync({}, {}, {}, {})),
+          "어제 자료가 없다는 사실을 기록")
+
+
+def test_universe_drift_tolerates_boundary_but_catches_a_real_gap():
+    """
+    국내 시장은 변동이 커서 매일 1~7종목이 상위 500위권을 드나듭니다(실측).
+    경계에서 몇 종목 어긋나는 것은 **정상**이지만, 크게 벌어지면 범위 설정이 틀린 것입니다.
+    """
+    prod = {f"{i:06d}" for i in range(520)}
+    near = {f"{i:06d}" for i in range(4, 524)}          # 앞뒤 4종목씩 차이 = 경계 흔들림
+    check(not SH.check_universe_drift(near, prod), "경계 흔들림(4종목)은 경고 없음")
+
+    far = {f"{i:06d}" for i in range(100, 620)}         # 100종목 차이
+    w = SH.check_universe_drift(far, prod)
+    check(w and "어긋납니다" in w[0], "크게 벌어지면 잡음", f"({w})")
+
 
 def test_all_urls_in_this_script_are_krx():
     check("codeType=KRX" in SH.DETAIL_URL, "상세 URL 이 codeType=KRX")

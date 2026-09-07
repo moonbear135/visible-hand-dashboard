@@ -72,7 +72,10 @@ KST = timezone(timedelta(hours=9))
 DELAY_MIN_SEC, DELAY_MAX_SEC = 2.0, 3.0
 TIMEOUT_SEC = 10
 CIRCUIT_CONSECUTIVE_FAILURES = 5
-MAX_REQUESTS_PER_RUN = 160         # 목록 26 + 상세 100 + 위즈리포트 20 + 여유
+MAX_REQUESTS_PER_RUN = 460         # 목록 26 + 상세 200 + 위즈리포트 200 + 여유
+# 📌 §0-3-2 — 하루 약 426요청, 순차, 2~3초 간격이라 **약 18분**입니다.
+#    현행 수집기가 이미 매일 하는 약 1,040요청에 **41% 를 더하는** 수준입니다.
+#    ⏳ **한시적**입니다 — 이관이 끝나면 이 워크플로우째 정리하세요.
 LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
 LIST_TARGET_COUNT = 520            # 🔴 현행과 동일한 범위: 상위 500 + 히스테리시스 버퍼 20.
 #    2026-09-08 실측 — 500 만 받으면 실전 520 중 21종목이 빠져 "안 맞는다"는 착시가 납니다.
@@ -91,8 +94,26 @@ LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
 #    실측 확인(오너, 2026-09-08): `startIdx=1&pageSize=20` → 첫 종목 **하나금융지주**(21위).
 #    ⚠️ 겉보기엔 정상이었습니다 — 첫 페이지가 맞았고, 전체가 시총 내림차순이기도 했습니다.
 #       그래서 아래 `check_pagination_continuity()` 로 **코드가 스스로 잡게** 했습니다.
-DETAIL_SAMPLE_SIZE = 100           # 상세는 전 종목이 아니라 표본만 (상대 서버 배려)
-WISEREPORT_SAMPLE_SIZE = 20        # Forward ROE·EV/EBITDA 검증용 표본
+# 🔴 2026-09-08 **오너 결정 — 회전 표본을 걷어내고 "좁게, 매일 전부"로 바꿉니다.**
+#
+#    오너: *"데이터 오염을 잡는 게 어렵기 때문에 이것저것 계속 안전막을 막고 있는 건데,
+#           지금 매일 100개씩 받는 걸로는 그걸 커버할 수가 없다고 생각해.
+#           차라리 크롤링 종목을 시가총액 순위 200개로 해서 **전체적으로 매일 받으면서**
+#           확인을 하는 게 맞아."*
+#
+#    왜 회전이 부족했나 (실측 근거):
+#      · `t_eps` 는 거의 매일 바뀝니다 — 실적 시즌 하루 **74종목**, 평소 6~21종목.
+#      · 시총 순위는 하루 중앙값 2~3계단, **최대 70계단**. 매일 1~7종목이 500위권을 드나듭니다.
+#      → 회전은 "오늘 일치"만 알려줄 뿐, **어느 날 어긋났는지·왜 어긋났는지**를 못 짚습니다.
+#        오염은 시계열로만 보이는데 회전은 그 시계열을 끊습니다.
+#
+#    → **폭을 줄이고 깊이를 택합니다.** 시총 상위 200종목을 **매일 전부** 봅니다.
+#      201위 아래는 이 섀도가 보지 않습니다(알고 두는 공백 — §0-1).
+#      목록(520종목)은 26요청으로 싸므로 **전 범위를 계속 받습니다** —
+#      순위 정합·종목 집합 검증에 필요합니다.
+SHADOW_UNIVERSE_SIZE = 200         # 섀도가 **매일 전부** 깊게 보는 범위 (시총 상위 N)
+DETAIL_SAMPLE_SIZE = SHADOW_UNIVERSE_SIZE       # 상세 — 회전 없음, 매일 전부
+WISEREPORT_SAMPLE_SIZE = SHADOW_UNIVERSE_SIZE   # Forward ROE·EV/EBITDA — 매일 전부
 
 # 🔴 표본은 **매일 다른 구간**을 돕니다 (2026-09-08 오너 지시 "표본 확대 + 회전").
 #    왜: 3회차까지 상세 검증률이 4%(20/520), Forward ROE 는 0% 였습니다. `f_pegy` 의
@@ -191,9 +212,12 @@ class PoliteSession:
         self.request_count += 1
 
         entry = {"url": url, "at": datetime.now(KST).isoformat(timespec="seconds")}
+        started = time.monotonic()
         try:
             res = self.session.get(url, timeout=TIMEOUT_SEC)
+            entry["elapsed_sec"] = round(time.monotonic() - started, 3)
         except requests.RequestException as e:
+            entry["elapsed_sec"] = round(time.monotonic() - started, 3)
             self.consecutive_failures += 1
             entry.update(ok=False, error=f"요청 예외: {type(e).__name__}")
             self.log.append(entry)
@@ -300,6 +324,148 @@ def check_pagination_continuity(rows, page_boundaries) -> list[str]:
     return warnings
 
 
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 "값이 같은가"를 넘어 — **정제까지 제대로 되는가** (2026-09-08 오너 지적)
+#
+#   오너 ①: *"매일 다른 종목 100개를 쌓으면, 그 사이사이에 데이터가 바뀌었을 때
+#            바뀐 데이터를 정리하는 것까지 오류를 잡을 수 있겠어?"*
+#   오너 ②: *"우리가 데이터 정제까지도 중요한데 크롤링해서 제대로 제 위치를 잡을 수 있을지
+#            없을지도 봐야 할 것 아냐. 현재 국내주식은 위아래가 다 롤러코스터라서."*
+#
+#   실측(2026-08~09 히스토리):
+#     · `t_eps` 는 **거의 매일** 바뀝니다 — 실적 시즌엔 하루 **74종목**, 평소 6~21종목.
+#     · 시총 순위는 하루 중앙값 2~3계단, **최대 70계단**까지 뜁니다.
+#     · **매일 1~7종목이 500위권에 새로 들어옵니다.**
+#
+#   → "오늘 값이 같은가"만 보면 **언제 어긋났는지도, 왜 어긋났는지도** 알 수 없습니다.
+#     아래 세 검사가 그 공백을 메웁니다.
+# ─────────────────────────────────────────────────────────────────────────────
+
+RANK_TOLERANCE = 0                 # 순위는 한 칸도 어긋나면 안 됩니다(오늘 실측 0/520)
+CHANGE_SYNC_MIN_OVERLAP = 0.8      # 값이 바뀐 종목 집합의 최소 일치율
+
+
+# 응답이 이보다 느려지면 상대 서버가 힘들어하고 있다는 신호로 봅니다(§0-3-2).
+RESPONSE_SLOW_SEC = 3.0
+# 수집이 이보다 길어지면 다음 장 시작까지 걸칠 위험이 있습니다.
+TOTAL_TOO_LONG_MIN = 90
+
+
+def check_timing(timing: dict) -> list[str]:
+    """**시간이 정상 범위인가** (2026-09-08 오너 요구)."""
+    if not timing:
+        return []
+    warnings = []
+    median = timing.get("response_sec_median")
+    if median is not None and median >= RESPONSE_SLOW_SEC:
+        warnings.append(
+            f"🔴 응답이 느립니다 — 중앙값 {median}초(최대 {timing.get('response_sec_max')}초). "
+            "상대 서버가 힘들어하는 신호일 수 있습니다(§0-3-2). 요청을 늘리지 마세요."
+        )
+    total = timing.get("total_sec")
+    if total is not None and total / 60 >= TOTAL_TOO_LONG_MIN:
+        warnings.append(
+            f"🔴 수집이 {total / 60:.0f}분 걸렸습니다 — 장 시작까지 걸칠 위험이 있습니다."
+        )
+    return warnings
+
+
+def check_rank_integrity(rows) -> list[str]:
+    """**① 제 위치를 잡았는가** — 받은 순서가 실제 시가총액 순서와 같은가.
+
+    현행은 코스피·코스닥을 따로 받아 합친 뒤 **직접 재정렬**합니다
+    (`collector_kospi200._rank_candidates_by_market_cap` — 구 순위 페이지에 시총 숫자
+    컬럼이 없기 때문). 신 API 는 통합 정렬된 순서를 `marketSum` 과 함께 주므로,
+    **그 순서를 믿어도 되는지**를 매일 확인합니다.
+    """
+    warnings = []
+    caps = [(r.get("code"), r.get("name"),
+             r.get("market_cap_api_truncated") or 0,
+             (r.get("price") or 0) * (r.get("outstanding_shares") or 0)) for r in rows]
+    if len(caps) < 2:
+        return warnings
+
+    desc = [i for i in range(len(caps) - 1) if caps[i][2] and caps[i + 1][2]
+            and caps[i][2] < caps[i + 1][2]]
+    if desc:
+        warnings.append(
+            f"🔴 받은 순서가 시가총액 내림차순이 아닙니다({len(desc)}곳) — "
+            f"예: {caps[desc[0]][1]} → {caps[desc[0] + 1][1]}"
+        )
+
+    # 직접 계산(현재가 × 상장주식수)으로 다시 세워도 같은 순서여야 합니다.
+    order = {c[0]: i for i, c in enumerate(caps)}
+    recomputed = sorted(caps, key=lambda c: -c[3])
+    moved = [(c[1], order[c[0]], j) for j, c in enumerate(recomputed)
+             if abs(order[c[0]] - j) > RANK_TOLERANCE]
+    if moved:
+        worst = max(moved, key=lambda m: abs(m[1] - m[2]))
+        warnings.append(
+            f"🟡 직접 계산한 시총으로 재정렬하면 {len(moved)}종목의 순위가 달라집니다 — "
+            f"최대 {worst[0]}: {worst[1] + 1}위 → {worst[2] + 1}위. "
+            "받은 순서를 그대로 쓰면 '제 위치'가 아닐 수 있습니다."
+        )
+    return warnings
+
+
+def check_change_sync(today_rows, yesterday_rows, prod_today, prod_yesterday) -> list[str]:
+    """**② 값이 바뀔 때 양쪽이 같이 바뀌는가.**
+
+    실적이 발표되면 `t_eps` 가 바뀝니다. 그때 **신 API 도 실전도 함께** 바뀌어야 정상입니다.
+    한쪽만 바뀌면 둘 중 하나가 갱신을 놓친 것이고, **그건 값이 같은지만 봐서는 안 보입니다**
+    (바뀌기 전에는 둘 다 옛 값이라 '일치'로 나옵니다).
+
+    어제 자료가 없으면 **조용히 넘어가지 않고** 그 사실을 남깁니다(§0-1).
+    """
+    if not yesterday_rows or not prod_yesterday:
+        return ["🟡 어제 자료가 없어 변경 동조를 확인하지 못했습니다(첫 실행이면 정상)"]
+
+    warnings = []
+    for key, label in (("t_eps", "Trailing EPS"), ("t_roe", "ROE")):
+        shadow_changed = {c for c in today_rows
+                          if c in yesterday_rows
+                          and _f(today_rows[c].get(key)) is not None
+                          and _f(yesterday_rows[c].get(key)) is not None
+                          and _f(today_rows[c].get(key)) != _f(yesterday_rows[c].get(key))}
+        prod_changed = {c for c in prod_today
+                        if c in prod_yesterday
+                        and _f(prod_today[c].get(key)) is not None
+                        and _f(prod_yesterday[c].get(key)) is not None
+                        and _f(prod_today[c].get(key)) != _f(prod_yesterday[c].get(key))}
+        union = shadow_changed | prod_changed
+        if not union:
+            continue
+        overlap = len(shadow_changed & prod_changed) / len(union)
+        if overlap < CHANGE_SYNC_MIN_OVERLAP:
+            only_shadow = sorted(shadow_changed - prod_changed)[:5]
+            only_prod = sorted(prod_changed - shadow_changed)[:5]
+            warnings.append(
+                f"🔴 {label} 가 바뀐 종목이 서로 다릅니다 (일치율 {overlap * 100:.0f}%) — "
+                f"신 API 만 바뀜 {len(shadow_changed - prod_changed)}종목{only_shadow}, "
+                f"실전만 바뀜 {len(prod_changed - shadow_changed)}종목{only_prod}. "
+                "한쪽이 갱신을 놓쳤을 수 있습니다."
+            )
+    return warnings
+
+
+def check_universe_drift(shadow_codes, prod_codes) -> list[str]:
+    """**③ 같은 종목 집합을 잡는가.**
+
+    국내 시장은 변동이 커서 매일 1~7종목이 상위 500위권을 드나듭니다(실측).
+    경계에서 몇 종목 어긋나는 것은 **정상**이지만, 크게 벌어지면 범위 설정이 틀린 것입니다.
+    """
+    a, b = set(shadow_codes), set(prod_codes)
+    if not a or not b:
+        return ["🟡 종목 집합 비교에 필요한 자료가 없습니다"]
+    only_a, only_b = a - b, b - a
+    drift = max(len(only_a), len(only_b)) / max(len(b), 1)
+    if drift > 0.05:                      # 5% 넘게 벌어지면 경계 흔들림이 아님
+        return [f"🔴 종목 집합이 {drift * 100:.0f}% 어긋납니다 — "
+                f"섀도에만 {len(only_a)}종목, 실전에만 {len(only_b)}종목. "
+                "수집 범위나 시장 필터가 다를 수 있습니다."]
+    return []
+
+
 def rotating_sample(codes, size, *, salt=0, day=None):
     """오늘 볼 표본을 고릅니다 — **날짜로 결정되는 회전**.
 
@@ -322,8 +488,12 @@ def rotating_sample(codes, size, *, salt=0, day=None):
 
 def collect(sess: PoliteSession) -> dict:
     """목록 전체 + 상세 표본. 실패도 **같은 스키마로** 기록합니다(빼지 않습니다)."""
+    started_at = datetime.now(KST)
+    stage_started = time.monotonic()
     result = {
-        "collected_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
+        "collected_at_kst": started_at.isoformat(timespec="seconds"),
+        "started_at_kst": started_at.isoformat(timespec="seconds"),
+        "timing": {},
         "list_rows": [], "list_raw_sample": [], "detail": {}, "detail_raw_sample": {},
         "wisereport": {}, "detail_sample_codes": [], "wisereport_sample_codes": [],
         "errors": [], "stopped_reason": None,
@@ -356,12 +526,17 @@ def collect(sess: PoliteSession) -> dict:
     # 🔴 페이지를 잘못 넘겼는지 **코드가 직접 확인**합니다(2026-09-08 신설, 위 주석 참고).
     result["pagination_warnings"] = check_pagination_continuity(
         result["list_rows"], page_boundaries)
-    result["errors"].extend(result["pagination_warnings"])
+    # 🔴 "제 위치를 잡았는가" — 받은 순서가 실제 시총 순서와 같은지(오너 지적 ②).
+    result["rank_warnings"] = check_rank_integrity(result["list_rows"])
+    result["errors"].extend(result["pagination_warnings"] + result["rank_warnings"])
 
+    result["timing"]["list_sec"] = round(time.monotonic() - stage_started, 1)
+    stage_started = time.monotonic()
     codes = [r["code"] for r in result["list_rows"]]
 
-    # ── 2) 상세 표본 (추정PER·추정EPS·BPS) ──────────────────────────────────
-    detail_codes = rotating_sample(codes, DETAIL_SAMPLE_SIZE)
+    # ── 2) 상세: 시총 상위 200종목 **전부, 매일** (회전 없음 — 오너 결정) ────
+    detail_codes = codes[:DETAIL_SAMPLE_SIZE]
+    result["universe_size"] = SHADOW_UNIVERSE_SIZE
     result["detail_sample_codes"] = detail_codes
     try:
         for i, code in enumerate(detail_codes):
@@ -380,10 +555,14 @@ def collect(sess: PoliteSession) -> dict:
         result["stopped_reason"] = str(e)
         return result
 
+    result["timing"]["detail_sec"] = round(time.monotonic() - stage_started, 1)
+    stage_started = time.monotonic()
+
     # ── 3) 위즈리포트 표본 (Forward ROE·EV/EBITDA) ──────────────────────────
     #    🔴 3회차까지 이 두 값의 검증률이 **0%** 였습니다 — `f_pegy` 의 재료인데도요.
-    #    `salt` 로 상세 표본과 어긋내 같은 종목만 반복해 보지 않게 합니다.
-    wise_codes = rotating_sample(codes, WISEREPORT_SAMPLE_SIZE, salt=7)
+    #    상세와 **같은 200종목**을 봅니다 — 한 종목의 모든 재료를 같은 날 함께 봐야
+    #    "이 종목에서 무엇이 어긋났는가"를 한 줄로 읽을 수 있습니다.
+    wise_codes = codes[:WISEREPORT_SAMPLE_SIZE]
     result["wisereport_sample_codes"] = wise_codes
     try:
         for i, code in enumerate(wise_codes):
@@ -398,6 +577,36 @@ def collect(sess: PoliteSession) -> dict:
     except (CircuitOpen, BlockedByServer) as e:
         result["stopped_reason"] = str(e)
 
+    result["timing"]["wisereport_sec"] = round(time.monotonic() - stage_started, 1)
+    _finish_timing(result, started_at, sess)
+    return result
+
+
+def _finish_timing(result, started_at, sess):
+    """🔴 **크롤링 시작·종료 시각과 소요를 남깁니다** (2026-09-08 오너 요구).
+
+    왜 필요한가:
+      ① **이관 후 실전이 얼마나 걸릴지** 추정하려면 실측이 있어야 합니다
+         (현행 `scrape.yml` 은 500종목에 20~30분).
+      ② **장중에 걸치는지** 확인 — 수집이 길어져 다음 장 시작까지 가면
+         백필 없는 수집기가 장중 가격을 종가로 저장하는 사고가 납니다.
+      ③ **상대 서버가 느려지는지** 감지 — 응답이 느려지는 것은 부하 신호입니다(§0-3-2).
+    """
+    ended_at = datetime.now(KST)
+    elapsed = [e["elapsed_sec"] for e in sess.log if e.get("elapsed_sec") is not None]
+    t = result["timing"]
+    t["ended_at_kst"] = ended_at.isoformat(timespec="seconds")
+    t["total_sec"] = round((ended_at - started_at).total_seconds(), 1)
+    t["requests"] = len(sess.log)
+    if elapsed:
+        ordered = sorted(elapsed)
+        t["response_sec_median"] = round(ordered[len(ordered) // 2], 3)
+        t["response_sec_max"] = round(ordered[-1], 3)
+        t["response_sec_total"] = round(sum(elapsed), 1)
+        slowest = max(sess.log, key=lambda e: e.get("elapsed_sec") or 0)
+        t["slowest_url"] = slowest.get("url", "")[-80:]
+    # 대기(딜레이)에 쓴 시간 = 전체 − 실제 응답 대기. 매너 장치가 실제로 도는지 확인용.
+    t["waiting_sec"] = round(t["total_sec"] - t.get("response_sec_total", 0), 1)
     return result
 
 
@@ -443,11 +652,37 @@ def _f(v):
         return None
 
 
-def compare_with_production(shadow: dict) -> dict:
+def _previous_shadow(today_path):
+    """어제(또는 그 이전) 섀도 파일. 없으면 None — 조용히 넘기지 않고 호출부가 기록합니다."""
+    files = sorted(f for f in SHADOW_DIR.glob("*_shadow.json") if f != today_path)
+    if not files:
+        return None
+    try:
+        return json.loads(files[-1].read_text(encoding="utf-8"))
+    except (ValueError, OSError):
+        return None
+
+
+def _production_history_by_date():
+    """실전 히스토리 CSV 를 날짜별로. **읽기만** 합니다."""
+    path = REPO_ROOT / "data" / "kospi200_stock_history.csv"
+    if not path.is_file():
+        return {}
+    import csv
+    by_date = {}
+    with path.open(encoding="utf-8-sig") as f:
+        for row in csv.DictReader(f):
+            d, c = row.get("date"), row.get("code")
+            if d and c:
+                by_date.setdefault(d, {})[c] = row
+    return by_date
+
+
+def compare_with_production(shadow: dict, *, today_path=None) -> dict:
     """실전 스냅샷을 **읽기만** 합니다. 쓰지 않습니다."""
     out = {"compared_at_kst": datetime.now(KST).isoformat(timespec="seconds"),
            "fields": {}, "matched_codes": 0, "shadow_only": 0, "production_only": 0,
-           "note": ""}
+           "integrity_warnings": [], "note": ""}
     if not PRODUCTION_SNAPSHOT.is_file():
         out["note"] = "실전 스냅샷이 없어 대조하지 못했습니다."
         return out
@@ -496,6 +731,19 @@ def compare_with_production(shadow: dict) -> dict:
             "worst": worst[:10],
             "alert_exempt": skey in ALERT_EXEMPT_FIELDS,
         }
+
+    # ── 🔴 "값이 같은가"를 넘어선 검사 (2026-09-08 오너 지적) ─────────────────
+    out["timing"] = shadow.get("timing", {})
+    out["integrity_warnings"] = list(shadow.get("rank_warnings", []))
+    out["integrity_warnings"] += check_timing(shadow.get("timing", {}))
+    out["integrity_warnings"] += check_universe_drift(shad.keys(), prod.keys())
+
+    prev = _previous_shadow(today_path)
+    hist = _production_history_by_date()
+    prev_rows = {r["code"]: r for r in prev.get("list_rows", [])} if prev else {}
+    prev_date = sorted(hist)[-2] if len(hist) >= 2 else None
+    out["integrity_warnings"] += check_change_sync(
+        shad, prev_rows, prod, hist.get(prev_date, {}) if prev_date else {})
     return out
 
 
@@ -530,6 +778,9 @@ def build_alert_message() -> str:
                 problems.append(w.replace("🔴 ", "").replace("🟡 ", ""))
         except (ValueError, OSError):
             pass
+    for w in r.get("integrity_warnings", [])[:3]:
+        if w.startswith("🔴"):                 # 🟡 는 참고용 — 알림까지 울리지 않습니다
+            problems.append(w.replace("🔴 ", ""))
     if r.get("matched_codes", 0) < ALERT_MIN_COMMON_CODES:
         problems.append(f'공통 종목이 {r.get("matched_codes")}개뿐 (대조 불가 수준)')
     for f in r.get("fields", {}).values():
@@ -629,10 +880,18 @@ def main() -> int:
         shadow["request_count"] = getattr(sess, "request_count", 0)
         json.dump(shadow, _assert_shadow_path(raw_path).open("w", encoding="utf-8"),
                   ensure_ascii=False, indent=1)
+        t = shadow.get("timing", {})
         print(f"💾 {raw_path.name} 저장 — 요청 {shadow['request_count']}건, "
               f"종목 {len(shadow['list_rows'])}개")
+        if t:
+            print(f"⏱️  {shadow.get('started_at_kst','?')[11:]} → {t.get('ended_at_kst','?')[11:]} "
+                  f"(총 {t.get('total_sec',0)/60:.1f}분)")
+            print(f"    목록 {t.get('list_sec',0):.0f}초 · 상세 {t.get('detail_sec',0):.0f}초 · "
+                  f"위즈리포트 {t.get('wisereport_sec',0):.0f}초")
+            print(f"    응답 중앙값 {t.get('response_sec_median','?')}초 / "
+                  f"최대 {t.get('response_sec_max','?')}초 / 대기 {t.get('waiting_sec',0)/60:.1f}분")
 
-    report = compare_with_production(shadow)
+    report = compare_with_production(shadow, today_path=raw_path)
     report_path = _assert_shadow_path(SHADOW_DIR / "latest_compare.json")
     json.dump(report, report_path.open("w", encoding="utf-8"), ensure_ascii=False, indent=1)
 
