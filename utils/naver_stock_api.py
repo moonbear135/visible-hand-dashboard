@@ -321,6 +321,11 @@ def parse_market_list_row(row: dict, *, market_label: str) -> dict:
         "api_asset_total_eok": _num(row.get("propertyTotal")),
         "api_debt_total_eok": _num(row.get("debtTotal")),
         "api_security_type": _text(row.get("type")),
+        # 🔴 시장 구분(실측: "0" = 코스피). **필터로 쓰지 않고 참고 보관만** 합니다 —
+        #    종목 선별 판정은 `kr_ticker_master.json` 한 곳에서만 합니다(§0-3-10).
+        #    2026-09-08 섀도가 잡은 것: `marketType=ALL` 은 **코넥스(KONEX)까지** 줍니다.
+        #    현행은 코스피(`sosok=0`)+코스닥(`sosok=1`)만 수집하므로 코넥스는 범위 밖입니다.
+        "api_sosok": _text(row.get("sosok")),
         "api_trade_stop": _text(row.get("tradeStopYn")),
         "api_market_alert": _text(row.get("marketAlertType")),
         "api_market_status": _text(row.get("marketStatus")),

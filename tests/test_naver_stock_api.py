@@ -198,6 +198,25 @@ def test_detail_pbr_is_computed_from_bps():
 # 3. 과거 사고 재발 방지 — 부호 보존 · 미수집/무배당 구분
 # ─────────────────────────────────────────────────────────────────────────────
 
+def test_market_and_type_fields_are_kept_for_reference_only():
+    """
+    🔴 2026-09-08 — 종목 선별 판정은 `kr_ticker_master.json` **한 곳**에서만 합니다(§0-3-10).
+    신 API 의 `type`(ST/RT/IF/DR/MF)과 `sosok`(시장 구분)은 **참고 보관만** 합니다.
+
+    두 판정이 생기면 어긋나는 순간 종목이 조용히 사라집니다 —
+    실제로 어긋납니다(FDR: 리츠를 STOCK ↔ 네이버: RT).
+
+    다만 **보관은 해야 합니다.** 이 필드들이 없었으면 섀도 3회차에서
+    코넥스(KONEX) 혼입을 발견하지 못했을 것입니다.
+    """
+    row = parse_market_list_row(market_list()[0], market_label="KOSPI")
+    check(row.get("api_security_type") == "ST", "종목 유형이 참고용으로 보관됨")
+    check("api_sosok" in row, "시장 구분(sosok)이 참고용으로 보관됨")
+    src = (REPO_ROOT / "utils" / "naver_stock_api.py").read_text(encoding="utf-8")
+    for banned in ('if _text(row.get("type")) != "ST"', 'sosok") != "0"', 'continue  # ETF'):
+        check(banned not in src, f"파서가 종목을 거르지 않음: {banned}")
+
+
 def test_negative_values_keep_their_sign():
     """2차 감사 1-1 — 적자 기업의 마이너스 부호를 절대 버리지 않습니다."""
     rows = {r["code"]: r for r in parse_market_list(market_list(),
