@@ -1698,6 +1698,11 @@ NEW_API_REQUIRED_MARKET_STATUS = "CLOSE"
 # 코스닥 글로벌 세그먼트는 구 경로에서 코스닥 페이지(sosok=1)에 실려 "KOSDAQ" 으로 저장돼 왔습니다
 # (2026-09-07 스냅샷 실측: KOSDAQ 188 = 코스닥 143 + 코스닥글로벌 45).
 NEW_API_MARKET_LABELS = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "KOSDAQ GLOBAL": "KOSDAQ"}
+# 🔴 상장주식수 출처 라벨 (2026-09-08 신설 — 전환 후 첫 실전 실행 사고, 작업지시서 §11).
+#    "이 시가총액이 무엇으로 계산됐는가"를 나중에 알 수 있어야 하므로(§0-1) 후보 dict 의
+#    `outstanding_shares_source` 와 스냅샷 metadata.outstanding_shares_source 에 이 값이 실립니다.
+SHARES_SOURCE_NAVER_LIST = "naver_new_api_list"   # 신 API 목록 응답의 listedStockCnt (현재가와 **같은 응답**)
+SHARES_SOURCE_FDR = "fdr_krx_listing"             # FinanceDataReader StockListing('KRX') — 구 경로의 1차 출처
 
 
 def _fetch_market_list_new_api():
@@ -1727,6 +1732,7 @@ def _fetch_market_list_new_api():
     seen_codes = set()
     status_counts = {}
     skipped = {"not_stock": 0, "market_out_of_scope": 0, "parse": 0}
+    parser_notes = 0        # 종목은 유지된 채 남은 파서 메모 수(배당 모순 등) — `skipped` 와 섞지 않습니다
     for page in range(NEW_API_LIST_MAX_PAGES):
         url = build_list_url(page)                  # NXT 면 여기서 예외
         try:
@@ -1745,12 +1751,19 @@ def _fetch_market_list_new_api():
             rows = parse_market_list(payload, source_url=url, market_label="UNKNOWN")
         except NaverApiSourceError as e:
             raise RuntimeError(f"신 API 시가총액 목록 {page}페이지 파싱 거부: {e}") from e
+        # 🔴 2026-09-08 정정 — "목록에서 실제로 빠진 종목 수"는 (받은 행 − 파싱된 행)입니다.
+        #    예전엔 아래 `errors` 메모 수를 세어 `parse` 로 찍었는데, 그 메모에는 **종목은 그대로 살아 있는**
+        #    배당 모순 기록(`_resolve_dps`, §0-1 — 값을 확정하지 않았다는 사실의 기록)까지 섞여 있어,
+        #    첫 실전 실행 로그가 "parse 49 건 빠짐"으로 읽혔습니다(실제로 빠진 종목은 0). 사실과 다른 숫자는
+        #    사실이 아닌 값을 적는 것과 같으므로 두 수를 따로 셉니다.
+        skipped["parse"] += len(payload) - len(rows)
 
         for row in rows:
             for note in row.get("errors", []):
-                # 파서가 깨진 행을 건너뛰며 남긴 사유 — 조용히 사라지면 §0-1 위반이라 로그에 남깁니다.
+                # 파서가 남긴 메모 — 깨져서 건너뛴 행의 사유(`[i] …`)와, 값을 확정하지 않은 사유(배당 모순 등).
+                # 조용히 사라지면 §0-1 위반이라 로그에 남깁니다.
                 print(f"⚠️ 신 API 목록 {page}페이지: {note}")
-                skipped["parse"] += 1
+                parser_notes += 1
             code = row["code"]
             status_counts[row.get("api_market_status")] = status_counts.get(row.get("api_market_status"), 0) + 1
             if code in seen_codes:
@@ -1774,6 +1787,12 @@ def _fetch_market_list_new_api():
                 "t_per": row["t_per"],               # 파서가 0 → None 처리(구 경로와 같은 규칙)
                 "t_roe": row["t_roe"],
                 "market": market_label,
+                # 🔴 2026-09-08 — 상장주식수는 **이 응답이 이미 줍니다**(listedStockCnt, 섀도 3회차 516종목
+                #    FDR 대비 100% 일치). 받아 놓고 안 쓰고 FDR 에 다시 물어보다 404 로 수집 전체가 죽은 것이
+                #    전환 후 첫 실전 실행 사고입니다. `_rank_candidates_by_market_cap` 이 이 값을 1차로 씁니다.
+                #    없으면(None) 그대로 None — 지어내지 않고 FDR 폴백에 맡깁니다(§0-1).
+                "outstanding_shares": row.get("outstanding_shares"),
+                "outstanding_shares_source": SHARES_SOURCE_NAVER_LIST if row.get("outstanding_shares") else None,
                 # 종가 검증용(아래). 스냅샷에는 실리지 않습니다(enrich 가 명시한 키만 씀).
                 "api_market_status": row.get("api_market_status"),
             })
@@ -1794,7 +1813,8 @@ def _fetch_market_list_new_api():
         print(f"⚠️ 신 API 목록: 적격 후보 {len(candidates)}개(목표 {NEW_API_LIST_TARGET_CANDIDATES}) "
               f"— 페이지 {NEW_API_LIST_MAX_PAGES}개 안에서 다 못 채웠습니다.")
     print(f"Successfully retrieved {len(candidates)} real candidates via new API "
-          f"(KRX, marketStatus={NEW_API_REQUIRED_MARKET_STATUS}; skipped {skipped}).")
+          f"(KRX, marketStatus={NEW_API_REQUIRED_MARKET_STATUS}; skipped {skipped}; "
+          f"파서 메모 {parser_notes}건 — 종목은 유지됨, 위 ⚠️ 줄 참고).")
     # 구 경로와 같은 반환 형태. 실패 페이지는 위에서 전부 중단 사유로 승격했으므로 항상 빈 목록입니다.
     return candidates, []
 
@@ -1818,18 +1838,42 @@ def _rank_candidates_by_market_cap(candidates, shares_lookup):
     회차 통합 순위 계산에서 제외합니다 — 값을 지어내지 않습니다(§0-1). 종목 상세 수집 자체가
     막히는 게 아니라, 이번엔 그 종목만 통합 순위표에서 빠질 뿐입니다.
 
+    🔴 2026-09-08 — 상장주식수 **우선순위**(전환 후 첫 실전 실행 사고의 조치):
+      ① 후보 dict 가 이미 가진 `outstanding_shares` (신 경로: 목록 API 응답의 `listedStockCnt`)
+      ② `shares_lookup` (FinanceDataReader) — ①이 없을 때만
+    왜 ①이 먼저인가:
+      · §2-3-1 "재료는 받는 것이지 만드는 것이 아니다" — 출처가 **현재가와 같은 응답**에 상장주식수를
+        실어 줍니다. 같은 시점·같은 출처의 두 값을 곱하는 것이 시가총액의 정의에 가장 가깝고, 받은
+        재료를 두고 다른 곳에 다시 물어볼 이유가 없습니다.
+      · 검증됨 — 섀도 관찰(2026-09-08 07:59)이 실전 스냅샷(FDR 기반)과 대조해 516종목 100% 일치
+        (`NAVER_MIGRATION_WORK_ORDER.md` §7-8). 즉 두 출처는 같은 값이고, 차이는 "누가 살아 있느냐"뿐.
+      · §0-3-2 — FDR 요청이 없어도 되는 날은 요청하지 않습니다(호출부 `_prepare_shares_lookup`).
+      · 2026-09-08 17:40 실전: 신 API 는 659종목을 완벽히 줬는데 FDR 404 하나로 659종목 전부가
+        "상장주식수 없음"으로 제외돼 수집이 죽었습니다. 받아 놓은 값을 쓰면 FDR 이 죽어도 삽니다.
+    구 경로 후보 dict 에는 ①이 없으므로 예전과 똑같이 ②만 씁니다 — 동작 불변.
+    어느 쪽을 썼는지는 각 후보의 `outstanding_shares_source` 에 남기고(§0-1), 호출부가 metadata 로 집계합니다.
+
     candidates: fetch_kospi200_real_market_data()가 반환한, 아직 시장별 순서인 리스트.
-    shares_lookup: _load_outstanding_shares_lookup()의 반환값({코드: 상장주식수}).
-    반환: market_cap 내림차순으로 정렬된 새 리스트(각 dict에 "market_cap" 필드 추가).
+    shares_lookup: _load_outstanding_shares_lookup()의 반환값({코드: 상장주식수}). 빈 dict 여도 됩니다.
+    반환: market_cap 내림차순으로 정렬된 새 리스트(각 dict에 "market_cap"·"outstanding_shares"·
+          "outstanding_shares_source" 필드 채움).
     """
     ranked = []
     missing_shares = []
     for c in candidates:
-        shares = shares_lookup.get(c["code"])
+        own = c.get("outstanding_shares")
+        if own and own > 0:
+            shares = own                                   # ① 출처가 준 값
+            source = c.get("outstanding_shares_source") or SHARES_SOURCE_NAVER_LIST
+        else:
+            shares = shares_lookup.get(c["code"])          # ② FDR 폴백(구 경로의 유일한 출처)
+            source = SHARES_SOURCE_FDR
         if not shares or shares <= 0:
             missing_shares.append(c["code"])
             continue
         c["market_cap"] = c["price"] * shares
+        c["outstanding_shares"] = shares
+        c["outstanding_shares_source"] = source
         ranked.append(c)
 
     if missing_shares:
@@ -1839,6 +1883,49 @@ def _rank_candidates_by_market_cap(candidates, shares_lookup):
 
     ranked.sort(key=lambda c: c["market_cap"], reverse=True)
     return ranked
+
+
+def _prepare_shares_lookup(candidates):
+    """
+    통합 순위 계산용 FinanceDataReader lookup 을 **필요할 때만** 조회합니다 (2026-09-08 신설).
+
+    규칙 하나: 후보 중 상장주식수(`outstanding_shares`)가 없는 종목이 **하나라도 있으면** FDR 을 조회하고,
+    전부 있으면 조회하지 않습니다. 출처를 따로 분기하지 않습니다 —
+      · 구 경로 후보에는 그 값이 없으므로 예전처럼 **항상** FDR 을 조회합니다(동작 불변).
+      · 신 경로 후보는 목록 응답이 상장주식수를 주므로 평소엔 FDR 요청 0회(§0-3-2). 일부 종목에 값이
+        없는 날만 폴백으로 조회합니다 — 폴백을 지우지 않는 이유는 그날을 위해서입니다.
+    FDR 404 는 여기서 고치지 않습니다(`_load_outstanding_shares_lookup` 이 빈 dict 를 돌려주고, 후보가
+    자기 값을 가진 종목은 그대로 순위에 들어갑니다).
+
+    반환: (lookup dict, fdr_attempted) — 조회했는지 여부는 metadata 에 남깁니다(§0-1).
+    """
+    missing = [c["code"] for c in candidates if not ((c.get("outstanding_shares") or 0) > 0)]
+    if not missing:
+        print(f"  [상장주식수] 후보 {len(candidates)}개 전부 목록 응답에 상장주식수가 있어 "
+              "FinanceDataReader 를 조회하지 않습니다(§0-3-2).")
+        return {}, False
+    if len(missing) < len(candidates):
+        preview = ", ".join(missing[:10]) + (f" 외 {len(missing) - 10}개" if len(missing) > 10 else "")
+        print(f"  [상장주식수] 목록 응답에 상장주식수가 없는 후보 {len(missing)}개 → FinanceDataReader 폴백 조회: {preview}")
+    return _load_outstanding_shares_lookup(), True
+
+
+def _summarize_shares_sources(ranked, candidate_count, fdr_attempted, fdr_lookup_count):
+    """
+    스냅샷 metadata.outstanding_shares_source 블록 — "이 시가총액이 무엇으로 계산됐는가"의 기록(§0-1).
+    `ranked` 각 후보의 `outstanding_shares_source`(위 `_rank_candidates_by_market_cap` 이 채움)를 셉니다.
+    """
+    counts = {}
+    for c in ranked:
+        src = c.get("outstanding_shares_source")
+        counts[src] = counts.get(src, 0) + 1
+    return {
+        "priority": [SHARES_SOURCE_NAVER_LIST, SHARES_SOURCE_FDR],   # 앞이 먼저 (근거: _rank_candidates_by_market_cap)
+        "counts": counts,
+        "excluded_missing_count": candidate_count - len(ranked),   # 상장주식수를 어디서도 못 찾아 순위에서 빠진 수
+        "fdr_attempted": bool(fdr_attempted),
+        "fdr_lookup_count": int(fdr_lookup_count),
+    }
 
 
 def _load_previously_tracked_codes(json_path):
@@ -2169,7 +2256,8 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None, naver_source=None):
     use_new_api = naver_source == NAVER_SOURCE_NEW_API
     enriched_stocks = []
 
-    # 상장주식수 1차 출처: FinanceDataReader 구조화 데이터 (한 번만 조회, 종목별 재조회 안 함)
+    # 상장주식수 1차 출처: 호출부가 넘긴 lookup(순위 계산에 쓴 값). 단독 호출이면 FinanceDataReader 를
+    # 한 번만 조회(종목별 재조회 안 함) — 구 경로 하위 호환.
     outstanding_shares_lookup = shares_lookup if shares_lookup is not None else _load_outstanding_shares_lookup()
 
     common_roe_lookup = _build_common_roe_lookup(stocks_raw)
@@ -2205,17 +2293,22 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None, naver_source=None):
         real_dps = item["dps"]
         outstanding_shares = item["outstanding_shares"]
 
-        # 상장주식수 최종 판정: FDR 구조화 데이터(1차, 컬럼 명확) 우선,
-        # 네이버 텍스트 파싱 값(2차, 이미 자체 sanity check 통과)은 백업으로만 사용.
-        # 두 출처 모두 실패/미달이면 지어내지 않고 None 처리 (guardrail 이 최종 차단).
+        # 상장주식수 최종 판정: `shares_lookup`(1차) 우선, 종목 상세에서 받은 값(2차, 이미 자체 sanity
+        # check 통과)은 백업으로만 사용. 두 출처 모두 실패/미달이면 지어내지 않고 None 처리 (guardrail 이 최종 차단).
+        # 🔴 2026-09-08 — 1차 lookup 의 정체: run_kospi200_collector() 가 **순위 계산에 실제로 쓴 값**입니다
+        #    (구 경로 = FDR, 신 경로 = 목록 API listedStockCnt·FDR 폴백). 그래서 FDR 이 통째로 404 인 날에도
+        #    신 경로는 여기서 값을 잃지 않습니다: lookup 이 비어 있으면(단독 호출 등) 아래 elif 가 종목 상세의
+        #    listedStockCnt 를 그대로 살립니다 — 조용히 None 이 되는 길은 "둘 다 없을 때"뿐입니다.
         fdr_shares = outstanding_shares_lookup.get(code)
         if fdr_shares and fdr_shares >= MIN_OUTSTANDING_SHARES:
             outstanding_shares = fdr_shares
         elif outstanding_shares and outstanding_shares >= MIN_OUTSTANDING_SHARES:
-            pass  # 네이버 파싱 값 유지 (fetch_naver_item_dps_and_eps 에서 이미 검증됨)
+            pass  # 종목 상세 값 유지 (구 경로: fetch_naver_item_dps_and_eps 에서 이미 검증됨 / 신 경로: 응답값)
         else:
             if outstanding_shares:
-                data_issues.append(f"상장주식수 파싱 오류 의심 (네이버={outstanding_shares}, FDR={fdr_shares})")
+                # 라벨은 실제 1차 출처를 따릅니다 — 신 경로에서 "FDR" 이라고 적으면 거짓 기록이 됩니다(§0-1).
+                lookup_label = "순위계산 lookup(목록API·FDR폴백)" if use_new_api else "FDR"
+                data_issues.append(f"상장주식수 파싱 오류 의심 (네이버={outstanding_shares}, {lookup_label}={fdr_shares})")
             outstanding_shares = None
 
         t_pbr = item["t_pbr"]
@@ -2800,13 +2893,22 @@ def run_kospi200_collector():
         raise RuntimeError("코스피+코스닥 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
 
     # 2026-08-26 신설 — 아직 "시장별" 순서로만 합쳐진 candidates를 실제 시가총액(현재가×
-    # 상장주식수)으로 다시 정렬해 진짜 통합 순위를 만듭니다. 상장주식수 조회는 여기서 딱 한 번만
-    # 하고(enrich_quant_metrics에도 그대로 넘겨써서 중복 조회 안 함), 코스피+코스닥 전체를
-    # 커버하는 FinanceDataReader 구조화 데이터를 씁니다(_load_outstanding_shares_lookup 참고).
-    shares_lookup = _load_outstanding_shares_lookup()
-    candidates = _rank_candidates_by_market_cap(candidates, shares_lookup)
+    # 상장주식수)으로 다시 정렬해 진짜 통합 순위를 만듭니다.
+    # 🔴 2026-09-08 — 상장주식수는 후보가 가진 값(신 API 목록 listedStockCnt)이 1차, FinanceDataReader 는
+    #    그 값이 없는 후보가 있을 때만 조회하는 폴백입니다(_prepare_shares_lookup·_rank_candidates_by_market_cap
+    #    주석에 우선순위 근거). 구 경로는 후보에 그 값이 없어 예전처럼 항상 FDR 을 조회합니다.
+    candidate_count = len(candidates)
+    fdr_lookup, fdr_attempted = _prepare_shares_lookup(candidates)
+    candidates = _rank_candidates_by_market_cap(candidates, fdr_lookup)
     if not candidates:
         raise RuntimeError("상장주식수 매칭 실패로 통합 순위를 계산할 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)")
+    shares_source_report = _summarize_shares_sources(candidates, candidate_count, fdr_attempted, len(fdr_lookup))
+    print(f"  [상장주식수 출처] {shares_source_report['counts']} / 미확보 제외 {shares_source_report['excluded_missing_count']}개"
+          f" / FDR 조회 {'함' if fdr_attempted else '안 함'}({len(fdr_lookup)}건)")
+    # enrich 에는 순위 계산에 **실제로 쓴** 상장주식수({코드: 값})를 넘깁니다 — 순위의 market_cap 과 종목별
+    # outstanding_shares 가 같은 숫자여야 하기 때문입니다(§0-3-10). 구 경로에서는 이 dict 가 FDR lookup 의
+    # 부분집합(순위에 든 종목만)이고 enrich 는 그 종목만 조회하므로 예전과 같은 값을 봅니다.
+    shares_lookup = {c["code"]: c["outstanding_shares"] for c in candidates}
 
     # 히스테리시스 버퍼 적용: 진입 500위 / 이탈 575위. 화면 노출은 여전히 상위 500개만이고,
     # 501~575위 버퍼 구간 종목은 어제도 추적 중이었을 때만 "화면 비노출로 계속 수집"됩니다.
@@ -2860,6 +2962,10 @@ def run_kospi200_collector():
             #    실패했는지를 그대로 남깁니다. 갱신 실패를 로그에만 남기면 화면을 보는 사람은
             #    아무것도 모릅니다(§0-1) — 화면(pegy_page)은 이 블록을 읽어 관리자 배너를 띄웁니다.
             "ticker_master": ticker_master_status(),
+            # 🔴 2026-09-08: 순위(market_cap)의 상장주식수가 **어느 출처**였는지(§0-1). 전환 후 첫 실전
+            #    실행에서 FDR 404 로 죽은 뒤 "목록 API 값 1차 / FDR 폴백"으로 바꿨으므로, 이 블록이
+            #    없으면 나중에 이 시가총액이 무엇으로 계산됐는지 아무도 알 수 없습니다.
+            "outstanding_shares_source": shares_source_report,
             "total_count": total_count,
             "valid_count": len(valid_stocks),
             "valid_ratio": round(valid_ratio, 3),

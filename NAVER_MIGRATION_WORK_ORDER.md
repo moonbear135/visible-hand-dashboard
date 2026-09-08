@@ -1831,6 +1831,104 @@ RuntimeError: 코스피+코스닥 시가총액 목록 스크래핑 실패 — �
   납니다(상장 목록은 대부분의 날 안 바뀜) — 그래서 끼우지 않았습니다.
 - `TASK_HISTORY.md`·`PROJECT_STATUS.md` 는 건드리지 않았습니다(오너 지시).
 
+## 11. 🔴 전환 후 첫 실전 실행 — FDR 404 로 죽음 → "받아 놓은 상장주식수를 쓴다" (2026-09-08, #224)
+
+### 11-1. 무슨 일이 있었나 (실제 로그, 2026-09-08 17:40 GitHub Actions, `NAVER_SOURCE=new_api`)
+
+```
+🔀 네이버 출처: new_api — 신 네이버 증권 JSON API (stock.naver.com)
+Successfully retrieved 659 real candidates via new API (KRX, marketStatus=CLOSE; skipped {'not_stock': 0, 'market_out_of_scope': 1, 'parse': 49}).
+⚠️ [상장주식수 구조화 조회 실패] HTTP Error 404: Not Found
+⚠️ 상장주식수를 찾지 못해 통합 순위 계산에서 제외된 종목 659개: 005930, 000660, 005935, 402340, ... 외 639개
+RuntimeError: 상장주식수 매칭 실패로 통합 순위를 계산할 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)
+```
+
+- 🟢 **신 API 는 완벽히 성공** — 659종목, 전 종목 `marketStatus=CLOSE`(§1-5-11 종가 검증 통과), 페이지 실패 0.
+- 🔴 죽은 곳은 신 API 가 아니라 **그 뒤의 FinanceDataReader** — `_load_outstanding_shares_lookup()` 이 §10-4 와 같은
+  `StockListing('KRX')` 404 로 빈 dict 를 돌려주자, `_rank_candidates_by_market_cap()` 이 659종목 **전부**를
+  "상장주식수 없음"으로 제외 → 0개 → 중단(기존 스냅샷은 유지됨, §0-1 의 "실패는 드러난다"는 지켜짐).
+- 🔴 핵심: 신 API 목록 응답은 `listedStockCnt`(상장주식수)를 **이미 주고 있었고**, `parse_market_list_row()` 가
+  `outstanding_shares` 로 담아 돌려주고 있었습니다. 그런데 `_fetch_market_list_new_api()` 가 후보 dict 를 만들 때
+  그 값을 **버리고** FDR 에 다시 물어봤습니다. 받아 놓은 재료를 두고 다른 데 다시 물어보다 죽은 것입니다.
+- 그 값은 검증돼 있었습니다 — 섀도 2·3회차(§7-8)가 실전 스냅샷(FDR 기반)과 대조해 **상장주식수 499/516종목 100% 일치,
+  불일치 0**.
+
+### 11-2. 조치 — 상장주식수 우선순위를 명시적으로 정함
+
+| 순위 | 출처 | 언제 쓰나 |
+|---|---|---|
+| ① | 후보 dict 의 `outstanding_shares` — 신 API **목록** 응답의 `listedStockCnt` | 값이 있으면 항상 |
+| ② | FinanceDataReader `StockListing('KRX')` (`_load_outstanding_shares_lookup`) | ①이 없는 후보가 **하나라도** 있을 때만 조회 |
+| — | 둘 다 없음 | 그 종목만 순위에서 제외(지어내지 않음), 수는 metadata 에 |
+
+**왜 ①이 먼저인가** (코드 주석 `_rank_candidates_by_market_cap` 에도 같은 근거):
+- §2-3-1 *"재료는 받는 것이지 만드는 것이 아니다"* — 출처가 **현재가와 같은 응답**에 상장주식수를 실어 줍니다. 같은
+  시점·같은 출처의 두 값을 곱하는 것이 시가총액의 정의에 가장 가깝고, 받은 재료를 두고 다른 곳(FDR = FinanceData 의
+  GitHub 캐시 CSV, §10-4)에 다시 물어볼 이유가 없습니다.
+- 두 출처는 같은 값입니다(위 100% 일치). 차이는 "그날 누가 살아 있느냐"뿐이고, 목록 API 는 어차피 현재가 때문에
+  반드시 살아 있어야 하는 출처입니다.
+- §0-3-2 — 평소엔 FDR 요청이 **0회**가 됩니다(예전엔 매일 1회). 요청을 늘리지 않고 줄였습니다.
+- FDR 폴백은 **지우지 않았습니다** — 구 경로(후보에 값이 없어 예전처럼 항상 FDR)와, 신 경로에서 일부 종목에 값이
+  없는 날을 위해 남깁니다. FDR 404 자체는 §10-4 그대로 미해결이며 여기서 고치지 않았습니다.
+
+고친 곳(전부 `collector_kospi200.py`):
+- `_fetch_market_list_new_api()` — 후보 dict 에 `outstanding_shares`·`outstanding_shares_source` 를 싣습니다.
+- `_rank_candidates_by_market_cap()` — ① → ② 순서로 찾고, 쓴 출처를 각 후보에 남깁니다. 구 경로 후보에는 ①이 없어
+  동작이 그대로입니다(기존 4개 순위 테스트 무수정 통과).
+- `_prepare_shares_lookup()` 신설 — "값 없는 후보가 있을 때만 FDR" 규칙 한 곳. 출처로 분기하지 않고 후보 내용으로만
+  판단하므로 구 경로는 저절로 예전과 같이 항상 FDR 을 부릅니다.
+- `_summarize_shares_sources()` 신설 → 스냅샷 **`metadata.outstanding_shares_source`** (§0-1 — 이 시가총액이 무엇으로
+  계산됐는지의 기록): `priority` / `counts`(출처별 종목 수) / `excluded_missing_count` / `fdr_attempted` /
+  `fdr_lookup_count`. 로그에도 `[상장주식수 출처] …` 한 줄.
+- `enrich_quant_metrics()` 에는 순위 계산에 **실제로 쓴** `{코드: 상장주식수}` 를 넘깁니다 — 순위의 `market_cap` 과
+  종목별 `outstanding_shares` 가 같은 숫자여야 하기 때문(§0-3-10). 구 경로에서는 이것이 FDR lookup 의 부분집합
+  (순위에 든 종목만)이고 enrich 는 그 종목만 조회하므로 보는 값이 예전과 같습니다(특성화 테스트 무수정 통과).
+- `enrich_quant_metrics()` 의 상장주식수 교차판정(FDR 우선 → 종목 상세 값 백업)은 **로직 무수정**. 읽어 보니 lookup 이
+  비면 `elif` 가 종목 상세의 `listedStockCnt` 를 그대로 살리므로 신 경로에서 값이 조용히 버려지지 않습니다 — 그래도
+  테스트로 못 박았습니다. 의심 기록 문구의 라벨만 신 경로에서 "FDR" 대신 실제 1차 출처를 말하게 했습니다(구 경로
+  문구는 한 글자도 안 바뀜 — 테스트가 문자열째 고정).
+
+### 11-3. `skipped {'parse': 49}` 의 정체 — **빠진 종목은 0 이었습니다** (코드로 판정, 실제 응답은 못 봤음)
+
+- 예전 코드는 파서가 행마다 남기는 `errors` **메모 수**를 `parse` 로 셌습니다. 그런데 그 메모에는 두 종류가 섞여 있습니다:
+  ⓐ 깨져서 **건너뛴** 행의 사유(`[i] …`, `parse_market_list`) / ⓑ **종목은 그대로 두고** 값만 확정하지 않은 기록 —
+  바로 로그에 수십 줄 찍힌 `모순: 주당배당금 0.0 인데 배당수익률 X% — 확정하지 않고 미수집으로 둡니다`(`_resolve_dps`).
+- 산술 근거: 목록은 페이지당 20행이고 적격 후보 640 을 채우면 멈춥니다. 후보 659 + 범위 밖 1 = **660 = 33페이지 × 20**,
+  즉 받은 행이 **전부** 파싱됐습니다. 49 는 ⓑ(배당 모순 메모 49건)이고, "659 + 49 + 1 = 709" 라는 셈은 성립하지 않습니다.
+- ⓑ는 §0-1 의 의도된 동작입니다 — `dividend: "0"` 인데 `dividendRate` 가 있으면 둘 중 하나가 틀린 것이므로 무배당으로
+  확정하지 않고 미수집으로 둡니다(§1-5-10 실측 근거). 그대로 둡니다.
+- 정정: `parse` 는 이제 **(받은 행 − 파싱된 행)** 으로 셉니다(실제로 빠진 종목 수). 메모는 `파서 메모 N건 — 종목은 유지됨`
+  으로 따로 찍습니다. 사실과 다른 숫자를 찍는 것은 사실이 아닌 값을 적는 것과 같습니다(§0-1).
+- ⚠️ **확인 못 한 것**: 그날의 실제 응답 660행을 보지 못했습니다(네트워크 차단). 위 판정은 코드 경로와 산술로만 한 것이며,
+  다음 실전 로그의 `skipped {…'parse': 0}; 파서 메모 49건` 으로 확인해야 합니다. 배당 모순 49종목이 실제로 어떤
+  종목인지도 로그 ⚠️ 줄로만 알 수 있습니다.
+
+### 11-4. 검증
+
+- 기준선(작업 전, 깨끗한 worktree): **2,556 passed / 77 skipped / 0 failed**.
+- 새 테스트 `tests/test_outstanding_shares_source.py` 11건 — 🔴 **사고 재현**(신 경로 + FDR `HTTPError 404`, 픽스처
+  10종목 → 수집이 끝까지 성공하고 `market_cap = 현재가 × listedStockCnt`, FDR 호출 **0회**, metadata 출처 기록),
+  일부 종목만 값 없음 + FDR 404(그 종목만 제외·metadata 에 `excluded_missing_count: 1`), 폴백이 살아 있는 날(FDR 값
+  사용·라벨 FDR), 우선순위 단위 검사(후보 값 > lookup, 0 은 값 아님), FDR 필요할 때만 조회, **구 경로 불변**(FDR 1회·
+  FDR 값으로 시가총액·enrich 가 같은 값을 봄·FDR 비면 예전처럼 중단), 구 목록 파서에 `outstanding_shares` 없음 고정,
+  수집기가 헬퍼 한 곳만 거침, enrich 가 lookup 비어도 상세 값 유지, 의심 라벨, `parse` 카운터.
+  전부 `tmp_path` 에만 쓰고 네트워크는 가짜입니다.
+- 사보타주 8종 — ① 순위가 후보 값 무시(FDR 만) ② FDR 항상 조회 ③ 후보 dict 에서 상장주식수 누락 ④ metadata 블록 제거
+  ⑤ `parse` 카운터 예전대로 ⑥ enrich 가 lookup 비면 상세 값 버림 ⑦ 우선순위 뒤집기(FDR 먼저) ⑧ enrich 에 해석 전
+  FDR lookup 전달 — **8종 전부 잡힘**(teardown ERROR 포함해 전체 출력으로 확인), 원복 후 파일 바이트 동일 확인.
+- 작업 후 전체: **2,570 passed / 77 skipped / 0 failed** (+11 새 테스트, +3 suite_integrity 의 파일별 자동 검사).
+- `data/` 는 작업 전후 `git status` 에서 변경 없음.
+
+### 11-5. 하지 않은 것 / 확신이 없는 것 (§0-1)
+
+- FDR 404 원인·재시도·대체 출처 — §10-4 그대로 미해결. 이번 조치는 "FDR 이 죽어도 신 경로는 산다"까지입니다.
+- 신 경로에서 **종목별** `outstanding_shares`(enrich 출력)의 출처는 스냅샷에 종목 단위로는 적지 않았습니다 — enrich 출력
+  키를 늘리면 특성화 기준선(구 경로 byte 동일)이 깨져 오너 승인 사항이 됩니다. 순위 단위 집계(metadata)까지만 했습니다.
+  실제 값은 순위 계산에 쓴 lookup 과 같은 숫자입니다.
+- 화면(`/kr`)에 `outstanding_shares_source` 를 띄우지는 않았습니다 — metadata 에 있으니 필요하면 배너로 올릴 수 있습니다.
+- 실제 응답으로 §11-3 을 확인하지 못했습니다(위).
+- `TASK_HISTORY.md`·`PROJECT_STATUS.md` 는 건드리지 않았습니다(오너 지시).
+
 ## 5. 하지 않은 것 (§0-1)
 
 - **구 URL 이 실제로 죽는지 확인하지 못했습니다.** 세션의 웹 접근이 차단(`SITE_BLOCKED`)돼
