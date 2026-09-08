@@ -97,6 +97,7 @@
 | `web/auth*.py`·`layout.py`·`state.py`·`blocking.py`·`components/`·개인정보·보안 | `web-security` |
 | `.github/workflows/*`·`crawl_ready_gate.py`·`run_*.py`·스케줄 | `automation-ops` |
 | `tests/*`·코드리뷰·전체 재감사 | `test-audit` |
+| 외부 출처 재고 `DATA_SOURCES_INVENTORY.md`·새 바깥 주소·새 패키지·출처 종료/404·대체재 조사 | `data-sources` |
 
 > 표에 없는 새 모듈을 만든다면 **담당 에이전트도 같이 만듭니다** —
 > `AGENT_ORCHESTRATION.md` §2-6. 잊으면 `tests/test_agent_registry.py` 가 빨간불을 냅니다.

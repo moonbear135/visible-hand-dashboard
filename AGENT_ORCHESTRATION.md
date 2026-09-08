@@ -154,10 +154,11 @@ scrape_us.yml  "Daily US Stocks Scraper"   cron 20:35 + 21:35 UTC (평일, 서�
    │ (/scorecard)   (/report)     (/duel)     (/admin/macro)         │
    └───────────────────────────────┬─────────────────────────────────┘
                                    │  (모두 아래 4개에 의존)
-   ┌───────────────────────── 공통 기반 4 ───────────────────────────┐
+   ┌──────────────────────── 공통 기반 4 + 1 ─────────────────────────┐
    │                                                                 │
    │  data-foundation   web-security   automation-ops   test-audit   │
    │   데이터·저장·검증   인증·개인정보   워크플로우·배치   테스트·감사  │
+   │  data-sources  — 외부 출처 재고·건강·대체재 (2026-09-08 신설)     │
    └─────────────────────────────────────────────────────────────────┘
 ```
 
@@ -177,6 +178,7 @@ scrape_us.yml  "Daily US Stocks Scraper"   cron 20:35 + 21:35 UTC (평일, 서�
 | `web-security` | 인증·개인정보·화면 기반 | `web/auth.py`, `auth_ui.py`, `layout.py`, `state.py`, `blocking.py`, `theme.py`, `static_html.py`, `ads.py`, `components/*`, `web/pages/admin_page.py`, `privacy_page.py`, `landing_page.py`, `main.py` |
 | `automation-ops` | 자동화·스케줄·운영 | `.github/workflows/*` (전체 조망), `crawl_ready_gate.py`, `Dockerfile`, `requirements.txt`, `.devcontainer/`, `cloudflare_worker.js` |
 | `test-audit` | 테스트·코드리뷰·감사 | `tests/*`, `AUDIT_*.md`, `SPAGHETTI_AUDIT_*.md`, 전체 코드리뷰 |
+| `data-sources` | 외부 데이터 출처 재고·건강·대체재 (2026-09-08 신설) | `DATA_SOURCES_INVENTORY.md`, `tests/test_data_sources_inventory.py`, `ENGINEERING_SPEC.md` §0-3-2 호스트 표 |
 
 ---
 

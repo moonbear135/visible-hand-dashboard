@@ -341,8 +341,37 @@ if kospi_close is None:
   비공개 API 무단 호출 등)은 금지합니다.
 - 차단(403/429, IP 차단 등)되면 **재시도를 무한 반복하지 말고** 실패로 기록하고 중단합니다
   (§0-1 원칙과 동일하게, 조용히 우회 시도하지 않음).
-- **지금 이 프로젝트가 네트워크로 접속하는 대상과 각각의 매너 장치** (예시일 뿐입니다 — 새
-  외부 의존성을 추가할 때마다 이 목록도 같이 늘리세요):
+- 🗂️ **2026-09-08 — 이 목록은 더 이상 "예시"가 아닙니다.** 그날 외부 출처 두 곳이 동시에 무너졌는데
+  하나(FinanceDataReader)는 아래 목록에 **아예 없었고**, 훑어 보니 빠진 것이 최소 다섯 종류 더
+  있었습니다(코스피 지수·환율·수급 페이지, FDR 뒤의 네이버 차트·KRX·FinanceData 깃허브 캐시·Yahoo,
+  미국 유니버스의 개인 깃허브 저장소, DART·KRX OPEN API, Gemini, PyPI, Render 핑). **전체 재고·하위
+  영향·폴백·관리 주체는 `DATA_SOURCES_INVENTORY.md`** 에 있고 소유 에이전트는 `data-sources` 입니다.
+  `tests/test_data_sources_inventory.py` 가 **코드 속 모든 바깥 주소가 그 문서에 있는지, 그리고 "요청"으로
+  분류된 호스트가 이 절 본문에도 있는지** 검사합니다 — 새 출처를 붙이면 두 문서를 같이 고쳐야 초록불입니다.
+  아래 표가 **호스트 기준 전체 목록**이고, 그 아래 글머리는 매너 장치의 상세입니다.
+
+  | 호스트 | 무엇 | 부르는 곳 | 매너 장치 | 관리 주체 |
+  |---|---|---|---|---|
+  | `stock.naver.com` | 코스피·코스닥 목록·상세 JSON(신 출처) | `collector_kospi200.py` | 2~3초 순차 · 403/429 즉시 중단 · 서킷 · NXT 차단 | 네이버 |
+  | `finance.naver.com` | 전 종목 종가(구 순위 페이지, 🔴 2026-09-08 0건) · 코스피 지수 · 환율 · 수급(매크로) · ETF 목록(FDR 뒤) | `collector_kospi200.py`, `scrape_daily.py`, `utils/db.py` | 2~3초 슬립, 페이지 실패는 건너뜀, 둘 다 실패면 파일 미생성 | 네이버 |
+  | `fchart.stock.naver.com` | 종목 일별 시계열 — **FinanceDataReader `DataReader()` 뒤** | `collector_indicator_kr.py`(500/일), `collector_kospi200.py` 변동성(520/일) | 우리가 바깥에서 0.5초·2~3초 간격. 라이브러리 자체는 UA 없이 보냄 | 네이버 |
+  | `navercomp.wisereport.co.kr` | EV/EBITDA·ROE·Forward ROE·목표주가 | `collector_kospi200.py` | 종목당 1회 · 서킷 브레이커 | 운영사 미확인 |
+  | `data.krx.co.kr` → `raw.githubusercontent.com`(FinanceData 캐시) | 상장종목 마스터 — **FinanceDataReader `StockListing('KRX')` 뒤** | `collector_kospi200.py` | 1회/일 · 실패 시 파일 안 씀(문지기) · 재시도 없음 | KRX + 👤 FinanceData 오픈소스 |
+  | `query2.finance.yahoo.com` | 코스피 지수·환율 1차값 — **FDR `DataReader('^KS11')` 뒤** | `scrape_daily.py` | 2회/일 | Yahoo(비공식) |
+  | `opendart.fss.or.kr` | DART OPEN API(배당·공시·고유번호) | `collector_dividend_*.py`, `corp_code_mapper.py` | 2~3초 슬립 · 요청 예산 · 키/한도/점검 status 즉시 중단 | 금융감독원(공식) |
+  | `data-dbg.krx.co.kr` | KRX OPEN API(VKOSPI·선물) | `utils/krx_openapi.py` | ≤10회/일 · 4xx 재시도 없음 | 한국거래소(공식) |
+  | `stockanalysis.com` | 미국 펀더멘털·스크리너·지수 | `collector_us_stocks.py`, `collector_us_indices.py` | 2~3초 슬립 · 차단 시 즉시 중단·스냅샷 유지 | Stock Analysis(비공식 내부 엔드포인트) |
+  | `raw.githubusercontent.com` (Ate329) | 미국 유니버스 CSV | `collector_us_stocks.py` | 1회/일 · 700행 미만이면 중단 | 👤 개인 저장소 |
+  | `raw.githubusercontent.com` (우리 저장소) | 웹앱이 `data/*.json` 읽음 | `utils/data_source.py` | ETag · TTL 600초 · 백오프 60초 · 로컬 사본 폴백 | GitHub + 우리 |
+  | `generativelanguage.googleapis.com` | Gemini — **google-genai SDK 뒤** | `utils/macro_ai.py`, `indicator_ai.py`, `scorecard_ocr.py` | 지표별 2/5초 슬립 · 종목+날짜 캐시 · 사용자당 15회/일 | Google |
+  | `www.googleapis.com` | Google Drive 백업(패키지 미설치로 Actions 에선 사실상 안 돎) | `utils/gdrive_helper.py` | 1회/일 | Google |
+  | `api.github.com` | 워크플로우 이력 조회·dispatch | `watch_schedule_health.yml`, `cloudflare_worker.js` | 하루 수 회 | GitHub |
+  | `visiblehand.co.kr` | 우리 배포처(Render) 핑 | `render_keep_awake.yml` | 10분 간격 — **정리 대상** | Render + 우리 |
+  | `pypi.org` · `files.pythonhosted.org` | `pip install`(모든 워크플로우 매 실행) | 워크플로우 전부 | 버전 대부분 미고정 | PSF |
+  | (시크릿) Supabase · Discord | DB/Auth · 알림 | `utils/*_db.py`, 워크플로우 | 불필요한 폴링 금지 | Supabase · Discord |
+
+- **각각의 매너 장치 상세** (새 외부 의존성을 추가할 때마다 위 표와 여기, 그리고 `DATA_SOURCES_INVENTORY.md` 를
+  같이 늘리세요 — 테스트가 강제합니다):
   - **네이버 증권**(크롤링) — `collector_kospi200.py`의 정중한 슬립(위 기준).
   - **네이버 신 증권 API `stock.naver.com`**(JSON, 2026-09-07 추가 — 구 서비스 9/10 종료 대비)
     — `run_naver_api_shadow.py`. 같은 2.0~3.0초 슬립 + **순차 요청만** + 1회 실행
