@@ -72,15 +72,19 @@ KST = timezone(timedelta(hours=9))
 DELAY_MIN_SEC, DELAY_MAX_SEC = 2.0, 3.0
 TIMEOUT_SEC = 10
 CIRCUIT_CONSECUTIVE_FAILURES = 5
-MAX_REQUESTS_PER_RUN = 460         # 목록 26 + 상세 200 + 위즈리포트 200 + 여유
-# 📌 §0-3-2 — 하루 약 426요청, 순차, 2~3초 간격이라 **약 18분**입니다.
-#    현행 수집기가 이미 매일 하는 약 1,040요청에 **41% 를 더하는** 수준입니다.
-#    ⏳ **한시적**입니다 — 이관이 끝나면 이 워크플로우째 정리하세요.
+MAX_REQUESTS_PER_RUN = 1100        # 목록 26 + 상세 520 + 위즈리포트 520 + 여유
+# 📌 §0-3-2 — 하루 약 1,066요청, 순차, 2~3초 간격이라 **약 45분**입니다.
+#    현행 수집기가 이미 매일 하는 약 1,040요청과 **비슷한 양**이므로,
+#    상대 서버가 받는 총량은 그날 **약 2배**가 됩니다.
+#    🔴 그래도 이렇게 하는 이유(오너 판단): 이관 후 실제로 돌릴 조건을 **그대로 시험**해야
+#    "준비를 다 해본" 것이 됩니다. 상위 200 만 보면 추정치 갱신의 **1/3을 놓칩니다**(실측).
+#    ⏳ **반드시 한시적입니다** — 이관이 끝나거나 관찰이 더 필요 없어지면
+#    **워크플로우째 지우세요.** 이 양을 계속 보내는 것은 §0-3-2 위반입니다.
 LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
 LIST_TARGET_COUNT = 520            # 🔴 현행과 동일한 범위: 상위 500 + 히스테리시스 버퍼 20.
 #    2026-09-08 실측 — 500 만 받으면 실전 520 중 21종목이 빠져 "안 맞는다"는 착시가 납니다.
 #    (실전 시총 상위 490 까지는 500 수집으로도 100% 일치했습니다. 순수한 경계 문제였습니다.)
-LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
+LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 26 페이지
 
 # 🔴 2026-09-08 정정 (섀도 1회차에서 실제로 겪은 오류).
 #    `startIdx` 는 **항목 오프셋이 아니라 페이지 인덱스**입니다.
@@ -111,7 +115,15 @@ LIST_PAGE_COUNT = LIST_TARGET_COUNT // LIST_PAGE_SIZE   # = 25 페이지
 #      201위 아래는 이 섀도가 보지 않습니다(알고 두는 공백 — §0-1).
 #      목록(520종목)은 26요청으로 싸므로 **전 범위를 계속 받습니다** —
 #      순위 정합·종목 집합 검증에 필요합니다.
-SHADOW_UNIVERSE_SIZE = 200         # 섀도가 **매일 전부** 깊게 보는 범위 (시총 상위 N)
+# 🔴 2026-09-08 재조정 — **520종목 전부**로 올립니다.
+#    오너 ①: *"언제 어떻게 애널리스트들이 정보를 업데이트할지 모르니까 500개의 종목을
+#            매일매일 받으면서 차라리 데이터를 누적하는 게 크롤링의 목적이야."*
+#    오너 ②(위즈리포트에 대해): *"테스트용으로 지켜보기 위해서면 100종목만 보는 게 맞는데,
+#            앞으로 준비를 다 해보기 위해서는 520개 전부가 맞다고 생각은 하거든."*
+#    실측 근거 — 상위 200 만 보면 **놓치는 것이 1/3** 입니다:
+#      추정치(f_eps·f_roe) 변경 411건 중 **201위 이하가 134건(33%)**.
+#      f_eps 는 하루 6~43종목, f_roe 26~55종목, f_per 75~108종목이 바뀝니다.
+SHADOW_UNIVERSE_SIZE = 520         # 섀도가 **매일 전부** 보는 범위 (= 실전과 동일)
 DETAIL_SAMPLE_SIZE = SHADOW_UNIVERSE_SIZE       # 상세 — 회전 없음, 매일 전부
 WISEREPORT_SAMPLE_SIZE = SHADOW_UNIVERSE_SIZE   # Forward ROE·EV/EBITDA — 매일 전부
 
@@ -368,6 +380,38 @@ def check_timing(timing: dict) -> list[str]:
             f"🔴 수집이 {total / 60:.0f}분 걸렸습니다 — 장 시작까지 걸칠 위험이 있습니다."
         )
     return warnings
+
+
+def check_frozen_data(today_rows, yesterday_rows) -> list[str]:
+    """**어제와 오늘이 통째로 같은가** — "얼어붙은 데이터" 감지.
+
+    🔴 2026-09-04 에 실제로 난 사고입니다(#195): 코스피 수집기가 **"오늘 날짜 라벨 +
+    어제 내용물"** 스냅샷을 남기고 정식 수집을 건너뛰었습니다. 전 종목 주가가 하나도
+    바뀌지 않았는데도 —
+
+      · `data_sanity` 는 **못 잡습니다.** 결측도 아니고, 종목 수도 같고, 중앙값 이동도
+        0 이라 **오히려 "너무 정상"** 으로 보입니다(실제 검사는 `row_count_drop`,
+        `unusable_ratio`, `median_shift_ratio` 뿐).
+      · 그래서 #201~#203 이 **소비자 쪽**(결투·성적표)에 신선도 검사를 붙였습니다.
+
+    → 섀도에도 같은 눈이 필요합니다. 신 API 가 얼어붙은 값을 주는 날을 놓치면,
+      "일치율 100%"라는 **가장 안심되는 숫자**가 나오면서 둘 다 틀린 상태가 됩니다.
+    """
+    if not yesterday_rows:
+        return []                     # 첫 실행 — check_change_sync 가 사실을 남깁니다
+    common = set(today_rows) & set(yesterday_rows)
+    if len(common) < 50:
+        return []
+    changed = sum(1 for c in common
+                  if _f(today_rows[c].get("price")) != _f(yesterday_rows[c].get("price")))
+    if changed == 0:
+        return ["🔴 어제와 오늘의 주가가 **전 종목 동일**합니다 — 신 API 가 얼어붙은 값을 "
+                "주고 있거나, 어제 것을 그대로 다시 받았을 수 있습니다"
+                f" (비교 {len(common)}종목). 2026-09-04 에 실전에서 실제로 났던 사고(#195)와 같은 모양입니다."]
+    if changed / len(common) < 0.05:
+        return [f"🟡 주가가 바뀐 종목이 {changed}/{len(common)}개뿐입니다 — "
+                "휴장일이면 정상, 아니면 갱신을 놓쳤을 수 있습니다"]
+    return []
 
 
 def check_rank_integrity(rows) -> list[str]:
@@ -744,6 +788,7 @@ def compare_with_production(shadow: dict, *, today_path=None) -> dict:
     prev_date = sorted(hist)[-2] if len(hist) >= 2 else None
     out["integrity_warnings"] += check_change_sync(
         shad, prev_rows, prod, hist.get(prev_date, {}) if prev_date else {})
+    out["integrity_warnings"] += check_frozen_data(shad, prev_rows)
     return out
 
 

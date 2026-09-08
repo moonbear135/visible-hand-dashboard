@@ -129,24 +129,42 @@ def test_manner_constants_are_not_weakened():
     check(SH.DELAY_MAX_SEC >= SH.DELAY_MIN_SEC, "최대 딜레이가 최소보다 크거나 같음")
     check(SH.CIRCUIT_CONSECUTIVE_FAILURES <= 5, "서킷 브레이커 임계 5회 이하",
           f"({SH.CIRCUIT_CONSECUTIVE_FAILURES})")
-    # 2026-09-08 오너 지시로 표본을 넓혔습니다(상세 20→100, 위즈리포트 20 신설).
-    # 🔴 그래도 **현행 수집기가 이미 매일 하는 요청(종목당 2회 × 520 = 약 1,040건)의
-    #    15% 수준**입니다. 이 상한을 더 올릴 때는 그 비율을 다시 따져 보세요(§0-3-2).
-    # 2026-09-08 오너 결정으로 "좁게(200종목), 매일 전부"로 바꾸며 상한을 올렸습니다.
-    # 🔴 그래도 **현행 수집기가 이미 매일 하는 약 1,040요청의 41% 수준**입니다.
-    #    이 상한을 더 올릴 때는 그 비율을 다시 따져 보세요(§0-3-2).
-    check(SH.MAX_REQUESTS_PER_RUN <= 500, "1회 실행 요청 상한 500건 이하",
-          f"({SH.MAX_REQUESTS_PER_RUN})")
+
+    # ── 2026-09-08 오너 결정으로 섀도를 "520종목 전부, 매일"로 올렸습니다. ──────
+    # 오너: *"앞으로 준비를 다 해보기 위해서는 520개 전부가 맞다고 생각은 하거든."*
+    # 🔴 이 결정의 대가를 숫자로 적어 둡니다 — 하루 약 1,066요청은
+    #    현행 수집기가 이미 보내는 약 1,040요청과 **비슷한 양**이라,
+    #    이관이 끝날 때까지 상대 서버가 받는 총량은 **약 2배**가 됩니다.
+    # ⏳ **반드시 한시적입니다.** 이관이 끝나거나 관찰이 필요 없어지면
+    #    워크플로우째 지우세요. 이 양을 계속 보내는 것은 §0-3-2 위반입니다.
+    #
+    # 그래서 상한은 "낮게"가 아니라 **"계획한 것 이상은 못 보낸다"**로 지킵니다.
+    # 아래 두 검사가 그 자물쇠입니다.
     planned = SH.LIST_PAGE_COUNT + SH.DETAIL_SAMPLE_SIZE + SH.WISEREPORT_SAMPLE_SIZE
     check(planned <= SH.MAX_REQUESTS_PER_RUN, "계획된 요청 수가 상한 안",
           f"({planned} / {SH.MAX_REQUESTS_PER_RUN})")
-    check(SH.SHADOW_UNIVERSE_SIZE <= SH.LIST_TARGET_COUNT / 2,
-          "섀도가 깊게 보는 범위는 전체의 절반 이하 (요청량 통제)",
+    # 상한과 계획의 간격이 벌어지면, 코드가 조용히 더 보내도 아무도 모릅니다.
+    # 여유는 재시도분 정도(10%)까지만 허용합니다.
+    check(SH.MAX_REQUESTS_PER_RUN <= planned * 1.1 + 10,
+          "요청 상한이 계획보다 과하게 크지 않음 (조용한 증가 방지)",
+          f"(상한 {SH.MAX_REQUESTS_PER_RUN} / 계획 {planned})")
+
+    # 섀도는 **실전보다 넓게 보지 않습니다.** 실전이 안 보는 종목을 섀도가 긁는 것은
+    # 관찰이 아니라 새로운 부하입니다(§0-3-2).
+    check(SH.SHADOW_UNIVERSE_SIZE <= SH.LIST_TARGET_COUNT,
+          "섀도 범위가 실전 범위를 넘지 않음",
           f"({SH.SHADOW_UNIVERSE_SIZE} / {SH.LIST_TARGET_COUNT})")
+
+    # 총량이 커진 만큼 **뭉쳐 보내지 않는 것**이 유일한 예의입니다.
+    # 순차 + 2초 간격이면 최소 30분 이상에 걸쳐 나갑니다. 이보다 짧아지면
+    # 누군가 병렬화했거나 딜레이를 줄인 것입니다.
+    min_minutes = planned * SH.DELAY_MIN_SEC / 60
+    check(min_minutes >= 30,
+          "한 번 실행이 최소 30분 이상에 걸쳐 나감 (버스트 금지)",
+          f"(약 {min_minutes:.0f}분)")
+
     check(SH.LIST_PAGE_SIZE == 20, "pageSize 는 화면이 쓰는 20 그대로 (한도 탐색 금지)",
           f"({SH.LIST_PAGE_SIZE})")
-    # 상세는 여전히 **전 종목이 아닙니다.** 520종목 중 100 → 매일 다른 구간을 돌아
-    # 6일이면 한 바퀴입니다(§0-3-2 — 요청량은 낮게, 커버리지는 시간으로).
     check(SH.DETAIL_SAMPLE_SIZE <= SH.SHADOW_UNIVERSE_SIZE,
           "상세는 섀도 범위를 넘지 않음",
           f"({SH.DETAIL_SAMPLE_SIZE} / {SH.SHADOW_UNIVERSE_SIZE})")
@@ -182,10 +200,13 @@ def test_shadow_looks_at_the_same_universe_every_day():
     check(codes[:SH.DETAIL_SAMPLE_SIZE] == codes[:SH.DETAIL_SAMPLE_SIZE],
           "대상이 날짜에 의존하지 않음 (매일 같은 종목)")
 
-    # 목록은 여전히 전 범위 — 순위·집합 검증에 필요하고 26요청으로 쌉니다.
-    check(SH.LIST_TARGET_COUNT > SH.SHADOW_UNIVERSE_SIZE,
-          "목록은 섀도 범위보다 넓게 받아 순위·집합을 검증", 
-          f"({SH.LIST_TARGET_COUNT} > {SH.SHADOW_UNIVERSE_SIZE})")
+    # 2026-09-08 오너 결정으로 섀도 범위를 실전과 **똑같이** 520으로 맞췄으므로,
+    # 목록이 더 넓을 이유가 사라졌습니다. 대신 지켜야 할 것은
+    # "목록이 섀도가 보는 종목을 **하나도 빠뜨리지 않는다**"입니다 —
+    # 목록이 좁아지면 상세를 받을 종목 코드 자체가 모자라 조용히 덜 받게 됩니다.
+    check(SH.LIST_TARGET_COUNT >= SH.SHADOW_UNIVERSE_SIZE,
+          "목록이 섀도가 볼 종목을 전부 덮음",
+          f"({SH.LIST_TARGET_COUNT} >= {SH.SHADOW_UNIVERSE_SIZE})")
 
 
 def test_timing_is_recorded_start_to_finish():
@@ -788,6 +809,92 @@ def test_alert_message_is_empty_when_everything_matches(tmp_path):
     (tmp_path / "latest_compare.json").write_text(json.dumps(report), encoding="utf-8")
     with mock.patch.object(SH, "SHADOW_DIR", tmp_path):
         check("공통 종목" in SH.build_alert_message(), "공통 종목이 너무 적으면 알림")
+
+
+def test_frozen_data_catches_the_2026_09_04_shape():
+    """
+    🔴 2026-09-04 에 **실전에서 실제로 났던 사고**(#195)와 같은 모양을 잡는지 봅니다.
+
+    그날 코스피 수집기는 "오늘 날짜 라벨 + 어제 내용물" 스냅샷을 남기고 정식 수집을
+    건너뛰었습니다. 전 종목 주가가 하나도 바뀌지 않았는데도 `data_sanity` 는 조용했습니다 —
+    결측도 아니고, 종목 수도 같고, 중앙값 이동이 0 이라 **오히려 "너무 정상"** 으로
+    보였기 때문입니다. 값이 같은지만 보는 검사로는 절대 안 보이는 사고입니다.
+
+    오너: *"9월 4일에는 크롤링 문제가 있었어서 그 부분은 수정을 했었을 거야."*
+    → 실전은 고쳤지만, **섀도에도 같은 눈이 없으면** 신 API 가 얼어붙은 값을 주는 날
+      "일치율 100%"라는 가장 안심되는 숫자가 나오면서 둘 다 틀린 상태가 됩니다.
+    """
+    y = {f"{i:06d}": {"price": 10000 + i} for i in range(100)}
+
+    # ① 정상 — 대부분의 종목 주가가 움직임
+    t_normal = {c: {"price": v["price"] + 100} for c, v in y.items()}
+    check(not SH.check_frozen_data(t_normal, y), "정상적으로 움직인 날은 조용함")
+
+    # ② 🔴 전 종목 동일 — 9/4 사고와 같은 모양
+    t_frozen = {c: dict(v) for c, v in y.items()}
+    w = SH.check_frozen_data(t_frozen, y)
+    check(any(x.startswith("🔴") for x in w), "전 종목 주가가 그대로면 빨간불", f"({w})")
+    check(any("#195" in x for x in w), "같은 모양이었던 실제 사고 번호를 남김")
+
+    # ③ 🟡 몇 종목만 움직임 — 휴장일이면 정상이므로 알림까지는 울리지 않습니다
+    t_few = {c: dict(v) for c, v in y.items()}
+    for c in list(y)[:3]:
+        t_few[c]["price"] = y[c]["price"] + 100
+    w3 = SH.check_frozen_data(t_few, y)
+    check(w3 and w3[0].startswith("🟡"), "소수만 움직이면 노란불", f"({w3})")
+
+    # ④ 어제 자료가 없거나 공통 종목이 너무 적으면 **판단하지 않습니다**
+    #    (없는 것을 있는 척하지 않음 — §0-1. 그 사실은 check_change_sync 가 남깁니다)
+    check(not SH.check_frozen_data(t_normal, {}), "어제 자료가 없으면 판단하지 않음")
+    small = {f"{i:06d}": {"price": 10000 + i} for i in range(10)}
+    check(not SH.check_frozen_data(small, small), "표본이 10종목뿐이면 판단하지 않음")
+
+
+def test_frozen_data_warning_actually_reaches_the_alert(tmp_path):
+    """
+    검사가 경고를 **만들기만 하고 아무도 안 읽으면** 없는 것과 같습니다.
+    (이 저장소에서 실제로 났던 실수 — `collect()` 가 경고를 버리고 있었습니다.)
+    """
+    report = {
+        "matched_codes": 300,
+        "fields": {"t_eps": {"label": "EPS", "match_ratio": 1.0}},
+        "integrity_warnings": ["🔴 어제와 오늘의 주가가 **전 종목 동일**합니다 (#195)"],
+    }
+    (tmp_path / "latest_compare.json").write_text(json.dumps(report), encoding="utf-8")
+    with mock.patch.object(SH, "SHADOW_DIR", tmp_path):
+        msg = SH.build_alert_message()
+    check("전 종목 동일" in msg, "얼어붙은 데이터 경고가 알림 문구까지 도달", f"({msg})")
+
+
+def test_compare_actually_runs_the_frozen_check(tmp_path):
+    """
+    🔴 **사보타주로 발견한 구멍입니다.** `compare_with_production` 에서
+    `check_frozen_data(...)` 의 결과를 `integrity_warnings` 에 안 붙이고 버려도
+    앞의 단위 테스트는 전부 통과했습니다 — 검사가 있는 것과 **불려서 읽히는 것**은
+    다릅니다(이 저장소에서 `collect()` 가 경고를 버리던 실수와 같은 계열).
+
+    그래서 여기서는 어제 파일까지 만들어 놓고 **대조 리포트 안에** 빨간불이
+    실제로 들어오는지 봅니다.
+    """
+    rows = [{"code": f"{i:06d}", "price": 10000.0 + i, "outstanding_shares": 1000}
+            for i in range(60)]
+    yesterday = {"list_rows": rows}                      # 어제와 오늘이 **완전히 동일**
+    today = {"list_rows": [dict(r) for r in rows]}
+
+    (tmp_path / "2026-09-07_shadow.json").write_text(json.dumps(yesterday), encoding="utf-8")
+    today_path = tmp_path / "2026-09-08_shadow.json"
+    today_path.write_text(json.dumps(today), encoding="utf-8")
+
+    fake_prod = tmp_path / "kospi200_pegy_latest.json"
+    fake_prod.write_text(json.dumps({"stocks": [dict(r) for r in rows]}), encoding="utf-8")
+
+    with mock.patch.object(SH, "SHADOW_DIR", tmp_path), \
+         mock.patch.object(SH, "PRODUCTION_SNAPSHOT", fake_prod):
+        rep = SH.compare_with_production(today, today_path=today_path)
+
+    warns = rep["integrity_warnings"]
+    check(any("전 종목 동일" in w for w in warns),
+          "얼어붙은 데이터 경고가 대조 리포트에 실제로 실림", f"({warns})")
 
 
 def main():
