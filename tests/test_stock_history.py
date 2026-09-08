@@ -252,7 +252,8 @@ def test_collector_blocked_scenarios():
     orig_fetch = K.fetch_kospi200_real_market_data
     orig_record_k = K.record_daily_history
     try:
-        K.fetch_kospi200_real_market_data = lambda: ([], [])
+        # 2026-09-08: 수집기가 출처 스위치 값을 naver_source= 로 넘기므로 키워드 인자를 받아야 합니다.
+        K.fetch_kospi200_real_market_data = lambda **kw: ([], [])
         K.record_daily_history = lambda **kw: calls.append(("kospi", kw))
         raised = False
         try:

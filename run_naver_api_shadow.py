@@ -63,6 +63,12 @@ from utils.naver_stock_api import (  # noqa: E402
     assert_krx_source,
     parse_market_list,
     parse_stock_detail,
+    # 🔴 주소·페이지 크기는 파서 모듈 **한 곳**에만 적혀 있습니다(§0-3-10, 2026-09-08 배선 때 통합).
+    #    실전 수집기(`collector_kospi200.py`)와 이 섀도가 같은 상수를 씁니다 — 한쪽만 고쳐져
+    #    "섀도는 KRX 인데 실전은 넥스트레이드" 같은 어긋남이 생길 수 없습니다.
+    LIST_URL_TEMPLATE as LIST_URL,
+    DETAIL_URL_TEMPLATE as DETAIL_URL,
+    LIST_PAGE_SIZE,
 )
 
 REPO_ROOT = Path(__file__).parent
@@ -82,7 +88,7 @@ MAX_REQUESTS_PER_RUN = 1100        # 목록 26 + 상세 520 + 위즈리포트 52
 #    "준비를 다 해본" 것이 됩니다. 상위 200 만 보면 추정치 갱신의 **1/3을 놓칩니다**(실측).
 #    ⏳ **반드시 한시적입니다** — 이관이 끝나거나 관찰이 더 필요 없어지면
 #    **워크플로우째 지우세요.** 이 양을 계속 보내는 것은 §0-3-2 위반입니다.
-LIST_PAGE_SIZE = 20                # 화면이 실제로 쓰는 값. 한도 탐색 금지
+# LIST_PAGE_SIZE(=20, 화면이 실제로 쓰는 값·한도 탐색 금지)는 utils/naver_stock_api.py 에서 import.
 LIST_TARGET_COUNT = 520            # 🔴 현행과 동일한 범위: 상위 500 + 히스테리시스 버퍼 20.
 #    2026-09-08 실측 — 500 만 받으면 실전 520 중 21종목이 빠져 "안 맞는다"는 착시가 납니다.
 #    (실전 시총 상위 490 까지는 500 수집으로도 100% 일치했습니다. 순수한 경계 문제였습니다.)
@@ -154,11 +160,8 @@ WISEREPORT_SAMPLE_SIZE = SHADOW_UNIVERSE_SIZE   # Forward ROE·EV/EBITDA — 매
 # 봇임을 숨기지 않습니다. 차단 우회용 위장이 아니라 **정직한 식별**입니다.
 USER_AGENT = "visible-hand-dashboard/shadow (+https://github.com/moonbear135/visible-hand-dashboard)"
 
-# `{page}` 는 **페이지 인덱스**입니다(0,1,2,…). 오프셋이 아닙니다 — 위 주석 참고.
-LIST_URL = ("https://stock.naver.com/api/domestic/market/stock/default"
-            "?tradeType=KRX&marketType=ALL&orderType=marketSum"
-            "&startIdx={page}&pageSize={size}")
-DETAIL_URL = "https://stock.naver.com/api/domestic/detail/{code}/detail?codeType=KRX"
+# LIST_URL / DETAIL_URL 은 utils/naver_stock_api.py 의 LIST_URL_TEMPLATE / DETAIL_URL_TEMPLATE 를
+# 그대로 씁니다(위 import). `{page}` 는 **페이지 인덱스**입니다(0,1,2,…). 오프셋이 아닙니다 — 위 주석 참고.
 # 🔴 현행 수집기(`collector_kospi200._fetch_ev_ebitda`)가 **이미 매일 부르는 바로 그 주소**입니다.
 #    섀도는 별도 프로세스라 따로 받아야 하므로, 표본만 받습니다(§0-3-2).
 WISEREPORT_URL = "https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}"

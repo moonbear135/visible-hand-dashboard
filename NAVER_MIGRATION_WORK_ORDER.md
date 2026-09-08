@@ -926,8 +926,8 @@ teardown 오류를 놓친 것이었습니다(이 저장소 하네스는 `check()
 
 1. **`c1010001.aspx` 파서 확장** — Forward ROE·순이익·자본총계를 읽습니다.
    🔴 **실제 HTML 픽스처가 선행 조건**입니다. 세션은 받아올 수 없으므로 오너가 저장해 주셔야 합니다.
-2. **`collector_kospi200.py` 배선** — 오너 승인 후. 구 경로를 지우지 않고 **출처 전환 스위치**로
-   붙여, 구 URL 이 살아 있는 동안 양쪽을 대조해 볼 수 있게 하는 것이 안전합니다(설계 제안).
+2. **`collector_kospi200.py` 배선** — ✅ 2026-09-08 오너 승인 후 **출처 전환 스위치**로 완료(§9).
+   기본값은 구 출처이며 켜는 것은 오너의 한 줄입니다(§9-2).
 3. `tradeType=KRX` 가 목록 API 에 실제로 있는지 확인 (미확인).
 4. `requests` 호출 시 헤더(`User-Agent`·`Referer`) 필요 여부 확인 (미확인).
 
@@ -1471,7 +1471,8 @@ f_per 계산 / 추정치 0 메움 / t_pbr 계산 회귀 / 요청 상한 상향 /
 ### 📌 이제 남은 미확인
 
 §1-5-7·§1-5-9 의 미확인이 §7-7 에서 닫혔고, 페이지네이션도 §7-8 에서 확인됐습니다.
-**신 API 쪽 미확인은 남아 있지 않습니다.** 남은 것은 배선 판단(오너 승인)뿐입니다.
+**신 API 쪽 미확인은 남아 있지 않습니다.** 배선은 §9 에서 스위치 방식으로 완료됐고, 남은 것은
+**스위치를 켜는 오너 결정**(§9-2)과 §9-6 의 "확신이 없는 것" 확인입니다.
 
 ---
 
@@ -1535,11 +1536,11 @@ f_per 계산 / 추정치 0 메움 / t_pbr 계산 회귀 / 요청 상한 상향 /
 
 → 🔴 **사보타주의 값어치가 여기에 있습니다.** 통과만 보고 끝냈으면 이 구멍을 몰랐을 것입니다.
 
-### 8-6. 🔴 아직 배선하지 않았습니다
+### 8-6. ~~🔴 아직 배선하지 않았습니다~~ → ✅ 2026-09-08 배선 완료 (§9-4)
 
-`collector_kospi200.py::_fetch_ev_ebitda()` 는 **그대로**입니다. 배선할 때는 그 함수를
-이 모듈 호출로 **대체**해야 합니다 — 같은 페이지를 두 곳에서 파싱하는 상태를 남기면 안 됩니다
-(§0-3-10). 테스트가 `collector_kospi200.py` 에 `wisereport_parser` 가 아직 없음을 확인합니다.
+`collector_kospi200.py::_fetch_ev_ebitda()` 의 인라인 표 파싱을 이 모듈 호출로 **대체**했습니다 —
+같은 페이지를 두 곳에서 파싱하지 않습니다(§0-3-10). 이 페이지는 출처 전환 스위치와 무관하게
+구·신 두 경로가 같이 씁니다. 자세한 판단 근거는 §9-4.
 
 ### 8-7. 남은 것
 
@@ -1548,6 +1549,191 @@ f_per 계산 / 추정치 0 메움 / t_pbr 계산 회귀 / 요청 상한 상향 /
 - 배선 — **오너 승인 사항**(§0-3-6).
 
 ---
+
+## 9. 🔀 이관 4단계 — 배선 (2026-09-08, 출처 전환 스위치)
+
+오너 지시(원문): *"권하는 방식은 구 경로를 지우지 않고 출처 전환 스위치로 붙이는 것입니다(구 주소가
+살아 있는 동안 양쪽 대조 가능, 문제 생기면 되돌리기 쉬움). **이 방식으로 가자**"*
+
+→ `collector_kospi200.py` 에 **구 경로(현행)와 신 경로가 나란히** 있고, **스위치 하나**로 어느 쪽을
+쓸지 정합니다. 🔴 **기본값은 구 출처입니다.** 세션이 기본값을 바꾸지 않았습니다(§0-3-6 — 실전
+전환은 오너 승인 사항). 켜는 것은 아래 §9-2 의 한 줄입니다.
+
+### 9-1. 무엇을 붙였나
+
+| 파일 | 역할 |
+|---|---|
+| 🆕 `utils/naver_source.py` | **스위치의 단일 출처**(§0-3-10). 환경변수 `NAVER_SOURCE` 를 읽어 `legacy`(기본) / `new_api` 를 돌려줌. 모르는 값이면 **예외로 멈춤**(오타를 기본값으로 눌러 담지 않음 §0-1). 스냅샷에 넣을 출처 기록 블록도 여기서 만듦 |
+| `collector_kospi200.py` | 스위치를 **실행당 한 번** 읽어 목록·상세 양쪽에 같은 값을 넘김. 신 경로 3함수 신설(`_new_api_get_json`·`_fetch_market_list_new_api`·`fetch_naver_item_new_api`). **구 경로 함수는 한 글자도 지우지 않음.** `_fetch_ev_ebitda()` 의 인라인 표 파싱을 `utils/wisereport_parser.py` 호출로 대체(§9-4) |
+| `utils/naver_stock_api.py` | 신 API **주소 상수를 이 파일 한 곳에만** 둠(`LIST_URL_TEMPLATE`·`DETAIL_URL_TEMPLATE`·`LIST_PAGE_SIZE`, `build_*_url()` 이 NXT 를 차단). `raw_period` 판정(§9-3 ④) |
+| `utils/wisereport_parser.py` | EV/EBITDA 를 페이지 표기 그대로 문자열로(구 경로 저장값 보존). 구 경로가 재무요약 표 사유를 걸러 받도록 `errors_excluding_summary_table()` |
+| `run_naver_api_shadow.py` | 자기 주소 상수를 지우고 파서 모듈 것을 import(실전과 섀도가 **같은 주소**) |
+| `.github/workflows/scrape.yml` | 수집 스텝 `env:` 에 **주석 처리된 켜는 줄** `# NAVER_SOURCE: new_api` 와 안내문. 기본값(`legacy`)은 YAML 에 적지 않음(§0-3-10) |
+| 🆕 `tests/test_naver_source_switch.py` | 25검사 — §9-5 |
+| `.claude/agents/kr-stocks.md` | 파일 목록 갱신 |
+
+**어느 출처로 만든 데이터인지 산출물에 남깁니다(§0-1)** — `data/kospi200_pegy_latest.json` 의
+`metadata.naver_source`(`legacy`/`new_api`)와 `metadata.data_source`(사람이 읽는 블록: 라벨·주소·거래소·
+종가 채택 조건·기본값 여부·켜는 법). 스위치가 켜진 뒤 첫 실행에서 이 값이 `new_api` 인지 보면 됩니다.
+
+### 9-2. 🔴 오너가 켜는 방법 (코딩 몰라도 됩니다)
+
+**깃허브 자동 실행(매일 16:05)을 신 출처로 바꾸기**
+
+1. 깃허브 저장소에서 `.github/workflows/scrape.yml` 을 엽니다(연필 아이콘으로 편집).
+2. 아래 줄을 찾습니다(수집 스텝의 `env:` 안, 안내 주석 바로 밑):
+   ```
+           # NAVER_SOURCE: new_api
+   ```
+3. 줄 **맨 앞의 `# ` 두 글자만** 지웁니다. 들여쓰기(공백)는 그대로 둡니다:
+   ```
+           NAVER_SOURCE: new_api
+   ```
+4. 저장(커밋)합니다. **다음 실행부터** 신 출처입니다. 코드 파일은 건드리지 않습니다.
+
+**되돌리기** — 같은 줄에 다시 `# ` 를 붙이거나 값을 `legacy` 로 바꿉니다. 그 다음 실행부터 구 출처입니다.
+
+**켜졌는지 확인하기** — 실행 로그 맨 앞의 `🔀 네이버 출처: new_api — 신 네이버 증권 JSON API (⚠️ 스위치로
+켜진 신 출처)` 줄, 그리고 그날 `data/kospi200_pegy_latest.json` 의 `"naver_source": "new_api"`.
+
+**오타를 내면** — `new-api`·`newapi` 처럼 허용값(`legacy`/`new_api`)이 아니면 수집기가 **시작하자마자
+멈추고** 로그에 허용값과 켜는 법을 찍습니다. 조용히 구 출처로 돌지 않습니다(§0-1).
+`tests/test_naver_source_switch.py` 도 YAML 의 켜진 값이 허용값인지 검사하므로, 오타 커밋은 CI 에서 먼저 잡힙니다.
+
+**로컬에서 손으로 돌릴 때** — `NAVER_SOURCE=new_api python collector_kospi200.py`
+
+### 9-3. 신 경로가 하는 일 — 그리고 구 경로와 **알고 두는 차이**
+
+```
+목록  stock.naver.com/api/domestic/market/stock/default?tradeType=KRX&marketType=ALL&orderType=marketSum&startIdx=<페이지>&pageSize=20
+       → 마스터(kr_ticker_master.json)로 STOCK + 코스피·코스닥만 골라 적격 640종목까지(이탈선 575 + 여유)
+       → price·t_per·t_roe·market (구 경로와 같은 키) → 이후 순위·히스테리시스·enrich 는 **구 경로 코드 그대로**
+상세  stock.naver.com/api/domestic/detail/<code>/detail?codeType=KRX
+       → t_per·t_eps·f_per·f_eps·t_pbr·div_yield·dps·상장주식수
+     + navercomp.wisereport.co.kr/…/c1010001.aspx (현행과 같은 페이지)
+       → f_roe·ev_ebitda
+```
+
+| 지킨 것 | 어떻게 |
+|---|---|
+| **KRX 고정, NXT 금지**(§1-5-11) | 주소는 `build_*_url()` 로만 만들고 그 안의 `assert_krx_source()` 가 NXT 를 예외로 차단. 수집기 본문에 주소 문자열 없음(테스트) |
+| **종가만 채택** | ④ 참고 — 전 종목 `marketStatus == CLOSE` 아니면 **수집 중단**(스냅샷 미갱신) |
+| **종목 선정은 `kr_ticker_master`** | 신 API 의 `type`·`sosok` 은 판정에 쓰지 않음. 코넥스(§7-8 본시스템즈)·ETF 제외, 코스닥글로벌 → `KOSDAQ` 라벨(현행과 동일) |
+| **`t_eps` 는 `eps`**, `krxEps` 아님 | 파서가 강제 + 테스트 |
+| **`f_per`·`t_pbr` 응답값 그대로**(§2-3-1) | 계산으로 만들지 않음 |
+| **요청 수 불변**(§0-3-2) | 목록 32~40요청(구: 시장별 최대 25 × 2), 상세 종목당 2요청(구와 동일). 종목 사이 2~3초는 `enrich` 루프가 구 경로와 똑같이 잡음. 봇임을 밝힌 User-Agent |
+| **403/429 즉시 중단** | 재시도·우회 없이 `RuntimeError` → 기존 스냅샷 유지 |
+| **페이지 실패 = 중단** | 목록이 시총순 한 흐름이라 페이지 하나가 빠지면 그 구간 종목이 통째로 사라지므로 "일부 실패 허용" 없음. 중복 종목(페이지 겹침)도 중단 |
+| **Forward ROE ±300% 상한** | 구 경로 리터럴을 상수 `FORWARD_ROE_ABS_LIMIT_PCT` 로 올려 **같은 값** 사용 |
+| **우선주 DPS 상속** | 구 경로와 같은 함수, 부모 조회도 신 경로(구 주소가 섞이지 않음) |
+
+**🟡 알고 두는 차이 (스위치를 켜면 이렇게 달라집니다 — 결함이 아니라 출처 차이)**
+
+| 항목 | 구 경로 | 신 경로 | 비고 |
+|---|---|---|---|
+| `dps` | 분기 배당 종목에서 **1회분**(§1-5-12 ① 결함) | **연간** 주당배당금 | 화면 "원/주"·`total_dividend_krw` 가 그 종목들에서 커짐. 오너 결정 A(배당 모듈로 재설계)는 그대로 별도 작업 |
+| `f_per` | 정수(구 사이트 표시값) | 소수점 | §7-8 ④ — 신 값이 더 정밀 |
+| `t_pbr` | 문자열 `"4.81"` | 숫자 `4.81` | 소비부는 전부 `float()` 를 거치므로 영향 없음 |
+| `dps_source` 라벨 | `naver_financial_statement` | (같은 라벨) | `_resolve_dividend()` 는 두 경로 공통이라 라벨을 바꾸지 않았습니다. 진짜 출처는 스냅샷 `metadata.naver_source` 가 말해 줍니다 |
+| 상세 요청 403/429 | 그 종목만 빈 값 | **수집 통째로 중단** | §0-3-2 를 더 엄격히 |
+| 장중 실행 | 장중 가격이 종가로 저장됨(#195 계열 사고) | **중단** | ④ |
+| ④ 종가 검증 | (구 사이트는 KRX 종가만 표시) | `marketStatus == CLOSE` | 작업지시서 §1-5-11 은 `closePrice`+`localTradedAt 15:30` 인데, **KRX 목록·상세 응답에 그 두 필드가 없습니다**(실측). 그 필드는 `polling.finance.naver.com` 실시간 API 에만 있고 그 주소의 KRX 변형은 확인된 적이 없어 쓰지 않았습니다(§0-1). 같은 응답의 `marketStatus` 로 같은 뜻을 지킵니다 |
+| `raw_period` | 헤더 `PER\|EPS(2026.06)` 을 읽어 TTM 판정 | 상수 `TTM` + 근거 문장 | 신 API 는 기간 라벨을 주지 않습니다. 섀도 401종목 `t_eps`·`t_per` 100% 일치(§7-8)를 근거로 두고 `raw_period_basis` 에 그 사실을 실어 보냅니다. **이 상수가 없으면 검증 1단계가 전 종목을 불합격시켜 status=FAILED 가 됩니다** — 섀도는 `enrich` 를 돌리지 않아 못 본 지점 |
+| EV/EBITDA 서킷 | 표 없는 200 응답이 연속 실패로 집계 | 집계 안 함(응답을 받았으면 연결은 산 것) | 두 경로 공통(§9-4) — 서킷 주석의 원래 의도 쪽 |
+
+### 9-4. `_fetch_ev_ebitda()` → `utils/wisereport_parser.py` 호출로 대체 — 스위치를 따르지 않습니다
+
+**판단 근거(코드를 읽고 확인, 함수 docstring 에도 적음)**
+① 이 도메인(`navercomp.wisereport.co.kr`)은 종료 예고 대상 `finance.naver.com` 이 아니고, 신 사이트가
+지금도 호출 중임이 실측됐습니다(§1-5-6). ② 구 경로가 EV/EBITDA 를 **오직 여기서만** 얻으므로 스위치를
+따르게 하면 구 경로에서 값이 사라져 현행이 바뀝니다. ③ 신 경로는 Forward ROE 까지 여기서만 얻습니다.
+→ **두 경로가 같은 페이지를 같은 파서로** 읽습니다. 요청·서킷브레이커 부분은 `_fetch_wisereport_page()`
+로 한 글자도 안 바꾸고 떼어냈고, 파싱만 파서 모듈로 갔습니다.
+
+**구 경로 저장값 보존 확인** — 실제 페이지(000660) `"19.51"`, 합성 픽스처(000010) `"6.7"` 모두 동일.
+파서 기준선(`test_naver_item_characterization`, 13사례)·계산 기준선(`test_enrich_quant_metrics_characterization`)
+**전부 그대로 통과** — 재생성하지 않았습니다.
+📌 구 코드는 후보 열에 추정(E) 열도 넣었지만 실제 페이지 헤더 `2026/12(E)` 는 분류기가 UNKNOWN 으로
+판정해 **한 번도 선택된 적이 없었습니다**(실측 픽스처로 확인). 파서는 원칙대로 추정 열을 제외합니다.
+
+### 9-5. 테스트 · 사보타주
+
+- 기준선(작업 전, 원본 코드): **2,512 passed / 77 skipped / 실패 0**
+- 작업 후 전체: §9-7 참고
+- 신설 `tests/test_naver_source_switch.py` **25검사**. 기존 3검사는 "미배선" 상태를 못 박던 것이라 배선 후
+  상태로 고침(`test_wisereport_parser::test_it_is_wired_in_and_the_old_inline_parser_is_gone`,
+  `test_naver_api_shadow::test_this_is_a_probe_not_a_collector`, `test_stock_history` 의 목록 함수 대체 람다가
+  `naver_source=` 키워드를 받도록).
+
+**사보타주 20종 — 전부 잡힘 (하나씩 주입 → 7개 테스트 파일 실행 → 원복 → 원복 확인 150 passed)**
+
+| # | 망가뜨린 것 | 잡은 테스트 |
+|---|---|---|
+| 1 | 기본값을 `new_api` 로 뒤집기 | `test_default_source_is_legacy` 외 (계산 기준선까지 빨간불) |
+| 2 | 스냅샷 metadata 에서 출처 기록 제거 | `test_snapshot_metadata_records_*` 2건 |
+| 3 | `assert_krx_source` 를 no-op(NXT 차단 무력화) | `test_nxt_template_is_refused_at_build_time` + 파서·섀도 NXT 검사 3건 |
+| 4 | 상세 주소 템플릿을 `codeType=NXT` 로 | 섀도 `test_all_urls_in_this_script_are_krx` 외 13건 |
+| 5 | 수집기가 환경변수를 무시하고 `"legacy"` 하드코딩 | `test_collector_reads_the_switch_only_through_the_resolver` 외 |
+| 6 | 오타를 예외 대신 기본값으로 폴백 | `test_unknown_switch_value_fails_loudly…`, `test_collector_refuses_to_start_on_a_typo` |
+| 7 | `marketStatus≠CLOSE` 검증 제거 | `test_new_list_refuses_intraday_or_after_market_values` |
+| 8 | `enrich` 가 스위치를 무시하고 항상 구 경로 | `test_legacy_path_still_exists_and_is_used_when_switch_is_off` |
+| 9 | 403/429 에 재시도(즉시 중단 제거) | `test_403_and_429_stop_immediately_without_retry` |
+| 10 | YAML 에 `NAVER_SOURCE: legacy` 를 다시 적기 | `test_workflow_has_a_commented_switch_line_and_no_invalid_active_value` |
+| 11 | YAML 에 오타 값 `new-api` 켜기 | 〃 |
+| 12 | 구 경로 EV/EBITDA 에 재무요약 표 사유 섞기 | **파서 기준선** `test_output_is_identical_to_baseline` + `test_legacy_ev_ebitda_…` |
+| 13 | 신 상세 `raw_period` 를 `tradeTime` 으로 되돌리기 | `test_new_item_matches_legacy_keys_…` |
+| 14 | `t_eps` 를 `krxEps` 로 | 〃 + 파서 `test_eps_comes_from_eps_not_krxeps` |
+| 15 | 수집기 안에 신 API 주소 문자열을 직접 적기 | `test_new_path_urls_come_from_the_parser_module_and_are_krx` |
+| 16 | EV/EBITDA 를 `str(float)` 로(표기 훼손 `"3.60"`→`"3.6"`) | `test_legacy_ev_ebitda_via_shared_parser_keeps_the_page_text` |
+| 17 | 우선주 부모를 구 주소로 조회 | `test_new_item_does_not_call_the_legacy_url_for_preferred_parent` |
+| 18 | Forward ROE 상한을 신 경로에서만 1000 으로 | `test_new_item_applies_the_same_forward_roe_limit_as_legacy` |
+| 19 | 섀도가 자기 주소 상수를 따로 정의(NXT) | 섀도 검사 11건 |
+| 20 | 신 목록 페이지 실패를 `continue` 로 삼킴 | `test_new_list_stops_when_a_page_fails` |
+
+⚠️ 사보타주 결과는 `FAILED` 뿐 아니라 **teardown `ERROR`**(이 저장소 하네스가 `check()` 실패를 승격하는
+방식)까지 세어 판정했습니다. 16번은 처음에 제 검사 픽스처가 잘못돼(`pd.read_html` 이 열을 float 로 읽어
+`"3.60"` 자체가 안 생김) 검사를 먼저 고친 뒤 다시 돌렸습니다 — 사보타주가 유효했는지부터 본 것입니다.
+
+### 9-6. 🔴 하지 않은 것 / 확신이 없는 것 (§0-1)
+
+- 🔴🔴 **스위치가 덮지 않는 구 주소가 같은 파일 안에 하나 더 있습니다 — `run_kr_all_market_prices_collector()`.**
+  `collector_kospi200.py` 의 `__main__` 이 PEGY 수집 뒤에 이어서 돌리는 **전 종목 종가**(`data/kr_all_market_prices.json`)
+  수집기로, `_fetch_naver_market_sum_page()` 가 구 `sise/sise_market_sum.naver?sosok=` 를 코스피·코스닥 끝 페이지까지
+  긁습니다(약 60요청). 이 파일을 **결투·성적표의 현재가 조회**와 **`collector_indicator_kr.py`(보조지표 유니버스)**가
+  읽습니다 — §0-2 의 "보조지표는 네이버 미사용" 은 **직접 호출이 없다는 뜻이지, 이 파일을 통해 간접 의존**합니다.
+  구 서비스가 종료되면 이 파일이 갱신되지 않고(실패 시 기존 파일 유지, 값을 지어내지는 않음) 그 소비자들은
+  **낡은 종가**를 보게 됩니다. 이번 배선 범위(오너 지시: PEGY 수집기의 목록·상세)에 넣지 않았습니다 —
+  신 API 목록(`marketType=ALL`, 20종목/페이지)으로 대체하면 약 145요청으로 **요청 수가 2.4배 늘어** §0-3-2 관점의
+  오너 판단이 필요하고, 결투·성적표·보조지표 세 모듈이 얽혀 별도 작업이 맞습니다. **오너 결정 대기.**
+- **실제 네트워크로 신 경로를 한 번도 돌리지 않았습니다.** 세션은 네이버에 접근할 수 없고, 접근할 수
+  있어도 시험 삼아 520종목을 긁는 것은 §0-3-2 위반입니다. 신 경로는 **실제 응답 픽스처**(오너 복사본)로만
+  끝까지 돌렸습니다. 첫 실전 실행은 오너가 스위치를 켠 뒤의 그날 로그로 확인해야 합니다.
+- **장마감 후(16:05 KST) KRX 목록의 `marketStatus` 가 `CLOSE` 인지 직접 보지 못했습니다.** 개장 전(07:59)에
+  전 종목 `CLOSE` 였다는 섀도 실측만 있습니다. 만약 마감 직후 다른 값(예: 정리 단계 문자열)이 온다면 신 경로는
+  **값을 지어내지 않고 중단**합니다 — 그때 로그에 집계(`{'값': 건수}`)가 찍히므로 그 값을 보고 판단하면 됩니다.
+  (섀도가 `scrape.yml` 완료 뒤 마감 후에 돌므로 `data/naver_api_shadow/…_shadow.json` 의 `list_raw_sample`
+  에서도 확인할 수 있습니다.)
+- **`closePrice`+`localTradedAt 15:30` 검증(§1-5-11 ②)은 못 붙였습니다** — 우리가 쓰는 KRX 응답에 그 필드가
+  없습니다. `marketStatus` 로 대신했고, 그 사실을 코드 주석·이 문서에 적었습니다.
+- **`raw_period = "TTM"` 은 출처 라벨이 아니라 섀도 대조 근거의 상수입니다.** 출처가 기간 라벨을 주기 시작하면
+  그때 라벨을 읽도록 바꿔야 합니다.
+- **우선주(K 접미) 상세 응답을 실제로 본 적이 없습니다.** `dividendAmount` 가 어떻게 오는지 미확인 —
+  상속 로직은 구 경로와 같은 조건(값 없음/0)에서만 동작하도록 두었습니다.
+- **`dps` 연간값 전환의 화면 영향**(분기 배당 종목의 "원/주" 표시가 커짐)은 결함 수정이 아니라 출처 차이입니다.
+  오너 결정 A(자체 배당 모듈로 재설계)는 이 작업과 별개로 남아 있습니다.
+- **`TASK_HISTORY.md`·`PROJECT_STATUS.md` 는 건드리지 않았습니다**(오너 지시).
+- 섀도(`run_naver_api_shadow.py`)의 **관찰 로직은 바꾸지 않았습니다.** 주소 상수를 파서 모듈에서 가져오도록
+  import 만 바꿨습니다.
+
+### 9-7. 제안하는 전환 순서 (오너 판단)
+
+1. 9/9 아침 섀도 결과(`data/naver_api_shadow/latest_compare.json`)가 계속 100% 인지 확인.
+2. §9-2 대로 `scrape.yml` 한 줄을 켜서 커밋. **구 서비스가 살아 있는 동안 켜는 편이 안전합니다** —
+   문제가 생기면 같은 줄로 되돌릴 수 있고, 되돌린 뒤 구 경로가 아직 동작하는지도 확인됩니다.
+3. 첫 실행 로그에서 `🔀 네이버 출처: new_api`, 목록 `Successfully retrieved … via new API (KRX, marketStatus=CLOSE …)`,
+   `metadata.status` 와 `valid_ratio`, `metadata.naver_source == "new_api"` 확인.
+4. 다음 날 아침 `watch_data_sanity.yml`(09:30) 이 조용한지, `/kr` 화면 값이 전날과 이어지는지 확인.
+5. 안정되면 섀도 워크플로우 정리(§7-6 — 한시적 약속).
 
 ## 5. 하지 않은 것 (§0-1)
 

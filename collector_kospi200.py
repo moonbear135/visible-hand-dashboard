@@ -63,6 +63,39 @@ from utils.stock_history import (
     stock_history_path,
 )
 from utils import data_sanity
+# =============================================================================
+# 🔀 네이버 출처 전환 스위치 — 2026-09-08 이관 4단계 "배선" (NAVER_MIGRATION_WORK_ORDER.md §9)
+#
+# 네이버가 2026-09-10 에 구 증권 서비스(finance.naver.com)를 종료합니다. 이 파일은 그래서
+#   · 구 경로: finance.naver.com HTML 파싱 (현행 — `fetch_kospi200_real_market_data` 본문,
+#             `fetch_naver_item_dps_and_eps`)
+#   · 신 경로: stock.naver.com JSON API (`_fetch_market_list_new_api`, `fetch_naver_item_new_api`)
+# 를 **둘 다** 갖고 있고, 어느 쪽을 쓸지는 `utils/naver_source.py` 의 스위치 하나로 정합니다.
+# 오너 지시: *"구 경로를 지우지 않고 출처 전환 스위치로 붙이는 것 — 구 주소가 살아 있는 동안
+# 양쪽 대조 가능, 문제 생기면 되돌리기 쉬움. 이 방식으로 가자."*
+#
+# 🔴 기본값은 구 출처입니다(오너 승인 사항 §0-3-6). 켜는 법은 utils/naver_source.py 머리말 —
+#    요약: scrape.yml 의 `# NAVER_SOURCE: new_api` 줄에서 `# ` 를 지우면 켜집니다.
+# 🔴 스위치 값·기본값을 이 파일에 다시 적지 않습니다(§0-3-10). 여기서는 읽기만 합니다.
+# 🔴 어느 출처로 만든 스냅샷인지 metadata.data_source 에 남깁니다(§0-1).
+# =============================================================================
+from utils.naver_source import (
+    NAVER_SOURCE_LEGACY,
+    NAVER_SOURCE_NEW_API,
+    resolve_naver_source,
+    describe_naver_source,
+    switch_instructions,
+)
+from utils.naver_stock_api import (
+    NaverApiSourceError,
+    DETAIL_MISSING_FIELD_NOTES,
+    build_list_url,
+    build_detail_url,
+    parse_market_list,
+    parse_stock_detail,
+)
+# WiseReport(c1010001.aspx) 파서 — 구·신 두 경로가 **같이** 씁니다(아래 _fetch_wisereport_metrics 주석).
+from utils.wisereport_parser import parse_financial_summary, errors_excluding_summary_table
 
 # =============================================================================
 # 데이터 무결성 상수 (ENGINEERING_SPEC §0-1 "하드코딩 및 더미 데이터 금지" 준수)
@@ -70,6 +103,11 @@ from utils import data_sanity
 #   실데이터를 대체하는 기본값(더미)이 아닙니다.
 # =============================================================================
 MIN_OUTSTANDING_SHARES = 1_000_000   # 상장주식수 파싱 결과 sanity range check 하한
+# Forward ROE 컨센서스 이상치 판정선(±%). 반도체 등 경기순환 업종은 극단적인 추정 ROE 가 실제로
+# 나오므로 값을 지우지 않되, 상식 밖 범위만 데이터 오염 의심으로 제외합니다(PER 이상치 가드레일과
+# 같은 취지). 2026-09-08: 구 경로(`_parse_financial_statement`)에 리터럴 300.0 으로 박혀 있던 것을
+# 신 경로(`fetch_naver_item_new_api`)도 **같은 값**을 써야 해서 상수로 올렸습니다(§0-3-10). 값은 그대로.
+FORWARD_ROE_ABS_LIMIT_PCT = 300.0
 VOL_WINDOW = 20                      # 변동성 산출 기간(영업일)
 VOL_THRESHOLD_PCT = 2.0              # 일간수익률 표준편차(%) 기준 '변동성 확대' 판정선
 
@@ -709,7 +747,7 @@ def _parse_financial_statement(page_text, parsed_dps, dps_status, errors):
                             # 반도체 등 경기순환 업종은 실제로 극단적인 추정 ROE가 나올 수 있어
                             # 값 자체를 지우지 않되, 상식 밖 범위(±300% 초과)만 데이터 오염
                             # 의심으로 제외합니다(PER 이상치 가드레일과 동일한 취지).
-                            if abs(v) > 300.0:
+                            if abs(v) > FORWARD_ROE_ABS_LIMIT_PCT:
                                 errors.append(f"Forward ROE 컨센서스 이상치 의심(범위 초과, {v}%) — 제외")
                                 continue
                             f_roe = v
@@ -787,91 +825,94 @@ def _parse_financial_statement(page_text, parsed_dps, dps_status, errors):
     return f_roe, parsed_dps, dps_status, dps_cell_parse_error
 
 
-def _fetch_ev_ebitda(code, errors):
+def _fetch_wisereport_page(code, errors):
     """
-    EV/EBITDA 를 네이버 WiseReport 에서 추가로 긁어옵니다. 반환: 값(문자열) 또는 None.
-    `errors` 는 제자리에서 덧붙입니다.
+    `navercomp.wisereport.co.kr/v2/company/c1010001.aspx` 응답 HTML 을 받아옵니다. 반환: 문자열 또는 None.
+    `errors` 는 제자리에서 덧붙입니다. **여기에는 파싱이 없습니다** — HTTP·대기·서킷브레이커만 있습니다.
+
+    📌 2026-09-08 배선(이관 4단계): 예전 `_fetch_ev_ebitda()` 의 요청·서킷 부분을 **그대로** 떼어낸
+       것입니다(1.5초 사전 대기, 10초 타임아웃, 예외 시 연속 실패 카운트, 임계 도달 시 서킷 개방 —
+       한 글자도 바꾸지 않음). 파싱은 `utils/wisereport_parser.py` 로 옮겼습니다(§0-3-10).
 
     ⚠️ 2026-08-27 신설 — **서킷브레이커**: 이 도메인이 연속으로 응답을 안 하면(연결 타임아웃 등)
     남은 종목은 요청 자체를 건너뜁니다. 값은 원래도 못 구한 것과 동일하게 None(§0-1)이고,
     재시도를 늘리는 게 아니라 "가망 없으면 빨리 포기"라 **상대 서버 요청 수는 오히려 줄어듭니다**
     (§0-3-2 — 모듈 상단 `_ev_ebitda_circuit` 주석 참고).
+    """
+    if _ev_ebitda_circuit["open"]:
+        _ev_ebitda_circuit["skipped_count"] += 1
+        return None
+    time.sleep(1.5) # 서버 부하 방지
+    try:
+        res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
+        _ev_ebitda_circuit["consecutive_failures"] = 0  # 응답을 받았으면(표 파싱 결과와 무관) 연결 자체는 살아있는 것
+        if res_ev.status_code == 200:
+            return res_ev.text
+        return None
+    except Exception as e:
+        print("EV_EBITDA FETCH_ERROR:", e)
+        errors.append(f"EV/EBITDA 수집 실패: {e}")
+        _ev_ebitda_circuit["consecutive_failures"] += 1
+        if _ev_ebitda_circuit["consecutive_failures"] >= _EV_EBITDA_FAILURE_THRESHOLD:
+            _ev_ebitda_circuit["open"] = True
+            print(
+                f"⚡ EV/EBITDA 데이터 소스(navercomp.wisereport.co.kr) 연속 "
+                f"{_EV_EBITDA_FAILURE_THRESHOLD}회 연결 실패 — 이번 실행에서는 남은 종목의 "
+                "EV/EBITDA 요청을 건너뜁니다(재시도 강화가 아니라 빨리 포기 — 상대 서버 "
+                "요청 수는 오히려 줄어듭니다)."
+            )
+        return None
 
-    ⚠️ 2026-08-06 2차 감사 1-6: `iloc[row_idx, 1]` 고정 위치 인덱스를 제거했습니다(SPEC §2-1).
-    위레포트 표는 연도 컬럼 개수가 종목·시점마다 달라 "무조건 2번째 칸이 최신"이라는 보장이
-    없습니다. 헤더를 `DataValidator.classify_header_timeframe()` 으로 분류해 연간 컬럼만 고른 뒤
-    가장 최근 것을 쓰고, 분류에 실패하면 지어내지 않고 미수집(None)으로 남깁니다.
+
+def _fetch_wisereport_metrics(code, errors):
+    """
+    WiseReport 페이지 한 장 → `utils.wisereport_parser.parse_financial_summary()` 결과 dict, 또는
+    페이지를 못 받았으면 None. `errors` 는 요청 실패 사유만 덧붙입니다(파싱 사유는 반환 dict 의
+    `errors` 에 들어 있고, 어디까지 쓸지는 호출부가 정합니다).
+
+    🔴 **이 페이지는 출처 전환 스위치를 따르지 않습니다 — 판단 근거(2026-09-08, 코드를 읽고 확인):**
+      ① 이 도메인(`navercomp.wisereport.co.kr`)은 9/10 종료 예고 대상인 `finance.naver.com` 이
+         아닙니다. 신 사이트 `stock.naver.com` 이 지금도 이 도메인을 호출하고 있음이 실측됐습니다
+         (NAVER_MIGRATION_WORK_ORDER.md §1-5-6).
+      ② 구 경로가 EV/EBITDA 를 **오직 여기서만** 얻습니다(`_fetch_ev_ebitda` → 이 함수). 스위치를
+         따르게 하면 구 경로에서 EV/EBITDA 가 사라져 현행이 바뀝니다.
+      ③ 신 경로는 Forward ROE 까지 **오직 여기서만** 얻습니다(신 JSON API 에 없음, §1-5-4).
+      → 두 경로가 같은 페이지를 같은 파서로 읽습니다. 요청 수는 현행과 같은 종목당 1회입니다.
+    """
+    html = _fetch_wisereport_page(code, errors)
+    if html is None:
+        return None
+    return parse_financial_summary(html)
+
+
+def _fetch_ev_ebitda(code, errors):
+    """
+    **구 경로 전용** 얇은 포장 — EV/EBITDA 값(문자열) 또는 None. `errors` 는 제자리에서 덧붙입니다.
+
+    📌 2026-09-08 배선(이관 4단계): 이 함수 안에 있던 표 파싱(`pd.read_html` + 헤더 분류 + 행 탐색)을
+       **`utils/wisereport_parser.py` 호출로 대체**했습니다. 같은 페이지를 두 곳에서 파싱하는 상태를
+       남기지 않기 위해서입니다(§0-3-10). 구 경로의 저장값이 바뀌지 않도록 지킨 것:
+         · 값은 페이지 표기 **문자열 그대로**(`"19.51"`·`"3.60"`) — 파서의 `_pick_text` 가 같은 규칙.
+         · 헤더 분류 실패 시 iloc 폴백 없이 미수집(§2-1) — 사유 문장에 `(§2-1)` 꼬리표가 붙는 것만 다름.
+         · 재무요약 표(ROE 등)에 관한 파서 사유는 **여기서 붙이지 않습니다** — 구 경로는 그 표를 쓰지
+           않으므로 붙이면 거짓 경고입니다(`errors_excluding_summary_table`).
+       ⚠️ 알고 두는 차이(현행 대비): 예전엔 표가 하나도 없는 200 응답에서 `pd.read_html` 의 ValueError 가
+          "EV/EBITDA 수집 실패: …" 로 기록되며 **연속 실패 카운트를 올렸습니다.** 파서는 이를 사유
+          문장("표를 하나도 찾지 못했습니다")으로 돌려주고 카운트는 올리지 않습니다 — 서킷 주석의
+          원래 의도("응답을 받았으면 연결은 살아있는 것")와 이쪽이 맞습니다.
 
     📌 반환값은 **문자열**입니다(원본 표기 보존 — 숫자로 해석되는지만 확인하고 문자열을 유지).
        `t_per`/`t_eps` 는 숫자인데 이 값과 `t_pbr` 만 문자열이라 반환 dict 안에 타입이 섞입니다.
-
-    📌 2026-09-07 분리: `fetch_naver_item_dps_and_eps()` 본문에서 **한 글자도 바꾸지 않고** 옮겼습니다.
     """
-    ev_ebitda = None
-    # EV/EBITDA (Naver WiseReport) 추가 스크래핑
-    # 2026-08-27 신설 — 서킷브레이커: 이 도메인이 연속으로 응답을 안 하면(연결 타임아웃 등)
-    # 남은 종목은 요청 자체를 건너뜁니다. 값은 원래도 못 구한 것과 동일하게 None(§0-1)이고,
-    # 재시도를 늘리는 게 아니라 "가망 없으면 빨리 포기"라 상대 서버 요청 수는 오히려 줄어듭니다
-    # (모듈 상단 `_ev_ebitda_circuit` 주석 참고).
-    if _ev_ebitda_circuit["open"]:
-        _ev_ebitda_circuit["skipped_count"] += 1
-    else:
-        time.sleep(1.5) # 서버 부하 방지
-        try:
-            res_ev = requests.get(f"https://navercomp.wisereport.co.kr/v2/company/c1010001.aspx?cmp_cd={code}", timeout=10)
-            _ev_ebitda_circuit["consecutive_failures"] = 0  # 응답을 받았으면(표 파싱 결과와 무관) 연결 자체는 살아있는 것
-            if res_ev.status_code == 200:
-                ev_dfs = pd.read_html(io.StringIO(res_ev.text))
-                # =========================================================
-                # 2026-08-06 2차 감사 1-6: `iloc[row_idx, 1]` 고정 위치 인덱스 제거
-                # (SPEC §2-1 위반). 위레포트 표는 연도 컬럼 개수가 종목/시점마다 달라서
-                # "무조건 2번째 칸"이 최신 연도라는 보장이 없습니다. 이제 헤더를
-                # DataValidator.classify_header_timeframe()으로 분류해 '연간 실적' 컬럼만
-                # 고른 뒤 가장 최근 것을 쓰고, 헤더 분류에 실패하면 지어내지 않고
-                # 미수집(None)으로 남깁니다.
-                # =========================================================
-                for df in ev_dfs:
-                    if 'EV/EBITDA' not in str(df):
-                        continue
-                    annual_ev_cols = [
-                        i for i, col in enumerate(df.columns)
-                        if DataValidator.classify_header_timeframe(col) in ("TTM", "ANNUAL_TTM", "ANNUAL_EST")
-                    ]
-                    if not annual_ev_cols:
-                        errors.append("EV/EBITDA 표 헤더 기간 분류 실패 → 위치 인덱스 폴백 없이 미수집 처리")
-                        break
-                    for row_idx in range(len(df)):
-                        if 'EV/EBITDA' not in str(df.iloc[row_idx, 0]):
-                            continue
-                        for col_i in reversed(annual_ev_cols):
-                            try:
-                                cell = df.iloc[row_idx, col_i]
-                                val = str(cell).replace(',', '').strip()
-                                if pd.isna(cell) or val in ('', 'nan', '-', 'ㅡ', '−'):
-                                    continue
-                                float(val)   # 숫자로 해석되는지만 확인 (문자열 원본 유지)
-                                ev_ebitda = val
-                                break
-                            except (ValueError, TypeError, IndexError):
-                                continue
-                        break
-                    break
-        except Exception as e:
-            print("EV_EBITDA FETCH_ERROR:", e)
-            errors.append(f"EV/EBITDA 수집 실패: {e}")
-            _ev_ebitda_circuit["consecutive_failures"] += 1
-            if _ev_ebitda_circuit["consecutive_failures"] >= _EV_EBITDA_FAILURE_THRESHOLD:
-                _ev_ebitda_circuit["open"] = True
-                print(
-                    f"⚡ EV/EBITDA 데이터 소스(navercomp.wisereport.co.kr) 연속 "
-                    f"{_EV_EBITDA_FAILURE_THRESHOLD}회 연결 실패 — 이번 실행에서는 남은 종목의 "
-                    "EV/EBITDA 요청을 건너뜁니다(재시도 강화가 아니라 빨리 포기 — 상대 서버 "
-                    "요청 수는 오히려 줄어듭니다)."
-                )
-    return ev_ebitda
+    metrics = _fetch_wisereport_metrics(code, errors)
+    if metrics is None:
+        return None
+    errors.extend(errors_excluding_summary_table(metrics["errors"]))
+    return metrics["ev_ebitda"]
 
 
-def _inherit_preferred_dps(code, ticker_types, parsed_dps, dps_status, dps_inherited_from, errors):
+def _inherit_preferred_dps(code, ticker_types, parsed_dps, dps_status, dps_inherited_from, errors,
+                           fetch_parent=None):
     """
     우선주(예: 00680K 미래에셋증권2우B) DPS 를 보통주에서 상속합니다.
     반환: (parsed_dps, dps_status, dps_inherited_from) — `errors` 는 제자리에서 덧붙입니다.
@@ -887,13 +928,19 @@ def _inherit_preferred_dps(code, ticker_types, parsed_dps, dps_status, dps_inher
 
     📌 2026-09-07 분리: `fetch_naver_item_dps_and_eps()` 본문에서 **한 글자도 바꾸지 않고**
        옮겼습니다(부모 페이지를 다시 부르는 재귀 호출도 그대로).
+
+    fetch_parent: 2026-09-08 배선. 부모(보통주) 정보를 어느 출처로 받을지 — None 이면 구 경로
+       (`fetch_naver_item_dps_and_eps`)라 현행과 동일하고, 신 경로는 `fetch_naver_item_new_api` 를
+       넘깁니다. 스위치가 신 출처인데 부모만 구 주소로 부르는 뒤섞임을 막기 위한 인자입니다.
     """
+    if fetch_parent is None:
+        fetch_parent = fetch_naver_item_dps_and_eps
     try:
         if (parsed_dps is None or parsed_dps == 0) and code.endswith('K'):
             parent_code = code[:-1] + '0'
             types = ticker_types if ticker_types is not None else _get_ticker_types_cached()
             if types.get(parent_code) == "STOCK":
-                parent_info = fetch_naver_item_dps_and_eps(parent_code, ticker_types=types)
+                parent_info = fetch_parent(parent_code, ticker_types=types)
                 p_dps = parent_info.get("dps")
                 if p_dps and p_dps > 0:
                     parsed_dps = p_dps
@@ -1023,6 +1070,162 @@ def fetch_naver_item_dps_and_eps(code, ticker_types=None):
         "errors": errors
     }
 
+# =============================================================================
+# 🆕 신 출처(stock.naver.com JSON API) 경로 — 2026-09-08 이관 4단계 "배선"
+#
+# 아래 두 함수(`_new_api_get_json`, `fetch_naver_item_new_api`)와 뒤쪽의
+# `_fetch_market_list_new_api` 가 신 경로의 전부입니다. 구 경로 함수는 **한 글자도 지우지
+# 않았습니다** — 스위치(`utils/naver_source.py`)가 구 출처(기본)면 아래 코드는 실행되지 않습니다.
+#
+# §0-3-2 매너 — 구 경로와 **같은 요청량·같은 간격**입니다:
+#   · 목록: 페이지당 1요청, 페이지 사이 2.0~3.0초 (구: 시장별 페이지네이션, 같은 간격)
+#   · 상세: 종목당 1요청(구 `item/main.naver` 자리) + WiseReport 1요청(현행 그대로)
+#   · 종목 사이 2.0~3.0초는 `enrich_quant_metrics` 루프가 구 경로와 똑같이 잡니다
+#   · 403/429 → **재시도·우회 없이 즉시 중단**(RuntimeError → 스냅샷 미갱신)
+#   · 일시 오류(타임아웃·5xx)는 구 경로와 같이 최대 3회 백오프 재시도
+# 🔴 NXT(넥스트레이드) 주소는 `build_*_url()` 안의 `assert_krx_source()` 가 예외로 막습니다(§1-5-11).
+# =============================================================================
+# 봇임을 숨기지 않습니다 — 차단 우회용 위장이 아니라 정직한 식별. 섀도(`run_naver_api_shadow.py`)가
+# 같은 방식으로 45요청 전부 200 을 받아 헤더 검사가 없음을 확인했습니다(§7-7).
+NEW_API_USER_AGENT = "visible-hand-dashboard/collector (+https://github.com/moonbear135/visible-hand-dashboard)"
+NEW_API_TIMEOUT_SEC = 10
+NEW_API_MAX_RETRIES = 3          # 구 경로 `fetch_naver_item_dps_and_eps` 의 max_retries 와 같은 값
+NEW_API_BLOCKED_STATUSES = (403, 429)
+
+
+class NaverApiBlocked(RuntimeError):
+    """상대 서버가 403/429 로 답함 — 그만하라는 뜻. 재시도·우회 없이 이번 수집을 통째로 중단합니다(§0-3-2)."""
+
+
+def _new_api_get_json(url):
+    """
+    신 API 한 요청. 반환: (JSON 또는 None, 실패 사유 또는 None).
+
+    · 403/429 → `NaverApiBlocked` 예외 (즉시 중단, 재시도 없음)
+    · 그 외 비정상(타임아웃·연결 오류·5xx·JSON 아님) → 구 경로와 같은 백오프로 최대 3회 재시도 후
+      (None, 사유). 값을 지어내지 않습니다(§0-1).
+    """
+    headers = {"User-Agent": NEW_API_USER_AGENT}
+    base_delay = 1.0
+    last_error = None
+    for attempt in range(NEW_API_MAX_RETRIES):
+        try:
+            res = requests.get(url, headers=headers, timeout=NEW_API_TIMEOUT_SEC)
+        except requests.exceptions.RequestException as e:
+            last_error = f"요청 예외: {type(e).__name__}: {e}"
+        else:
+            if res.status_code in NEW_API_BLOCKED_STATUSES:
+                raise NaverApiBlocked(
+                    f"🔴 신 API 가 {res.status_code} 로 응답했습니다 — §0-3-2 에 따라 재시도·우회 없이 "
+                    f"이번 수집을 중단합니다(기존 스냅샷 유지). 원인을 확인하기 전에는 다시 돌리지 마세요. "
+                    f"주소: {url}"
+                )
+            if res.status_code == 200:
+                try:
+                    return res.json(), None
+                except ValueError:
+                    last_error = "JSON 파싱 실패 — 응답 구조가 바뀌었을 수 있음"
+            else:
+                last_error = f"HTTP {res.status_code}"
+        if attempt < NEW_API_MAX_RETRIES - 1:
+            time.sleep(base_delay * (2 ** attempt) + random.uniform(0.1, 0.5))
+    return None, last_error
+
+
+def fetch_naver_item_new_api(code, ticker_types=None):
+    """
+    **신 경로** 종목 상세 — 구 `fetch_naver_item_dps_and_eps()` 와 **같은 키 집합**의 dict 를
+    돌려줍니다(소비부 `enrich_quant_metrics` 를 고치지 않고 갈아끼우기 위해, §0-3-10).
+
+    출처 두 곳:
+      ① `stock.naver.com/api/domestic/detail/<code>/detail?codeType=KRX` (JSON)
+         → t_per·t_eps·f_per·f_eps·t_pbr·div_yield·dps·상장주식수 (`utils.naver_stock_api.parse_stock_detail`)
+      ② `navercomp.wisereport.co.kr/…/c1010001.aspx` (HTML, 현행과 같은 페이지)
+         → f_roe·ev_ebitda (`utils.wisereport_parser`) — ①에는 이 둘이 없습니다(§1-5-4).
+
+    🔴 지키는 것(전부 작업지시서 실측 근거):
+      · `t_eps` 는 `eps` 이지 `krxEps` 가 아닙니다(3.6배 차이) — 파서가 강제.
+      · `f_per`·`f_eps`·`t_pbr` 는 **응답값 그대로**. 계산으로 만들지 않습니다(§2-3-1 — 재료는 받는 것).
+      · Forward ROE 이상치 판정(±300%)은 구 경로와 **같은 상수** `FORWARD_ROE_ABS_LIMIT_PCT`.
+      · 우선주 DPS 상속은 구 경로와 같은 함수(`_inherit_preferred_dps`)를 쓰되, 부모도 **신 경로**로 받습니다.
+      · 못 받은 값은 None + 사유. 0·평균으로 메우지 않습니다(§0-1).
+
+    ⚠️ 알고 두는 차이(구 경로 대비): `dps` 가 **연간** 주당배당금입니다(구 경로는 분기 배당 종목에서
+       1회분만 저장하는 결함이 있음 — §1-5-12 ①). `t_pbr` 은 문자열이 아니라 숫자입니다.
+    """
+    url = build_detail_url(code)                    # NXT 면 여기서 예외
+    payload, err = _new_api_get_json(url)
+    if payload is None:
+        return _empty_item_info(f"신 API 종목 상세 요청 실패: {err}")
+    try:
+        item = parse_stock_detail(payload, source_url=url)
+    except NaverApiSourceError as e:
+        return _empty_item_info(f"신 API 종목 상세 파싱 거부: {e}")
+
+    # 파서가 남긴 "f_roe·ev_ebitda 는 이 API 에 없음" 사유는 아래에서 실제로 채우므로 걷어냅니다 —
+    # 채워 놓고 "미수집" 이라고 적혀 있으면 그것도 거짓입니다(§0-1). 못 채우면 아래에서 다시 적습니다.
+    errors = [e for e in item["errors"] if e not in DETAIL_MISSING_FIELD_NOTES.values()]
+
+    f_roe, ev_ebitda = None, None
+    wise = _fetch_wisereport_metrics(code, errors)
+    if wise is None:
+        errors.append("WiseReport(c1010001.aspx) 미수신 — f_roe·ev_ebitda 미수집")
+    else:
+        errors.extend(wise["errors"])
+        ev_ebitda = wise["ev_ebitda"]
+        v = wise["f_roe"]
+        if v is not None and abs(v) > FORWARD_ROE_ABS_LIMIT_PCT:
+            errors.append(f"Forward ROE 컨센서스 이상치 의심(범위 초과, {v}%) — 제외")
+        else:
+            f_roe = v
+    if f_roe is None and wise is not None:
+        errors.append("Forward ROE 컨센서스 미제공(애널리스트 커버리지 없음 또는 값 없음)")
+
+    dps, dps_status, dps_inherited_from = _inherit_preferred_dps(
+        code, ticker_types, item["dps"], item["dps_status"], item["dps_inherited_from"], errors,
+        fetch_parent=fetch_naver_item_new_api)
+
+    item.update({
+        "f_roe": f_roe,
+        "ev_ebitda": ev_ebitda,
+        "dps": dps,
+        "dps_status": dps_status,
+        "dps_inherited_from": dps_inherited_from,
+        "errors": errors,
+    })
+    return item
+
+
+def _load_ticker_master_stocks(path=None):
+    """data/kr_ticker_master.json 의 `stocks` 배열. 파일이 없거나 못 읽으면 빈 리스트.
+
+    2026-09-08: `load_ticker_types()` 와 `load_ticker_markets()` 가 같은 파일을 읽으므로 읽기를
+    한 곳으로 모았습니다(§0-3-10). 실패 시 경고 문구·반환 규약은 예전 `load_ticker_types` 그대로.
+    """
+    if path is None:
+        path = os.path.join(os.path.dirname(__file__), "data", KR_TICKER_MASTER_FILENAME)
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception as e:
+        print(f"⚠️ {path} 를 읽지 못했습니다: {e}")
+        return []
+    return data.get("stocks", [])
+
+
+def load_ticker_markets(path=None):
+    """반환: {code: "KOSPI"|"KOSDAQ"|"KOSDAQ GLOBAL"|"KONEX"|None} (data/kr_ticker_master.json 기준).
+
+    2026-09-08 신 경로용. 구 경로는 네이버 목록 페이지가 시장별(`sosok=0/1`)이라 시장 구분이
+    저절로 됐지만, 신 API 목록은 `marketType=ALL` 이라 **코넥스까지 섞여 옵니다**(§7-8 실측 —
+    본시스템즈). 종목 선별 판정은 이 마스터 파일 **한 곳**에서만 합니다(§0-3-10) — 신 API 의
+    `sosok`·`type` 필드로 두 번째 판정을 만들지 않습니다.
+    """
+    return {s["code"]: s.get("market") for s in _load_ticker_master_stocks(path) if s.get("code")}
+
+
 def load_ticker_types(path=None):
     """반환: {code: "STOCK"|"ETF"|...} (data/kr_ticker_master.json 기준).
     파일이 없거나 읽기 실패하면 빈 dict를 반환합니다 (→ 아래 필터에서 전부 걸러짐,
@@ -1032,17 +1235,7 @@ def load_ticker_types(path=None):
     완전히 동일한 규약입니다 — 정답 코드가 이미 이 저장소에 있어 그대로 재사용합니다
     (§0-3-10, 검증된 코드를 새로 짜지 않음).
     """
-    if path is None:
-        path = os.path.join(os.path.dirname(__file__), "data", KR_TICKER_MASTER_FILENAME)
-    if not os.path.exists(path):
-        return {}
-    try:
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-    except Exception as e:
-        print(f"⚠️ {path} 를 읽지 못했습니다: {e}")
-        return {}
-    return {s["code"]: s.get("type") for s in data.get("stocks", []) if s.get("code")}
+    return {s["code"]: s.get("type") for s in _load_ticker_master_stocks(path) if s.get("code")}
 
 
 # 2026-08-29 재감사 H12: 우선주 부모 코드 검증용 캐시.
@@ -1142,10 +1335,14 @@ def _cell_float(cols, idx):
         return None
 
 
-def fetch_kospi200_real_market_data():
+def fetch_kospi200_real_market_data(naver_source=None):
     """
     네이버 증권 시가총액 순위 목록(sise_market_sum.naver)을 코스피(sosok=0)+코스닥(sosok=1)
     양쪽 다 실행 시점 기준으로 스크래핑합니다.
+
+    🔀 naver_source (2026-09-08 배선): 출처 전환 스위치 값. None 이면 `resolve_naver_source()`
+       (환경변수 → 기본값 구 출처). 신 출처면 `_fetch_market_list_new_api()` 로 **넘기고 끝**이고,
+       아래 본문(구 경로)은 한 글자도 바뀌지 않았습니다.
 
     🔴 2026-08-26(오너 요청 — "재무제표 읽기" 코스피 상위 200 → 코스피+코스닥 통합 상위 500
        확대, TASK_HISTORY #150 참고). 원래는 코스피(sosok=0)만 긁었는데, 이제 두 시장을 각각
@@ -1168,6 +1365,11 @@ def fetch_kospi200_real_market_data():
     단순 시가총액 순위 기준입니다. (ETF, ETN, 인덱스 펀드류 상품 완전 제외, 순수 개별
     기업 주식만)
     """
+    if naver_source is None:
+        naver_source = resolve_naver_source()
+    if naver_source == NAVER_SOURCE_NEW_API:
+        return _fetch_market_list_new_api()
+    # ── 여기서부터 구 경로(현행) — 2026-09-10 종료 예고 대상 finance.naver.com ──────────
     # =========================================================
     # 2026-08-06 2차 감사 1-5: 페이지 수집 실패를 `continue`로 삼키면 순위가 조용히 밀립니다.
     # → 실패한 페이지를 기록해 두고, 필요한 순위 구간을 다 못 채운 채 실패가 하나라도
@@ -1330,6 +1532,125 @@ def fetch_kospi200_real_market_data():
     # 순위·히스테리시스 판정은 이 함수 밖(_rank_candidates_by_market_cap → apply_hysteresis_buffer)
     # 에서 정해집니다.
     return all_stocks_raw, all_failed_pages
+
+
+# 신 API 목록 수집 상수 — 값의 근거를 옆에 적습니다(§0-1).
+# 이탈선 575위(apply_hysteresis_buffer 의 exit_rank)까지 통합 순위를 매길 수 있어야 하므로, 마스터로
+# 걸러낸 **적격 후보**가 이 수를 채우면 요청을 멈춥니다. 여유 65 은 코넥스·ETF 등 비적격 혼입분과
+# 경계 흔들림용. 구 경로는 시장별 700 씩(최대 1,400) 받았으니 요청 수(페이지당 20종목, 32~40회)는
+# 구 경로(시장별 최대 25페이지 × 2 = 50회, 통상 28회 안팎)보다 늘지 않습니다(§0-3-2).
+NEW_API_LIST_TARGET_CANDIDATES = 640
+NEW_API_LIST_MAX_PAGES = 40
+# 🔴 종가 채택 조건. 작업지시서 §1-5-11 은 "localTradedAt 이 15:30 이 아니면 채택하지 않는다" 인데,
+#    우리가 쓰는 KRX 목록·상세 API 응답에는 `closePrice`·`localTradedAt` 필드가 **없습니다**(실측 —
+#    그 두 필드는 `polling.finance.naver.com` 실시간 API 에만 있고, 그 주소의 KRX 변형은 확인된 적이
+#    없어 쓰지 않습니다 §0-1). 대신 같은 응답의 `marketStatus` 로 같은 뜻을 지킵니다: 정규장이
+#    열려 있으면(장중) "OPEN", 마감 후·개장 전이면 "CLOSE" — 섀도 3회차(07:59 KST) 전 종목 CLOSE 실측.
+#    전 종목이 CLOSE 가 아니면 값을 채택하지 않고 **수집을 중단**합니다(스냅샷 미갱신).
+NEW_API_REQUIRED_MARKET_STATUS = "CLOSE"
+# 마스터(`kr_ticker_master.json`)의 시장값 → 구 경로와 같은 라벨. 코넥스·None 은 여기 없으므로 걸러집니다.
+# 코스닥 글로벌 세그먼트는 구 경로에서 코스닥 페이지(sosok=1)에 실려 "KOSDAQ" 으로 저장돼 왔습니다
+# (2026-09-07 스냅샷 실측: KOSDAQ 188 = 코스닥 143 + 코스닥글로벌 45).
+NEW_API_MARKET_LABELS = {"KOSPI": "KOSPI", "KOSDAQ": "KOSDAQ", "KOSDAQ GLOBAL": "KOSDAQ"}
+
+
+def _fetch_market_list_new_api():
+    """
+    **신 경로** 시가총액 순위 목록 — `stock.naver.com/api/domestic/market/stock/default?tradeType=KRX…`
+    구 `fetch_kospi200_real_market_data()` 와 **같은 반환 형태** `(candidates, failed_pages)` 이고,
+    각 종목 dict 도 같은 키(`name·code·price·t_per·t_roe·market`)를 갖습니다(§0-3-10 — 뒤 단계인
+    `_rank_candidates_by_market_cap`·`apply_hysteresis_buffer`·`enrich_quant_metrics` 를 고치지 않음).
+
+    구 경로와 다른 점 세 가지(전부 작업지시서 실측 근거):
+      ① 시장 구분이 응답에 없으므로(`marketType=ALL`, 코넥스 혼입) **종목 선별은 마스터 파일 한 곳**
+         (`kr_ticker_master.json`: type=STOCK 그리고 market ∈ 코스피·코스닥)에서만 합니다. 신 API 의
+         `type`·`sosok` 은 판정에 쓰지 않습니다 — 두 판정이 어긋나면 종목이 조용히 사라집니다(§7-8).
+      ② 목록이 이미 시총 내림차순 **하나의 흐름**이라, 중간 페이지 하나만 빠져도 그 구간 종목이
+         통째로 사라집니다. 그래서 페이지 실패는 "일부 실패 허용" 없이 **즉시 중단**입니다.
+      ③ 종가 검증 — 전 종목 `marketStatus == CLOSE` 가 아니면 중단(`NEW_API_REQUIRED_MARKET_STATUS`).
+
+    `startIdx` 는 **페이지 인덱스**입니다(0,1,2,…). 오프셋이 아닙니다 — 섀도 1회차 사고(§7-7).
+    """
+    ticker_types = load_ticker_types()
+    ticker_markets = load_ticker_markets()
+    if not ticker_types:
+        print("⚠️ data/kr_ticker_master.json 을 읽지 못해 ticker_types 가 비어 있습니다 "
+              "— 이번 수집에서는 종목 타입을 확인할 수 없는 모든 후보가 걸러집니다(안전한 쪽으로).")
+
+    candidates = []
+    seen_codes = set()
+    status_counts = {}
+    skipped = {"not_stock": 0, "market_out_of_scope": 0, "parse": 0}
+    for page in range(NEW_API_LIST_MAX_PAGES):
+        url = build_list_url(page)                  # NXT 면 여기서 예외
+        try:
+            payload, err = _new_api_get_json(url)
+        except NaverApiBlocked as e:
+            raise RuntimeError(str(e)) from e
+        if payload is None:
+            # ② 한 페이지라도 빠지면 순위 한 구간이 통째로 사라지므로 중단(기존 스냅샷 유지).
+            raise RuntimeError(
+                f"신 API 시가총액 목록 {page}페이지 수집 실패({err}) — 순위 구간이 비어 순위가 밀리므로 "
+                "수집을 중단합니다(기존 스냅샷 유지)"
+            )
+        if not payload:
+            break                                   # 더 줄 게 없으면 그만 요청합니다
+        try:
+            rows = parse_market_list(payload, source_url=url, market_label="UNKNOWN")
+        except NaverApiSourceError as e:
+            raise RuntimeError(f"신 API 시가총액 목록 {page}페이지 파싱 거부: {e}") from e
+
+        for row in rows:
+            for note in row.get("errors", []):
+                # 파서가 깨진 행을 건너뛰며 남긴 사유 — 조용히 사라지면 §0-1 위반이라 로그에 남깁니다.
+                print(f"⚠️ 신 API 목록 {page}페이지: {note}")
+                skipped["parse"] += 1
+            code = row["code"]
+            status_counts[row.get("api_market_status")] = status_counts.get(row.get("api_market_status"), 0) + 1
+            if code in seen_codes:
+                raise RuntimeError(
+                    f"신 API 시가총액 목록에 같은 종목({code})이 두 번 들어왔습니다 — 페이지가 겹쳤을 수 "
+                    "있어 수집을 중단합니다(startIdx 는 오프셋이 아니라 페이지 인덱스)"
+                )
+            seen_codes.add(code)
+            # ① 종목 선별은 마스터 한 곳에서만.
+            if ticker_types.get(code) != "STOCK":
+                skipped["not_stock"] += 1
+                continue
+            market_label = NEW_API_MARKET_LABELS.get(ticker_markets.get(code))
+            if market_label is None:
+                skipped["market_out_of_scope"] += 1     # 코넥스 등 — 현행이 수집한 적 없는 시장
+                continue
+            candidates.append({
+                "name": row["name"],
+                "code": code,
+                "price": row["price"],
+                "t_per": row["t_per"],               # 파서가 0 → None 처리(구 경로와 같은 규칙)
+                "t_roe": row["t_roe"],
+                "market": market_label,
+                # 종가 검증용(아래). 스냅샷에는 실리지 않습니다(enrich 가 명시한 키만 씀).
+                "api_market_status": row.get("api_market_status"),
+            })
+        if len(candidates) >= NEW_API_LIST_TARGET_CANDIDATES:
+            break
+        time.sleep(random.uniform(2.0, 3.0))  # 매너 있는 크롤링을 위한 여유 있는 딜레이 (Polite Scraping)
+
+    # ③ 종가 검증 — 장중 값·다른 시장의 값을 종가로 저장하지 않습니다(§1-5-11).
+    bad = {k: v for k, v in status_counts.items() if k != NEW_API_REQUIRED_MARKET_STATUS}
+    if bad or not status_counts:
+        raise RuntimeError(
+            f"신 API 목록의 marketStatus 가 전 종목 {NEW_API_REQUIRED_MARKET_STATUS} 가 아닙니다"
+            f"(집계: {status_counts}) — 장중 가격 또는 다른 시장의 값일 수 있어 채택하지 않고 수집을 "
+            "중단합니다(기존 스냅샷 유지, §1-5-11)"
+        )
+    if len(candidates) < NEW_API_LIST_TARGET_CANDIDATES:
+        # 페이지가 일찍 비었거나 상한에 걸림 — 이탈선(575)을 못 덮으면 순위를 매길 수 없으므로 알립니다.
+        print(f"⚠️ 신 API 목록: 적격 후보 {len(candidates)}개(목표 {NEW_API_LIST_TARGET_CANDIDATES}) "
+              f"— 페이지 {NEW_API_LIST_MAX_PAGES}개 안에서 다 못 채웠습니다.")
+    print(f"Successfully retrieved {len(candidates)} real candidates via new API "
+          f"(KRX, marketStatus={NEW_API_REQUIRED_MARKET_STATUS}; skipped {skipped}).")
+    # 구 경로와 같은 반환 형태. 실패 페이지는 위에서 전부 중단 사유로 승격했으므로 항상 빈 목록입니다.
+    return candidates, []
 
 
 def _rank_candidates_by_market_cap(candidates, shares_lookup):
@@ -1682,7 +2003,7 @@ def _apply_cross_sectional_scoring(enriched_stocks):
         stock_dict["growth_score_capped"] = score_res.get("growth_score_capped", False)
 
 
-def enrich_quant_metrics(stocks_raw, shares_lookup=None):
+def enrich_quant_metrics(stocks_raw, shares_lookup=None, naver_source=None):
     """
     수집된(코스피+코스닥 통합, 최대 수백 개) 실데이터 종목에 네이버 공식 투자정보
     (aside_invest_info) 스냅샷 실데이터를 적용하여 Forward PEGY, 100점 만점 quant_score,
@@ -1692,7 +2013,14 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
     (`_rank_candidates_by_market_cap`) 때 이미 한 번 조회해둔 상장주식수 lookup을 그대로
     넘겨받아 FinanceDataReader를 중복 호출하지 않습니다. None이면(단독 호출·테스트 등)
     기존처럼 이 함수가 직접 조회합니다 — 하위 호환.
+
+    naver_source: 2026-09-08 배선. 종목 상세를 어느 출처로 받을지(스위치 값). None 이면
+    `resolve_naver_source()`(환경변수 → 기본값 구 출처). 구 출처면 예전과 **완전히 같은 호출**
+    (`fetch_naver_item_dps_and_eps(code)`)이라 계산 기준선(특성화 테스트)이 그대로 성립합니다.
     """
+    if naver_source is None:
+        naver_source = resolve_naver_source()
+    use_new_api = naver_source == NAVER_SOURCE_NEW_API
     enriched_stocks = []
 
     # 상장주식수 1차 출처: FinanceDataReader 구조화 데이터 (한 번만 조회, 종목별 재조회 안 함)
@@ -1714,7 +2042,15 @@ def enrich_quant_metrics(stocks_raw, shares_lookup=None):
             data_issues.append(_roe_inherit_note)
 
         # 1. 네이버 종목 상세 우측 Investment Info 공식 실데이터 전면 우선 적용
-        item = fetch_naver_item_dps_and_eps(code)
+        #    🔀 출처 스위치: 구 출처(기본)면 예전 호출 그대로, 신 출처면 JSON API 경로.
+        if use_new_api:
+            try:
+                item = fetch_naver_item_new_api(code)
+            except NaverApiBlocked as e:
+                # 403/429 — 남은 종목으로 계속 가지 않습니다. 통째로 실패시켜 스냅샷을 지킵니다(§0-3-2).
+                raise RuntimeError(str(e)) from e
+        else:
+            item = fetch_naver_item_dps_and_eps(code)
         n_t_per = item["t_per"]
         n_t_eps = item["t_eps"]
         n_f_per = item["f_per"]
@@ -2283,6 +2619,20 @@ def run_kospi200_collector():
     """
     print(f"[{_now_kst().strftime('%Y-%m-%d %H:%M:%S')} KST] 코스피+코스닥 통합 시가총액 상위 500 100% 실데이터 수집 시작...")
 
+    # 🔀 출처 전환 스위치 — 실행당 **한 번만** 읽어 목록·상세 양쪽에 같은 값을 넘깁니다.
+    #    (환경변수를 두 번 읽으면 이론상 중간에 바뀔 수 있고, 그러면 목록은 구·상세는 신이 됩니다.)
+    #    모르는 값이면 resolve_naver_source() 가 예외로 멈춥니다 — 오타를 기본값으로 눌러 담지 않음(§0-1).
+    naver_source = resolve_naver_source()
+    data_source = describe_naver_source(naver_source)
+    print("=" * 70)
+    print(f"🔀 네이버 출처: {naver_source} — {data_source['label']}"
+          + (" (기본값)" if data_source["is_default"] else " (⚠️ 스위치로 켜진 신 출처)"))
+    print(f"   {switch_instructions()}")
+    if naver_source == NAVER_SOURCE_LEGACY:
+        print("   ⚠️ 구 서비스(finance.naver.com)는 2026-09-10 종료 예고 대상입니다. 종료되면 파싱이 실패해 "
+              "값이 None 으로 남습니다(§0-1) — 위 방법으로 신 출처로 전환하세요.")
+    print("=" * 70)
+
     # 2026-08-29 재감사 L11: EV/EBITDA 서킷브레이커는 모듈 전역이라 같은 프로세스에서
     # 이 함수를 두 번 부르면 지난 실행의 열린 상태가 그대로 남습니다(테스트·배치 재실행).
     # 실행 단위로 초기 상태를 복원합니다.
@@ -2298,7 +2648,7 @@ def run_kospi200_collector():
 
     # 2차 감사 1-5: 페이지 실패 정보를 함께 받아 메타데이터에 남깁니다.
     # (순위 구간이 비어 순위가 밀릴 수 있는 상황이면 여기까지 오지 못하고 RuntimeError로 중단됩니다.)
-    candidates, failed_pages = fetch_kospi200_real_market_data()
+    candidates, failed_pages = fetch_kospi200_real_market_data(naver_source=naver_source)
     if not candidates:
         # 종목 목록조차 못 가져오면 기존 스냅샷을 건드리지 않고 명확히 실패시킵니다.
         raise RuntimeError("코스피+코스닥 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)")
@@ -2318,7 +2668,8 @@ def run_kospi200_collector():
     if not tracked_stocks:
         raise RuntimeError("히스테리시스 버퍼 적용 후 추적 대상 종목이 0개입니다 — 수집을 중단합니다 (기존 스냅샷 유지)")
 
-    enriched_stocks = enrich_quant_metrics(tracked_stocks, shares_lookup=shares_lookup)
+    enriched_stocks = enrich_quant_metrics(tracked_stocks, shares_lookup=shares_lookup,
+                                           naver_source=naver_source)
 
     # 공개 화면에는 is_visible(순위 500위 이내)인 종목만 노출됩니다. 품질 지표(검증 통과율 등)도
     # "화면에 실제로 보이는 500개" 기준으로 집계해야 배너 숫자가 사용자에게 의미가 있습니다.
@@ -2353,6 +2704,11 @@ def run_kospi200_collector():
         "metadata": {
             "last_updated_at": now_str,
             "status": status,
+            # 🔀 2026-09-08: 어느 출처로 만든 스냅샷인지(§0-1). 이 기록이 없으면 나중에
+            #    "이 숫자가 구 페이지 값인지 신 API 값인지" 아무도 알 수 없습니다.
+            #    `naver_source` 는 짧은 키(legacy/new_api), `data_source` 는 사람이 읽는 상세 블록.
+            "naver_source": naver_source,
+            "data_source": data_source,
             "total_count": total_count,
             "valid_count": len(valid_stocks),
             "valid_ratio": round(valid_ratio, 3),

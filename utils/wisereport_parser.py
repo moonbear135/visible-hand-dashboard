@@ -8,9 +8,12 @@
    확인됐습니다. 받아놓고 안 읽고 있었던 것입니다.
    → **요청을 늘리지 않고** 필요한 값을 더 얻을 수 있습니다(§0-3-2 관점에서 최선).
 
-🔴 **아직 실전에 배선돼 있지 않습니다**(§0-3-6 — 오너 승인 사항).
-   지금 `_fetch_ev_ebitda()` 는 그대로 두었습니다. 배선할 때는 **이 모듈이 EV/EBITDA 도
-   같이 읽으므로** 그 함수를 이 모듈 호출로 바꿔 중복을 없애는 것이 맞습니다(§0-3-10).
+🟢 **2026-09-08 배선 완료** (이관 4단계, `NAVER_MIGRATION_WORK_ORDER.md` §9).
+   `collector_kospi200.py::_fetch_ev_ebitda()` 안에 있던 EV/EBITDA 표 파싱을 걷어내고
+   **이 모듈 호출로 대체**했습니다 — 같은 페이지를 두 곳에서 파싱하지 않습니다(§0-3-10).
+   🔴 이 페이지는 출처 전환 스위치(`utils/naver_source.py`)와 **무관하게** 구·신 두 경로가
+   **똑같이** 씁니다. 종료 예고 대상(`finance.naver.com`)이 아닌 별도 도메인이기 때문입니다.
+   구 경로는 여기서 `ev_ebitda` 만, 신 경로는 `ev_ebitda` + `f_roe` 를 읽습니다.
 
 ─────────────────────────────────────────────────────────────────────────────
 📌 이 파서가 지키는 것
@@ -41,12 +44,29 @@ import pandas as pd
 
 from utils.data_validator import DataValidator
 
-__all__ = ["parse_financial_summary", "ANNUAL_ACTUAL_KINDS", "ANNUAL_ESTIMATE_KINDS"]
+__all__ = [
+    "parse_financial_summary",
+    "ANNUAL_ACTUAL_KINDS",
+    "ANNUAL_ESTIMATE_KINDS",
+    "SUMMARY_TABLE_ERROR_MARKERS",
+    "errors_excluding_summary_table",
+]
 
 # `DataValidator.classify_header_timeframe()` 이 돌려주는 분류 중 우리가 쓰는 것.
 # 🔴 QUARTERLY / QUARTERLY_EST 는 **의도적으로 빠져 있습니다**(위 ②).
 ANNUAL_ACTUAL_KINDS = ("TTM", "ANNUAL_TTM")
 ANNUAL_ESTIMATE_KINDS = ("ANNUAL_EST",)
+
+# 재무요약 표(ROE·EPS 등)에 **관한** 사유 문장에만 들어가는 표식. 구 경로(`_fetch_ev_ebitda`)는
+# 이 표를 쓰지 않으므로, 그 사유까지 종목의 data_issues 에 붙이면 "구 경로가 ROE 를 못 읽었다"는
+# 거짓 경고가 됩니다. 그래서 구 경로는 아래 `errors_excluding_summary_table()` 로 걸러 받습니다.
+SUMMARY_TABLE_ERROR_MARKERS = ("재무요약", "ROE 행")
+
+
+def errors_excluding_summary_table(errors):
+    """재무요약 표에 관한 사유를 뺀 나머지(빈 HTML·표 없음·환경 문제·EV/EBITDA 관련)만 돌려줍니다."""
+    return [e for e in errors if not any(m in e for m in SUMMARY_TABLE_ERROR_MARKERS)]
+
 
 # 행 라벨은 키워드로 찾습니다(§2-1 — 위치로 세지 않습니다).
 _ROW_KEYS = {
@@ -102,6 +122,28 @@ def _pick(df, row_idx, col_indices):
         value = _cell_number(df.iat[row_idx, col_i])
         if value is not None:
             return value, str(df.columns[col_i])
+    return None, None
+
+
+def _pick_text(df, row_idx, col_indices):
+    """`_pick` 과 같은 규칙으로 고르되 **원본 표기 문자열**을 돌려줍니다(쉼표·공백만 제거).
+
+    EV/EBITDA 전용. 구 `_fetch_ev_ebitda()` 가 `"3.60"` 처럼 페이지 표기를 그대로 저장해 왔으므로
+    (`str(float)` 로 바꾸면 `"3.6"` 이 되어 스냅샷 문자열이 달라집니다), 배선 후에도 구 경로의
+    저장값이 한 글자도 바뀌지 않게 같은 규칙을 지킵니다. 숫자로 해석되는지만 확인합니다.
+    """
+    for col_i in reversed(col_indices):
+        cell = df.iat[row_idx, col_i]
+        if cell is None or (isinstance(cell, float) and pd.isna(cell)):
+            continue
+        text = str(cell).replace(",", "").strip()
+        if text in ("", "nan", "-", "ㅡ", "−", "N/A"):
+            continue
+        try:
+            float(text)
+        except (TypeError, ValueError):
+            continue
+        return text, str(df.columns[col_i])
     return None, None
 
 
@@ -210,10 +252,12 @@ def parse_financial_summary(html: str) -> dict:
                 "EV/EBITDA 표 헤더 기간 분류 실패 → 위치 인덱스 폴백 없이 미수집 처리(§2-1)"
             )
         else:
-            value, _ = _pick(fundamental, row, cols)
-            # 📌 기존 관례대로 **문자열**로 돌려줍니다(원본 표기 보존).
-            #    `collector_kospi200._fetch_ev_ebitda()` 가 문자열을 반환하고
-            #    소비부(`_compute_graham_number`)가 float() 으로 바꿉니다.
-            out["ev_ebitda"] = None if value is None else str(value)
+            # 📌 기존 관례대로 **문자열**로, 그것도 **페이지 표기 그대로** 돌려줍니다.
+            #    `collector_kospi200._fetch_ev_ebitda()` 가 2026-09-08 부터 이 값을 그대로 저장하고
+            #    소비부(`_compute_graham_number`·화면 fmt_num)가 float() 으로 바꿉니다.
+            #    🔴 구 코드는 후보 열에 추정(E) 열도 넣었지만, 실제 페이지 헤더 `2026/12(E)` 는
+            #    분류기가 UNKNOWN 으로 판정해 **한 번도 선택된 적이 없습니다**(실측 픽스처로 확인 —
+            #    구 코드·이 파서 모두 `19.51`). 이 파서는 원칙(②·③)대로 추정 열을 제외합니다.
+            out["ev_ebitda"], _ = _pick_text(fundamental, row, cols)
 
     return out

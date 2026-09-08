@@ -177,13 +177,23 @@ def test_module_does_not_touch_the_network():
         check(banned not in src, f"네트워크 라이브러리 미사용: {banned}")
 
 
-def test_it_is_documented_as_not_yet_wired_in():
-    """배선 전 상태임을 코드가 스스로 밝히는지 — 다음 세션이 착각하지 않게."""
+def test_it_is_wired_in_and_the_old_inline_parser_is_gone():
+    """
+    2026-09-08 배선(이관 4단계) 후 상태 — 다음 세션이 착각하지 않게 코드가 스스로 밝히는지.
+
+    🔴 §0-3-10: 같은 페이지를 두 곳에서 파싱하면 안 됩니다. `_fetch_ev_ebitda()` 안에 있던
+       `pd.read_html` + `'EV/EBITDA' not in str(df)` 식 인라인 파싱이 남아 있으면 빨간불.
+    """
     src = (REPO_ROOT / "utils" / "wisereport_parser.py").read_text(encoding="utf-8")
-    check("아직 실전에 배선돼 있지 않습니다" in src, "미배선 사실이 모듈 머리말에 명시됨")
+    check("배선 완료" in src, "배선 사실이 모듈 머리말에 명시됨")
+    check("아직 실전에 배선돼 있지 않습니다" not in src, "옛 '미배선' 문구가 남아 있지 않음")
     collector = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
-    check("wisereport_parser" not in collector,
-          "수집기가 아직 이 모듈을 쓰지 않음 (배선은 오너 승인 사항 §0-3-6)")
+    check("from utils.wisereport_parser import parse_financial_summary" in collector,
+          "수집기가 이 모듈을 import 함")
+    check("if 'EV/EBITDA' not in str(df):" not in collector,
+          "수집기 안의 인라인 EV/EBITDA 표 파싱이 제거됨(§0-3-10)")
+    check("_fetch_wisereport_metrics" in collector and "_fetch_ev_ebitda" in collector,
+          "구 경로용 얇은 포장(_fetch_ev_ebitda)과 공용 요청기(_fetch_wisereport_metrics)가 있음")
 
 
 def main():

@@ -361,6 +361,10 @@ if kospi_close is None:
     🔴 **`NXT`(넥스트레이드) 주소는 코드가 차단**합니다 — 15:40~20:00 애프터마켓 가격이
     섞여 종가가 크롤링 시각에 따라 달라집니다(`NAVER_MIGRATION_WORK_ORDER.md` §1-5-11).
     ⏳ **한시적**입니다. 이관이 끝나면 워크플로우째 정리하세요.
+    🔀 **2026-09-08 — 실전 수집기 `collector_kospi200.py` 에도 배선**(출처 전환 스위치
+    `utils/naver_source.py`, 기본값 구 출처, 켜는 것은 오너 결정 — `NAVER_MIGRATION_WORK_ORDER.md` §9).
+    켜지면 같은 주소·같은 2~3초 순차 간격·403/429 즉시 중단으로, 요청 수는 구 경로와 같은
+    종목당 2회(목록 32~40회)입니다. 주소 상수는 `utils/naver_stock_api.py` 한 곳에만 있습니다.
   - **`navercomp.wisereport.co.kr`**(EV/EBITDA, 그리고 2026-09-07 확인 — **ROE·Forward ROE·
     순이익·자본총계·목표주가도 같은 응답 안에 있음**) — `collector_kospi200.py`.
     종목당 1요청 + 연속 실패 시 서킷 브레이커(#19, 2026-08-27).

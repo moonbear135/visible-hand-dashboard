@@ -9,8 +9,10 @@
    여기는 **"받은 JSON 을 우리 필드로 옮기는 일"만** 합니다. 그래야 실제 응답 픽스처
    (`tests/fixtures/naver_new_api/`)만으로 전량 테스트할 수 있습니다.
 
-🔴 **이 모듈은 아직 실전에 배선돼 있지 않습니다** (§0-3-6 — 신규 기능은 독립 모듈로 만들고
-   오너 승인 후 반영). `collector_kospi200.py` 는 여전히 구 HTML 파서를 씁니다.
+🟢 **2026-09-08 배선 완료 — 단, 스위치로 켭니다** (이관 4단계, `NAVER_MIGRATION_WORK_ORDER.md` §9).
+   `collector_kospi200.py` 가 이 모듈을 부르지만, **기본값은 여전히 구 HTML 파서**입니다.
+   어느 출처를 쓸지는 `utils/naver_source.py` 의 스위치 하나(환경변수 `NAVER_SOURCE`)로
+   정하며, 켜는 것은 오너 결정입니다(§0-3-6). 켜는 방법은 그 파일 머리말에 있습니다.
 
 ─────────────────────────────────────────────────────────────────────────────
 📌 이 파일이 코드로 강제하는 함정 4가지 (전부 2026-09-07 실측으로 확인된 것)
@@ -74,6 +76,13 @@ from __future__ import annotations
 __all__ = [
     "NaverApiSourceError",
     "assert_krx_source",
+    "LIST_URL_TEMPLATE",
+    "DETAIL_URL_TEMPLATE",
+    "LIST_PAGE_SIZE",
+    "build_list_url",
+    "build_detail_url",
+    "DETAIL_EPS_PERIOD",
+    "DETAIL_MISSING_FIELD_NOTES",
     "parse_stock_detail",
     "parse_market_list_row",
     "parse_market_list",
@@ -102,6 +111,55 @@ DELIBERATELY_UNUSED_DETAIL_FIELDS = (
     "listedStock",   # 천주 단위 축약본. 우리는 listedStockCnt(주 단위)를 씁니다
     "estimatedSellPrice", "estimatedBuyPrice",   # 예상체결가 — 후행지표 전용 원칙(§0-3-1)
 )
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 주소 — 저장소에서 **여기 한 곳에만** 적습니다(§0-3-10). 수집기·섀도가 둘 다 여기서 가져갑니다.
+# ─────────────────────────────────────────────────────────────────────────────
+# 🔴 KRX 고정. `tradeType=KRX` / `codeType=KRX`. NXT 로 바꾸면 assert_krx_source() 가 막습니다(①).
+# `{page}` 는 **페이지 인덱스**(0,1,2,…)입니다. 오프셋이 아닙니다 — 2026-09-08 섀도 1회차에서
+# 오프셋으로 착각해 1~20위 다음에 401위가 이어붙는 사고가 실제로 났습니다(§7-7).
+LIST_URL_TEMPLATE = ("https://stock.naver.com/api/domestic/market/stock/default"
+                     "?tradeType=KRX&marketType=ALL&orderType=marketSum"
+                     "&startIdx={page}&pageSize={size}")
+DETAIL_URL_TEMPLATE = "https://stock.naver.com/api/domestic/detail/{code}/detail?codeType=KRX"
+# 화면이 실제로 쓰는 값. 한도를 찾겠다고 큰 값을 넣어 시험하지 않습니다(§0-3-2).
+LIST_PAGE_SIZE = 20
+
+
+def build_list_url(page: int, size: int = LIST_PAGE_SIZE) -> str:
+    """목록 주소. `page` 는 0부터 시작하는 **페이지 인덱스**."""
+    url = LIST_URL_TEMPLATE.format(page=int(page), size=int(size))
+    assert_krx_source(url)
+    return url
+
+
+def build_detail_url(code: str) -> str:
+    url = DETAIL_URL_TEMPLATE.format(code=code)
+    assert_krx_source(url)
+    return url
+
+
+# 상세 응답 `eps`·`per` 의 기간 판정 — 검증 파이프라인(`DataValidator`, 1단계)이 요구하는 값.
+#
+# 🔴 왜 상수로 두는가 (§0-1 "하드코딩 TTM 금지" 와의 관계를 정직하게 적습니다):
+#    구 페이지는 헤더에 `PER|EPS(2026.06)` 처럼 기준 시점을 적어 줘서 수집기가 **그 라벨을 읽고**
+#    TTM 이라고 판정했습니다. 신 API 는 **기간 라벨을 주지 않습니다**(필드에 없음). 그래서 라벨을
+#    읽는 대신, **섀도 대조 실측**으로 판정했습니다 — 2026-09-08 섀도 3회차, 401종목의
+#    `t_eps`·`t_per` 가 구 페이지의 TTM 값과 **100% 일치, 불일치 0건**(§7-8). 즉 이 값이
+#    TTM 계열이라는 것은 추측이 아니라 대조로 확인한 사실이고, 그 근거를 `raw_period_basis` 에
+#    같이 실어 보냅니다. 출처가 라벨을 주기 시작하면 그때는 라벨을 읽도록 바꿔야 합니다.
+DETAIL_EPS_PERIOD = "TTM"
+DETAIL_EPS_PERIOD_BASIS = ("출처에 기간 라벨 없음 — 2026-09-08 섀도 대조 401종목 t_eps·t_per 구 TTM 값과 "
+                           "100% 일치로 확인(NAVER_MIGRATION_WORK_ORDER.md §7-8)")
+
+# 이 API 가 **주지 않는** 두 값에 대해 `parse_stock_detail()` 이 남기는 사유 문장.
+# 호출부가 `c1010001.aspx` 에서 그 값을 채운 뒤에는 이 문장을 걷어내야 합니다(채웠는데
+# "미수집" 이라고 적혀 있으면 그것도 거짓입니다 — §0-1). 문장을 여기 상수로 못 박아 두는 이유입니다.
+DETAIL_MISSING_FIELD_NOTES = {
+    "f_roe": "f_roe 미수집: 이 API 에 없음 — c1010001.aspx 에서 별도 수집 필요",
+    "ev_ebitda": "ev_ebitda 미수집: 이 API 에 없음 — c1010001.aspx 에서 별도 수집 필요",
+}
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -266,8 +324,8 @@ def parse_stock_detail(payload: dict, *, source_url: str) -> dict:
     if conflict:
         errors.append(conflict)
 
-    errors.append("f_roe 미수집: 이 API 에 없음 — c1010001.aspx 에서 별도 수집 필요")
-    errors.append("ev_ebitda 미수집: 이 API 에 없음 — c1010001.aspx 에서 별도 수집 필요")
+    errors.append(DETAIL_MISSING_FIELD_NOTES["f_roe"])
+    errors.append(DETAIL_MISSING_FIELD_NOTES["ev_ebitda"])
 
     return {
         # ── 구 파서와 동일한 키 ───────────────────────────────────────────────
@@ -281,7 +339,9 @@ def parse_stock_detail(payload: dict, *, source_url: str) -> dict:
         "t_pbr": t_pbr,
         "ev_ebitda": None,
         "f_roe": None,
-        "raw_period": _text(payload.get("tradeTime")),
+        # 검증 1단계가 읽는 기간 판정. 상수를 쓰는 근거는 DETAIL_EPS_PERIOD 정의 주석에 있습니다.
+        "raw_period": DETAIL_EPS_PERIOD,
+        "raw_period_basis": DETAIL_EPS_PERIOD_BASIS,
         "dps_status": dps_status,
         "dps_inherited_from": None,   # 신 API 는 우선주도 자기 값을 주므로 상속이 필요 없습니다
         "div_yield_row_found": div_yield_pct is not None,
@@ -290,6 +350,7 @@ def parse_stock_detail(payload: dict, *, source_url: str) -> dict:
         # ── 신 API 에서 새로 얻는 것 (구 파서에 없던 키. 접두어로 구분) ────────
         "api_code": code,
         "api_name": _text(payload.get("itemname")),
+        "api_trade_time": _text(payload.get("tradeTime")),   # "20260907161021" — 마지막 체결/갱신 시각
         "api_price": price,
         "api_bps": bps,
         "api_market_sum_truncated": _num(payload.get("marketSum")),

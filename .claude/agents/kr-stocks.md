@@ -31,10 +31,16 @@ model: inherit
 - 🔒 `tests/test_naver_item_characterization.py` + `tests/_naver_item_baseline.py` +
   `tests/fixtures/naver_item/` · `tests/fixtures/naver_item_baseline.json` — **파서 결과 고정 기준선.**
   ⚠️ 입력 HTML 은 합성 픽스처입니다 — 한계는 아래 고유 규칙 9번을 반드시 읽으세요
+- 🔀 `utils/naver_source.py` + `tests/test_naver_source_switch.py` — **네이버 출처 전환 스위치**
+  (2026-09-08 배선, `NAVER_MIGRATION_WORK_ORDER.md` §9). 환경변수 `NAVER_SOURCE`
+  (`legacy` 기본 / `new_api`)의 **단일 출처**. 기본값을 이 파일 밖에 다시 적지 마세요(§0-3-10).
+  🔴 **기본값을 신 출처로 바꾸는 것은 오너 결정**입니다 — 켜는 줄은 `scrape.yml` 의
+  `# NAVER_SOURCE: new_api`(주석 해제). 스냅샷 `metadata.naver_source` 에 어느 출처로 만들었는지 남습니다.
 - 🆕 `utils/naver_stock_api.py` + `tests/test_naver_stock_api.py` +
   `tests/fixtures/naver_new_api/` — **네이버 신 증권(`stock.naver.com`) JSON API 파서.**
-  2026-09-10 구 서비스 종료 대비(#211). 🔴 **아직 실전에 배선돼 있지 않습니다** — 수집기는
-  여전히 구 HTML 파서를 씁니다. 배선은 **오너 승인 사항**(§0-3-6).
+  2026-09-10 구 서비스 종료 대비(#211). 🟢 **2026-09-08 배선 완료** — 단, 위 스위치가 켜졌을 때만
+  실전이 씁니다(기본은 구 HTML 파서). 주소 상수(`LIST_URL_TEMPLATE`·`DETAIL_URL_TEMPLATE`·
+  `LIST_PAGE_SIZE`)는 이 파일 한 곳에만 있고 수집기·섀도가 같이 씁니다.
   ⚠️ 이 픽스처는 **합성이 아니라 실제 응답**입니다(오너가 DevTools 에서 복사).
   쓰기 전에 `NAVER_MIGRATION_WORK_ORDER.md` §1-5-11(NXT 함정)을 반드시 읽으세요.
 - ⏳ `run_naver_api_shadow.py` + `.github/workflows/naver_api_shadow.yml` +
@@ -48,8 +54,9 @@ model: inherit
   (파일 위치는 `data-foundation` 에이전트 문서를 보세요 — 소유는 그쪽입니다.)
 - 🆕 `utils/wisereport_parser.py` + `tests/test_wisereport_parser.py` —
   **WiseReport `c1010001.aspx` 재무요약 파서** (ROE·Forward ROE·순이익·자본총계·EV/EBITDA).
-  🔴 **아직 배선 안 됨** — `_fetch_ev_ebitda()` 는 그대로입니다. 배선할 때는 그 함수를
-  이 모듈 호출로 **대체**해 중복을 없애세요(§0-3-10). 픽스처는 **실제 저장 페이지**입니다.
+  🟢 **2026-09-08 배선 완료** — `_fetch_ev_ebitda()` 의 인라인 표 파싱을 이 모듈 호출로 대체했습니다
+  (§0-3-10). 🔴 이 페이지는 **출처 스위치와 무관하게** 구·신 두 경로가 같이 씁니다(종료 대상 도메인이
+  아님). 구 경로는 `ev_ebitda` 만, 신 경로는 `ev_ebitda` + `f_roe` 를 읽습니다. 픽스처는 **실제 저장 페이지**입니다.
 
 ## 읽기만 (수정하려면 인계)
 

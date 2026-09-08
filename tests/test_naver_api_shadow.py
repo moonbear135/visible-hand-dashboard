@@ -79,11 +79,16 @@ def test_this_is_a_probe_not_a_collector():
     check(SH.LIST_TARGET_COUNT >= 520, "목록은 실전과 같은 전 종목 범위",
           f"({SH.LIST_TARGET_COUNT})")
 
-    # 실전 수집기는 이 모듈을 **아직 쓰지 않습니다**(§0-3-6 오너 승인 사항).
+    # 2026-09-08 배선 후: 실전 수집기는 파서 모듈을 쓰지만 **이 섀도 스크립트에는 의존하지 않습니다**
+    # (섀도는 한시적이라 이관이 끝나면 지워질 파일입니다 — 실전이 여기에 기대면 지울 수 없게 됩니다).
     collector = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
-    for banned in ("naver_stock_api", "naver_api_shadow", "wisereport_parser"):
-        check(banned not in collector, f"실전 수집기가 아직 {banned} 를 쓰지 않음")
-    check("finance.naver.com" in collector, "실전 수집기는 여전히 구 출처를 씀")
+    for banned in ("import run_naver_api_shadow", "from run_naver_api_shadow"):
+        check(banned not in collector, f"실전 수집기가 섀도 스크립트를 import 하지 않음: {banned}")
+    # 구 경로는 지워지지 않았고(오너 지시 — 스위치로 공존), 기본값도 구 출처입니다.
+    check("finance.naver.com" in collector, "실전 수집기에 구 출처 경로가 그대로 남아 있음")
+    from utils import naver_source as NS
+    check(NS.DEFAULT_NAVER_SOURCE == NS.NAVER_SOURCE_LEGACY,
+          "실전 기본값은 여전히 구 출처(전환은 오너 승인 사항 §0-3-6)")
 
 
 def test_writing_outside_the_shadow_folder_is_refused():
