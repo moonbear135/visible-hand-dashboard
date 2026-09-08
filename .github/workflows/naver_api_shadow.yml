@@ -43,9 +43,27 @@
 name: Naver API Shadow
 
 on:
-  workflow_run:
-    workflows: ["Daily Market Scraper"]
-    types: [completed]
+  # 🔴 2026-09-08 (#222) — **자동 실행을 껐습니다.**
+  #
+  # 섀도의 임무는 "신 API 가 구 출처와 같은 값을 주는가"를 매일 확인하는 것이었습니다.
+  # 그런데 같은 날 실전이 **신 출처로 전환**됐습니다(`scrape.yml` 의 NAVER_SOURCE).
+  # 이제 섀도가 돌면 **신 API 로 받은 값을 신 API 로 만든 스냅샷과 비교**하게 됩니다 —
+  # 같은 파서(`utils/naver_stock_api.py`)를 자기 자신과 대조하는 것이라 **얻는 정보가 0** 입니다.
+  #
+  # 그런데 비용은 그대로입니다: 하루 약 1,066요청 · 45분. 실전이 방금 같은 양을 보낸
+  # 직후에 이걸 또 보내면 그날 네이버가 받는 요청이 **두 배**가 됩니다.
+  # 얻는 것이 없는데 상대 서버에 두 배를 보내는 것은 §0-3-2 정면 위반입니다
+  # (오너 절대 원칙: *"상대방 서버에서 차단 당할 일을 절대로 만들 면 안된다"*).
+  # 하필 지금은 **차단당하면 안 되는 시점**입니다 — 이관 직후라 대안이 없습니다.
+  #
+  # ▶ 수동 실행은 남겨 둡니다(`workflow_dispatch`) — 이관 후 문제를 진단할 때 쓸 수 있습니다.
+  # ▶ 되살리려면 아래 workflow_run 블록의 주석을 풀면 됩니다.
+  # ⏳ 이관이 완전히 끝나면(=`run_kr_all_market_prices_collector()` 까지 신 출처로 옮기면)
+  #    이 워크플로우와 `run_naver_api_shadow.py`·`data/naver_api_shadow/` 를 **통째로 지우세요.**
+  #
+  # workflow_run:
+  #   workflows: ["Daily Market Scraper"]
+  #   types: [completed]
   workflow_dispatch:
 
 permissions:

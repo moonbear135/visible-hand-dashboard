@@ -904,6 +904,38 @@ def test_compare_actually_runs_the_frozen_check(tmp_path):
           "얼어붙은 데이터 경고가 대조 리포트에 실제로 실림", f"({warns})")
 
 
+def test_shadow_does_not_run_itself_automatically_after_the_cutover():
+    """
+    🔴 2026-09-08 (#222) — 실전이 **신 출처로 전환**된 뒤, 섀도의 자동 실행을 껐습니다.
+
+    섀도의 임무는 "신 API 가 구 출처와 같은 값을 주는가"였습니다. 실전이 신 출처로 넘어간
+    지금 섀도가 돌면 **같은 파서를 자기 자신과 대조**하는 것이라 얻는 정보가 0 인데,
+    비용은 그대로 하루 약 1,066요청·45분입니다. 실전이 방금 같은 양을 보낸 직후에 이걸 또
+    보내면 그날 네이버가 받는 요청이 **두 배**가 됩니다 — 얻는 것 없이(§0-3-2).
+
+    오너 절대 원칙: *"상대방 서버에서 차단 당할 일을 절대로 만들 면 안된다."*
+    하필 지금은 **차단당하면 대안이 없는 시점**입니다.
+
+    🔻 이 검사가 없어서 생긴 일: 트리거를 지키는 검사가 **아예 없었습니다.** 그래서
+       자동 실행을 꺼도 테스트가 하나도 안 울렸습니다. 이제는 되살릴 때 여기가 걸립니다.
+    """
+    import yaml as _yaml                                     # noqa: PLC0415
+    path = REPO_ROOT / ".github" / "workflows" / "naver_api_shadow.yml"
+    config = _yaml.safe_load(path.read_text(encoding="utf-8"))[True]
+
+    check("workflow_run" not in config,
+          "섀도가 수집 완료에 자동으로 딸려 돌지 않음 (이관 후에는 요청만 두 배)",
+          f"({sorted(config)})")
+    check("schedule" not in config,
+          "섀도에 cron 도 없음 (혼자 조용히 매일 도는 일이 없게)")
+    check("workflow_dispatch" in config,
+          "수동 실행은 남아 있음 (문제 진단용)")
+
+    text = path.read_text(encoding="utf-8")
+    check("§0-3-2" in text and "통째로 지우세요" in text,
+          "왜 껐는지와 언제 통째로 지울지가 파일에 적혀 있음")
+
+
 def main():
     sys.path.append(str(Path(__file__).parent))
     from _test_discovery import discover_and_run_module_tests
