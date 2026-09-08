@@ -42,6 +42,7 @@ from nicegui import ui
 # 로 옮겼습니다(같은 화면에 붙는 종목 다운로드 도구·매크로 CSV 가 서버 UTC 를 써서 자정~09시
 # 사이 파일명 날짜가 하루 어긋났음). 아래 `from web.components import ...` 에서 가져옵니다.
 
+from utils import data_sanity
 from utils import data_source
 from utils.constants import GROWTH_CAP_PCT, SH_RETURN_CAP_PCT, GEFF_TOTAL_CAP_PCT
 from utils.db import COL_MAP, HISTORY_FILE
@@ -1060,6 +1061,27 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         stale_hours = (now_kst_naive - datetime.strptime(last_updated_at, "%Y-%m-%d %H:%M")).total_seconds() / 3600.0
     except Exception:                              # noqa: BLE001 — 형식이 달라도 화면은 계속 그립니다
         stale_hours = None
+
+    # 🔴 2026-09-08 (#219) — **"어제와 값이 같은 날"을 화면이 말하게 합니다.**
+    #
+    # 오너: *"결투, 성적표, 사실 이 가격이에요 — 전부 다 적용이 안 되던 걸 찾았지."*
+    #
+    # 아래 "마지막 동기화" 배너는 `last_updated_at`(수집 **시각**)만 봅니다. 그런데
+    # 2026-09-04 사고(#195)는 **오늘 날짜 라벨에 어제 내용물**이 담긴 스냅샷이었으므로,
+    # 그날 이 화면은 "오늘 수집분"이라고 **사실이 아닌 말**을 하고 있었습니다.
+    #
+    # ⚠️ 여기서 어제와 직접 비교하지 **않습니다.** 판정은 수집 직후 `utils/data_sanity`
+    #    가 이미 내려 상태 파일에 남겨 뒀고, 화면은 그걸 **읽어서 보여주기만** 합니다.
+    #    판정이 두 곳에 생기면 조용히 어긋납니다(§0-3-10).
+    # ⚠️ 파일 읽기는 `load_json_file_async`(io_bound) 로 넘깁니다 — 여기서 동기로 읽으면
+    #    이벤트 루프가 막혀 '연결 끊김'이 납니다(2026-08-21 회귀).
+    _sanity_payload, _ = await load_json_file_async(
+        data_path(f"{data_sanity.DATASET_KOSPI200}{data_sanity.SANITY_FILENAME_SUFFIX}"))
+    _frozen_notice = data_sanity.frozen_notice(_sanity_payload)
+    if _frozen_notice:
+        # 관리자 전용이 아닙니다 — 이건 운영 지시가 아니라 **이 화면 숫자의 시점에 대한
+        # 사실**이고, 사용자가 알아야 판단을 그르치지 않습니다(§0-1).
+        warning_banner(f"🧊 {_frozen_notice}")
 
     # "자동 수집이 멈춰 있는지 확인해 주세요"는 운영자용 지시문이라 관리자에게만 노출합니다.
     # (실제 데이터 시점 자체는 아래 "마지막 동기화" 배너에 이미 정직하게 표기됩니다 — §0-1)

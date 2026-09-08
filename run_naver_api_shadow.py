@@ -56,6 +56,8 @@ import requests
 
 sys.path.insert(0, str(Path(__file__).parent))
 from utils.wisereport_parser import parse_financial_summary  # noqa: E402
+# 🔴 "어제와 통째로 같은가" 판정은 저장소에 **한 곳에만** 둡니다(§0-3-10, #219).
+from utils import data_freshness
 from utils.naver_stock_api import (  # noqa: E402
     NaverApiSourceError,
     assert_krx_source,
@@ -387,30 +389,31 @@ def check_frozen_data(today_rows, yesterday_rows) -> list[str]:
 
     🔴 2026-09-04 에 실제로 난 사고입니다(#195): 코스피 수집기가 **"오늘 날짜 라벨 +
     어제 내용물"** 스냅샷을 남기고 정식 수집을 건너뛰었습니다. 전 종목 주가가 하나도
-    바뀌지 않았는데도 —
-
-      · `data_sanity` 는 **못 잡습니다.** 결측도 아니고, 종목 수도 같고, 중앙값 이동도
-        0 이라 **오히려 "너무 정상"** 으로 보입니다(실제 검사는 `row_count_drop`,
-        `unusable_ratio`, `median_shift_ratio` 뿐).
-      · 그래서 #201~#203 이 **소비자 쪽**(결투·성적표)에 신선도 검사를 붙였습니다.
+    바뀌지 않았는데도 `data_sanity` 는 조용했습니다 — 결측도 아니고, 종목 수도 같고,
+    중앙값 이동도 0 이라 **오히려 "너무 정상"** 으로 보였기 때문입니다.
 
     → 섀도에도 같은 눈이 필요합니다. 신 API 가 얼어붙은 값을 주는 날을 놓치면,
       "일치율 100%"라는 **가장 안심되는 숫자**가 나오면서 둘 다 틀린 상태가 됩니다.
+
+    🔴 **판정은 여기서 하지 않습니다**(2026-09-08, #219 — 오너 지시로 공용화).
+       `utils/data_freshness.judge_frozen()` 한 곳에만 있습니다. 같은 질문에 답하는
+       계산이 저장소에 여러 개 있으면, 한 곳만 고쳐지고 나머지는 조용히 틀립니다 —
+       그게 정확히 9/4 사고가 워치독을 통과한 이유였습니다(§0-3-10).
     """
     if not yesterday_rows:
         return []                     # 첫 실행 — check_change_sync 가 사실을 남깁니다
-    common = set(today_rows) & set(yesterday_rows)
-    if len(common) < 50:
-        return []
-    changed = sum(1 for c in common
-                  if _f(today_rows[c].get("price")) != _f(yesterday_rows[c].get("price")))
-    if changed == 0:
-        return ["🔴 어제와 오늘의 주가가 **전 종목 동일**합니다 — 신 API 가 얼어붙은 값을 "
-                "주고 있거나, 어제 것을 그대로 다시 받았을 수 있습니다"
-                f" (비교 {len(common)}종목). 2026-09-04 에 실전에서 실제로 났던 사고(#195)와 같은 모양입니다."]
-    if changed / len(common) < 0.05:
-        return [f"🟡 주가가 바뀐 종목이 {changed}/{len(common)}개뿐입니다 — "
-                "휴장일이면 정상, 아니면 갱신을 놓쳤을 수 있습니다"]
+
+    verdict = data_freshness.judge_frozen(
+        {code: row.get("price") for code, row in today_rows.items()},
+        {code: row.get("price") for code, row in yesterday_rows.items()},
+    )
+    if verdict["status"] == data_freshness.STATUS_FROZEN:
+        return [f'🔴 {verdict["reason"]}'
+                " 2026-09-04 에 실전에서 실제로 났던 사고(#195)와 같은 모양입니다."]
+    if verdict["status"] == data_freshness.STATUS_MOSTLY_FROZEN:
+        return [f'🟡 {verdict["reason"]}']
+    # ok / no_baseline / too_few 는 조용합니다 — 어제 자료가 없다는 사실은
+    # check_change_sync 가 이미 남깁니다(같은 말을 두 번 하지 않습니다).
     return []
 
 

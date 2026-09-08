@@ -23,12 +23,13 @@ model: inherit
 | `utils/db.py` | 저장·이력 (`COL_MAP`, `HISTORY_FILE`, `save_and_load_history`) |
 | `utils/data_validator.py` | **3단계 검증 파이프라인 + `PERIOD_KEYWORDS` 원본** |
 | `utils/data_sanity.py` | 데이터 건전성 감시 (외부 사이트 구조 변경 감지 책임) |
+| `utils/data_freshness.py` | 🧊 **"어제와 통째로 같은가" 공용 판정** (2026-09-08, #219). 2026-09-04 사고(#195)를 잡는 눈. `data_sanity`·섀도·화면이 **전부 이 하나를** 씁니다 — 여기를 고치면 셋 다 같이 바뀝니다(그게 목적이고, 그래서 결투 테스트까지 같이 봐야 합니다) |
 | `utils/constants.py` | 전역 임계값·가중치 **단일 출처** |
 | `utils/stock_history.py` | 종목별 시계열 이력 단일 출처 (`KOSPI_HISTORY_FIELDS` 26개 / `US_HISTORY_FIELDS` 40개) |
 | `utils/stock_export.py` | CSV(UTF-8 BOM)·JSON 내보내기, 파일명 안전화 |
 | `utils/gdrive_helper.py` | 구글드라이브 백업 |
-| `.github/workflows/watch_data_sanity.yml` | 건전성 감시 (cron 00:30 UTC = 09:30 KST) |
-| 테스트 | `tests/test_data_source.py`, `test_data_validator.py`, `test_data_sanity.py`, `test_stock_history.py`, `test_screen_reads_data_source.py`, `test_event_loop_blocking.py` |
+| `.github/workflows/watch_data_sanity.yml` | 건전성 감시. 🔴 2026-09-08(#219)부터 **각 수집기 완료 이벤트(workflow_run)** 로 돕니다 — 09:30 cron 은 안전망으로만 남았습니다 (그 시각은 이미 장이 열린 뒤라 알아도 그날 수습이 안 됐습니다) |
+| 테스트 | `tests/test_data_source.py`, `test_data_validator.py`, `test_data_sanity.py`, `test_data_freshness.py`, `test_stock_history.py`, `test_screen_reads_data_source.py`, `test_event_loop_blocking.py` |
 
 ## 🔴 이 에이전트 고유의 절대 규칙
 
@@ -65,7 +66,7 @@ model: inherit
 ## 검증
 
 ```bash
-python -m py_compile utils/data_source.py utils/db.py utils/data_validator.py utils/data_sanity.py
+python -m py_compile utils/data_source.py utils/db.py utils/data_validator.py utils/data_sanity.py utils/data_freshness.py
 pytest --ignore=archive -q        # 🔴 전체 필수 — 부분 실행으로 끝내지 않습니다
 ```
 

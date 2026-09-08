@@ -42,6 +42,10 @@ model: inherit
   신 API 를 매일 받아 실전 스냅샷과 대조만 합니다. 🔴 **실전 데이터에 쓰지 않습니다**
   (`_assert_shadow_path()` 가 코드로 강제). 이관이 끝나면 **워크플로우째 정리**하세요 —
   필요 없어진 주기 작업을 남겨두는 것도 §0-3-2 위반입니다.
+  🔗 **판정은 `data-foundation` 의 공용 신선도 모듈을 부릅니다** — `check_frozen_data()` 는
+  얼어붙은 데이터 판정을 여기서 하지 않고 그쪽 모듈에 넘깁니다(§0-3-10 · §0-3-16).
+  여기서 같은 판정을 다시 구현하지 마세요. 그쪽을 고치면 이쪽 테스트도 같이 돌려야 합니다.
+  (파일 위치는 `data-foundation` 에이전트 문서를 보세요 — 소유는 그쪽입니다.)
 - 🆕 `utils/wisereport_parser.py` + `tests/test_wisereport_parser.py` —
   **WiseReport `c1010001.aspx` 재무요약 파서** (ROE·Forward ROE·순이익·자본총계·EV/EBITDA).
   🔴 **아직 배선 안 됨** — `_fetch_ev_ebitda()` 는 그대로입니다. 배선할 때는 그 함수를

@@ -835,6 +835,8 @@ def test_frozen_data_catches_the_2026_09_04_shape():
     w = SH.check_frozen_data(t_frozen, y)
     check(any(x.startswith("🔴") for x in w), "전 종목 주가가 그대로면 빨간불", f"({w})")
     check(any("#195" in x for x in w), "같은 모양이었던 실제 사고 번호를 남김")
+    check("data_freshness" in Path(SH.__file__).read_text(encoding="utf-8"),
+          "🔴 판정을 여기서 다시 구현하지 않고 공용 모듈을 부름 (§0-3-10)")
 
     # ③ 🟡 몇 종목만 움직임 — 휴장일이면 정상이므로 알림까지는 울리지 않습니다
     t_few = {c: dict(v) for c, v in y.items()}
@@ -858,12 +860,12 @@ def test_frozen_data_warning_actually_reaches_the_alert(tmp_path):
     report = {
         "matched_codes": 300,
         "fields": {"t_eps": {"label": "EPS", "match_ratio": 1.0}},
-        "integrity_warnings": ["🔴 어제와 오늘의 주가가 **전 종목 동일**합니다 (#195)"],
+        "integrity_warnings": ["🔴 520개를 어제와 비교했는데 **하나도 바뀌지 않았습니다** (#195)"],
     }
     (tmp_path / "latest_compare.json").write_text(json.dumps(report), encoding="utf-8")
     with mock.patch.object(SH, "SHADOW_DIR", tmp_path):
         msg = SH.build_alert_message()
-    check("전 종목 동일" in msg, "얼어붙은 데이터 경고가 알림 문구까지 도달", f"({msg})")
+    check("하나도 바뀌지" in msg, "얼어붙은 데이터 경고가 알림 문구까지 도달", f"({msg})")
 
 
 def test_compare_actually_runs_the_frozen_check(tmp_path):
@@ -893,7 +895,7 @@ def test_compare_actually_runs_the_frozen_check(tmp_path):
         rep = SH.compare_with_production(today, today_path=today_path)
 
     warns = rep["integrity_warnings"]
-    check(any("전 종목 동일" in w for w in warns),
+    check(any("하나도 바뀌지" in w and "#195" in w for w in warns),
           "얼어붙은 데이터 경고가 대조 리포트에 실제로 실림", f"({warns})")
 
 

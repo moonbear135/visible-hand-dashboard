@@ -431,3 +431,181 @@ def test_default_thresholds_are_documented_values():
         "median_shift_ratio": 2.00,
         "min_rows_for_ratio_checks": 30,
     }
+
+
+# =====================================================================================
+# 13. 🔴 어제와 내용이 통째로 같은 날 (2026-09-08 신설, #219)
+#
+#     2026-09-04 에 **실제로 났던 사고**(#195)의 모양입니다. 수집기가 "오늘 날짜 라벨 +
+#     어제 내용물" 스냅샷을 남기고 정식 수집을 건너뛰었는데, 이 워치독은 조용했습니다 —
+#     결측도 없고, 건수도 같고, 중앙값 이동이 0 이라 검사 ①~⑥ 이 **전부 통과**시켰습니다.
+#
+#     오너: *"결투, 성적표, 사실 이 가격이에요 — 전부 다 적용이 안 되던 걸 찾았지."*
+# =====================================================================================
+def _frozen_check(result):
+    return next(c for c in result["checks"] if c["name"] == "frozen_content")
+
+
+def test_the_2026_09_04_incident_shape_is_now_caught():
+    """🔴 이 테스트가 이 검사의 존재 이유입니다."""
+    rows = make_rows(200)
+    yesterday = probe(rows)
+    today = probe(rows)                                # 어제 것을 그대로 다시 받은 날
+
+    # 먼저, **기존 검사들은 여전히 이 날을 정상으로 봅니다** — 그게 사고의 원인이었습니다.
+    for name in ("row_count_drop", "unusable_ratio", "constant_value"):
+        old_checks = [c for c in ds.judge_sanity(today, yesterday)["checks"]
+                      if c["name"] == name]
+        assert all(c["status"] != "fail" for c in old_checks), (
+            f"{name} 은 이 사고를 못 잡는 검사입니다(그래서 새 검사가 필요했습니다)")
+
+    result = ds.judge_sanity(today, yesterday, baseline_date="2026-09-04")
+    assert _frozen_check(result)["status"] == "fail"
+    assert result["status"] == ds.STATUS_SUSPECT
+    assert ds.STATUS_SUSPECT in ds.ALERT_STATUSES          # 알림까지 올라감
+    detail = _frozen_check(result)["detail"]
+    assert "전부 어제와 내용이 똑같습니다" in detail
+    assert "휴장일이면 정상" in detail                      # 오탐일 수 있음을 같이 알림
+
+
+def test_a_normal_day_passes_the_frozen_check_quietly():
+    yesterday = probe(make_rows(200))
+    today = probe(make_rows(200, drift=1.01))
+    result = ds.judge_sanity(today, yesterday)
+    assert _frozen_check(result)["status"] == "pass"
+    assert result["status"] == ds.STATUS_OK
+
+
+def test_one_column_standing_still_is_not_enough_to_alarm():
+    """
+    상장주식수처럼 며칠씩 안 바뀌는 컬럼이 있습니다. 컬럼 하나만 보고 판정하면 매일 웁니다 —
+    **검사 대상 전부**가 그대로일 때만 걸려야 합니다.
+    """
+    rows = make_rows(200)
+    yesterday = probe(rows)
+    moved = [dict(row, price=row["price"] * 1.02) for row in rows]   # 시총은 그대로
+    result = ds.judge_sanity(probe(moved), yesterday)
+    assert _frozen_check(result)["status"] == "pass"
+    assert "price" in _frozen_check(result)["detail"]
+
+
+def test_first_run_does_not_claim_the_data_is_frozen():
+    result = ds.judge_sanity(probe(make_rows(200)), None)
+    assert _frozen_check(result)["status"] == "skipped"
+    assert result["status"] == ds.STATUS_NO_BASELINE
+
+
+def test_an_old_format_baseline_is_skipped_not_guessed():
+    """
+    2026-09-08 이전 기준값 파일에는 지문이 없습니다. 없는 것을 있는 척 추측하지 않고
+    **하루 쉬고** 내일 기준값부터 비교합니다(§0-1).
+    """
+    yesterday = probe(make_rows(200))
+    for stat in yesterday["fields"].values():
+        del stat["fingerprint"]                        # 구형식 재현
+    result = ds.judge_sanity(probe(make_rows(200)), yesterday)
+    assert _frozen_check(result)["status"] == "skipped"
+    assert "지문이 없어" in _frozen_check(result)["detail"]
+
+
+def test_fingerprint_is_not_computed_here_but_borrowed(monkeypatch):
+    """
+    §0-3-10 — 지문 계산은 `utils/data_freshness` 한 곳에만 있어야 합니다.
+    여기서 다시 구현하면 두 곳이 조용히 어긋납니다.
+    """
+    called = []
+    monkeypatch.setattr(ds.data_freshness, "fingerprint",
+                        lambda values: called.append(len(list(values))) or "고정지문")
+    summary = probe(make_rows(50))
+    assert called, "요약이 공용 지문 함수를 부르지 않았습니다"
+    assert all(stat["fingerprint"] == "고정지문" for stat in summary["fields"].values())
+
+
+def test_fingerprint_uses_raw_values_including_missing():
+    """
+    🔴 **사보타주로 고친 테스트입니다.** 처음 쓴 판(숫자 하나를 None 으로 바꿔 비교)은
+    지문을 "숫자만 골라서" 내도 그대로 통과했습니다 — 숫자 하나가 빠지면 어차피 숫자
+    묶음도 달라지기 때문입니다. 즉 **아무것도 못 지키는 테스트**였습니다.
+
+    아래 두 경우는 **숫자 묶음이 완전히 같고 결측만 다른** 상황이라, 지문이 숫자만
+    보면 "내용이 똑같다"가 되어 버립니다. 결측이 결측 그대로인 것도 내용의 일부입니다.
+    """
+    numeric = [{"price": 10000.0 + index} for index in range(195)]
+
+    # ① 결측 5개가 **행으로 더 붙은** 날 — 숫자만 보면 어제와 완전히 같습니다.
+    assert probe(numeric, ("price",))["fields"]["price"]["fingerprint"] != \
+           probe(numeric + [{"price": None}] * 5, ("price",))["fields"]["price"]["fingerprint"]
+
+    # ② 결측의 **모양이 바뀐** 날 (None → 빈 문자열). 출처가 필드를 빼다가 빈 값으로
+    #    주기 시작한 경우인데, 숫자만 보면 이 변화가 지문에서 통째로 사라집니다.
+    assert probe(numeric + [{"price": None}] * 5, ("price",))["fields"]["price"]["fingerprint"] != \
+           probe(numeric + [{"price": ""}] * 5, ("price",))["fields"]["price"]["fingerprint"]
+
+
+# =====================================================================================
+# 14. 🔴 경고가 **수습할 수 있는 시각에** 도착하는가 (2026-09-08, #219)
+#
+#     오너: *"매일 오전 9시 30분이라는 시간은 참 애매한 시간대인데, 크롤링이 실패했어도
+#     수습할 수 있는 시간도 아니고, 그날 장은 시작했으니까 장 종료까지 기다려야 하고."*
+#     *"문제가 생긴 것을 수습할 시간을 벌기 위한 경고문들인데, 그 경고문들을 쓸 수가 없네."*
+#
+#     판정은 수집 직후에 이미 나와 있었는데 알림만 다음 날 09:30 에 갔습니다. 그 시각은
+#     이미 장이 열린 뒤라, 다시 수집하면 장중 가격이 그날 종가로 저장됩니다.
+#     이 테스트는 그 배선이 되돌아가지 않게 막습니다.
+# =====================================================================================
+WATCH_WORKFLOW = os.path.join(
+    os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+    ".github", "workflows", "watch_data_sanity.yml")
+
+
+def _watch_yaml():
+    yaml = pytest.importorskip("yaml", reason="PyYAML 이 없는 환경 (CI 에서는 검사됩니다)")
+    with open(WATCH_WORKFLOW, encoding="utf-8") as handle:
+        return yaml.safe_load(handle)
+
+
+def test_sanity_watch_fires_when_collection_finishes_not_next_morning():
+    config = _watch_yaml()[True]          # PyYAML 은 `on:` 을 불린 True 로 읽습니다
+    assert "workflow_run" in config, (
+        "산티체크 감시가 수집 완료 이벤트에 걸려 있지 않습니다 — 다음 날 09:30 에만 알리면 "
+        "이미 장이 열린 뒤라 그날은 손쓸 수가 없습니다(§0-3-15).")
+    assert config["workflow_run"]["types"] == ["completed"]
+
+
+def test_korean_and_us_collectors_are_watched_separately():
+    """
+    오너: *"이 부분을 미국장 한국장을 분리해서 돌려야 하는 게 맞다고 생각해, 이게 커버가 안 돼."*
+    두 시장은 마감이 12시간 가까이 다릅니다. 하루 한 번으로 묶으면 반드시 한쪽이 늦습니다.
+    """
+    watched = _watch_yaml()[True]["workflow_run"]["workflows"]
+    assert "Daily Market Scraper" in watched, "코스피 수집 완료를 안 보고 있습니다"
+    assert "Daily US Stocks Scraper" in watched, "미국주식 수집 완료를 안 보고 있습니다"
+
+
+def test_daily_cron_survives_as_a_safety_net():
+    """
+    이벤트가 유실되거나 수집 워크플로우 자체가 안 돈 날을 받칠 것이 필요합니다.
+    (그리고 watch_schedule_health.yml 이 이 워크플로우를 'daily' 로 감시하고 있습니다.)
+    """
+    assert _watch_yaml()[True].get("schedule"), "안전망 cron 이 사라졌습니다"
+
+
+def test_watch_does_not_run_after_a_failed_collection():
+    """
+    수집이 실패한 날에는 상태 파일이 갱신되지 않습니다. 그걸 오늘 판정처럼 다시 알리면
+    사실과 다릅니다(§0-1). "수집이 안 돌았다"는 watch_schedule_health.yml 의 관심사입니다.
+    """
+    condition = _watch_yaml()["jobs"]["check"]["if"]
+    assert "conclusion == 'success'" in condition
+
+
+def test_the_workflow_does_not_list_dataset_files():
+    """
+    §0-3-10 — 데이터셋 파일 목록을 YAML 에 적으면 수집기 쪽과 두 개의 출처가 생겨 어긋납니다.
+    워크플로우 **이름**은 workflow_run 배선에 꼭 필요하지만, **파일 이름**은 아닙니다.
+    """
+    with open(WATCH_WORKFLOW, encoding="utf-8") as handle:
+        text = handle.read()
+    for banned in ("kospi200_sanity.json", "us_stocks_sanity.json", "indicator_kr_sanity.json"):
+        assert banned not in text, f"YAML 에 데이터셋 파일명({banned})이 박혔습니다"
+    assert "data/*_sanity.json" in text, "글롭으로 전부 보는 방식이 유지되어야 합니다"

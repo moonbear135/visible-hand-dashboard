@@ -53,6 +53,10 @@ import os
 import re
 from datetime import date, datetime, timedelta, timezone
 
+# 🔴 "어제와 통째로 같은가"를 재는 계산은 이 저장소에 **한 곳에만** 둡니다(§0-3-10).
+#    같은 판정을 여기서 다시 구현하지 않습니다.
+from utils import data_freshness
+
 KST = timezone(timedelta(hours=9))
 
 #: 상태 파일의 형식 버전. 키 이름이 바뀌면 이 숫자를 올리고, 읽는 쪽이 모르는 버전을
@@ -143,6 +147,10 @@ DEFAULT_THRESHOLDS = {
 
 #: 상태 파일 이름 규칙. 워크플로우가 `data/*_sanity.json` 글롭으로 찾습니다.
 SANITY_FILENAME_SUFFIX = "_sanity.json"
+
+#: 데이터셋 키 — 수집기와 화면이 **같은 문자열**을 봐야 하므로 여기 한 곳에 둡니다(§0-3-10).
+#: 문자열을 각자 적어 두면 한쪽만 바뀌었을 때 화면이 조용히 "판정 없음"이 됩니다.
+DATASET_KOSPI200 = "kospi200"
 
 #: 데이터셋 키에 허용하는 글자 — 파일명에 그대로 들어가므로 경로 조작을 막습니다(§0-3-9).
 _DATASET_KEY_RE = re.compile(r"^[a-z0-9_]+$")
@@ -260,7 +268,15 @@ def summarize_dataset(dataset, fields):
 
     반환
         {"row_count": int,
-         "fields": {컬럼명: {numeric_count, missing_count, zero_count, distinct_count, median}}}
+         "fields": {컬럼명: {numeric_count, missing_count, zero_count, distinct_count, median,
+                            fingerprint}}}
+
+    🔴 `fingerprint`(2026-09-08 추가, #219) — **"어제와 내용이 통째로 같은가"를 보기 위한
+       16자리 지문**입니다. 이 요약이 원본 값을 안 들고 있어서(위 참고) 그때까지는
+       내용 동일 여부를 볼 방법이 아예 없었고, 그게 **2026-09-04 사고(#195)** 가 이
+       워치독을 그냥 통과한 이유입니다 — 그날은 결측도 없고 건수도 같고 중앙값 이동이
+       0 이라 아래 검사 전부가 **오히려 "너무 정상"** 이라고 답했습니다.
+       계산은 `utils/data_freshness.fingerprint()` 한 곳에만 있습니다(§0-3-10).
     """
     rows = _as_rows(dataset)
     names = [str(name) for name in (fields or [])]
@@ -286,6 +302,9 @@ def summarize_dataset(dataset, fields):
             "zero_count": zeros,
             "distinct_count": len(set(numbers)),
             "median": _median(numbers),
+            # ⚠️ 지문은 **원본 값 전부**로 냅니다(위 `numbers` 가 아닙니다) — 결측이 결측
+            #    그대로인 것도 "내용이 같다"의 일부이기 때문입니다.
+            "fingerprint": data_freshness.fingerprint([row.get(name) for row in rows]),
         }
     return summary
 
@@ -481,6 +500,54 @@ def judge_sanity(today, baseline=None, *, baseline_date=None, level_fields=None,
                     "median_shift", name, "pass",
                     f"'{name}' 중앙값 {base_median:,.6g} → {today_median:,.6g} ({shift:.2f}배)."))
 
+    # ── ⑦ 내용이 어제와 통째로 같은가 (2026-09-08 신설, #219) ─────────────────
+    # 🔴 **2026-09-04 사고(#195)가 이 워치독을 그냥 통과한 이유가 여기 있었습니다.**
+    #    그날 수집기는 "오늘 날짜 라벨 + 어제 내용물" 스냅샷을 남겼는데,
+    #    결측도 없고 건수도 같고 중앙값 이동이 0 이라 위 검사 ①~⑥ 이 **전부 통과**
+    #    시켰습니다. 값이 "그럴듯한가"만 보면 어제 것을 그대로 다시 받은 날이
+    #    **가장 정상적인 날**로 보입니다.
+    #
+    # ⚠️ 컬럼 하나가 아니라 **검사 대상 컬럼 전부**의 지문이 같을 때만 걸립니다.
+    #    상장주식수처럼 며칠씩 안 바뀌는 컬럼이 있어서, 한 컬럼만 보고 판정하면
+    #    매일 울립니다.
+    #
+    # 🟡 **휴장일에는 정상적으로 걸립니다** — 정직하게 적어 둡니다. 휴장일이든 사고든
+    #    "어제 값을 그대로 들고 있다"는 사실은 같고, 이 워치독에는 그 둘을 구분할
+    #    앵커가 없습니다(구분에는 지수 값이 필요하고, 그건 `duel_rules` 쪽 관심사입니다).
+    #    사유 문장에 "휴장일이면 정상"이라고 같이 적어, 한 번 보고 넘길 수 있게 했습니다.
+    #    놓쳐서 하루를 통째로 잃는 것보다 낫다는 것이 오너 판단입니다.
+    comparable = []
+    for name, stat in today["fields"].items():
+        base_stat = baseline["fields"].get(name) if baseline else None
+        today_print = stat.get("fingerprint")
+        base_print = base_stat.get("fingerprint") if base_stat else None
+        if today_print and base_print:
+            comparable.append((name, today_print == base_print))
+
+    if not comparable:
+        checks.append(_check(
+            "frozen_content", None, "skipped",
+            baseline_skip or "기준값에 내용 지문이 없어(2026-09-08 이전 형식) 어제와 내용이"
+                             " 같은지 비교하지 않았습니다 — 내일 기준값부터 비교됩니다."))
+    elif row_count < min_rows:
+        checks.append(_check(
+            "frozen_content", None, "skipped",
+            f"행이 {row_count:,}건뿐이라(최소 {min_rows}건) 내용 동일 판정을 하지 않았습니다."))
+    elif all(same for _, same in comparable):
+        checks.append(_check(
+            "frozen_content", None, "fail",
+            f"검사 대상 컬럼 {len(comparable)}개가 **전부 어제와 내용이 똑같습니다**"
+            f" ({', '.join(name for name, _ in comparable)})"
+            f" — {baseline_date or '기준일 미상'} 것을 그대로 다시 받았거나 수집이"
+            " 건너뛰어졌을 수 있습니다. **휴장일이면 정상입니다.**"
+            " (2026-09-04 에 실제로 났던 사고와 같은 모양입니다.)"))
+    else:
+        moved = [name for name, same in comparable if not same]
+        checks.append(_check(
+            "frozen_content", None, "pass",
+            f"어제와 내용이 달라진 컬럼 {len(moved)}/{len(comparable)}개"
+            f" ({', '.join(moved)})."))
+
     failures = [c for c in checks if c["status"] == "fail"]
     skipped = [c for c in checks if c["status"] == "skipped"]
     passed = [c for c in checks if c["status"] == "pass"]
@@ -523,6 +590,34 @@ def judge_sanity(today, baseline=None, *, baseline_date=None, level_fields=None,
 # =============================================================================
 # 4. 상태 파일 읽기·쓰기 (duel_batch 의 기준값 파일과 같은 규율)
 # =============================================================================
+def frozen_notice(payload):
+    """상태 파일 내용을 받아 **"어제와 값이 같습니다"를 사람에게 보여줄 문장**을 만듭니다.
+
+    화면(`web/pages/pegy_page.py` 등)이 쓰라고 만든 함수입니다. 화면이 직접 어제와
+    비교하지 않고 **워치독이 이미 내린 판정을 읽기만** 하게 하려는 것입니다 —
+    판정이 두 곳에 생기면 조용히 어긋납니다(§0-3-10).
+
+    🔴 왜 필요한가: 화면은 `last_updated_at`(수집 시각)만 보고 "📅 마지막 동기화: 오늘"
+       이라고 적습니다. **2026-09-04 사고(#195)** 는 오늘 날짜 라벨에 어제 내용물이
+       담긴 스냅샷이었으므로, 화면이 사용자에게 **사실이 아닌 말**을 하고 있었습니다.
+
+    ⚠️ 파일을 읽지 않습니다(순수 함수). 호출부가 읽어서 넘깁니다 — 화면은 비동기라
+       여기서 동기 파일 읽기를 하면 이벤트 루프를 막습니다.
+
+    반환: 보여줄 한 문장(str), 보여줄 것이 없으면 **None**.
+    """
+    if not isinstance(payload, dict):
+        return None
+    for check in payload.get("checks") or ():
+        if not isinstance(check, dict):
+            continue
+        if check.get("name") == "frozen_content" and check.get("status") == "fail":
+            return (f"이 화면의 값은 **{payload.get('target_date') or '오늘'} 수집분이지만,"
+                    " 어제와 내용이 똑같습니다** — 휴장일이면 정상이고, 아니면 갱신이"
+                    " 안 된 것입니다. 아래 숫자는 어제 기준일 수 있습니다.")
+    return None
+
+
 def default_state_dir():
     """상태 파일이 사는 곳(`<저장소>/data`). duel_batch.default_state_dir() 과 같은 자리."""
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")

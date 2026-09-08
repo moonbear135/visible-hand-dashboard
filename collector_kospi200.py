@@ -2444,7 +2444,7 @@ def run_kospi200_collector():
     # 대상은 visible_stocks(정확히 500개로 고정)가 아니라 enriched_stocks 입니다 —
     # 고정된 수를 세면 '건수 급감'을 영영 못 잡습니다.
     data_sanity.check_dataset(
-        "kospi200", enriched_stocks, ("price", "market_cap"),
+        data_sanity.DATASET_KOSPI200, enriched_stocks, ("price", "market_cap"),
         target_date=_now_kst().strftime('%Y-%m-%d'),
         level_fields=("price", "market_cap"),
         # 상태 파일은 이 실행이 스냅샷을 쓴 바로 그 디렉터리에 둡니다(위 data_dir).

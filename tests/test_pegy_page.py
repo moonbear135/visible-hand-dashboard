@@ -400,3 +400,100 @@ def test_next_dividend_line_escapes_disclosure_strings():
     check("<script>" not in html, "스크립트 태그가 그대로 들어가지 않음")
     check("&lt;script&gt;" in html, "이스케이프된 형태로만 들어감")
     check("<img src=x" not in html, "배당기준일 문자열도 이스케이프됨")
+
+
+# =============================================================================
+# 🧊 "어제와 값이 같은 날" 화면 표시 (2026-09-08 추가, #219)
+#
+# 오너: *"결투, 성적표, 사실 이 가격이에요 — 전부 다 적용이 안 되던 걸 찾았지."*
+#
+# 이 화면은 `last_updated_at`(수집 **시각**)만 보고 "📅 마지막 동기화: 오늘"이라고 적습니다.
+# 2026-09-04 사고(#195)는 **오늘 날짜 라벨에 어제 내용물**이 담긴 스냅샷이었으므로,
+# 그날 이 화면은 사용자에게 **사실이 아닌 말**을 하고 있었습니다.
+# =============================================================================
+def _frozen_sanity_payload(status="fail"):
+    return {
+        "version": 1,
+        "dataset": "kospi200",
+        "target_date": "2026-09-04",
+        "status": "suspect" if status == "fail" else "ok",
+        "checks": [
+            {"name": "row_count_empty", "field": None, "status": "pass", "detail": "수집 결과 520건."},
+            {"name": "frozen_content", "field": None, "status": status,
+             "detail": "검사 대상 컬럼 2개가 전부 어제와 내용이 똑같습니다"},
+        ],
+    }
+
+
+def test_frozen_day_is_announced_on_the_page():
+    """🔴 판정이 'fail' 이면 화면이 그 사실을 말해야 합니다."""
+    sys.path.append(str(Path(__file__).parent))
+    from _render_helpers import run_render
+
+    import web.pages.pegy_page as page
+    from utils import data_sanity
+
+    warned = []
+    original_warn = page.warning_banner
+    original_load = page.load_json_file_async
+    suffix = data_sanity.SANITY_FILENAME_SUFFIX
+
+    async def _fake_load(path):
+        if str(path).endswith(suffix):
+            return _frozen_sanity_payload(), None
+        return await original_load(path)
+
+    page.warning_banner = lambda text: warned.append(str(text))
+    page.load_json_file_async = _fake_load
+    try:
+        run_render(page.pegy_index_page())
+    finally:
+        page.warning_banner = original_warn
+        page.load_json_file_async = original_load
+
+    frozen = [w for w in warned if "🧊" in w]
+    check(bool(frozen), "얼어붙은 날 경고가 화면에 그려짐", f"({warned[:3]})")
+    if frozen:
+        check("2026-09-04" in frozen[0], "언제 것인지 날짜를 밝힘", f"({frozen[0]})")
+        check("휴장일이면 정상" in frozen[0],
+              "오탐일 수 있다는 사실도 같이 알림 (§0-1)", f"({frozen[0]})")
+
+
+def test_a_normal_day_shows_no_frozen_banner():
+    """평소에 뜨면 아무도 안 봅니다."""
+    sys.path.append(str(Path(__file__).parent))
+    from _render_helpers import run_render
+
+    import web.pages.pegy_page as page
+    from utils import data_sanity
+
+    warned = []
+    original_warn = page.warning_banner
+    original_load = page.load_json_file_async
+    suffix = data_sanity.SANITY_FILENAME_SUFFIX
+
+    async def _fake_load(path):
+        if str(path).endswith(suffix):
+            return _frozen_sanity_payload(status="pass"), None
+        return await original_load(path)
+
+    page.warning_banner = lambda text: warned.append(str(text))
+    page.load_json_file_async = _fake_load
+    try:
+        run_render(page.pegy_index_page())
+    finally:
+        page.warning_banner = original_warn
+        page.load_json_file_async = original_load
+
+    check(not [w for w in warned if "🧊" in w], "정상인 날에는 안 뜸", f"({warned[:3]})")
+
+
+def test_page_does_not_judge_freshness_itself():
+    """
+    §0-3-10 — 화면은 **판정을 읽기만** 합니다. 화면이 직접 어제와 비교하기 시작하면
+    워치독과 두 개의 판정이 생겨 조용히 어긋납니다.
+    """
+    source = (Path(__file__).parent.parent / "web" / "pages" / "pegy_page.py").read_text(encoding="utf-8")
+    check("data_sanity.frozen_notice(" in source, "공용 판정 결과를 읽어 씀")
+    for banned in ("judge_frozen(", "compare_unchanged(", "fingerprint("):
+        check(banned not in source, f"화면이 직접 판정하지 않음 ({banned} 없음)")
