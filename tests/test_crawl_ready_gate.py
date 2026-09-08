@@ -23,6 +23,7 @@ from datetime import datetime
 from pathlib import Path
 
 import pytest
+from conftest import skip_if_system_halted  # noqa: E402
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.append(str(REPO_ROOT))
@@ -86,6 +87,9 @@ WORK_STEPS = {
 @pytest.mark.parametrize("filename", sorted(CONSUMER_WORKFLOWS))
 def test_consumer_workflow_is_triggered_by_the_crawls_it_consumes(filename):
     """① workflow_run 이 **소비하는 크롤링 워크플로우의 `name`** 을 그대로 가리키고 types=[completed]."""
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("수집 완료 이벤트 배선")
     consumer, sources, _crons, _gate_on_cron = CONSUMER_WORKFLOWS[filename]
     trigger = _triggers(_load_workflow(filename))
     run = trigger.get("workflow_run")
@@ -105,6 +109,9 @@ def test_consumer_workflow_is_triggered_by_the_crawls_it_consumes(filename):
 @pytest.mark.parametrize("filename", sorted(CONSUMER_WORKFLOWS))
 def test_consumer_workflow_keeps_its_cron_as_a_safety_net_without_moving_it_later(filename):
     """② cron 은 안전망으로 남고 ⑥ #203 시각에서 뒤로 밀리지 않았다(오너: 고정 시각을 늦추는 방향 금지)."""
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     _consumer, _sources, crons, _gate_on_cron = CONSUMER_WORKFLOWS[filename]
     trigger = _triggers(_load_workflow(filename))
     actual = [entry["cron"] for entry in (trigger.get("schedule") or [])]

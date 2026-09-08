@@ -87,3 +87,21 @@ def _assert_no_check_failures():
     yield
     new_failures = FAILURES[start:]
     assert not new_failures, f"check() 로 기록된 실패 {len(new_failures)}건: {new_failures}"
+
+
+# ─────────────────────────────────────────────────────────────────────────────
+# 🛑 2026-09-08 — 자동 실행이 멈춰 있을 때 "예약 시각" 검사를 건너뛰는 헬퍼
+#
+# 오너 지시로 공개 서비스를 접고 GitHub Actions 예약을 전부 껐습니다.
+# 그러자 "cron 이 이 시각에 있어야 한다"·"완료 이벤트에 걸려 있어야 한다" 를 지키던
+# 검사들이 빨간불이 됐습니다. 그 검사들은 **틀린 게 아니라 지금 해당이 없을 뿐**입니다.
+#
+# 지우지 않고 건너뜁니다 — 빨간불을 방치하면 나중에 **진짜 실패를 못 봅니다**(§0-1).
+# 판단 기준은 `utils/system_halt.SYSTEM_HALTED` **한 곳뿐**입니다(§0-3-10).
+# ─────────────────────────────────────────────────────────────────────────────
+def skip_if_system_halted(what="예약 실행"):
+    """자동 실행이 멈춰 있으면 이 테스트를 건너뜁니다(사유를 그대로 남기고)."""
+    import pytest as _pytest                                    # noqa: PLC0415
+    from utils.system_halt import SYSTEM_HALTED, HALT_REASON    # noqa: PLC0415
+    if SYSTEM_HALTED:
+        _pytest.skip(f"🛑 {what} 검사 건너뜀 — {HALT_REASON}")

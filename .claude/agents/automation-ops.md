@@ -26,6 +26,11 @@ GitHub Actions 워크플로우 17개의 **연쇄 구조**, 데이터 게이트, 
 - `Dockerfile`, `.dockerignore`, `requirements.txt`, `.devcontainer/devcontainer.json`, `cloudflare_worker.js`
 - 테스트: `tests/test_crawl_ready_gate.py`, `test_watch_schedule_health_window.py`
 
+- 🛑 `utils/system_halt.py` — **이 저장소의 자동 실행이 멈춰 있는가**를 선언하는 단 하나의 자리
+  (2026-09-08 오너 지시로 공개 서비스 중단). 예약 시각·완료 이벤트를 지키던 테스트들이
+  이 값을 보고 건너뜁니다 — 지운 게 아니라 **되살리면 그대로 다시 지킵니다**(§0-3-10).
+  🔴 되살리기 전에 **시세정보 이용 조건이 해결됐는지** 반드시 확인하세요(그게 멈춘 이유입니다).
+
 ## 🔴 절대 규칙
 
 1. **cron은 안전망일 뿐입니다** (§0-3-15). 크롤링을 소비하는 배치는 **크롤링이 실제로 끝나는

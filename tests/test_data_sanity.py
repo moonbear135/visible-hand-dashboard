@@ -25,6 +25,7 @@ import os
 import sys
 
 import pytest
+from conftest import skip_if_system_halted  # noqa: E402
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -565,6 +566,9 @@ def _watch_yaml():
 
 
 def test_sanity_watch_fires_when_collection_finishes_not_next_morning():
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     config = _watch_yaml()[True]          # PyYAML 은 `on:` 을 불린 True 로 읽습니다
     assert "workflow_run" in config, (
         "산티체크 감시가 수집 완료 이벤트에 걸려 있지 않습니다 — 다음 날 09:30 에만 알리면 "
@@ -577,6 +581,9 @@ def test_korean_and_us_collectors_are_watched_separately():
     오너: *"이 부분을 미국장 한국장을 분리해서 돌려야 하는 게 맞다고 생각해, 이게 커버가 안 돼."*
     두 시장은 마감이 12시간 가까이 다릅니다. 하루 한 번으로 묶으면 반드시 한쪽이 늦습니다.
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     watched = _watch_yaml()[True]["workflow_run"]["workflows"]
     assert "Daily Market Scraper" in watched, "코스피 수집 완료를 안 보고 있습니다"
     assert "Daily US Stocks Scraper" in watched, "미국주식 수집 완료를 안 보고 있습니다"
@@ -587,6 +594,9 @@ def test_daily_cron_survives_as_a_safety_net():
     이벤트가 유실되거나 수집 워크플로우 자체가 안 돈 날을 받칠 것이 필요합니다.
     (그리고 watch_schedule_health.yml 이 이 워크플로우를 'daily' 로 감시하고 있습니다.)
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     assert _watch_yaml()[True].get("schedule"), "안전망 cron 이 사라졌습니다"
 
 

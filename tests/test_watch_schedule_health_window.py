@@ -44,6 +44,7 @@ import textwrap
 from pathlib import Path
 
 import pytest
+from conftest import skip_if_system_halted  # noqa: E402
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
 if str(REPO_ROOT) not in sys.path:
@@ -1180,6 +1181,9 @@ def test_watchdog_cron_runs_outside_market_hours_and_after_every_target():
            파일에서 직접 읽으므로, 나중에 누가 대상에 더 늦은 스케줄을 추가하면 이 검사가
            빨간불이 되어 "워치독 시각도 같이 옮겨야 한다"는 사실을 알려 줍니다.
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     crons = _schedule_crons(WORKFLOW_PATH)
     assert len(crons) == 1, f"워치독 cron 이 여러 개입니다(설계상 하루 한 번): {crons}"
     watchdog_min = _cron_kst_minute_of_day(crons[0])
@@ -1925,6 +1929,9 @@ def test_daily_deadlines_match_each_target_workflows_cron():
     daily@HH:MM 의 HH:MM 은 그 워크플로우 schedule cron 을 KST 로 옮긴 값이어야 합니다 — 누군가 cron 을
     옮기고 여기를 안 고치면 "기대 실행일" 판정이 어긋납니다(한쪽만 바뀌면 빨간불).
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     import re
     script = load_check_step_script()
     for wf in DAILY_DATA_TARGETS:
@@ -2061,6 +2068,9 @@ def test_weekend_skip_set_is_exactly_the_weekday_targets_without_a_data_file():
     와 대조합니다. 또 weekdays 로 적힌 대상의 cron 은 정말 월~금(1-5)뿐이고 daily 대상은 요일
     제한이 없어야 합니다 — duel_daily_us.yml 이 daily 인 것도 여기서 확인됩니다.
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     rows = _targets_table()
     skipped = [f for f, kind, data_file in rows if kind == "weekdays" and not data_file]
     assert skipped == WEEKEND_SKIPPED_TARGETS == ["duel_daily.yml"], skipped

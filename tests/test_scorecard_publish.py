@@ -47,6 +47,7 @@ from pathlib import Path
 from unittest import mock
 
 import pytest
+from conftest import skip_if_system_halted  # noqa: E402
 
 REPO_ROOT = Path(__file__).parent.parent
 sys.path.append(str(REPO_ROOT))
@@ -2112,6 +2113,9 @@ def test_usd_publish_cron_runs_after_us_benchmark_with_repo_margin_and_before_wa
          (13~16시대)까지 기준으로 삼아 뒤로 밀리는 것을 막는 상한입니다.
     나중에 누가 벤치마크 시각을 늦추거나 이 cron 을 앞당기면 이 테스트가 빨간불로 알려 줍니다.
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     publish = _workflow_crons("scorecard_publish_daily_us.yml")
     assert len(publish) == 1, f"발행 배치 cron 은 하루 한 번이어야 합니다: {publish}"
     publish_min = _cron_kst_minute_of_day(publish[0])
@@ -2150,6 +2154,9 @@ def test_krw_publish_cron_is_an_early_morning_slot_that_does_not_wait_for_us_dat
       ② 달러 트랙·결투 USD·워치독보다 앞(순서가 뒤집히면 워치독이 그날 것을 못 봅니다).
       ③ 정각·정30분이 아닐 것 · ④ 매일 · ⑤ 하루 한 번.
     """
+    # 🛑 2026-09-08 — 자동 실행이 멈춰 있으면 이 검사는 해당이 없습니다.
+    #    지운 게 아니라 건너뜁니다. 되살리면 그대로 다시 지킵니다(utils/system_halt.py).
+    skip_if_system_halted("예약 실행 시각")
     publish = _workflow_crons("scorecard_publish_daily.yml")
     assert len(publish) == 1, f"원화 발행 cron 은 하루 한 번이어야 합니다: {publish}"
     publish_min = _cron_kst_minute_of_day(publish[0])
