@@ -134,11 +134,22 @@ def test_collector_reads_the_switch_only_through_the_resolver():
 
 
 def test_workflow_has_a_commented_switch_line_and_no_invalid_active_value():
-    """오너가 켜는 줄이 실제로 있고, 켜져 있다면 허용값이어야 합니다(오타는 실행 전에 잡음)."""
+    """오너가 켜고 끄는 줄이 실제로 있고, 켜져 있다면 허용값이어야 합니다(오타는 실행 전에 잡음).
+
+    🔴 2026-09-08 정정 — 처음에는 "주석 처리된 안내 줄이 **반드시** 있어야 한다"고 못 박았는데,
+       그건 **스위치가 영영 꺼져 있어야 한다**는 뜻이 되어 버립니다. 같은 날 오너 승인으로
+       실제로 켰더니(구 순위 페이지가 0건을 돌려주기 시작) 이 검사가 걸렸습니다.
+       스위치는 **켜지라고 만든 것**이므로, 지켜야 할 것은 "꺼져 있음"이 아니라
+       **"켜져 있든 꺼져 있든 그 줄을 사람이 찾을 수 있고 값이 유효하다"** 입니다.
+    """
     yml = WORKFLOW.read_text(encoding="utf-8")
-    check(re.search(r"^\s*#\s*NAVER_SOURCE:\s*new_api\s*$", yml, re.M) is not None,
-          "scrape.yml 에 '# NAVER_SOURCE: new_api' 안내 줄이 있음")
+    commented = re.search(r"^\s*#\s*NAVER_SOURCE:\s*\S+\s*$", yml, re.M) is not None
     active = re.findall(r"^\s*NAVER_SOURCE:\s*(\S+)\s*$", yml, re.M)
+    check(commented or active,
+          "scrape.yml 에서 NAVER_SOURCE 줄을 찾을 수 있음 (꺼져 있으면 주석, 켜져 있으면 값)")
+    check(len(active) <= 1,
+          "켜진 NAVER_SOURCE 가 두 줄 이상이 아님 (뒤엣것이 조용히 이김)",
+          f"({active})")
     for value in active:
         check(value.strip('"\'') in NS.NAVER_SOURCES, f"켜진 NAVER_SOURCE 값이 허용값: {value}")
     # 기본값을 YAML 에 다시 적지 않습니다(§0-3-10). 켜는 것은 new_api 뿐이라 legacy 가 켜져 있을 이유가 없습니다.
