@@ -1735,6 +1735,102 @@ f_per 계산 / 추정치 0 메움 / t_pbr 계산 회귀 / 요청 상한 상향 /
 4. 다음 날 아침 `watch_data_sanity.yml`(09:30) 이 조용한지, `/kr` 화면 값이 전날과 이어지는지 확인.
 5. 안정되면 섀도 워크플로우 정리(§7-6 — 한시적 약속).
 
+## 10. 🛡️ 마스터 파일 문지기 — "반쪽짜리 결과로 멀쩡한 파일을 덮어쓰지 않는다" (2026-09-08)
+
+### 10-1. 무슨 일이 있었나 (실제 로그)
+
+2026-09-08 16:11 `Daily Market Scraper` 실행:
+
+```
+⚠️ [전체 상장종목 목록] StockListing('KRX') 실패: HTTP Error 404: Not Found
+[전체 상장종목 목록] StockListing('ETF/KR') (국내 ETF) 1167건 반영(컬럼: code=Symbol, name=Name, market=None)
+[전체 상장종목 목록] 1167건 저장 완료 -> .../data/kr_ticker_master.json
+...
+Successfully retrieved 0 real KOSPI candidates (market order, up to 700).
+Successfully retrieved 0 real KOSDAQ candidates (market order, up to 700).
+RuntimeError: 코스피+코스닥 시가총액 목록 스크래핑 실패 — 수집을 중단합니다 (기존 스냅샷 유지)
+```
+
+- `run_kr_ticker_master_collector()` 는 주식 목록(KRX)이 404 로 실패했는데도 **ETF 1,167건만 담아
+  `data/kr_ticker_master.json` 을 덮어썼습니다.** 정상 파일은 주식 2,873 + ETF 1,167 = 4,040건입니다.
+- 그날은 뒤 단계(코스피 목록 스크래핑)가 실패해 커밋 스텝이 안 돌아 **저장소 파일이 우연히 살아남았습니다**
+  (`data/kr_ticker_master.json` 은 2026-09-07 자 4,040건 그대로 — 직접 확인).
+- 왜 치명적인가: §9-3 의 신 경로는 종목 선별을 **이 마스터 한 곳**(type=STOCK 그리고 market ∈ 코스피·코스닥)에서만
+  합니다. ETF 만 남은 마스터면 **후보 전부가 걸러져 0건**이고, 그 상태가 커밋되면 다음 날도 0건입니다.
+  구 경로도 ETF 판정·우선주 부모 검증을 같은 파일로 하므로 무관하지 않습니다.
+
+### 10-2. 무엇을 고쳤나
+
+| 곳 | 변경 |
+|---|---|
+| `collector_kospi200.py::run_kr_ticker_master_collector()` | **두 원천(KRX 주식, ETF/KR) 중 하나라도 실패(예외 또는 0건)하면 파일을 쓰지 않고 기존 파일을 그대로 둡니다.** 예전엔 "0건이 아니면 저장"이었습니다. 파일은 임시 파일 → `os.replace` 로 바꿔치기(반쯤 쓰인 파일 방지). |
+| 같은 파일 `_ticker_master_refresh` / `_note_ticker_master_refresh()` | 이번 실행의 갱신 결과(시도했나·썼나·실패 원천·사유)를 한 곳에 기록. `__main__` 의 except 가지도 기록합니다. |
+| 같은 파일 `ticker_master_status()` | 마스터 파일 날짜(며칠 전인지) + 위 기록을 한 dict 로. **판정은 이 한 곳**(§0-3-10). |
+| `utils/data_sanity.py::ticker_master_notice()` | 그 dict 를 사람이 읽을 한 문장으로(`frozen_notice()` 와 같은 역할). 화면이 수집기 모듈을 import 하지 않게 가벼운 쪽에 뒀습니다. |
+| `_warn_ticker_master_staleness()` | 🚨 로그 + GitHub Actions 실행 요약 `::warning` 주석(잡이 초록불이어도 요약 화면에 보임). |
+| `run_kospi200_collector()` metadata | `metadata.ticker_master` 블록 신설 — 이 스냅샷의 ETF 판정·종목 선별이 어느 날짜 마스터 기준이었는지 + 갱신 실패 여부. |
+| `web/pages/pegy_page.py` | `metadata.ticker_master` → `ticker_master_notice()` → 관리자 배너(📋). 화면은 판정 필드를 직접 해석하지 않습니다. |
+| `_load_outstanding_shares_lookup()` (같은 원천 `StockListing('KRX')`) | **손대지 않았습니다.** 파일을 쓰지 않고 빈 dict 를 돌려주며 호출부가 네이버 파싱 값/미수집으로 처리하므로 "덮어쓰기" 위험이 없습니다(주석으로 남김). 같은 주소를 하루 두 번 두드리는 점(§0-3-2)은 별건으로 남겨 둡니다. |
+
+**"반쪽"의 판정 기준과 근거** — 원천 단위 성공/실패(예외 또는 0건)입니다. 건수 급감 비교는 **하지 않았습니다**:
+① 이 자리는 원인을 직접 아는 곳(예외를 우리가 받고, 0건도 우리가 셈)이라 추정이 필요 없고,
+② `utils/data_sanity.py` 의 급감 판정은 "저장 **뒤에** 얹히는 관찰자, 아무것도 막지 않음" 이 설계이고 어제 요약
+상태 파일과 숫자 컬럼을 전제로 해서 여기(저장 **전** 문지기, 숫자 컬럼 없음)와 성격이 다릅니다. 재사용도 못 하고,
+같은 판정을 새로 짜지도 않았습니다(§0-3-10). 🔻 그래서 "예외 없이 일부만 온 응답"(예: 주식 300건)은 못 잡습니다 —
+설치된 FDR 소스를 보면 KRX 목록은 CSV 한 장을 통째로 받는 구조라 실제로는 전부 아니면 404 입니다.
+
+**주식 목록이 실패한 날 수집 전체는 계속 갑니다(죽이지 않음).** 근거: 마스터는 보조 목록이라 어제 것이어도 그날
+가격·밸류에이션 수집은 됩니다(누락은 하루치 신규 상장·폐지뿐이고 그 사실은 경고·metadata·배너로 드러남). 여기서
+죽이면 보조 목록 하나 때문에 그날 코스피 스냅샷(핵심 산출물)을 통째로 잃습니다(TASK_HISTORY #83 의 원래 설계 이유).
+마스터가 **아예 없으면** 신 경로는 후보 0건 → 이미 `RuntimeError` 로 멈춥니다.
+
+### 10-3. 검증
+
+- 기준선(작업 전, 깨끗한 worktree): **2541 passed / 77 skipped / 0 failed**.
+- 새 테스트 `tests/test_ticker_master_guard.py` 11건 — 사고 모양 그대로(KRX 404 + ETF 1,167건 성공) 재현해
+  **기존 파일 sha256 불변** 확인, 반대 방향(ETF 실패)·0건·파일 없음, 기록→문장→`::warning`→metadata→화면 배선,
+  평소 날 저장 동일. 전부 `tmp_path` 안에서만 씁니다.
+- 사보타주 9종(문지기 되돌림 / ETF 실패 기록 누락 / 0건을 성공 취급 / 실패 문장 삭제 / metadata 블록 제거 /
+  `::warning` 제거 / 화면 배너 제거 / 실패 가지에서 파일 씀 / `__main__` except 기록 제거) — **9종 전부 잡힘**, 원복 확인.
+- 기존 테스트 정정 1건: `tests/test_stock_history.py::test_kr_ticker_master_collector` 의 배선 검사가 파일 전체에서
+  두 함수 이름의 **첫 등장 위치**를 비교하고 있었고(주석에 이름이 한 번 더 나오면 뒤집히는 우연한 판정), 라벨
+  "핵심 수집 뒤에 실행됨"은 2026-08-29 H6 이후 사실과 달랐습니다. `__main__` 블록 안의 try/except 만 보도록 고쳤고,
+  순서는 `test_collector_kospi200_ranking.py` 가 이미 검사합니다.
+- `data/kr_ticker_master.json` 은 작업 전후 `git status` 에서 변경 없음.
+
+### 10-4. 🔴 FDR `StockListing('KRX')` 404 에 대해 알아낸 것 (코드로만 — 네트워크 확인은 못 했습니다)
+
+이 기계에 설치된 `finance-datareader 0.9.202` 의 소스를 직접 읽었습니다(`FinanceDataReader/data.py`,
+`krx/listing.py`, `naver/listing.py`):
+
+- `StockListing('KRX')` → `KrxMarcapListingCache.read()` :
+  ① `data.krx.co.kr` 에 `max_work_dt`(최근 영업일)를 묻고 → ② 그 날짜로
+  `https://raw.githubusercontent.com/FinanceData/fdr_krx_data_cache/.../data/listing/krx/{YYYY-MM-DD}.csv` 를
+  `pd.read_csv(url)` 로 내려받습니다. **KRX 서버 직접 조회가 아니라 FinanceData 쪽 GitHub 캐시 저장소**입니다.
+- 오류 문구 `HTTP Error 404: Not Found` 는 pandas 가 쓰는 urllib 의 `HTTPError` 형식입니다. ① 이 실패하면
+  `ValueError("Failed to load data from ...")` 가 나므로, 그날 404 는 **② GitHub 캐시 CSV 가 없어서**로 보는 것이
+  코드상 일관됩니다.
+- 그렇다면 가장 그럴듯한 그림은 **타이밍**입니다: 16:11 KST 에 KRX 는 `max_work_dt = 2026-09-08` 을 돌려줬는데,
+  캐시 저장소에 `2026-09-08.csv` 가 아직 올라오지 않았을 가능성. 🔴 **이건 추정입니다** — 캐시 저장소의 실제 상태,
+  갱신 시각, 그날의 KRX 응답은 네트워크가 막혀 확인하지 못했습니다. Actions 러너에 설치되는 FDR 버전도
+  (`requirements.txt` 가 버전을 고정하지 않아) 이 기계와 같은지 확인 못 했습니다.
+- 그래서 **재시도를 넣지 않았습니다**(§0-3-2). 나중에 다시 시도하면 될 수도 있지만 그건 확인 안 된 가설이고,
+  어제 마스터로 하루 버티는 쪽이 정직하고 충분합니다.
+- ⚠️ 부수 발견: `StockListing('ETF/KR')` 는 **`https://finance.naver.com/api/sise/etfItemList.nhn`** 을 씁니다 —
+  §1 의 그 구 도메인입니다. 2026-09-10 종료가 이 API 까지 미치면 ETF 쪽도 실패하고, 그때부터 마스터는 이 문지기
+  덕에 **덮어써지지 않고 마지막 정상 파일에서 멈춥니다**(매일 🚨 + `::warning` + 관리자 배너). 그 뒤의 ETF 목록
+  대체 출처는 이 작업 범위 밖이며 미확인입니다.
+
+### 10-5. 하지 않은 것 / 확신이 없는 것
+
+- FDR 404 의 실제 원인 확인(위). 재시도·대체 출처 추가 없음.
+- `_load_outstanding_shares_lookup()` 와 마스터 수집기의 KRX 응답 공유(하루 1회로 줄이기) — 별건.
+- 마스터가 N 일 이상 오래됐을 때 **디스코드**로 알리는 것은 넣지 않았습니다. 지금 알림 경로는 로그 🚨 /
+  Actions `::warning` / 코스피 스냅샷 metadata / `/kr` 관리자 배너입니다. `watch_data_sanity.yml` 은
+  `data/*_sanity.json` 만 읽는데, 마스터는 숫자 컬럼이 없어 그 형식에 억지로 끼우면 매일 "얼어붙음" 오탐이
+  납니다(상장 목록은 대부분의 날 안 바뀜) — 그래서 끼우지 않았습니다.
+- `TASK_HISTORY.md`·`PROJECT_STATUS.md` 는 건드리지 않았습니다(오너 지시).
+
 ## 5. 하지 않은 것 (§0-1)
 
 - **구 URL 이 실제로 죽는지 확인하지 못했습니다.** 세션의 웹 접근이 차단(`SITE_BLOCKED`)돼

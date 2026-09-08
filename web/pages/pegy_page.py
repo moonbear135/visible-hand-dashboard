@@ -1083,6 +1083,19 @@ async def _render_body() -> None:                  # noqa: C901 — 원본 화�
         # 사실**이고, 사용자가 알아야 판단을 그르치지 않습니다(§0-1).
         warning_banner(f"🧊 {_frozen_notice}")
 
+    # 🔴 2026-09-08 — 전체 상장종목 마스터(kr_ticker_master.json) 갱신 실패·노후를 화면에 드러냅니다.
+    #    그날 실제 사고: KRX 목록이 404 인데 ETF 만 성공해 마스터가 ETF 1,167건짜리로 덮어써질 뻔
+    #    했습니다. 수집기는 이제 그런 날 파일을 쓰지 않고 기존 파일을 유지하되, 그 사실을
+    #    스냅샷 metadata.ticker_master 에 남깁니다. 로그에만 남기면 화면을 보는 사람은 모르므로
+    #    (§0-1 "로그만 남기는 것은 조치가 아니다") 여기서 읽어 보여줍니다.
+    # ⚠️ 판정·문장은 화면이 만들지 않습니다 — 수집기(ticker_master_status)가 판정하고 문장은
+    #    utils/data_sanity.ticker_master_notice() 한 곳에 있습니다(§0-3-10). 화면은 읽기만.
+    # ⚠️ 관리자 전용인 이유: 이 배너는 "ETF 판정·우선주 검증이 어제 목록 기준" 이라는 **운영
+    #    사실**이고, 화면의 개별 숫자를 바꾸지 않습니다(아래 "마지막 수집" 배너와 같은 성격).
+    _ticker_master_notice = data_sanity.ticker_master_notice(metadata.get("ticker_master"))
+    if _ticker_master_notice and admin:
+        warning_banner(f"📋 [관리자 전용] {_ticker_master_notice}")
+
     # "자동 수집이 멈춰 있는지 확인해 주세요"는 운영자용 지시문이라 관리자에게만 노출합니다.
     # (실제 데이터 시점 자체는 아래 "마지막 동기화" 배너에 이미 정직하게 표기됩니다 — §0-1)
     if stale_hours is not None and stale_hours >= 24 and admin:

@@ -23,13 +23,14 @@ model: inherit
 | `utils/db.py` | 저장·이력 (`COL_MAP`, `HISTORY_FILE`, `save_and_load_history`) |
 | `utils/data_validator.py` | **3단계 검증 파이프라인 + `PERIOD_KEYWORDS` 원본** |
 | `utils/data_sanity.py` | 데이터 건전성 감시 (외부 사이트 구조 변경 감지 책임) |
+| `utils/data_sanity.py::ticker_master_notice()` | 📋 전체 상장종목 마스터(`data/kr_ticker_master.json`) 갱신 실패·노후를 사람 문장으로(2026-09-08). 판정 자체는 `collector_kospi200.ticker_master_status()` 한 곳, 화면(`pegy_page`)은 스냅샷 `metadata.ticker_master` 를 이 함수에 넘겨 읽기만. 🔴 그날 KRX 404 로 마스터가 ETF 1,167건짜리로 덮어써질 뻔한 사고가 근거 — 수집기는 이제 원천 하나라도 실패하면 파일을 쓰지 않습니다(`NAVER_MIGRATION_WORK_ORDER.md` §10) |
 | `utils/data_freshness.py` | 🧊 **"어제와 통째로 같은가" 공용 판정** (2026-09-08, #219). 2026-09-04 사고(#195)를 잡는 눈. `data_sanity`·섀도·화면이 **전부 이 하나를** 씁니다 — 여기를 고치면 셋 다 같이 바뀝니다(그게 목적이고, 그래서 결투 테스트까지 같이 봐야 합니다) |
 | `utils/constants.py` | 전역 임계값·가중치 **단일 출처** |
 | `utils/stock_history.py` | 종목별 시계열 이력 단일 출처 (`KOSPI_HISTORY_FIELDS` 26개 / `US_HISTORY_FIELDS` 40개) |
 | `utils/stock_export.py` | CSV(UTF-8 BOM)·JSON 내보내기, 파일명 안전화 |
 | `utils/gdrive_helper.py` | 구글드라이브 백업 |
 | `.github/workflows/watch_data_sanity.yml` | 건전성 감시. 🔴 2026-09-08(#219)부터 **각 수집기 완료 이벤트(workflow_run)** 로 돕니다 — 09:30 cron 은 안전망으로만 남았습니다 (그 시각은 이미 장이 열린 뒤라 알아도 그날 수습이 안 됐습니다) |
-| 테스트 | `tests/test_data_source.py`, `test_data_validator.py`, `test_data_sanity.py`, `test_data_freshness.py`, `test_stock_history.py`, `test_screen_reads_data_source.py`, `test_event_loop_blocking.py` |
+| 테스트 | `tests/test_data_source.py`, `test_data_validator.py`, `test_data_sanity.py`, `test_data_freshness.py`, `test_ticker_master_guard.py`, `test_stock_history.py`, `test_screen_reads_data_source.py`, `test_event_loop_blocking.py` |
 
 ## 🔴 이 에이전트 고유의 절대 규칙
 
@@ -59,6 +60,7 @@ model: inherit
 ## 절대 하지 말 것
 
 - 검증 실패를 로그로만 남기고 통과시키기 → **로그만 남기는 것은 조치가 아닙니다** (§0-1)
+- 원천 일부만 성공한 결과로 **정상 파일을 덮어쓰기** → 2026-09-08 `kr_ticker_master.json` 사고(§10 in `NAVER_MIGRATION_WORK_ORDER.md`). 반쪽이면 쓰지 말고 기존 파일을 두고, 그 사실을 metadata·화면까지 전달합니다
 - 결측값을 평균·전년값·0으로 채우는 헬퍼 함수를 만들기 → 이 기반 계층에 그런 함수가 생기면
   8개 모듈이 전부 오염됩니다
 - 상수 값을 "모듈마다 다르니까" 각 모듈에 복사하기

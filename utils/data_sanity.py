@@ -618,6 +618,43 @@ def frozen_notice(payload):
     return None
 
 
+def ticker_master_notice(status):
+    """
+    전체 상장종목 마스터(kr_ticker_master.json)의 상태 dict 를 **사람에게 보여줄 한 문장**으로.
+    보여줄 것이 없으면 None. (2026-09-08 신설 — 그날 KRX 404 로 마스터가 ETF 만 남을 뻔한 사고)
+
+    입력은 `collector_kospi200.ticker_master_status()` 가 만든 dict 이고, 코스피 스냅샷
+    `metadata.ticker_master` 에 그대로 실려 옵니다. 화면(web/pages/pegy_page.py)과 수집기 로그가
+    **같은 문장**을 쓰게 하려고 여기 한 곳에 뒀습니다 — 위 frozen_notice() 와 같은 역할 분담
+    (판정은 수집기 한 곳, 화면은 읽기만 — §0-3-10). 화면이 수집기 모듈을 import 하지 않도록
+    수집기 쪽이 아니라 이 가벼운 모듈에 있습니다. 순수 함수(파일·시계를 건드리지 않음).
+
+    말할 것이 있는 경우 두 가지뿐입니다:
+      · 이번 실행에서 갱신을 **시도했는데 못 썼다** (오늘 사고 모양) — 실패 원천·사유를 그대로.
+      · 파일이 오늘 자가 아니다 — 며칠 전 것인지. (갱신 실패가 하루면 어제 파일이라 괜찮지만,
+        며칠씩 이어지면 신규 상장·폐지가 누락되므로 사람이 알아야 합니다.)
+    """
+    if not isinstance(status, dict):
+        return None
+    generated = status.get("generated_date")
+    age = status.get("age_days")
+    where = (f"마스터는 {generated}자({age}일 전)입니다" if generated and age is not None
+             else "마스터 파일이 없거나 날짜를 읽을 수 없습니다")
+    effect = ("ETF 판정·우선주 부모 검증·신 경로 종목 선별이 그 목록 기준이라 그 뒤 신규 상장·폐지는 "
+              "반영되지 않습니다")
+    if status.get("refresh_attempted") and not status.get("refresh_written"):
+        failed = ", ".join(status.get("refresh_failed_sources") or []) or "원천 미상"
+        reason = status.get("refresh_reason") or "사유 미상"
+        return (f"전체 상장종목 마스터 갱신 실패(실패 원천: {failed} — {reason}). 반쪽짜리 결과로 "
+                f"덮어쓰지 않고 기존 파일을 유지했습니다. {where} — {effect}.")
+    if generated and not status.get("is_today"):
+        return f"전체 상장종목 마스터가 오늘 자가 아닙니다. {where} — {effect}."
+    if not generated:
+        return (f"전체 상장종목 마스터를 읽지 못했습니다 — 종목 타입을 확인할 수 없어 확인 못 한 후보는 "
+                "전부 걸러집니다(안전한 쪽으로).")
+    return None
+
+
 def default_state_dir():
     """상태 파일이 사는 곳(`<저장소>/data`). duel_batch.default_state_dir() 과 같은 자리."""
     return os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")

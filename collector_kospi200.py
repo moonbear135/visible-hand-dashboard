@@ -275,6 +275,14 @@ def _load_outstanding_shares_lookup():
     조금만 바뀌어도 다른 필드(예: 외국인소진율 %)를 상장주식수로 오인할 위험이 있어,
     구조화된 표(컬럼 이름이 명확한 DataFrame)를 1차 출처로 우선 사용합니다.
     조회에 실패하면 빈 dict 를 반환하며, 이 경우 기존 네이버 파싱 값(자체 sanity check 포함)만 사용합니다.
+
+    2026-09-08 검토 — 아래 `fdr.StockListing('KRX')` 는 run_kr_ticker_master_collector() 와 **같은
+    원천**이라 그날 404 면 여기도 똑같이 실패합니다. 하지만 같은 위험(반쪽짜리로 정상 파일 덮어쓰기)
+    은 없습니다: 이 함수는 **파일을 쓰지 않고** 빈 dict 를 돌려주며, 호출부는 상장주식수를 네이버
+    파싱 값으로 채우거나(자체 sanity check 통과 시) 미수집(None)으로 둡니다 — 값을 지어내지 않고
+    어제 파일을 망가뜨리지도 않습니다. 그래서 문지기를 따로 두지 않았습니다.
+    🔻 다만 같은 주소를 하루 두 번 두드리는 셈이라(§0-3-2) 언젠가 마스터 수집기의 응답을 재사용하는
+       정리가 가능합니다 — 이번 건(덮어쓰기 방지)과는 별개라 손대지 않았습니다.
     """
     if not HAS_FDR:
         return {}
@@ -303,6 +311,31 @@ def _load_outstanding_shares_lookup():
 
 KR_TICKER_MASTER_FILENAME = "kr_ticker_master.json"
 
+#: 마스터 파일을 이루는 두 원천. 파일을 쓰려면 **둘 다** 성공해야 합니다(아래 수집기 주석).
+TICKER_MASTER_SOURCES = ("STOCK", "ETF")
+
+#: 이번 실행에서 마스터 갱신이 어떻게 됐는지의 기록 (2026-09-08 신설).
+#:   attempted       — 이번 프로세스에서 run_kr_ticker_master_collector() 가 불렸는가
+#:   written         — 파일을 실제로 새로 썼는가
+#:   failed_sources  — 실패한 원천 이름 목록 ("STOCK" / "ETF")
+#:   reason          — 사람이 읽을 실패 사유(없으면 None)
+#: 왜 모듈 전역인가: 수집기(run_kr_ticker_master_collector)는 반환값 규약(경로/None)을 기존
+#: 테스트·호출부가 그대로 쓰고 있고, 이 사실을 읽어야 하는 곳은 뒤에 도는 run_kospi200_collector()
+#: 의 metadata 작성부입니다. 두 함수를 잇는 가장 짧은 길이 이 기록 한 곳입니다(_ticker_types_cache·
+#: _ev_ebitda_circuit 과 같은 방식). 테스트는 _note_ticker_master_refresh(attempted=False) 로 되돌립니다.
+_ticker_master_refresh = {"attempted": False, "written": False, "failed_sources": [], "reason": None}
+
+
+def _note_ticker_master_refresh(*, attempted, written, failed_sources, reason):
+    """위 `_ticker_master_refresh` 기록을 갱신합니다(한 곳에서만 쓰기 — §0-3-10)."""
+    _ticker_master_refresh.update({
+        "attempted": bool(attempted),
+        "written": bool(written),
+        "failed_sources": list(failed_sources or []),
+        "reason": reason,
+    })
+    return dict(_ticker_master_refresh)
+
 
 def run_kr_ticker_master_collector(data_dir=None):
     """
@@ -320,6 +353,14 @@ def run_kr_ticker_master_collector(data_dir=None):
     던지지 않고 그냥 건너뜁니다 — 이 보조 기능 하나 때문에 매일의 핵심 수집(코스피 200 밸류에이션)이
     막히면 안 되기 때문입니다.
 
+    🔴 2026-09-08 신설 — **"반쪽짜리 결과로 멀쩡한 파일을 덮어쓰지 않는다."** 두 원천(KRX 주식,
+    ETF/KR) 중 하나라도 실패하면 파일을 **쓰지 않고** 기존 파일을 그대로 둡니다(본문 주석의
+    사고 경위·판정 근거 참고). 건너뛰었다는 사실은 로그에만 남기지 않고 `_ticker_master_refresh`
+    기록 → `ticker_master_status()` → 코스피 스냅샷 metadata.ticker_master → 화면 배너까지
+    전달됩니다(§0-1 "로그만 남기는 것은 조치가 아니다").
+
+    반환값: 파일을 썼으면 그 경로, 안 썼으면 None(기존 규약 그대로).
+
     ⚠️ **미검증 주의**: 이 함수는 샌드박스에 네트워크가 없어 FinanceDataReader 실제 응답으로
     검증하지 못했습니다(코드는 `_load_outstanding_shares_lookup()`의 기존 방어적 컬럼 감지
     패턴을 그대로 따름). 처음 실행 후 GitHub Actions 로그에서 "[전체 상장종목 목록]" 줄로
@@ -329,8 +370,13 @@ def run_kr_ticker_master_collector(data_dir=None):
     씁니다(운영 시에는 항상 None → 이 파일과 같은 경로의 data/, 기존 run_kospi200_collector()와
     동일한 기본 경로 규칙).
     """
+    # 이번 실행의 갱신 결과 기록을 먼저 비웁니다(아래 _note_ticker_master_refresh 참고).
+    _note_ticker_master_refresh(attempted=True, written=False, failed_sources=[], reason=None)
+
     if not HAS_FDR:
         print("⚠️ [전체 상장종목 목록] FinanceDataReader 미설치 — 건너뜁니다(핵심 수집엔 영향 없음)")
+        _note_ticker_master_refresh(attempted=True, written=False, failed_sources=list(TICKER_MASTER_SOURCES),
+                                    reason="FinanceDataReader 미설치")
         return None
 
     entries = {}
@@ -362,23 +408,75 @@ def run_kr_ticker_master_collector(data_dir=None):
         print(f"  [전체 상장종목 목록] {source_label} {added}건 반영(컬럼: code={code_col}, name={name_col}, market={market_col})")
         return added
 
+    # ── 원천별로 "성공했는가"를 따로 기록합니다 (2026-09-08 사고, 아래 판정의 근거) ──────
+    # 원천 하나가 0건이거나 예외를 던졌으면 그 이름을 failed_sources 에 남깁니다.
+    # 예외 메시지도 함께 남겨 "왜 실패했는지"가 metadata·로그에 그대로 드러나게 합니다(§0-1).
+    failed_sources = []
+    failure_notes = []
+
     try:
-        _ingest(fdr.StockListing('KRX'), "StockListing('KRX') (코스피+코스닥 주식)", "STOCK")
+        if _ingest(fdr.StockListing('KRX'), "StockListing('KRX') (코스피+코스닥 주식)", "STOCK") == 0:
+            failed_sources.append("STOCK")
+            failure_notes.append("StockListing('KRX') 0건(응답 비었거나 컬럼 구조가 다름)")
     except Exception as e:
         print(f"⚠️ [전체 상장종목 목록] StockListing('KRX') 실패: {e}")
+        failed_sources.append("STOCK")
+        failure_notes.append(f"StockListing('KRX') 실패: {type(e).__name__}: {e}")
 
     try:
-        _ingest(fdr.StockListing('ETF/KR'), "StockListing('ETF/KR') (국내 ETF)", "ETF")
+        if _ingest(fdr.StockListing('ETF/KR'), "StockListing('ETF/KR') (국내 ETF)", "ETF") == 0:
+            failed_sources.append("ETF")
+            failure_notes.append("StockListing('ETF/KR') 0건(응답 비었거나 컬럼 구조가 다름)")
     except Exception as e:
         print(f"⚠️ [전체 상장종목 목록] StockListing('ETF/KR') 실패: {e}")
-
-    if not entries:
-        print("⚠️ [전체 상장종목 목록] 수집된 종목이 0건이라 파일을 만들지 않습니다(기존 파일 유지)")
-        return None
+        failed_sources.append("ETF")
+        failure_notes.append(f"StockListing('ETF/KR') 실패: {type(e).__name__}: {e}")
 
     resolved_data_dir = data_dir or os.path.join(os.path.dirname(__file__), "data")
-    os.makedirs(resolved_data_dir, exist_ok=True)
     json_path = os.path.join(resolved_data_dir, KR_TICKER_MASTER_FILENAME)
+
+    # ── 🔴 "반쪽짜리"면 파일을 쓰지 않습니다 (2026-09-08 실제 사고 → 신설) ──────────────
+    #
+    # 무슨 일이 있었나: 2026-09-08 16:11 실행에서 StockListing('KRX') 가 HTTP 404 로 실패하고
+    # StockListing('ETF/KR') 만 1,167건 성공했습니다. 예전 코드는 "0건이 아니면 저장" 이라
+    # 주식 2,873 + ETF 1,167 = 4,040건짜리 정상 파일을 **ETF 1,167건만 든 파일로 덮어썼습니다.**
+    # 그날은 뒤 단계가 실패해 커밋이 안 돼 저장소 파일이 우연히 살아남았을 뿐입니다.
+    #
+    # 판정 기준 = **두 원천 모두 성공(예외 없이 1건 이상)했을 때만 저장.** 왜 이 기준인가:
+    #   · 이 파일의 metadata.source 는 "KRX + ETF/KR" 라고 적힙니다. 한쪽이 빠진 내용을 그
+    #     이름표로 저장하면 파일 스스로가 사실이 아닌 말을 하는 것입니다(§0-1).
+    #   · 읽는 쪽이 전부 "이 파일에 없으면 걸러낸다(안전한 쪽으로)" 규약입니다 — ETF 판정·
+    #     우선주 부모 검증(load_ticker_types)·신 경로 종목 선별(load_ticker_markets: type=STOCK
+    #     그리고 market ∈ 코스피·코스닥). 주식이 빠진 마스터면 **후보 전부가 걸러져 0건**,
+    #     ETF 가 빠진 마스터면 ETF 가 주식으로 오인될 순 없지만 "내 성적표" 이름 검색에서
+    #     ETF 전부가 사라집니다. 어느 쪽이 빠져도 어제 파일보다 나쁩니다.
+    #   · 원인을 **직접 알 수 있는** 자리입니다(예외를 우리가 받았고, 0건도 우리가 셌습니다).
+    #     건수를 어제와 비교해 "급감했나"로 **추정**할 이유가 없습니다.
+    #
+    # ⚠️ 왜 utils/data_sanity.py 의 "건수 급감" 판정을 여기서 안 쓰는가(§0-3-10 검토):
+    #   그 모듈은 스스로 "수집기는 이 판정과 무관하게 원래 하던 저장을 그대로 끝낸다 —
+    #   판정은 저장 **뒤에** 얹히는 관찰자" 라고 못 박아 두었고, 어제 요약이 담긴 상태 파일과
+    #   숫자 컬럼(price 등)을 전제로 합니다. 여기서 필요한 것은 저장 **전에** 막는 문지기이고
+    #   이 파일에는 숫자 컬럼이 없습니다. 성격이 달라 재사용할 수 없고, 같은 판정을 여기
+    #   다시 짜지도 않았습니다 — 그래서 이 문지기는 건수 비교를 **하지 않습니다.**
+    #   🔻 정직하게 남기는 한계: 한 원천이 "예외 없이, 그러나 일부만"(예: 주식 2,873건 중
+    #      300건) 돌려주는 경우는 이 기준으로 못 잡습니다. FDR 의 KRX 목록은 CSV 한 장을
+    #      통째로 내려받는 구조라(설치된 FDR 소스 확인) 실제로는 전부 아니면 404 이고, 그
+    #      경우를 잡으려면 건수 비교가 필요한데 그건 위 이유로 여기 두지 않습니다.
+    if failed_sources:
+        existing_date = get_ticker_master_generated_date(json_path)
+        kept = (f"기존 파일({existing_date}자)을 그대로 둡니다" if existing_date
+                else "기존 파일이 없어 마스터 없이 진행합니다(확인 못 한 후보는 전부 걸러짐)")
+        reason = "; ".join(failure_notes) or ", ".join(failed_sources) + " 원천 실패"
+        print("🚨 [전체 상장종목 목록] 원천 일부가 실패해 **파일을 쓰지 않습니다** — "
+              f"실패 원천: {', '.join(failed_sources)} / 성공 반영 {len(entries)}건은 버립니다. {kept}.")
+        print(f"   · 사유: {reason}")
+        print("   · 반쪽짜리 목록으로 정상 파일을 덮어쓰면 ETF 판정·우선주 부모 검증·신 경로 종목 선별이 "
+              "전부 어제 파일보다 나빠집니다(2026-09-08 사고 재발 방지, §0-1).")
+        _note_ticker_master_refresh(attempted=True, written=False, failed_sources=failed_sources, reason=reason)
+        return None
+
+    os.makedirs(resolved_data_dir, exist_ok=True)
     payload = {
         "metadata": {
             "generated_at": _now_kst().strftime("%Y-%m-%d %H:%M"),
@@ -388,9 +486,14 @@ def run_kr_ticker_master_collector(data_dir=None):
         },
         "stocks": list(entries.values()),
     }
-    with open(json_path, "w", encoding="utf-8") as f:
+    # 같은 폴더에 임시 파일로 쓴 뒤 바꿔치웁니다 — 쓰는 도중 러너가 죽어도 반쯤 쓰인 파일이
+    # 남지 않게(utils/data_sanity.save_sanity_state 와 같은 방식).
+    temporary = os.path.join(resolved_data_dir, f".{KR_TICKER_MASTER_FILENAME}.tmp")
+    with open(temporary, "w", encoding="utf-8") as f:
         json.dump(payload, f, ensure_ascii=False, indent=2)
+    os.replace(temporary, json_path)
     print(f"[전체 상장종목 목록] {len(entries)}건 저장 완료 -> {json_path}")
+    _note_ticker_master_refresh(attempted=True, written=True, failed_sources=[], reason=None)
     return json_path
 
 
@@ -1261,18 +1364,61 @@ def get_ticker_master_generated_date(path=None):
         return None
 
 
+def ticker_master_status(path=None, now_kst=None):
+    """마스터 파일(kr_ticker_master.json)의 신선도 + 이번 실행의 갱신 결과를 한 dict 로 (2026-09-08 신설).
+
+    반환 (전부 사실만, 지어내지 않음 — §0-1):
+        generated_date   : 파일의 metadata.generated_at 날짜(YYYY-MM-DD). 파일 없음/못 읽음 → None
+        age_days         : 오늘(KST) 기준 며칠 전 파일인가. 날짜를 모르면 None
+        is_today         : generated_date == 오늘
+        refresh_attempted: 이번 프로세스에서 갱신을 시도했는가
+        refresh_written  : 이번 프로세스에서 파일을 실제로 새로 썼는가
+        refresh_failed_sources / refresh_reason : 실패했다면 어느 원천이·왜
+
+    이 dict 는 ① `_warn_ticker_master_staleness()` 의 로그, ② 코스피 스냅샷 metadata.ticker_master,
+    ③ 화면 배너(web/pages/pegy_page.py) 가 **전부 같은 것**을 보게 하려고 한 곳에 뒀습니다(§0-3-10).
+    사람에게 보여줄 문장은 `utils.data_sanity.ticker_master_notice(이 dict)` 가 만듭니다 — 화면이
+    이 수집기 모듈(requests·bs4·FDR 를 끌고 옴)을 import 하지 않아도 되게 가벼운 쪽에 뒀습니다.
+    """
+    moment = now_kst or _now_kst()
+    today_str = moment.strftime("%Y-%m-%d")
+    generated_date = get_ticker_master_generated_date(path)
+    age_days = None
+    if generated_date:
+        try:
+            age_days = (moment.date() - datetime.strptime(generated_date, "%Y-%m-%d").date()).days
+        except ValueError:
+            age_days = None
+    record = _ticker_master_refresh
+    return {
+        "generated_date": generated_date,
+        "today": today_str,
+        "age_days": age_days,
+        "is_today": generated_date == today_str,
+        "refresh_attempted": bool(record.get("attempted")),
+        "refresh_written": bool(record.get("written")),
+        "refresh_failed_sources": list(record.get("failed_sources") or []),
+        "refresh_reason": record.get("reason"),
+    }
+
+
 def _warn_ticker_master_staleness():
-    """2026-08-29 재감사 H6: 마스터 목록이 오늘 자가 아니면 한 줄 경고를 남깁니다.
-    차단하지는 않습니다 — 기존 파일이라도 있으면 ETF 판정은 되고, 없는 것보다 낫습니다."""
-    today_str = datetime.now().strftime("%Y-%m-%d")
-    generated_date = get_ticker_master_generated_date()
-    if generated_date is None:
-        print(f"  ⚠️ data/{KR_TICKER_MASTER_FILENAME} 을 읽지 못했습니다 — ETF 판정·우선주 부모 "
-              "검증에 쓸 종목 타입을 확인할 수 없어, 확인 못 한 후보는 전부 걸러집니다(안전한 쪽으로).")
-    elif generated_date != today_str:
-        print(f"  ⚠️ data/{KR_TICKER_MASTER_FILENAME} 이 {generated_date}자 스냅샷입니다(오늘 "
-              f"{today_str}과 다름) — 오늘 신규 상장/폐지된 종목은 ETF 판정·우선주 부모 검증에 "
-              "반영되지 않습니다.")
+    """2026-08-29 재감사 H6: 마스터 목록이 오늘 자가 아니면 경고를 남깁니다.
+    차단하지는 않습니다 — 기존 파일이라도 있으면 ETF 판정은 되고, 없는 것보다 낫습니다.
+
+    2026-09-08 보강: 판정은 `ticker_master_status()` / 문장은 `utils.data_sanity.ticker_master_notice()`
+    한 곳에서 가져오고, 여기서는 ① 수집기 로그에 눈에 띄게(🚨) 찍고 ② GitHub Actions 실행 요약 화면에
+    `::warning` 주석으로 띄웁니다(run_scorecard_publish_batch.py · watch_data_sanity.yml 과 같은
+    방식 — 잡이 초록불이어도 로그를 열지 않고 요약 화면에서 바로 보입니다). 화면 배너는
+    코스피 스냅샷 metadata.ticker_master 를 통해 따로 갑니다. 반환: status dict(호출부 확인용).
+    """
+    status = ticker_master_status()
+    notice = data_sanity.ticker_master_notice(status)
+    if notice:
+        print(f"  🚨 {notice}")
+        # ::warning 은 Actions 밖(로컬 실행)에서는 그냥 한 줄 로그입니다 — 해가 없습니다.
+        print(f"::warning title=전체 상장종목 마스터::{notice}")
+    return status
 
 
 def _get_ticker_types_cached():
@@ -2709,6 +2855,11 @@ def run_kospi200_collector():
             #    `naver_source` 는 짧은 키(legacy/new_api), `data_source` 는 사람이 읽는 상세 블록.
             "naver_source": naver_source,
             "data_source": data_source,
+            # 🔴 2026-09-08: 이 스냅샷의 ETF 판정·우선주 부모 검증·(신 경로) 종목 선별이 **어느 날짜의
+            #    마스터(kr_ticker_master.json)** 기준이었는지, 그리고 이번 실행에서 마스터 갱신이
+            #    실패했는지를 그대로 남깁니다. 갱신 실패를 로그에만 남기면 화면을 보는 사람은
+            #    아무것도 모릅니다(§0-1) — 화면(pegy_page)은 이 블록을 읽어 관리자 배너를 띄웁니다.
+            "ticker_master": ticker_master_status(),
             "total_count": total_count,
             "valid_count": len(valid_stocks),
             "valid_ratio": round(valid_ratio, 3),
@@ -3028,14 +3179,25 @@ if __name__ == "__main__":
     # 이 보조 수집이 실패해도(FDR API 변경 등) 기존 파일이 있으면 그대로 쓰게 되므로
     # try/except 로 감싸 두는 기존 설계는 그대로 유지합니다(TASK_HISTORY #83).
     # =========================================================
+    # 🔴 2026-09-08: 원천 일부만 성공한 날(실제 사고: KRX 404 + ETF 성공)에는 위 함수가 파일을
+    #    쓰지 않고 기존 파일을 유지합니다. 그래도 **수집 전체는 계속 갑니다** — 근거:
+    #      · 마스터는 보조 목록이라 어제 것이어도 오늘 수집(가격·밸류에이션)은 그대로 됩니다.
+    #        하루치 신규 상장·폐지 누락이 전부이고, 그 사실은 아래 경고·metadata·화면 배너로 드러납니다.
+    #      · 반대로 여기서 죽이면 보조 목록 하나 때문에 그날 코스피 스냅샷(핵심 산출물)을 통째로
+    #        잃습니다(TASK_HISTORY #83 의 원래 설계 이유와 같음).
+    #      · 마스터가 아예 없으면 신 경로는 후보 0건 → 이미 RuntimeError 로 멈춥니다(별도 방어 불필요).
     try:
         run_kr_ticker_master_collector()
     except Exception as e:
         print(f"⚠️ [전체 상장종목 목록] 수집 중 예외 발생(핵심 수집 결과에는 영향 없음): {e}")
+        # 예상 밖 예외로 빠져나온 경우도 "갱신 못 함" 으로 기록해 metadata·화면까지 전달되게 합니다.
+        _note_ticker_master_refresh(attempted=True, written=False, failed_sources=list(TICKER_MASTER_SOURCES),
+                                    reason=f"수집 중 예외: {type(e).__name__}: {e}")
 
     # 마스터 파일 신선도 확인 — 오늘 자가 아니면(생성 실패로 어제 파일이 남았거나 파일 없음)
-    # ETF 판정·우선주 부모 검증이 낡은 목록 기준이라는 사실을 로그로 명시합니다
-    # (collector_indicator_kr.py 의 유니버스 신선도 경고와 같은 취지).
+    # ETF 판정·우선주 부모 검증이 낡은 목록 기준이라는 사실을 로그 + Actions 요약(::warning)에
+    # 명시합니다(collector_indicator_kr.py 의 유니버스 신선도 경고와 같은 취지). 화면 배너는
+    # run_kospi200_collector() 가 metadata.ticker_master 에 같은 판정을 실어 보냅니다.
     _warn_ticker_master_staleness()
 
     run_kospi200_collector()

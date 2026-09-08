@@ -674,7 +674,8 @@ def test_kr_ticker_master_collector():
         K.fdr = _BrokenFdr()
         broken_result = K.run_kr_ticker_master_collector(data_dir=tempfile.mkdtemp())
         check(broken_result is None,
-              "컬럼 구조가 예상과 다르면(0건) 파일을 만들지 않고 조용히 None 반환(크래시 안 함)")
+              "컬럼 구조가 예상과 다르면(0건) 파일을 만들지 않고 None 반환(크래시 안 함 — 2026-09-08부터는 "
+              "실패 사실이 _ticker_master_refresh 기록에 남음, tests/test_ticker_master_guard.py)")
 
         # FDR 자체가 예외를 던지는 경우(네트워크 장애 등)도 마찬가지
         class _RaisingFdr:
@@ -684,8 +685,8 @@ def test_kr_ticker_master_collector():
         K.fdr = _RaisingFdr()
         raising_result = K.run_kr_ticker_master_collector(data_dir=tempfile.mkdtemp())
         check(raising_result is None,
-              "FDR 호출 자체가 예외를 던져도 예외를 밖으로 던지지 않고 조용히 건너뜀"
-              "(핵심 수집을 막지 않음)")
+              "FDR 호출 자체가 예외를 던져도 예외를 밖으로 던지지 않고 건너뜀"
+              "(핵심 수집을 막지 않음 — 삼키는 게 아니라 기록에 남김)")
 
         # FinanceDataReader 미설치 상황
         K.HAS_FDR = False
@@ -699,12 +700,18 @@ def test_kr_ticker_master_collector():
             del K.fdr
         shutil.rmtree(tmpdir, ignore_errors=True)
 
-    # 배선 확인: __main__ 에서 핵심 수집(run_kospi200_collector) '뒤에' 실행되고, try/except로
-    # 감싸져 있어 이 보조 기능이 실패해도 핵심 수집 결과에 영향이 없는지.
+    # 배선 확인: __main__ 에서 try/except 로 감싸져 있어 이 보조 기능이 실패해도 핵심 수집이
+    # 계속 가는지. (2026-09-08 정정 — 예전 검사는 파일 전체에서 두 이름의 **첫 등장 위치**를
+    # 비교했는데, 그건 주석·docstring 에 이름이 한 번만 더 나와도 뒤집히는 우연한 판정이었고,
+    # 라벨 "핵심 수집 뒤에 실행됨" 자체도 2026-08-29 H6 이후 사실과 달랐습니다 — 마스터는
+    # 이제 코스피 수집 **앞**에서 만들어지고, 그 순서는 tests/test_collector_kospi200_ranking.py
+    # ::test_main_block_builds_ticker_master_before_kospi_collection 이 __main__ 블록으로 검사합니다.
+    # 여기서는 그 검사와 겹치지 않게(§0-3-10) try/except 감싸기만 __main__ 블록 안에서 봅니다.)
     k_src = (REPO_ROOT / "collector_kospi200.py").read_text(encoding="utf-8")
-    check(k_src.index("run_kospi200_collector()") < k_src.index("run_kr_ticker_master_collector()"),
-          "전체 상장종목 목록 수집은 핵심 수집(코스피 200) 뒤에 실행됨")
-    check("except Exception as e:" in k_src.split("run_kr_ticker_master_collector()")[1][:200],
+    main_block = k_src.split('if __name__ == "__main__":')[1]
+    call_at = main_block.index("run_kr_ticker_master_collector()")
+    check("try:" in main_block[max(0, call_at - 80):call_at]
+          and "except Exception as e:" in main_block[call_at:call_at + 200],
           "__main__ 에서 이 보조 수집을 try/except 로 감쌈(실패해도 핵심 수집 결과는 그대로)")
 
 
