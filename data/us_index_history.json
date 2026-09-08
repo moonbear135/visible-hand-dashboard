@@ -1,7 +1,7 @@
 {
   "metadata": {
-    "collected_at_et": "2026-09-07T19:50:52.182583-04:00",
-    "collected_at_kst": "2026-09-08T08:50:52.182588+09:00",
+    "collected_at_et": "2026-09-07T21:14:49.889348-04:00",
+    "collected_at_kst": "2026-09-08T10:14:49.889352+09:00",
     "source_template": "https://stockanalysis.com/etf/{symbol}/history/__data.json",
     "is_etf_proxy": true,
     "close_kind": "unadjusted_close",
@@ -21,7 +21,7 @@
       "close_kind": "unadjusted_close",
       "source_symbol": "SPY",
       "source_provider": "tiingo",
-      "source_updated": "Mon, 07 Sep 2026 23:50:32 GMT",
+      "source_updated": "Tue, 08 Sep 2026 01:14:39 GMT",
       "proxy_symbol_verified": true,
       "proxy_name": "State Street SPDR S&P 500 ETF",
       "proxy_name_verified": true,
@@ -173,7 +173,7 @@
       "count": 143,
       "first_date": "2026-02-11",
       "last_date": "2026-09-04",
-      "last_collected_at_kst": "2026-09-08T08:50:49.354681+09:00",
+      "last_collected_at_kst": "2026-09-08T10:14:47.601631+09:00",
       "last_error": null
     },
     "NASDAQ_PROXY_ONEQ": {
@@ -338,7 +338,7 @@
       "count": 143,
       "first_date": "2026-02-11",
       "last_date": "2026-09-04",
-      "last_collected_at_kst": "2026-09-08T08:50:52.182513+09:00",
+      "last_collected_at_kst": "2026-09-08T10:14:49.889289+09:00",
       "last_error": null
     }
   }
