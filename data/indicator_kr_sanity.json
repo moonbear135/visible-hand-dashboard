@@ -1,5 +1,5 @@
 {
-  "baseline_date": "2026-09-14",
+  "baseline_date": "2026-09-15",
   "baseline_row_count": 500,
   "checks": [
     {
@@ -9,13 +9,13 @@
       "status": "pass"
     },
     {
-      "detail": "건수 정상: 2026-09-14 500건 → 오늘 500건.",
+      "detail": "건수 정상: 2026-09-15 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_drop",
       "status": "pass"
     },
     {
-      "detail": "건수 급증 없음: 2026-09-14 500건 → 오늘 500건.",
+      "detail": "건수 급증 없음: 2026-09-15 500건 → 오늘 500건.",
       "field": null,
       "name": "row_count_surge",
       "status": "pass"
@@ -33,7 +33,7 @@
       "status": "pass"
     },
     {
-      "detail": "'rsi' 서로 다른 값 458개.",
+      "detail": "'rsi' 서로 다른 값 460개.",
       "field": "rsi",
       "name": "constant_value",
       "status": "pass"
@@ -57,13 +57,13 @@
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 서로 다른 값 499개.",
+      "detail": "'bb_mid' 서로 다른 값 498개.",
       "field": "bb_mid",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'bb_mid' 중앙값 32,383.8 → 32,578.8 (1.01배).",
+      "detail": "'bb_mid' 중앙값 32,578.8 → 32,616.2 (1.00배).",
       "field": "bb_mid",
       "name": "median_shift",
       "status": "pass"
@@ -76,21 +76,21 @@
     }
   ],
   "dataset": "indicator_kr",
-  "generated_at_kst": "2026-09-15T17:22:06.221460+09:00",
+  "generated_at_kst": "2026-09-16T17:20:34.825877+09:00",
   "probe": {
     "fields": {
       "bb_mid": {
-        "distinct_count": 499,
-        "fingerprint": "946fd99d07a037d4",
-        "median": 32578.75,
+        "distinct_count": 498,
+        "fingerprint": "36c2bd19eb5ddaec",
+        "median": 32616.25,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 0
       },
       "rsi": {
-        "distinct_count": 458,
-        "fingerprint": "c679b6484813bed9",
-        "median": 48.195,
+        "distinct_count": 460,
+        "fingerprint": "4519ff30a1ca4ae0",
+        "median": 47.015,
         "missing_count": 0,
         "numeric_count": 500,
         "zero_count": 1
@@ -98,10 +98,10 @@
     },
     "row_count": 500
   },
-  "reason": "2026-09-14 대비 검사 11건 통과 (판정 불가 1건).",
+  "reason": "2026-09-15 대비 검사 11건 통과 (판정 불가 1건).",
   "reasons": [],
   "row_count": 500,
   "status": "ok",
-  "target_date": "2026-09-15",
+  "target_date": "2026-09-16",
   "version": 1
 }
