@@ -1,21 +1,21 @@
 {
-  "baseline_date": "2026-09-10",
+  "baseline_date": "2026-09-13",
   "baseline_row_count": 520,
   "checks": [
     {
-      "detail": "수집 결과 520건.",
+      "detail": "수집 결과 524건.",
       "field": null,
       "name": "row_count_empty",
       "status": "pass"
     },
     {
-      "detail": "건수 정상: 2026-09-10 520건 → 오늘 520건.",
+      "detail": "건수 정상: 2026-09-13 520건 → 오늘 524건.",
       "field": null,
       "name": "row_count_drop",
       "status": "pass"
     },
     {
-      "detail": "건수 급증 없음: 2026-09-10 520건 → 오늘 520건.",
+      "detail": "건수 급증 없음: 2026-09-13 520건 → 오늘 524건.",
       "field": null,
       "name": "row_count_surge",
       "status": "pass"
@@ -33,13 +33,13 @@
       "status": "pass"
     },
     {
-      "detail": "'price' 서로 다른 값 483개.",
+      "detail": "'price' 서로 다른 값 478개.",
       "field": "price",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'price' 중앙값 43,925 → 43,475 (0.99배).",
+      "detail": "'price' 중앙값 43,475 → 42,300 (0.97배).",
       "field": "price",
       "name": "median_shift",
       "status": "pass"
@@ -57,13 +57,13 @@
       "status": "pass"
     },
     {
-      "detail": "'market_cap' 서로 다른 값 520개.",
+      "detail": "'market_cap' 서로 다른 값 524개.",
       "field": "market_cap",
       "name": "constant_value",
       "status": "pass"
     },
     {
-      "detail": "'market_cap' 중앙값 1.44956e+12 → 1.42792e+12 (0.99배).",
+      "detail": "'market_cap' 중앙값 1.42792e+12 → 1.43877e+12 (1.01배).",
       "field": "market_cap",
       "name": "median_shift",
       "status": "pass"
@@ -76,32 +76,32 @@
     }
   ],
   "dataset": "kospi200",
-  "generated_at_kst": "2026-09-13T17:09:25.989501+09:00",
+  "generated_at_kst": "2026-09-20T17:10:44.899994+09:00",
   "probe": {
     "fields": {
       "market_cap": {
-        "distinct_count": 520,
-        "fingerprint": "5ac8f81ed531ed44",
-        "median": 1427920721150.0,
+        "distinct_count": 524,
+        "fingerprint": "2ad24e5405a753e9",
+        "median": 1438765520650.0,
         "missing_count": 0,
-        "numeric_count": 520,
+        "numeric_count": 524,
         "zero_count": 0
       },
       "price": {
-        "distinct_count": 483,
-        "fingerprint": "5dc03c63e90fec89",
-        "median": 43475.0,
+        "distinct_count": 478,
+        "fingerprint": "21fde2f9f327300d",
+        "median": 42300.0,
         "missing_count": 0,
-        "numeric_count": 520,
+        "numeric_count": 524,
         "zero_count": 0
       }
     },
-    "row_count": 520
+    "row_count": 524
   },
-  "reason": "2026-09-10 대비 검사 12건 통과.",
+  "reason": "2026-09-13 대비 검사 12건 통과.",
   "reasons": [],
-  "row_count": 520,
+  "row_count": 524,
   "status": "ok",
-  "target_date": "2026-09-13",
+  "target_date": "2026-09-20",
   "version": 1
 }
