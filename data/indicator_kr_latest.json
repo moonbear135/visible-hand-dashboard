@@ -1,6 +1,6 @@
 {
-  "generated_at": "2026-09-24 17:18",
-  "date": "2026-09-24",
+  "generated_at": "2026-09-27 17:20",
+  "date": "2026-09-27",
   "status": "SUCCESS",
   "universe_tracked_count": 500,
   "universe_visible_count": 500,
@@ -8,7 +8,7 @@
   "failed_count": 0,
   "stocks": [
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005930",
       "name": "삼성전자",
       "rsi": 62.35,
@@ -24,12 +24,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000660",
       "name": "SK하이닉스",
       "rsi": 57.16,
@@ -45,12 +45,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005935",
       "name": "삼성전자우",
       "rsi": 65.54,
@@ -66,12 +66,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "402340",
       "name": "SK스퀘어",
       "rsi": 59.35,
@@ -87,12 +87,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009150",
       "name": "삼성전기",
       "rsi": 58.78,
@@ -108,12 +108,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005380",
       "name": "현대차",
       "rsi": 33.62,
@@ -129,12 +129,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "373220",
       "name": "LG에너지솔루션",
       "rsi": 47.21,
@@ -150,12 +150,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "207940",
       "name": "삼성바이오로직스",
       "rsi": 34.14,
@@ -171,12 +171,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "028260",
       "name": "삼성물산",
       "rsi": 51.1,
@@ -192,12 +192,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "105560",
       "name": "KB금융",
       "rsi": 50.54,
@@ -213,12 +213,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "032830",
       "name": "삼성생명",
       "rsi": 48.4,
@@ -234,12 +234,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "012450",
       "name": "한화에어로스페이스",
       "rsi": 44.59,
@@ -255,12 +255,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000270",
       "name": "기아",
       "rsi": 31.5,
@@ -276,12 +276,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "055550",
       "name": "신한지주",
       "rsi": 49.58,
@@ -297,12 +297,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "329180",
       "name": "HD현대중공업",
       "rsi": 44.25,
@@ -318,12 +318,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034020",
       "name": "두산에너빌리티",
       "rsi": 48.32,
@@ -339,12 +339,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "012330",
       "name": "현대모비스",
       "rsi": 24.91,
@@ -360,12 +360,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "068270",
       "name": "셀트리온",
       "rsi": 39.7,
@@ -381,12 +381,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006400",
       "name": "삼성SDI",
       "rsi": 48.03,
@@ -402,12 +402,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034730",
       "name": "SK",
       "rsi": 57.78,
@@ -423,12 +423,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "086790",
       "name": "하나금융지주",
       "rsi": 48.56,
@@ -444,12 +444,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "035420",
       "name": "NAVER",
       "rsi": 38.46,
@@ -465,12 +465,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "066570",
       "name": "LG전자",
       "rsi": 56.43,
@@ -486,12 +486,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010120",
       "name": "LS ELECTRIC",
       "rsi": 52.19,
@@ -507,12 +507,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000810",
       "name": "삼성화재",
       "rsi": 47.76,
@@ -528,12 +528,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010130",
       "name": "고려아연",
       "rsi": 39.41,
@@ -549,12 +549,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "298040",
       "name": "효성중공업",
       "rsi": 51.58,
@@ -570,12 +570,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "267260",
       "name": "HD현대일렉트릭",
       "rsi": 44.1,
@@ -591,12 +591,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005490",
       "name": "POSCO홀딩스",
       "rsi": 40.1,
@@ -612,12 +612,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "042660",
       "name": "한화오션",
       "rsi": 40.02,
@@ -633,12 +633,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009540",
       "name": "HD한국조선해양",
       "rsi": 42.71,
@@ -654,12 +654,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "316140",
       "name": "우리금융지주",
       "rsi": 56.17,
@@ -675,12 +675,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "096770",
       "name": "SK이노베이션",
       "rsi": 61.08,
@@ -696,12 +696,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017670",
       "name": "SK텔레콤",
       "rsi": 40.48,
@@ -717,12 +717,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011200",
       "name": "HMM",
       "rsi": 47.28,
@@ -738,12 +738,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "015760",
       "name": "한국전력",
       "rsi": 38.07,
@@ -759,12 +759,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "042700",
       "name": "한미반도체",
       "rsi": 58.67,
@@ -780,12 +780,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006800",
       "name": "미래에셋증권",
       "rsi": 41.08,
@@ -801,12 +801,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "138040",
       "name": "메리츠금융지주",
       "rsi": 49.65,
@@ -822,12 +822,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "051910",
       "name": "LG화학",
       "rsi": 39.47,
@@ -843,12 +843,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "033780",
       "name": "KT&G",
       "rsi": 51.5,
@@ -864,12 +864,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010140",
       "name": "삼성중공업",
       "rsi": 44.21,
@@ -885,12 +885,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "018260",
       "name": "삼성에스디에스",
       "rsi": 47.23,
@@ -906,12 +906,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000150",
       "name": "두산",
       "rsi": 66.67,
@@ -927,12 +927,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003550",
       "name": "LG",
       "rsi": 49.57,
@@ -948,12 +948,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "267250",
       "name": "HD현대",
       "rsi": 39.59,
@@ -969,12 +969,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "024110",
       "name": "기업은행",
       "rsi": 49.3,
@@ -990,12 +990,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010950",
       "name": "S-Oil",
       "rsi": 57.32,
@@ -1011,12 +1011,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "035720",
       "name": "카카오",
       "rsi": 39.59,
@@ -1032,12 +1032,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "079550",
       "name": "LIG디펜스앤에어로스페이스",
       "rsi": 48.65,
@@ -1053,12 +1053,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "278470",
       "name": "에이피알",
       "rsi": 45.51,
@@ -1074,12 +1074,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003670",
       "name": "포스코퓨처엠",
       "rsi": 51.05,
@@ -1095,12 +1095,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "086280",
       "name": "현대글로비스",
       "rsi": 44.52,
@@ -1116,12 +1116,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "064350",
       "name": "현대로템",
       "rsi": 33.07,
@@ -1137,12 +1137,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011070",
       "name": "LG이노텍",
       "rsi": 44.88,
@@ -1158,12 +1158,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "272210",
       "name": "한화시스템",
       "rsi": 51.54,
@@ -1179,12 +1179,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "030200",
       "name": "KT",
       "rsi": 47.05,
@@ -1200,12 +1200,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "047810",
       "name": "한국항공우주",
       "rsi": 45.43,
@@ -1221,12 +1221,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "307950",
       "name": "현대오토에버",
       "rsi": 44.7,
@@ -1242,12 +1242,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005830",
       "name": "DB손해보험",
       "rsi": 49.68,
@@ -1263,12 +1263,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000720",
       "name": "현대건설",
       "rsi": 49.39,
@@ -1284,12 +1284,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "078930",
       "name": "GS",
       "rsi": 45.64,
@@ -1305,12 +1305,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003230",
       "name": "삼양식품",
       "rsi": 38.31,
@@ -1326,12 +1326,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "259960",
       "name": "크래프톤",
       "rsi": 32.31,
@@ -1347,12 +1347,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "323410",
       "name": "카카오뱅크",
       "rsi": 26.72,
@@ -1368,12 +1368,12 @@
       "bb_position": "below_lower",
       "verdict_score": 2,
       "verdict_label": "매수 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "071050",
       "name": "한국금융지주",
       "rsi": 43.54,
@@ -1389,12 +1389,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005940",
       "name": "NH투자증권",
       "rsi": 44.32,
@@ -1410,12 +1410,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003490",
       "name": "대한항공",
       "rsi": 68.38,
@@ -1431,12 +1431,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "047050",
       "name": "포스코인터내셔널",
       "rsi": 50.24,
@@ -1452,12 +1452,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "443060",
       "name": "HD현대마린솔루션",
       "rsi": 60.6,
@@ -1473,12 +1473,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "0126Z0",
       "name": "삼성에피스홀딩스",
       "rsi": 38.44,
@@ -1499,7 +1499,7 @@
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006260",
       "name": "LS",
       "rsi": 53.68,
@@ -1515,12 +1515,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "028050",
       "name": "삼성E&A",
       "rsi": 51.37,
@@ -1536,12 +1536,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "161390",
       "name": "한국타이어앤테크놀로지",
       "rsi": 32.15,
@@ -1557,12 +1557,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "090430",
       "name": "아모레퍼시픽",
       "rsi": 53.39,
@@ -1578,12 +1578,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "180640",
       "name": "한진칼",
       "rsi": 57.88,
@@ -1599,12 +1599,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "016360",
       "name": "삼성증권",
       "rsi": 55.37,
@@ -1620,12 +1620,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "352820",
       "name": "하이브",
       "rsi": 30.1,
@@ -1641,12 +1641,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007660",
       "name": "이수페타시스",
       "rsi": 63.47,
@@ -1662,12 +1662,12 @@
       "bb_position": "above_upper",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009830",
       "name": "한화솔루션",
       "rsi": 46.45,
@@ -1683,12 +1683,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "039490",
       "name": "키움증권",
       "rsi": 42.0,
@@ -1704,12 +1704,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "064400",
       "name": "LG씨엔에스",
       "rsi": 44.81,
@@ -1725,12 +1725,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "128940",
       "name": "한미약품",
       "rsi": 62.14,
@@ -1746,12 +1746,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "021240",
       "name": "코웨이",
       "rsi": 51.1,
@@ -1767,12 +1767,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005387",
       "name": "현대차2우B",
       "rsi": 40.03,
@@ -1788,12 +1788,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "326030",
       "name": "SK바이오팜",
       "rsi": 34.17,
@@ -1809,12 +1809,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000100",
       "name": "유한양행",
       "rsi": 35.53,
@@ -1830,12 +1830,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "047040",
       "name": "대우건설",
       "rsi": 47.4,
@@ -1851,12 +1851,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "032640",
       "name": "LG유플러스",
       "rsi": 46.96,
@@ -1872,12 +1872,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "267270",
       "name": "HD건설기계",
       "rsi": 45.11,
@@ -1893,12 +1893,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "377300",
       "name": "카카오페이",
       "rsi": 38.78,
@@ -1914,12 +1914,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000880",
       "name": "한화",
       "rsi": 51.69,
@@ -1935,12 +1935,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "241560",
       "name": "두산밥캣",
       "rsi": 38.15,
@@ -1956,12 +1956,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "029780",
       "name": "삼성카드",
       "rsi": 27.62,
@@ -1977,12 +1977,12 @@
       "bb_position": "below_lower",
       "verdict_score": 2,
       "verdict_label": "매수 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001440",
       "name": "대한전선",
       "rsi": 57.36,
@@ -1998,12 +1998,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "353200",
       "name": "대덕전자",
       "rsi": 61.77,
@@ -2019,12 +2019,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "175330",
       "name": "JB금융지주",
       "rsi": 49.8,
@@ -2040,12 +2040,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "271560",
       "name": "오리온",
       "rsi": 29.12,
@@ -2061,12 +2061,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "062040",
       "name": "산일전기",
       "rsi": 56.76,
@@ -2082,12 +2082,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010060",
       "name": "OCI홀딩스",
       "rsi": 42.11,
@@ -2103,12 +2103,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "066970",
       "name": "엘앤에프",
       "rsi": 46.33,
@@ -2124,12 +2124,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "036570",
       "name": "NC",
       "rsi": 46.96,
@@ -2145,12 +2145,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034220",
       "name": "LG디스플레이",
       "rsi": 32.75,
@@ -2166,12 +2166,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "051900",
       "name": "LG생활건강",
       "rsi": 47.95,
@@ -2187,12 +2187,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000500",
       "name": "가온전선",
       "rsi": 72.64,
@@ -2208,12 +2208,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "088980",
       "name": "맥쿼리인프라",
       "rsi": 48.46,
@@ -2229,12 +2229,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005385",
       "name": "현대차우",
       "rsi": 38.82,
@@ -2250,12 +2250,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "088350",
       "name": "한화생명",
       "rsi": 50.84,
@@ -2271,12 +2271,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "454910",
       "name": "두산로보틱스",
       "rsi": 51.59,
@@ -2292,12 +2292,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "138930",
       "name": "BNK금융지주",
       "rsi": 54.37,
@@ -2313,12 +2313,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001450",
       "name": "현대해상",
       "rsi": 46.7,
@@ -2334,12 +2334,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011790",
       "name": "SKC",
       "rsi": 52.92,
@@ -2355,12 +2355,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002380",
       "name": "KCC",
       "rsi": 53.13,
@@ -2376,12 +2376,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "008930",
       "name": "한미사이언스",
       "rsi": 57.93,
@@ -2397,12 +2397,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000990",
       "name": "DB하이텍",
       "rsi": 67.96,
@@ -2418,12 +2418,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004170",
       "name": "신세계",
       "rsi": 33.35,
@@ -2439,12 +2439,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "082740",
       "name": "한화엔진",
       "rsi": 49.56,
@@ -2460,12 +2460,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004020",
       "name": "현대제철",
       "rsi": 48.7,
@@ -2481,12 +2481,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001040",
       "name": "CJ",
       "rsi": 48.19,
@@ -2502,12 +2502,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "018880",
       "name": "한온시스템",
       "rsi": 38.0,
@@ -2523,12 +2523,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "085620",
       "name": "미래에셋생명",
       "rsi": 45.77,
@@ -2544,12 +2544,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "052690",
       "name": "한전기술",
       "rsi": 53.4,
@@ -2565,12 +2565,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "161890",
       "name": "한국콜마",
       "rsi": 57.78,
@@ -2586,12 +2586,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "028670",
       "name": "팬오션",
       "rsi": 44.55,
@@ -2607,12 +2607,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "036460",
       "name": "한국가스공사",
       "rsi": 44.78,
@@ -2628,12 +2628,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "111770",
       "name": "영원무역",
       "rsi": 30.27,
@@ -2649,12 +2649,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "192820",
       "name": "코스맥스",
       "rsi": 54.88,
@@ -2670,12 +2670,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "103590",
       "name": "일진전기",
       "rsi": 66.83,
@@ -2691,12 +2691,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "251270",
       "name": "넷마블",
       "rsi": 39.12,
@@ -2712,12 +2712,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "022100",
       "name": "포스코DX",
       "rsi": 40.12,
@@ -2733,12 +2733,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009420",
       "name": "한올바이오파마",
       "rsi": 35.57,
@@ -2754,12 +2754,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "035250",
       "name": "강원랜드",
       "rsi": 41.69,
@@ -2775,12 +2775,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011780",
       "name": "금호석유화학",
       "rsi": 40.57,
@@ -2796,12 +2796,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "012750",
       "name": "에스원",
       "rsi": 53.99,
@@ -2817,12 +2817,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "302440",
       "name": "SK바이오사이언스",
       "rsi": 42.24,
@@ -2838,12 +2838,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "031210",
       "name": "서울보증보험",
       "rsi": 37.37,
@@ -2859,12 +2859,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "483650",
       "name": "달바글로벌",
       "rsi": 43.95,
@@ -2880,12 +2880,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006360",
       "name": "GS건설",
       "rsi": 48.19,
@@ -2901,12 +2901,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017800",
       "name": "현대엘리베이터",
       "rsi": 51.07,
@@ -2922,12 +2922,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "097950",
       "name": "CJ제일제당",
       "rsi": 38.66,
@@ -2943,12 +2943,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007340",
       "name": "DN오토모티브",
       "rsi": 52.57,
@@ -2964,12 +2964,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004370",
       "name": "농심",
       "rsi": 39.3,
@@ -2985,12 +2985,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "023530",
       "name": "롯데쇼핑",
       "rsi": 41.86,
@@ -3006,12 +3006,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "139130",
       "name": "iM금융지주",
       "rsi": 46.86,
@@ -3027,12 +3027,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "375500",
       "name": "DL이앤씨",
       "rsi": 54.24,
@@ -3048,12 +3048,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "450080",
       "name": "에코프로머티",
       "rsi": 45.35,
@@ -3069,12 +3069,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "026960",
       "name": "동서",
       "rsi": 46.77,
@@ -3090,12 +3090,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004800",
       "name": "효성",
       "rsi": 52.77,
@@ -3111,12 +3111,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "336260",
       "name": "두산퓨얼셀",
       "rsi": 52.14,
@@ -3132,12 +3132,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001720",
       "name": "신영증권",
       "rsi": 31.88,
@@ -3153,12 +3153,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003690",
       "name": "코리안리",
       "rsi": 48.69,
@@ -3174,12 +3174,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "489790",
       "name": "한화비전",
       "rsi": 49.92,
@@ -3195,12 +3195,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "282330",
       "name": "BGF리테일",
       "rsi": 39.21,
@@ -3216,12 +3216,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005850",
       "name": "에스엘",
       "rsi": 35.16,
@@ -3237,12 +3237,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "383220",
       "name": "F&F",
       "rsi": 50.83,
@@ -3258,12 +3258,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "204320",
       "name": "HL만도",
       "rsi": 38.05,
@@ -3279,12 +3279,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011170",
       "name": "롯데케미칼",
       "rsi": 48.04,
@@ -3300,12 +3300,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "103140",
       "name": "풍산",
       "rsi": 48.36,
@@ -3321,12 +3321,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004990",
       "name": "롯데지주",
       "rsi": 50.5,
@@ -3342,12 +3342,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "181710",
       "name": "NHN",
       "rsi": 45.7,
@@ -3363,12 +3363,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000240",
       "name": "한국앤컴퍼니",
       "rsi": 50.8,
@@ -3384,12 +3384,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007070",
       "name": "GS리테일",
       "rsi": 31.08,
@@ -3405,12 +3405,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "279570",
       "name": "케이뱅크",
       "rsi": 33.8,
@@ -3431,7 +3431,7 @@
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "081660",
       "name": "미스토홀딩스",
       "rsi": 32.93,
@@ -3447,12 +3447,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009970",
       "name": "영원무역홀딩스",
       "rsi": 38.93,
@@ -3468,12 +3468,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "014680",
       "name": "한솔케미칼",
       "rsi": 67.85,
@@ -3489,12 +3489,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "030000",
       "name": "제일기획",
       "rsi": 33.21,
@@ -3510,12 +3510,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "018670",
       "name": "SK가스",
       "rsi": 50.79,
@@ -3531,12 +3531,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005440",
       "name": "현대지에프홀딩스",
       "rsi": 55.75,
@@ -3552,12 +3552,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "073240",
       "name": "금호타이어",
       "rsi": 39.09,
@@ -3573,12 +3573,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002790",
       "name": "아모레퍼시픽홀딩스",
       "rsi": 52.0,
@@ -3594,12 +3594,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "069960",
       "name": "현대백화점",
       "rsi": 41.41,
@@ -3615,12 +3615,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "139480",
       "name": "이마트",
       "rsi": 37.44,
@@ -3636,12 +3636,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "112610",
       "name": "씨에스윈드",
       "rsi": 54.02,
@@ -3657,12 +3657,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "051600",
       "name": "한전KPS",
       "rsi": 47.36,
@@ -3678,12 +3678,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "457190",
       "name": "이수스페셜티케미컬",
       "rsi": 49.0,
@@ -3699,12 +3699,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "462870",
       "name": "시프트업",
       "rsi": 45.8,
@@ -3720,12 +3720,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "439260",
       "name": "대한조선",
       "rsi": 40.99,
@@ -3741,12 +3741,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "475150",
       "name": "SK이터닉스",
       "rsi": 47.43,
@@ -3762,12 +3762,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "395400",
       "name": "SK리츠",
       "rsi": 49.58,
@@ -3783,12 +3783,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "071970",
       "name": "HD현대마린엔진",
       "rsi": 42.22,
@@ -3804,12 +3804,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "020150",
       "name": "롯데에너지머티리얼즈",
       "rsi": 55.18,
@@ -3825,12 +3825,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006040",
       "name": "동원산업",
       "rsi": 36.15,
@@ -3846,12 +3846,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000120",
       "name": "CJ대한통운",
       "rsi": 37.56,
@@ -3867,12 +3867,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "089860",
       "name": "롯데렌탈",
       "rsi": 62.73,
@@ -3888,12 +3888,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "008770",
       "name": "호텔신라",
       "rsi": 36.02,
@@ -3909,12 +3909,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "023590",
       "name": "다우기술",
       "rsi": 50.39,
@@ -3930,12 +3930,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011210",
       "name": "현대위아",
       "rsi": 30.96,
@@ -3951,12 +3951,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000155",
       "name": "두산우",
       "rsi": 64.75,
@@ -3972,12 +3972,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001800",
       "name": "오리온홀딩스",
       "rsi": 31.29,
@@ -3993,12 +3993,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006280",
       "name": "녹십자",
       "rsi": 44.82,
@@ -4014,12 +4014,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "097230",
       "name": "HJ중공업",
       "rsi": 36.16,
@@ -4035,12 +4035,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "00680K",
       "name": "미래에셋증권2우B",
       "rsi": 45.64,
@@ -4056,12 +4056,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "120110",
       "name": "코오롱인더",
       "rsi": 47.08,
@@ -4077,12 +4077,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001430",
       "name": "세아베스틸지주",
       "rsi": 56.59,
@@ -4098,12 +4098,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001120",
       "name": "LX인터내셔널",
       "rsi": 52.48,
@@ -4119,12 +4119,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "020560",
       "name": "아시아나항공",
       "rsi": 67.92,
@@ -4140,12 +4140,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "069620",
       "name": "대웅제약",
       "rsi": 33.83,
@@ -4161,12 +4161,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "294870",
       "name": "IPARK현대산업개발",
       "rsi": 54.84,
@@ -4182,12 +4182,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "322000",
       "name": "HD현대에너지솔루션",
       "rsi": 43.76,
@@ -4203,12 +4203,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "298020",
       "name": "효성티앤씨",
       "rsi": 39.03,
@@ -4224,12 +4224,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001740",
       "name": "SK네트웍스",
       "rsi": 31.63,
@@ -4245,12 +4245,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009155",
       "name": "삼성전기우",
       "rsi": 56.04,
@@ -4266,12 +4266,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007310",
       "name": "오뚜기",
       "rsi": 34.24,
@@ -4287,12 +4287,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005070",
       "name": "코스모신소재",
       "rsi": 55.81,
@@ -4308,12 +4308,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007810",
       "name": "코리아써키트",
       "rsi": 62.58,
@@ -4329,12 +4329,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "229640",
       "name": "LS에코에너지",
       "rsi": 71.84,
@@ -4350,12 +4350,12 @@
       "bb_position": "above_upper",
       "verdict_score": -2,
       "verdict_label": "매도 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "093370",
       "name": "후성",
       "rsi": 57.43,
@@ -4371,12 +4371,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "082640",
       "name": "",
       "rsi": 60.94,
@@ -4392,12 +4392,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 250,
+      "bars_used": 247,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "281820",
       "name": "케이씨텍",
       "rsi": 68.14,
@@ -4413,12 +4413,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "012630",
       "name": "HDC",
       "rsi": 55.35,
@@ -4434,12 +4434,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "361610",
       "name": "SK아이이테크놀로지",
       "rsi": 56.37,
@@ -4455,12 +4455,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "192080",
       "name": "더블유게임즈",
       "rsi": 48.24,
@@ -4476,12 +4476,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "415640",
       "name": "KB발해인프라",
       "rsi": 42.29,
@@ -4497,12 +4497,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003540",
       "name": "대신증권",
       "rsi": 44.34,
@@ -4518,12 +4518,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000815",
       "name": "삼성화재우",
       "rsi": 46.01,
@@ -4539,12 +4539,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "280360",
       "name": "롯데웰푸드",
       "rsi": 41.48,
@@ -4560,12 +4560,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "300720",
       "name": "한일시멘트",
       "rsi": 49.83,
@@ -4581,12 +4581,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "066575",
       "name": "LG전자우",
       "rsi": 51.26,
@@ -4602,12 +4602,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004000",
       "name": "롯데정밀화학",
       "rsi": 34.78,
@@ -4623,12 +4623,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017960",
       "name": "한국카본",
       "rsi": 34.16,
@@ -4644,12 +4644,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "030610",
       "name": "교보증권",
       "rsi": 46.31,
@@ -4665,12 +4665,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "330590",
       "name": "롯데리츠",
       "rsi": 67.56,
@@ -4686,12 +4686,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000080",
       "name": "하이트진로",
       "rsi": 42.44,
@@ -4707,12 +4707,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003530",
       "name": "한화투자증권",
       "rsi": 46.32,
@@ -4728,12 +4728,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "032350",
       "name": "롯데관광개발",
       "rsi": 37.82,
@@ -4749,12 +4749,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006340",
       "name": "대원전선",
       "rsi": 51.66,
@@ -4770,12 +4770,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "192400",
       "name": "쿠쿠홀딩스",
       "rsi": 50.28,
@@ -4791,12 +4791,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003240",
       "name": "태광산업",
       "rsi": 50.75,
@@ -4812,12 +4812,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "451800",
       "name": "한화리츠",
       "rsi": 55.3,
@@ -4833,12 +4833,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003570",
       "name": "SNT다이내믹스",
       "rsi": 34.06,
@@ -4854,12 +4854,12 @@
       "bb_position": "below_lower",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003090",
       "name": "대웅",
       "rsi": 38.76,
@@ -4875,12 +4875,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000210",
       "name": "DL",
       "rsi": 45.39,
@@ -4896,12 +4896,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001820",
       "name": "삼화콘덴서",
       "rsi": 71.56,
@@ -4917,12 +4917,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "185750",
       "name": "종근당",
       "rsi": 37.4,
@@ -4938,12 +4938,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "051915",
       "name": "LG화학우",
       "rsi": 39.62,
@@ -4959,12 +4959,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "077970",
       "name": "STX엔진",
       "rsi": 40.07,
@@ -4980,12 +4980,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009450",
       "name": "경동나비엔",
       "rsi": 43.55,
@@ -5001,12 +5001,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "030190",
       "name": "NICE평가정보",
       "rsi": 48.95,
@@ -5022,12 +5022,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009240",
       "name": "한샘",
       "rsi": 56.56,
@@ -5043,12 +5043,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005300",
       "name": "롯데칠성",
       "rsi": 42.62,
@@ -5064,12 +5064,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "195870",
       "name": "해성디에스",
       "rsi": 66.13,
@@ -5085,12 +5085,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006120",
       "name": "SK디스커버리",
       "rsi": 70.4,
@@ -5106,12 +5106,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006110",
       "name": "삼아알미늄",
       "rsi": 42.2,
@@ -5127,12 +5127,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005090",
       "name": "SGC에너지",
       "rsi": 39.85,
@@ -5148,12 +5148,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003470",
       "name": "유안타증권",
       "rsi": 38.62,
@@ -5169,12 +5169,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034230",
       "name": "파라다이스",
       "rsi": 39.03,
@@ -5190,12 +5190,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "079160",
       "name": "CJ CGV",
       "rsi": 46.22,
@@ -5211,12 +5211,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "071055",
       "name": "한국금융지주우",
       "rsi": 42.81,
@@ -5232,12 +5232,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "285130",
       "name": "SK케미칼",
       "rsi": 45.42,
@@ -5253,12 +5253,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "071320",
       "name": "지역난방공사",
       "rsi": 65.55,
@@ -5274,12 +5274,12 @@
       "bb_position": "above_upper",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000370",
       "name": "한화손해보험",
       "rsi": 47.47,
@@ -5295,12 +5295,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005180",
       "name": "빙그레",
       "rsi": 48.41,
@@ -5316,12 +5316,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "100090",
       "name": "SK오션플랜트",
       "rsi": 34.88,
@@ -5337,12 +5337,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004490",
       "name": "세방전지",
       "rsi": 46.13,
@@ -5358,12 +5358,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "137310",
       "name": "에스디바이오센서",
       "rsi": 44.35,
@@ -5379,12 +5379,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "499790",
       "name": "GS피앤엘",
       "rsi": 36.27,
@@ -5400,12 +5400,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003850",
       "name": "보령",
       "rsi": 38.14,
@@ -5421,12 +5421,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "214320",
       "name": "이노션",
       "rsi": 30.59,
@@ -5442,12 +5442,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "365550",
       "name": "ESR켄달스퀘어리츠",
       "rsi": 57.13,
@@ -5463,12 +5463,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "298050",
       "name": "HS효성첨단소재",
       "rsi": 35.86,
@@ -5484,12 +5484,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "036530",
       "name": "SNT홀딩스",
       "rsi": 40.87,
@@ -5505,12 +5505,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000670",
       "name": "영풍",
       "rsi": 52.69,
@@ -5526,12 +5526,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "456040",
       "name": "OCI",
       "rsi": 47.16,
@@ -5547,12 +5547,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "064960",
       "name": "SNT모티브",
       "rsi": 43.88,
@@ -5568,12 +5568,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "093050",
       "name": "LF",
       "rsi": 43.49,
@@ -5589,12 +5589,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005880",
       "name": "대한해운",
       "rsi": 43.27,
@@ -5610,12 +5610,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "317450",
       "name": "명인제약",
       "rsi": 34.64,
@@ -5636,7 +5636,7 @@
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "094800",
       "name": "맵스리얼티",
       "rsi": 66.32,
@@ -5652,12 +5652,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005690",
       "name": "파미셀",
       "rsi": 63.42,
@@ -5673,12 +5673,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "268280",
       "name": "미원에스씨",
       "rsi": 54.24,
@@ -5694,12 +5694,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002960",
       "name": "한국쉘석유",
       "rsi": 54.65,
@@ -5715,12 +5715,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "069260",
       "name": "TKG휴켐스",
       "rsi": 49.42,
@@ -5736,12 +5736,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "033240",
       "name": "자화전자",
       "rsi": 42.12,
@@ -5757,12 +5757,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "293940",
       "name": "신한알파리츠",
       "rsi": 65.66,
@@ -5778,12 +5778,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003160",
       "name": "디아이",
       "rsi": 73.06,
@@ -5799,12 +5799,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001060",
       "name": "JW중외제약",
       "rsi": 45.9,
@@ -5820,12 +5820,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002350",
       "name": "넥센타이어",
       "rsi": 32.57,
@@ -5841,12 +5841,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017940",
       "name": "E1",
       "rsi": 42.34,
@@ -5862,12 +5862,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001570",
       "name": "금양",
       "rsi": 50.0,
@@ -5883,12 +5883,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001680",
       "name": "대상",
       "rsi": 44.1,
@@ -5904,12 +5904,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "014820",
       "name": "동원시스템즈",
       "rsi": 43.6,
@@ -5925,12 +5925,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "383800",
       "name": "LX홀딩스",
       "rsi": 52.46,
@@ -5946,12 +5946,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "453340",
       "name": "현대그린푸드",
       "rsi": 56.45,
@@ -5967,12 +5967,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000640",
       "name": "동아쏘시오홀딩스",
       "rsi": 61.4,
@@ -5988,12 +5988,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "248070",
       "name": "솔루엠",
       "rsi": 45.29,
@@ -6009,12 +6009,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006380",
       "name": "카프로",
       "rsi": 0.0,
@@ -6030,12 +6030,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 263,
+      "bars_used": 260,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001510",
       "name": "SK증권",
       "rsi": 43.84,
@@ -6051,12 +6051,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000400",
       "name": "롯데손해보험",
       "rsi": 47.13,
@@ -6072,12 +6072,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "108320",
       "name": "LX세미콘",
       "rsi": 49.83,
@@ -6093,12 +6093,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002840",
       "name": "미원상사",
       "rsi": 57.63,
@@ -6114,12 +6114,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "075580",
       "name": "세진중공업",
       "rsi": 41.3,
@@ -6135,12 +6135,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "114090",
       "name": "GKL",
       "rsi": 34.1,
@@ -6156,12 +6156,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "00088K",
       "name": "한화3우B",
       "rsi": 56.24,
@@ -6177,12 +6177,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001270",
       "name": "부국증권",
       "rsi": 41.12,
@@ -6198,12 +6198,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "058650",
       "name": "세아홀딩스",
       "rsi": 41.58,
@@ -6219,12 +6219,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003300",
       "name": "한일홀딩스",
       "rsi": 54.08,
@@ -6240,12 +6240,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "025540",
       "name": "한국단자",
       "rsi": 44.15,
@@ -6261,12 +6261,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002990",
       "name": "금호건설",
       "rsi": 43.18,
@@ -6282,12 +6282,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "019170",
       "name": "신풍제약",
       "rsi": 47.41,
@@ -6303,12 +6303,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "100840",
       "name": "SNT에너지",
       "rsi": 58.02,
@@ -6324,12 +6324,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007700",
       "name": "F&F홀딩스",
       "rsi": 36.27,
@@ -6345,12 +6345,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "178920",
       "name": "PI첨단소재",
       "rsi": 43.15,
@@ -6366,12 +6366,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005810",
       "name": "풍산홀딩스",
       "rsi": 49.04,
@@ -6387,12 +6387,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "090460",
       "name": "비에이치",
       "rsi": 55.73,
@@ -6408,12 +6408,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "016380",
       "name": "KG스틸",
       "rsi": 47.63,
@@ -6429,12 +6429,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003620",
       "name": "KG모빌리티",
       "rsi": 33.35,
@@ -6450,12 +6450,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006650",
       "name": "대한유화",
       "rsi": 42.72,
@@ -6471,12 +6471,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001530",
       "name": "DI동일",
       "rsi": 43.1,
@@ -6492,12 +6492,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "00104K",
       "name": "CJ4우(전환)",
       "rsi": 50.54,
@@ -6513,12 +6513,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "336370",
       "name": "솔루스첨단소재",
       "rsi": 47.65,
@@ -6534,12 +6534,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "284740",
       "name": "쿠쿠홈시스",
       "rsi": 61.1,
@@ -6555,12 +6555,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "377740",
       "name": "바이오노트",
       "rsi": 39.91,
@@ -6576,12 +6576,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "039130",
       "name": "하나투어",
       "rsi": 37.91,
@@ -6597,12 +6597,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "448730",
       "name": "삼성FN리츠",
       "rsi": 29.38,
@@ -6618,12 +6618,12 @@
       "bb_position": "below_lower",
       "verdict_score": 2,
       "verdict_label": "매수 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003545",
       "name": "대신증권우",
       "rsi": 50.67,
@@ -6639,12 +6639,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010780",
       "name": "아이에스동서",
       "rsi": 37.62,
@@ -6660,12 +6660,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005250",
       "name": "녹십자홀딩스",
       "rsi": 38.21,
@@ -6681,12 +6681,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034310",
       "name": "NICE",
       "rsi": 33.39,
@@ -6702,12 +6702,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "008060",
       "name": "대덕",
       "rsi": 48.87,
@@ -6723,12 +6723,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001500",
       "name": "현대차증권",
       "rsi": 46.41,
@@ -6744,12 +6744,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "079900",
       "name": "전진건설로봇",
       "rsi": 58.89,
@@ -6765,12 +6765,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "249420",
       "name": "일동제약",
       "rsi": 41.13,
@@ -6786,12 +6786,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "090435",
       "name": "아모레퍼시픽우",
       "rsi": 42.95,
@@ -6807,12 +6807,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009410",
       "name": "태영건설",
       "rsi": 40.0,
@@ -6828,12 +6828,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004690",
       "name": "삼천리",
       "rsi": 47.62,
@@ -6849,12 +6849,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "145990",
       "name": "삼양사",
       "rsi": 40.22,
@@ -6870,12 +6870,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "161000",
       "name": "애경케미칼",
       "rsi": 47.98,
@@ -6891,12 +6891,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000070",
       "name": "삼양홀딩스",
       "rsi": 38.49,
@@ -6912,12 +6912,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "0120G0",
       "name": "삼양바이오팜",
       "rsi": 44.5,
@@ -6938,7 +6938,7 @@
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "460860",
       "name": "동국제강",
       "rsi": 42.17,
@@ -6954,12 +6954,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002240",
       "name": "고려제강",
       "rsi": 41.39,
@@ -6975,12 +6975,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005389",
       "name": "현대차3우B",
       "rsi": 39.3,
@@ -6996,12 +6996,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005945",
       "name": "NH투자증권우",
       "rsi": 43.7,
@@ -7017,12 +7017,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "072710",
       "name": "농심홀딩스",
       "rsi": 37.72,
@@ -7038,12 +7038,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017900",
       "name": "광전자",
       "rsi": 59.36,
@@ -7059,12 +7059,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "417310",
       "name": "코람코더원리츠",
       "rsi": 66.79,
@@ -7080,12 +7080,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004700",
       "name": "조광피혁",
       "rsi": 49.14,
@@ -7101,12 +7101,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002810",
       "name": "삼영무역",
       "rsi": 36.94,
@@ -7122,12 +7122,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003280",
       "name": "흥아해운",
       "rsi": 50.89,
@@ -7143,12 +7143,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009900",
       "name": "명신산업",
       "rsi": 51.98,
@@ -7164,12 +7164,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "014830",
       "name": "유니드",
       "rsi": 38.41,
@@ -7185,12 +7185,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "403550",
       "name": "쏘카",
       "rsi": 44.53,
@@ -7206,12 +7206,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003030",
       "name": "세아제강지주",
       "rsi": 42.81,
@@ -7227,12 +7227,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "357120",
       "name": "코람코라이프인프라리츠",
       "rsi": 61.2,
@@ -7248,12 +7248,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005420",
       "name": "코스모화학",
       "rsi": 45.8,
@@ -7269,12 +7269,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "092230",
       "name": "KPX홀딩스",
       "rsi": 48.1,
@@ -7290,12 +7290,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "484870",
       "name": "엠앤씨솔루션",
       "rsi": 48.51,
@@ -7311,12 +7311,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003000",
       "name": "부광약품",
       "rsi": 44.07,
@@ -7332,12 +7332,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001200",
       "name": "유진투자증권",
       "rsi": 42.78,
@@ -7353,12 +7353,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "029530",
       "name": "신도리코",
       "rsi": 43.77,
@@ -7374,12 +7374,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "317400",
       "name": "자이에스앤디",
       "rsi": 48.91,
@@ -7395,12 +7395,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "344820",
       "name": "KCC글라스",
       "rsi": 41.68,
@@ -7416,12 +7416,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002030",
       "name": "아세아",
       "rsi": 53.38,
@@ -7437,12 +7437,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "016610",
       "name": "DB증권",
       "rsi": 62.16,
@@ -7458,12 +7458,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "016590",
       "name": "신대양제지",
       "rsi": 41.08,
@@ -7479,12 +7479,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "306200",
       "name": "세아제강",
       "rsi": 44.31,
@@ -7500,12 +7500,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "029460",
       "name": "케이씨",
       "rsi": 66.33,
@@ -7521,12 +7521,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001940",
       "name": "KISCO홀딩스",
       "rsi": 47.8,
@@ -7542,12 +7542,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "271940",
       "name": "일진하이솔루스",
       "rsi": 50.95,
@@ -7563,12 +7563,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "015360",
       "name": "INVENI",
       "rsi": 57.04,
@@ -7584,12 +7584,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "027410",
       "name": "BGF",
       "rsi": 32.75,
@@ -7605,12 +7605,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "452260",
       "name": "한화갤러리아",
       "rsi": 72.6,
@@ -7626,12 +7626,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "008730",
       "name": "율촌화학",
       "rsi": 44.35,
@@ -7647,12 +7647,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "194370",
       "name": "제이에스코퍼레이션",
       "rsi": 46.13,
@@ -7668,12 +7668,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "170900",
       "name": "동아에스티",
       "rsi": 33.38,
@@ -7689,12 +7689,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017810",
       "name": "풀무원",
       "rsi": 36.44,
@@ -7710,12 +7710,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "950210",
       "name": "프레스티지바이오파마",
       "rsi": 43.34,
@@ -7731,12 +7731,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "105630",
       "name": "한세실업",
       "rsi": 36.48,
@@ -7752,12 +7752,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "104700",
       "name": "한국철강",
       "rsi": 39.58,
@@ -7773,12 +7773,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "183190",
       "name": "아세아시멘트",
       "rsi": 51.98,
@@ -7794,12 +7794,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "031430",
       "name": "신세계인터내셔날",
       "rsi": 39.66,
@@ -7815,12 +7815,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004710",
       "name": "한솔테크닉스",
       "rsi": 66.68,
@@ -7836,12 +7836,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "060980",
       "name": "HL홀딩스",
       "rsi": 42.15,
@@ -7857,12 +7857,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "130660",
       "name": "한전산업",
       "rsi": 48.45,
@@ -7878,12 +7878,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "126560",
       "name": "현대퓨처넷",
       "rsi": 55.59,
@@ -7899,12 +7899,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006220",
       "name": "제주은행",
       "rsi": 42.21,
@@ -7920,12 +7920,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007690",
       "name": "국도화학",
       "rsi": 43.82,
@@ -7941,12 +7941,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "02826K",
       "name": "삼성물산우B",
       "rsi": 58.46,
@@ -7962,12 +7962,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "024720",
       "name": "콜마홀딩스",
       "rsi": 40.69,
@@ -7983,12 +7983,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "097520",
       "name": "엠씨넥스",
       "rsi": 38.5,
@@ -8004,12 +8004,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "089590",
       "name": "제주항공",
       "rsi": 49.11,
@@ -8025,12 +8025,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "015860",
       "name": "일진홀딩스",
       "rsi": 57.85,
@@ -8046,12 +8046,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005610",
       "name": "삼립",
       "rsi": 38.07,
@@ -8067,12 +8067,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011760",
       "name": "현대코퍼레이션",
       "rsi": 40.13,
@@ -8088,12 +8088,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "006405",
       "name": "삼성SDI우",
       "rsi": 48.01,
@@ -8109,12 +8109,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "020000",
       "name": "한섬",
       "rsi": 76.28,
@@ -8130,12 +8130,12 @@
       "bb_position": "above_upper",
       "verdict_score": -2,
       "verdict_label": "매도 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "200880",
       "name": "서연이화",
       "rsi": 36.63,
@@ -8151,12 +8151,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005720",
       "name": "넥센",
       "rsi": 28.08,
@@ -8172,12 +8172,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011930",
       "name": "신성이엔지",
       "rsi": 56.01,
@@ -8193,12 +8193,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "026890",
       "name": "스틱인베스트먼트",
       "rsi": 42.66,
@@ -8214,12 +8214,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "091810",
       "name": "트리니티항공",
       "rsi": 31.23,
@@ -8235,12 +8235,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009160",
       "name": "SIMPAC",
       "rsi": 48.93,
@@ -8256,12 +8256,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "145720",
       "name": "덴티움",
       "rsi": 42.44,
@@ -8277,12 +8277,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005950",
       "name": "이수화학",
       "rsi": 37.56,
@@ -8298,12 +8298,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002020",
       "name": "코오롱",
       "rsi": 34.99,
@@ -8319,12 +8319,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "123890",
       "name": "한국자산신탁",
       "rsi": 40.74,
@@ -8340,12 +8340,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "016800",
       "name": "퍼시스",
       "rsi": 22.5,
@@ -8361,12 +8361,12 @@
       "bb_position": "below_lower",
       "verdict_score": 2,
       "verdict_label": "매수 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "192650",
       "name": "드림텍",
       "rsi": 82.41,
@@ -8382,12 +8382,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "108670",
       "name": "LX하우시스",
       "rsi": 38.73,
@@ -8403,12 +8403,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "092790",
       "name": "넥스틸",
       "rsi": 51.14,
@@ -8424,12 +8424,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009290",
       "name": "광동제약",
       "rsi": 52.28,
@@ -8445,12 +8445,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002310",
       "name": "아세아제지",
       "rsi": 50.15,
@@ -8466,12 +8466,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001230",
       "name": "동국홀딩스",
       "rsi": 60.17,
@@ -8487,12 +8487,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "018250",
       "name": "애경산업",
       "rsi": 36.56,
@@ -8508,12 +8508,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "126720",
       "name": "수산인더스트리",
       "rsi": 47.15,
@@ -8529,12 +8529,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "096760",
       "name": "JW홀딩스",
       "rsi": 65.82,
@@ -8550,12 +8550,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "272450",
       "name": "진에어",
       "rsi": 56.75,
@@ -8571,12 +8571,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "078520",
       "name": "에이블씨엔씨",
       "rsi": 46.17,
@@ -8592,12 +8592,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "381970",
       "name": "케이카",
       "rsi": 40.3,
@@ -8613,12 +8613,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "244920",
       "name": "에이플러스에셋",
       "rsi": 41.66,
@@ -8634,12 +8634,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001750",
       "name": "한양증권",
       "rsi": 45.88,
@@ -8655,12 +8655,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000157",
       "name": "두산2우B",
       "rsi": 67.99,
@@ -8676,12 +8676,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "025860",
       "name": "남해화학",
       "rsi": 47.9,
@@ -8697,12 +8697,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "012030",
       "name": "DB",
       "rsi": 61.58,
@@ -8718,12 +8718,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "033270",
       "name": "유나이티드제약",
       "rsi": 38.45,
@@ -8739,12 +8739,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002900",
       "name": "TYM",
       "rsi": 42.84,
@@ -8760,12 +8760,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001390",
       "name": "KG케미칼",
       "rsi": 40.16,
@@ -8781,12 +8781,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010690",
       "name": "화신",
       "rsi": 39.06,
@@ -8802,12 +8802,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "475560",
       "name": "더본코리아",
       "rsi": 42.39,
@@ -8823,12 +8823,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034830",
       "name": "한국토지신탁",
       "rsi": 41.61,
@@ -8844,12 +8844,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010820",
       "name": "퍼스텍",
       "rsi": 54.38,
@@ -8865,12 +8865,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003960",
       "name": "사조대림",
       "rsi": 27.48,
@@ -8886,12 +8886,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "037710",
       "name": "광주신세계",
       "rsi": 38.72,
@@ -8907,12 +8907,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "286940",
       "name": "롯데이노베이트",
       "rsi": 37.77,
@@ -8928,12 +8928,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "058430",
       "name": "포스코스틸리온",
       "rsi": 43.16,
@@ -8949,12 +8949,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "084690",
       "name": "대상홀딩스",
       "rsi": 45.33,
@@ -8970,12 +8970,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003120",
       "name": "일성아이에스",
       "rsi": 61.85,
@@ -8991,12 +8991,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002710",
       "name": "TCC스틸",
       "rsi": 51.19,
@@ -9012,12 +9012,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "217590",
       "name": "티엠씨",
       "rsi": 62.2,
@@ -9038,7 +9038,7 @@
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004430",
       "name": "송원산업",
       "rsi": 42.24,
@@ -9054,12 +9054,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "010955",
       "name": "S-Oil우",
       "rsi": 72.98,
@@ -9075,12 +9075,12 @@
       "bb_position": "above_upper",
       "verdict_score": -2,
       "verdict_label": "매도 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017390",
       "name": "서울가스",
       "rsi": 40.59,
@@ -9096,12 +9096,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "122900",
       "name": "아이마켓코리아",
       "rsi": 65.6,
@@ -9117,12 +9117,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "084010",
       "name": "대한제강",
       "rsi": 39.36,
@@ -9138,12 +9138,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003350",
       "name": "한국화장품제조",
       "rsi": 64.44,
@@ -9159,12 +9159,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003650",
       "name": "미창석유",
       "rsi": 32.97,
@@ -9180,12 +9180,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "334890",
       "name": "이지스밸류플러스리츠",
       "rsi": 47.5,
@@ -9201,12 +9201,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "008490",
       "name": "서흥",
       "rsi": 37.38,
@@ -9222,12 +9222,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005430",
       "name": "한국공항",
       "rsi": 57.9,
@@ -9243,12 +9243,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "298690",
       "name": "에어부산",
       "rsi": 50.53,
@@ -9264,12 +9264,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004360",
       "name": "세방",
       "rsi": 49.14,
@@ -9285,12 +9285,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "136490",
       "name": "선진",
       "rsi": 49.23,
@@ -9306,12 +9306,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003200",
       "name": "일신방직",
       "rsi": 51.11,
@@ -9327,12 +9327,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000430",
       "name": "대원강업",
       "rsi": 60.48,
@@ -9348,12 +9348,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003070",
       "name": "코오롱글로벌",
       "rsi": 45.38,
@@ -9369,12 +9369,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "007160",
       "name": "사조산업",
       "rsi": 45.23,
@@ -9390,12 +9390,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005680",
       "name": "삼영전자",
       "rsi": 54.5,
@@ -9411,12 +9411,12 @@
       "bb_position": "above_upper",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003920",
       "name": "남양유업",
       "rsi": 41.63,
@@ -9432,12 +9432,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001790",
       "name": "대한제당",
       "rsi": 50.71,
@@ -9453,12 +9453,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "105840",
       "name": "우진",
       "rsi": 47.23,
@@ -9474,12 +9474,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "900140",
       "name": "엘브이엠씨홀딩스",
       "rsi": 30.29,
@@ -9495,12 +9495,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005500",
       "name": "삼진제약",
       "rsi": 51.55,
@@ -9516,12 +9516,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "134380",
       "name": "미원화학",
       "rsi": 39.17,
@@ -9537,12 +9537,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "025000",
       "name": "KPX케미칼",
       "rsi": 65.33,
@@ -9558,12 +9558,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "404990",
       "name": "신한서부티엔디리츠",
       "rsi": 52.61,
@@ -9579,12 +9579,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "092200",
       "name": "디아이씨",
       "rsi": 47.99,
@@ -9600,12 +9600,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001460",
       "name": "BYC",
       "rsi": 39.48,
@@ -9621,12 +9621,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "002320",
       "name": "한진",
       "rsi": 36.65,
@@ -9642,12 +9642,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "348950",
       "name": "제이알글로벌리츠",
       "rsi": 31.65,
@@ -9663,12 +9663,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "030210",
       "name": "다올투자증권",
       "rsi": 51.42,
@@ -9684,12 +9684,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "298000",
       "name": "효성화학",
       "rsi": 32.34,
@@ -9705,12 +9705,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000680",
       "name": "LS네트웍스",
       "rsi": 46.64,
@@ -9726,12 +9726,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "051905",
       "name": "LG생활건강우",
       "rsi": 35.51,
@@ -9747,12 +9747,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "034120",
       "name": "SBS",
       "rsi": 40.96,
@@ -9768,12 +9768,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "0030R0",
       "name": "대신밸류리츠",
       "rsi": 41.19,
@@ -9789,12 +9789,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "226320",
       "name": "잇츠한불",
       "rsi": 53.77,
@@ -9810,12 +9810,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "044450",
       "name": "KSS해운",
       "rsi": 77.48,
@@ -9831,12 +9831,12 @@
       "bb_position": "above_upper",
       "verdict_score": -2,
       "verdict_label": "매도 우위",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000050",
       "name": "경방",
       "rsi": 37.22,
@@ -9852,12 +9852,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001340",
       "name": "PKC",
       "rsi": 54.93,
@@ -9873,12 +9873,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "044820",
       "name": "코스맥스비티아이",
       "rsi": 59.14,
@@ -9894,12 +9894,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000320",
       "name": "노루홀딩스",
       "rsi": 35.48,
@@ -9915,12 +9915,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003720",
       "name": "삼영",
       "rsi": 51.04,
@@ -9936,12 +9936,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000540",
       "name": "흥국화재",
       "rsi": 50.8,
@@ -9957,12 +9957,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "009680",
       "name": "모토닉",
       "rsi": 43.96,
@@ -9978,12 +9978,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003520",
       "name": "영진약품",
       "rsi": 28.4,
@@ -9999,12 +9999,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000490",
       "name": "대동",
       "rsi": 43.12,
@@ -10020,12 +10020,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "033920",
       "name": "무학",
       "rsi": 41.24,
@@ -10041,12 +10041,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "432320",
       "name": "KB스타리츠",
       "rsi": 64.82,
@@ -10062,12 +10062,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000650",
       "name": "천일고속",
       "rsi": 42.07,
@@ -10083,12 +10083,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001250",
       "name": "GS글로벌",
       "rsi": 38.8,
@@ -10104,12 +10104,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "000480",
       "name": "CR홀딩스",
       "rsi": 26.81,
@@ -10125,12 +10125,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "035150",
       "name": "백산",
       "rsi": 44.06,
@@ -10146,12 +10146,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "003555",
       "name": "LG우",
       "rsi": 49.16,
@@ -10167,12 +10167,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "017860",
       "name": "DS단석",
       "rsi": 52.3,
@@ -10188,12 +10188,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "005010",
       "name": "휴스틸",
       "rsi": 47.96,
@@ -10209,12 +10209,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "037270",
       "name": "YG PLUS",
       "rsi": 38.46,
@@ -10230,12 +10230,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "03473K",
       "name": "SK우",
       "rsi": 52.05,
@@ -10251,12 +10251,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "011500",
       "name": "한농화성",
       "rsi": 48.6,
@@ -10272,12 +10272,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "088260",
       "name": "이리츠코크렙",
       "rsi": 56.97,
@@ -10293,12 +10293,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "025560",
       "name": "미래산업",
       "rsi": 49.13,
@@ -10314,12 +10314,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "100250",
       "name": "진양홀딩스",
       "rsi": 39.18,
@@ -10335,12 +10335,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "004980",
       "name": "성신양회",
       "rsi": 50.67,
@@ -10356,12 +10356,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "013580",
       "name": "계룡건설",
       "rsi": 51.91,
@@ -10377,12 +10377,12 @@
       "bb_position": "inside",
       "verdict_score": -1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001130",
       "name": "대한제분",
       "rsi": 33.11,
@@ -10398,12 +10398,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "095570",
       "name": "AJ네트웍스",
       "rsi": 53.23,
@@ -10419,12 +10419,12 @@
       "bb_position": "inside",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "039570",
       "name": "HDC랩스",
       "rsi": 44.5,
@@ -10440,12 +10440,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "001630",
       "name": "종근당홀딩스",
       "rsi": 33.86,
@@ -10461,12 +10461,12 @@
       "bb_position": "below_lower",
       "verdict_score": 1,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "028100",
       "name": "동아지질",
       "rsi": 65.39,
@@ -10482,12 +10482,12 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     },
     {
-      "date": "2026-09-24",
+      "date": "2026-09-27",
       "code": "053210",
       "name": "스카이라이프",
       "rsi": 34.95,
@@ -10503,7 +10503,7 @@
       "bb_position": "inside",
       "verdict_score": 0,
       "verdict_label": "중립",
-      "bars_used": 268,
+      "bars_used": 265,
       "warmup_insufficient": false,
       "unavailable_reasons": null
     }
